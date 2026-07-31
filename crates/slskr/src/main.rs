@@ -38657,6 +38657,16 @@ async fn pod_request_peer_id(state: &AppState) -> Option<String> {
         .or_else(|| (!state.config.auth_required).then(|| "Anonymous".to_owned()))
 }
 
+/// True when this instance's own configured Soulseek identity
+/// (`pod_request_peer_id`) holds owner/moderator role in `pod_id`.
+async fn pod_local_peer_can_moderate(state: &AppState, pod_id: &str) -> bool {
+    let acting_peer_id = pod_request_peer_id(state).await;
+    let pods = state.pods.read().await;
+    acting_peer_id
+        .as_deref()
+        .is_some_and(|acting| pods.can_moderate(pod_id, acting))
+}
+
 async fn versioned_get_failure_contract(
     path: &str,
     query: Option<&str>,
@@ -43910,6 +43920,13 @@ async fn podcore_mutation_response(
             ))
         }
         ("POST", [pod_id, section]) if section == "channels" => {
+            // Matches the frozen slskdN contract: creating a pod channel
+            // requires the acting peer to moderate the pod.
+            if !pod_local_peer_can_moderate(state, pod_id).await {
+                return Some(routing::forbidden_response(
+                    "only a pod moderator may create channels",
+                ));
+            }
             let mut value = match serde_json::from_str::<serde_json::Value>(body) {
                 Ok(serde_json::Value::Object(value)) => serde_json::Value::Object(value),
                 Ok(_) => {
@@ -43951,6 +43968,13 @@ async fn podcore_mutation_response(
             })
         }
         ("PUT", [pod_id, section, channel_id]) if section == "channels" => {
+            // Matches the frozen slskdN contract: updating a pod channel
+            // requires the acting peer to moderate the pod.
+            if !pod_local_peer_can_moderate(state, pod_id).await {
+                return Some(routing::forbidden_response(
+                    "only a pod moderator may update channels",
+                ));
+            }
             let mut value = match serde_json::from_str::<serde_json::Value>(body) {
                 Ok(serde_json::Value::Object(value)) => serde_json::Value::Object(value),
                 Ok(_) => {
@@ -43984,6 +44008,13 @@ async fn podcore_mutation_response(
             })
         }
         ("DELETE", [pod_id, section, channel_id]) if section == "channels" => {
+            // Matches the frozen slskdN contract: deleting a pod channel
+            // requires the acting peer to moderate the pod.
+            if !pod_local_peer_can_moderate(state, pod_id).await {
+                return Some(routing::forbidden_response(
+                    "only a pod moderator may delete channels",
+                ));
+            }
             let response = state.pods.write().await.remove_channel(pod_id, channel_id);
             if matches!(response, Ok(Some(true))) {
                 let mut channels = HashSet::new();
@@ -44006,6 +44037,14 @@ async fn podcore_mutation_response(
         ("POST", [section, pod_id, peer_id, action])
             if section == "membership" && matches!(action.as_str(), "ban" | "unban" | "role") =>
         {
+            // Matches the frozen slskdN contract: BanMember/UnbanMember/
+            // ChangeRole all require the acting peer to moderate the pod --
+            // there is no self-service path for any of these three.
+            if !pod_local_peer_can_moderate(state, pod_id).await {
+                return Some(routing::forbidden_response(
+                    "only a pod moderator may perform this action",
+                ));
+            }
             let mut pods = state.pods.write().await;
             let response = match action.as_str() {
                 "ban" => pods.ban(pod_id, peer_id).map(|value| {
@@ -44039,7 +44078,7 @@ async fn podcore_mutation_response(
             })
         }
         ("POST", [section, pod_id, members]) if section == "membership" && members == "members" => {
-            let member = match serde_json::from_str::<pods::PodMember>(body) {
+            let mut member = match serde_json::from_str::<pods::PodMember>(body) {
                 Ok(member) => member,
                 Err(error) => {
                     return Some(routing::bad_request_response(&format!(
@@ -44047,6 +44086,30 @@ async fn podcore_mutation_response(
                     )))
                 }
             };
+            // Matches the frozen slskdN contract: a peer may only publish
+            // membership for themselves, and role/ban state always come
+            // from the existing record (or safe defaults), never the
+            // request body -- otherwise any caller could self-assign a
+            // moderator role or clear their own ban.
+            let acting_peer_id = pod_request_peer_id(state).await;
+            if acting_peer_id
+                .as_deref()
+                .is_none_or(|acting| !acting.eq_ignore_ascii_case(&member.peer_id))
+            {
+                return Some(routing::forbidden_response(
+                    "a peer may only publish their own membership",
+                ));
+            }
+            let existing = state.pods.read().await.members(pod_id).and_then(|members| {
+                members
+                    .into_iter()
+                    .find(|existing| existing.peer_id.eq_ignore_ascii_case(&member.peer_id))
+            });
+            member.role = existing
+                .as_ref()
+                .map(|existing| existing.role.clone())
+                .unwrap_or_else(|| "member".to_owned());
+            member.is_banned = existing.as_ref().is_some_and(|existing| existing.is_banned);
             let response = state.pods.write().await.upsert_member(pod_id, member);
             Some(match response {
                 Ok(Some(member)) => routing::ok_response(
@@ -44072,7 +44135,7 @@ async fn podcore_mutation_response(
                 Err(_) => return Some(routing::bad_request_response("invalid JSON body")),
             };
             value["peerId"] = serde_json::json!(peer_id);
-            let member = match serde_json::from_value::<pods::PodMember>(value) {
+            let mut member = match serde_json::from_value::<pods::PodMember>(value) {
                 Ok(member) => member,
                 Err(error) => {
                     return Some(routing::bad_request_response(&format!(
@@ -44080,6 +44143,33 @@ async fn podcore_mutation_response(
                     )))
                 }
             };
+            // Matches the frozen slskdN contract: updating a membership
+            // record requires moderating the pod, or the member updating
+            // their own record. A non-moderator's role/ban fields in the
+            // body are ignored and pinned to the existing record (or safe
+            // defaults) so a self-update can't grant a role or clear a ban.
+            let acting_peer_id = pod_request_peer_id(state).await;
+            let existing = state.pods.read().await.members(pod_id).and_then(|members| {
+                members
+                    .into_iter()
+                    .find(|existing| existing.peer_id.eq_ignore_ascii_case(peer_id))
+            });
+            let can_moderate = pod_local_peer_can_moderate(state, pod_id).await;
+            let is_self = acting_peer_id
+                .as_deref()
+                .is_some_and(|acting| acting.eq_ignore_ascii_case(peer_id));
+            if !can_moderate && !is_self {
+                return Some(routing::forbidden_response(
+                    "only a pod moderator or the member themselves may update this membership",
+                ));
+            }
+            if !can_moderate {
+                member.role = existing
+                    .as_ref()
+                    .map(|existing| existing.role.clone())
+                    .unwrap_or_else(|| "member".to_owned());
+                member.is_banned = existing.as_ref().is_some_and(|existing| existing.is_banned);
+            }
             let response = state.pods.write().await.upsert_member(pod_id, member);
             Some(match response {
                 Ok(Some(member)) => routing::ok_response(
@@ -44104,12 +44194,7 @@ async fn podcore_mutation_response(
             let is_self_leave = acting_peer_id
                 .as_deref()
                 .is_some_and(|acting| acting.eq_ignore_ascii_case(peer_id.as_str()));
-            let can_moderate = {
-                let pods = state.pods.read().await;
-                acting_peer_id
-                    .as_deref()
-                    .is_some_and(|acting| pods.can_moderate(pod_id, acting))
-            };
+            let can_moderate = pod_local_peer_can_moderate(state, pod_id).await;
             if !is_self_leave && !can_moderate {
                 return Some(routing::forbidden_response(
                     "only a pod moderator or the member themselves may remove this membership",
@@ -86662,6 +86747,325 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(removed.status, "200 OK", "{}", removed.body);
+    }
+
+    async fn pod_fixture_with_local_role(
+        local_peer: &str,
+        creator: &str,
+        pod_id: &str,
+    ) -> (Arc<super::AppState>, mpsc::Receiver<super::SessionCommand>) {
+        let (state, receiver) = test_state_with_env(
+            MapEnv::default()
+                .with("SLSK_USERNAME", local_peer)
+                .with("SLSK_PASSWORD", "test-secret"),
+        );
+        state
+            .pods
+            .write()
+            .await
+            .create(
+                serde_json::from_value::<super::pods::PodRecord>(serde_json::json!({
+                    "podId": pod_id,
+                    "name": "Authorization Audit",
+                }))
+                .expect("deserialize pod record fixture"),
+                creator.to_owned(),
+            )
+            .expect("create pod");
+        (state, receiver)
+    }
+
+    #[tokio::test]
+    async fn pod_ban_unban_role_require_moderator() {
+        let pod_id = "pod:0000000000000000000000000000ba01";
+        let (state, _receiver) =
+            pod_fixture_with_local_role("ordinary-peer", "owner-peer", pod_id).await;
+        state
+            .pods
+            .write()
+            .await
+            .upsert_member(
+                pod_id,
+                super::pods::PodMember {
+                    peer_id: "ordinary-peer".to_owned(),
+                    role: "member".to_owned(),
+                    is_banned: false,
+                    public_key: None,
+                    joined_at: None,
+                    last_seen: None,
+                },
+            )
+            .expect("add local peer as ordinary member");
+        state
+            .pods
+            .write()
+            .await
+            .upsert_member(
+                pod_id,
+                super::pods::PodMember {
+                    peer_id: "target-member".to_owned(),
+                    role: "member".to_owned(),
+                    is_banned: false,
+                    public_key: None,
+                    joined_at: None,
+                    last_seen: None,
+                },
+            )
+            .expect("add target member");
+
+        for action in ["ban", "unban", "role"] {
+            let body = if action == "role" {
+                r#"{"role":"mod"}"#
+            } else {
+                ""
+            };
+            let response = super::route_http_request(
+                "POST",
+                &format!("/api/v0/podcore/membership/{pod_id}/target-member/{action}"),
+                None,
+                body,
+                &state,
+            )
+            .await
+            .unwrap();
+            assert_eq!(
+                response.status, "403 Forbidden",
+                "non-moderator {action} must be denied"
+            );
+        }
+
+        // The pod owner (a moderator) may perform all three actions.
+        let owned_pod = "pod:0000000000000000000000000000ba02";
+        let (state, _receiver) =
+            pod_fixture_with_local_role("owner-peer", "owner-peer", owned_pod).await;
+        for peer_id in ["target-member", "target-member-2"] {
+            state
+                .pods
+                .write()
+                .await
+                .upsert_member(
+                    owned_pod,
+                    super::pods::PodMember {
+                        peer_id: peer_id.to_owned(),
+                        role: "member".to_owned(),
+                        is_banned: false,
+                        public_key: None,
+                        joined_at: None,
+                        last_seen: None,
+                    },
+                )
+                .expect("add target member");
+        }
+        let ban = super::route_http_request(
+            "POST",
+            &format!("/api/v0/podcore/membership/{owned_pod}/target-member/ban"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(ban.status, "200 OK", "{}", ban.body);
+        // A banned member is no longer visible to member-scoped lookups
+        // (matching the oracle), so exercise unban/role on a fresh member.
+        let unban = super::route_http_request(
+            "POST",
+            &format!("/api/v0/podcore/membership/{owned_pod}/target-member/unban"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(unban.status, "200 OK", "{}", unban.body);
+        let role = super::route_http_request(
+            "POST",
+            &format!("/api/v0/podcore/membership/{owned_pod}/target-member-2/role"),
+            None,
+            r#"{"role":"mod"}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(role.status, "200 OK", "{}", role.body);
+    }
+
+    #[tokio::test]
+    async fn pod_membership_add_requires_self() {
+        let pod_id = "pod:0000000000000000000000000000ba03";
+        let (state, _receiver) =
+            pod_fixture_with_local_role("local-peer", "owner-peer", pod_id).await;
+
+        // The local peer may not publish membership claiming to be someone
+        // else, nor self-assign a moderator role or clear a ban via the
+        // request body.
+        let impersonation = super::route_http_request(
+            "POST",
+            &format!("/api/v0/podcore/membership/{pod_id}/members"),
+            None,
+            r#"{"peerId":"someone-else","role":"member","isBanned":false}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(impersonation.status, "403 Forbidden");
+
+        let escalation = super::route_http_request(
+            "POST",
+            &format!("/api/v0/podcore/membership/{pod_id}/members"),
+            None,
+            r#"{"peerId":"local-peer","role":"mod","isBanned":false}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(escalation.status, "200 OK", "{}", escalation.body);
+        let escalation = serde_json::from_str::<serde_json::Value>(&escalation.body).unwrap();
+        assert_eq!(
+            escalation["member"]["role"], "member",
+            "self-publish must not grant a role from the request body"
+        );
+    }
+
+    #[tokio::test]
+    async fn pod_membership_update_requires_moderator_or_self_and_pins_role() {
+        let pod_id = "pod:0000000000000000000000000000ba04";
+        let (state, _receiver) =
+            pod_fixture_with_local_role("local-peer", "owner-peer", pod_id).await;
+        state
+            .pods
+            .write()
+            .await
+            .upsert_member(
+                pod_id,
+                super::pods::PodMember {
+                    peer_id: "local-peer".to_owned(),
+                    role: "member".to_owned(),
+                    is_banned: false,
+                    public_key: None,
+                    joined_at: None,
+                    last_seen: None,
+                },
+            )
+            .expect("add local peer as ordinary member");
+        state
+            .pods
+            .write()
+            .await
+            .upsert_member(
+                pod_id,
+                super::pods::PodMember {
+                    peer_id: "target-member".to_owned(),
+                    role: "member".to_owned(),
+                    is_banned: false,
+                    public_key: None,
+                    joined_at: None,
+                    last_seen: None,
+                },
+            )
+            .expect("add target member");
+
+        // A non-moderator, non-self update must be denied.
+        let denied = super::route_http_request(
+            "PUT",
+            &format!("/api/v0/podcore/membership/{pod_id}/members/target-member"),
+            None,
+            r#"{"role":"member","isBanned":false}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(denied.status, "403 Forbidden");
+
+        // A self-update is allowed, but role/ban escalation attempts in the
+        // body are ignored and pinned back to the existing record.
+        let self_update = super::route_http_request(
+            "PUT",
+            &format!("/api/v0/podcore/membership/{pod_id}/members/local-peer"),
+            None,
+            r#"{"role":"mod","isBanned":false}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(self_update.status, "200 OK", "{}", self_update.body);
+        let self_update = serde_json::from_str::<serde_json::Value>(&self_update.body).unwrap();
+        assert_eq!(
+            self_update["member"]["role"], "member",
+            "self-update must not grant a role from the request body"
+        );
+    }
+
+    #[tokio::test]
+    async fn pod_channel_mutations_require_moderator() {
+        let pod_id = "pod:0000000000000000000000000000ba05";
+        let (state, _receiver) =
+            pod_fixture_with_local_role("ordinary-peer", "owner-peer", pod_id).await;
+        state
+            .pods
+            .write()
+            .await
+            .upsert_member(
+                pod_id,
+                super::pods::PodMember {
+                    peer_id: "ordinary-peer".to_owned(),
+                    role: "member".to_owned(),
+                    is_banned: false,
+                    public_key: None,
+                    joined_at: None,
+                    last_seen: None,
+                },
+            )
+            .expect("add local peer as ordinary member");
+
+        let denied_create = super::route_http_request(
+            "POST",
+            &format!("/api/v0/podcore/{pod_id}/channels"),
+            None,
+            r#"{"name":"general"}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(denied_create.status, "403 Forbidden");
+
+        let owned_pod = "pod:0000000000000000000000000000ba06";
+        let (state, _receiver) =
+            pod_fixture_with_local_role("owner-peer", "owner-peer", owned_pod).await;
+        let created = super::route_http_request(
+            "POST",
+            &format!("/api/v0/podcore/{owned_pod}/channels"),
+            None,
+            r#"{"name":"general"}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(created.status, "201 Created", "{}", created.body);
+        let created = serde_json::from_str::<serde_json::Value>(&created.body).unwrap();
+        let channel_id = created["channelId"].as_str().unwrap().to_owned();
+
+        let updated = super::route_http_request(
+            "PUT",
+            &format!("/api/v0/podcore/{owned_pod}/channels/{channel_id}"),
+            None,
+            r#"{"name":"general-renamed"}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(updated.status, "200 OK", "{}", updated.body);
+
+        let deleted = super::route_http_request(
+            "DELETE",
+            &format!("/api/v0/podcore/{owned_pod}/channels/{channel_id}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(deleted.status, "204 No Content", "{}", deleted.body);
     }
 
     #[tokio::test]
