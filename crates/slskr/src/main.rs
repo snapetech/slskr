@@ -17986,9 +17986,24 @@ async fn route_http_request_with_headers(
              };
              let username = decoded_path_segment(username);
              let transfers = state.transfers.read().await;
-             let position = transfers.slskd_transfer_position(0, &username, id);
+             let exists = transfers.entries.iter().any(|entry| {
+                 entry.direction == 0
+                     && entry.id == id
+                     && entry.peer_username.as_deref() == Some(username.as_str())
+             });
              drop(transfers);
-             Ok(routing::ok_response(position.to_string()))
+             if !exists {
+                 return Ok(routing::not_found_response());
+             }
+             // Matches the oracle's GetPlaceInQueueAsync: a real position
+             // requires a live PlaceInQueueResponse round-trip with the
+             // remote peer, which slskr does not yet request for an
+             // in-flight download. Rather than fabricate a number (the
+             // prior behavior: a local list index, returned even for a
+             // completed transfer), report the same 204 "queue position
+             // unavailable" the oracle itself falls back to on a timeout
+             // or error -- a real code path, not an invented one.
+             Ok(routing::no_content_response())
          }
 
         ("POST", "/api/transfers/downloads/find-alternative") => {
@@ -80017,9 +80032,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn slskd_transfer_position_reports_peer_queue_index() {
+    async fn slskd_transfer_position_requires_a_real_download_and_reports_no_fake_number() {
         let (state, _receiver) = test_state();
-        {
+        let (first_id, second_id) = {
             let mut transfers = state.transfers.write().await;
             let first = transfers.create(
                 0,
@@ -80029,74 +80044,66 @@ mod tests {
                 Some(1),
             );
             transfers.update_status(first.id, "completed", Some(1), None);
-            transfers.create(
+            let second = transfers.create(
                 0,
                 Some("friend".to_owned()),
                 "Remote/Two.flac".to_owned(),
                 None,
                 Some(2),
             );
-            transfers.create(
-                0,
-                Some("friend".to_owned()),
-                "Remote/Three.flac".to_owned(),
-                None,
-                Some(3),
-            );
-            transfers.create(
-                0,
-                Some("other".to_owned()),
-                "Remote/Other.flac".to_owned(),
-                None,
-                Some(4),
-            );
-        }
+            (first.id, second.id)
+        };
 
-        let first_active = super::route_http_request(
+        // A real, tracked download exists, but slskr does not yet request a
+        // live PlaceInQueueResponse from the remote peer -- matching the
+        // oracle's own 204 "queue position unavailable" fallback rather
+        // than fabricating a number, even for a completed transfer (the
+        // prior behavior returned a fake "0" for every case below).
+        let active = super::route_http_request(
             "GET",
-            "/api/v0/transfers/downloads/friend/2/position",
+            &format!("/api/v0/transfers/downloads/friend/{second_id}/position"),
             None,
             "",
             &state,
         )
         .await
-        .expect("first active position");
-        assert_eq!(first_active.status, "200 OK");
-        assert_eq!(first_active.body, "0");
-
-        let second_active = super::route_http_request(
-            "GET",
-            "/api/v0/transfers/downloads/friend/3/position",
-            None,
-            "",
-            &state,
-        )
-        .await
-        .expect("second active position");
-        assert_eq!(second_active.status, "200 OK");
-        assert_eq!(second_active.body, "1");
-
-        let other_peer = super::route_http_request(
-            "GET",
-            "/api/v0/transfers/downloads/other/4/position",
-            None,
-            "",
-            &state,
-        )
-        .await
-        .expect("other peer position");
-        assert_eq!(other_peer.body, "0");
+        .expect("active position");
+        assert_eq!(active.status, "204 No Content", "{}", active.body);
 
         let completed = super::route_http_request(
             "GET",
-            "/api/v0/transfers/downloads/friend/1/position",
+            &format!("/api/v0/transfers/downloads/friend/{first_id}/position"),
             None,
             "",
             &state,
         )
         .await
         .expect("completed position");
-        assert_eq!(completed.body, "0");
+        assert_eq!(completed.status, "204 No Content");
+
+        // An id that isn't a real download for this username must 404,
+        // not silently report a position.
+        let unknown_id = super::route_http_request(
+            "GET",
+            "/api/v0/transfers/downloads/friend/999999/position",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("unknown id");
+        assert_eq!(unknown_id.status, "404 Not Found");
+
+        let wrong_username = super::route_http_request(
+            "GET",
+            &format!("/api/v0/transfers/downloads/other/{second_id}/position"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("wrong username");
+        assert_eq!(wrong_username.status, "404 Not Found");
     }
 
     #[tokio::test]
