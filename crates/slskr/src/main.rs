@@ -44035,6 +44035,7 @@ async fn quarantine_mutation_response(path: &str, body: &str, state: &AppState) 
             .get("requestId")
             .and_then(serde_json::Value::as_str)
             .unwrap_or_default()
+            .trim()
             .to_owned();
         let Some(request) = state
             .controller_features
@@ -44054,6 +44055,7 @@ async fn quarantine_mutation_response(path: &str, body: &str, state: &AppState) 
             .get("juror")
             .and_then(serde_json::Value::as_str)
             .unwrap_or_default()
+            .trim()
             .to_owned();
         let jurors_listed = request
             .get("jurors")
@@ -44073,6 +44075,44 @@ async fn quarantine_mutation_response(path: &str, body: &str, state: &AppState) 
         ) {
             errors
                 .push("Verdict must be NeedsManualReview, UpholdQuarantine, or ReleaseCandidate.");
+        }
+        // Matches the oracle's real ValidateVerdict: a verdict must carry a
+        // signature whose payloadHash actually matches the verdict's own
+        // contents -- otherwise nothing stops a caller from replaying or
+        // hand-editing a verdict while claiming it was signed as-is. This
+        // is a content-integrity check (the oracle never resolves a real
+        // public key for `Signer` here either), not full cryptographic
+        // authentication, but it's exactly what the oracle enforces.
+        verdict["requestId"] = serde_json::json!(request_id);
+        verdict["juror"] = serde_json::json!(juror);
+        let signature = verdict.get("signature").cloned().unwrap_or_default();
+        let signer = signature
+            .get("signer")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        let payload_hash = signature
+            .get("payloadHash")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        let signature_value = signature
+            .get("value")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        if signer.trim().is_empty()
+            || payload_hash.trim().is_empty()
+            || signature_value.trim().is_empty()
+        {
+            errors.push("Signed juror verdict is required.");
+        } else if !payload_hash.eq_ignore_ascii_case(&quarantine_verdict_payload_hash(&verdict)) {
+            errors.push("Signature payload hash does not match verdict contents.");
+        }
+        if let Some(evidence_items) = verdict
+            .get("evidence")
+            .and_then(serde_json::Value::as_array)
+        {
+            for evidence in evidence_items {
+                quarantine_add_evidence_errors(&mut errors, evidence);
+            }
         }
         if !errors.is_empty() {
             return HttpResponse {
@@ -44205,6 +44245,98 @@ fn quarantine_can_accept(aggregate: &serde_json::Value, already_accepted: bool) 
         && aggregate["recommendation"] == "ReleaseCandidate"
 }
 
+/// Matches the oracle's `QuarantineJuryService.AddEvidenceErrors`: an
+/// evidence reference must be present and pass the same opaque/safe
+/// reference check used for pod content references, and a summary is
+/// capped at 512 characters. Deliberately pushes both errors when the
+/// reference is empty (an empty reference also fails the safety check),
+/// matching the oracle's literal (if slightly redundant) behavior.
+fn quarantine_add_evidence_errors(errors: &mut Vec<&'static str>, evidence: &serde_json::Value) {
+    let reference = evidence
+        .get("reference")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .trim();
+    let summary = evidence
+        .get("summary")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .trim();
+    if reference.is_empty() {
+        errors.push("Evidence reference is required.");
+    }
+    if !is_safe_opaque_reference(reference) {
+        errors.push(
+            "Evidence references must not include paths, raw hashes, endpoints, or private identifiers.",
+        );
+    }
+    if summary.len() > 512 {
+        errors.push("Evidence summary must be 512 characters or fewer.");
+    }
+}
+
+/// Matches the oracle's `QuarantineJuryVerdictRecord.ComputePayloadHash`:
+/// a canonical hash over the verdict's own contents (request id, juror,
+/// verdict, reason, and evidence, evidence sorted by type then
+/// reference), used to verify a submitted signature's `payloadHash`
+/// actually covers what was submitted rather than trusting the claim.
+fn quarantine_verdict_payload_hash(verdict: &serde_json::Value) -> String {
+    let request_id = verdict
+        .get("requestId")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .trim();
+    let juror = verdict
+        .get("juror")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .trim();
+    let verdict_value = verdict
+        .get("verdict")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let reason = verdict
+        .get("reason")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .trim();
+    let mut evidence_parts = verdict
+        .get("evidence")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|item| {
+            let evidence_type = item
+                .get("type")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .to_owned();
+            let reference = item
+                .get("reference")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .trim()
+                .to_owned();
+            let summary = item
+                .get("summary")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .trim()
+                .to_owned();
+            (evidence_type, reference, summary)
+        })
+        .collect::<Vec<_>>();
+    evidence_parts.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
+    let evidence_joined = evidence_parts
+        .iter()
+        .map(|(evidence_type, reference, summary)| format!("{evidence_type}:{reference}:{summary}"))
+        .collect::<Vec<_>>()
+        .join("|");
+    let payload = [request_id, juror, verdict_value, reason, &evidence_joined].join("\n");
+    hex::encode(Sha256::digest(payload.as_bytes()))
+}
+
 fn quarantine_acceptance_reason(aggregate: &serde_json::Value, already_accepted: bool) -> String {
     if already_accepted {
         return "Release-candidate recommendation has already been accepted.".to_owned();
@@ -44217,6 +44349,109 @@ fn quarantine_acceptance_reason(aggregate: &serde_json::Value, already_accepted:
     } else {
         "Only a release-candidate supermajority can be accepted.".to_owned()
     }
+}
+
+/// Matches the oracle's `QuarantineJuryService.BuildAuditStatus`.
+fn quarantine_audit_status(aggregate: &serde_json::Value, has_acceptance: bool) -> &'static str {
+    if has_acceptance {
+        return "accepted-release-candidate";
+    }
+    if aggregate["recommendation"] == "ReleaseCandidate" && aggregate["quorumReached"] == true {
+        return "pending-release-acceptance";
+    }
+    if aggregate["recommendation"] == "UpholdQuarantine" && aggregate["quorumReached"] == true {
+        return "uphold-quarantine";
+    }
+    "manual-review"
+}
+
+/// Matches the oracle's `QuarantineJuryService.BuildAuditEntry`: real
+/// per-request quorum/status/staleness derived from the same stored
+/// verdicts, route attempts, and acceptance decisions the review/aggregate
+/// endpoints already use -- not hardcoded zeros standing in for every
+/// request regardless of its real state.
+async fn quarantine_build_audit_entry(
+    state: &AppState,
+    request: &serde_json::Value,
+    generated_at: u64,
+    stale_after_seconds: u64,
+) -> serde_json::Value {
+    let request_id = request
+        .get("requestId")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    let aggregate = quarantine_build_aggregate(state, &request_id)
+        .await
+        .unwrap_or_else(|| {
+            serde_json::json!({
+                "requestId": request_id,
+                "recommendation": "NeedsManualReview",
+                "totalVerdicts": 0,
+                "requiredVotes": 1,
+                "verdictCounts": {},
+                "dissentingJurors": [],
+                "quorumReached": false,
+                "reason": "Request not found.",
+            })
+        });
+    let features = state.controller_features.read().await;
+    let verdict_count = features
+        .values_with_prefix(&format!("quarantine/verdict/{request_id}/"))
+        .len();
+    let route_attempts = features.values_with_prefix(&format!("quarantine/routes/{request_id}/"));
+    let acceptance = features
+        .get(&format!("quarantine/acceptance/{request_id}"))
+        .cloned();
+    drop(features);
+    let has_acceptance = acceptance.is_some();
+    let can_accept = quarantine_can_accept(&aggregate, has_acceptance);
+    let status = quarantine_audit_status(&aggregate, has_acceptance);
+    let created_at = request
+        .get("createdAt")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+    let is_stale = !has_acceptance
+        && generated_at.saturating_sub(created_at) >= stale_after_seconds
+        && matches!(status, "manual-review" | "pending-release-acceptance");
+    let has_failed_route_attempts = route_attempts.iter().any(|attempt| {
+        attempt.get("success") != Some(&serde_json::json!(true))
+            || attempt
+                .get("failedJurors")
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|jurors| !jurors.is_empty())
+    });
+    let evidence_count = request
+        .get("evidence")
+        .and_then(serde_json::Value::as_array)
+        .map_or(0, Vec::len);
+    let juror_count = request
+        .get("jurors")
+        .and_then(serde_json::Value::as_array)
+        .map_or(0, Vec::len);
+    serde_json::json!({
+        "requestId": request_id,
+        "localReason": request.get("localReason").cloned().unwrap_or(serde_json::Value::Null),
+        "createdAt": created_at,
+        "evidenceCount": evidence_count,
+        "jurorCount": juror_count,
+        "verdictCount": verdict_count,
+        "requiredVotes": aggregate["requiredVotes"],
+        "recommendation": aggregate["recommendation"],
+        "quorumReached": aggregate["quorumReached"],
+        "hasAcceptance": has_acceptance,
+        "canAcceptReleaseCandidate": can_accept,
+        "hasRouteAttempts": !route_attempts.is_empty(),
+        "hasFailedRouteAttempts": has_failed_route_attempts,
+        "isStale": is_stale,
+        "status": status,
+        "reason": if has_acceptance {
+            "Release-candidate recommendation accepted locally.".to_owned()
+        } else {
+            aggregate["reason"].as_str().unwrap_or_default().to_owned()
+        },
+        "dissentingJurors": aggregate["dissentingJurors"],
+    })
 }
 
 async fn quarantine_accept_release_candidate_response(
@@ -48594,17 +48829,44 @@ async fn extended_controller_get_response(
                 .values_with_prefix("quarantine/request/");
             let request_count = requests.len();
             if path.ends_with("/audit") {
+                let stale_after_hours = query
+                    .map(query_params)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .find(|(key, _)| key == "staleAfterHours")
+                    .and_then(|(_, value)| value.parse::<u64>().ok())
+                    .unwrap_or(72)
+                    .max(1);
+                let generated_at = unix_timestamp();
+                let mut entries = Vec::with_capacity(requests.len());
+                for request in &requests {
+                    entries.push(
+                        quarantine_build_audit_entry(
+                            state,
+                            request,
+                            generated_at,
+                            stale_after_hours.saturating_mul(3600),
+                        )
+                        .await,
+                    );
+                }
+                let count_with_status = |status: &str| {
+                    entries
+                        .iter()
+                        .filter(|entry| entry["status"] == status)
+                        .count()
+                };
                 routing::ok_response(
                     serde_json::json!({
-                        "entries": requests,
+                        "entries": entries,
                         "requestCount": request_count,
-                        "acceptedReleaseCandidateCount": 0,
-                        "pendingReleaseCandidateCount": request_count,
-                        "pendingManualReviewCount": 0,
-                        "upholdQuarantineCount": 0,
-                        "staleRequestCount": 0,
+                        "acceptedReleaseCandidateCount": count_with_status("accepted-release-candidate"),
+                        "pendingReleaseCandidateCount": count_with_status("pending-release-acceptance"),
+                        "pendingManualReviewCount": count_with_status("manual-review"),
+                        "upholdQuarantineCount": count_with_status("uphold-quarantine"),
+                        "staleRequestCount": entries.iter().filter(|entry| entry["isStale"] == true).count(),
                         "count": request_count,
-                        "generatedAt": unix_timestamp(),
+                        "generatedAt": generated_at,
                     })
                     .to_string(),
                 )
@@ -88368,6 +88630,30 @@ mod tests {
         assert_eq!(kpis_json["slskr_searches"]["type"], "gauge");
     }
 
+    /// Builds a verdict body with a real, self-consistent signature --
+    /// the oracle's own check is content-integrity (the submitted
+    /// payloadHash must match a hash of the verdict's own fields), not
+    /// full cryptographic authentication, so a real "signer" key isn't
+    /// needed here, only a hash that genuinely matches.
+    fn quarantine_signed_verdict_json(
+        request_id: &str,
+        juror: &str,
+        verdict: &str,
+    ) -> serde_json::Value {
+        let mut value = serde_json::json!({
+            "requestId": request_id,
+            "juror": juror,
+            "verdict": verdict,
+        });
+        let payload_hash = super::quarantine_verdict_payload_hash(&value);
+        value["signature"] = serde_json::json!({
+            "signer": juror,
+            "payloadHash": payload_hash,
+            "value": "test-signature",
+        });
+        value
+    }
+
     #[tokio::test]
     async fn quarantine_jury_requires_real_quorum_before_accepting_or_releasing() {
         let (state, _receiver) = test_state();
@@ -88393,12 +88679,63 @@ mod tests {
             "POST",
             "/api/v0/quarantine-jury/verdicts",
             None,
-            &format!(r#"{{"requestId":"{request_id}","juror":"not-a-juror","verdict":"ReleaseCandidate"}}"#),
+            &quarantine_signed_verdict_json(&request_id, "not-a-juror", "ReleaseCandidate")
+                .to_string(),
             &state,
         )
         .await
         .unwrap();
         assert_eq!(unlisted.status, "400 Bad Request");
+
+        // A verdict without a real signature (or with a payload hash that
+        // doesn't match its own contents) must be rejected too -- not
+        // silently accepted the way the old handler took any verdict
+        // shape it was given.
+        let unsigned = super::route_http_request(
+            "POST",
+            "/api/v0/quarantine-jury/verdicts",
+            None,
+            &format!(
+                r#"{{"requestId":"{request_id}","juror":"juror-a","verdict":"ReleaseCandidate"}}"#
+            ),
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(unsigned.status, "400 Bad Request");
+        let unsigned_json = serde_json::from_str::<serde_json::Value>(&unsigned.body).unwrap();
+        assert!(
+            unsigned_json["errors"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|error| error == "Signed juror verdict is required."),
+            "{unsigned_json}"
+        );
+
+        let mut tampered =
+            quarantine_signed_verdict_json(&request_id, "juror-a", "ReleaseCandidate");
+        tampered["verdict"] = serde_json::json!("UpholdQuarantine");
+        let tampered_result = super::route_http_request(
+            "POST",
+            "/api/v0/quarantine-jury/verdicts",
+            None,
+            &tampered.to_string(),
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(tampered_result.status, "400 Bad Request");
+        let tampered_json =
+            serde_json::from_str::<serde_json::Value>(&tampered_result.body).unwrap();
+        assert!(
+            tampered_json["errors"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|error| error == "Signature payload hash does not match verdict contents."),
+            "{tampered_json}"
+        );
 
         // Before quorum (minJurorVotes=2), acceptance and release must be
         // denied -- not silently accepted, as the old fake handlers did.
@@ -88440,9 +88777,7 @@ mod tests {
                 "POST",
                 "/api/v0/quarantine-jury/verdicts",
                 None,
-                &format!(
-                    r#"{{"requestId":"{request_id}","juror":"{juror}","verdict":"ReleaseCandidate"}}"#
-                ),
+                &quarantine_signed_verdict_json(&request_id, juror, "ReleaseCandidate").to_string(),
                 &state,
             )
             .await
@@ -88579,6 +88914,154 @@ mod tests {
             real_route_json["errorMessage"],
             "Routing backend is not available."
         );
+    }
+
+    #[tokio::test]
+    async fn quarantine_jury_audit_report_reflects_real_status_not_hardcoded_zeros() {
+        let (state, _receiver) = test_state();
+
+        // Request A: reaches a real ReleaseCandidate quorum.
+        let created_a = super::route_http_request(
+            "POST",
+            "/api/v0/quarantine-jury/requests",
+            None,
+            r#"{"localReason":"audit-a","jurors":["juror-a","juror-b"],"evidence":[{"type":"hash","reference":"opaque-ref-a"}],"minJurorVotes":2}"#,
+            &state,
+        )
+        .await
+        .expect("create request a");
+        let request_a = serde_json::from_str::<serde_json::Value>(&created_a.body).unwrap()
+            ["request"]["requestId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        for juror in ["juror-a", "juror-b"] {
+            let verdict = super::route_http_request(
+                "POST",
+                "/api/v0/quarantine-jury/verdicts",
+                None,
+                &quarantine_signed_verdict_json(&request_a, juror, "ReleaseCandidate").to_string(),
+                &state,
+            )
+            .await
+            .unwrap();
+            assert_eq!(verdict.status, "200 OK", "{}", verdict.body);
+        }
+
+        // Request B: no verdicts at all -- stuck at real manual-review.
+        let created_b = super::route_http_request(
+            "POST",
+            "/api/v0/quarantine-jury/requests",
+            None,
+            r#"{"localReason":"audit-b","jurors":["juror-c"],"evidence":[{"type":"hash","reference":"opaque-ref-b"}],"minJurorVotes":1}"#,
+            &state,
+        )
+        .await
+        .expect("create request b");
+        let request_b = serde_json::from_str::<serde_json::Value>(&created_b.body).unwrap()
+            ["request"]["requestId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+
+        let baseline =
+            super::route_http_request("GET", "/api/v0/quarantine-jury/audit", None, "", &state)
+                .await
+                .expect("audit report before acceptance");
+        let baseline_json = serde_json::from_str::<serde_json::Value>(&baseline.body).unwrap();
+        assert_eq!(baseline_json["requestCount"], 2, "{baseline_json}");
+        // Real per-status counts, not hardcoded zeros: A is pending
+        // release acceptance (quorum reached, not yet accepted), B is a
+        // real manual-review (no verdicts at all).
+        assert_eq!(
+            baseline_json["pendingReleaseCandidateCount"], 1,
+            "{baseline_json}"
+        );
+        assert_eq!(
+            baseline_json["pendingManualReviewCount"], 1,
+            "{baseline_json}"
+        );
+        assert_eq!(
+            baseline_json["acceptedReleaseCandidateCount"], 0,
+            "{baseline_json}"
+        );
+        assert_eq!(baseline_json["upholdQuarantineCount"], 0, "{baseline_json}");
+        let entries = baseline_json["entries"].as_array().unwrap();
+        let entry_a = entries
+            .iter()
+            .find(|entry| entry["requestId"] == request_a)
+            .expect("entry for request a");
+        assert_eq!(entry_a["status"], "pending-release-acceptance");
+        assert_eq!(entry_a["verdictCount"], 2);
+        assert_eq!(entry_a["quorumReached"], true);
+        assert_eq!(entry_a["canAcceptReleaseCandidate"], true);
+        let entry_b = entries
+            .iter()
+            .find(|entry| entry["requestId"] == request_b)
+            .expect("entry for request b");
+        assert_eq!(entry_b["status"], "manual-review");
+        assert_eq!(entry_b["verdictCount"], 0);
+        assert_eq!(entry_b["quorumReached"], false);
+
+        // Accepting request A must move it out of "pending" and into a
+        // real "accepted" bucket in a fresh report.
+        let accept = super::route_http_request(
+            "POST",
+            &format!("/api/v0/quarantine-jury/requests/{request_a}/accept-release-candidate"),
+            None,
+            "{}",
+            &state,
+        )
+        .await
+        .expect("accept request a");
+        assert_eq!(accept.status, "200 OK", "{}", accept.body);
+
+        let after_accept =
+            super::route_http_request("GET", "/api/v0/quarantine-jury/audit", None, "", &state)
+                .await
+                .expect("audit report after acceptance");
+        let after_accept_json =
+            serde_json::from_str::<serde_json::Value>(&after_accept.body).unwrap();
+        assert_eq!(
+            after_accept_json["acceptedReleaseCandidateCount"], 1,
+            "{after_accept_json}"
+        );
+        assert_eq!(
+            after_accept_json["pendingReleaseCandidateCount"], 0,
+            "{after_accept_json}"
+        );
+
+        // Backdate request B (still not accepted) well past the default
+        // 72-hour staleness window -- proving isStale reflects real
+        // request age and the real staleAfterHours floor (the oracle
+        // clamps it to a minimum of 1 hour, so a "staleAfterHours=0"
+        // query can't be used to fake staleness on a brand-new request).
+        {
+            let key = format!("quarantine/request/{request_b}");
+            let mut features = state.controller_features.write().await;
+            let mut backdated = features.get(&key).cloned().expect("request b exists");
+            backdated["createdAt"] =
+                serde_json::json!(super::unix_timestamp().saturating_sub(100 * 3600));
+            features.upsert(key, backdated).expect("backdate request b");
+        }
+        let stale =
+            super::route_http_request("GET", "/api/v0/quarantine-jury/audit", None, "", &state)
+                .await
+                .expect("audit report after backdating request b");
+        let stale_json = serde_json::from_str::<serde_json::Value>(&stale.body).unwrap();
+        assert_eq!(stale_json["staleRequestCount"], 1, "{stale_json}");
+        let stale_entries = stale_json["entries"].as_array().unwrap();
+        let stale_entry_b = stale_entries
+            .iter()
+            .find(|entry| entry["requestId"] == request_b)
+            .unwrap();
+        assert_eq!(stale_entry_b["isStale"], true, "{stale_entry_b}");
+        let stale_entry_a = stale_entries
+            .iter()
+            .find(|entry| entry["requestId"] == request_a)
+            .unwrap();
+        // Already-accepted requests are never stale, regardless of age.
+        assert_eq!(stale_entry_a["isStale"], false, "{stale_entry_a}");
     }
 
     #[tokio::test]
