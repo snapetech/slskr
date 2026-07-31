@@ -21574,34 +21574,20 @@ async fn route_http_request_with_headers(
         {
             let username = user_route_username(path, "/browse/status")
                 .expect("guarded user browse status path");
+            if state.runtime.read().await.relay_agent_enabled {
+                return Ok(controller_forbidden_response());
+            }
             let browse = state.browse.read().await;
-            let body = browse
+            let tracked = browse
                 .records
                 .iter()
                 .find(|record| record.username == username)
-                .map(BrowseRecord::slskd_status_json)
-                .unwrap_or_else(|| {
-                    serde_json::json!({
-                        "username": username,
-                        "status": "idle",
-                        "state": "NotStarted",
-                        "size": 0,
-                        "bytesTransferred": 0,
-                        "bytesRemaining": 0,
-                        "percentComplete": 0.0,
-                        "fileCount": 0,
-                        "directoryCount": 0,
-                        "isComplete": false,
-                        "reason": null,
-                        "folder": null,
-                        "indirectToken": null,
-                        "requestedAt": null,
-                        "updatedAt": null,
-                    })
-                    .to_string()
-                });
+                .map(BrowseRecord::slskd_status_json);
             drop(browse);
-            Ok(routing::ok_response(body))
+            match tracked {
+                Some(body) => Ok(routing::ok_response(body)),
+                None => Ok(routing::not_found_response()),
+            }
         }
         // ADDITIONAL MISSING USER ENDPOINTS (Phase 5)
         ("GET", "/api/profile/me") => {
@@ -73115,7 +73101,6 @@ mod tests {
             ("DELETE", "/api/conversations/peer1", ""),
             ("GET", "/api/users/peer1/endpoint", ""),
             ("GET", "/api/users/peer1/browse", ""),
-            ("GET", "/api/users/peer1/browse/status", ""),
             ("POST", "/api/users/peer1/directory", r#"{"directory":""}"#),
             ("GET", "/api/users/peer1/info", ""),
             ("GET", "/api/users/peer1/status", ""),
@@ -73208,7 +73193,6 @@ mod tests {
                     || versioned.starts_with("/api/v0/conversations/")
                     || versioned == "/api/v0/shares")
                 || (method == "GET" && versioned.starts_with("/api/v0/transfers/uploads/peer1"))
-                || (method == "GET" && versioned == "/api/v0/users/peer1/browse/status")
                 || (method == "GET" && versioned.starts_with("/api/v0/shares/root"))
             {
                 assert_eq!(versioned_response.status, "404 Not Found");
@@ -73224,6 +73208,20 @@ mod tests {
                 versioned_response.status
             );
             while receiver.try_recv().is_ok() {}
+        }
+
+        // A user with no tracked browse must 404, matching the oracle's
+        // BrowseTracker.TryGet-miss contract, on both the unversioned and
+        // versioned paths -- there is no version-specific split here.
+        for path in [
+            "/api/users/peer1/browse/status",
+            "/api/v0/users/peer1/browse/status",
+            "/api/users/peer%201/browse/status",
+        ] {
+            let response = super::route_http_request("GET", path, None, "", &state)
+                .await
+                .unwrap_or_else(|error| panic!("GET {path}: {error}"));
+            assert_eq!(response.status, "404 Not Found", "GET {path}");
         }
 
         let query_contract_routes = [
@@ -73285,7 +73283,6 @@ mod tests {
         let encoded_path_routes = [
             ("GET", "/api/profile/peer%201", ""),
             ("GET", "/api/users/peer%201/browse", ""),
-            ("GET", "/api/users/peer%201/browse/status", ""),
             (
                 "POST",
                 "/api/transfers/downloads/peer%201",
