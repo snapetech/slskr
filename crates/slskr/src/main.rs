@@ -10778,7 +10778,12 @@ impl RuntimeCompatState {
             "id": format!("songid-{}", self.songid_runs),
             "source": "",
             "sourceType": "text_query",
-            "status": if matches.is_empty() { "completed" } else { "matched" },
+            // Matches the oracle's real terminal status vocabulary
+            // exactly ("queued" | "running" | "completed" | "failed" --
+            // never "matched"): whether matches were found is reflected
+            // in the matches/matchCount fields, not a separate status
+            // value the oracle never uses.
+            "status": "completed",
             "query": "",
             "createdAt": chrono::Utc::now().to_rfc3339(),
             "summary": if matches.is_empty() { "SongID analysis completed." } else { "SongID matches found." },
@@ -24017,14 +24022,19 @@ async fn route_http_request_with_headers(
              let shared_files = shares.entries.len();
              drop(shares);
              drop(library);
+             // Unlike the oracle's real async queue+worker pipeline
+             // (SongIdService.QueueAnalyzeAsync enqueues a "queued" run
+             // that a background worker progresses through "running" to
+             // "completed" over real time), slskR analyzes synchronously
+             // right here -- record_songid_run has already computed the
+             // real, final status by the time this response is built. It
+             // must not be overwritten with a fake "queued" placeholder
+             // that nothing would ever advance past, permanently hiding
+             // the real (already-available) result from every later poll.
              let run = match mutate_runtime_compat_state(state, |runtime, _| {
                  let mut run = runtime.record_songid_run(matches, library_items, shared_files)?;
                  run["source"] = serde_json::json!(source);
                  run["query"] = serde_json::json!(query);
-                 run["status"] = serde_json::json!("queued");
-                 run["summary"] = serde_json::json!("Queued for SongID analysis.");
-                 run["currentStage"] = serde_json::json!("queued");
-                 run["percentComplete"] = serde_json::json!(0.05);
                  if let Some(stored) = runtime.songid_run_records.last_mut() {
                      *stored = run.clone();
                  }
@@ -88724,6 +88734,59 @@ mod tests {
             .unwrap()
             .len();
         assert_eq!(after_count, before_count + 1);
+    }
+
+    #[tokio::test]
+    async fn songid_run_reports_its_real_completed_status_not_stuck_at_queued() {
+        let (state, _receiver) = test_state();
+
+        // slskR analyzes synchronously (unlike the oracle's real async
+        // queue+worker pipeline), so by the time the create response is
+        // built the run has already really finished -- it must report
+        // that real status immediately, not a fake "queued" placeholder
+        // that nothing would ever advance past.
+        let created = super::route_http_request(
+            "POST",
+            "/api/v0/songid/runs",
+            None,
+            r#"{"source":"route-audit"}"#,
+            &state,
+        )
+        .await
+        .expect("create run");
+        assert_eq!(created.status, "202 Accepted", "{}", created.body);
+        let created_json = serde_json::from_str::<serde_json::Value>(&created.body).unwrap();
+        assert_eq!(created_json["status"], "completed", "{created_json}");
+        assert_eq!(created_json["currentStage"], "completed", "{created_json}");
+        assert_eq!(created_json["percentComplete"], 1.0, "{created_json}");
+        let run_id = created_json["id"].as_str().unwrap().to_owned();
+
+        // Polling the run afterward must reflect the same real, final
+        // status -- not revert to a stale "queued" snapshot.
+        let polled = super::route_http_request(
+            "GET",
+            &format!("/api/v0/songid/runs/{run_id}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("poll run");
+        let polled_json = serde_json::from_str::<serde_json::Value>(&polled.body).unwrap();
+        assert_eq!(polled_json["status"], "completed", "{polled_json}");
+
+        // The queue summary must count this as a real completion, never
+        // as perpetually queued/running.
+        let queue = super::route_http_request("GET", "/api/v0/songid/runs/queue", None, "", &state)
+            .await
+            .expect("queue summary");
+        let queue_json = serde_json::from_str::<serde_json::Value>(&queue.body).unwrap();
+        assert!(
+            queue_json["completedCount"].as_u64().unwrap() >= 1,
+            "{queue_json}"
+        );
+        assert_eq!(queue_json["queuedCount"], 0, "{queue_json}");
+        assert_eq!(queue_json["runningCount"], 0, "{queue_json}");
     }
 
     #[tokio::test]
