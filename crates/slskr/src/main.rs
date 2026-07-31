@@ -23076,21 +23076,6 @@ async fn route_http_request_with_headers(
             Ok(routing::ok_response(json))
         }
 
-        ("POST", "/api/admin/shutdown") => {
-            let json = "{\"status\":\"shutdown_requested\"}".to_string();
-            Ok(routing::accepted_response(json))
-        }
-
-        ("GET", "/api/admin/version") => {
-            let json = format!("{{\"version\":\"1.0.0-RC\",\"build_date\":\"{}\"}}", "2026-05-04");
-            Ok(routing::ok_response(json))
-        }
-
-        ("POST", "/api/admin/restart") => {
-            let json = "{\"status\":\"restart_requested\"}".to_string();
-            Ok(routing::accepted_response(json))
-        }
-
         // RECOMMENDATIONS & ANALYTICS ENDPOINTS
         ("GET", "/api/soulseek/recommendations") => {
             let interests = state.interests.read().await;
@@ -89789,6 +89774,22 @@ mod tests {
         assert_eq!(admin_json["total_transfers"], 1);
         assert_eq!(admin_json["total_bytes"], 55);
         assert_eq!(admin_json["searches"], 1);
+
+        // These slskR-invented admin/{shutdown,restart,version} routes had
+        // no oracle equivalent, no caller, and no test coverage, and always
+        // faked a success response without doing anything -- a real 404 is
+        // honest where a fake "requested" body was not. The real, working
+        // equivalents are DELETE/PUT /api/application and GET /api/version.
+        for (method, path) in [
+            ("POST", "/api/admin/shutdown"),
+            ("GET", "/api/admin/version"),
+            ("POST", "/api/admin/restart"),
+        ] {
+            let response = super::route_http_request(method, path, None, "", &state)
+                .await
+                .unwrap_or_else(|error| panic!("{method} {path}: {error}"));
+            assert_eq!(response.status, "404 Not Found", "{method} {path}");
+        }
 
         {
             let mut session = state.session.write().await;
