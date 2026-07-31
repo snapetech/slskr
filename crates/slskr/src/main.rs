@@ -13028,6 +13028,294 @@ fn resolve_external_visualizer_path(configured: Option<&str>) -> Option<PathBuf>
         .find(|candidate| candidate.is_file())
 }
 
+fn path_directories() -> Vec<PathBuf> {
+    std::env::var_os("PATH")
+        .into_iter()
+        .flat_map(|value| std::env::split_paths(&value).collect::<Vec<_>>())
+        .collect()
+}
+
+fn command_exists_on_path(command: &str) -> bool {
+    path_directories()
+        .iter()
+        .any(|directory| directory.join(command).is_file())
+}
+
+fn file_exists_at_known_location_or_on_path(candidates: &[&str], path_file_name: &str) -> bool {
+    candidates
+        .iter()
+        .any(|candidate| Path::new(candidate).is_file())
+        || command_exists_on_path(path_file_name)
+}
+
+/// Matches the oracle's `SongIdCapabilityReporter`: real external-tool
+/// presence checks on `PATH` (and, for panako/audfprint, known install
+/// locations), not a hardcoded list. Capabilities that depend on features
+/// slskR has not implemented (MusicBrainz-backed lookup, Chromaprint
+/// fingerprinting, AcoustID lookup, and the deeper per-source-type
+/// analysis the oracle's SongID run pipeline performs) honestly report
+/// `available: false` with a "not yet implemented" reason rather than
+/// claiming parity depth slskR's own run queue doesn't have.
+fn songid_capabilities_json() -> serde_json::Value {
+    const DOCKER_HINT: &str = "For Docker, run install-optional-media-tools with the matching profile or install the tool in a derived image and keep it on PATH.";
+    const NOT_IMPLEMENTED: &str = "Not yet implemented in slskR.";
+
+    fn capability(
+        id: &str,
+        label: &str,
+        status: &str,
+        available: bool,
+        reason: String,
+        requirements: &[&str],
+    ) -> serde_json::Value {
+        serde_json::json!({
+            "id": id,
+            "label": label,
+            "status": status,
+            "available": available,
+            "reason": reason,
+            "requirements": requirements,
+        })
+    }
+
+    fn missing_tools_reason(missing: &[&str]) -> String {
+        format!(
+            "{} {DOCKER_HINT}",
+            match missing {
+                [] => "Required tools were not found on PATH.".to_owned(),
+                [one] => format!("{one} was not found on PATH."),
+                many => format!("{} were not found on PATH.", many.join(" and ")),
+            }
+        )
+    }
+
+    /// Builds the "available" flag and reason for a capability that
+    /// requires every named tool to be present.
+    fn tool_reason(tools: &[(&str, bool)]) -> (bool, String) {
+        let missing = tools
+            .iter()
+            .filter(|(_, present)| !present)
+            .map(|(name, _)| *name)
+            .collect::<Vec<_>>();
+        let available = missing.is_empty();
+        let reason = if available {
+            format!(
+                "{} {}",
+                tools
+                    .iter()
+                    .map(|(name, _)| *name)
+                    .collect::<Vec<_>>()
+                    .join(" and "),
+                if tools.len() == 1 {
+                    "is available."
+                } else {
+                    "are available."
+                }
+            )
+        } else {
+            missing_tools_reason(&missing)
+        };
+        (available, reason)
+    }
+
+    let yt_dlp = command_exists_on_path("yt-dlp");
+    let ffmpeg = command_exists_on_path("ffmpeg");
+    let songrec = command_exists_on_path("songrec");
+    let whisper = command_exists_on_path("whisper");
+    let tesseract = command_exists_on_path("tesseract");
+    let demucs = command_exists_on_path("demucs");
+    let c2patool = command_exists_on_path("c2patool");
+    let panako = file_exists_at_known_location_or_on_path(
+        &[
+            "/usr/share/java/panako.jar",
+            "/usr/local/share/java/panako.jar",
+            "/usr/share/panako/panako.jar",
+            "/usr/local/share/panako/panako.jar",
+        ],
+        "panako.jar",
+    );
+    let audfprint = file_exists_at_known_location_or_on_path(
+        &[
+            "/usr/share/audfprint/audfprint.py",
+            "/usr/local/share/audfprint/audfprint.py",
+            "/opt/audfprint/audfprint.py",
+        ],
+        "audfprint.py",
+    );
+
+    let (youtube_metadata_available, youtube_metadata_reason) = tool_reason(&[("yt-dlp", yt_dlp)]);
+    let (youtube_audio_available, youtube_audio_reason) =
+        tool_reason(&[("yt-dlp", yt_dlp), ("ffmpeg", ffmpeg)]);
+    let (songrec_available, songrec_reason) = tool_reason(&[("songrec", songrec)]);
+    let (demucs_available, demucs_reason) = tool_reason(&[("demucs", demucs), ("ffmpeg", ffmpeg)]);
+    let (whisper_available, whisper_reason) =
+        tool_reason(&[("whisper", whisper), ("ffmpeg", ffmpeg)]);
+    let (ocr_available, ocr_reason) = tool_reason(&[("tesseract", tesseract), ("ffmpeg", ffmpeg)]);
+    let (c2pa_available, c2pa_reason) = tool_reason(&[("c2patool", c2patool)]);
+
+    serde_json::json!([
+        capability(
+            "text_query",
+            "Text query analysis",
+            "experimental",
+            false,
+            NOT_IMPLEMENTED.to_owned(),
+            &[]
+        ),
+        capability(
+            "url_parsing",
+            "YouTube and Spotify URL parsing",
+            "experimental",
+            false,
+            NOT_IMPLEMENTED.to_owned(),
+            &[]
+        ),
+        capability(
+            "musicbrainz_lookup",
+            "MusicBrainz lookup",
+            "experimental",
+            false,
+            NOT_IMPLEMENTED.to_owned(),
+            &["musicbrainz base URL"]
+        ),
+        capability(
+            "spotify_page_metadata",
+            "Spotify page metadata",
+            "experimental",
+            false,
+            NOT_IMPLEMENTED.to_owned(),
+            &[]
+        ),
+        capability(
+            "youtube_metadata",
+            "YouTube metadata",
+            "experimental",
+            youtube_metadata_available,
+            youtube_metadata_reason.clone(),
+            &["yt-dlp"]
+        ),
+        capability(
+            "youtube_audio",
+            "YouTube audio extraction",
+            "experimental",
+            youtube_audio_available,
+            youtube_audio_reason,
+            &["yt-dlp", "ffmpeg"]
+        ),
+        capability(
+            "local_file_intake",
+            "Local file intake",
+            "experimental",
+            false,
+            NOT_IMPLEMENTED.to_owned(),
+            &[]
+        ),
+        capability(
+            "chromaprint_fingerprint",
+            "Chromaprint fingerprinting",
+            "experimental",
+            false,
+            NOT_IMPLEMENTED.to_owned(),
+            &[
+                "integration.chromaprint.enabled",
+                "ffmpeg",
+                "libchromaprint"
+            ]
+        ),
+        capability(
+            "acoustid_lookup",
+            "AcoustID lookup",
+            "experimental",
+            false,
+            NOT_IMPLEMENTED.to_owned(),
+            &[
+                "integration.acoustid.enabled",
+                "integration.acoustid.client_id"
+            ]
+        ),
+        capability(
+            "songrec",
+            "SongRec recognition",
+            "experimental",
+            songrec_available,
+            songrec_reason,
+            &["songrec"]
+        ),
+        capability(
+            "panako",
+            "Panako local corpus matching",
+            "experimental",
+            panako,
+            if panako {
+                "Panako jar found.".to_owned()
+            } else {
+                format!("panako.jar was not found in known locations or PATH. {DOCKER_HINT}")
+            },
+            &["java", "panako.jar"],
+        ),
+        capability(
+            "audfprint",
+            "Audfprint local corpus matching",
+            "experimental",
+            audfprint,
+            if audfprint {
+                "Audfprint script found.".to_owned()
+            } else {
+                format!("audfprint.py was not found in known locations or PATH. {DOCKER_HINT}")
+            },
+            &["python", "audfprint.py"],
+        ),
+        capability(
+            "demucs",
+            "Demucs stem extraction",
+            "experimental",
+            demucs_available,
+            demucs_reason,
+            &["demucs", "ffmpeg"]
+        ),
+        capability(
+            "whisper_transcripts",
+            "Whisper transcript extraction",
+            "experimental",
+            whisper_available,
+            whisper_reason,
+            &["whisper", "ffmpeg"]
+        ),
+        capability(
+            "ocr_frames",
+            "OCR frame scanning",
+            "experimental",
+            ocr_available,
+            ocr_reason,
+            &["tesseract", "ffmpeg"]
+        ),
+        capability(
+            "comments_and_chapters",
+            "YouTube comments and chapters",
+            "experimental",
+            youtube_metadata_available,
+            youtube_metadata_reason.clone(),
+            &["yt-dlp"]
+        ),
+        capability(
+            "c2pa_provenance",
+            "C2PA provenance signal detection",
+            "experimental",
+            c2pa_available,
+            c2pa_reason,
+            &["c2patool"]
+        ),
+        capability(
+            "hash_from_audio_file_flag",
+            "HashFromAudioFileEnabled flag",
+            "broken",
+            false,
+            "Not applicable to slskR.".to_owned(),
+            &[]
+        ),
+    ])
+}
+
 fn resolve_external_visualizer_working_directory(
     configured: Option<&Path>,
     resolved_path: Option<&Path>,
@@ -47280,9 +47568,7 @@ async fn extended_controller_get_response(
                 .to_string(),
             )
         }
-        "/api/songid/capabilities" => {
-            routing::ok_response(serde_json::json!(["filename", "metadata", "sha256"]).to_string())
-        }
+        "/api/songid/capabilities" => routing::ok_response(songid_capabilities_json().to_string()),
         "/api/telemetry/prometheus" | "/api/telemetry/prometheus/kpis" => {
             let transfers = state.transfers.read().await;
             let searches = state.searches.read().await;
@@ -86718,6 +87004,68 @@ mod tests {
         // Below both real thresholds, so no recommendations should fire.
         assert_eq!(analyze["recommendations"], serde_json::json!([]));
         assert_eq!(analyze["missingIndexes"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn songid_capabilities_report_real_tool_presence_not_a_fake_string_array() {
+        let capabilities = super::songid_capabilities_json();
+        let capabilities = capabilities.as_array().expect("capabilities array");
+        // Matches the oracle's full SongIdCapabilityReporter id set, not
+        // the old three-string placeholder.
+        assert_eq!(capabilities.len(), 18);
+
+        let by_id = |id: &str| {
+            capabilities
+                .iter()
+                .find(|capability| capability["id"] == id)
+                .unwrap_or_else(|| panic!("missing capability {id}"))
+        };
+
+        // Features slskR has not implemented must honestly say so, not
+        // claim oracle-level depth slskR's SongID run queue doesn't have.
+        for id in [
+            "text_query",
+            "url_parsing",
+            "musicbrainz_lookup",
+            "spotify_page_metadata",
+            "local_file_intake",
+            "chromaprint_fingerprint",
+            "acoustid_lookup",
+        ] {
+            let capability = by_id(id);
+            assert_eq!(capability["available"], false, "{id}");
+            assert!(
+                capability["reason"]
+                    .as_str()
+                    .unwrap()
+                    .contains("Not yet implemented")
+                    || capability["reason"].as_str().unwrap().contains("base URL"),
+                "{id}: {}",
+                capability["reason"]
+            );
+        }
+
+        // Tool-gated capabilities must reflect real PATH state, not a
+        // hardcoded value.
+        let youtube_metadata = by_id("youtube_metadata");
+        assert_eq!(
+            youtube_metadata["available"],
+            super::command_exists_on_path("yt-dlp")
+        );
+        assert_eq!(
+            youtube_metadata["requirements"],
+            serde_json::json!(["yt-dlp"])
+        );
+
+        let youtube_audio = by_id("youtube_audio");
+        assert_eq!(
+            youtube_audio["available"],
+            super::command_exists_on_path("yt-dlp") && super::command_exists_on_path("ffmpeg")
+        );
+
+        let hash_flag = by_id("hash_from_audio_file_flag");
+        assert_eq!(hash_flag["status"], "broken");
+        assert_eq!(hash_flag["available"], false);
     }
 
     #[tokio::test]
