@@ -13521,6 +13521,11 @@ struct AppState {
     login_attempts: RwLock<LoginAttemptStore>,
     pod_signature_stats: PodSignatureStats,
     pod_verification_stats: PodVerificationStats,
+    /// Real, monotonic count of successful DHT publish/update calls --
+    /// distinct from the number of currently-tracked publications (a
+    /// republish overwrites the same `pod/dht/{id}` record), matching the
+    /// oracle's `PodDhtPublisher`'s own all-time `_totalPublished` counter.
+    pod_dht_publish_count: std::sync::atomic::AtomicU64,
 }
 
 /// Matches the oracle's `MessageSigner`'s real `Interlocked` counters --
@@ -45552,6 +45557,8 @@ async fn podcore_mutation_response(
                     "payload": payload,
                 })
             };
+            let is_dht_publish =
+                section == "dht" && matches!(action.as_str(), "publish" | "update");
             Some(
                 match state
                     .controller_features
@@ -45559,7 +45566,14 @@ async fn podcore_mutation_response(
                     .await
                     .upsert(key, value.clone())
                 {
-                    Ok(()) => routing::ok_response(value.to_string()),
+                    Ok(()) => {
+                        if is_dht_publish {
+                            state
+                                .pod_dht_publish_count
+                                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        }
+                        routing::ok_response(value.to_string())
+                    }
                     Err(error) => routing::service_unavailable_response(&error),
                 },
             )
@@ -48824,20 +48838,95 @@ async fn podcore_stats_response(path: &str, query: Option<&str>, state: &AppStat
             "membershipsByPod": {},
             "lastOperation": chrono::Utc::now().to_rfc3339(),
         }).to_string()),
-        "/api/podcore/dht/stats" => routing::ok_response(serde_json::json!({
-            "totalPublished": pod_count,
-            "activePublications": pod_count,
-            "expiredPublications": 0,
-            "failedPublications": 0,
-            "averagePublishTime": "00:00:00",
-            "publicationsByDomain": {},
-            "publicationsByVisibility": {},
-            "lastPublishOperation": serde_json::Value::Null,
-            "registeredPods": pod_count,
-            "activeEntries": pod_count,
-            "publishedKeys": pod_count + channel_count,
-            "errors": 0,
-        }).to_string()),
+        "/api/podcore/dht/stats" => {
+            fn increment_count(map: &mut serde_json::Map<String, serde_json::Value>, key: String) {
+                let counter = map.entry(key).or_insert_with(|| serde_json::json!(0));
+                *counter = serde_json::json!(counter.as_u64().unwrap_or(0) + 1);
+            }
+
+            let now = chrono::Utc::now();
+            let dht_records = state
+                .controller_features
+                .read()
+                .await
+                .values_with_prefix("pod/dht/");
+            let mut active_publications = 0_u64;
+            let mut expired_publications = 0_u64;
+            let mut publications_by_domain = serde_json::Map::new();
+            let mut publications_by_visibility = serde_json::Map::new();
+            let mut last_publish_operation: Option<chrono::DateTime<chrono::Utc>> = None;
+            for record in &dht_records {
+                let expires_at = record
+                    .get("expiresAt")
+                    .and_then(serde_json::Value::as_str)
+                    .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+                    .map(|value| value.with_timezone(&chrono::Utc));
+                let is_active = expires_at.is_none_or(|expires_at| expires_at > now);
+                if is_active {
+                    active_publications += 1;
+                } else {
+                    expired_publications += 1;
+                }
+                let published_at = record
+                    .get("publishedAt")
+                    .and_then(serde_json::Value::as_str)
+                    .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+                    .map(|value| value.with_timezone(&chrono::Utc));
+                if let Some(published_at) = published_at {
+                    if last_publish_operation.is_none_or(|current| published_at > current) {
+                        last_publish_operation = Some(published_at);
+                    }
+                }
+                if !is_active {
+                    continue;
+                }
+                let Some(pod) = record
+                    .get("podId")
+                    .and_then(serde_json::Value::as_str)
+                    .and_then(|pod_id| pods.get(pod_id))
+                else {
+                    continue;
+                };
+                if let Some(domain) = pod
+                    .focus_content_id
+                    .as_deref()
+                    .and_then(|content_id| content_id.split(':').nth(1))
+                {
+                    increment_count(&mut publications_by_domain, domain.to_owned());
+                }
+                let visibility = pod
+                    .visibility
+                    .as_str()
+                    .unwrap_or("unknown")
+                    .to_owned();
+                increment_count(&mut publications_by_visibility, visibility);
+            }
+            // Total-ever-published is a real monotonic counter, distinct
+            // from currently-tracked publications (a republish overwrites
+            // the same record rather than adding a new one) -- it can
+            // never be lower than what's still tracked right now.
+            let total_published = state
+                .pod_dht_publish_count
+                .load(std::sync::atomic::Ordering::Relaxed)
+                .max(active_publications + expired_publications);
+            routing::ok_response(
+                serde_json::json!({
+                    "totalPublished": total_published,
+                    "activePublications": active_publications,
+                    "expiredPublications": expired_publications,
+                    "failedPublications": 0,
+                    "averagePublishTime": "00:00:00",
+                    "publicationsByDomain": publications_by_domain,
+                    "publicationsByVisibility": publications_by_visibility,
+                    "lastPublishOperation": last_publish_operation.map(|value| value.to_rfc3339()),
+                    "registeredPods": active_publications,
+                    "activeEntries": active_publications,
+                    "publishedKeys": active_publications,
+                    "errors": 0,
+                })
+                .to_string(),
+            )
+        }
         "/api/podcore/backfill/stats" => routing::ok_response(serde_json::json!({
             "totalBackfillRequestsSent": 0,
             "totalBackfillRequestsReceived": 0,
@@ -51853,6 +51942,7 @@ async fn serve(invocation: ServeInvocation) -> Result<(), String> {
         login_attempts: RwLock::new(LoginAttemptStore::default()),
         pod_signature_stats: PodSignatureStats::default(),
         pod_verification_stats: PodVerificationStats::default(),
+        pod_dht_publish_count: std::sync::atomic::AtomicU64::new(0),
     });
     start_controller_version_check(Arc::clone(&state)).await;
     match credential_store::load(&state.config) {
@@ -69172,6 +69262,7 @@ mod tests {
             login_attempts: RwLock::new(super::LoginAttemptStore::default()),
             pod_signature_stats: super::PodSignatureStats::default(),
             pod_verification_stats: super::PodVerificationStats::default(),
+            pod_dht_publish_count: std::sync::atomic::AtomicU64::new(0),
         });
         (state, receiver)
     }
@@ -88796,6 +88887,133 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn podcore_dht_stats_reflect_real_publications_not_a_pod_count_proxy() {
+        let (state, _receiver) = test_state();
+        state
+            .pods
+            .write()
+            .await
+            .create(
+                serde_json::from_value::<super::pods::PodRecord>(serde_json::json!({
+                    "podId": "dht-audit-pod-1",
+                    "name": "DHT Audit One",
+                    "visibility": "public",
+                    "focusContentId": "content:audio:artist:some-artist",
+                }))
+                .expect("deserialize pod record fixture"),
+                "owner-peer".to_owned(),
+            )
+            .expect("create pod one");
+        state
+            .pods
+            .write()
+            .await
+            .create(
+                serde_json::from_value::<super::pods::PodRecord>(serde_json::json!({
+                    "podId": "dht-audit-pod-2",
+                    "name": "DHT Audit Two",
+                    "visibility": "private",
+                    "focusContentId": "content:video:movie:some-movie",
+                }))
+                .expect("deserialize pod record fixture"),
+                "owner-peer".to_owned(),
+            )
+            .expect("create pod two");
+
+        // Two real pods exist but neither has been DHT-published yet --
+        // pod_count and dht-publication-count are different things.
+        let baseline =
+            super::route_http_request("GET", "/api/v0/podcore/dht/stats", None, "", &state)
+                .await
+                .expect("baseline dht stats");
+        let baseline_json = serde_json::from_str::<serde_json::Value>(&baseline.body).unwrap();
+        assert_eq!(baseline_json["activePublications"], 0, "{baseline_json}");
+        assert_eq!(baseline_json["totalPublished"], 0, "{baseline_json}");
+
+        for path in [
+            "/api/v0/podcore/dht/publish/dht-audit-pod-1",
+            "/api/v0/podcore/dht/publish/dht-audit-pod-2",
+        ] {
+            let published = super::route_http_request("POST", path, None, "{}", &state)
+                .await
+                .unwrap_or_else(|error| panic!("{path}: {error}"));
+            assert_eq!(published.status, "200 OK", "{path}");
+        }
+        // Republishing the same pod must still add to the real all-time
+        // counter without inflating the currently-active count.
+        let republished = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/dht/update/dht-audit-pod-1",
+            None,
+            "{}",
+            &state,
+        )
+        .await
+        .expect("republish pod one");
+        assert_eq!(republished.status, "200 OK");
+
+        let stats = super::route_http_request("GET", "/api/v0/podcore/dht/stats", None, "", &state)
+            .await
+            .expect("dht stats");
+        let stats_json = serde_json::from_str::<serde_json::Value>(&stats.body).unwrap();
+        assert_eq!(stats_json["activePublications"], 2, "{stats_json}");
+        assert_eq!(stats_json["totalPublished"], 3, "{stats_json}");
+        assert_eq!(stats_json["expiredPublications"], 0, "{stats_json}");
+        assert_eq!(
+            stats_json["publicationsByDomain"]["audio"], 1,
+            "{stats_json}"
+        );
+        assert_eq!(
+            stats_json["publicationsByDomain"]["video"], 1,
+            "{stats_json}"
+        );
+        assert_eq!(
+            stats_json["publicationsByVisibility"]["public"], 1,
+            "{stats_json}"
+        );
+        assert_eq!(
+            stats_json["publicationsByVisibility"]["private"], 1,
+            "{stats_json}"
+        );
+        assert!(
+            stats_json["lastPublishOperation"].is_string(),
+            "{stats_json}"
+        );
+
+        let unpublished = super::route_http_request(
+            "DELETE",
+            "/api/v0/podcore/dht/unpublish/dht-audit-pod-2",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("unpublish pod two");
+        assert_eq!(unpublished.status, "200 OK");
+
+        let after_unpublish =
+            super::route_http_request("GET", "/api/v0/podcore/dht/stats", None, "", &state)
+                .await
+                .expect("dht stats after unpublish");
+        let after_unpublish_json =
+            serde_json::from_str::<serde_json::Value>(&after_unpublish.body).unwrap();
+        assert_eq!(
+            after_unpublish_json["activePublications"], 1,
+            "{after_unpublish_json}"
+        );
+        assert_eq!(
+            after_unpublish_json["totalPublished"], 3,
+            "{after_unpublish_json}"
+        );
+        assert!(
+            after_unpublish_json["publicationsByDomain"]
+                .get("video")
+                .is_none(),
+            "{after_unpublish_json}"
+        );
+    }
+
+    #[tokio::test]
     async fn library_bloom_preview_reflects_real_hashdb_contents_not_an_empty_filter() {
         let (state, _receiver) = test_state();
 
@@ -98094,6 +98312,7 @@ mod tests {
             login_attempts: RwLock::new(super::LoginAttemptStore::default()),
             pod_signature_stats: super::PodSignatureStats::default(),
             pod_verification_stats: super::PodVerificationStats::default(),
+            pod_dht_publish_count: std::sync::atomic::AtomicU64::new(0),
         });
         let missing = super::route_http_request("GET", "/api/v0/config", None, "", &state)
             .await
@@ -98397,6 +98616,7 @@ mod tests {
             login_attempts: RwLock::new(super::LoginAttemptStore::default()),
             pod_signature_stats: super::PodSignatureStats::default(),
             pod_verification_stats: super::PodVerificationStats::default(),
+            pod_dht_publish_count: std::sync::atomic::AtomicU64::new(0),
         };
         let cookie_allowed = super::route_http_request_with_headers(
             "GET",
