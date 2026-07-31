@@ -48319,7 +48319,9 @@ async fn extended_controller_get_response(
                 .to_string(),
             )
         }
-        path if path.starts_with("/api/podcore/") => podcore_stats_response(path, state).await,
+        path if path.starts_with("/api/podcore/") => {
+            podcore_stats_response(path, query, state).await
+        }
         "/api/quarantine-jury/audit" | "/api/quarantine-jury/requests" => {
             let requests = state
                 .controller_features
@@ -48460,7 +48462,7 @@ async fn extended_controller_get_response(
     }
 }
 
-async fn podcore_stats_response(path: &str, state: &AppState) -> HttpResponse {
+async fn podcore_stats_response(path: &str, query: Option<&str>, state: &AppState) -> HttpResponse {
     let pods = state.pods.read().await;
     let visible = pods.list_visible(None);
     let pod_count = visible.len();
@@ -48521,9 +48523,48 @@ async fn podcore_stats_response(path: &str, state: &AppState) -> HttpResponse {
             "lastDiscoveryOperation": chrono::Utc::now().to_rfc3339(),
             "averageDiscoveryTime": "00:00:00",
         }).to_string()),
-        "/api/podcore/content/metadata" => routing::ok_response(serde_json::json!({
-            "pods": pod_count, "channels": channel_count, "items": [],
-        }).to_string()),
+        "/api/podcore/content/metadata" => {
+            // Matches the oracle's PodContentController.GetContentMetadata
+            // + ContentLinkService.CreateBasicMetadata: requires a real
+            // contentId query parameter and returns a single content
+            // object shaped by its `content:<domain>:<type>:<id>` parts,
+            // not an unrelated pod/channel-count aggregate that ignored
+            // the query entirely. MusicBrainz-backed enrichment for the
+            // audio/video domains is not implemented here -- the same
+            // honest simplification already accepted for content/validate.
+            let content_id = query_parameter(query, "contentId")
+                .map(|value| value.trim().to_owned())
+                .unwrap_or_default();
+            if content_id.is_empty() {
+                return routing::bad_request_response("Content ID is required");
+            }
+            let parts = content_id.split(':').collect::<Vec<_>>();
+            let valid = parts.len() == 4
+                && parts[0].eq_ignore_ascii_case("content")
+                && parts[1..].iter().all(|part| !part.trim().is_empty());
+            if !valid {
+                return HttpResponse {
+                    status: "404 Not Found",
+                    content_type: "application/json",
+                    body: serde_json::json!("Content not found").to_string(),
+                };
+            }
+            routing::ok_response(
+                serde_json::json!({
+                    "contentId": content_id,
+                    "title": format!("{}: {}", parts[2], parts[3]),
+                    "artist": "Unknown",
+                    "type": parts[2],
+                    "domain": parts[1],
+                    "additionalInfo": {
+                        "id": parts[3],
+                        "domain": parts[1],
+                        "type": parts[2],
+                    },
+                })
+                .to_string(),
+            )
+        }
         "/api/podcore/membership/stats" => routing::ok_response(serde_json::json!({
             "totalMemberships": member_count,
             "activeMemberships": member_count,
@@ -88351,6 +88392,45 @@ mod tests {
             "{summary}"
         );
         assert_eq!(summary["opinions"].as_array().unwrap().len(), 3);
+    }
+
+    #[tokio::test]
+    async fn podcore_content_metadata_requires_a_real_content_id() {
+        let (state, _receiver) = test_state();
+
+        let missing =
+            super::route_http_request("GET", "/api/v0/podcore/content/metadata", None, "", &state)
+                .await
+                .unwrap();
+        assert_eq!(missing.status, "400 Bad Request");
+
+        let malformed = super::route_http_request(
+            "GET",
+            "/api/v0/podcore/content/metadata?contentId=not-a-content-id",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(malformed.status, "404 Not Found");
+
+        let valid = super::route_http_request(
+            "GET",
+            "/api/v0/podcore/content/metadata?contentId=content:music:recording:route-audit",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(valid.status, "200 OK", "{}", valid.body);
+        let valid = serde_json::from_str::<serde_json::Value>(&valid.body).unwrap();
+        assert_eq!(valid["contentId"], "content:music:recording:route-audit");
+        assert_eq!(valid["title"], "recording: route-audit");
+        assert_eq!(valid["artist"], "Unknown");
+        assert_eq!(valid["type"], "recording");
+        assert_eq!(valid["domain"], "music");
     }
 
     #[tokio::test]
