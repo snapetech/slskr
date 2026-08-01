@@ -7031,6 +7031,51 @@ impl RoomMessageRecord {
     }
 }
 
+/// Mirrors the oracle's real `UserDataResponse` fields for a room member,
+/// sourced from the server's real `JoinedRoom` roster snapshot rather than
+/// a placeholder.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct RoomRosterEntry {
+    username: String,
+    status: u32,
+    average_speed: u32,
+    upload_count: u64,
+    file_count: u32,
+    directory_count: u32,
+    slots_free: u32,
+    country_code: String,
+}
+
+impl RoomRosterEntry {
+    /// `status` matches the wire protocol's numeric UserPresence codes
+    /// (0=offline, 1=away, 2=online), which the oracle serializes by enum
+    /// name via a global `JsonStringEnumConverter`.
+    fn slskd_json(&self, local_username: &str) -> serde_json::Value {
+        serde_json::json!({
+            "username": self.username,
+            "status": match self.status {
+                1 => "Away",
+                2 => "Online",
+                _ => "Offline",
+            },
+            "averageSpeed": self.average_speed,
+            "uploadCount": self.upload_count,
+            "fileCount": self.file_count,
+            "directoryCount": self.directory_count,
+            "slotsFree": self.slots_free,
+            "countryCode": self.country_code,
+            // Matches the oracle's real `Self = self ? self : (bool?)null`:
+            // present-and-true only for the caller's own username, absent
+            // (never `false`) otherwise.
+            "self": if self.username.eq_ignore_ascii_case(local_username) {
+                serde_json::Value::Bool(true)
+            } else {
+                serde_json::Value::Null
+            },
+        })
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct RoomRecord {
     name: String,
@@ -7041,6 +7086,7 @@ struct RoomRecord {
     last_error: Option<String>,
     ticker: Option<String>,
     members: Vec<String>,
+    roster: Vec<RoomRosterEntry>,
     messages: Vec<RoomMessageRecord>,
     updated_at: u64,
 }
@@ -7136,6 +7182,7 @@ impl RoomStore {
                 last_error: None,
                 ticker: None,
                 members: Vec::new(),
+                roster: Vec::new(),
                 messages: Vec::new(),
                 updated_at: u64::try_from(record.last_activity).unwrap_or_default(),
             })
@@ -7177,6 +7224,7 @@ impl RoomStore {
             last_error: None,
             ticker: None,
             members: Vec::new(),
+            roster: Vec::new(),
             messages: Vec::new(),
             updated_at: now,
         };
@@ -7218,6 +7266,7 @@ impl RoomStore {
             last_error: Some(reason),
             ticker: None,
             members: Vec::new(),
+            roster: Vec::new(),
             messages: Vec::new(),
             updated_at: now,
         };
@@ -7255,6 +7304,7 @@ impl RoomStore {
                     last_error: None,
                     ticker: None,
                     members: Vec::new(),
+                    roster: Vec::new(),
                     messages: Vec::new(),
                     updated_at: now,
                 });
@@ -7292,6 +7342,7 @@ impl RoomStore {
             last_error: None,
             ticker: None,
             members: Vec::new(),
+            roster: Vec::new(),
             messages: Vec::new(),
             updated_at: now,
         };
@@ -7377,6 +7428,27 @@ impl RoomStore {
         let now = unix_timestamp();
         let record = self.records.iter_mut().find(|record| record.name == room)?;
         record.ticker = Some(truncate_utf8_bytes(ticker, MAX_ROOM_TICKER_BYTES));
+        record.updated_at = now;
+        self.updated_at = now;
+        Some(record.clone())
+    }
+
+    /// Applies the real roster snapshot from the server's `JoinedRoom`
+    /// message -- matches the oracle's `IRoomTracker`, which populates the
+    /// room's user list from this same message rather than leaving it
+    /// empty until someone happens to join/leave afterward.
+    fn apply_roster(&mut self, room: &str, roster: Vec<RoomRosterEntry>) -> Option<RoomRecord> {
+        let room = bounded_room_name(room);
+        let now = unix_timestamp();
+        let cap = self.max_members_per_room;
+        let record = self.records.iter_mut().find(|record| record.name == room)?;
+        record.roster = roster.into_iter().take(cap).collect();
+        record.members = record
+            .roster
+            .iter()
+            .map(|user| user.username.clone())
+            .collect();
+        record.user_count = Some(u32::try_from(record.roster.len()).unwrap_or(u32::MAX));
         record.updated_at = now;
         self.updated_at = now;
         Some(record.clone())
@@ -19717,9 +19789,25 @@ async fn route_http_request_with_headers(
         {
             let room_name = joined_room_subresource(path, "/users")
                 .expect("guarded joined-room users path");
+            let session = state.session.read().await;
+            let local_username = session
+                .username
+                .clone()
+                .or_else(|| state.config.username.clone())
+                .unwrap_or_else(|| "local".to_owned());
+            drop(session);
             let rooms = state.rooms.read().await;
-            if let Some(_room) = rooms.records.iter().find(|r| r.name == room_name) {
-                let json = "[]".to_string();
+            if let Some(room) = rooms.records.iter().find(|r| r.name == room_name) {
+                // Matches the oracle's real GetUsersByRoomName: the room's
+                // real roster (from the server's JoinedRoom snapshot), not
+                // a hardcoded empty list.
+                let json = serde_json::Value::Array(
+                    room.roster
+                        .iter()
+                        .map(|user| user.slskd_json(&local_username))
+                        .collect(),
+                )
+                .to_string();
                 drop(rooms);
                 Ok(routing::ok_response(json))
             } else {
@@ -59267,8 +59355,23 @@ async fn project_server_message(
         }
         ServerMessage::JoinedRoom(joined) => {
             let room = joined.room.clone();
+            let roster = joined
+                .users
+                .iter()
+                .map(|user| RoomRosterEntry {
+                    username: user.username.clone(),
+                    status: user.status,
+                    average_speed: user.average_speed,
+                    upload_count: user.upload_count,
+                    file_count: user.file_count,
+                    directory_count: user.directory_count,
+                    slots_free: user.slots_free,
+                    country_code: user.country_code.clone(),
+                })
+                .collect();
             let mut rooms = state.rooms.write().await;
             rooms.join(room.clone());
+            rooms.apply_roster(&room, roster);
             drop(rooms);
             record_event(state, "room.joined", room.clone(), None).await;
         }
@@ -97286,6 +97389,107 @@ mod tests {
                 .await
                 .expect("joined room filter");
         assert!(joined_filter.body.contains("\"filtered_count\":0"));
+    }
+
+    #[tokio::test]
+    async fn joined_room_server_snapshot_populates_the_real_user_roster() {
+        // Matches the oracle's real IRoomTracker: the room's user list is
+        // populated from the server's JoinedRoom snapshot itself, not left
+        // empty until some other event happens to arrive. Previously
+        // JoinedRoom.users was fully decoded off the wire and then
+        // discarded -- GET .../users always returned a hardcoded "[]".
+        use slskr_client::{
+            protocol::server::{JoinedRoom, RoomUser, ServerMessage},
+            server::ServerSession,
+            stream::ServerConnection,
+        };
+
+        let (state, _receiver) = test_state();
+        state.session.write().await.username = Some("tester".to_owned());
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind server fixture");
+        let address = listener.local_addr().expect("server fixture address");
+        let client = tokio::net::TcpStream::connect(address);
+        let server = listener.accept();
+        let (client, server) = tokio::join!(client, server);
+        let (server, _) = server.expect("accept server fixture");
+        let mut session = ServerSession::new(ServerConnection::new(server));
+        let _fixture = ServerConnection::new(client.expect("client fixture"));
+
+        super::project_server_message(
+            &state,
+            &mut session,
+            &ServerMessage::JoinedRoom(JoinedRoom {
+                room: "roster-audit".to_owned(),
+                users: vec![
+                    RoomUser {
+                        username: "tester".to_owned(),
+                        status: 2,
+                        average_speed: 1_000,
+                        upload_count: 5,
+                        file_count: 42,
+                        directory_count: 3,
+                        slots_free: 1,
+                        country_code: "US".to_owned(),
+                    },
+                    RoomUser {
+                        username: "otherpeer".to_owned(),
+                        status: 1,
+                        average_speed: 0,
+                        upload_count: 0,
+                        file_count: 0,
+                        directory_count: 0,
+                        slots_free: 0,
+                        country_code: String::new(),
+                    },
+                ],
+                owner: None,
+                operators: Vec::new(),
+            }),
+        )
+        .await;
+
+        let response = super::route_http_request(
+            "GET",
+            "/api/v0/rooms/joined/roster-audit/users",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("joined room users");
+        assert_eq!(response.status, "200 OK", "{}", response.body);
+        let users = serde_json::from_str::<serde_json::Value>(&response.body).unwrap();
+        let users = users.as_array().expect("roster array");
+        assert_eq!(users.len(), 2, "{users:?}");
+        assert_eq!(users[0]["username"], "tester");
+        assert_eq!(users[0]["status"], "Online");
+        assert_eq!(users[0]["averageSpeed"], 1_000);
+        assert_eq!(users[0]["uploadCount"], 5);
+        assert_eq!(users[0]["fileCount"], 42);
+        assert_eq!(users[0]["directoryCount"], 3);
+        assert_eq!(users[0]["slotsFree"], 1);
+        assert_eq!(users[0]["countryCode"], "US");
+        assert_eq!(users[0]["self"], true);
+        assert_eq!(users[1]["username"], "otherpeer");
+        assert_eq!(users[1]["status"], "Away");
+        assert_eq!(users[1]["self"], serde_json::Value::Null);
+
+        // The room's own JSON contract also reflects the real roster's
+        // usernames (via the existing `members` field), not just an
+        // incrementally-tracked/empty list.
+        let room =
+            super::route_http_request("GET", "/api/v0/rooms/joined/roster-audit", None, "", &state)
+                .await
+                .expect("joined room detail");
+        assert_eq!(room.status, "200 OK");
+        let room_json = serde_json::from_str::<serde_json::Value>(&room.body).unwrap();
+        assert_eq!(
+            room_json["users"],
+            serde_json::json!(["tester", "otherpeer"])
+        );
     }
 
     #[tokio::test]
