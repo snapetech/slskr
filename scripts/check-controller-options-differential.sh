@@ -509,7 +509,7 @@ for path in source.iterdir():
             "accepted": value["accepted"],
             "active": value["active"],
             "loginUsernames": value.get("login_usernames", []),
-            "loginPasswordSha256": value.get("login_password_sha256", []),
+            "loginPasswordDigest": value.get("login_password_digest", []),
         }
     elif path.name.startswith("credential-debug-") and isinstance(value, str):
         soulseek_lines = []
@@ -2002,8 +2002,8 @@ write_credentials_omitted_yaml() {
   mv "$temporary" "$path"
 }
 
-password_sha256() {
-  "$python_bin" -c 'import hashlib,sys; print(hashlib.sha256(sys.argv[1].encode()).hexdigest())' "$1"
+password_digest() {
+  "$python_bin" -c 'import hashlib,sys; print(hashlib.pbkdf2_hmac("sha256", sys.argv[1].encode(), b"slskr-fixture-listener-digest-salt-v1", 100_000).hex())' "$1"
 }
 
 wait_for_credential_option() {
@@ -2035,15 +2035,15 @@ wait_for_fixture_login() {
   local status_file="$1"
   local expected_count="$2"
   local expected_username="$3"
-  local expected_password_hash="$4"
+  local expected_password_digest="$4"
   local log="$5"
   for _ in $(seq 1 600); do
-    if "$python_bin" - "$status_file" "$expected_count" "$expected_username" "$expected_password_hash" <<'PY' 2>/dev/null
+    if "$python_bin" - "$status_file" "$expected_count" "$expected_username" "$expected_password_digest" <<'PY' 2>/dev/null
 import json,sys
 value=json.load(open(sys.argv[1], encoding="utf-8"))
 count=int(sys.argv[2])
 users=value.get("login_usernames", [])
-hashes=value.get("login_password_sha256", [])
+hashes=value.get("login_password_digest", [])
 raise SystemExit(0 if len(users) == count and len(hashes) == count and users[-1] == sys.argv[3] and hashes[-1] == sys.argv[4] else 1)
 PY
     then
@@ -2148,8 +2148,8 @@ run_credential_scenario() {
   local server_port="$(pick_free_port)"
   local listen_port="$(pick_free_port)"
   local base_url="http://127.0.0.1:$http_port"
-  local hash_a="$(password_sha256 credential-password-a)"
-  local hash_b="$(password_sha256 credential-password-b)"
+  local hash_a="$(password_digest credential-password-a)"
+  local hash_b="$(password_digest credential-password-b)"
 
   for implementation in upstream slskr; do
     local state="$work_dir/state-$target-credential-$implementation"

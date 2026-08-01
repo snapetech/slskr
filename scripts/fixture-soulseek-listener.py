@@ -36,7 +36,7 @@ peer_fixture = len(sys.argv) == 9
 if peer_fixture and sys.argv[4] != "login-success":
     raise SystemExit("peer endpoint fixture requires login-success mode")
 login_success = login_success or private_message_fixture or peer_fixture
-peer_host = sys.argv[5] if peer_fixture else ""
+peer_host = sys.argv[5] if peer_fixture else "127.0.0.1"
 peer_regular_port = int(sys.argv[6]) if peer_fixture else 0
 peer_obfuscated_port = int(sys.argv[7]) if peer_fixture else 0
 peer_listener_mode = sys.argv[8] if peer_fixture else ""
@@ -48,7 +48,21 @@ active = 0
 set_wait_ports: list[int] = []
 set_wait_port_messages: list[dict[str, int | None]] = []
 login_usernames: list[str] = []
-login_password_sha256: list[str] = []
+login_password_digest: list[str] = []
+
+_LOGIN_DIGEST_SALT = b"slskr-fixture-listener-digest-salt-v1"
+_LOGIN_DIGEST_ITERATIONS = 100_000
+
+
+def password_digest(password: bytes) -> str:
+    """Non-reversible fingerprint of a received login password for test assertions.
+
+    Uses PBKDF2-HMAC-SHA256 rather than a bare fast hash so the digest exposed
+    via the status file cannot be brute-forced from a rainbow table.
+    """
+    return hashlib.pbkdf2_hmac(
+        "sha256", password, _LOGIN_DIGEST_SALT, _LOGIN_DIGEST_ITERATIONS
+    ).hex()
 peer_address_requests: list[str] = []
 peer_accept_order: list[str] = []
 regular_peer_accepts = 0
@@ -70,7 +84,7 @@ def write_status() -> None:
             "set_wait_ports": list(set_wait_ports),
             "set_wait_port_messages": list(set_wait_port_messages),
             "login_usernames": list(login_usernames),
-            "login_password_sha256": list(login_password_sha256),
+            "login_password_digest": list(login_password_digest),
             "peer_address_requests": list(peer_address_requests),
             "peer_accept_order": list(peer_accept_order),
             "regular_peer_accepts": regular_peer_accepts,
@@ -282,9 +296,7 @@ def handle_connection(connection: socket.socket) -> None:
                             break
                         with lock:
                             login_usernames.append(username)
-                            login_password_sha256.append(
-                                hashlib.sha256(password).hexdigest()
-                            )
+                            login_password_digest.append(password_digest(password))
                         write_status()
                         greeting = b"fixture login accepted"
                         password_hash = b"fixture-hash"
