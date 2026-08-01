@@ -26737,23 +26737,61 @@ async fn route_http_request_with_headers(
         }
 
         ("GET", "/api/listening-party") => {
-            let rooms = state.rooms.read().await;
-            let active_parties = rooms
-                .records
-                .iter()
-                .filter(|room| room.joined)
-                .map(|room| {
-                    serde_json::json!({
-                        "room": room.name,
-                        "userCount": room.user_count.unwrap_or(0),
-                        "messageCount": room.messages.len(),
-                        "updated_at": room.updated_at,
-                    })
+            // Matches the oracle's real ListeningPartyController.List
+            // response shape (ListeningPartyAnnouncement[]), but built
+            // from slskR's own locally-stored listening-party events
+            // rather than a real DHT-backed cross-peer directory --
+            // slskR is single-peer-per-instance and has no such mesh
+            // discovery wired in for this feature yet. This is an
+            // honest, local-only simplification (every entry reflects a
+            // real, currently-active local listen-along event), not the
+            // previous behavior of listing unrelated joined chat rooms.
+            const ANNOUNCEMENT_TTL_MS: u64 = 900_000;
+            let now_ms = unix_timestamp_millis();
+            let events = state
+                .controller_features
+                .read()
+                .await
+                .values_with_prefix("listening-party/");
+            let announcements = events
+                .into_iter()
+                .filter(|event| {
+                    event
+                        .get("listed")
+                        .and_then(serde_json::Value::as_bool)
+                        .unwrap_or(false)
+                })
+                .filter_map(|event| {
+                    let last_seen = event
+                        .get("serverTimeUnixMs")
+                        .and_then(serde_json::Value::as_u64)
+                        .unwrap_or(0);
+                    let expires_at = last_seen.saturating_add(ANNOUNCEMENT_TTL_MS);
+                    if expires_at <= now_ms {
+                        return None;
+                    }
+                    Some(serde_json::json!({
+                        "kind": "slskdn.listeningParty.announce.v1",
+                        "partyId": event.get("partyId").cloned().unwrap_or_default(),
+                        "podId": event.get("podId").cloned().unwrap_or_default(),
+                        "channelId": event.get("channelId").cloned().unwrap_or_default(),
+                        "hostPeerId": event.get("hostPeerId").cloned().unwrap_or_default(),
+                        "title": event.get("title").cloned().unwrap_or_default(),
+                        "artist": event.get("artist").cloned().unwrap_or_default(),
+                        "album": event.get("album").cloned().unwrap_or(serde_json::Value::Null),
+                        "contentId": event.get("contentId").cloned().unwrap_or_default(),
+                        "description": event.get("description").cloned().unwrap_or_default(),
+                        "tags": event.get("tags").cloned().unwrap_or_else(|| serde_json::json!([])),
+                        "allowMeshStreaming": event.get("allowMeshStreaming").cloned().unwrap_or(serde_json::json!(false)),
+                        "streamPath": "",
+                        "startedAtUnixMs": last_seen,
+                        "expiresAtUnixMs": expires_at,
+                        "lastSeenUnixMs": last_seen,
+                    }))
                 })
                 .collect::<Vec<_>>();
-            drop(rooms);
             Ok(routing::ok_response(
-                serde_json::Value::Array(active_parties).to_string(),
+                serde_json::Value::Array(announcements).to_string(),
             ))
         }
 
@@ -89387,6 +89425,113 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn listening_party_directory_reflects_real_listed_events() {
+        let (state, _receiver) = test_state();
+        let pod_id = "pod:listening-party-directory-audit";
+        let channel_id = "general";
+        state
+            .pods
+            .write()
+            .await
+            .create(
+                serde_json::from_value::<super::pods::PodRecord>(serde_json::json!({
+                    "podId": pod_id,
+                    "name": "Directory Audit",
+                }))
+                .expect("deserialize pod record fixture"),
+                "tester".to_owned(),
+            )
+            .expect("create pod");
+        state
+            .pods
+            .write()
+            .await
+            .upsert_channel(
+                pod_id,
+                super::pods::PodChannel {
+                    channel_id: channel_id.to_owned(),
+                    kind: serde_json::json!(0),
+                    name: "General".to_owned(),
+                    binding_info: None,
+                    description: None,
+                },
+            )
+            .expect("create channel");
+
+        // An unlisted event must never appear in the public directory.
+        let unlisted = super::route_http_request(
+            "POST",
+            &format!("/api/v0/listening-party/{pod_id}/{channel_id}"),
+            None,
+            r#"{"action":"play","contentId":"content:audio:track:unlisted","listed":false}"#,
+            &state,
+        )
+        .await
+        .expect("unlisted play event");
+        assert_eq!(unlisted.status, "200 OK", "{}", unlisted.body);
+        let after_unlisted =
+            super::route_http_request("GET", "/api/v0/listening-party", None, "", &state)
+                .await
+                .expect("directory after unlisted event");
+        assert_eq!(
+            after_unlisted.body, "[]",
+            "an unlisted event must not appear in the directory"
+        );
+
+        // A listed event must appear with the real event's data.
+        let listed = super::route_http_request(
+            "POST",
+            &format!("/api/v0/listening-party/{pod_id}/{channel_id}"),
+            None,
+            r#"{"action":"play","contentId":"content:audio:track:listed","title":"Directory Track","artist":"Directory Artist","listed":true,"allowMeshStreaming":true}"#,
+            &state,
+        )
+        .await
+        .expect("listed play event");
+        assert_eq!(listed.status, "200 OK", "{}", listed.body);
+        let listed_json = serde_json::from_str::<serde_json::Value>(&listed.body).unwrap();
+        let party_id = listed_json["partyId"].as_str().unwrap().to_owned();
+
+        let directory =
+            super::route_http_request("GET", "/api/v0/listening-party", None, "", &state)
+                .await
+                .expect("directory after listed event");
+        let directory_json = serde_json::from_str::<serde_json::Value>(&directory.body).unwrap();
+        let entries = directory_json.as_array().unwrap();
+        assert_eq!(entries.len(), 1, "{directory_json}");
+        assert_eq!(entries[0]["partyId"], party_id);
+        assert_eq!(entries[0]["podId"], pod_id);
+        assert_eq!(entries[0]["channelId"], channel_id);
+        assert_eq!(entries[0]["hostPeerId"], "tester");
+        assert_eq!(entries[0]["title"], "Directory Track");
+        assert_eq!(entries[0]["artist"], "Directory Artist");
+        assert_eq!(entries[0]["contentId"], "content:audio:track:listed");
+        assert_eq!(entries[0]["allowMeshStreaming"], true);
+        assert_eq!(entries[0]["kind"], "slskdn.listeningParty.announce.v1");
+        assert!(
+            entries[0]["expiresAtUnixMs"].as_u64().unwrap()
+                > entries[0]["startedAtUnixMs"].as_u64().unwrap()
+        );
+
+        // Stopping the party removes it from the directory entirely.
+        let stopped = super::route_http_request(
+            "POST",
+            &format!("/api/v0/listening-party/{pod_id}/{channel_id}"),
+            None,
+            r#"{"action":"stop"}"#,
+            &state,
+        )
+        .await
+        .expect("stop event");
+        assert_eq!(stopped.status, "200 OK", "{}", stopped.body);
+        let after_stop_directory =
+            super::route_http_request("GET", "/api/v0/listening-party", None, "", &state)
+                .await
+                .expect("directory after stop");
+        assert_eq!(after_stop_directory.body, "[]");
+    }
+
+    #[tokio::test]
     async fn quarantine_jury_request_creation_validates_reason_evidence_and_jurors() {
         let (state, _receiver) = test_state();
 
@@ -93175,8 +93320,12 @@ mod tests {
         let parties = super::route_http_request("GET", "/api/listening-party", None, "", &state)
             .await
             .expect("listening parties");
+        // Matches the oracle's real directory contract: it reflects
+        // real, currently-listed pod listen-along events, not unrelated
+        // joined chat rooms -- joining a room named "listening" above
+        // must not fabricate an entry here.
         let parties_json = serde_json::from_str::<serde_json::Value>(&parties.body).unwrap();
-        assert_eq!(parties_json[0]["room"], "listening");
+        assert_eq!(parties_json, serde_json::json!([]));
         let party_content = super::route_http_request(
             "POST",
             "/api/listening-party/radio/party/content",
