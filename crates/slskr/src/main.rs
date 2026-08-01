@@ -41889,6 +41889,97 @@ async fn detect_nat_type(servers: &[&str]) -> (&'static str, bool) {
     ("restricted", true)
 }
 
+/// Matches the oracle's `ListeningPartyService.Normalize` exactly: a
+/// real, restricted `play|pause|seek|stop` action vocabulary (not
+/// slskR's previously-invented `{kind, action}` pair), a required
+/// `contentId` for playback events, server-derived `partyId`/
+/// `hostPeerId`/`serverTimeUnixMs`, and bounded/deduplicated tags.
+/// `sequence` is the millisecond-resolution wall clock at call time,
+/// since slskR has no real per-process monotonic event counter for
+/// this feature the way the oracle does.
+fn listening_party_normalize(
+    payload: &serde_json::Value,
+    pod_id: &str,
+    channel_id: &str,
+    host_peer_id: &str,
+) -> Result<serde_json::Value, &'static str> {
+    let now_ms = unix_timestamp_millis();
+    let action = payload
+        .get("action")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    if !matches!(action.as_str(), "play" | "pause" | "seek" | "stop") {
+        return Err("Listen-along event is invalid.");
+    }
+    let content_id = if action == "stop" {
+        String::new()
+    } else {
+        payload
+            .get("contentId")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .trim()
+            .to_owned()
+    };
+    if action != "stop" && content_id.is_empty() {
+        return Err("Listen-along event is invalid.");
+    }
+    let party_id = payload
+        .get("partyId")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+        .unwrap_or_else(|| format!("party:{}", uuid::Uuid::new_v4().simple()));
+    let position_seconds = payload
+        .get("positionSeconds")
+        .and_then(serde_json::Value::as_f64)
+        .unwrap_or(0.0)
+        .max(0.0);
+    let mut seen_tags = std::collections::BTreeSet::new();
+    let mut tags = payload
+        .get("tags")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|tag| {
+            tag.as_str()
+                .map(str::trim)
+                .filter(|tag| !tag.is_empty())
+                .map(str::to_owned)
+        })
+        .collect::<Vec<_>>();
+    tags.retain(|tag| seen_tags.insert(tag.to_ascii_lowercase()));
+    tags.truncate(10);
+    let album = payload
+        .get("album")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    Ok(serde_json::json!({
+        "partyId": party_id,
+        "kind": "slskdn.listenAlong.v1",
+        "podId": pod_id,
+        "channelId": channel_id,
+        "hostPeerId": host_peer_id,
+        "action": action,
+        "contentId": content_id,
+        "title": payload.get("title").and_then(serde_json::Value::as_str).unwrap_or_default().trim(),
+        "artist": payload.get("artist").and_then(serde_json::Value::as_str).unwrap_or_default().trim(),
+        "album": album,
+        "positionSeconds": position_seconds,
+        "serverTimeUnixMs": now_ms,
+        "sequence": now_ms,
+        "listed": payload.get("listed").and_then(serde_json::Value::as_bool).unwrap_or(false),
+        "allowMeshStreaming": payload.get("allowMeshStreaming").and_then(serde_json::Value::as_bool).unwrap_or(false),
+        "description": payload.get("description").and_then(serde_json::Value::as_str).unwrap_or_default().trim(),
+        "tags": tags,
+    }))
+}
+
 async fn misc_controller_mutation_response(
     method: &str,
     path: &str,
@@ -42093,33 +42184,25 @@ async fn misc_controller_mutation_response(
         let [pod_id, channel_id] = segments.as_slice() else {
             return Some(routing::not_found_response());
         };
-        if is_versioned_v0 {
-            let payload = serde_json::from_str::<serde_json::Value>(body).unwrap_or_default();
-            let kind = payload.get("kind").and_then(serde_json::Value::as_str);
-            let action = payload.get("action").and_then(serde_json::Value::as_str);
-            let valid_kind = kind.is_some_and(|kind| {
-                matches!(
-                    kind.to_ascii_lowercase().as_str(),
-                    "started" | "paused" | "resumed" | "seeked" | "stopped" | "trackchanged"
-                )
-            });
-            let valid_action = action.is_some_and(|action| {
-                matches!(
-                    action.to_ascii_lowercase().as_str(),
-                    "play" | "pause" | "resume" | "seek" | "stop" | "change"
-                )
-            });
-            if !valid_kind || !valid_action {
-                return Some(HttpResponse {
-                    status: "400 Bad Request",
-                    content_type: "application/json",
-                    body: serde_json::json!("Listen-along event is invalid.").to_string(),
-                });
-            }
-        }
-        if !state.pods.read().await.channel_exists(pod_id, channel_id) {
+        let pods = state.pods.read().await;
+        if pods.get(pod_id).is_none() || !pods.channel_exists(pod_id, channel_id) {
             return Some(routing::not_found_response());
         }
+        // Matches the oracle's ListeningPartyController.Publish: the
+        // caller must be a real pod member, and the host peer id is
+        // always the authenticated local identity, never a
+        // client-supplied field.
+        let Some(host_peer_id) = pod_request_peer_id(state).await else {
+            drop(pods);
+            return Some(routing::forbidden_response(
+                "Authenticated peer identity is required",
+            ));
+        };
+        if !pods.is_member(pod_id, &host_peer_id) {
+            drop(pods);
+            return Some(routing::forbidden_response("Pod membership is required"));
+        }
+        drop(pods);
         let payload = match serde_json::from_str::<serde_json::Value>(body) {
             Ok(payload @ serde_json::Value::Object(_)) => payload,
             Ok(_) => {
@@ -42129,21 +42212,31 @@ async fn misc_controller_mutation_response(
             }
             Err(_) => return Some(routing::bad_request_response("invalid JSON body")),
         };
-        let record = serde_json::json!({
-            "podId": pod_id,
-            "channelId": channel_id,
-            "state": payload,
-            "updatedAt": unix_timestamp(),
+        let event = match listening_party_normalize(&payload, pod_id, channel_id, &host_peer_id) {
+            Ok(event) => event,
+            Err(error) => {
+                return Some(HttpResponse {
+                    status: "400 Bad Request",
+                    content_type: "application/json",
+                    body: serde_json::json!(error).to_string(),
+                })
+            }
+        };
+        let key = format!("listening-party/{pod_id}/{channel_id}");
+        let mut features = state.controller_features.write().await;
+        // Matches the oracle's PublishAsync: a "stop" event clears the
+        // stored state entirely rather than persisting a "stopped"
+        // snapshot -- there is no active listen-along after a stop.
+        let result = if event["action"] == "stop" {
+            features.remove(&key).map(|_| ())
+        } else {
+            features.upsert(key, event.clone())
+        };
+        drop(features);
+        return Some(match result {
+            Ok(()) => routing::ok_response(event.to_string()),
+            Err(error) => routing::service_unavailable_response(&error),
         });
-        return Some(
-            match state.controller_features.write().await.upsert(
-                format!("listening-party/{pod_id}/{channel_id}"),
-                record.clone(),
-            ) {
-                Ok(()) => routing::ok_response(record.to_string()),
-                Err(error) => routing::service_unavailable_response(&error),
-            },
-        );
     }
     if method == "POST" && path == "/api/mesh/nat/detect" {
         let (nat_type, detected) = detect_nat_type(&STUN_SERVERS).await;
@@ -47541,27 +47634,33 @@ async fn extended_controller_dynamic_get_response(
     if let Some(segments) = decoded_segments_after(path, "/api/listening-party/") {
         if let [pod_id, channel_id] = segments.as_slice() {
             let pods = state.pods.read().await;
-            let Some(pod) = pods.get(pod_id) else {
-                return routing::no_content_response();
+            if pods.get(pod_id).is_none() || !pods.channel_exists(pod_id, channel_id) {
+                return routing::not_found_response();
+            }
+            // Matches the oracle's ListeningPartyController.Get: requires
+            // real pod membership, then returns the real stored
+            // ListeningPartyEvent that the sibling POST handler writes
+            // (or 204 if there is none) -- never the pod object plus raw
+            // chat history, and never without a membership check.
+            let Some(peer_id) = pod_request_peer_id(state).await else {
+                drop(pods);
+                return routing::forbidden_response("Authenticated peer identity is required");
             };
-            if !pods.channel_exists(pod_id, channel_id) {
-                return routing::no_content_response();
+            if !pods.is_member(pod_id, &peer_id) {
+                drop(pods);
+                return routing::forbidden_response("Pod membership is required");
             }
             drop(pods);
-            let messages = state
-                .pod_channels
+            let event = state
+                .controller_features
                 .read()
                 .await
-                .list(pod_id, channel_id, None);
-            return routing::ok_response(
-                serde_json::json!({
-                    "podId": pod_id,
-                    "channelId": channel_id,
-                    "pod": pod,
-                    "messages": messages,
-                })
-                .to_string(),
-            );
+                .get(&format!("listening-party/{pod_id}/{channel_id}"))
+                .cloned();
+            return match event {
+                Some(event) => routing::ok_response(event.to_string()),
+                None => routing::no_content_response(),
+            };
         }
     }
     if let Some(flac_key) = path_segment_after(path, "/api/mesh/lookup/") {
@@ -87726,10 +87825,14 @@ mod tests {
         let (state, _receiver) = test_state();
         let cases = [
             ("/api/v0/nowplaying", "204 No Content", None),
+            // A truly nonexistent pod/channel is a real 404, not a
+            // fake 204 -- matching the sibling pod-channel-messages
+            // endpoint's convention for the identical "doesn't exist"
+            // check.
             (
                 "/api/v0/listening-party/missing-pod/missing-channel",
-                "204 No Content",
-                None,
+                "404 Not Found",
+                Some("\"error\":\"not found\""),
             ),
             (
                 "/api/v0/mediacore/contentid/domain/music",
@@ -89100,6 +89203,187 @@ mod tests {
             real_route_json["errorMessage"],
             "Routing backend is not available."
         );
+    }
+
+    #[tokio::test]
+    async fn listening_party_requires_membership_and_reports_a_real_event() {
+        let (state, _receiver) = test_state();
+        let pod_id = "pod:listening-party-audit";
+        let channel_id = "general";
+        state
+            .pods
+            .write()
+            .await
+            .create(
+                serde_json::from_value::<super::pods::PodRecord>(serde_json::json!({
+                    "podId": pod_id,
+                    "name": "Listening Party Audit",
+                }))
+                .expect("deserialize pod record fixture"),
+                "tester".to_owned(),
+            )
+            .expect("create pod (tester is the owner/member)");
+        state
+            .pods
+            .write()
+            .await
+            .upsert_channel(
+                pod_id,
+                super::pods::PodChannel {
+                    channel_id: channel_id.to_owned(),
+                    kind: serde_json::json!(0),
+                    name: "General".to_owned(),
+                    binding_info: None,
+                    description: None,
+                },
+            )
+            .expect("create channel");
+
+        // A pod that exists, where "tester" (the fixture's default
+        // configured identity) is not a member, must reject both GET and
+        // POST with a real 403 -- never leak state or accept an event.
+        let outside_pod = "pod:listening-party-outsider";
+        state
+            .pods
+            .write()
+            .await
+            .create(
+                serde_json::from_value::<super::pods::PodRecord>(serde_json::json!({
+                    "podId": outside_pod,
+                    "name": "Not Tester's Pod",
+                }))
+                .expect("deserialize pod record fixture"),
+                "someone-else".to_owned(),
+            )
+            .expect("create outsider pod");
+        state
+            .pods
+            .write()
+            .await
+            .upsert_channel(
+                outside_pod,
+                super::pods::PodChannel {
+                    channel_id: channel_id.to_owned(),
+                    kind: serde_json::json!(0),
+                    name: "General".to_owned(),
+                    binding_info: None,
+                    description: None,
+                },
+            )
+            .expect("create outsider channel");
+        let forbidden_get = super::route_http_request(
+            "GET",
+            &format!("/api/v0/listening-party/{outside_pod}/{channel_id}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("forbidden get");
+        assert_eq!(
+            forbidden_get.status, "403 Forbidden",
+            "{}",
+            forbidden_get.body
+        );
+        let forbidden_post = super::route_http_request(
+            "POST",
+            &format!("/api/v0/listening-party/{outside_pod}/{channel_id}"),
+            None,
+            r#"{"action":"play","contentId":"content:audio:track:x"}"#,
+            &state,
+        )
+        .await
+        .expect("forbidden post");
+        assert_eq!(
+            forbidden_post.status, "403 Forbidden",
+            "{}",
+            forbidden_post.body
+        );
+
+        // An invalid action is a real 400, matching the oracle's real
+        // play|pause|seek|stop vocabulary -- not slskR's old invented
+        // {kind, action} pair.
+        let invalid_action = super::route_http_request(
+            "POST",
+            &format!("/api/v0/listening-party/{pod_id}/{channel_id}"),
+            None,
+            r#"{"action":"resume","contentId":"content:audio:track:x"}"#,
+            &state,
+        )
+        .await
+        .expect("invalid action");
+        assert_eq!(invalid_action.status, "400 Bad Request");
+
+        // No prior state: a real 204, not a fabricated pod+chat-history
+        // payload.
+        let before = super::route_http_request(
+            "GET",
+            &format!("/api/v0/listening-party/{pod_id}/{channel_id}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("no state yet");
+        assert_eq!(before.status, "204 No Content", "{}", before.body);
+
+        let played = super::route_http_request(
+            "POST",
+            &format!("/api/v0/listening-party/{pod_id}/{channel_id}"),
+            None,
+            r#"{"action":"play","contentId":"content:audio:track:x","title":"Track","artist":"Artist","hostPeerId":"forged-peer"}"#,
+            &state,
+        )
+        .await
+        .expect("play event");
+        assert_eq!(played.status, "200 OK", "{}", played.body);
+        let played_json = serde_json::from_str::<serde_json::Value>(&played.body).unwrap();
+        assert_eq!(played_json["action"], "play");
+        assert_eq!(played_json["podId"], pod_id);
+        assert_eq!(played_json["channelId"], channel_id);
+        // hostPeerId is always the authenticated local identity, never
+        // the client-supplied value -- a forged value must not survive.
+        assert_eq!(played_json["hostPeerId"], "tester");
+        assert_eq!(played_json["kind"], "slskdn.listenAlong.v1");
+        assert!(played_json["partyId"]
+            .as_str()
+            .unwrap()
+            .starts_with("party:"));
+
+        // GET must now return the exact same real, persisted event.
+        let polled = super::route_http_request(
+            "GET",
+            &format!("/api/v0/listening-party/{pod_id}/{channel_id}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("poll event");
+        assert_eq!(polled.status, "200 OK", "{}", polled.body);
+        assert_eq!(polled.body, played.body);
+
+        // A "stop" event clears the stored state entirely.
+        let stopped = super::route_http_request(
+            "POST",
+            &format!("/api/v0/listening-party/{pod_id}/{channel_id}"),
+            None,
+            r#"{"action":"stop"}"#,
+            &state,
+        )
+        .await
+        .expect("stop event");
+        assert_eq!(stopped.status, "200 OK", "{}", stopped.body);
+        let after_stop = super::route_http_request(
+            "GET",
+            &format!("/api/v0/listening-party/{pod_id}/{channel_id}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("state after stop");
+        assert_eq!(after_stop.status, "204 No Content", "{}", after_stop.body);
     }
 
     #[tokio::test]
