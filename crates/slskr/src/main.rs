@@ -22760,37 +22760,22 @@ async fn route_http_request_with_headers(
             } else {
                 "disabled"
             };
-            let users = state.users.read().await;
-            let mesh = state.mesh.read().await;
-            let clients = mesh
-                .capability_records
-                .iter()
-                .map(|record| {
-                    format!(
-                        "{{\"username\":\"{}\",\"status\":\"capable\",\"source\":\"peer-capability\",\"updated_at\":{}}}",
-                        json_escape(&record.username),
-                        record.issued_at_unix
-                    )
-                })
-                .chain(users.records.iter().filter(|user| user.status.as_deref() == Some("online")).map(|user| {
-                    format!(
-                        "{{\"username\":\"{}\",\"status\":\"online\",\"source\":\"watched-user\",\"updated_at\":{}}}",
-                        json_escape(&user.username),
-                        user.updated_at
-                    )
-                }))
-                .collect::<Vec<_>>();
-            drop(mesh);
-            drop(users);
             drop(runtime);
-             let json = format!(
-                 "{{\"clients\":[{}],\"count\":{},\"status\":\"{}\",\"ready\":{}}}",
-                 clients.join(","),
-                 clients.len(),
-                 status,
-                 bridge.enabled
-             );
-             Ok(routing::ok_response(json))
+            // Matches the oracle's real BridgeDashboard.
+            // GetConnectedClientsAsync contract (a real ConnectedClient[]
+            // tracked from genuine legacy-client connections to an
+            // embedded Soulfind-protocol bridge server) -- slskR has no
+            // such embedded server, so there are no real bridge clients
+            // to report. An honest empty list, not mesh-capability
+            // records or watched-user presence pretending to be bridge
+            // connections.
+             let json = serde_json::json!({
+                 "clients": [],
+                 "count": 0,
+                 "status": status,
+                 "ready": bridge.enabled,
+             });
+             Ok(routing::ok_response(json.to_string()))
          }
 
          ("GET", "/api/bridge/admin/config") => {
@@ -22830,25 +22815,34 @@ async fn route_http_request_with_headers(
                  .iter()
                  .map(|entry| entry.bytes_transferred)
                  .sum::<u64>();
-             let json = format!(
-                 "{{\"health\":\"{}\",\"connectedClients\":{},\"stats\":{{\"totalBytesProxied\":{},\"totalConnections\":{}}},\"meshBenefits\":{{\"enabled\":{}}},\"active_clients\":{},\"transfers\":{},\"active_transfers\":{},\"total_bytes\":{},\"uptime_seconds\":0,\"enabled\":{},\"running\":{},\"configUpdates\":{},\"host\":null,\"port\":null,\"endpoint_configured\":{}}}",
-                 if runtime.bridge_running { "Healthy" } else { "Disabled" },
-                 active_transfers,
-                 bytes,
-                 active_transfers,
-                 bridge.enabled,
-                 active_transfers,
-                 transfers.entries.len(),
-                 active_transfers,
-                 bytes,
-                 bridge.enabled,
-                 runtime.bridge_running,
-                 runtime.bridge_config_updates,
-                 bridge.endpoint_configured()
-             );
+             let transfer_count = transfers.entries.len();
              drop(transfers);
+             // Matches the oracle's real BridgeDashboardData contract:
+             // no embedded Soulfind bridge server exists in slskR, so
+             // there are no real legacy-client connections or
+             // bridge-proxied bytes to report -- honest zeros for the
+             // oracle's own fields, not slskR's local transfer activity
+             // standing in for unrelated bridge metrics (kept below as
+             // separate, honestly-labeled extra fields).
+             let json = serde_json::json!({
+                 "health": if runtime.bridge_running { "Healthy" } else { "Disabled" },
+                 "connectedClients": 0,
+                 "stats": {"totalBytesProxied": 0, "totalConnections": 0},
+                 "meshBenefits": {"enabled": bridge.enabled},
+                 "active_clients": 0,
+                 "transfers": transfer_count,
+                 "active_transfers": active_transfers,
+                 "total_bytes": bytes,
+                 "uptime_seconds": 0,
+                 "enabled": bridge.enabled,
+                 "running": runtime.bridge_running,
+                 "configUpdates": runtime.bridge_config_updates,
+                 "host": serde_json::Value::Null,
+                 "port": serde_json::Value::Null,
+                 "endpoint_configured": bridge.endpoint_configured(),
+             });
              drop(runtime);
-             Ok(routing::ok_response(json))
+             Ok(routing::ok_response(json.to_string()))
          }
 
          ("GET", "/api/bridge/admin/stats") => {
@@ -22871,22 +22865,32 @@ async fn route_http_request_with_headers(
                  .iter()
                  .filter(|entry| matches!(entry.status.as_str(), "queued" | "in_progress" | "requested"))
                  .count();
-             let json = format!(
-                 "{{\"totalConnections\":{},\"currentConnections\":{},\"totalSearches\":0,\"totalDownloads\":{},\"totalRoomJoins\":0,\"totalBytesProxied\":{},\"uptime\":\"00:00:00\",\"total_requests\":{},\"total_bytes\":{},\"active_sessions\":{},\"enabled\":{},\"running\":{},\"configUpdates\":{}}}",
-                 transfers.entries.len(),
-                 active_sessions,
-                 transfers.entries.iter().filter(|entry| entry.direction == 0).count(),
-                 total_bytes,
-                 transfers.entries.len(),
-                 total_bytes,
-                 active_sessions,
-                 bridge.enabled,
-                 runtime.bridge_running,
-                 runtime.bridge_config_updates
-             );
+             let total_requests = transfers.entries.len();
              drop(transfers);
+             // Matches the oracle's real BridgeStatistics contract: no
+             // embedded Soulfind bridge server exists in slskR, so there
+             // are no real legacy-client connections/searches/
+             // room-joins/downloads/proxied bytes to report -- honest
+             // zeros, not slskR's own transfer queue standing in for
+             // unrelated bridge metrics (kept below as separate,
+             // honestly-labeled extra fields).
+             let json = serde_json::json!({
+                 "totalConnections": 0,
+                 "currentConnections": 0,
+                 "totalSearches": 0,
+                 "totalDownloads": 0,
+                 "totalRoomJoins": 0,
+                 "totalBytesProxied": 0,
+                 "uptime": "00:00:00",
+                 "total_requests": total_requests,
+                 "total_bytes": total_bytes,
+                 "active_sessions": active_sessions,
+                 "enabled": bridge.enabled,
+                 "running": runtime.bridge_running,
+                 "configUpdates": runtime.bridge_config_updates,
+             });
              drop(runtime);
-             Ok(routing::ok_response(json))
+             Ok(routing::ok_response(json.to_string()))
          }
 
          ("GET", "/api/bridge/status") => {
@@ -87737,6 +87741,83 @@ mod tests {
             serde_json::from_str::<serde_json::Value>(&bridge_stats.body).unwrap();
         assert_eq!(bridge_stats_json["total_requests"], 1);
         assert_eq!(bridge_stats_json["total_bytes"], 25);
+        // Matches the oracle's real BridgeStatistics contract: with no
+        // embedded Soulfind bridge server, these must stay honest zeros
+        // even though a real (unrelated) local transfer just happened --
+        // they must never be backfilled from slskR's own transfer queue.
+        assert_eq!(
+            bridge_stats_json["totalConnections"], 0,
+            "{bridge_stats_json}"
+        );
+        assert_eq!(
+            bridge_stats_json["currentConnections"], 0,
+            "{bridge_stats_json}"
+        );
+        assert_eq!(
+            bridge_stats_json["totalDownloads"], 0,
+            "{bridge_stats_json}"
+        );
+        assert_eq!(bridge_stats_json["totalSearches"], 0, "{bridge_stats_json}");
+        assert_eq!(
+            bridge_stats_json["totalRoomJoins"], 0,
+            "{bridge_stats_json}"
+        );
+        assert_eq!(
+            bridge_stats_json["totalBytesProxied"], 0,
+            "{bridge_stats_json}"
+        );
+
+        let bridge_dashboard =
+            super::route_http_request("GET", "/api/bridge/admin/dashboard", None, "", &state)
+                .await
+                .expect("bridge dashboard");
+        let bridge_dashboard_json =
+            serde_json::from_str::<serde_json::Value>(&bridge_dashboard.body).unwrap();
+        assert_eq!(
+            bridge_dashboard_json["connectedClients"], 0,
+            "{bridge_dashboard_json}"
+        );
+        assert_eq!(
+            bridge_dashboard_json["stats"]["totalConnections"], 0,
+            "{bridge_dashboard_json}"
+        );
+        assert_eq!(
+            bridge_dashboard_json["stats"]["totalBytesProxied"], 0,
+            "{bridge_dashboard_json}"
+        );
+    }
+
+    #[tokio::test]
+    async fn bridge_admin_clients_never_leaks_unrelated_peer_activity() {
+        let (state, _receiver) = test_state();
+        // Real, unrelated peer activity: an online watched user and a
+        // real peer capability record. Neither is a real legacy client
+        // connected to an embedded Soulfind bridge server (slskR has no
+        // such server), so neither must appear in the bridge client
+        // list -- matching the oracle's real (and, here, honestly
+        // empty) BridgeDashboard.GetConnectedClientsAsync contract.
+        {
+            let mut users = state.users.write().await;
+            users.watch("online-peer".to_owned());
+            if let Some(record) = users
+                .records
+                .iter_mut()
+                .find(|record| record.username == "online-peer")
+            {
+                record.status = Some("online".to_owned());
+            }
+        }
+        let clients =
+            super::route_http_request("GET", "/api/bridge/admin/clients", None, "", &state)
+                .await
+                .expect("bridge clients");
+        assert_eq!(clients.status, "200 OK", "{}", clients.body);
+        let clients_json = serde_json::from_str::<serde_json::Value>(&clients.body).unwrap();
+        assert_eq!(
+            clients_json,
+            serde_json::json!({"clients": [], "count": 0, "status": "disabled", "ready": false}),
+            "{clients_json}"
+        );
     }
 
     #[tokio::test]
