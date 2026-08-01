@@ -13140,6 +13140,181 @@ fn format_timespan_hms(total_seconds: i64) -> String {
     }
 }
 
+/// Matches the oracle's real `SongIdService.BuildEvidencePackage`/
+/// `SongIdRunEvidencePackage` contract: a real reshape of the same
+/// stored run fields the other SongID endpoints already read/write
+/// (scorecard, identityAssessment, syntheticAssessment, track/album/
+/// artist candidates, segments, mixGroups, plans, options, evidence),
+/// applying the oracle's real sort-by-score/truncate rules and deriving
+/// warnings from the same real conditions (incomplete run, no track
+/// candidates, no recognizer hits, no forensic matrix). Fields slskR's
+/// synchronous, non-fingerprinting analysis pipeline never populates
+/// (artifacts from clips/stems/perturbations/a full-source fingerprint,
+/// a forensic matrix) are honestly reported as empty/absent rather than
+/// fabricated.
+fn songid_evidence_package_json(run: &serde_json::Value) -> serde_json::Value {
+    fn sorted_candidates(
+        run: &serde_json::Value,
+        field: &str,
+        take: usize,
+    ) -> Vec<serde_json::Value> {
+        let mut candidates = run
+            .get(field)
+            .and_then(serde_json::Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        candidates.sort_by(|left, right| {
+            let score = |value: &serde_json::Value, field: &str| {
+                value
+                    .get(field)
+                    .and_then(serde_json::Value::as_f64)
+                    .unwrap_or(0.0)
+            };
+            score(right, "actionScore")
+                .partial_cmp(&score(left, "actionScore"))
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| {
+                    score(right, "identityScore")
+                        .partial_cmp(&score(left, "identityScore"))
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+        });
+        candidates.truncate(take);
+        candidates
+    }
+    fn taken(run: &serde_json::Value, field: &str, take: usize) -> Vec<serde_json::Value> {
+        let mut values = run
+            .get(field)
+            .and_then(serde_json::Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        values.truncate(take);
+        values
+    }
+
+    let status = run
+        .get("status")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    let track_candidates = sorted_candidates(run, "tracks", 10);
+    let scorecard = run
+        .get("scorecard")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
+    let forensic_matrix = run
+        .get("forensicMatrix")
+        .cloned()
+        .filter(|value| !value.is_null());
+    let artifact_directory = run
+        .get("artifactDirectory")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+
+    let mut artifacts = Vec::new();
+    if !artifact_directory.trim().is_empty() {
+        artifacts.push(serde_json::json!({
+            "kind": "workspace",
+            "label": "SongID artifact directory",
+            "path": artifact_directory,
+        }));
+    }
+    for (field, kind) in [
+        ("clips", "clip"),
+        ("stems", "stem"),
+        ("perturbations", "perturbation"),
+    ] {
+        for item in run
+            .get(field)
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            let path = item
+                .get("path")
+                .or_else(|| item.get("fingerprint"))
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default();
+            if path.trim().is_empty() {
+                continue;
+            }
+            let label = item
+                .get("label")
+                .and_then(serde_json::Value::as_str)
+                .filter(|label| !label.trim().is_empty())
+                .or_else(|| item.get("clipId").and_then(serde_json::Value::as_str))
+                .or_else(|| item.get("artifactId").and_then(serde_json::Value::as_str))
+                .or_else(|| {
+                    item.get("perturbationId")
+                        .and_then(serde_json::Value::as_str)
+                })
+                .unwrap_or_default();
+            artifacts.push(serde_json::json!({
+                "kind": kind,
+                "label": label,
+                "path": path,
+                "startSeconds": item.get("startSeconds").cloned().unwrap_or(serde_json::Value::Null),
+                "durationSeconds": item.get("durationSeconds").cloned().unwrap_or(serde_json::Value::Null),
+            }));
+        }
+    }
+    artifacts.truncate(100);
+
+    let mut warnings = Vec::new();
+    if !status.eq_ignore_ascii_case("completed") {
+        warnings.push("SongID run is not completed; evidence package may be partial.".to_owned());
+    }
+    if track_candidates.is_empty() {
+        warnings.push("No track candidates were produced.".to_owned());
+    }
+    let hit_count = |field: &str| {
+        scorecard
+            .get(field)
+            .and_then(serde_json::Value::as_i64)
+            .unwrap_or(0)
+    };
+    if hit_count("acoustIdHitCount") == 0
+        && hit_count("songRecHitCount") == 0
+        && hit_count("panakoHitCount") == 0
+        && hit_count("audfprintHitCount") == 0
+    {
+        warnings.push("No recognizer hits were recorded.".to_owned());
+    }
+    if forensic_matrix.is_none() {
+        warnings.push("No forensic matrix was generated.".to_owned());
+    }
+
+    serde_json::json!({
+        "runId": run.get("id").cloned().unwrap_or(serde_json::Value::Null),
+        "sourceType": run.get("sourceType").cloned().unwrap_or(serde_json::Value::Null),
+        "status": status,
+        "query": run.get("query").cloned().unwrap_or(serde_json::Value::Null),
+        "createdAt": run.get("createdAt").cloned().unwrap_or(serde_json::Value::Null),
+        "completedAt": if status.eq_ignore_ascii_case("completed") {
+            run.get("createdAt").cloned().unwrap_or(serde_json::Value::Null)
+        } else {
+            serde_json::Value::Null
+        },
+        "summary": run.get("summary").cloned().unwrap_or(serde_json::Value::Null),
+        "currentStage": run.get("currentStage").cloned().unwrap_or(serde_json::Value::Null),
+        "percentComplete": run.get("percentComplete").cloned().unwrap_or(serde_json::json!(0.0)),
+        "scorecard": scorecard,
+        "identityAssessment": run.get("identityAssessment").cloned().unwrap_or_else(|| serde_json::json!({})),
+        "syntheticAssessment": run.get("syntheticAssessment").cloned().unwrap_or_else(|| serde_json::json!({})),
+        "forensicMatrix": forensic_matrix,
+        "trackCandidates": track_candidates,
+        "albumCandidates": sorted_candidates(run, "albums", 6),
+        "artistCandidates": sorted_candidates(run, "artists", 6),
+        "segments": taken(run, "segments", 12),
+        "mixGroups": taken(run, "mixGroups", 12),
+        "plans": taken(run, "plans", 20),
+        "acquisitionOptions": taken(run, "options", 20),
+        "evidence": taken(run, "evidence", 100),
+        "artifacts": artifacts,
+        "warnings": warnings,
+    })
+}
+
 /// Matches the oracle's `SongIdCapabilityReporter`: real external-tool
 /// presence checks on `PATH` (and, for panako/audfprint, known install
 /// locations), not a hardcoded list. Capabilities that depend on features
@@ -24128,7 +24303,25 @@ async fn route_http_request_with_headers(
              Ok(routing::accepted_response(run.to_string()))
          }
 
-         ("GET", path) if path.starts_with("/api/songid/runs/") && !path.contains("/forensic-matrix") => {
+         ("GET", path) if path.starts_with("/api/songid/runs/") && path.contains("/evidence-package") => {
+             let Some(run_id) =
+                 path_segment_between(path, "/api/songid/runs/", "/evidence-package")
+             else {
+                 return Ok(routing::not_found_response());
+             };
+             let runtime = state.runtime.read().await;
+             let run = runtime.songid_run(run_id);
+             drop(runtime);
+             Ok(run
+                 .map(|run| routing::ok_response(songid_evidence_package_json(&run).to_string()))
+                 .unwrap_or_else(routing::not_found_response))
+         }
+
+         ("GET", path)
+             if path.starts_with("/api/songid/runs/")
+                 && !path.contains("/forensic-matrix")
+                 && !path.contains("/evidence-package") =>
+         {
              let Some(run_id) = path_segment_after(path, "/api/songid/runs/") else {
                  return Ok(routing::not_found_response());
              };
@@ -89407,6 +89600,107 @@ mod tests {
         );
         assert_eq!(queue_json["queuedCount"], 0, "{queue_json}");
         assert_eq!(queue_json["runningCount"], 0, "{queue_json}");
+    }
+
+    #[tokio::test]
+    async fn songid_run_evidence_package_reshapes_real_stored_run_fields() {
+        let (state, _receiver) = test_state();
+        let created = super::route_http_request(
+            "POST",
+            "/api/v0/songid/runs",
+            None,
+            r#"{"source":"route-audit","query":"Evidence Package Audit"}"#,
+            &state,
+        )
+        .await
+        .expect("create run");
+        assert_eq!(created.status, "202 Accepted", "{}", created.body);
+        let created_json = serde_json::from_str::<serde_json::Value>(&created.body).unwrap();
+        let run_id = created_json["id"].as_str().unwrap().to_owned();
+
+        // Matches the oracle's real SongIdRunEvidencePackage contract,
+        // reshaped from the same stored run fields -- not a missing
+        // endpoint or an invented shape.
+        let package = super::route_http_request(
+            "GET",
+            &format!("/api/v0/songid/runs/{run_id}/evidence-package"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("evidence package");
+        assert_eq!(package.status, "200 OK", "{}", package.body);
+        let package_json = serde_json::from_str::<serde_json::Value>(&package.body).unwrap();
+        assert_eq!(package_json["runId"], run_id, "{package_json}");
+        assert_eq!(package_json["status"], "completed", "{package_json}");
+        assert_eq!(
+            package_json["query"], "Evidence Package Audit",
+            "{package_json}"
+        );
+        // slskR's synchronous analysis completes instantly, so
+        // completedAt is real (equal to createdAt), not fabricated.
+        assert_eq!(
+            package_json["completedAt"], package_json["createdAt"],
+            "{package_json}"
+        );
+        assert_eq!(package_json["trackCandidates"], serde_json::json!([]));
+        assert_eq!(package_json["artifacts"], serde_json::json!([]));
+        // Honest warnings reflecting the real (empty) analysis state,
+        // not fabricated ones.
+        let warnings = package_json["warnings"].as_array().unwrap();
+        assert!(
+            warnings
+                .iter()
+                .any(|warning| warning == "No track candidates were produced."),
+            "{package_json}"
+        );
+        assert!(
+            warnings
+                .iter()
+                .any(|warning| warning == "No recognizer hits were recorded."),
+            "{package_json}"
+        );
+        assert!(
+            warnings
+                .iter()
+                .any(|warning| warning == "No forensic matrix was generated."),
+            "{package_json}"
+        );
+
+        let missing = super::route_http_request(
+            "GET",
+            "/api/v0/songid/runs/songid-does-not-exist/evidence-package",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("missing run evidence package");
+        assert_eq!(missing.status, "404 Not Found");
+
+        // The sibling run-detail and forensic-matrix routes must still
+        // work unaffected by the new routing guard.
+        let detail = super::route_http_request(
+            "GET",
+            &format!("/api/v0/songid/runs/{run_id}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("run detail");
+        assert_eq!(detail.status, "200 OK");
+        let matrix = super::route_http_request(
+            "GET",
+            &format!("/api/v0/songid/runs/{run_id}/forensic-matrix"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("forensic matrix");
+        assert_eq!(matrix.status, "200 OK");
     }
 
     #[tokio::test]
