@@ -8212,6 +8212,23 @@ fn collection_owner_forbids(caller_id: Option<&str>, owner_user_id: &str) -> boo
     caller_id.is_some_and(|caller_id| !owner_user_id.is_empty() && owner_user_id != caller_id)
 }
 
+/// Matches the oracle's real Share-Grants ownership gate (SharesController.cs):
+/// a share grant is owned transitively through its collection, so every
+/// grant action checks `collection.OwnerUserId == currentUserId`, treating
+/// a mismatch identically to the collection/grant not existing (`NotFound`).
+async fn share_grant_collection_forbids(
+    state: &AppState,
+    collection_id: &str,
+    caller_id: Option<&str>,
+) -> bool {
+    state
+        .collections
+        .read()
+        .await
+        .get(collection_id)
+        .is_some_and(|collection| collection_owner_forbids(caller_id, &collection.owner_user_id))
+}
+
 fn bounded_collection_item(mut item: CollectionItem) -> CollectionItem {
     item.content_id = truncate_utf8_bytes(item.content_id, MAX_LIST_CONTENT_ID_BYTES);
     item.artist = truncate_utf8_bytes(item.artist, MAX_LIST_ARTIST_BYTES);
@@ -22350,20 +22367,45 @@ async fn route_http_request_with_headers(
 
         // SHARE GRANTS ENDPOINTS
         ("GET", "/api/share-grants") => {
+            let caller_id = utils::authenticated_caller_id(
+                &state.config,
+                authorization,
+                headers.cookie.as_deref(),
+                headers.remote_addr,
+            );
             let grants = state.share_grants.read().await;
-            let json = grants.json_array();
+            let records = grants.records.clone();
             drop(grants);
-            Ok(routing::ok_response(json))
+            let mut visible = Vec::with_capacity(records.len());
+            for record in &records {
+                if !share_grant_collection_forbids(state, &record.collection_id, caller_id.as_deref())
+                    .await
+                {
+                    visible.push(record.json());
+                }
+            }
+            Ok(routing::ok_response(format!("[{}]", visible.join(","))))
         }
         ("POST", "/api/share-grants") => {
             let collection_id = extract_json_string_field(body, "collection_id")
                 .or_else(|| extract_json_string_field(body, "collectionId"))
                 .unwrap_or_default();
+            let caller_id = utils::authenticated_caller_id(
+                &state.config,
+                authorization,
+                headers.cookie.as_deref(),
+                headers.remote_addr,
+            );
             if !collection_id.is_empty() {
                 let collections = state.collections.read().await;
                 let collection_exists = collections.get(&collection_id).is_some();
                 drop(collections);
                 if !collection_exists {
+                    return Ok(routing::not_found_response());
+                }
+                // Matches the oracle's real Create: a grant may only be
+                // created against a collection the caller actually owns.
+                if share_grant_collection_forbids(state, &collection_id, caller_id.as_deref()).await {
                     return Ok(routing::not_found_response());
                 }
             }
@@ -22461,15 +22503,23 @@ async fn route_http_request_with_headers(
             if path.starts_with("/api/share-grants/") && share_grant_resource_id(path).is_some() =>
         {
             let id = share_grant_resource_id(path).expect("guarded share-grant resource path");
+            let caller_id = utils::authenticated_caller_id(
+                &state.config,
+                authorization,
+                headers.cookie.as_deref(),
+                headers.remote_addr,
+            );
             let grants = state.share_grants.read().await;
-            if let Some(record) = grants.get(id) {
-                let json = record.json();
-                drop(grants);
-                Ok(routing::ok_response(json))
-            } else {
-                drop(grants);
-                Ok(routing::not_found_response())
+            let record = grants.get(id);
+            drop(grants);
+            let Some(record) = record else {
+                return Ok(routing::not_found_response());
+            };
+            if share_grant_collection_forbids(state, &record.collection_id, caller_id.as_deref()).await
+            {
+                return Ok(routing::not_found_response());
             }
+            Ok(routing::ok_response(record.json()))
         }
         ("GET", path)
             if path.starts_with("/api/share-grants/by-collection/")
@@ -22477,6 +22527,18 @@ async fn route_http_request_with_headers(
         {
             let collection_id = share_grant_collection_id(path)
                 .expect("guarded share-grant collection path");
+            let caller_id = utils::authenticated_caller_id(
+                &state.config,
+                authorization,
+                headers.cookie.as_deref(),
+                headers.remote_addr,
+            );
+            // Matches the oracle's real GetByCollection: this is the
+            // "outgoing shares" owner-perspective view, so it 404s unless
+            // the caller actually owns this collection.
+            if share_grant_collection_forbids(state, collection_id, caller_id.as_deref()).await {
+                return Ok(routing::not_found_response());
+            }
             let grants = state.share_grants.read().await;
             let records = grants.get_by_collection(collection_id);
             let json = records.iter()
@@ -22492,7 +22554,20 @@ async fn route_http_request_with_headers(
         {
             let id = share_grant_resource_id(path).expect("guarded share-grant resource path");
             let permissions = extract_json_string_field(body, "permissions").unwrap_or_else(|| "read".to_string());
+            let caller_id = utils::authenticated_caller_id(
+                &state.config,
+                authorization,
+                headers.cookie.as_deref(),
+                headers.remote_addr,
+            );
             let mut grants = state.share_grants.write().await;
+            let owning_collection_id = grants.get(id).map(|record| record.collection_id.clone());
+            if let Some(collection_id) = owning_collection_id.as_deref() {
+                if share_grant_collection_forbids(state, collection_id, caller_id.as_deref()).await {
+                    drop(grants);
+                    return Ok(routing::not_found_response());
+                }
+            }
             let previous = grants.clone();
             if let Some(record) = grants.update(id, permissions) {
                 let json = record.json();
@@ -22511,7 +22586,20 @@ async fn route_http_request_with_headers(
             if path.starts_with("/api/share-grants/") && share_grant_resource_id(path).is_some() =>
         {
             let id = share_grant_resource_id(path).expect("guarded share-grant resource path");
+            let caller_id = utils::authenticated_caller_id(
+                &state.config,
+                authorization,
+                headers.cookie.as_deref(),
+                headers.remote_addr,
+            );
             let mut grants = state.share_grants.write().await;
+            let owning_collection_id = grants.get(id).map(|record| record.collection_id.clone());
+            if let Some(collection_id) = owning_collection_id.as_deref() {
+                if share_grant_collection_forbids(state, collection_id, caller_id.as_deref()).await {
+                    drop(grants);
+                    return Ok(routing::not_found_response());
+                }
+            }
             let previous = grants.clone();
             let deleted = grants.delete(id);
             if deleted {
@@ -27807,6 +27895,19 @@ async fn route_http_request_with_headers(
              let share_grants = state.share_grants.read().await;
              let grant = share_grants.get(grant_id);
              drop(share_grants);
+             let caller_id = utils::authenticated_caller_id(
+                 &state.config,
+                 authorization,
+                 headers.cookie.as_deref(),
+                 headers.remote_addr,
+             );
+             // Matches the oracle's real CreateToken: "Caller must own
+             // the collection."
+             if let Some(collection_id) = grant.as_ref().map(|grant| grant.collection_id.as_str()) {
+                 if share_grant_collection_forbids(state, collection_id, caller_id.as_deref()).await {
+                     return Ok(routing::not_found_response());
+                 }
+             }
              let ttl_seconds = extract_json_u64_field(body, "expiresInSeconds")
                  .or_else(|| extract_json_u64_field(body, "expires_in_seconds"))
                 .unwrap_or(DEFAULT_SHARE_ACCESS_TOKEN_TTL_SECONDS)
@@ -89668,6 +89769,153 @@ mod tests {
         )
         .await
         .expect("alice's collection still exists");
+        assert_eq!(still_there.status, "200 OK");
+    }
+
+    #[tokio::test]
+    async fn share_grants_are_scoped_to_the_real_collection_owner() {
+        // Matches the oracle's real Share-Grants ownership gate
+        // (SharesController.cs): a grant is owned transitively through
+        // its collection, so every action 404s unless
+        // `collection.OwnerUserId == currentUserId`. Previously there was
+        // no ownership check anywhere -- any authenticated caller could
+        // view, mutate, delete, or mint access tokens for any other
+        // caller's share grants.
+        let keys = serde_json::json!({
+            "alice": {"key": "alice-key-0123456789", "role": "administrator", "cidr": ""},
+            "bob": {"key": "bob-key-00123456789ab", "role": "administrator", "cidr": ""},
+        });
+        let (state, _receiver) = test_state_with_env(
+            MapEnv::default()
+                .with("SLSKR_AUTH_DISABLED", "false")
+                .with("SLSKD_API_KEYS_JSON", &keys.to_string()),
+        );
+        let alice = Some("ApiKey alice-key-0123456789");
+        let bob = Some("ApiKey bob-key-00123456789ab");
+
+        let collection = super::route_http_request(
+            "POST",
+            "/api/v0/collections",
+            alice,
+            r#"{"title":"Alice Private"}"#,
+            &state,
+        )
+        .await
+        .expect("alice creates a collection");
+        assert_eq!(collection.status, "201 Created");
+        let collection_id = serde_json::from_str::<serde_json::Value>(&collection.body).unwrap()
+            ["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+
+        // Bob cannot create a grant against a collection he doesn't own.
+        let bob_create = super::route_http_request(
+            "POST",
+            "/api/v0/share-grants",
+            bob,
+            &format!(r#"{{"collection_id":"{collection_id}","username":"recipient"}}"#),
+            &state,
+        )
+        .await
+        .expect("bob attempts to grant alice's collection");
+        assert_eq!(bob_create.status, "404 Not Found");
+
+        let granted = super::route_http_request(
+            "POST",
+            "/api/v0/share-grants",
+            alice,
+            &format!(r#"{{"collection_id":"{collection_id}","username":"recipient"}}"#),
+            &state,
+        )
+        .await
+        .expect("alice grants her own collection");
+        assert_eq!(granted.status, "201 Created", "{}", granted.body);
+        let grant_id = serde_json::from_str::<serde_json::Value>(&granted.body).unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+
+        for (method, path, body) in [
+            ("GET", format!("/api/share-grants/{grant_id}"), ""),
+            (
+                "PUT",
+                format!("/api/v0/share-grants/{grant_id}"),
+                r#"{"permissions":"read,download"}"#,
+            ),
+            (
+                "GET",
+                format!("/api/share-grants/by-collection/{collection_id}"),
+                "",
+            ),
+            (
+                "POST",
+                format!("/api/v0/share-grants/{grant_id}/token"),
+                "{}",
+            ),
+        ] {
+            let response = super::route_http_request(method, &path, bob, body, &state)
+                .await
+                .unwrap_or_else(|error| panic!("{method} {path}: {error}"));
+            assert_eq!(response.status, "404 Not Found", "{method} {path}");
+        }
+
+        // Bob's own grant list never includes Alice's grant.
+        let bob_list = super::route_http_request("GET", "/api/v0/share-grants", bob, "", &state)
+            .await
+            .expect("bob lists share grants");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&bob_list.body)
+                .unwrap()
+                .as_array()
+                .unwrap()
+                .len(),
+            0
+        );
+
+        // Alice can still manage her own grant.
+        let alice_get = super::route_http_request(
+            "GET",
+            &format!("/api/share-grants/{grant_id}"),
+            alice,
+            "",
+            &state,
+        )
+        .await
+        .expect("alice reads her own grant");
+        assert_eq!(alice_get.status, "200 OK");
+
+        let alice_token = super::route_http_request(
+            "POST",
+            &format!("/api/v0/share-grants/{grant_id}/token"),
+            alice,
+            "{}",
+            &state,
+        )
+        .await
+        .expect("alice mints a token for her own grant");
+        assert_eq!(alice_token.status, "201 Created", "{}", alice_token.body);
+
+        // Bob cannot delete Alice's grant, either.
+        let bob_delete = super::route_http_request(
+            "DELETE",
+            &format!("/api/v0/share-grants/{grant_id}"),
+            bob,
+            "",
+            &state,
+        )
+        .await
+        .expect("bob attempts to delete alice's grant");
+        assert_eq!(bob_delete.status, "404 Not Found");
+        let still_there = super::route_http_request(
+            "GET",
+            &format!("/api/share-grants/{grant_id}"),
+            alice,
+            "",
+            &state,
+        )
+        .await
+        .expect("alice's grant still exists");
         assert_eq!(still_there.status, "200 OK");
     }
 
