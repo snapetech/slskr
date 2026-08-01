@@ -5057,6 +5057,14 @@ struct MeshState {
     sync_quarantined_until: BTreeMap<String, u64>,
     sync_rejected_messages: u64,
     sync_quarantine_events: u64,
+    /// Real counters backing `/api/mesh/stats`'s `MeshSyncStats`
+    /// contract, incremented at the one real merge call site
+    /// (`POST /api/mesh/merge`) instead of being hardcoded to 0.
+    sync_merge_total: u64,
+    sync_merge_successful: u64,
+    sync_merge_failed: u64,
+    sync_entries_received: u64,
+    sync_entries_merged: u64,
     updated_at: u64,
 }
 
@@ -5095,6 +5103,11 @@ impl MeshState {
             sync_quarantined_until: BTreeMap::new(),
             sync_rejected_messages: 0,
             sync_quarantine_events: 0,
+            sync_merge_total: 0,
+            sync_merge_successful: 0,
+            sync_merge_failed: 0,
+            sync_entries_received: 0,
+            sync_entries_merged: 0,
             updated_at: unix_timestamp(),
         }
     }
@@ -15401,16 +15414,28 @@ async fn route_http_request_with_headers(
             let rejected_messages = mesh.sync_rejected_messages;
             let quarantine_events = mesh.sync_quarantine_events;
             let quarantined_peers = mesh.sync_quarantined_until.len();
+            let total_syncs = mesh.sync_merge_total;
+            let successful_syncs = mesh.sync_merge_successful;
+            let failed_syncs = mesh.sync_merge_failed;
+            let total_entries_received = mesh.sync_entries_received;
+            let total_entries_merged = mesh.sync_entries_merged;
             drop(mesh);
             drop(users);
+            let current_seq_id = state.content_discovery.read().await.latest_seq();
             Ok(routing::ok_response(serde_json::json!({
-                "totalSyncs": 0,
-                "successfulSyncs": 0,
-                "failedSyncs": 0,
-                "totalEntriesReceived": 0,
+                "totalSyncs": total_syncs,
+                "successfulSyncs": successful_syncs,
+                "failedSyncs": failed_syncs,
+                "totalEntriesReceived": total_entries_received,
+                // No real send-side mesh sync endpoint exists in slskR
+                // yet (the oracle's real sync is bidirectional); honest
+                // 0 rather than a fabricated count.
                 "totalEntriesSent": 0,
-                "totalEntriesMerged": 0,
+                "totalEntriesMerged": total_entries_merged,
                 "rejectedMessages": rejected_messages,
+                // slskR's merge is all-or-nothing per batch (no partial
+                // per-entry skip path), so there is genuinely nothing to
+                // report here yet -- honest 0, not fabricated.
                 "skippedEntries": 0,
                 "signatureVerificationFailures": 0,
                 "reputationBasedRejections": 0,
@@ -15418,7 +15443,7 @@ async fn route_http_request_with_headers(
                 "quarantinedPeers": quarantined_peers,
                 "quarantineEvents": quarantine_events,
                 "proofOfPossessionFailures": 0,
-                "currentSeqId": 0,
+                "currentSeqId": current_seq_id,
                 "knownMeshPeers": known_mesh_peers,
                 "warnings": [],
             }).to_string()))
@@ -41478,11 +41503,30 @@ async fn extended_controller_mutation_response(
                 return routing::bad_request_response(&format!("invalid entries: {error}"))
             }
         };
+        let entries_received = entries.len() as u64;
         let mut discovery = state.content_discovery.write().await;
-        return match discovery.merge_hash_entries(entries) {
-            Ok(merged) => routing::ok_response(
-                serde_json::json!({"merged": merged, "latestSeqId": discovery.latest_seq()})
-                    .to_string(),
+        let result = discovery
+            .merge_hash_entries(entries)
+            .map(|merged| (merged, discovery.latest_seq()));
+        drop(discovery);
+        // Matches the oracle's real MeshSyncStats: this is the one real
+        // merge call site backing /api/mesh/stats's totalSyncs/
+        // successfulSyncs/failedSyncs/totalEntriesReceived/
+        // totalEntriesMerged, previously hardcoded to 0 regardless of
+        // real merge activity.
+        let mut mesh = state.mesh.write().await;
+        mesh.sync_merge_total = mesh.sync_merge_total.saturating_add(1);
+        mesh.sync_entries_received = mesh.sync_entries_received.saturating_add(entries_received);
+        if let Ok((merged, _)) = result {
+            mesh.sync_merge_successful = mesh.sync_merge_successful.saturating_add(1);
+            mesh.sync_entries_merged = mesh.sync_entries_merged.saturating_add(merged as u64);
+        } else {
+            mesh.sync_merge_failed = mesh.sync_merge_failed.saturating_add(1);
+        }
+        drop(mesh);
+        return match result {
+            Ok((merged, latest_seq_id)) => routing::ok_response(
+                serde_json::json!({"merged": merged, "latestSeqId": latest_seq_id}).to_string(),
             ),
             Err(error) => routing::bad_request_response(&error),
         };
@@ -89194,6 +89238,63 @@ mod tests {
                 missing.body
             );
         }
+    }
+
+    #[tokio::test]
+    async fn mesh_stats_reflect_real_merge_activity_not_hardcoded_zeros() {
+        let (state, _receiver) = test_state();
+
+        let baseline = super::route_http_request("GET", "/api/v0/mesh/stats", None, "", &state)
+            .await
+            .expect("baseline mesh stats");
+        let baseline_json = serde_json::from_str::<serde_json::Value>(&baseline.body).unwrap();
+        assert_eq!(baseline_json["totalSyncs"], 0, "{baseline_json}");
+        assert_eq!(baseline_json["currentSeqId"], 0, "{baseline_json}");
+
+        let valid_entry = serde_json::json!({
+            "flacKey": "mesh-stats-audit-key",
+            "size": 1234,
+            "fileSha256": "a".repeat(64),
+        });
+        let merged = super::route_http_request(
+            "POST",
+            "/api/v0/mesh/merge",
+            None,
+            &serde_json::json!({"entries": [valid_entry]}).to_string(),
+            &state,
+        )
+        .await
+        .expect("merge real entry");
+        assert_eq!(merged.status, "200 OK", "{}", merged.body);
+        let merged_json = serde_json::from_str::<serde_json::Value>(&merged.body).unwrap();
+        assert_eq!(merged_json["merged"], 1, "{merged_json}");
+        let real_seq_id = merged_json["latestSeqId"].as_u64().unwrap();
+        assert!(real_seq_id > 0, "{merged_json}");
+
+        // An invalid entry (zero size) must count as a real failure, not
+        // silently succeed or vanish from the stats.
+        let invalid_entry = serde_json::json!({"flacKey": "mesh-stats-audit-invalid", "size": 0});
+        let failed = super::route_http_request(
+            "POST",
+            "/api/v0/mesh/merge",
+            None,
+            &serde_json::json!({"entries": [invalid_entry]}).to_string(),
+            &state,
+        )
+        .await
+        .expect("merge invalid entry");
+        assert_eq!(failed.status, "400 Bad Request", "{}", failed.body);
+
+        let stats = super::route_http_request("GET", "/api/v0/mesh/stats", None, "", &state)
+            .await
+            .expect("mesh stats after activity");
+        let stats_json = serde_json::from_str::<serde_json::Value>(&stats.body).unwrap();
+        assert_eq!(stats_json["totalSyncs"], 2, "{stats_json}");
+        assert_eq!(stats_json["successfulSyncs"], 1, "{stats_json}");
+        assert_eq!(stats_json["failedSyncs"], 1, "{stats_json}");
+        assert_eq!(stats_json["totalEntriesReceived"], 2, "{stats_json}");
+        assert_eq!(stats_json["totalEntriesMerged"], 1, "{stats_json}");
+        assert_eq!(stats_json["currentSeqId"], real_seq_id, "{stats_json}");
     }
 
     #[tokio::test]
