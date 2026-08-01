@@ -14758,6 +14758,7 @@ async fn route_http_request_with_headers(
             || (!feature.social_federation
                 && (normalized_path.starts_with("/api/federation")
                     || normalized_path.starts_with("/api/activitypub")
+                    || normalized_path.starts_with("/actors/")
                     || normalized_path.starts_with("/.well-known/webfinger")))
             || (!feature.virtual_soulfind
                 && (normalized_path.starts_with("/api/virtualsoulfind")
@@ -93317,6 +93318,40 @@ mod tests {
             .expect("mesh services response");
         assert_eq!(mesh.status, "404 Not Found");
         assert_eq!(mesh.body, r#"{"error":"mesh_gateway_disabled"}"#);
+    }
+
+    #[tokio::test]
+    async fn actors_routes_are_gated_by_the_social_federation_feature_flag() {
+        // Matches the oracle's real [FeatureGate(FeatureId.SocialFederation)]
+        // on ActivityPubController, which 404s every action (actor,
+        // inbox, outbox, followers, following) when the feature is
+        // disabled. The feature-disabled check previously only covered
+        // "/api/federation"/"/api/activitypub"/webfinger -- "/actors/"
+        // itself was never included, so disabling the feature left the
+        // actor/inbox/outbox/followers/following routes fully reachable.
+        let (state, _receiver) = test_state_with_env(
+            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+        );
+        state
+            .media_services
+            .write()
+            .await
+            .features
+            .social_federation = false;
+
+        for path in [
+            "/actors/library",
+            "/actors/library/inbox",
+            "/actors/library/outbox",
+            "/actors/library/followers",
+            "/actors/library/following",
+            "/api/federation/diagnostics",
+        ] {
+            let response = super::route_http_request("GET", path, None, "", &state)
+                .await
+                .unwrap_or_else(|error| panic!("{path}: {error}"));
+            assert_eq!(response.status, "404 Not Found", "{path}");
+        }
     }
 
     #[tokio::test]
