@@ -58525,6 +58525,18 @@ fn effective_transfer_group_from(
     users: &UserStore,
     username: &str,
 ) -> String {
+    // Matches the oracle's real UserService.GetGroup: IsBlacklisted is
+    // checked before privileged status or any other group -- a
+    // blacklisted user is always classified as blacklisted, even if the
+    // Soulseek server also reports them as privileged.
+    if settings
+        .blacklisted
+        .members
+        .iter()
+        .any(|member| member.eq_ignore_ascii_case(username))
+    {
+        return "blacklisted".to_owned();
+    }
     if users
         .records
         .iter()
@@ -85303,13 +85315,16 @@ mod tests {
         assert_eq!(groups_json["friend"], "trusted");
         assert_eq!(groups_json["stranger"], "default");
 
+        // Matches the oracle's real UserService.GetGroup: a user in
+        // groups.blacklisted.members is classified as "blacklisted", not
+        // silently treated as an ordinary default-group user.
         let blocked =
             super::route_http_request("GET", "/api/v0/users/blocked/group", None, "", &state)
                 .await
                 .unwrap();
         assert_eq!(
             serde_json::from_str::<String>(&blocked.body).unwrap(),
-            "default"
+            "blacklisted"
         );
 
         {
@@ -85329,7 +85344,24 @@ mod tests {
                 status: 2,
                 privileged: true,
             });
+            // Matches the oracle's real precedence: IsBlacklisted is
+            // checked before privileged status, so a blacklisted user
+            // stays blacklisted even if the Soulseek server also reports
+            // them as privileged.
+            users.apply_status(&super::UserStatus {
+                username: "blocked".to_owned(),
+                status: 2,
+                privileged: true,
+            });
         }
+        let blocked_but_privileged =
+            super::route_http_request("GET", "/api/v0/users/blocked/group", None, "", &state)
+                .await
+                .unwrap();
+        assert_eq!(
+            serde_json::from_str::<String>(&blocked_but_privileged.body).unwrap(),
+            "blacklisted"
+        );
         let leecher =
             super::route_http_request("GET", "/api/v0/users/leecher/group", None, "", &state)
                 .await

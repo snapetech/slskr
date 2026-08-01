@@ -387,7 +387,19 @@ pub struct TransferDownloadDestinationSettings {
 pub struct TransferGroupsSettings {
     pub default: TransferGroupSettings,
     pub leechers: LeecherTransferGroupSettings,
+    pub blacklisted: BlacklistedGroupSettings,
     pub user_defined: BTreeMap<String, UserDefinedTransferGroupSettings>,
+}
+
+/// Matches the oracle's real `Groups.Blacklisted`: a user in this group is
+/// classified as "blacklisted" ahead of every other group (including
+/// privileged), by `UserService.GetGroup`/`IsBlacklisted`. Only the
+/// exact-username `members` list is enforced for now -- the oracle's
+/// `patterns` (regex against username) and `cidrs` (IP-range) checks are
+/// a separate, deferred follow-up.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct BlacklistedGroupSettings {
+    pub members: Vec<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -6808,9 +6820,19 @@ impl TransferGroupsSettings {
                 }
             }
         }
+        let mut seen_blacklisted = std::collections::HashSet::new();
+        let blacklisted_members = blacklisted_members
+            .into_iter()
+            .map(|member| member.trim().to_owned())
+            .filter(|member| !member.is_empty())
+            .filter(|member| seen_blacklisted.insert(member.to_ascii_lowercase()))
+            .collect::<Vec<_>>();
         Ok(Self {
             default,
             leechers,
+            blacklisted: BlacklistedGroupSettings {
+                members: blacklisted_members,
+            },
             user_defined,
         })
     }
