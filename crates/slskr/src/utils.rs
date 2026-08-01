@@ -760,7 +760,6 @@ pub fn normalize_api_path(path: &str) -> &str {
         "/api/downloads" => "/api/transfers/downloads",
         "/api/server/status" => "/api/server",
         "/api/slskdn/capabilities" | "/api/v0/slskdn/capabilities" => "/api/capabilities",
-        "/api/v0/capabilities/mesh-peers" => "/api/capabilities/peers",
         "/api/v0/fairness/summary" => "/api/fairness",
         "/api/v0/hashdb/backfill/candidates" => "/api/backfill/candidates",
         "/api/v0/transfers/downloads/auto-replace/status" => "/api/autoreplace",

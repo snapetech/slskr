@@ -11082,6 +11082,10 @@ impl SecurityState {
         }
     }
 
+    /// Convenience default over `ban_with_options`, exercised directly by
+    /// several unit tests below; every real HTTP call site now passes
+    /// real reason/duration/permanent via `security_ban_options`.
+    #[allow(dead_code)]
     fn ban(&mut self, kind: &str, value: String) -> Option<SecurityBanRecord> {
         self.ban_with_options(kind, value, "Manual ban".to_owned(), 3_600, false)
     }
@@ -11553,8 +11557,14 @@ impl ShareGrantStore {
         }
     }
 
-    fn create(
+    /// `id` matches `CollectionStore::create_with_contract`: a real UUID
+    /// for v0/oracle-contract requests (the oracle's real `ShareGrant.Id`
+    /// is a `Guid`, and `versioned_get_failure_contract`'s `uuid_prefixes`
+    /// guard requires v0 share-grant ids to parse as one), `None` for the
+    /// legacy internal "grant-N" sequential format.
+    fn create_with_contract(
         &mut self,
+        id: Option<String>,
         collection_id: String,
         username: String,
     ) -> Option<(ShareGrantRecord, bool)> {
@@ -11567,7 +11577,7 @@ impl ShareGrantStore {
         if self.records.len() >= MAX_SHARE_GRANTS {
             return None;
         }
-        let id = format!("grant-{}", self.allocate_id());
+        let id = id.unwrap_or_else(|| format!("grant-{}", self.allocate_id()));
         let now = unix_timestamp();
         let record = ShareGrantRecord {
             id,
@@ -15485,17 +15495,31 @@ async fn route_http_request_with_headers(
             }).to_string()))
         }
         ("GET", "/api/capabilities/peers") => {
-            let users = state.users.read().await;
-            let peers: Vec<serde_json::Value> = users.records.iter().map(|user| {
-                serde_json::json!({
-                    "username": user.username,
-                    "status": user.status,
-                    "watching": user.watched,
-                    "last_seen": user.updated_at,
-                })
-            }).collect();
+            // Matches the oracle's real GetPeers: known slskdn peer
+            // *capability* records, not the generic connected-Soulseek-
+            // user list -- the sibling single-peer route
+            // (/api/capabilities/peers/{username}) already correctly
+            // uses this same real capability store.
+            let mesh = state.mesh.read().await;
+            let peers = mesh.capability_records_json();
             let count = peers.len();
-            drop(users);
+            drop(mesh);
+            Ok(routing::ok_response(serde_json::json!({
+                "peers": peers,
+                "count": count,
+            }).to_string()))
+        }
+        ("GET", "/api/capabilities/mesh-peers") => {
+            // Matches the oracle's real GetMeshPeers: only the
+            // mesh-sync-capable subset of known peer capability records.
+            let mesh = state.mesh.read().await;
+            let peers = mesh
+                .capability_records_json()
+                .into_iter()
+                .filter(|record| record["meshCapable"] == true)
+                .collect::<Vec<_>>();
+            let count = peers.len();
+            drop(mesh);
             Ok(routing::ok_response(serde_json::json!({
                 "peers": peers,
                 "count": count,
@@ -22471,9 +22495,12 @@ async fn route_http_request_with_headers(
             if collection_id.is_empty() {
                 return Ok(routing::conflict_response("collection_id and username are required"));
             }
+            let compatibility_contract = route.path.starts_with("/api/v0/");
+            let id = compatibility_contract.then(|| uuid::Uuid::new_v4().to_string());
             let mut grants = state.share_grants.write().await;
             let previous = grants.clone();
-            let Some((record, created)) = grants.create(collection_id, username) else {
+            let Some((record, created)) = grants.create_with_contract(id, collection_id, username)
+            else {
                 return Ok(routing::service_unavailable_response("share grant capacity is full"));
             };
             let json = record.json();
@@ -42415,8 +42442,17 @@ async fn extended_controller_mutation_response(
             return routing::bad_request_response("blocklist value is required");
         };
         if method == "POST" {
+            // Matches the oracle's real BlockIp/BlockUsername: reason,
+            // durationMinutes, and permanent are real inputs that
+            // determine the real ban record, not silently discarded in
+            // favor of a fixed 1-hour "Manual ban" default -- the
+            // sibling /api/security/bans endpoints already do this
+            // correctly via the same helpers.
+            let (reason, duration_seconds, is_permanent) = security_ban_options(body);
             let mut security = state.security.write().await;
-            let Some(record) = security.ban(kind, value) else {
+            let Some(record) =
+                security.ban_with_options(kind, value, reason, duration_seconds, is_permanent)
+            else {
                 return routing::bad_request_response(
                     "invalid blocklist value or capacity reached",
                 );
@@ -43175,51 +43211,53 @@ async fn misc_controller_mutation_response(
         ));
     }
     if method == "POST" && path == "/api/mesh/publish" {
+        // Matches the oracle's real PublishHash/PublishHashRequest: only
+        // flacKey (never "key"/"contentId" aliases -- those let a
+        // payload skip the byteHash/size validation entirely), and the
+        // entry is stored in the same real hash database GET
+        // /api/mesh/lookup/{flacKey} already reads from. Previously this
+        // wrote into an unrelated "mesh/published/{key}" feature-state
+        // key that lookup never consulted, so a publish→lookup round
+        // trip always reported "not found".
         let payload = match serde_json::from_str::<serde_json::Value>(body) {
             Ok(payload @ serde_json::Value::Object(_)) => payload,
-            Ok(_) => {
+            _ => {
                 return Some(routing::bad_request_response(
-                    "mesh record must be an object",
+                    "flacKey, byteHash, and size are required",
                 ))
             }
-            Err(_) => return Some(routing::bad_request_response("invalid JSON body")),
         };
-        let Some(key) = payload
+        let flac_key = payload
             .get("flacKey")
-            .or_else(|| payload.get("key"))
-            .or_else(|| payload.get("contentId"))
             .and_then(serde_json::Value::as_str)
-            .filter(|key| !key.trim().is_empty())
-        else {
-            return Some(routing::bad_request_response(
-                "flacKey, byteHash, and size are required",
-            ));
-        };
-        if payload.get("flacKey").is_some()
-            && (payload
-                .get("byteHash")
-                .and_then(serde_json::Value::as_str)
-                .is_none_or(|value| value.trim().is_empty())
-                || payload
-                    .get("size")
-                    .and_then(serde_json::Value::as_i64)
-                    .is_none_or(|value| value <= 0))
-        {
+            .map(str::trim)
+            .unwrap_or_default();
+        let byte_hash = payload
+            .get("byteHash")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .unwrap_or_default();
+        let size = payload.get("size").and_then(serde_json::Value::as_i64);
+        if flac_key.is_empty() || byte_hash.is_empty() || size.is_none_or(|size| size <= 0) {
             return Some(routing::bad_request_response(
                 "flacKey, byteHash, and size are required",
             ));
         }
-        let record =
-            serde_json::json!({"key": key, "value": payload, "publishedAt": unix_timestamp()});
+        let entry = content_discovery::HashDbEntry {
+            flac_key: flac_key.to_owned(),
+            byte_hash: byte_hash.to_owned(),
+            size: size.unwrap_or_default() as u64,
+            ..Default::default()
+        };
         return Some(
             match state
-                .controller_features
+                .content_discovery
                 .write()
                 .await
-                .upsert(format!("mesh/published/{key}"), record.clone())
+                .merge_hash_entries(vec![entry])
             {
-                Ok(()) => routing::ok_response(serde_json::json!({"published": true}).to_string()),
-                Err(error) => routing::service_unavailable_response(&error),
+                Ok(_) => routing::ok_response(serde_json::json!({"published": true}).to_string()),
+                Err(error) => content_discovery_error_response(state, error).await,
             },
         );
     }
@@ -43785,27 +43823,34 @@ async fn feature_controller_mutation_response(
         });
     }
     if method == "PUT" && path.starts_with("/api/overlay/pins/") {
+        // Matches the oracle's real RotateCertificatePin: the wire field
+        // is "thumbprint" (not "certificateSha256"/"pin"), the pin is
+        // stored upper-invariant, and success is a real 204 No Content
+        // rather than a 200 with a body.
         let username = decoded_path_segment(path.trim_start_matches("/api/overlay/pins/"));
-        let pin = extract_json_string_field(body, "certificateSha256")
-            .or_else(|| extract_json_string_field(body, "pin"));
-        let Some(pin) =
-            pin.filter(|pin| pin.len() == 64 && pin.bytes().all(|byte| byte.is_ascii_hexdigit()))
-        else {
+        if username.trim().is_empty() {
+            return Some(routing::bad_request_response("Username required"));
+        }
+        let thumbprint =
+            extract_json_string_field(body, "thumbprint").map(|value| value.trim().to_owned());
+        let Some(thumbprint) = thumbprint.filter(|value| {
+            value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+        }) else {
             return Some(routing::bad_request_response(
-                "certificateSha256 must be 64 hexadecimal digits",
+                "Thumbprint must be a 64-character SHA-256 hexadecimal value",
             ));
         };
         let value = serde_json::json!({
-            "username": username, "certificateSha256": pin.to_ascii_lowercase(), "updatedAt": unix_timestamp()
+            "username": username, "certificateSha256": thumbprint.to_ascii_uppercase(), "updatedAt": unix_timestamp()
         });
         return Some(
             match state
                 .controller_features
                 .write()
                 .await
-                .upsert(format!("overlay/pin/{username}"), value.clone())
+                .upsert(format!("overlay/pin/{username}"), value)
             {
-                Ok(()) => routing::ok_response(value.to_string()),
+                Ok(()) => routing::no_content_response(),
                 Err(error) => routing::service_unavailable_response(&error),
             },
         );
@@ -50196,10 +50241,27 @@ async fn extended_controller_get_response(
             )
         }
         "/api/overlay/blocklist" => {
+            // Matches the oracle's real GetBlocklist/BlockedEntryResponse
+            // shape (target/type/reason/blockedAt/expiresAt/isPermanent),
+            // not the generic {kind,type,value,created_at} ban-listing
+            // shape used elsewhere.
             let security = state.security.read().await;
-            routing::ok_response(
-                serde_json::json!({"entries": security.json_value()["bans"]}).to_string(),
-            )
+            let entries = security
+                .bans
+                .iter()
+                .map(|record| {
+                    serde_json::json!({
+                        "target": record.value,
+                        "type": record.kind,
+                        "reason": record.reason,
+                        "blockedAt": unix_seconds_rfc3339(record.created_at),
+                        "expiresAt": unix_seconds_rfc3339(record.expires_at),
+                        "isPermanent": record.is_permanent,
+                    })
+                })
+                .collect::<Vec<_>>();
+            drop(security);
+            routing::ok_response(serde_json::json!({"entries": entries}).to_string())
         }
         "/api/overlay/connections" => {
             // Matches the oracle's real MeshPeerInfoResponse concept (the
@@ -58516,6 +58578,18 @@ fn effective_transfer_group_from(
     users: &UserStore,
     username: &str,
 ) -> String {
+    // Matches the oracle's real UserService.GetGroup: IsBlacklisted is
+    // checked before privileged status or any other group -- a
+    // blacklisted user is always classified as blacklisted, even if the
+    // Soulseek server also reports them as privileged.
+    if settings
+        .blacklisted
+        .members
+        .iter()
+        .any(|member| member.eq_ignore_ascii_case(username))
+    {
+        return "blacklisted".to_owned();
+    }
     if users
         .records
         .iter()
@@ -71082,9 +71156,12 @@ mod tests {
             normalize_api_path("/api/v0/portforwarding/start"),
             "/api/port-forwarding/start"
         );
+        // Matches the oracle's real, distinct GetMeshPeers endpoint --
+        // previously collapsed into the same (wrong) handler as
+        // GET /api/capabilities/peers.
         assert_eq!(
             normalize_api_path("/api/v0/capabilities/mesh-peers"),
-            "/api/capabilities/peers"
+            "/api/v0/capabilities/mesh-peers"
         );
     }
 
@@ -85294,13 +85371,16 @@ mod tests {
         assert_eq!(groups_json["friend"], "trusted");
         assert_eq!(groups_json["stranger"], "default");
 
+        // Matches the oracle's real UserService.GetGroup: a user in
+        // groups.blacklisted.members is classified as "blacklisted", not
+        // silently treated as an ordinary default-group user.
         let blocked =
             super::route_http_request("GET", "/api/v0/users/blocked/group", None, "", &state)
                 .await
                 .unwrap();
         assert_eq!(
             serde_json::from_str::<String>(&blocked.body).unwrap(),
-            "default"
+            "blacklisted"
         );
 
         {
@@ -85320,7 +85400,24 @@ mod tests {
                 status: 2,
                 privileged: true,
             });
+            // Matches the oracle's real precedence: IsBlacklisted is
+            // checked before privileged status, so a blacklisted user
+            // stays blacklisted even if the Soulseek server also reports
+            // them as privileged.
+            users.apply_status(&super::UserStatus {
+                username: "blocked".to_owned(),
+                status: 2,
+                privileged: true,
+            });
         }
+        let blocked_but_privileged =
+            super::route_http_request("GET", "/api/v0/users/blocked/group", None, "", &state)
+                .await
+                .unwrap();
+        assert_eq!(
+            serde_json::from_str::<String>(&blocked_but_privileged.body).unwrap(),
+            "blacklisted"
+        );
         let leecher =
             super::route_http_request("GET", "/api/v0/users/leecher/group", None, "", &state)
                 .await
@@ -87058,32 +87155,32 @@ mod tests {
     fn share_grants_bound_and_deduplicate_collection_users() {
         let mut grants = super::ShareGrantStore::new();
         assert!(grants
-            .create("collection".to_owned(), "   ".to_owned())
+            .create_with_contract(None, "collection".to_owned(), "   ".to_owned())
             .is_none());
         let (first, created) = grants
-            .create("collection".to_owned(), "  Alice  ".to_owned())
+            .create_with_contract(None, "collection".to_owned(), "  Alice  ".to_owned())
             .unwrap();
         assert!(created);
         assert_eq!(first.username, "Alice");
         let (duplicate, created) = grants
-            .create("collection".to_owned(), "alice".to_owned())
+            .create_with_contract(None, "collection".to_owned(), "alice".to_owned())
             .unwrap();
         assert!(!created);
         assert_eq!(duplicate.id, first.id);
         for index in 1..super::MAX_SHARE_GRANTS {
             grants
-                .create(format!("collection-{index}"), format!("user-{index}"))
+                .create_with_contract(None, format!("collection-{index}"), format!("user-{index}"))
                 .unwrap();
         }
         assert!(grants
-            .create("overflow".to_owned(), "user".to_owned())
+            .create_with_contract(None, "overflow".to_owned(), "user".to_owned())
             .is_none());
         assert_eq!(grants.records.len(), super::MAX_SHARE_GRANTS);
         let mut exhausted = super::ShareGrantStore::new();
         exhausted.next_id = u64::MAX;
         assert_eq!(
             exhausted
-                .create("collection".to_owned(), "user".to_owned())
+                .create_with_contract(None, "collection".to_owned(), "user".to_owned())
                 .unwrap()
                 .0
                 .id,
@@ -87404,6 +87501,229 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn overlay_pin_rotation_uses_the_real_thumbprint_field_and_no_content_response() {
+        // Matches the oracle's real RotateCertificatePin
+        // (DhtRendezvousController.cs): the wire field is "thumbprint",
+        // not "certificateSha256"/"pin", the pin is stored
+        // upper-invariant, and a successful rotation is a real 204 No
+        // Content, not a 200 with a JSON body.
+        let (state, _receiver) = test_state();
+
+        let missing_field = super::route_http_request(
+            "PUT",
+            "/api/overlay/pins/peer1",
+            None,
+            r#"{"certificateSha256":"07070707070707070707070707070707070707070707070707070707070707"}"#,
+            &state,
+        )
+        .await
+        .expect("reject the wrong field name");
+        assert_eq!(missing_field.status, "400 Bad Request");
+
+        let too_short = super::route_http_request(
+            "PUT",
+            "/api/overlay/pins/peer1",
+            None,
+            r#"{"thumbprint":"abc123"}"#,
+            &state,
+        )
+        .await
+        .expect("reject a too-short thumbprint");
+        assert_eq!(too_short.status, "400 Bad Request");
+
+        let rotated = super::route_http_request(
+            "PUT",
+            "/api/overlay/pins/peer1",
+            None,
+            r#"{"thumbprint":"0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"}"#,
+            &state,
+        )
+        .await
+        .expect("rotate the pin");
+        assert_eq!(rotated.status, "204 No Content", "{}", rotated.body);
+        assert!(rotated.body.is_empty());
+
+        let stored = state
+            .controller_features
+            .read()
+            .await
+            .get("overlay/pin/peer1")
+            .cloned()
+            .expect("pin was really stored");
+        assert_eq!(
+            stored["certificateSha256"],
+            "0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A"
+        );
+    }
+
+    #[tokio::test]
+    async fn overlay_blocklist_honors_real_reason_duration_and_permanent_fields() {
+        // Matches the oracle's real BlockIp/BlockUsername/GetBlocklist
+        // (DhtRendezvousController.cs): reason/durationMinutes/permanent
+        // are real inputs, and the listing reflects the oracle's real
+        // BlockedEntryResponse shape (target/type/reason/blockedAt/
+        // expiresAt/isPermanent) -- previously these fields were
+        // silently discarded in favor of a fixed 1-hour "Manual ban"
+        // default, and the listing used an unrelated shape.
+        let (state, _receiver) = test_state();
+
+        let blocked = super::route_http_request(
+            "POST",
+            "/api/overlay/blocklist/username",
+            None,
+            r#"{"value":"forever-banned","reason":"repeated abuse","permanent":true}"#,
+            &state,
+        )
+        .await
+        .expect("block a username permanently");
+        assert_eq!(blocked.status, "200 OK", "{}", blocked.body);
+
+        let listed = super::route_http_request("GET", "/api/overlay/blocklist", None, "", &state)
+            .await
+            .expect("list the blocklist");
+        assert_eq!(listed.status, "200 OK");
+        let listed_json = serde_json::from_str::<serde_json::Value>(&listed.body).unwrap();
+        let entries = listed_json["entries"].as_array().unwrap();
+        assert_eq!(entries.len(), 1, "{entries:?}");
+        assert_eq!(entries[0]["target"], "forever-banned");
+        assert_eq!(entries[0]["type"], "username");
+        assert_eq!(entries[0]["reason"], "repeated abuse");
+        assert_eq!(entries[0]["isPermanent"], true);
+        assert!(entries[0]["blockedAt"].as_str().is_some());
+        assert!(entries[0]["expiresAt"].as_str().is_some());
+
+        let timed = super::route_http_request(
+            "POST",
+            "/api/overlay/blocklist/ip",
+            None,
+            r#"{"value":"203.0.113.5","durationMinutes":5}"#,
+            &state,
+        )
+        .await
+        .expect("block an ip for a real, non-default duration");
+        assert_eq!(timed.status, "200 OK");
+        let ban = state
+            .security
+            .read()
+            .await
+            .bans
+            .iter()
+            .find(|record| record.kind == "ip")
+            .cloned()
+            .expect("ip ban recorded");
+        assert!(!ban.is_permanent);
+        assert_eq!(ban.expires_at - ban.created_at, 5 * 60);
+    }
+
+    #[tokio::test]
+    async fn mesh_publish_and_lookup_round_trip_through_the_real_hash_database() {
+        // Matches the oracle's real PublishHashAsync/LookupHashAsync,
+        // which both operate on the exact same hash database. Previously
+        // POST /api/mesh/publish wrote into an unrelated
+        // "mesh/published/{key}" feature-state key that
+        // GET /api/mesh/lookup/{flacKey} never read, so a publish then
+        // immediate lookup always reported "not found".
+        let (state, _receiver) = test_state();
+
+        let missing =
+            super::route_http_request("GET", "/api/mesh/lookup/round-trip-key", None, "", &state)
+                .await
+                .expect("lookup before publish");
+        assert_eq!(missing.status, "404 Not Found");
+
+        let byte_hash = "a".repeat(64);
+        let published = super::route_http_request(
+            "POST",
+            "/api/mesh/publish",
+            None,
+            &format!(r#"{{"flacKey":"round-trip-key","byteHash":"{byte_hash}","size":4096}}"#),
+            &state,
+        )
+        .await
+        .expect("publish a real hash");
+        assert_eq!(published.status, "200 OK", "{}", published.body);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&published.body).unwrap()["published"],
+            true
+        );
+
+        let found =
+            super::route_http_request("GET", "/api/mesh/lookup/round-trip-key", None, "", &state)
+                .await
+                .expect("lookup after publish");
+        assert_eq!(found.status, "200 OK", "{}", found.body);
+        let found_json = serde_json::from_str::<serde_json::Value>(&found.body).unwrap();
+        assert_eq!(found_json["entry"]["flacKey"], "round-trip-key");
+        assert_eq!(found_json["entry"]["byteHash"], byte_hash);
+        assert_eq!(found_json["entry"]["size"], 4096);
+
+        // The "key"/"contentId" aliases the previous implementation
+        // accepted (and used to bypass byteHash/size validation) are no
+        // longer accepted at all -- only the oracle's real "flacKey".
+        let alias_rejected = super::route_http_request(
+            "POST",
+            "/api/mesh/publish",
+            None,
+            r#"{"key":"alias-key"}"#,
+            &state,
+        )
+        .await
+        .expect("reject the key/contentId alias with no real validation");
+        assert_eq!(alias_rejected.status, "400 Bad Request");
+    }
+
+    #[tokio::test]
+    async fn capabilities_peers_routes_use_the_real_capability_store() {
+        // Matches the oracle's real GetPeers/GetMeshPeers: known peer
+        // *capability* records (mesh-capable subset for mesh-peers), not
+        // the generic connected-Soulseek-user list. Previously both
+        // "/api/capabilities/peers" and its "/api/v0/capabilities/
+        // mesh-peers" alias collapsed into the same wrong handler.
+        let (state, _receiver) = test_state();
+        {
+            let mut mesh = state.mesh.write().await;
+            mesh.capability_records.push(test_capability_descriptor(
+                "mesh-capable-peer",
+                vec![slskr_client::capabilities::FEATURE_MESH_V1.to_owned()],
+            ));
+            mesh.capability_records
+                .push(test_capability_descriptor("plain-peer", vec![]));
+        }
+        // A watched Soulseek user with no capability record at all must
+        // not appear in either capability listing.
+        state.users.write().await.apply_status(&super::UserStatus {
+            username: "unrelated-soulseek-user".to_owned(),
+            status: 2,
+            privileged: false,
+        });
+
+        let peers = super::route_http_request("GET", "/api/capabilities/peers", None, "", &state)
+            .await
+            .expect("list all known peer capability records");
+        assert_eq!(peers.status, "200 OK");
+        let peers_json = serde_json::from_str::<serde_json::Value>(&peers.body).unwrap();
+        let usernames = peers_json["peers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|record| record["username"].as_str().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(peers_json["count"], 2);
+        assert!(usernames.contains(&"mesh-capable-peer"));
+        assert!(usernames.contains(&"plain-peer"));
+        assert!(!usernames.contains(&"unrelated-soulseek-user"));
+
+        let mesh_peers =
+            super::route_http_request("GET", "/api/v0/capabilities/mesh-peers", None, "", &state)
+                .await
+                .expect("list only mesh-capable peer capability records");
+        assert_eq!(mesh_peers.status, "200 OK");
+        let mesh_peers_json = serde_json::from_str::<serde_json::Value>(&mesh_peers.body).unwrap();
+        assert_eq!(mesh_peers_json["count"], 1);
+        assert_eq!(mesh_peers_json["peers"][0]["username"], "mesh-capable-peer");
+    }
+
+    #[tokio::test]
     async fn security_ban_routes_reject_invalid_ips_and_canonicalize_values() {
         let (state, _receiver) = test_state();
         let invalid = super::route_http_request(
@@ -87686,7 +88006,7 @@ mod tests {
             .share_grants
             .write()
             .await
-            .create(collection_id.clone(), "friend".to_owned())
+            .create_with_contract(None, collection_id.clone(), "friend".to_owned())
             .expect("share grant");
         db.close_for_test().await;
 
@@ -87721,7 +88041,7 @@ mod tests {
             .share_grants
             .write()
             .await
-            .create("private-collection".to_owned(), "friend".to_owned())
+            .create_with_contract(None, "private-collection".to_owned(), "friend".to_owned())
             .expect("grant");
         db.close_for_test().await;
 
@@ -87779,7 +88099,7 @@ mod tests {
             .share_grants
             .write()
             .await
-            .create("private-collection".to_owned(), "friend".to_owned())
+            .create_with_contract(None, "private-collection".to_owned(), "friend".to_owned())
             .expect("grant");
         update_db.close_for_test().await;
 
@@ -88242,7 +88562,7 @@ mod tests {
             .share_grants
             .write()
             .await
-            .create("col-1".to_owned(), "friend".to_owned())
+            .create_with_contract(None, "col-1".to_owned(), "friend".to_owned())
             .expect("grant");
         db.close_for_test().await;
 
@@ -89155,7 +89475,7 @@ mod tests {
         grants.next_id = u64::MAX;
         assert_eq!(
             grants
-                .create("one".to_owned(), "alice".to_owned())
+                .create_with_contract(None, "one".to_owned(), "alice".to_owned())
                 .unwrap()
                 .0
                 .id,
@@ -89163,7 +89483,7 @@ mod tests {
         );
         assert_eq!(
             grants
-                .create("two".to_owned(), "bob".to_owned())
+                .create_with_contract(None, "two".to_owned(), "bob".to_owned())
                 .unwrap()
                 .0
                 .id,
@@ -90440,6 +90760,85 @@ mod tests {
         .await
         .expect("alice's grant still exists");
         assert_eq!(still_there.status, "200 OK");
+    }
+
+    #[tokio::test]
+    async fn v0_share_grants_get_real_uuid_ids_usable_on_versioned_routes() {
+        // Matches the oracle's real ShareGrant.Id (a Guid), and the
+        // existing `versioned_get_failure_contract` UUID-format guard
+        // that v0 share-grant routes already enforced -- previously
+        // ShareGrantStore always minted sequential "grant-N" ids
+        // regardless of API version (unlike CollectionStore, which
+        // already mints a real UUID for v0 requests), so any v0
+        // GET/PUT/DELETE by id always 400'd against that same guard for
+        // a real grant, no matter what id was passed.
+        let (state, _receiver) = test_state();
+        let collection = super::route_http_request(
+            "POST",
+            "/api/v0/collections",
+            None,
+            r#"{"title":"Versioned Grants"}"#,
+            &state,
+        )
+        .await
+        .expect("create collection");
+        let collection_id = serde_json::from_str::<serde_json::Value>(&collection.body).unwrap()
+            ["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+
+        let created = super::route_http_request(
+            "POST",
+            "/api/v0/share-grants",
+            None,
+            &format!(r#"{{"collection_id":"{collection_id}","username":"friend"}}"#),
+            &state,
+        )
+        .await
+        .expect("create share grant via the v0 route");
+        assert_eq!(created.status, "201 Created", "{}", created.body);
+        let grant_id = serde_json::from_str::<serde_json::Value>(&created.body).unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        assert!(
+            uuid::Uuid::parse_str(&grant_id).is_ok(),
+            "v0-created share grant id must be a real UUID: {grant_id}"
+        );
+
+        let get = super::route_http_request(
+            "GET",
+            &format!("/api/v0/share-grants/{grant_id}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("get share grant via the v0 route");
+        assert_eq!(get.status, "200 OK", "{}", get.body);
+
+        let update = super::route_http_request(
+            "PUT",
+            &format!("/api/v0/share-grants/{grant_id}"),
+            None,
+            r#"{"permissions":"read,download"}"#,
+            &state,
+        )
+        .await
+        .expect("update share grant via the v0 route");
+        assert_eq!(update.status, "200 OK", "{}", update.body);
+
+        let delete = super::route_http_request(
+            "DELETE",
+            &format!("/api/v0/share-grants/{grant_id}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("delete share grant via the v0 route");
+        assert_eq!(delete.status, "200 OK", "{}", delete.body);
     }
 
     #[tokio::test]
