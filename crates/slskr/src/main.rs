@@ -42964,6 +42964,42 @@ async fn mesh_http_services_response(state: &AppState) -> HttpResponse {
     )
 }
 
+/// Matches the oracle's real `PlaybackPriorityService.GetPriority`: High
+/// when the buffer is low/empty (< 5s), Low when comfortably ahead
+/// (>= 30s), Mid otherwise -- including when no feedback has ever been
+/// recorded for this job at all.
+fn playback_priority_for_latest_feedback(
+    latest_feedback: Option<&serde_json::Value>,
+) -> &'static str {
+    let Some(latest_feedback) = latest_feedback else {
+        return "Mid";
+    };
+    let buffer_ahead_ms = latest_feedback
+        .get("bufferAheadMs")
+        .and_then(serde_json::Value::as_i64)
+        .unwrap_or(0);
+    if buffer_ahead_ms < 5_000 {
+        "High"
+    } else if buffer_ahead_ms >= 30_000 {
+        "Low"
+    } else {
+        "Mid"
+    }
+}
+
+/// Finds the most recently received playback-feedback entry for a job
+/// among its stored history, matching the oracle's
+/// `ConcurrentDictionary<string, PlaybackFeedback>` "latest wins"
+/// semantics.
+fn latest_playback_feedback(entries: &[serde_json::Value]) -> Option<&serde_json::Value> {
+    entries.iter().max_by_key(|entry| {
+        entry
+            .get("receivedAt")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0)
+    })
+}
+
 async fn feature_controller_mutation_response(
     method: &str,
     path: &str,
@@ -42996,7 +43032,9 @@ async fn feature_controller_mutation_response(
         };
         let id = uuid::Uuid::new_v4().to_string();
         feedback["feedbackId"] = serde_json::json!(id);
-        feedback["receivedAt"] = serde_json::json!(unix_timestamp());
+        // Millisecond precision so `latest_playback_feedback` can reliably
+        // order feedback posted multiple times within the same second.
+        feedback["receivedAt"] = serde_json::json!(unix_timestamp_millis());
         return Some(
             match state
                 .controller_features
@@ -43004,7 +43042,15 @@ async fn feature_controller_mutation_response(
                 .await
                 .upsert(format!("playback/feedback/{job_id}/{id}"), feedback.clone())
             {
-                Ok(()) => routing::ok_response(serde_json::json!({"priority": "High"}).to_string()),
+                // Matches the oracle's real PostFeedback: the priority
+                // reflects this job's actual recorded buffer state, not a
+                // hardcoded constant.
+                Ok(()) => routing::ok_response(
+                    serde_json::json!({
+                        "priority": playback_priority_for_latest_feedback(Some(&feedback))
+                    })
+                    .to_string(),
+                ),
                 Err(error) => routing::service_unavailable_response(&error),
             },
         );
@@ -48298,29 +48344,29 @@ async fn extended_controller_dynamic_get_response(
     }
     if let Some(job_id) = path_segment_between(path, "/api/playback/", "/diagnostics") {
         let job_id = decoded_path_segment(job_id);
-        let jobs = state.multisource.read().await;
+        // Matches the oracle's real GetDiagnostics: this is the job's
+        // recorded playback-feedback state (position/buffer/priority), not
+        // multisource swarm-download progress -- 404 when no feedback has
+        // ever been posted for this jobId, regardless of whether a
+        // download job with that id happens to exist.
         let feedback = state
             .controller_features
             .read()
             .await
             .values_with_prefix(&format!("playback/feedback/{job_id}/"));
-        return jobs
-            .get(&job_id)
-            .map_or_else(routing::not_found_response, |job| {
-                routing::ok_response(
-                    serde_json::json!({
-                        "jobId": job.id,
-                        "status": job.status,
-                        "completedChunks": job.completed_chunks,
-                        "totalChunks": job.total_chunks,
-                        "bytesDownloaded": job.bytes_downloaded,
-                        "sources": job.sources,
-                        "result": job.result,
-                        "feedback": feedback,
-                    })
-                    .to_string(),
-                )
-            });
+        let Some(latest) = latest_playback_feedback(&feedback) else {
+            return routing::not_found_response();
+        };
+        return routing::ok_response(
+            serde_json::json!({
+                "jobId": job_id,
+                "trackId": latest.get("trackId").cloned().unwrap_or(serde_json::Value::Null),
+                "positionMs": latest.get("positionMs").and_then(serde_json::Value::as_i64).unwrap_or(0),
+                "bufferAheadMs": latest.get("bufferAheadMs").and_then(serde_json::Value::as_i64).unwrap_or(0),
+                "priority": playback_priority_for_latest_feedback(Some(latest)),
+            })
+            .to_string(),
+        );
     }
     if path.starts_with("/api/podcore/") {
         return podcore_dynamic_get_response(path, query, state).await;
@@ -93353,6 +93399,102 @@ mod tests {
                 .unwrap_or_else(|error| panic!("{path}: {error}"));
             assert_eq!(response.status, "404 Not Found", "{path}");
         }
+    }
+
+    #[tokio::test]
+    async fn playback_feedback_and_diagnostics_reflect_the_real_buffer_state() {
+        // Matches the oracle's real PlaybackController: priority is
+        // computed from PlaybackPriorityService.GetPriority (High when
+        // buffer < 5s, Low when >= 30s, Mid otherwise), and diagnostics
+        // reflects the most recently posted feedback for that job, not
+        // multisource swarm-download progress.
+        let (state, _receiver) = test_state();
+
+        let missing = super::route_http_request(
+            "GET",
+            "/api/v0/playback/track-audit/diagnostics",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("missing playback diagnostics");
+        assert_eq!(missing.status, "404 Not Found");
+
+        let low_buffer = super::route_http_request(
+            "POST",
+            "/api/v0/playback/feedback",
+            None,
+            r#"{"jobId":"track-audit","trackId":"track-1","positionMs":1000,"bufferAheadMs":500}"#,
+            &state,
+        )
+        .await
+        .expect("low-buffer feedback");
+        assert_eq!(low_buffer.status, "200 OK");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&low_buffer.body).unwrap()["priority"],
+            "High"
+        );
+
+        let diagnostics = super::route_http_request(
+            "GET",
+            "/api/v0/playback/track-audit/diagnostics",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("playback diagnostics");
+        assert_eq!(diagnostics.status, "200 OK");
+        let diagnostics_json =
+            serde_json::from_str::<serde_json::Value>(&diagnostics.body).unwrap();
+        assert_eq!(diagnostics_json["jobId"], "track-audit");
+        assert_eq!(diagnostics_json["trackId"], "track-1");
+        assert_eq!(diagnostics_json["positionMs"], 1_000);
+        assert_eq!(diagnostics_json["bufferAheadMs"], 500);
+        assert_eq!(diagnostics_json["priority"], "High");
+
+        let comfortable = super::route_http_request(
+            "POST",
+            "/api/v0/playback/feedback",
+            None,
+            r#"{"jobId":"track-audit","trackId":"track-1","positionMs":5000,"bufferAheadMs":45000}"#,
+            &state,
+        )
+        .await
+        .expect("comfortable-buffer feedback");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&comfortable.body).unwrap()["priority"],
+            "Low"
+        );
+
+        let updated = super::route_http_request(
+            "GET",
+            "/api/v0/playback/track-audit/diagnostics",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("updated playback diagnostics");
+        let updated_json = serde_json::from_str::<serde_json::Value>(&updated.body).unwrap();
+        assert_eq!(updated_json["positionMs"], 5_000);
+        assert_eq!(updated_json["bufferAheadMs"], 45_000);
+        assert_eq!(updated_json["priority"], "Low");
+
+        let mid = super::route_http_request(
+            "POST",
+            "/api/v0/playback/feedback",
+            None,
+            r#"{"jobId":"track-audit","positionMs":6000,"bufferAheadMs":15000}"#,
+            &state,
+        )
+        .await
+        .expect("mid-buffer feedback");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&mid.body).unwrap()["priority"],
+            "Mid"
+        );
     }
 
     #[tokio::test]
