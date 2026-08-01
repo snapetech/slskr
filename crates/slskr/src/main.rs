@@ -11241,6 +11241,60 @@ impl SecurityState {
     }
 }
 
+/// Matches the oracle's real `PeerReputation.TrustedThreshold`/
+/// `UntrustedThreshold`/`MaxScore`.
+const SECURITY_REPUTATION_TRUSTED_THRESHOLD: i32 = 70;
+const SECURITY_REPUTATION_UNTRUSTED_THRESHOLD: i32 = 20;
+const SECURITY_REPUTATION_DEFAULT_SCORE: i32 = 100;
+
+fn security_reputation_trust_level(score: i32) -> &'static str {
+    if score >= SECURITY_REPUTATION_TRUSTED_THRESHOLD {
+        "Trusted"
+    } else if score <= SECURITY_REPUTATION_UNTRUSTED_THRESHOLD {
+        "Untrusted"
+    } else {
+        "Neutral"
+    }
+}
+
+/// Matches the oracle's real `PeerReputation`/`PeerProfile` shape for a
+/// single peer, sourced from slskR's real, violation-driven score and
+/// violation counters (`SecurityState.reputation`/`violations`) rather
+/// than a disconnected, admin-only settings blob that never reflected
+/// real behavior. slskR does not yet track the oracle's finer-grained
+/// per-event counters (successful/failed/aborted transfers, malformed
+/// messages, content mismatches, slot availability) or per-peer first/
+/// last-seen timestamps, so those fields are honestly left at their
+/// zero/neutral defaults rather than fabricated.
+async fn security_reputation_profile_json(state: &AppState, username: &str) -> serde_json::Value {
+    let key = username.to_ascii_lowercase();
+    let security = state.security.read().await;
+    let score = security
+        .reputation
+        .get(&key)
+        .copied()
+        .unwrap_or(SECURITY_REPUTATION_DEFAULT_SCORE);
+    let protocol_violations = security.violations.get(&key).copied().unwrap_or(0);
+    drop(security);
+    let now = chrono::Utc::now().to_rfc3339();
+    serde_json::json!({
+        "username": username,
+        "score": score,
+        "firstSeen": now,
+        "lastSeen": now,
+        "successfulTransfers": 0,
+        "failedTransfers": 0,
+        "abortedTransfers": 0,
+        "totalBytesTransferred": 0,
+        "malformedMessages": 0,
+        "protocolViolations": protocol_violations,
+        "contentMismatches": 0,
+        "slotsAvailableCount": 0,
+        "successRate": 0.5,
+        "trustLevel": security_reputation_trust_level(score),
+    })
+}
+
 fn normalize_security_ban_value(kind: &str, value: &str) -> Option<String> {
     match kind {
         "username" => {
@@ -14866,6 +14920,7 @@ async fn route_http_request_with_headers(
             || (!feature.social_federation
                 && (normalized_path.starts_with("/api/federation")
                     || normalized_path.starts_with("/api/activitypub")
+                    || normalized_path.starts_with("/api/taste-recommendations")
                     || normalized_path.starts_with("/actors/")
                     || normalized_path.starts_with("/.well-known/webfinger")))
             || (!feature.virtual_soulfind
@@ -25655,11 +25710,6 @@ async fn route_http_request_with_headers(
               let events = state.events.read().await;
               let security = state.security.read().await;
               let watched = users.records.iter().filter(|user| user.watched).count();
-              let suspicious = users
-                  .records
-                  .iter()
-                  .filter(|user| user.status.as_deref() == Some("offline") && user.watched)
-                  .count();
               let webhook_count = webhooks.get_all().len();
               let event_count = events.records.len();
               let ban_count = security.active_bans();
@@ -25668,6 +25718,37 @@ async fn route_http_request_with_headers(
                   .get("bans")
                   .cloned()
                   .unwrap_or_else(|| serde_json::json!([]));
+              // Matches the oracle's real PeerReputation.GetStats(): real
+              // per-peer scores and violation counts, not watch/online
+              // status (which has nothing to do with reputation).
+              let total_peers = security.reputation.len();
+              let trusted_peers = security
+                  .reputation
+                  .values()
+                  .filter(|score| **score >= SECURITY_REPUTATION_TRUSTED_THRESHOLD)
+                  .count();
+              let untrusted_peers = security
+                  .reputation
+                  .values()
+                  .filter(|score| **score <= SECURITY_REPUTATION_UNTRUSTED_THRESHOLD)
+                  .count();
+              let average_score = if total_peers > 0 {
+                  security.reputation.values().map(|score| *score as f64).sum::<f64>()
+                      / total_peers as f64
+              } else {
+                  f64::from(SECURITY_REPUTATION_DEFAULT_SCORE)
+              };
+              let total_protocol_violations =
+                  security.violations.values().map(|count| u64::from(*count)).sum::<u64>();
+              let reputation_stats = serde_json::json!({
+                  "totalPeers": total_peers,
+                  "trustedPeers": trusted_peers,
+                  "untrustedPeers": untrusted_peers,
+                  "averageScore": average_score,
+                  "totalSuccessfulTransfers": 0,
+                  "totalFailedTransfers": 0,
+                  "totalProtocolViolations": total_protocol_violations,
+              });
               drop(security);
               drop(events);
               drop(webhooks);
@@ -25676,7 +25757,7 @@ async fn route_http_request_with_headers(
                   "eventStats": {"totalEvents": event_count},
                   "networkGuardStats": {"globalConnections": watched},
                   "violationStats": {"activeBans": ban_count},
-                  "reputationStats": {"totalPeers": watched, "suspiciousPeers": suspicious},
+                  "reputationStats": reputation_stats.clone(),
                   "paranoidStats": {"enabled": false},
                   "fingerprintStats": {"knownFingerprints": 0},
                   "entropyStats": {"checks": 0},
@@ -25688,8 +25769,8 @@ async fn route_http_request_with_headers(
                   "status": "local",
                   "stats": {
                       "networkGuardStats": { "globalConnections": watched },
-                      "reputationStats": { "totalPeers": watched, "suspiciousPeers": suspicious },
-                      "threatStats": { "activeThreats": suspicious },
+                      "reputationStats": reputation_stats,
+                      "threatStats": { "activeThreats": untrusted_peers },
                       "banStats": { "activeBans": ban_count }
                   },
                   "events": event_count,
@@ -40953,46 +41034,44 @@ async fn security_extended_response(
             routing::ok_response(serde_json::Value::Array(rows).to_string())
         }
         "/api/security/reputation/suspicious" | "/api/security/reputation/trusted" => {
+            // Matches the oracle's real GetSuspiciousPeers/GetTrustedPeers:
+            // real per-peer scores (SecurityState.reputation), sorted
+            // worst/best-first, filtered by the oracle's real
+            // Untrusted/Trusted thresholds -- not watch/online status,
+            // which has nothing to do with reputation.
             let trusted = path.ends_with("/trusted");
-            let users = state.users.read().await;
-            let mut rows = users
-                .records
+            let security = state.security.read().await;
+            let mut peers = security
+                .reputation
                 .iter()
-                .filter(|user| {
-                    if trusted {
-                        user.watched || user.status.as_deref() == Some("online")
-                    } else {
-                        user.watched && user.status.as_deref() == Some("offline")
-                    }
-                })
-                .take(list_limit)
-                .map(|user| {
+                .map(|(username, score)| (username.clone(), *score))
+                .collect::<Vec<_>>();
+            drop(security);
+            peers.retain(|(_, score)| {
+                if trusted {
+                    *score >= SECURITY_REPUTATION_TRUSTED_THRESHOLD
+                } else {
+                    *score <= SECURITY_REPUTATION_UNTRUSTED_THRESHOLD
+                }
+            });
+            if trusted {
+                peers.sort_by_key(|peer| std::cmp::Reverse(peer.1));
+            } else {
+                peers.sort_by_key(|peer| peer.1);
+            }
+            peers.truncate(list_limit);
+            let rows = peers
+                .into_iter()
+                .map(|(username, score)| {
                     serde_json::json!({
-                        "username": user.username,
-                        "score": if trusted { 100 } else { 0 },
-                        "isTrusted": trusted,
-                        "isSuspicious": !trusted,
-                        "lastSeen": user.updated_at,
+                        "username": username,
+                        "score": score,
+                        "isTrusted": score >= SECURITY_REPUTATION_TRUSTED_THRESHOLD,
+                        "isSuspicious": score <= SECURITY_REPUTATION_UNTRUSTED_THRESHOLD,
+                        "trustLevel": security_reputation_trust_level(score),
                     })
                 })
                 .collect::<Vec<_>>();
-            rows.extend(
-                state
-                    .controller_features
-                    .read()
-                    .await
-                    .values_with_prefix("security/profile/security/reputation/")
-                    .into_iter()
-                    .filter(|profile| {
-                        let score = profile["settings"]["score"].as_f64().unwrap_or(0.0);
-                        if trusted {
-                            score >= 0.0
-                        } else {
-                            score < 0.0
-                        }
-                    }),
-            );
-            rows.truncate(list_limit);
             routing::ok_response(serde_json::Value::Array(rows).to_string())
         }
         "/api/security/scanners" | "/api/security/threats" => routing::ok_response("[]".to_owned()),
@@ -41186,40 +41265,10 @@ async fn security_extended_response(
         _ => {
             if let Some(username) = path_segment_after(path, "/api/security/reputation/") {
                 let username = decoded_path_segment(username);
-                let configured = state
-                    .controller_features
-                    .read()
-                    .await
-                    .get(&format!("security/profile/security/reputation/{username}"))
-                    .cloned();
-                let settings = configured
-                    .as_ref()
-                    .and_then(|value| value.get("settings"))
-                    .unwrap_or(&serde_json::Value::Null);
-                let score = settings
-                    .get("score")
-                    .and_then(serde_json::Value::as_i64)
-                    .unwrap_or(50)
-                    .clamp(0, 100);
-                let now = chrono::Utc::now().to_rfc3339();
                 return routing::ok_response(
-                    serde_json::json!({
-                        "username": username,
-                        "score": score,
-                        "firstSeen": configured.as_ref().and_then(|value| value.get("createdAt")).cloned().unwrap_or_else(|| serde_json::json!(now)),
-                        "lastSeen": configured.as_ref().and_then(|value| value.get("updatedAt")).cloned().unwrap_or_else(|| serde_json::json!(now)),
-                        "successfulTransfers": 0,
-                        "failedTransfers": 0,
-                        "abortedTransfers": 0,
-                        "totalBytesTransferred": 0,
-                        "malformedMessages": 0,
-                        "protocolViolations": 0,
-                        "contentMismatches": 0,
-                        "slotsAvailableCount": 0,
-                        "successRate": 0.5,
-                        "trustLevel": if score >= 75 { "Trusted" } else if score <= 25 { "Untrusted" } else { "Neutral" },
-                    })
-                    .to_string(),
+                    security_reputation_profile_json(state, &username)
+                        .await
+                        .to_string(),
                 );
             }
             if let Some(username) = path_segment_after(path, "/api/security/disclosure/") {
@@ -43357,9 +43406,9 @@ async fn feature_controller_mutation_response(
         };
         let id = uuid::Uuid::new_v4().to_string();
         feedback["feedbackId"] = serde_json::json!(id);
-        // Millisecond precision so `latest_playback_feedback` can reliably
-        // order feedback posted multiple times within the same second.
-        feedback["receivedAt"] = serde_json::json!(unix_timestamp_millis());
+        // Nanosecond precision so `latest_playback_feedback` can reliably
+        // order feedback posted multiple times in rapid succession.
+        feedback["receivedAt"] = serde_json::json!(unix_timestamp_nanos());
         return Some(
             match state
                 .controller_features
@@ -43679,10 +43728,45 @@ async fn feature_controller_mutation_response(
             },
         );
     }
+    if method == "PUT" && path.starts_with("/api/security/reputation/") {
+        let Some(username) = path_segment_after(path, "/api/security/reputation/") else {
+            return Some(routing::not_found_response());
+        };
+        let username = decoded_path_segment(username);
+        if username.trim().is_empty() {
+            return Some(routing::bad_request_response("Username is required"));
+        }
+        let payload = match serde_json::from_str::<serde_json::Value>(body) {
+            Ok(payload @ serde_json::Value::Object(_)) => payload,
+            _ => return Some(routing::bad_request_response("Request is required")),
+        };
+        let Some(score) = payload.get("score").and_then(serde_json::Value::as_i64) else {
+            return Some(routing::bad_request_response(
+                "Score must be between 0 and 100",
+            ));
+        };
+        // Matches the oracle's real SetReputation: an out-of-range score
+        // is a real validation error, not silently clamped.
+        if !(0..=100).contains(&score) {
+            return Some(routing::bad_request_response(
+                "Score must be between 0 and 100",
+            ));
+        }
+        // Matches the oracle's real PeerReputation.SetScore: a manual
+        // override writes directly into the same real score the
+        // automatic violation-tracking system (record_peer_violation)
+        // also adjusts, rather than a disconnected settings blob that
+        // was never read by anything else.
+        state
+            .security
+            .write()
+            .await
+            .reputation
+            .insert(username.to_ascii_lowercase(), score as i32);
+        return Some(routing::ok_response("{}".to_owned()));
+    }
     if method == "PUT"
-        && (path == "/api/security/adversarial"
-            || path.starts_with("/api/security/disclosure/")
-            || path.starts_with("/api/security/reputation/"))
+        && (path == "/api/security/adversarial" || path.starts_with("/api/security/disclosure/"))
     {
         let payload = match serde_json::from_str::<serde_json::Value>(body) {
             Ok(payload @ serde_json::Value::Object(_)) => payload,
@@ -86898,6 +86982,130 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn security_reputation_routes_reflect_real_score_and_violations() {
+        // Matches the oracle's real PeerReputation-backed
+        // SecurityController: reputation endpoints previously read/wrote
+        // a disconnected, admin-only settings blob that never reflected
+        // real peer behavior (violations always showed as 0, and
+        // suspicious/trusted lists were derived from watch/online status
+        // instead of reputation at all).
+        let (state, _receiver) = test_state();
+
+        // A peer with no recorded violations reports the real,
+        // never-decremented default score.
+        let clean = super::route_http_request(
+            "GET",
+            "/api/v0/security/reputation/cleanpeer",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("clean peer reputation");
+        let clean_json = serde_json::from_str::<serde_json::Value>(&clean.body).unwrap();
+        assert_eq!(clean_json["score"], 100);
+        assert_eq!(clean_json["protocolViolations"], 0);
+        assert_eq!(clean_json["trustLevel"], "Trusted");
+
+        // Seed a real violation-driven score drop via the same
+        // SecurityState used by the real violation tracker.
+        {
+            let mut security = state.security.write().await;
+            security.reputation.insert("badpeer".to_owned(), 15);
+            security.violations.insert("badpeer".to_owned(), 3);
+        }
+        let bad = super::route_http_request(
+            "GET",
+            "/api/v0/security/reputation/badpeer",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("bad peer reputation");
+        let bad_json = serde_json::from_str::<serde_json::Value>(&bad.body).unwrap();
+        assert_eq!(bad_json["score"], 15);
+        assert_eq!(bad_json["protocolViolations"], 3);
+        assert_eq!(bad_json["trustLevel"], "Untrusted");
+
+        // The suspicious list reflects the real low score, not
+        // watch/online status.
+        let suspicious = super::route_http_request(
+            "GET",
+            "/api/v0/security/reputation/suspicious",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("suspicious peers");
+        let suspicious_json = serde_json::from_str::<serde_json::Value>(&suspicious.body).unwrap();
+        let suspicious_usernames = suspicious_json
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|entry| entry["username"].as_str().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(suspicious_usernames, vec!["badpeer"]);
+
+        // The trusted list never includes the suspicious peer.
+        let trusted = super::route_http_request(
+            "GET",
+            "/api/v0/security/reputation/trusted",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("trusted peers");
+        let trusted_json = serde_json::from_str::<serde_json::Value>(&trusted.body).unwrap();
+        assert!(trusted_json
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|entry| entry["username"] != "badpeer"));
+
+        // A manual PUT override rejects out-of-range scores...
+        let invalid = super::route_http_request(
+            "PUT",
+            "/api/v0/security/reputation/badpeer",
+            None,
+            r#"{"score":150}"#,
+            &state,
+        )
+        .await
+        .expect("reject out-of-range score");
+        assert_eq!(invalid.status, "400 Bad Request");
+
+        // ...and a valid override writes directly into the same real
+        // score the automatic violation tracker reads and adjusts.
+        let overridden = super::route_http_request(
+            "PUT",
+            "/api/v0/security/reputation/badpeer",
+            None,
+            r#"{"score":80,"reason":"manual review"}"#,
+            &state,
+        )
+        .await
+        .expect("override reputation score");
+        assert_eq!(overridden.status, "200 OK");
+        assert_eq!(state.security.read().await.reputation["badpeer"], 80);
+        let after_override = super::route_http_request(
+            "GET",
+            "/api/v0/security/reputation/badpeer",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("reputation after override");
+        let after_override_json =
+            serde_json::from_str::<serde_json::Value>(&after_override.body).unwrap();
+        assert_eq!(after_override_json["score"], 80);
+        assert_eq!(after_override_json["trustLevel"], "Trusted");
+    }
+
+    #[tokio::test]
     async fn security_ban_routes_reject_invalid_ips_and_canonicalize_values() {
         let (state, _receiver) = test_state();
         let invalid = super::route_http_request(
@@ -89257,9 +89465,12 @@ mod tests {
                 Some("\"peerTier\":\"Unknown\""),
             ),
             (
+                // Matches slskR's real reputation default: a peer with no
+                // recorded violations has never been decremented from its
+                // starting score.
                 "/api/v0/security/reputation/missing",
                 "200 OK",
-                Some("\"score\":50"),
+                Some("\"score\":100"),
             ),
             (
                 "/api/v0/traces/missing/summary",
@@ -94069,6 +94280,20 @@ mod tests {
             "/api/federation/diagnostics",
         ] {
             let response = super::route_http_request("GET", path, None, "", &state)
+                .await
+                .unwrap_or_else(|error| panic!("{path}: {error}"));
+            assert_eq!(response.status, "404 Not Found", "{path}");
+        }
+
+        // Matches the oracle's real [FeatureGate(FeatureId.SocialFederation)]
+        // on TasteRecommendationsController, a sibling federation surface
+        // that was previously missing from this same gate.
+        for path in [
+            "/api/v0/taste-recommendations/wishlist",
+            "/api/v0/taste-recommendations/release-radar",
+            "/api/v0/taste-recommendations/graph-preview",
+        ] {
+            let response = super::route_http_request("POST", path, None, "{}", &state)
                 .await
                 .unwrap_or_else(|error| panic!("{path}: {error}"));
             assert_eq!(response.status, "404 Not Found", "{path}");

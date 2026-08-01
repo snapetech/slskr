@@ -1170,6 +1170,13 @@ pub fn unix_timestamp_millis() -> u64 {
         .unwrap_or_default()
 }
 
+pub fn unix_timestamp_nanos() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| u64::try_from(duration.as_nanos()).unwrap_or(u64::MAX))
+        .unwrap_or_default()
+}
+
 /// Determine cache control header for response
 pub fn cache_control_header(method: &str, content_type: &str, path: &str) -> Option<String> {
     // Only cache GET requests
