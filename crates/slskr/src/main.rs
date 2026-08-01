@@ -49078,17 +49078,24 @@ async fn extended_controller_get_response(
             )
         }
         "/api/overlay/connections" => {
-            let peers = state.peer_endpoints.read().await;
-            let rows = peers
-                .iter()
-                .map(|(username, (address, updated_at))| {
-                    serde_json::json!({
-                        "username": username,
-                        "address": address.ip,
-                        "port": address.port,
-                        "updatedAt": updated_at,
-                    })
-                })
+            // Matches the oracle's real MeshPeerInfoResponse concept (the
+            // live overlay/mesh session list) -- previously reported
+            // state.peer_endpoints, a last-known-IP cache from Soulseek
+            // server lookups, unrelated to whether an overlay session is
+            // actually open. Built from the gateway's real open-tunnel
+            // registry instead, the only real per-connection identity
+            // slskR currently tracks; the oracle's additional per-session
+            // fields (address/port/connectedAt/lastActivity/
+            // certificateThumbprint/version/isOutbound) aren't tracked at
+            // the tunnel level yet, so they're omitted rather than
+            // fabricated.
+            let usernames = match state.private_gateway.as_ref() {
+                Some(gateway) => gateway.connected_peer_usernames().await,
+                None => Vec::new(),
+            };
+            let rows = usernames
+                .into_iter()
+                .map(|username| serde_json::json!({"username": username}))
                 .collect::<Vec<_>>();
             routing::ok_response(serde_json::Value::Array(rows).to_string())
         }
@@ -72746,6 +72753,21 @@ mod tests {
             "{overlay_stats_json}"
         );
 
+        // Matches the oracle's real overlay/mesh session list -- must
+        // report the real tunnel owner's identity, not slskR's old
+        // unrelated peer-endpoints IP cache.
+        let overlay_connections =
+            super::route_http_request("GET", "/api/v0/overlay/connections", None, "", &state)
+                .await
+                .expect("overlay connections with an open tunnel");
+        let overlay_connections_json =
+            serde_json::from_str::<serde_json::Value>(&overlay_connections.body).unwrap();
+        assert_eq!(
+            overlay_connections_json,
+            serde_json::json!([{"username": "member"}]),
+            "{overlay_connections_json}"
+        );
+
         let reply = client
             .call(
                 &MeshServiceCall::new(
@@ -72820,6 +72842,11 @@ mod tests {
             overlay_stats_after_close_json["activeConnections"], 0,
             "{overlay_stats_after_close_json}"
         );
+        let overlay_connections_after_close =
+            super::route_http_request("GET", "/api/v0/overlay/connections", None, "", &state)
+                .await
+                .expect("overlay connections after closing the tunnel");
+        assert_eq!(overlay_connections_after_close.body, "[]");
 
         let mut second_hello = MeshHello::new(
             "member",
