@@ -13169,6 +13169,75 @@ fn is_safe_opaque_reference(value: &str) -> bool {
     !(trimmed.len() >= 32 && trimmed.bytes().all(|byte| byte.is_ascii_hexdigit()))
 }
 
+/// Matches the oracle's real `MusicBrainzOverlayService.IsExportableEdit`.
+const MUSICBRAINZ_EXPORTABLE_EDIT_TYPES: [&str; 7] = [
+    "TitleCorrection",
+    "ArtistCorrection",
+    "Alias",
+    "MissingAltTitle",
+    "DuplicateMarker",
+    "ReleaseGrouping",
+    "RecordingLinkage",
+];
+
+fn musicbrainz_edit_is_exportable(edit: &serde_json::Value) -> bool {
+    edit.get("type")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|value| MUSICBRAINZ_EXPORTABLE_EDIT_TYPES.contains(&value))
+}
+
+fn musicbrainz_edit_upstream_target(edit: &serde_json::Value) -> String {
+    format!(
+        "{}:{}",
+        edit.get("targetType")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default(),
+        edit.get("targetId")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default(),
+    )
+}
+
+fn musicbrainz_edit_proposed_change(edit: &serde_json::Value) -> String {
+    format!(
+        "{} => {}",
+        edit.get("field")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .trim(),
+        edit.get("value")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .trim(),
+    )
+}
+
+/// Matches the oracle's real `MusicBrainzOverlayService.BuildExportReview`,
+/// used both by `GET .../export-review` directly and by
+/// `POST .../approve-export` to decide `CanApproveExport`/`ReviewReason`.
+fn musicbrainz_export_review_json(
+    edit: &serde_json::Value,
+    decision: Option<&serde_json::Value>,
+) -> serde_json::Value {
+    let exportable = musicbrainz_edit_is_exportable(edit);
+    let review_reason = if decision.is_some() {
+        "Upstream export has already been approved locally."
+    } else if exportable {
+        "Overlay edit can be reviewed for manual upstream MusicBrainz submission."
+    } else {
+        "Overlay edit type is not exportable."
+    };
+    serde_json::json!({
+        "edit": edit,
+        "upstreamTarget": musicbrainz_edit_upstream_target(edit),
+        "proposedChange": musicbrainz_edit_proposed_change(edit),
+        "evidence": edit.get("evidence").cloned().unwrap_or_else(|| serde_json::json!([])),
+        "canApproveExport": decision.is_none() && exportable,
+        "reviewReason": review_reason,
+        "decision": decision,
+    })
+}
+
 /// Matches the oracle's `PodAffinityScorer.CalculateTrustScore`: a base
 /// trust of 0.5, +0.3 for an owner or +0.2 for a mod, +0.2 for no ban,
 /// capped at 1.0.
@@ -44221,23 +44290,83 @@ async fn musicbrainz_mutation_response(
     {
         let edit_id = decoded_path_segment(edit_id);
         let features = state.controller_features.read().await;
-        if features
+        let Some(edit) = features
             .get(&format!("musicbrainz/edit/{edit_id}"))
-            .is_none()
-        {
-            return routing::not_found_response();
-        }
+            .cloned()
+        else {
+            drop(features);
+            return HttpResponse {
+                status: "404 Not Found",
+                content_type: "application/json",
+                body: serde_json::json!({"errors": ["Edit not found."], "decision": null})
+                    .to_string(),
+            };
+        };
+        // Matches the oracle's real ApproveExportAsync: approving an
+        // already-approved edit is idempotent -- it returns the existing
+        // decision unchanged rather than re-validating or overwriting it.
+        let existing_decision = features
+            .get(&format!("musicbrainz/approval/{edit_id}"))
+            .cloned();
         drop(features);
-        let value = serde_json::json!({
-            "editId": edit_id, "isApproved": true, "approvedAt": unix_timestamp(), "errors": []
+        if let Some(existing_decision) = existing_decision {
+            return routing::ok_response(
+                serde_json::json!({"errors": [], "decision": existing_decision}).to_string(),
+            );
+        }
+
+        let request = serde_json::from_str::<serde_json::Value>(body)
+            .unwrap_or_else(|_| serde_json::json!({}));
+        let approved_by = request
+            .get("approvedBy")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("local-user")
+            .to_owned();
+        let note = request
+            .get("note")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .unwrap_or_default()
+            .to_owned();
+
+        let mut errors = Vec::new();
+        if !is_safe_opaque_reference(&approved_by) {
+            errors.push("Approved-by identifier must be opaque and safe.");
+        }
+        if note.len() > 512 {
+            errors.push("Approval note must be 512 characters or fewer.");
+        }
+        if !musicbrainz_edit_is_exportable(&edit) {
+            errors.push("Overlay edit type is not exportable.");
+        }
+        if !errors.is_empty() {
+            return HttpResponse {
+                status: "400 Bad Request",
+                content_type: "application/json",
+                body: serde_json::json!({"errors": errors, "decision": null}).to_string(),
+            };
+        }
+
+        let decision = serde_json::json!({
+            "id": format!("musicbrainz-overlay-export:{}", uuid::Uuid::new_v4().simple()),
+            "editId": edit_id,
+            "approvedBy": approved_by,
+            "note": note,
+            "upstreamTarget": musicbrainz_edit_upstream_target(&edit),
+            "proposedChange": musicbrainz_edit_proposed_change(&edit),
+            "createdAt": unix_timestamp(),
         });
         return match state
             .controller_features
             .write()
             .await
-            .upsert(format!("musicbrainz/approval/{edit_id}"), value.clone())
+            .upsert(format!("musicbrainz/approval/{edit_id}"), decision.clone())
         {
-            Ok(()) => routing::ok_response(value.to_string()),
+            Ok(()) => routing::ok_response(
+                serde_json::json!({"errors": [], "decision": decision}).to_string(),
+            ),
             Err(error) => routing::service_unavailable_response(&error),
         };
     }
@@ -48528,17 +48657,17 @@ async fn musicbrainz_dynamic_get_response(path: &str, state: &AppState) -> HttpR
         else {
             return routing::not_found_response();
         };
-        let approval = features
+        let decision = features
             .get(&format!("musicbrainz/approval/{edit_id}"))
             .cloned();
+        drop(features);
+        // Matches the oracle's real GetExportReview: the same
+        // BuildExportReview shape the approve-export flow validates
+        // against (upstreamTarget/proposedChange/evidence/
+        // canApproveExport/reviewReason/decision), not an invented
+        // {editId, edit, approval, readyForExport} wrapper.
         return routing::ok_response(
-            serde_json::json!({
-                "editId": edit_id,
-                "edit": edit,
-                "approval": approval,
-                "readyForExport": approval.is_some(),
-            })
-            .to_string(),
+            musicbrainz_export_review_json(&edit, decision.as_ref()).to_string(),
         );
     }
     if let Some(edit_id) = path_segment_between(path, "/api/musicbrainz/overlays/edits/", "/routes")
@@ -93494,6 +93623,194 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<serde_json::Value>(&mid.body).unwrap()["priority"],
             "Mid"
+        );
+    }
+
+    #[tokio::test]
+    async fn musicbrainz_overlay_export_review_and_approval_match_real_oracle_gating() {
+        // Matches the oracle's real MusicBrainzOverlayService: export
+        // review/approval reflects the edit's real exportable-type gate
+        // (IsExportableEdit) and validates a real opaque approvedBy and
+        // note length, rather than always approving with an invented
+        // {editId, isApproved:true} shape.
+        let (state, _receiver) = test_state();
+
+        let non_exportable = super::route_http_request(
+            "POST",
+            "/api/v0/musicbrainz/overlays/edits",
+            None,
+            r#"{"type":"Other","targetType":"Recording","targetId":"rec-1","field":"title","value":"New Title","evidence":[{"type":"WorkRef","reference":"opaque-ref"}]}"#,
+            &state,
+        )
+        .await
+        .expect("create non-exportable edit");
+        assert_eq!(non_exportable.status, "200 OK", "{}", non_exportable.body);
+        let non_exportable_id = serde_json::from_str::<serde_json::Value>(&non_exportable.body)
+            .unwrap()["edit"]["editId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+
+        let review = super::route_http_request(
+            "GET",
+            &format!("/api/v0/musicbrainz/overlays/edits/{non_exportable_id}/export-review"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("export review");
+        assert_eq!(review.status, "200 OK", "{}", review.body);
+        let review_json = serde_json::from_str::<serde_json::Value>(&review.body).unwrap();
+        assert_eq!(review_json["upstreamTarget"], "Recording:rec-1");
+        assert_eq!(review_json["proposedChange"], "title => New Title");
+        assert_eq!(review_json["canApproveExport"], false);
+        assert_eq!(
+            review_json["reviewReason"],
+            "Overlay edit type is not exportable."
+        );
+        assert!(review_json["decision"].is_null());
+
+        let rejected_approval = super::route_http_request(
+            "POST",
+            &format!("/api/v0/musicbrainz/overlays/edits/{non_exportable_id}/approve-export"),
+            None,
+            "{}",
+            &state,
+        )
+        .await
+        .expect("reject non-exportable approval");
+        assert_eq!(rejected_approval.status, "400 Bad Request");
+        let rejected_json =
+            serde_json::from_str::<serde_json::Value>(&rejected_approval.body).unwrap();
+        assert!(
+            rejected_json["errors"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|error| error == "Overlay edit type is not exportable."),
+            "{rejected_json}"
+        );
+        assert!(rejected_json["decision"].is_null());
+
+        // An unsafe approvedBy identifier must be rejected even for an
+        // otherwise-exportable edit type.
+        let unsafe_edit = super::route_http_request(
+            "POST",
+            "/api/v0/musicbrainz/overlays/edits",
+            None,
+            r#"{"type":"TitleCorrection","targetType":"Recording","targetId":"rec-2","field":"title","value":"Corrected","evidence":[{"type":"WorkRef","reference":"opaque-ref"}]}"#,
+            &state,
+        )
+        .await
+        .expect("create exportable edit for unsafe-approver check");
+        let unsafe_edit_id = serde_json::from_str::<serde_json::Value>(&unsafe_edit.body).unwrap()
+            ["edit"]["editId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let unsafe_approval = super::route_http_request(
+            "POST",
+            &format!("/api/v0/musicbrainz/overlays/edits/{unsafe_edit_id}/approve-export"),
+            None,
+            r#"{"approvedBy":"/etc/passwd"}"#,
+            &state,
+        )
+        .await
+        .expect("reject unsafe approvedBy");
+        assert_eq!(unsafe_approval.status, "400 Bad Request");
+        assert!(
+            serde_json::from_str::<serde_json::Value>(&unsafe_approval.body).unwrap()["errors"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|error| error == "Approved-by identifier must be opaque and safe."),
+            "{}",
+            unsafe_approval.body
+        );
+
+        // A real, exportable edit is approved for real, and approving it
+        // again is idempotent -- it returns the original decision
+        // unchanged rather than re-validating or overwriting it.
+        let exportable = super::route_http_request(
+            "POST",
+            "/api/v0/musicbrainz/overlays/edits",
+            None,
+            r#"{"type":"TitleCorrection","targetType":"Recording","targetId":"rec-3","field":"title","value":"Corrected Title","evidence":[{"type":"WorkRef","reference":"opaque-ref"}]}"#,
+            &state,
+        )
+        .await
+        .expect("create exportable edit");
+        let exportable_id = serde_json::from_str::<serde_json::Value>(&exportable.body).unwrap()
+            ["edit"]["editId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+
+        let approval = super::route_http_request(
+            "POST",
+            &format!("/api/v0/musicbrainz/overlays/edits/{exportable_id}/approve-export"),
+            None,
+            r#"{"approvedBy":"reviewer-1","note":"looks good"}"#,
+            &state,
+        )
+        .await
+        .expect("approve exportable edit");
+        assert_eq!(approval.status, "200 OK", "{}", approval.body);
+        let approval_json = serde_json::from_str::<serde_json::Value>(&approval.body).unwrap();
+        assert_eq!(approval_json["errors"], serde_json::json!([]));
+        assert_eq!(approval_json["decision"]["approvedBy"], "reviewer-1");
+        assert_eq!(approval_json["decision"]["note"], "looks good");
+        assert_eq!(approval_json["decision"]["editId"], exportable_id);
+        assert_eq!(
+            approval_json["decision"]["upstreamTarget"],
+            "Recording:rec-3"
+        );
+        assert_eq!(
+            approval_json["decision"]["proposedChange"],
+            "title => Corrected Title"
+        );
+        assert!(approval_json["decision"]["id"]
+            .as_str()
+            .unwrap()
+            .starts_with("musicbrainz-overlay-export:"));
+
+        let post_approval_review = super::route_http_request(
+            "GET",
+            &format!("/api/v0/musicbrainz/overlays/edits/{exportable_id}/export-review"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("export review after approval");
+        let post_approval_review_json =
+            serde_json::from_str::<serde_json::Value>(&post_approval_review.body).unwrap();
+        assert_eq!(post_approval_review_json["canApproveExport"], false);
+        assert_eq!(
+            post_approval_review_json["reviewReason"],
+            "Upstream export has already been approved locally."
+        );
+        assert_eq!(
+            post_approval_review_json["decision"]["approvedBy"],
+            "reviewer-1"
+        );
+
+        let repeat_approval = super::route_http_request(
+            "POST",
+            &format!("/api/v0/musicbrainz/overlays/edits/{exportable_id}/approve-export"),
+            None,
+            r#"{"approvedBy":"different-reviewer"}"#,
+            &state,
+        )
+        .await
+        .expect("idempotent re-approval");
+        assert_eq!(repeat_approval.status, "200 OK");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&repeat_approval.body).unwrap()["decision"]
+                ["approvedBy"],
+            "reviewer-1",
+            "re-approval must not overwrite the original decision"
         );
     }
 
