@@ -43197,51 +43197,53 @@ async fn misc_controller_mutation_response(
         ));
     }
     if method == "POST" && path == "/api/mesh/publish" {
+        // Matches the oracle's real PublishHash/PublishHashRequest: only
+        // flacKey (never "key"/"contentId" aliases -- those let a
+        // payload skip the byteHash/size validation entirely), and the
+        // entry is stored in the same real hash database GET
+        // /api/mesh/lookup/{flacKey} already reads from. Previously this
+        // wrote into an unrelated "mesh/published/{key}" feature-state
+        // key that lookup never consulted, so a publish→lookup round
+        // trip always reported "not found".
         let payload = match serde_json::from_str::<serde_json::Value>(body) {
             Ok(payload @ serde_json::Value::Object(_)) => payload,
-            Ok(_) => {
+            _ => {
                 return Some(routing::bad_request_response(
-                    "mesh record must be an object",
+                    "flacKey, byteHash, and size are required",
                 ))
             }
-            Err(_) => return Some(routing::bad_request_response("invalid JSON body")),
         };
-        let Some(key) = payload
+        let flac_key = payload
             .get("flacKey")
-            .or_else(|| payload.get("key"))
-            .or_else(|| payload.get("contentId"))
             .and_then(serde_json::Value::as_str)
-            .filter(|key| !key.trim().is_empty())
-        else {
-            return Some(routing::bad_request_response(
-                "flacKey, byteHash, and size are required",
-            ));
-        };
-        if payload.get("flacKey").is_some()
-            && (payload
-                .get("byteHash")
-                .and_then(serde_json::Value::as_str)
-                .is_none_or(|value| value.trim().is_empty())
-                || payload
-                    .get("size")
-                    .and_then(serde_json::Value::as_i64)
-                    .is_none_or(|value| value <= 0))
-        {
+            .map(str::trim)
+            .unwrap_or_default();
+        let byte_hash = payload
+            .get("byteHash")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .unwrap_or_default();
+        let size = payload.get("size").and_then(serde_json::Value::as_i64);
+        if flac_key.is_empty() || byte_hash.is_empty() || size.is_none_or(|size| size <= 0) {
             return Some(routing::bad_request_response(
                 "flacKey, byteHash, and size are required",
             ));
         }
-        let record =
-            serde_json::json!({"key": key, "value": payload, "publishedAt": unix_timestamp()});
+        let entry = content_discovery::HashDbEntry {
+            flac_key: flac_key.to_owned(),
+            byte_hash: byte_hash.to_owned(),
+            size: size.unwrap_or_default() as u64,
+            ..Default::default()
+        };
         return Some(
             match state
-                .controller_features
+                .content_discovery
                 .write()
                 .await
-                .upsert(format!("mesh/published/{key}"), record.clone())
+                .merge_hash_entries(vec![entry])
             {
-                Ok(()) => routing::ok_response(serde_json::json!({"published": true}).to_string()),
-                Err(error) => routing::service_unavailable_response(&error),
+                Ok(_) => routing::ok_response(serde_json::json!({"published": true}).to_string()),
+                Err(error) => content_discovery_error_response(state, error).await,
             },
         );
     }
@@ -87594,6 +87596,63 @@ mod tests {
             .expect("ip ban recorded");
         assert!(!ban.is_permanent);
         assert_eq!(ban.expires_at - ban.created_at, 5 * 60);
+    }
+
+    #[tokio::test]
+    async fn mesh_publish_and_lookup_round_trip_through_the_real_hash_database() {
+        // Matches the oracle's real PublishHashAsync/LookupHashAsync,
+        // which both operate on the exact same hash database. Previously
+        // POST /api/mesh/publish wrote into an unrelated
+        // "mesh/published/{key}" feature-state key that
+        // GET /api/mesh/lookup/{flacKey} never read, so a publish then
+        // immediate lookup always reported "not found".
+        let (state, _receiver) = test_state();
+
+        let missing =
+            super::route_http_request("GET", "/api/mesh/lookup/round-trip-key", None, "", &state)
+                .await
+                .expect("lookup before publish");
+        assert_eq!(missing.status, "404 Not Found");
+
+        let byte_hash = "a".repeat(64);
+        let published = super::route_http_request(
+            "POST",
+            "/api/mesh/publish",
+            None,
+            &format!(r#"{{"flacKey":"round-trip-key","byteHash":"{byte_hash}","size":4096}}"#),
+            &state,
+        )
+        .await
+        .expect("publish a real hash");
+        assert_eq!(published.status, "200 OK", "{}", published.body);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&published.body).unwrap()["published"],
+            true
+        );
+
+        let found =
+            super::route_http_request("GET", "/api/mesh/lookup/round-trip-key", None, "", &state)
+                .await
+                .expect("lookup after publish");
+        assert_eq!(found.status, "200 OK", "{}", found.body);
+        let found_json = serde_json::from_str::<serde_json::Value>(&found.body).unwrap();
+        assert_eq!(found_json["entry"]["flacKey"], "round-trip-key");
+        assert_eq!(found_json["entry"]["byteHash"], byte_hash);
+        assert_eq!(found_json["entry"]["size"], 4096);
+
+        // The "key"/"contentId" aliases the previous implementation
+        // accepted (and used to bypass byteHash/size validation) are no
+        // longer accepted at all -- only the oracle's real "flacKey".
+        let alias_rejected = super::route_http_request(
+            "POST",
+            "/api/mesh/publish",
+            None,
+            r#"{"key":"alias-key"}"#,
+            &state,
+        )
+        .await
+        .expect("reject the key/contentId alias with no real validation");
+        assert_eq!(alias_rejected.status, "400 Bad Request");
     }
 
     #[tokio::test]
