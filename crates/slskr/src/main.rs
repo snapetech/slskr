@@ -23968,31 +23968,68 @@ async fn route_http_request_with_headers(
          }
 
          ("GET", "/api/songid/runs") => {
+             // Matches the oracle's real ListRuns(limit=10): newest-first,
+             // bounded by the real `limit` query param -- not the full,
+             // unbounded, oldest-first storage order.
+             let limit = route
+                 .query
+                 .map(query_params)
+                 .unwrap_or_default()
+                 .into_iter()
+                 .find(|(key, _)| key == "limit")
+                 .and_then(|(_, value)| value.parse::<i64>().ok())
+                 .filter(|limit| *limit > 0)
+                 .unwrap_or(10) as usize;
              let runtime = state.runtime.read().await;
-             let runs = runtime.songid_run_records.clone();
+             let mut runs = runtime.songid_run_records.clone();
              drop(runtime);
+             runs.reverse();
+             runs.truncate(limit);
              Ok(routing::ok_response(serde_json::Value::Array(runs).to_string()))
          }
 
          ("GET", "/api/songid/runs/queue") => {
+             // Matches the oracle's real GetQueueSummary(activeLimit):
+             // counts are windowed over the most recent
+             // max(activeLimit, 100) runs (newest-first), and activeRuns
+             // is bounded by the real activeLimit query param -- not the
+             // entire unbounded, unordered history.
+             let active_limit = route
+                 .query
+                 .map(query_params)
+                 .unwrap_or_default()
+                 .into_iter()
+                 .find(|(key, _)| key == "activeLimit")
+                 .and_then(|(_, value)| value.parse::<i64>().ok())
+                 .filter(|limit| *limit > 0)
+                 .unwrap_or(25) as usize;
              let max_concurrent_runs = state
                  .media_services
                  .read()
                  .await
                  .song_id_max_concurrent_runs;
              let runtime = state.runtime.read().await;
-             let records = &runtime.songid_run_records;
-             let queued = records.iter().filter(|record| record["status"] == "queued").count();
-             let running = records.iter().filter(|record| record["status"] == "running").count();
-             let completed = records.iter().filter(|record| record["status"] == "completed").count();
-             let failed = records.iter().filter(|record| record["status"] == "failed").count();
+             let mut recent_runs = runtime.songid_run_records.clone();
+             drop(runtime);
+             recent_runs.reverse();
+             recent_runs.truncate(active_limit.max(100));
+             let queued = recent_runs.iter().filter(|record| record["status"] == "queued").count();
+             let running = recent_runs.iter().filter(|record| record["status"] == "running").count();
+             let completed = recent_runs.iter().filter(|record| record["status"] == "completed").count();
+             let failed = recent_runs.iter().filter(|record| record["status"] == "failed").count();
+             let active_runs = recent_runs
+                 .iter()
+                 .filter(|record| matches!(record["status"].as_str(), Some("queued" | "running")))
+                 .take(active_limit)
+                 .cloned()
+                 .collect::<Vec<_>>();
              Ok(routing::ok_response(serde_json::json!({
                  "queuedCount": queued,
                  "runningCount": running,
                  "completedCount": completed,
                  "failedCount": failed,
                  "maxConcurrentRuns": max_concurrent_runs,
-                 "activeRuns": records.iter().filter(|record| matches!(record["status"].as_str(), Some("queued" | "running"))).cloned().collect::<Vec<_>>(),
+                 "activeRuns": active_runs,
              }).to_string()))
          }
 
@@ -89009,6 +89046,52 @@ mod tests {
         );
         assert_eq!(queue_json["queuedCount"], 0, "{queue_json}");
         assert_eq!(queue_json["runningCount"], 0, "{queue_json}");
+    }
+
+    #[tokio::test]
+    async fn songid_runs_respect_a_real_limit_and_newest_first_order() {
+        let (state, _receiver) = test_state();
+        for index in 0..3 {
+            let response = super::route_http_request(
+                "POST",
+                "/api/v0/songid/runs",
+                None,
+                &format!(r#"{{"source":"route-audit-{index}"}}"#),
+                &state,
+            )
+            .await
+            .unwrap_or_else(|error| panic!("create run {index}: {error}"));
+            assert_eq!(response.status, "202 Accepted");
+        }
+
+        // Matches the oracle's real ListRuns: newest-first, bounded by
+        // the real `limit` query param -- not the full, unbounded,
+        // creation-order history.
+        let limited =
+            super::route_http_request("GET", "/api/v0/songid/runs?limit=2", None, "", &state)
+                .await
+                .expect("limited runs");
+        let limited_json = serde_json::from_str::<serde_json::Value>(&limited.body).unwrap();
+        let limited_runs = limited_json.as_array().unwrap();
+        assert_eq!(limited_runs.len(), 2, "{limited_json}");
+        assert_eq!(
+            limited_runs[0]["source"], "route-audit-2",
+            "newest run must come first: {limited_json}"
+        );
+        assert_eq!(limited_runs[1]["source"], "route-audit-1", "{limited_json}");
+
+        // A non-positive limit falls back to the oracle's default of 10,
+        // not an empty or unbounded result.
+        let zero_limit =
+            super::route_http_request("GET", "/api/v0/songid/runs?limit=0", None, "", &state)
+                .await
+                .expect("zero limit runs");
+        let zero_limit_json = serde_json::from_str::<serde_json::Value>(&zero_limit.body).unwrap();
+        assert_eq!(
+            zero_limit_json.as_array().unwrap().len(),
+            3,
+            "{zero_limit_json}"
+        );
     }
 
     #[tokio::test]
