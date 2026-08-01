@@ -41345,16 +41345,23 @@ async fn extended_controller_mutation_response(
         record_event(state, "room.joined", room_name, None).await;
         return routing::created_response(record.slskd_room_json().to_string());
     }
-    if method == "POST" && matches!(path, "/api/search" | "/api/bridge/search") {
-        return extended_controller_search_response(body, state).await;
+    if method == "POST" && path == "/api/search" {
+        return match extended_controller_search_response(body, state).await {
+            Ok(record) => routing::created_response(record.json()),
+            Err(response) => response,
+        };
     }
-    if method == "POST"
-        && matches!(
-            path,
-            "/api/downloads" | "/api/transfers/downloads" | "/api/bridge/download"
-        )
-    {
-        return extended_controller_download_response(body, state).await;
+    if method == "POST" && path == "/api/bridge/search" {
+        return bridge_search_response(body, state).await;
+    }
+    if method == "POST" && matches!(path, "/api/downloads" | "/api/transfers/downloads") {
+        return match extended_controller_download_response(body, state).await {
+            Ok(entries) => extended_controller_download_success_response(&entries),
+            Err(response) => response,
+        };
+    }
+    if method == "POST" && path == "/api/bridge/download" {
+        return bridge_download_response(body, state).await;
     }
     if method == "POST" && path == "/api/library/scan" {
         let library_path = extract_json_string_field(body, "path")
@@ -43134,7 +43141,7 @@ async fn multisource_controller_response(
             if filename.is_empty() || username.is_empty() {
                 return routing::bad_request_response("filename and username are required");
             }
-            extended_controller_download_response(
+            match extended_controller_download_response(
                 &serde_json::json!({
                     "items": [{"user": username, "remotePath": filename}]
                 })
@@ -43142,6 +43149,10 @@ async fn multisource_controller_response(
                 state,
             )
             .await
+            {
+                Ok(requests) => extended_controller_download_success_response(&requests),
+                Err(response) => response,
+            }
         }
         "/api/multisource/file-sources" => {
             let filename = extract_json_string_field(body, "filename").unwrap_or_default();
@@ -45046,12 +45057,16 @@ async fn search_action_controller_response(path: &str, state: &AppState) -> Http
         return routing::bad_request_response("search result has no source peer");
     };
     if action == "download" {
-        return extended_controller_download_response(
+        return match extended_controller_download_response(
             &serde_json::json!({"items": [{"user": username, "remotePath": result.filename}]})
                 .to_string(),
             state,
         )
-        .await;
+        .await
+        {
+            Ok(requests) => extended_controller_download_success_response(&requests),
+            Err(response) => response,
+        };
     }
     let payload = serde_json::json!({
         "contentId": result.filename,
@@ -45065,16 +45080,30 @@ async fn search_action_controller_response(path: &str, state: &AppState) -> Http
     }
 }
 
-async fn extended_controller_search_response(body: &str, state: &AppState) -> HttpResponse {
+/// Real search-record creation shared by `/api/search` and
+/// `/api/bridge/search` -- returns the real `SearchRecord` so each
+/// caller can shape its own real response (the oracle's `/api/search`
+/// contract vs. the oracle's real `BridgeSearchResult`) without
+/// duplicating the real search-creation/dispatch side effects.
+async fn extended_controller_search_response(
+    body: &str,
+    state: &AppState,
+) -> Result<SearchRecord, HttpResponse> {
     let Some(query) = extract_json_string_field(body, "query")
         .or_else(|| extract_json_string_field(body, "searchText"))
         .filter(|query| !query.trim().is_empty())
     else {
-        return routing::bad_request_response("query/searchText is required");
+        return Err(routing::bad_request_response(
+            "query/searchText is required",
+        ));
     };
     let permit = match state.session_commands.reserve().await {
         Ok(permit) => permit,
-        Err(_) => return routing::service_unavailable_response("session manager is not running"),
+        Err(_) => {
+            return Err(routing::service_unavailable_response(
+                "session manager is not running",
+            ))
+        }
     };
     let shares = state.shares.read().await;
     let matching = search_shares(&shares.entries, &query);
@@ -45089,28 +45118,86 @@ async fn extended_controller_search_response(body: &str, state: &AppState) -> Ht
         DEFAULT_SEARCH_TTL_SECONDS,
     ) {
         Ok(outcome) => outcome,
-        Err(error) => return search_create_error_response(error),
+        Err(error) => return Err(search_create_error_response(error)),
     };
     let record = outcome.record;
     drop(searches);
     if let Err(error) = delete_persisted_searches(state, &outcome.evicted).await {
-        return routing::service_unavailable_response(&error);
+        return Err(routing::service_unavailable_response(&error));
     }
     if let Err(error) = persist_search_record(state, &record).await {
-        return routing::service_unavailable_response(&error);
+        return Err(routing::service_unavailable_response(&error));
     }
     permit.send(SessionCommand::Search {
         token: record.token,
         query,
         target: SearchDispatchTarget::Global,
     });
-    routing::created_response(record.json())
+    Ok(record)
 }
 
-async fn extended_controller_download_response(body: &str, state: &AppState) -> HttpResponse {
+/// Matches the oracle's real `BridgeSearchResult{Query, Users[{PeerId,
+/// Username, Files[{Path, SizeBytes, MbRecordingId, BitrateKbps, Codec,
+/// IsCanonical}]}]}` contract, built from the same real search results
+/// `/api/search` produces. The oracle's real backend resolves results
+/// from real remote mesh peers; slskR's local share search has no
+/// remote-peer concept for these hits (they're this instance's own
+/// shared files), so all real results are reported under this
+/// instance's own local identity -- an honest single-peer
+/// simplification, not fabricated peer data.
+async fn bridge_search_response(body: &str, state: &AppState) -> HttpResponse {
+    let record = match extended_controller_search_response(body, state).await {
+        Ok(record) => record,
+        Err(response) => return response,
+    };
+    let local_peer_id = pod_request_peer_id(state)
+        .await
+        .unwrap_or_else(|| "local".to_owned());
+    let files = record
+        .results
+        .iter()
+        .map(|entry| {
+            serde_json::json!({
+                "path": entry.filename,
+                "sizeBytes": entry.size,
+                "mbRecordingId": serde_json::Value::Null,
+                "bitrateKbps": serde_json::Value::Null,
+                "codec": if entry.extension.is_empty() {
+                    serde_json::Value::Null
+                } else {
+                    serde_json::json!(entry.extension)
+                },
+                "isCanonical": false,
+            })
+        })
+        .collect::<Vec<_>>();
+    let users = if files.is_empty() {
+        Vec::new()
+    } else {
+        vec![serde_json::json!({
+            "peerId": local_peer_id,
+            "username": local_peer_id,
+            "files": files,
+        })]
+    };
+    routing::created_response(
+        serde_json::json!({"query": record.query, "users": users}).to_string(),
+    )
+}
+
+/// Real per-item download-queue creation shared by `/api/downloads` and
+/// `/api/bridge/download` -- returns the real queued `TransferEntry`
+/// list so each caller can shape its own real response (the oracle's
+/// batch `/api/downloads` contract vs. the oracle's real single-item
+/// `BridgeDownloadRequest`/`{transfer_id}`) without duplicating the
+/// real queue-creation/dispatch side effects.
+async fn extended_controller_download_response(
+    body: &str,
+    state: &AppState,
+) -> Result<Vec<TransferEntry>, HttpResponse> {
     let payload = match serde_json::from_str::<serde_json::Value>(body) {
         Ok(payload) => payload,
-        Err(_) => return routing::bad_request_response("invalid JSON body"),
+        Err(_) => return Err(routing::bad_request_response("invalid JSON body")),
     };
     let items = payload
         .get("items")
@@ -45123,7 +45210,7 @@ async fn extended_controller_download_response(body: &str, state: &AppState) -> 
         })
         .unwrap_or_default();
     if items.is_empty() {
-        return routing::bad_request_response("items are required");
+        return Err(routing::bad_request_response("items are required"));
     }
     let mut requests = Vec::new();
     for item in items.into_iter().take(1_000) {
@@ -45142,12 +45229,16 @@ async fn extended_controller_download_response(body: &str, state: &AppState) -> 
             .map(str::trim)
             .unwrap_or_default();
         if username.is_empty() || filename.is_empty() {
-            return routing::bad_request_response("each item requires user and remotePath");
+            return Err(routing::bad_request_response(
+                "each item requires user and remotePath",
+            ));
         }
         let permit = match state.session_commands.reserve().await {
             Ok(permit) => permit,
             Err(_) => {
-                return routing::service_unavailable_response("session manager is not running")
+                return Err(routing::service_unavailable_response(
+                    "session manager is not running",
+                ))
             }
         };
         let mut transfers = state.transfers.write().await;
@@ -45163,7 +45254,7 @@ async fn extended_controller_download_response(body: &str, state: &AppState) -> 
             .unwrap_or(entry);
         drop(transfers);
         if let Err(error) = persist_transfer_record(state, &entry).await {
-            return routing::service_unavailable_response(&error);
+            return Err(routing::service_unavailable_response(&error));
         }
         permit.send(SessionCommand::TransferPeer {
             id: entry.id,
@@ -45171,6 +45262,10 @@ async fn extended_controller_download_response(body: &str, state: &AppState) -> 
         });
         requests.push(entry);
     }
+    Ok(requests)
+}
+
+fn extended_controller_download_success_response(requests: &[TransferEntry]) -> HttpResponse {
     routing::ok_response(
         serde_json::json!({
             "downloadIds": requests.iter().filter_map(|entry| entry.request_id.clone()).collect::<Vec<_>>(),
@@ -45180,6 +45275,28 @@ async fn extended_controller_download_response(body: &str, state: &AppState) -> 
         })
         .to_string(),
     )
+}
+
+/// Matches the oracle's real single-item `BridgeDownloadRequest` /
+/// `{transfer_id}` contract, built from the same real download-queue
+/// creation `/api/downloads` uses. The oracle's request shape is
+/// already a single object (`{username, filename, targetPath}`), which
+/// the shared handler already accepts directly (its "items" array is
+/// optional, falling back to a single-item list) -- only the response
+/// shape needed to change.
+async fn bridge_download_response(body: &str, state: &AppState) -> HttpResponse {
+    match extended_controller_download_response(body, state).await {
+        Ok(requests) => {
+            let transfer_id = requests.first().map(|entry| {
+                entry
+                    .request_id
+                    .clone()
+                    .unwrap_or_else(|| entry.id.to_string())
+            });
+            routing::ok_response(serde_json::json!({"transfer_id": transfer_id}).to_string())
+        }
+        Err(response) => response,
+    }
 }
 
 async fn collection_item_controller_response(
@@ -88026,6 +88143,79 @@ mod tests {
             serde_json::json!({"clients": [], "count": 0, "status": "disabled", "ready": false}),
             "{clients_json}"
         );
+    }
+
+    #[tokio::test]
+    async fn bridge_search_and_download_use_real_oracle_shapes() {
+        let (state, _receiver) = test_state();
+        add_test_share(
+            &state,
+            "Virtual/Bridge Track.flac",
+            Path::new("/nonexistent/bridge-track.flac"),
+            4096,
+        )
+        .await;
+
+        // Matches the oracle's real BridgeSearchResult{Query,
+        // Users[{PeerId, Username, Files[...]}]} contract, not the
+        // generic /api/search record shape.
+        let search = super::route_http_request(
+            "POST",
+            "/api/v0/bridge/search",
+            None,
+            r#"{"query":"Bridge Track"}"#,
+            &state,
+        )
+        .await
+        .expect("bridge search");
+        assert_eq!(search.status, "201 Created", "{}", search.body);
+        let search_json = serde_json::from_str::<serde_json::Value>(&search.body).unwrap();
+        assert_eq!(search_json["query"], "Bridge Track");
+        let users = search_json["users"].as_array().unwrap();
+        assert_eq!(users.len(), 1, "{search_json}");
+        assert!(users[0].get("peerId").is_some(), "{search_json}");
+        assert!(users[0].get("username").is_some(), "{search_json}");
+        let files = users[0]["files"].as_array().unwrap();
+        assert_eq!(files.len(), 1, "{search_json}");
+        assert_eq!(files[0]["path"], "Virtual/Bridge Track.flac");
+        assert_eq!(files[0]["sizeBytes"], 4096);
+        assert_eq!(files[0]["codec"], "flac");
+
+        // A query with no matches must report a real empty users list,
+        // not a synthetic empty-file peer entry.
+        let empty_search = super::route_http_request(
+            "POST",
+            "/api/v0/bridge/search",
+            None,
+            r#"{"query":"nothing-matches-this"}"#,
+            &state,
+        )
+        .await
+        .expect("bridge search with no matches");
+        let empty_search_json =
+            serde_json::from_str::<serde_json::Value>(&empty_search.body).unwrap();
+        assert_eq!(empty_search_json["users"], serde_json::json!([]));
+
+        // Matches the oracle's real single-item BridgeDownloadRequest /
+        // {transfer_id} contract, not the generic /api/downloads
+        // batch shape.
+        let download = super::route_http_request(
+            "POST",
+            "/api/v0/bridge/download",
+            None,
+            r#"{"username":"peer","filename":"Virtual/Bridge Track.flac","targetPath":"/tmp/out.flac"}"#,
+            &state,
+        )
+        .await
+        .expect("bridge download");
+        assert_eq!(download.status, "200 OK", "{}", download.body);
+        let download_json = serde_json::from_str::<serde_json::Value>(&download.body).unwrap();
+        assert!(download_json["transfer_id"].is_string(), "{download_json}");
+        assert!(
+            download_json.get("downloadIds").is_none(),
+            "{download_json}"
+        );
+        assert!(download_json.get("enqueued").is_none(), "{download_json}");
     }
 
     #[tokio::test]
