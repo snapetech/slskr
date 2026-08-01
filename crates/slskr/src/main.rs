@@ -16072,9 +16072,12 @@ async fn route_http_request_with_headers(
         }
         ("GET", "/api/telemetry/reports/transfers/leaderboard") => {
             let transfers = state.transfers.read().await;
-            let body = slskd_transfer_leaderboard_report(route.query, &transfers);
+            let result = slskd_transfer_leaderboard_report(route.query, &transfers);
             drop(transfers);
-            Ok(routing::ok_response(body))
+            Ok(match result {
+                Ok(body) => routing::ok_response(body),
+                Err(error) => routing::bad_request_response(error),
+            })
         }
         ("GET", path) if path.starts_with("/api/telemetry/reports/transfers/users/") => {
             let Some(username) =
@@ -16090,15 +16093,21 @@ async fn route_http_request_with_headers(
         }
         ("GET", "/api/telemetry/reports/transfers/exceptions") => {
             let transfers = state.transfers.read().await;
-            let body = slskd_transfer_exceptions_report(route.query, &transfers);
+            let result = slskd_transfer_exceptions_report(route.query, &transfers);
             drop(transfers);
-            Ok(routing::ok_response(body))
+            Ok(match result {
+                Ok(body) => routing::ok_response(body),
+                Err(error) => routing::bad_request_response(error),
+            })
         }
         ("GET", "/api/telemetry/reports/transfers/exceptions/pareto") => {
             let transfers = state.transfers.read().await;
-            let body = slskd_transfer_exceptions_pareto_report(route.query, &transfers);
+            let result = slskd_transfer_exceptions_pareto_report(route.query, &transfers);
             drop(transfers);
-            Ok(routing::ok_response(body))
+            Ok(match result {
+                Ok(body) => routing::ok_response(body),
+                Err(error) => routing::bad_request_response(error),
+            })
         }
         ("GET", "/api/telemetry/reports/transfers/directories") => {
             let transfers = state.transfers.read().await;
@@ -50585,6 +50594,22 @@ fn slskd_transfer_query_value(query: Option<&str>, key: &str) -> Option<String> 
         })
 }
 
+/// Matches the oracle's real ReportsController contract for
+/// leaderboard/exceptions/exceptions-pareto: `direction` is required,
+/// not optional -- a missing direction previously meant "no filter",
+/// silently mixing Upload and Download rows into a single report
+/// instead of rejecting the request the way the oracle does.
+fn slskd_transfer_query_required_direction(query: Option<&str>) -> Result<u32, &'static str> {
+    match slskd_transfer_query_value(query, "direction") {
+        None => Err("Direction is required"),
+        Some(value) => match value.to_ascii_lowercase().as_str() {
+            "download" | "0" => Ok(0),
+            "upload" | "1" => Ok(1),
+            _ => Err("Invalid direction"),
+        },
+    }
+}
+
 fn slskd_transfer_matches_query(
     entry: &TransferEntry,
     direction: Option<u32>,
@@ -51417,8 +51442,11 @@ fn slskd_transfer_histogram_report(query: Option<&str>, transfers: &TransferQueu
     .to_string()
 }
 
-fn slskd_transfer_leaderboard_report(query: Option<&str>, transfers: &TransferQueue) -> String {
-    let direction = slskd_transfer_query_direction(query);
+fn slskd_transfer_leaderboard_report(
+    query: Option<&str>,
+    transfers: &TransferQueue,
+) -> Result<String, &'static str> {
+    let direction = Some(slskd_transfer_query_required_direction(query)?);
     let (limit, offset) = slskd_transfer_query_limit_offset(query);
     let sort_by = slskd_transfer_query_value(query, "sortBy")
         .unwrap_or_else(|| "Count".to_owned())
@@ -51474,11 +51502,14 @@ fn slskd_transfer_leaderboard_report(query: Option<&str>, transfers: &TransferQu
         };
         ordering.then_with(|| left["username"].as_str().cmp(&right["username"].as_str()))
     });
-    serde_json::Value::Array(rows.into_iter().skip(offset).take(limit).collect()).to_string()
+    Ok(serde_json::Value::Array(rows.into_iter().skip(offset).take(limit).collect()).to_string())
 }
 
-fn slskd_transfer_exceptions_report(query: Option<&str>, transfers: &TransferQueue) -> String {
-    let direction = slskd_transfer_query_direction(query);
+fn slskd_transfer_exceptions_report(
+    query: Option<&str>,
+    transfers: &TransferQueue,
+) -> Result<String, &'static str> {
+    let direction = Some(slskd_transfer_query_required_direction(query)?);
     let username = slskd_transfer_query_username(query);
     let (limit, offset) = slskd_transfer_query_limit_offset(query);
     let descending = slskd_transfer_query_value(query, "sortOrder")
@@ -51522,14 +51553,14 @@ fn slskd_transfer_exceptions_report(query: Option<&str>, transfers: &TransferQue
             })
         })
         .collect::<Vec<_>>();
-    serde_json::Value::Array(rows).to_string()
+    Ok(serde_json::Value::Array(rows).to_string())
 }
 
 fn slskd_transfer_exceptions_pareto_report(
     query: Option<&str>,
     transfers: &TransferQueue,
-) -> String {
-    let direction = slskd_transfer_query_direction(query);
+) -> Result<String, &'static str> {
+    let direction = Some(slskd_transfer_query_required_direction(query)?);
     let username = slskd_transfer_query_username(query);
     let (limit, offset) = slskd_transfer_query_limit_offset(query);
     let mut grouped: BTreeMap<String, (usize, BTreeMap<String, ()>)> = BTreeMap::new();
@@ -51569,7 +51600,7 @@ fn slskd_transfer_exceptions_pareto_report(
             .cmp(&left["count"].as_u64())
             .then_with(|| left["exception"].as_str().cmp(&right["exception"].as_str()))
     });
-    serde_json::Value::Array(rows.into_iter().skip(offset).take(limit).collect()).to_string()
+    Ok(serde_json::Value::Array(rows.into_iter().skip(offset).take(limit).collect()).to_string())
 }
 
 fn slskd_transfer_directories_report(query: Option<&str>, transfers: &TransferQueue) -> String {
@@ -89095,6 +89126,50 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn transfer_reports_require_a_real_direction_not_a_silent_default() {
+        let (state, _receiver) = test_state();
+        for path in [
+            "/api/v0/telemetry/reports/transfers/leaderboard",
+            "/api/v0/telemetry/reports/transfers/exceptions",
+            "/api/v0/telemetry/reports/transfers/exceptions/pareto",
+        ] {
+            // Present but nonsense: matches the oracle's real
+            // Enum.TryParse<TransferDirection> failure path -- must be a
+            // real 400, not silently treated as "no filter" and mixing
+            // Upload/Download rows into one report.
+            let invalid = super::route_http_request(
+                "GET",
+                &format!("{path}?direction=sideways"),
+                None,
+                "",
+                &state,
+            )
+            .await
+            .unwrap_or_else(|error| panic!("{path}: {error}"));
+            assert_eq!(invalid.status, "400 Bad Request", "{path}");
+            assert!(
+                invalid.body.contains("Invalid direction"),
+                "{path}: {}",
+                invalid.body
+            );
+
+            // Absent, but with an unrelated query param present (so the
+            // generic "no query at all" gate doesn't short-circuit it):
+            // still a real 400, matching the oracle's required Direction.
+            let missing =
+                super::route_http_request("GET", &format!("{path}?limit=5"), None, "", &state)
+                    .await
+                    .unwrap_or_else(|error| panic!("{path}: {error}"));
+            assert_eq!(missing.status, "400 Bad Request", "{path}");
+            assert!(
+                missing.body.contains("Direction is required"),
+                "{path}: {}",
+                missing.body
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn telemetry_kpis_are_always_json_unlike_the_base_prometheus_route() {
         let (state, _receiver) = test_state();
 
@@ -101516,7 +101591,8 @@ mod tests {
         assert_eq!(summary["averageSpeed"], 75.0);
 
         let leaderboard = serde_json::from_str::<serde_json::Value>(
-            &super::slskd_transfer_leaderboard_report(Some("direction=Download"), &queue),
+            &super::slskd_transfer_leaderboard_report(Some("direction=Download"), &queue)
+                .expect("direction is present"),
         )
         .unwrap();
         assert_eq!(leaderboard[0]["username"], "friend");
@@ -101579,7 +101655,8 @@ mod tests {
             .status = "succeeded".to_owned();
 
         let leaderboard = serde_json::from_str::<serde_json::Value>(
-            &super::slskd_transfer_leaderboard_report(Some("direction=Download"), &queue),
+            &super::slskd_transfer_leaderboard_report(Some("direction=Download"), &queue)
+                .expect("direction is present"),
         )
         .unwrap();
         let rows = leaderboard.as_array().unwrap();
