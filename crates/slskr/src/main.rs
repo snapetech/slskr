@@ -25560,17 +25560,19 @@ async fn route_http_request_with_headers(
                           "size": size,
                           "updated_at": entry.updated_at,
                       })
-                  })
-                  .unwrap_or_else(|| {
-                      serde_json::json!({
-                          "id": job_id,
-                          "status": "not_found",
-                          "sources": [],
-                          "progress": 0,
-                      })
                   });
               drop(transfers);
-              Ok(routing::ok_response(body.to_string()))
+              // Matches the oracle's real GetJobStatus: an unknown job id
+              // is a real 404, not a fabricated 200 with an invented
+              // "not_found" status string.
+              match body {
+                  Some(body) => Ok(routing::ok_response(body.to_string())),
+                  None => Ok(HttpResponse {
+                      status: "404 Not Found",
+                      content_type: "application/json",
+                      body: r#"{"error":"Job not found. It may have completed or been cancelled."}"#.to_owned(),
+                  }),
+              }
           }
 
           ("GET", "/api/player/external-visualizer") => {
@@ -76435,7 +76437,6 @@ mod tests {
                 "/api/multisource/swarm/async",
                 r#"{"filename":"x","size":1,"sources":[]}"#,
             ),
-            ("GET", "/api/multisource/jobs/job-1", ""),
             ("GET", "/api/podcore/content/search?query=cover", ""),
             (
                 "POST",
@@ -94958,6 +94959,19 @@ mod tests {
         .await
         .expect("reject aliased multisource job detail");
         assert_eq!(aliased_multisource.status, "404 Not Found");
+        // Matches the oracle's real GetJobStatus: an unknown job id must be
+        // a real 404, not a fabricated 200 with an invented "not_found"
+        // status string.
+        let missing_multisource = super::route_http_request(
+            "GET",
+            "/api/multisource/jobs/multisource-does-not-exist",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("missing multisource job");
+        assert_eq!(missing_multisource.status, "404 Not Found");
 
         let slskdn = super::route_http_request("GET", "/api/slskdn", None, "", &state)
             .await
