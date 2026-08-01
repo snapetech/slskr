@@ -11553,8 +11553,14 @@ impl ShareGrantStore {
         }
     }
 
-    fn create(
+    /// `id` matches `CollectionStore::create_with_contract`: a real UUID
+    /// for v0/oracle-contract requests (the oracle's real `ShareGrant.Id`
+    /// is a `Guid`, and `versioned_get_failure_contract`'s `uuid_prefixes`
+    /// guard requires v0 share-grant ids to parse as one), `None` for the
+    /// legacy internal "grant-N" sequential format.
+    fn create_with_contract(
         &mut self,
+        id: Option<String>,
         collection_id: String,
         username: String,
     ) -> Option<(ShareGrantRecord, bool)> {
@@ -11567,7 +11573,7 @@ impl ShareGrantStore {
         if self.records.len() >= MAX_SHARE_GRANTS {
             return None;
         }
-        let id = format!("grant-{}", self.allocate_id());
+        let id = id.unwrap_or_else(|| format!("grant-{}", self.allocate_id()));
         let now = unix_timestamp();
         let record = ShareGrantRecord {
             id,
@@ -22471,9 +22477,12 @@ async fn route_http_request_with_headers(
             if collection_id.is_empty() {
                 return Ok(routing::conflict_response("collection_id and username are required"));
             }
+            let compatibility_contract = route.path.starts_with("/api/v0/");
+            let id = compatibility_contract.then(|| uuid::Uuid::new_v4().to_string());
             let mut grants = state.share_grants.write().await;
             let previous = grants.clone();
-            let Some((record, created)) = grants.create(collection_id, username) else {
+            let Some((record, created)) = grants.create_with_contract(id, collection_id, username)
+            else {
                 return Ok(routing::service_unavailable_response("share grant capacity is full"));
             };
             let json = record.json();
@@ -87058,32 +87067,32 @@ mod tests {
     fn share_grants_bound_and_deduplicate_collection_users() {
         let mut grants = super::ShareGrantStore::new();
         assert!(grants
-            .create("collection".to_owned(), "   ".to_owned())
+            .create_with_contract(None, "collection".to_owned(), "   ".to_owned())
             .is_none());
         let (first, created) = grants
-            .create("collection".to_owned(), "  Alice  ".to_owned())
+            .create_with_contract(None, "collection".to_owned(), "  Alice  ".to_owned())
             .unwrap();
         assert!(created);
         assert_eq!(first.username, "Alice");
         let (duplicate, created) = grants
-            .create("collection".to_owned(), "alice".to_owned())
+            .create_with_contract(None, "collection".to_owned(), "alice".to_owned())
             .unwrap();
         assert!(!created);
         assert_eq!(duplicate.id, first.id);
         for index in 1..super::MAX_SHARE_GRANTS {
             grants
-                .create(format!("collection-{index}"), format!("user-{index}"))
+                .create_with_contract(None, format!("collection-{index}"), format!("user-{index}"))
                 .unwrap();
         }
         assert!(grants
-            .create("overflow".to_owned(), "user".to_owned())
+            .create_with_contract(None, "overflow".to_owned(), "user".to_owned())
             .is_none());
         assert_eq!(grants.records.len(), super::MAX_SHARE_GRANTS);
         let mut exhausted = super::ShareGrantStore::new();
         exhausted.next_id = u64::MAX;
         assert_eq!(
             exhausted
-                .create("collection".to_owned(), "user".to_owned())
+                .create_with_contract(None, "collection".to_owned(), "user".to_owned())
                 .unwrap()
                 .0
                 .id,
@@ -87686,7 +87695,7 @@ mod tests {
             .share_grants
             .write()
             .await
-            .create(collection_id.clone(), "friend".to_owned())
+            .create_with_contract(None, collection_id.clone(), "friend".to_owned())
             .expect("share grant");
         db.close_for_test().await;
 
@@ -87721,7 +87730,7 @@ mod tests {
             .share_grants
             .write()
             .await
-            .create("private-collection".to_owned(), "friend".to_owned())
+            .create_with_contract(None, "private-collection".to_owned(), "friend".to_owned())
             .expect("grant");
         db.close_for_test().await;
 
@@ -87779,7 +87788,7 @@ mod tests {
             .share_grants
             .write()
             .await
-            .create("private-collection".to_owned(), "friend".to_owned())
+            .create_with_contract(None, "private-collection".to_owned(), "friend".to_owned())
             .expect("grant");
         update_db.close_for_test().await;
 
@@ -88242,7 +88251,7 @@ mod tests {
             .share_grants
             .write()
             .await
-            .create("col-1".to_owned(), "friend".to_owned())
+            .create_with_contract(None, "col-1".to_owned(), "friend".to_owned())
             .expect("grant");
         db.close_for_test().await;
 
@@ -89155,7 +89164,7 @@ mod tests {
         grants.next_id = u64::MAX;
         assert_eq!(
             grants
-                .create("one".to_owned(), "alice".to_owned())
+                .create_with_contract(None, "one".to_owned(), "alice".to_owned())
                 .unwrap()
                 .0
                 .id,
@@ -89163,7 +89172,7 @@ mod tests {
         );
         assert_eq!(
             grants
-                .create("two".to_owned(), "bob".to_owned())
+                .create_with_contract(None, "two".to_owned(), "bob".to_owned())
                 .unwrap()
                 .0
                 .id,
@@ -90440,6 +90449,85 @@ mod tests {
         .await
         .expect("alice's grant still exists");
         assert_eq!(still_there.status, "200 OK");
+    }
+
+    #[tokio::test]
+    async fn v0_share_grants_get_real_uuid_ids_usable_on_versioned_routes() {
+        // Matches the oracle's real ShareGrant.Id (a Guid), and the
+        // existing `versioned_get_failure_contract` UUID-format guard
+        // that v0 share-grant routes already enforced -- previously
+        // ShareGrantStore always minted sequential "grant-N" ids
+        // regardless of API version (unlike CollectionStore, which
+        // already mints a real UUID for v0 requests), so any v0
+        // GET/PUT/DELETE by id always 400'd against that same guard for
+        // a real grant, no matter what id was passed.
+        let (state, _receiver) = test_state();
+        let collection = super::route_http_request(
+            "POST",
+            "/api/v0/collections",
+            None,
+            r#"{"title":"Versioned Grants"}"#,
+            &state,
+        )
+        .await
+        .expect("create collection");
+        let collection_id = serde_json::from_str::<serde_json::Value>(&collection.body).unwrap()
+            ["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+
+        let created = super::route_http_request(
+            "POST",
+            "/api/v0/share-grants",
+            None,
+            &format!(r#"{{"collection_id":"{collection_id}","username":"friend"}}"#),
+            &state,
+        )
+        .await
+        .expect("create share grant via the v0 route");
+        assert_eq!(created.status, "201 Created", "{}", created.body);
+        let grant_id = serde_json::from_str::<serde_json::Value>(&created.body).unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        assert!(
+            uuid::Uuid::parse_str(&grant_id).is_ok(),
+            "v0-created share grant id must be a real UUID: {grant_id}"
+        );
+
+        let get = super::route_http_request(
+            "GET",
+            &format!("/api/v0/share-grants/{grant_id}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("get share grant via the v0 route");
+        assert_eq!(get.status, "200 OK", "{}", get.body);
+
+        let update = super::route_http_request(
+            "PUT",
+            &format!("/api/v0/share-grants/{grant_id}"),
+            None,
+            r#"{"permissions":"read,download"}"#,
+            &state,
+        )
+        .await
+        .expect("update share grant via the v0 route");
+        assert_eq!(update.status, "200 OK", "{}", update.body);
+
+        let delete = super::route_http_request(
+            "DELETE",
+            &format!("/api/v0/share-grants/{grant_id}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("delete share grant via the v0 route");
+        assert_eq!(delete.status, "200 OK", "{}", delete.body);
     }
 
     #[tokio::test]
