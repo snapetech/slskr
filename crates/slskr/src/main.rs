@@ -15454,9 +15454,13 @@ async fn route_http_request_with_headers(
             let mut value = serde_json::from_str::<serde_json::Value>(&mesh.users_json(&users))
                 .unwrap_or_else(|_| serde_json::json!({}));
             value["peers"] = value["users"].clone();
+            let active_connections = match state.private_gateway.as_ref() {
+                Some(gateway) => gateway.active_connection_count().await,
+                None => 0,
+            };
             value["overlay"] = serde_json::json!({
                 "enabled": state.private_gateway.is_some(),
-                "activeConnections": 0,
+                "activeConnections": active_connections,
             });
             let body = value.to_string();
             drop(mesh);
@@ -25198,6 +25202,10 @@ async fn route_http_request_with_headers(
           ("GET", "/api/mesh/transport") => {
               let gateway = state.private_gateway.as_ref();
               let enabled = gateway.is_some();
+              let connected_peers = match gateway {
+                  Some(gateway) => gateway.active_connection_count().await,
+                  None => 0,
+              };
               Ok(routing::ok_response(serde_json::json!({
                   "dht": {
                       "enabled": state.dht.is_some(),
@@ -25219,8 +25227,8 @@ async fn route_http_request_with_headers(
                   "overlayPort": gateway.map(|gateway| gateway.bind().port()),
                   "certificateSha256": gateway.map(|gateway| hex::encode(gateway.certificate_sha256())),
                   "dhtEnabled": state.dht.is_some(),
-                  "connectedPeers": 0,
-                  "totalPeers": 0,
+                  "connectedPeers": connected_peers,
+                  "totalPeers": connected_peers,
                   "activeCircuits": 0,
                   "activeStreams": 0,
                   "bootstrapPeers": [],
@@ -49087,13 +49095,17 @@ async fn extended_controller_get_response(
         "/api/overlay/stats" => {
             let peers = state.peer_endpoints.read().await;
             let listeners = state.listeners.read().await;
+            let active_connections = match state.private_gateway.as_ref() {
+                Some(gateway) => gateway.active_connection_count().await,
+                None => 0,
+            };
             routing::ok_response(
                 serde_json::json!({
-                    "server": {"activeConnections": 0, "acceptedConnections": listeners.regular_accepts + listeners.obfuscated_accepts},
+                    "server": {"activeConnections": active_connections, "acceptedConnections": listeners.regular_accepts + listeners.obfuscated_accepts},
                     "connector": {"knownPeers": peers.len()},
                     "rateLimiter": {"rejected": 0},
                     "blocklist": {"entries": state.security.read().await.active_bans()},
-                    "activeConnections": 0,
+                    "activeConnections": active_connections,
                     "knownPeers": peers.len(),
                     "acceptedConnections": listeners.regular_accepts + listeners.obfuscated_accepts,
                     "errors": listeners.errors,
@@ -72716,6 +72728,24 @@ mod tests {
         assert_eq!(reply.status_code, 0, "{:?}", reply.error_message);
         let opened: OpenTunnelResponse = serde_json::from_slice(&reply.payload).unwrap();
 
+        // Matches the oracle's real ServerStatsResponse.ActiveConnections:
+        // must reflect this real, currently-open tunnel, not a hardcoded
+        // 0 regardless of live connection state.
+        let overlay_stats =
+            super::route_http_request("GET", "/api/v0/overlay/stats", None, "", &state)
+                .await
+                .expect("overlay stats with an open tunnel");
+        let overlay_stats_json =
+            serde_json::from_str::<serde_json::Value>(&overlay_stats.body).unwrap();
+        assert_eq!(
+            overlay_stats_json["activeConnections"], 1,
+            "{overlay_stats_json}"
+        );
+        assert_eq!(
+            overlay_stats_json["server"]["activeConnections"], 1,
+            "{overlay_stats_json}"
+        );
+
         let reply = client
             .call(
                 &MeshServiceCall::new(
@@ -72779,6 +72809,18 @@ mod tests {
             .await
             .expect("close reply");
         assert_eq!(reply.status_code, 0, "{:?}", reply.error_message);
+
+        let overlay_stats_after_close =
+            super::route_http_request("GET", "/api/v0/overlay/stats", None, "", &state)
+                .await
+                .expect("overlay stats after closing the tunnel");
+        let overlay_stats_after_close_json =
+            serde_json::from_str::<serde_json::Value>(&overlay_stats_after_close.body).unwrap();
+        assert_eq!(
+            overlay_stats_after_close_json["activeConnections"], 0,
+            "{overlay_stats_after_close_json}"
+        );
+
         let mut second_hello = MeshHello::new(
             "member",
             vec![FEATURE_MESH_SERVICE.to_owned()],

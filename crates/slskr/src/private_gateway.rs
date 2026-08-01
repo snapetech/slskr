@@ -148,6 +148,14 @@ impl Gateway {
         self.bind
     }
 
+    /// Real count of currently-open overlay tunnels -- backs the
+    /// oracle's `ServerStatsResponse.ActiveConnections`-style fields,
+    /// which several HTTP routes previously hardcoded to 0 despite this
+    /// registry already tracking real, live connections.
+    pub async fn active_connection_count(&self) -> usize {
+        self.tunnels.read().await.len()
+    }
+
     pub async fn run(self: Arc<Self>, state: Arc<super::AppState>) -> Result<(), String> {
         let listener = self
             .listener
