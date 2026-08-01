@@ -15495,17 +15495,31 @@ async fn route_http_request_with_headers(
             }).to_string()))
         }
         ("GET", "/api/capabilities/peers") => {
-            let users = state.users.read().await;
-            let peers: Vec<serde_json::Value> = users.records.iter().map(|user| {
-                serde_json::json!({
-                    "username": user.username,
-                    "status": user.status,
-                    "watching": user.watched,
-                    "last_seen": user.updated_at,
-                })
-            }).collect();
+            // Matches the oracle's real GetPeers: known slskdn peer
+            // *capability* records, not the generic connected-Soulseek-
+            // user list -- the sibling single-peer route
+            // (/api/capabilities/peers/{username}) already correctly
+            // uses this same real capability store.
+            let mesh = state.mesh.read().await;
+            let peers = mesh.capability_records_json();
             let count = peers.len();
-            drop(users);
+            drop(mesh);
+            Ok(routing::ok_response(serde_json::json!({
+                "peers": peers,
+                "count": count,
+            }).to_string()))
+        }
+        ("GET", "/api/capabilities/mesh-peers") => {
+            // Matches the oracle's real GetMeshPeers: only the
+            // mesh-sync-capable subset of known peer capability records.
+            let mesh = state.mesh.read().await;
+            let peers = mesh
+                .capability_records_json()
+                .into_iter()
+                .filter(|record| record["meshCapable"] == true)
+                .collect::<Vec<_>>();
+            let count = peers.len();
+            drop(mesh);
             Ok(routing::ok_response(serde_json::json!({
                 "peers": peers,
                 "count": count,
@@ -71142,9 +71156,12 @@ mod tests {
             normalize_api_path("/api/v0/portforwarding/start"),
             "/api/port-forwarding/start"
         );
+        // Matches the oracle's real, distinct GetMeshPeers endpoint --
+        // previously collapsed into the same (wrong) handler as
+        // GET /api/capabilities/peers.
         assert_eq!(
             normalize_api_path("/api/v0/capabilities/mesh-peers"),
-            "/api/capabilities/peers"
+            "/api/v0/capabilities/mesh-peers"
         );
     }
 
@@ -87653,6 +87670,57 @@ mod tests {
         .await
         .expect("reject the key/contentId alias with no real validation");
         assert_eq!(alias_rejected.status, "400 Bad Request");
+    }
+
+    #[tokio::test]
+    async fn capabilities_peers_routes_use_the_real_capability_store() {
+        // Matches the oracle's real GetPeers/GetMeshPeers: known peer
+        // *capability* records (mesh-capable subset for mesh-peers), not
+        // the generic connected-Soulseek-user list. Previously both
+        // "/api/capabilities/peers" and its "/api/v0/capabilities/
+        // mesh-peers" alias collapsed into the same wrong handler.
+        let (state, _receiver) = test_state();
+        {
+            let mut mesh = state.mesh.write().await;
+            mesh.capability_records.push(test_capability_descriptor(
+                "mesh-capable-peer",
+                vec![slskr_client::capabilities::FEATURE_MESH_V1.to_owned()],
+            ));
+            mesh.capability_records
+                .push(test_capability_descriptor("plain-peer", vec![]));
+        }
+        // A watched Soulseek user with no capability record at all must
+        // not appear in either capability listing.
+        state.users.write().await.apply_status(&super::UserStatus {
+            username: "unrelated-soulseek-user".to_owned(),
+            status: 2,
+            privileged: false,
+        });
+
+        let peers = super::route_http_request("GET", "/api/capabilities/peers", None, "", &state)
+            .await
+            .expect("list all known peer capability records");
+        assert_eq!(peers.status, "200 OK");
+        let peers_json = serde_json::from_str::<serde_json::Value>(&peers.body).unwrap();
+        let usernames = peers_json["peers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|record| record["username"].as_str().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(peers_json["count"], 2);
+        assert!(usernames.contains(&"mesh-capable-peer"));
+        assert!(usernames.contains(&"plain-peer"));
+        assert!(!usernames.contains(&"unrelated-soulseek-user"));
+
+        let mesh_peers =
+            super::route_http_request("GET", "/api/v0/capabilities/mesh-peers", None, "", &state)
+                .await
+                .expect("list only mesh-capable peer capability records");
+        assert_eq!(mesh_peers.status, "200 OK");
+        let mesh_peers_json = serde_json::from_str::<serde_json::Value>(&mesh_peers.body).unwrap();
+        assert_eq!(mesh_peers_json["count"], 1);
+        assert_eq!(mesh_peers_json["peers"][0]["username"], "mesh-capable-peer");
     }
 
     #[tokio::test]
