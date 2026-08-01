@@ -42161,18 +42161,45 @@ async fn misc_controller_mutation_response(
     }
     if method == "POST" && matches!(path, "/api/dht/announce" | "/api/dht/discover") {
         if body.trim().is_empty() {
+            // Matches the oracle's real DhtRendezvousController.Announce/
+            // Discover: both force a real DHT operation (the oracle's own
+            // AnnounceAsync/DiscoverPeersAsync), not merely report whether
+            // DHT is configured. slskR's Rendezvous::refresh() performs
+            // both the real announce and the real peer-discovery lookup
+            // together (it has no separate announce-only operation), so
+            // both routes drive the same real refresh.
             return Some(if path.ends_with("/announce") {
-                if state.dht.is_some() {
-                    routing::ok_response(serde_json::json!({"message": "Announced"}).to_string())
-                } else {
-                    routing::bad_request_response("Not beacon capable")
+                match state.dht.as_ref() {
+                    Some(dht) if dht.is_beacon_capable() => {
+                        dht.refresh().await;
+                        routing::ok_response(
+                            serde_json::json!({"message": "Announced"}).to_string(),
+                        )
+                    }
+                    _ => routing::bad_request_response("Not beacon capable"),
                 }
             } else {
-                let mesh = state.mesh.read().await;
+                let Some(dht) = state.dht.as_ref() else {
+                    return Some(routing::ok_response(
+                        serde_json::json!({
+                            "newConnectionsMade": 0,
+                            "totalMeshConnections": 0,
+                        })
+                        .to_string(),
+                    ));
+                };
+                let before = dht
+                    .peers()
+                    .await
+                    .into_iter()
+                    .collect::<std::collections::BTreeSet<_>>();
+                dht.refresh().await;
+                let after = dht.peers().await;
+                let new_connections = after.iter().filter(|peer| !before.contains(peer)).count();
                 routing::ok_response(
                     serde_json::json!({
-                        "newConnectionsMade": 0,
-                        "totalMeshConnections": mesh.capability_records.len(),
+                        "newConnectionsMade": new_connections,
+                        "totalMeshConnections": after.len(),
                     })
                     .to_string(),
                 )

@@ -225,7 +225,11 @@ impl Rendezvous {
             "isBeaconCapable": self.overlay_port.load(Ordering::Relaxed) != 0,
             "isDhtRunning": status.bootstrapped,
             "verifiedBeaconCount": 0,
-            "discoveredBeaconCount": peer_count,
+            // Matches the oracle's real DhtRendezvousStats.DiscoveredPeerCount
+            // -- previously emitted under a differently-named key
+            // (discoveredBeaconCount), so the route's merge-defaults logic
+            // never found it and silently inserted a fake 0 instead.
+            "discoveredPeerCount": peer_count,
             "bootstrapped": status.bootstrapped,
             "dhtSizeEstimate": status.dht_size_estimate,
             "publicAddress": status.public_address,
@@ -241,6 +245,12 @@ impl Rendezvous {
 
     pub fn set_advertised_overlay_port(&self, port: u16) {
         self.overlay_port.store(port, Ordering::Relaxed);
+    }
+
+    /// Matches the oracle's real `IsBeaconCapable`: only true once a real
+    /// advertised overlay port has been configured.
+    pub fn is_beacon_capable(&self) -> bool {
+        self.overlay_port.load(Ordering::Relaxed) != 0
     }
 }
 
@@ -315,6 +325,12 @@ mod tests {
         assert_eq!(status["isDhtRunning"], true);
         assert_eq!(status["bootstrapped"], true);
         assert!(status["dhtNodeCount"]
+            .as_u64()
+            .is_some_and(|count| count > 0));
+        // Matches the oracle's real DhtRendezvousStats.DiscoveredPeerCount
+        // -- must reflect the real discovered-peer count, not a key-name
+        // mismatch silently defaulting to 0 at the HTTP route layer.
+        assert!(status["discoveredPeerCount"]
             .as_u64()
             .is_some_and(|count| count > 0));
     }
