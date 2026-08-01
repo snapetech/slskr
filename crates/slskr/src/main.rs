@@ -26467,38 +26467,91 @@ async fn route_http_request_with_headers(
           }
 
           ("POST", "/api/taste-recommendations/wishlist") => {
+              let request = serde_json::from_str::<serde_json::Value>(body)
+                  .unwrap_or_else(|_| serde_json::json!({}));
+              let work_ref = request.get("workRef").cloned().unwrap_or_default();
               if route.path.starts_with("/api/v0/")
-                  && serde_json::from_str::<serde_json::Value>(body)
-                      .ok()
-                      .and_then(|value| value.get("workRef").cloned())
-                      .and_then(|value| value.get("@context").cloned())
-                      .is_some_and(|value| value.is_null())
+                  && work_ref.get("@context").is_some_and(serde_json::Value::is_null)
               {
                   return Ok(slskdn_model_validation_response());
               }
-              let wishlist = state.wishlist.read().await;
-              let recommendations = wishlist
-                  .records
-                  .iter()
-                  .flat_map(|record| record.items.iter())
-                  .map(|item| {
-                      serde_json::json!({
-                          "id": item.id,
-                          "query": item.search_text(),
-                          "artist": item.artist,
-                          "title": item.title,
-                          "source": "wishlist",
+              // Matches the oracle's real PromoteToWishlistAsync: a
+              // recommendable WorkRef either promotes to a real, honest
+              // review-only (disabled, no auto-download) Wishlist seed,
+              // or -- if a wishlist item with the same search text
+              // already exists -- reports the existing one, rather than
+              // just echoing the caller's own current wishlist back as
+              // if a promotion had happened.
+              if !work_ref_is_recommendable(&work_ref) {
+                  return Ok(HttpResponse {
+                      status: "400 Bad Request",
+                      content_type: "application/json",
+                      body: serde_json::json!({
+                          "created": false,
+                          "message": "WorkRef is not a safe music recommendation.",
                       })
-                  })
-                  .collect::<Vec<_>>();
-              let count = recommendations.len();
+                      .to_string(),
+                  });
+              }
+              let search_text = work_ref_search_text(&work_ref);
+              let mut wishlist = state.wishlist.write().await;
+              if let Some(existing_id) = wishlist.item_id_for_search_text(&search_text) {
+                  drop(wishlist);
+                  return Ok(routing::ok_response(
+                      serde_json::json!({
+                          "created": false,
+                          "wishlistItemId": existing_id,
+                          "searchText": search_text,
+                          "message": "Wishlist already has this recommendation seed.",
+                      })
+                      .to_string(),
+                  ));
+              }
+              let previous = wishlist.clone();
+              let creator = work_ref
+                  .get("creator")
+                  .and_then(serde_json::Value::as_str)
+                  .unwrap_or_default()
+                  .trim()
+                  .to_owned();
+              let title = work_ref
+                  .get("title")
+                  .and_then(serde_json::Value::as_str)
+                  .unwrap_or_default()
+                  .trim()
+                  .to_owned();
+              let note = request.get("note").and_then(serde_json::Value::as_str);
+              let filter = work_ref_wishlist_filter(&work_ref, note);
+              let Ok(item) = wishlist.add_item_with_settings(
+                  creator,
+                  title,
+                  "TasteRecommendation".to_owned(),
+                  filter,
+                  false,
+                  false,
+                  25,
+                  None,
+              ) else {
+                  drop(wishlist);
+                  return Ok(routing::service_unavailable_response(
+                      "wishlist item capacity is full",
+                  ));
+              };
+              let mutated = wishlist.clone();
               drop(wishlist);
-              let json = serde_json::json!({
-                  "recommendations": recommendations,
-                  "count": count,
-                  "status": "processing",
-              }).to_string();
-              Ok(routing::accepted_response(json))
+              if let Err(error) = persist_wishlist_item_checked(state, &item).await {
+                  rollback_wishlist_if_unchanged(state, previous, &mutated).await;
+                  return Ok(routing::service_unavailable_response(&error));
+              }
+              Ok(routing::ok_response(
+                  serde_json::json!({
+                      "created": true,
+                      "wishlistItemId": item.id,
+                      "searchText": search_text,
+                      "message": "Created review-only Wishlist seed.",
+                  })
+                  .to_string(),
+              ))
           }
 
           // PLAYER LAUNCH ENDPOINT (Phase 6)
@@ -44014,6 +44067,102 @@ fn normalized_radar_timestamp(value: Option<&str>) -> Result<String, String> {
             .map_err(|_| "timestamp must be an RFC 3339 date-time".to_owned()),
         None => Ok(chrono::Utc::now().to_rfc3339()),
     }
+}
+
+/// Matches the oracle's real `TasteRecommendationService.IsRecommendable`:
+/// only a `WorkRef` in the "music" domain with a real title is
+/// recommendable at all. The oracle's `WorkRef.ValidateSecurity` checks
+/// title/creator/externalIds against the same class of unsafe patterns
+/// (paths, hashes, private-network addresses) already covered by
+/// `is_safe_opaque_reference`, reused here rather than re-implementing
+/// the oracle's full regex list from scratch.
+fn work_ref_is_recommendable(work_ref: &serde_json::Value) -> bool {
+    let domain = work_ref
+        .get("domain")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let title = work_ref
+        .get("title")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .trim();
+    if !domain.eq_ignore_ascii_case("music") || title.is_empty() || !is_safe_opaque_reference(title)
+    {
+        return false;
+    }
+    if let Some(creator) = work_ref.get("creator").and_then(serde_json::Value::as_str) {
+        let creator = creator.trim();
+        if !creator.is_empty() && !is_safe_opaque_reference(creator) {
+            return false;
+        }
+    }
+    if let Some(external_ids) = work_ref
+        .get("externalIds")
+        .and_then(serde_json::Value::as_object)
+    {
+        for (key, value) in external_ids {
+            if !is_safe_opaque_reference(key) {
+                return false;
+            }
+            if let Some(value) = value.as_str() {
+                if !is_safe_opaque_reference(value) {
+                    return false;
+                }
+            }
+        }
+    }
+    true
+}
+
+/// Matches the oracle's real `TasteRecommendationService.BuildSearchText`:
+/// creator and title joined with a space, skipping either half if blank.
+fn work_ref_search_text(work_ref: &serde_json::Value) -> String {
+    let creator = work_ref
+        .get("creator")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .trim();
+    let title = work_ref
+        .get("title")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .trim();
+    match (creator.is_empty(), title.is_empty()) {
+        (true, true) => String::new(),
+        (true, false) => title.to_owned(),
+        (false, true) => creator.to_owned(),
+        (false, false) => format!("{creator} {title}"),
+    }
+}
+
+/// Matches the oracle's real `TasteRecommendationService.BuildWishlistFilter`.
+fn work_ref_wishlist_filter(work_ref: &serde_json::Value, note: Option<&str>) -> String {
+    let mut metadata = vec![
+        "source:taste-recommendation".to_owned(),
+        "review-only".to_owned(),
+    ];
+    if let Some(mbid) = work_ref
+        .get("externalIds")
+        .and_then(|value| value.get("musicbrainz"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        metadata.push(format!("mbid:{mbid}"));
+    }
+    if let Some(artist_mbid) = work_ref
+        .get("externalIds")
+        .and_then(|value| value.get("musicbrainz_artist"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        metadata.push(format!("artist-mbid:{artist_mbid}"));
+    }
+    if let Some(note) = note.map(str::trim).filter(|value| !value.is_empty()) {
+        metadata.push(format!("note:{note}"));
+    }
+    metadata.join("; ")
 }
 
 fn slskdn_model_validation_response() -> HttpResponse {
@@ -87114,6 +87263,97 @@ mod tests {
             serde_json::from_str::<serde_json::Value>(&after_override.body).unwrap();
         assert_eq!(after_override_json["score"], 80);
         assert_eq!(after_override_json["trustLevel"], "Trusted");
+    }
+
+    #[tokio::test]
+    async fn taste_recommendation_wishlist_promotion_creates_a_real_review_only_seed() {
+        // Matches the oracle's real PromoteToWishlistAsync: a
+        // recommendable WorkRef actually creates a disabled,
+        // no-auto-download Wishlist seed (or reports the existing one
+        // if already promoted), rather than just echoing the caller's
+        // current wishlist back as if a promotion had occurred.
+        let (state, _receiver) = test_state();
+
+        let work_ref = r#"{"workRef":{"domain":"music","title":"Selected Ambient Works","creator":"Aphex Twin","externalIds":{"musicbrainz":"abcd1234-1234-4a12-9a12-0a1234567890"}},"note":"from a trusted follower"}"#;
+        let promoted = super::route_http_request(
+            "POST",
+            "/api/v0/taste-recommendations/wishlist",
+            None,
+            work_ref,
+            &state,
+        )
+        .await
+        .expect("promote a recommendable WorkRef");
+        assert_eq!(promoted.status, "200 OK", "{}", promoted.body);
+        let promoted_json = serde_json::from_str::<serde_json::Value>(&promoted.body).unwrap();
+        assert_eq!(promoted_json["created"], true);
+        assert_eq!(
+            promoted_json["searchText"],
+            "Aphex Twin Selected Ambient Works"
+        );
+        let item_id = promoted_json["wishlistItemId"].as_str().unwrap().to_owned();
+
+        let wishlist = state.wishlist.read().await;
+        let item = wishlist
+            .records
+            .iter()
+            .flat_map(|record| record.items.iter())
+            .find(|item| item.id == item_id)
+            .expect("the promoted item is really stored in the wishlist")
+            .clone();
+        drop(wishlist);
+        assert_eq!(item.artist, "Aphex Twin");
+        assert_eq!(item.title, "Selected Ambient Works");
+        assert!(!item.enabled, "a promoted seed must be review-only");
+        assert!(!item.auto_download);
+        assert!(item.filter.contains("source:taste-recommendation"));
+        assert!(item.filter.contains("review-only"));
+        assert!(item.filter.contains("note:from a trusted follower"));
+
+        // Promoting the exact same WorkRef again reports the existing
+        // seed instead of creating a duplicate.
+        let duplicate = super::route_http_request(
+            "POST",
+            "/api/v0/taste-recommendations/wishlist",
+            None,
+            work_ref,
+            &state,
+        )
+        .await
+        .expect("promote the same WorkRef again");
+        assert_eq!(duplicate.status, "200 OK");
+        let duplicate_json = serde_json::from_str::<serde_json::Value>(&duplicate.body).unwrap();
+        assert_eq!(duplicate_json["created"], false);
+        assert_eq!(duplicate_json["wishlistItemId"], item_id);
+        assert_eq!(
+            state
+                .wishlist
+                .read()
+                .await
+                .records
+                .iter()
+                .flat_map(|record| record.items.iter())
+                .filter(|item| item.id == item_id)
+                .count(),
+            1,
+            "no duplicate wishlist item was created"
+        );
+
+        // A non-music WorkRef is not recommendable at all.
+        let rejected = super::route_http_request(
+            "POST",
+            "/api/v0/taste-recommendations/wishlist",
+            None,
+            r#"{"workRef":{"domain":"books","title":"Not Music"}}"#,
+            &state,
+        )
+        .await
+        .expect("reject a non-music WorkRef");
+        assert_eq!(rejected.status, "400 Bad Request");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&rejected.body).unwrap()["created"],
+            false
+        );
     }
 
     #[tokio::test]
