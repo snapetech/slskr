@@ -7830,9 +7830,14 @@ impl CollectionStore {
         }
     }
 
-    fn create(&mut self, name: String, description: String) -> Option<CollectionRecord> {
+    fn create(
+        &mut self,
+        owner_user_id: String,
+        name: String,
+        description: String,
+    ) -> Option<CollectionRecord> {
         let id = format!("col-{}", self.allocate_id());
-        self.create_with_contract(id, String::new(), name, description, "ShareList".to_owned())
+        self.create_with_contract(id, owner_user_id, name, description, "ShareList".to_owned())
     }
 
     fn create_with_contract(
@@ -8161,7 +8166,7 @@ impl CollectionStore {
             .count();
         format!(
             "{{\"entries\":{},\"count\":{},\"filtered_count\":{},\"offset\":{},\"limit\":{},\"updated_at\":{}}}",
-            self.json_array(query),
+            self.json_array(query, None),
             self.records.len(),
             filtered_count,
             filter.offset,
@@ -8170,11 +8175,18 @@ impl CollectionStore {
         )
     }
 
-    fn json_array(&self, query: Option<&str>) -> String {
+    /// `caller_id` matches the oracle's real `GetCollectionsByOwnerAsync`
+    /// scoping: when a real per-caller identity is resolvable, only that
+    /// caller's own collections are visible. `None` (no resolvable
+    /// identity, e.g. the common single-operator `auth_required=false`
+    /// deployment) preserves the unrestricted behavior every collection
+    /// visible to every caller.
+    fn json_array(&self, query: Option<&str>, caller_id: Option<&str>) -> String {
         let filter = RecordListFilter::from_query(query);
         let records = self
             .records
             .iter()
+            .filter(|record| !collection_owner_forbids(caller_id, &record.owner_user_id))
             .filter(|record| {
                 filter
                     .q
@@ -8188,6 +8200,16 @@ impl CollectionStore {
             .join(",");
         format!("[{}]", records)
     }
+}
+
+/// Matches the oracle's real per-owner Collections/Share-Grants scoping:
+/// a caller with a real resolvable identity (`Some`) may not see/mutate a
+/// resource owned by a *different* real identity. An empty
+/// `owner_user_id` (legacy data, or created before any per-caller
+/// identity existed) and a `None` caller (no resolvable identity at all)
+/// both preserve today's unrestricted behavior.
+fn collection_owner_forbids(caller_id: Option<&str>, owner_user_id: &str) -> bool {
+    caller_id.is_some_and(|caller_id| !owner_user_id.is_empty() && owner_user_id != caller_id)
 }
 
 fn bounded_collection_item(mut item: CollectionItem) -> CollectionItem {
@@ -20924,6 +20946,12 @@ async fn route_http_request_with_headers(
 
         // COLLECTIONS ENDPOINTS
         ("GET", "/api/collections") => {
+            let caller_id = utils::authenticated_caller_id(
+                &state.config,
+                authorization,
+                headers.cookie.as_deref(),
+                headers.remote_addr,
+            );
             let collections = state.collections.read().await;
             let json = if route.path.starts_with("/api/v0/") {
                 format!(
@@ -20931,12 +20959,15 @@ async fn route_http_request_with_headers(
                     collections
                         .records
                         .iter()
+                        .filter(|record| {
+                            !collection_owner_forbids(caller_id.as_deref(), &record.owner_user_id)
+                        })
                         .map(CollectionRecord::slskdn_json)
                         .collect::<Vec<_>>()
                         .join(",")
                 )
             } else {
-                collections.json_array(route.query)
+                collections.json_array(route.query, caller_id.as_deref())
             };
             drop(collections);
             Ok(routing::ok_response(json))
@@ -20963,6 +20994,17 @@ async fn route_http_request_with_headers(
                 return Ok(routing::bad_request_response("title is required"));
             };
             let description = extract_json_string_field(body, "description").unwrap_or_default();
+            // Matches the oracle's real AuthenticatedWebUserId.Resolve:
+            // the collection's real owner is the caller's own resolved
+            // identity, never a hardcoded placeholder -- empty when no
+            // per-caller identity is resolvable (single-operator mode).
+            let owner_user_id = utils::authenticated_caller_id(
+                &state.config,
+                authorization,
+                headers.cookie.as_deref(),
+                headers.remote_addr,
+            )
+            .unwrap_or_default();
             let mut collections = state.collections.write().await;
             let previous = collections.clone();
             let compatibility_contract = route.path.starts_with("/api/v0/");
@@ -20973,13 +21015,13 @@ async fn route_http_request_with_headers(
                     .unwrap_or_else(|| "ShareList".to_owned());
                 collections.create_with_contract(
                     uuid::Uuid::new_v4().to_string(),
-                    "Anonymous".to_owned(),
+                    owner_user_id,
                     name,
                     description,
                     collection_type,
                 )
             } else {
-                collections.create(name, description)
+                collections.create(owner_user_id, name, description)
             };
             let Some(record) = record else {
                 return Ok(routing::service_unavailable_response(
@@ -21004,8 +21046,17 @@ async fn route_http_request_with_headers(
             if id.is_empty() {
                 return Ok(routing::not_found_response());
             }
+            let caller_id = utils::authenticated_caller_id(
+                &state.config,
+                authorization,
+                headers.cookie.as_deref(),
+                headers.remote_addr,
+            );
             let collections = state.collections.read().await;
-            if let Some(record) = collections.get(id) {
+            if let Some(record) = collections
+                .get(id)
+                .filter(|record| !collection_owner_forbids(caller_id.as_deref(), &record.owner_user_id))
+            {
                 let json = if route.path.starts_with("/api/v0/") {
                     record.slskdn_json()
                 } else {
@@ -21066,7 +21117,20 @@ async fn route_http_request_with_headers(
                     None,
                 )
             };
+            let caller_id = utils::authenticated_caller_id(
+                &state.config,
+                authorization,
+                headers.cookie.as_deref(),
+                headers.remote_addr,
+            );
             let mut collections = state.collections.write().await;
+            if collections
+                .get(id)
+                .is_some_and(|record| collection_owner_forbids(caller_id.as_deref(), &record.owner_user_id))
+            {
+                drop(collections);
+                return Ok(routing::not_found_response());
+            }
             let previous = collections.clone();
             let updated = if compatibility_contract {
                 collections.update_contract(id, name, description, collection_type)
@@ -21100,8 +21164,22 @@ async fn route_http_request_with_headers(
             if id.is_empty() {
                 return Ok(routing::not_found_response());
             }
+            let caller_id = utils::authenticated_caller_id(
+                &state.config,
+                authorization,
+                headers.cookie.as_deref(),
+                headers.remote_addr,
+            );
             let mut grants = state.share_grants.write().await;
             let mut collections = state.collections.write().await;
+            if collections
+                .get(id)
+                .is_some_and(|record| collection_owner_forbids(caller_id.as_deref(), &record.owner_user_id))
+            {
+                drop(collections);
+                drop(grants);
+                return Ok(routing::not_found_response());
+            }
             let previous_collections = collections.clone();
             let previous_grants = grants.clone();
             let deleted = collections.delete(id);
@@ -21141,8 +21219,17 @@ async fn route_http_request_with_headers(
                 && collection_items_id(path).is_some() =>
         {
             let id = collection_items_id(path).expect("guarded collection items path");
+            let caller_id = utils::authenticated_caller_id(
+                &state.config,
+                authorization,
+                headers.cookie.as_deref(),
+                headers.remote_addr,
+            );
             let collections = state.collections.read().await;
-            if let Some(record) = collections.get(id) {
+            if let Some(record) = collections
+                .get(id)
+                .filter(|record| !collection_owner_forbids(caller_id.as_deref(), &record.owner_user_id))
+            {
                 let compatibility_contract = route.path.starts_with("/api/v0/");
                 let items = record.items.iter()
                     .enumerate()
@@ -21185,7 +21272,20 @@ async fn route_http_request_with_headers(
                 .or_else(|| extract_json_string_field(body, "sha256"))
                 .unwrap_or_default();
 
+            let caller_id = utils::authenticated_caller_id(
+                &state.config,
+                authorization,
+                headers.cookie.as_deref(),
+                headers.remote_addr,
+            );
             let mut collections = state.collections.write().await;
+            if collections
+                .get(id)
+                .is_some_and(|record| collection_owner_forbids(caller_id.as_deref(), &record.owner_user_id))
+            {
+                drop(collections);
+                return Ok(routing::not_found_response());
+            }
             let previous = collections.clone();
             match collections.add_item_with_contract(
                 id,
@@ -21230,9 +21330,23 @@ async fn route_http_request_with_headers(
             if item_id.is_empty() {
                 return Ok(routing::not_found_response());
             }
+            let caller_id = utils::authenticated_caller_id(
+                &state.config,
+                authorization,
+                headers.cookie.as_deref(),
+                headers.remote_addr,
+            );
             let mut collections = state.collections.write().await;
-            let previous = collections.clone();
             let collection_id = collections.collection_id_for_item(item_id);
+            if collection_id
+                .as_deref()
+                .and_then(|id| collections.get(id))
+                .is_some_and(|record| collection_owner_forbids(caller_id.as_deref(), &record.owner_user_id))
+            {
+                drop(collections);
+                return Ok(routing::not_found_response());
+            }
+            let previous = collections.clone();
             if let Some(item) = collections.remove_item(item_id) {
                 let record = collection_id
                     .as_deref()
@@ -21266,9 +21380,23 @@ async fn route_http_request_with_headers(
             let kind = extract_json_string_field(body, "kind")
                 .or_else(|| extract_json_string_field(body, "mediaKind"));
 
+            let caller_id = utils::authenticated_caller_id(
+                &state.config,
+                authorization,
+                headers.cookie.as_deref(),
+                headers.remote_addr,
+            );
             let mut collections = state.collections.write().await;
-            let previous = collections.clone();
             let collection_id = collections.collection_id_for_item(item_id);
+            if collection_id
+                .as_deref()
+                .and_then(|id| collections.get(id))
+                .is_some_and(|record| collection_owner_forbids(caller_id.as_deref(), &record.owner_user_id))
+            {
+                drop(collections);
+                return Ok(routing::not_found_response());
+            }
+            let previous = collections.clone();
             if let Some(item) = collections.update_item(item_id, artist, title, kind) {
                 let record = collection_id
                     .as_deref()
@@ -23424,7 +23552,20 @@ async fn route_http_request_with_headers(
                 .strip_prefix("/api/collections/")
                 .and_then(|rest| rest.strip_suffix("/items/reorder"))
                 .unwrap_or_default();
+            let caller_id = utils::authenticated_caller_id(
+                &state.config,
+                authorization,
+                headers.cookie.as_deref(),
+                headers.remote_addr,
+            );
             let mut collections = state.collections.write().await;
+            if collections
+                .get(collection_id)
+                .is_some_and(|record| collection_owner_forbids(caller_id.as_deref(), &record.owner_user_id))
+            {
+                drop(collections);
+                return Ok(routing::not_found_response());
+            }
             let previous = collections.clone();
             if let Some(record) = collections.reorder_items(collection_id, body) {
                 let mutated = collections.clone();
@@ -78944,7 +79085,7 @@ mod tests {
             );
             let mut collections = state.collections.write().await;
             collections
-                .create("Collection".to_owned(), String::new())
+                .create(String::new(), "Collection".to_owned(), String::new())
                 .unwrap();
             collections
                 .add_item(
@@ -79339,7 +79480,7 @@ mod tests {
         );
         let rehydrated_library = super::LibraryStore::from_persisted(persisted_library);
         assert!(rehydrated_collections
-            .json_array(None)
+            .json_array(None, None)
             .contains("\"title\":\"Two\""));
         assert!(rehydrated_library
             .json()
@@ -85965,10 +86106,10 @@ mod tests {
     fn collections_bound_nested_state_and_allocate_unique_item_ids() {
         let mut collections = super::CollectionStore::with_limits(1, 2);
         let collection = collections
-            .create("Road Trip".to_owned(), String::new())
+            .create(String::new(), "Road Trip".to_owned(), String::new())
             .unwrap();
         assert!(collections
-            .create("Overflow".to_owned(), String::new())
+            .create(String::new(), "Overflow".to_owned(), String::new())
             .is_none());
 
         let first = collections
@@ -86019,6 +86160,7 @@ mod tests {
             super::CollectionStore::with_limits(6, super::MAX_COLLECTION_ITEMS + 1);
         let first = collections
             .create(
+                String::new(),
                 "n".repeat(super::MAX_LIST_NAME_BYTES + 1),
                 "d".repeat(super::MAX_LIST_DESCRIPTION_BYTES + 1),
             )
@@ -86054,14 +86196,14 @@ mod tests {
         collections.records[0].items.clear();
         while collections.records.len() < 5 {
             collections
-                .create("collection".to_owned(), String::new())
+                .create(String::new(), "collection".to_owned(), String::new())
                 .unwrap();
         }
         for record in &mut collections.records {
             record.items = vec![template.clone(); super::MAX_COLLECTION_ITEMS];
         }
         let last = collections
-            .create("last".to_owned(), String::new())
+            .create(String::new(), "last".to_owned(), String::new())
             .unwrap();
         assert!(collections
             .add_item(
@@ -86109,9 +86251,11 @@ mod tests {
     fn collection_and_wishlist_ids_wrap_without_collisions() {
         let mut collections = super::CollectionStore::with_limits(3, 3);
         collections.next_id = u64::MAX;
-        let max_collection = collections.create("Max".to_owned(), String::new()).unwrap();
+        let max_collection = collections
+            .create(String::new(), "Max".to_owned(), String::new())
+            .unwrap();
         let wrapped_collection = collections
-            .create("Wrapped".to_owned(), String::new())
+            .create(String::new(), "Wrapped".to_owned(), String::new())
             .unwrap();
         assert_eq!(max_collection.id, format!("col-{}", u64::MAX));
         assert_eq!(wrapped_collection.id, "col-1");
@@ -86914,7 +87058,7 @@ mod tests {
             .collections
             .write()
             .await
-            .create("Private".to_owned(), String::new())
+            .create(String::new(), "Private".to_owned(), String::new())
             .expect("collection")
             .id;
         state
@@ -86985,7 +87129,7 @@ mod tests {
             .collections
             .write()
             .await
-            .create("Private".to_owned(), String::new())
+            .create(String::new(), "Private".to_owned(), String::new())
             .expect("collection");
         create_db.close_for_test().await;
 
@@ -87471,7 +87615,7 @@ mod tests {
             .collections
             .write()
             .await
-            .create("Private".to_owned(), String::new())
+            .create(String::new(), "Private".to_owned(), String::new())
             .expect("collection");
         state
             .share_grants
@@ -89043,7 +89187,11 @@ mod tests {
         let collection_json = serde_json::from_str::<serde_json::Value>(&collection.body).unwrap();
         assert_eq!(collection_json["title"], "Route Audit");
         assert_eq!(collection_json["type"], "ShareList");
-        assert_eq!(collection_json["ownerUserId"], "Anonymous");
+        // Matches the real AuthenticatedWebUserId.Resolve semantics: with
+        // no resolvable per-caller identity (this test uses no
+        // authentication at all), ownerUserId is honestly empty rather
+        // than a fabricated "Anonymous" placeholder.
+        assert_eq!(collection_json["ownerUserId"], "");
         assert!(uuid::Uuid::parse_str(collection_json["id"].as_str().unwrap()).is_ok());
         assert!(chrono::DateTime::parse_from_rfc3339(
             collection_json["createdAt"].as_str().unwrap()
@@ -89386,6 +89534,141 @@ mod tests {
         )
         .is_ok());
         assert!(security_record["timeRemaining"].as_str().is_some());
+    }
+
+    #[tokio::test]
+    async fn collections_are_scoped_to_the_real_authenticated_caller_identity() {
+        // Matches the oracle's real AuthenticatedWebUserId-based
+        // ownership (CollectionsController.cs): a collection created by
+        // one authenticated identity must not be visible to, or mutable
+        // by, a different one. Previously `owner_user_id` was always a
+        // hardcoded "Anonymous"/empty placeholder, never checked on any
+        // read or write -- any caller could view/edit/delete any other
+        // caller's collections.
+        let keys = serde_json::json!({
+            "alice": {"key": "alice-key-0123456789", "role": "readwrite", "cidr": ""},
+            "bob": {"key": "bob-key-00123456789ab", "role": "readwrite", "cidr": ""},
+        });
+        let (state, _receiver) = test_state_with_env(
+            MapEnv::default()
+                .with("SLSKR_AUTH_DISABLED", "false")
+                .with("SLSKD_API_KEYS_JSON", &keys.to_string()),
+        );
+        let alice = Some("ApiKey alice-key-0123456789");
+        let bob = Some("ApiKey bob-key-00123456789ab");
+
+        let created = super::route_http_request(
+            "POST",
+            "/api/v0/collections",
+            alice,
+            r#"{"title":"Alice Collection"}"#,
+            &state,
+        )
+        .await
+        .expect("alice creates a collection");
+        assert_eq!(created.status, "201 Created", "{}", created.body);
+        let created_json = serde_json::from_str::<serde_json::Value>(&created.body).unwrap();
+        assert_eq!(created_json["ownerUserId"], "alice");
+        let collection_id = created_json["id"].as_str().unwrap().to_owned();
+
+        for (method, path, body) in [
+            ("GET", format!("/api/v0/collections/{collection_id}"), ""),
+            (
+                "PUT",
+                format!("/api/v0/collections/{collection_id}"),
+                r#"{"title":"Hijacked"}"#,
+            ),
+            (
+                "GET",
+                format!("/api/v0/collections/{collection_id}/items"),
+                "",
+            ),
+            (
+                "POST",
+                format!("/api/v0/collections/{collection_id}/items"),
+                r#"{"contentId":"track-1"}"#,
+            ),
+        ] {
+            let response = super::route_http_request(method, &path, bob, body, &state)
+                .await
+                .unwrap_or_else(|error| panic!("{method} {path}: {error}"));
+            assert_eq!(response.status, "404 Not Found", "{method} {path}");
+        }
+
+        // Alice can still read/mutate her own collection.
+        let alice_get = super::route_http_request(
+            "GET",
+            &format!("/api/v0/collections/{collection_id}"),
+            alice,
+            "",
+            &state,
+        )
+        .await
+        .expect("alice reads her own collection");
+        assert_eq!(alice_get.status, "200 OK");
+
+        // Bob's own collection list never includes Alice's collection,
+        // and vice versa.
+        let bob_created = super::route_http_request(
+            "POST",
+            "/api/v0/collections",
+            bob,
+            r#"{"title":"Bob Collection"}"#,
+            &state,
+        )
+        .await
+        .expect("bob creates his own collection");
+        assert_eq!(bob_created.status, "201 Created");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&bob_created.body).unwrap()["ownerUserId"],
+            "bob"
+        );
+
+        let alice_list = super::route_http_request("GET", "/api/v0/collections", alice, "", &state)
+            .await
+            .expect("alice lists collections");
+        let alice_list_json = serde_json::from_str::<serde_json::Value>(&alice_list.body).unwrap();
+        let alice_titles = alice_list_json
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|record| record["title"].as_str().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(alice_titles, vec!["Alice Collection"]);
+
+        let bob_list = super::route_http_request("GET", "/api/v0/collections", bob, "", &state)
+            .await
+            .expect("bob lists collections");
+        let bob_list_json = serde_json::from_str::<serde_json::Value>(&bob_list.body).unwrap();
+        let bob_titles = bob_list_json
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|record| record["title"].as_str().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(bob_titles, vec!["Bob Collection"]);
+
+        // Bob cannot delete Alice's collection.
+        let bob_delete = super::route_http_request(
+            "DELETE",
+            &format!("/api/v0/collections/{collection_id}"),
+            bob,
+            "",
+            &state,
+        )
+        .await
+        .expect("bob attempts to delete alice's collection");
+        assert_eq!(bob_delete.status, "404 Not Found");
+        let still_there = super::route_http_request(
+            "GET",
+            &format!("/api/v0/collections/{collection_id}"),
+            alice,
+            "",
+            &state,
+        )
+        .await
+        .expect("alice's collection still exists");
+        assert_eq!(still_there.status, "200 OK");
     }
 
     #[tokio::test]
