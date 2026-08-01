@@ -31,6 +31,13 @@ CI runs login, local peer, private-message, and room-message probes and uploads
 `target/live-interop`; when the secret is absent, it uploads an explicit skipped
 TSV artifact.
 
+The live slskd automation-client compatibility smoke is opt-in because it starts
+a local daemon and may install the Python `slskd-api` package:
+
+```sh
+SLSKR_RUN_SLSKD_API_COMPAT_SMOKE=1 scripts/run-release-gate.sh
+```
+
 ## Local Archive
 
 Build the host archive:
