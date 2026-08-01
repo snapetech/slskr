@@ -39769,16 +39769,34 @@ async fn versioned_get_failure_contract(
         .strip_prefix("/api/v0/listening-party/radio/")
         .map(|value| value.split('/').collect::<Vec<_>>())
     {
-        if segments.len() == 2
-            && !state
-                .content_discovery
+        if let [party_id, content_id] = segments.as_slice() {
+            // Matches the oracle's real StreamListedParty gate: the party
+            // referenced by partyId must actually be listed, must allow
+            // mesh streaming, and must currently be playing exactly this
+            // contentId -- otherwise NotFound(), evaluated before any
+            // stream ticket is even considered. Previously this checked
+            // the unrelated global content-discovery shadow-record index,
+            // which neither matched the oracle's real per-party gate nor
+            // scoped the check to the specific party being queried.
+            let listed = state
+                .controller_features
                 .read()
                 .await
-                .shadow_records()
-                .iter()
-                .any(|record| record.recording_id.eq_ignore_ascii_case(segments[1]))
-        {
-            return Some(routing::not_found_response());
+                .values_with_prefix("listening-party/")
+                .into_iter()
+                .any(|event| {
+                    event.get("partyId").and_then(serde_json::Value::as_str) == Some(*party_id)
+                        && event.get("listed").and_then(serde_json::Value::as_bool) == Some(true)
+                        && event
+                            .get("allowMeshStreaming")
+                            .and_then(serde_json::Value::as_bool)
+                            == Some(true)
+                        && event.get("contentId").and_then(serde_json::Value::as_str)
+                            == Some(*content_id)
+                });
+            if !listed {
+                return Some(routing::not_found_response());
+            }
         }
     }
 
@@ -48092,6 +48110,24 @@ async fn extended_controller_dynamic_get_response(
     }
     if let Some(segments) = decoded_segments_after(path, "/api/listening-party/radio/") {
         if let [party_id, content_id] = segments.as_slice() {
+            // Matches the oracle's real StreamListedParty gate: a real,
+            // valid stream ticket is required before revealing anything
+            // about this content, not an unauthenticated availability
+            // probe anyone could query for any partyId/contentId. Full
+            // byte streaming (the oracle's real File(...) response) is a
+            // separate, deeper gap -- slskR has no real range-request
+            // file-serving capability anywhere yet -- so this closes the
+            // info-leak half of the finding without claiming to have
+            // built real audio streaming.
+            let ticket_token = query_parameter(query, "ticket").unwrap_or_default();
+            let ticket = if ticket_token.trim().is_empty() {
+                None
+            } else {
+                state.stream_tickets.write().await.get(&ticket_token)
+            };
+            if !ticket.is_some_and(|ticket| ticket.content_id.eq_ignore_ascii_case(content_id)) {
+                return routing::unauthorized_response();
+            }
             let discovery = state.content_discovery.read().await;
             let record = discovery
                 .shadow_records()
@@ -90449,6 +90485,155 @@ mod tests {
                 .await
                 .expect("directory after stop");
         assert_eq!(after_stop_directory.body, "[]");
+    }
+
+    #[tokio::test]
+    async fn listening_party_radio_requires_a_real_ticket_matching_the_content_id() {
+        let (state, _receiver) = test_state();
+        let pod_id = "pod:listening-party-radio-audit";
+        let channel_id = "general";
+        let content_id = "radio-audit-content";
+        state
+            .pods
+            .write()
+            .await
+            .create(
+                serde_json::from_value::<super::pods::PodRecord>(serde_json::json!({
+                    "podId": pod_id,
+                    "name": "Radio Audit",
+                }))
+                .expect("deserialize pod record fixture"),
+                "tester".to_owned(),
+            )
+            .expect("create pod");
+        state
+            .pods
+            .write()
+            .await
+            .upsert_channel(
+                pod_id,
+                super::pods::PodChannel {
+                    channel_id: channel_id.to_owned(),
+                    kind: serde_json::json!(0),
+                    name: "General".to_owned(),
+                    binding_info: None,
+                    description: None,
+                },
+            )
+            .expect("create channel");
+
+        // A real, listed, mesh-streaming-enabled party actually playing
+        // this exact contentId -- matches the oracle's real StreamListedParty
+        // party-state gate, which is evaluated before any ticket at all.
+        let played = super::route_http_request(
+            "POST",
+            &format!("/api/v0/listening-party/{pod_id}/{channel_id}"),
+            None,
+            &format!(
+                r#"{{"action":"play","contentId":"{content_id}","title":"Radio Track","artist":"Radio Artist","listed":true,"allowMeshStreaming":true}}"#
+            ),
+            &state,
+        )
+        .await
+        .expect("play event");
+        assert_eq!(played.status, "200 OK", "{}", played.body);
+        let party_id = serde_json::from_str::<serde_json::Value>(&played.body).unwrap()["partyId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+
+        // No ticket at all -- must not leak availability/peer data to an
+        // unauthenticated probe.
+        let no_ticket = super::route_http_request(
+            "GET",
+            &format!("/api/v0/listening-party/radio/{party_id}/{content_id}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("no ticket request");
+        assert_eq!(no_ticket.status, "401 Unauthorized", "{}", no_ticket.body);
+
+        // A real ticket, but issued for a different piece of content --
+        // must not authorize access to this contentId.
+        let mismatched_ticket_response = super::route_http_request(
+            "POST",
+            "/api/v0/mesh-streams/tickets",
+            None,
+            r#"{"contentId":"some-other-content","filename":"Other.flac","peerId":"mesh-peer"}"#,
+            &state,
+        )
+        .await
+        .expect("create mismatched ticket");
+        assert_eq!(mismatched_ticket_response.status, "200 OK");
+        let mismatched_ticket =
+            serde_json::from_str::<serde_json::Value>(&mismatched_ticket_response.body).unwrap()
+                ["ticket"]
+                .as_str()
+                .unwrap()
+                .to_owned();
+        let mismatched = super::route_http_request(
+            "GET",
+            &format!(
+                "/api/v0/listening-party/radio/{party_id}/{content_id}?ticket={mismatched_ticket}"
+            ),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("mismatched ticket request");
+        assert_eq!(mismatched.status, "401 Unauthorized", "{}", mismatched.body);
+
+        // A real ticket issued for exactly this contentId is authorized,
+        // and the response reflects the real content-discovery shadow
+        // record (not a fake/empty stub).
+        state
+            .content_discovery
+            .write()
+            .await
+            .merge_shadow_records(vec![super::content_discovery::ShadowIndexRecord {
+                recording_id: content_id.to_owned(),
+                peer_ids: vec!["peer-a".to_owned(), "peer-b".to_owned()],
+                updated_at: 0,
+            }])
+            .expect("seed shadow record");
+        let valid_ticket_response = super::route_http_request(
+            "POST",
+            "/api/v0/mesh-streams/tickets",
+            None,
+            &format!(
+                r#"{{"contentId":"{content_id}","filename":"Radio.flac","peerId":"mesh-peer"}}"#
+            ),
+            &state,
+        )
+        .await
+        .expect("create valid ticket");
+        assert_eq!(valid_ticket_response.status, "200 OK");
+        let valid_ticket = serde_json::from_str::<serde_json::Value>(&valid_ticket_response.body)
+            .unwrap()["ticket"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let authorized = super::route_http_request(
+            "GET",
+            &format!("/api/v0/listening-party/radio/{party_id}/{content_id}?ticket={valid_ticket}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("authorized request");
+        assert_eq!(authorized.status, "200 OK", "{}", authorized.body);
+        let authorized_json = serde_json::from_str::<serde_json::Value>(&authorized.body).unwrap();
+        assert_eq!(authorized_json["partyId"], party_id);
+        assert_eq!(authorized_json["contentId"], content_id);
+        assert_eq!(authorized_json["available"], true);
+        assert_eq!(
+            authorized_json["peerIds"],
+            serde_json::json!(["peer-a", "peer-b"])
+        );
     }
 
     #[tokio::test]
