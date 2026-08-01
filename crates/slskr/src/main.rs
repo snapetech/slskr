@@ -32313,6 +32313,17 @@ async fn apply_watched_controller_configuration(
         .write()
         .await
         .merge_configured(&reloaded.core_workflow.rooms);
+    // Matches the oracle's real OptionsMonitor_OnChange, which calls
+    // RoomService.TryJoinAsync(newOptions.Rooms) on every config reload,
+    // issuing a real join for each configured room over the live
+    // session (idempotent for rooms already joined) -- previously
+    // config-reload only updated local bookkeeping, so a room added to
+    // an already-connected instance was marked "joined" in the API
+    // immediately but the server was never actually told to join it
+    // until the next reconnect.
+    for room in &reloaded.core_workflow.rooms {
+        send_room_join_if_connected(state, room.clone()).await;
+    }
     state.interests.write().await.merge_configured(
         &reloaded.core_workflow.liked_interests,
         &reloaded.core_workflow.hated_interests,
@@ -100454,6 +100465,43 @@ mod tests {
         super::apply_watched_controller_configuration(&state, Some(second), &cli_environment).await;
         assert_eq!(super::effective_server_address(&state), "127.0.0.3:34568");
         assert!(!state.runtime.read().await.application_reconnect_pending);
+    }
+
+    #[tokio::test]
+    async fn config_reload_joins_newly_configured_rooms_while_connected() {
+        // Matches the oracle's real OptionsMonitor_OnChange, which calls
+        // RoomService.TryJoinAsync(newOptions.Rooms) on every config
+        // reload -- previously config-reload only updated local
+        // bookkeeping (RoomStore::merge_configured), so a room added
+        // while already connected was marked "joined" in the API
+        // immediately but the server was never actually told to join it.
+        let (state, mut receiver) = test_state();
+        state.session.write().await.state = "connected";
+        let cli_environment = BTreeMap::from([
+            (
+                "SLSKR_STATE_DIR".to_owned(),
+                state.config.state_dir.display().to_string(),
+            ),
+            ("SLSKR_AUTH_DISABLED".to_owned(), "true".to_owned()),
+        ]);
+        let yaml = "rooms: [music]\n";
+        fs::write(state.config.state_dir.join("slskd.yml"), yaml).unwrap();
+
+        super::apply_watched_controller_configuration(&state, Some(yaml), &cli_environment).await;
+
+        assert_eq!(
+            receiver
+                .try_recv()
+                .expect("real join dispatched for the newly configured room"),
+            super::SessionCommand::JoinRoom("music".to_owned())
+        );
+        assert!(state
+            .rooms
+            .read()
+            .await
+            .records
+            .iter()
+            .any(|record| record.name == "music" && record.joined));
     }
 
     #[tokio::test]
