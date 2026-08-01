@@ -148,6 +148,32 @@ impl Gateway {
         self.bind
     }
 
+    /// Real count of currently-open overlay tunnels -- backs the
+    /// oracle's `ServerStatsResponse.ActiveConnections`-style fields,
+    /// which several HTTP routes previously hardcoded to 0 despite this
+    /// registry already tracking real, live connections.
+    pub async fn active_connection_count(&self) -> usize {
+        self.tunnels.read().await.len()
+    }
+
+    /// Real, deduplicated usernames of peers with a currently-open
+    /// tunnel -- the only real per-connection identity slskR's gateway
+    /// currently tracks. Unlike the oracle's real `MeshPeerInfoResponse`,
+    /// there is no per-session `connectedAt`/`lastActivity`/
+    /// `certificateThumbprint` tracking yet (only `Tunnel::owner` is
+    /// recorded), so this reports real identities without that extra
+    /// metadata rather than fabricating it.
+    pub async fn connected_peer_usernames(&self) -> Vec<String> {
+        let tunnels = self.tunnels.read().await;
+        let mut usernames = tunnels
+            .values()
+            .map(|tunnel| tunnel.owner.clone())
+            .collect::<Vec<_>>();
+        usernames.sort();
+        usernames.dedup();
+        usernames
+    }
+
     pub async fn run(self: Arc<Self>, state: Arc<super::AppState>) -> Result<(), String> {
         let listener = self
             .listener

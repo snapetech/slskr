@@ -660,6 +660,7 @@ impl WebhookDispatcher {
             let webhook_url = webhook.url.clone();
             let webhook_secret = webhook.secret.clone();
             let webhook_timeout = webhook.timeout_seconds;
+            let webhook_max_retries = webhook.max_retries;
             let webhook_id = webhook.id.clone();
             let payload_clone = payload_json.clone();
             let database = database.clone();
@@ -667,11 +668,12 @@ impl WebhookDispatcher {
 
             tokio::spawn(async move {
                 let _delivery_permit = delivery_permit;
-                let (status, error_message) = match Self::send_webhook(
+                let (status, error_message) = match Self::send_webhook_with_retries(
                     &webhook_url,
                     &webhook_secret,
                     &payload_clone,
                     webhook_timeout,
+                    webhook_max_retries,
                 )
                 .await
                 {
@@ -700,6 +702,41 @@ impl WebhookDispatcher {
                 }
             });
         }
+    }
+
+    /// Real retry-with-backoff wrapper around `send_webhook` -- the
+    /// dynamic webhook API previously delivered exactly once and never
+    /// retried a failed delivery at all, despite `Webhook` exposing
+    /// `max_retries`/`can_retry()` as if retries were real.
+    async fn send_webhook_with_retries(
+        url: &str,
+        secret: &str,
+        payload: &str,
+        timeout_secs: u32,
+        max_retries: u32,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let attempts = max_retries.saturating_add(1);
+        let mut last_error = "webhook delivery failed".to_owned();
+        for attempt in 1..=attempts {
+            if attempt > 1 {
+                let delay = Self::calculate_backoff(attempt - 2);
+                if !delay.is_zero() {
+                    tokio::time::sleep(delay).await;
+                }
+            }
+            match Self::send_webhook(url, secret, payload, timeout_secs).await {
+                Ok(()) => return Ok(()),
+                Err(error) => last_error = error.to_string(),
+            }
+        }
+        Err(last_error.into())
+    }
+
+    /// Exponential backoff delay between retry attempts: 30s, 60s, 120s,
+    /// 240s, 480s (max). `attempt` is 0-indexed by completed failures.
+    fn calculate_backoff(attempt: u32) -> Duration {
+        let seconds = 30_u64.saturating_mul(2_u64.saturating_pow(attempt));
+        Duration::from_secs(seconds.min(480))
     }
 
     /// Send webhook to URL with HMAC-SHA256 signature
@@ -975,33 +1012,6 @@ fn sanitized_webhook_url_for_log(url: &str) -> String {
     match reqwest::Url::parse(url) {
         Ok(parsed) => parsed.origin().ascii_serialization(),
         Err(_) => "<invalid webhook url>".to_string(),
-    }
-}
-
-/// Webhook retry scheduler for failed deliveries
-pub struct WebhookRetryScheduler;
-
-impl WebhookRetryScheduler {
-    /// Start background retry scheduler
-    #[allow(dead_code)]
-    pub fn start(
-        _db: Option<std::sync::Arc<crate::persistence::DatabaseManager>>,
-        _manager: std::sync::Arc<tokio::sync::RwLock<WebhookManager>>,
-    ) {
-        // Background task for retrying failed webhooks
-        // In production, this would be wired to the DatabaseManager
-        tokio::spawn(async {
-            // Retry scheduler would run periodically (every 5 minutes)
-            // and attempt to deliver failed webhook payloads with exponential backoff
-        });
-    }
-
-    /// Calculate exponential backoff delay
-    #[allow(dead_code)]
-    fn calculate_backoff(attempt: u32) -> std::time::Duration {
-        // 30s, 60s, 120s, 240s, 480s (max)
-        let seconds = 30_u64.saturating_mul(2_u64.saturating_pow(attempt));
-        std::time::Duration::from_secs(seconds.min(480))
     }
 }
 
@@ -1557,10 +1567,33 @@ mod tests {
     fn test_webhook_retry_backoff_saturates_before_overflow() {
         for (attempt, seconds) in [(0, 30), (1, 60), (4, 480), (5, 480), (u32::MAX, 480)] {
             assert_eq!(
-                WebhookRetryScheduler::calculate_backoff(attempt),
+                WebhookDispatcher::calculate_backoff(attempt),
                 std::time::Duration::from_secs(seconds)
             );
         }
+    }
+
+    #[tokio::test]
+    async fn send_webhook_with_retries_makes_a_single_attempt_when_max_retries_is_zero() {
+        // Matches max_retries=0's real semantics (attempts = 0 + 1 = 1):
+        // a permanently-blocked target (SSRF-filtered loopback address)
+        // must fail immediately, with no retry-backoff sleep at all --
+        // the real multi-attempt retry loop this fix adds must never
+        // turn a single delivery attempt into a multi-second wait.
+        let start = std::time::Instant::now();
+        let result = WebhookDispatcher::send_webhook_with_retries(
+            "http://127.0.0.1:1/unreachable",
+            "secret",
+            "{}",
+            1,
+            0,
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "a single attempt must not incur any retry-backoff delay"
+        );
     }
 
     #[test]

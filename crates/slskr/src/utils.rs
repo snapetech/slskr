@@ -227,11 +227,19 @@ fn controller_route_auth_policy(
     })
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 struct ApiCredential {
     access: ApiAccess,
     scheme: ApiAuthScheme,
     nowplaying_only: bool,
+    /// The stable identity of the credential that authenticated this
+    /// request, matching the oracle's real
+    /// `AuthenticatedWebUserId.Resolve` (the `ClaimTypes.Name` claim,
+    /// populated per-request from either a named configured API key or a
+    /// JWT's own `name` claim). `None` for slskR's own legacy
+    /// single-shared-token/cookie schemes, which have no per-caller
+    /// identity at all -- callers in that mode share one implicit owner.
+    name: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -335,15 +343,17 @@ fn api_credential(
             expected.is_some_and(|expected| constant_time_eq(token.as_bytes(), expected.as_bytes()))
         };
         if scheme == ApiAuthScheme::ApiKey {
-            if let Some(configured) = config.controller_api_keys.values().find(|configured| {
-                constant_time_eq(token.as_bytes(), configured.key.as_bytes())
-                    && remote_addr.is_some_and(|remote| {
-                        configured
-                            .cidrs
-                            .iter()
-                            .any(|cidr| cidr.contains(remote.ip()))
-                    })
-            }) {
+            if let Some((key_name, configured)) =
+                config.controller_api_keys.iter().find(|(_, configured)| {
+                    constant_time_eq(token.as_bytes(), configured.key.as_bytes())
+                        && remote_addr.is_some_and(|remote| {
+                            configured
+                                .cidrs
+                                .iter()
+                                .any(|cidr| cidr.contains(remote.ip()))
+                        })
+                })
+            {
                 let access = match configured.role.as_str() {
                     "readonly" => ApiAccess::Authenticated,
                     "readwrite" => ApiAccess::ReadWrite,
@@ -354,6 +364,7 @@ fn api_credential(
                     access,
                     scheme,
                     nowplaying_only: false,
+                    name: Some(key_name.clone()),
                 });
             }
         }
@@ -362,32 +373,35 @@ fn api_credential(
                 access: ApiAccess::Administrator,
                 scheme,
                 nowplaying_only: false,
+                name: None,
             })
         } else if matches(config.api_read_write_token.as_deref()) {
             Some(ApiCredential {
                 access: ApiAccess::ReadWrite,
                 scheme,
                 nowplaying_only: false,
+                name: None,
             })
         } else if matches(config.api_read_only_token.as_deref()) {
             Some(ApiCredential {
                 access: ApiAccess::Authenticated,
                 scheme,
                 nowplaying_only: false,
+                name: None,
             })
         } else if matches(config.api_nowplaying_token.as_deref()) {
             Some(ApiCredential {
                 access: ApiAccess::ReadWrite,
                 scheme,
                 nowplaying_only: true,
+                name: None,
             })
-        } else if scheme == ApiAuthScheme::Jwt
-            && verify_admin_jwt(config, token, unix_timestamp()).is_some()
-        {
-            Some(ApiCredential {
+        } else if scheme == ApiAuthScheme::Jwt {
+            verify_admin_jwt(config, token, unix_timestamp()).map(|claims| ApiCredential {
                 access: ApiAccess::Administrator,
                 scheme,
                 nowplaying_only: false,
+                name: Some(claims.name),
             })
         } else {
             None
@@ -404,6 +418,7 @@ fn api_credential(
                 access: ApiAccess::Administrator,
                 scheme: ApiAuthScheme::Jwt,
                 nowplaying_only: false,
+                name: None,
             });
         }
     }
@@ -418,6 +433,26 @@ pub fn authorize_controller_route(
     cookie: Option<&str>,
 ) -> Result<(), &'static str> {
     authorize_controller_route_from(config, method, path, authorization, cookie, None)
+}
+
+/// Matches the oracle's real `AuthenticatedWebUserId.Resolve`: the stable
+/// identity of whichever named API key or JWT authenticated this request,
+/// for resources (Collections, Share-Grants) that must be scoped to their
+/// real owner rather than visible/mutable by any caller. Returns `None`
+/// for slskR's own legacy single-shared-token/cookie schemes and for the
+/// common `auth_required=false` single-operator deployment mode -- both
+/// have no per-caller identity to isolate against, so callers there share
+/// one implicit owner (today's unrestricted behavior), matching the
+/// oracle's model only degenerating to "no isolation possible" rather
+/// than "deny everything".
+pub fn authenticated_caller_id(
+    config: &AppConfig,
+    authorization: Option<&str>,
+    cookie: Option<&str>,
+    remote_addr: Option<SocketAddr>,
+) -> Option<String> {
+    api_credential(config, authorization, cookie, remote_addr)
+        .and_then(|credential| credential.name)
 }
 
 pub fn authorize_controller_route_from(
@@ -731,7 +766,7 @@ pub fn normalize_api_path(path: &str) -> &str {
         "/api/v0/transfers/downloads/auto-replace/status" => "/api/autoreplace",
         "/api/v0/portforwarding/available-ports" => "/api/port-forwarding/available-ports",
         "/api/v0/portforwarding/stream-stats" => "/api/port-forwarding/stream-stats",
-        "/api/v0/portforwarding/start" => "/api/portforwarding/start",
+        "/api/v0/portforwarding/start" => "/api/port-forwarding/start",
         _ => path,
     }
 }
@@ -1132,6 +1167,13 @@ pub fn unix_timestamp_millis() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| u64::try_from(duration.as_millis()).unwrap_or(u64::MAX))
+        .unwrap_or_default()
+}
+
+pub fn unix_timestamp_nanos() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| u64::try_from(duration.as_nanos()).unwrap_or(u64::MAX))
         .unwrap_or_default()
 }
 

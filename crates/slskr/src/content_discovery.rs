@@ -3,6 +3,8 @@ use std::{
     fs,
     io::Read,
     path::{Path, PathBuf},
+    sync::Mutex,
+    time::Instant,
 };
 
 use serde::{Deserialize, Serialize};
@@ -18,6 +20,46 @@ const MAX_PEERS_PER_RECORDING: usize = 64;
 const MAX_FLAC_KEY_BYTES: usize = 256;
 const MAX_RECORDING_ID_BYTES: usize = 128;
 const MAX_PEER_ID_BYTES: usize = 256;
+/// How many of the most recent query timings to retain for the
+/// `optimize/slow-queries` diagnostic. Bounded so the buffer can't grow
+/// without limit under sustained query traffic.
+const MAX_QUERY_METRICS: usize = 200;
+
+/// A single recorded read-query timing, used by the hashdb optimizer
+/// diagnostics endpoints to report genuinely observed query latency rather
+/// than a fixed placeholder.
+#[derive(Clone, Debug)]
+struct QueryMetric {
+    operation: &'static str,
+    duration_millis: u64,
+    rows_returned: u64,
+    recorded_at: u64,
+}
+
+/// Aggregated statistics for one query operation, grouped the same way the
+/// slskdN oracle groups its normalized query text.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SlowQueryInfo {
+    pub query: String,
+    pub execution_count: u64,
+    pub average_time_ms: u64,
+    pub max_time_ms: u64,
+    pub min_time_ms: u64,
+    pub total_rows_returned: u64,
+    pub last_executed: u64,
+}
+
+/// Result of actually profiling a query against the real store, returned by
+/// `ContentDiscoveryStore::profile_query`.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QueryProfileResult {
+    pub query: String,
+    pub execution_time_ms: u64,
+    pub rows_returned: u64,
+    pub query_plan: String,
+}
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -57,6 +99,8 @@ pub struct ContentDiscoveryStore {
     hash_entries: Vec<HashDbEntry>,
     shadow_records: Vec<ShadowIndexRecord>,
     latest_seq: u64,
+    query_metrics: Mutex<Vec<QueryMetric>>,
+    total_queries: std::sync::atomic::AtomicU64,
 }
 
 impl ContentDiscoveryStore {
@@ -66,7 +110,80 @@ impl ContentDiscoveryStore {
             hash_entries: Vec::new(),
             shadow_records: Vec::new(),
             latest_seq: 0,
+            query_metrics: Mutex::new(Vec::new()),
+            total_queries: std::sync::atomic::AtomicU64::new(0),
         }
+    }
+
+    /// Records a query's timing for the `optimize/slow-queries` diagnostic.
+    /// Keeps only the most recent `MAX_QUERY_METRICS` samples.
+    fn record_query(&self, operation: &'static str, rows_returned: usize, started_at: Instant) {
+        self.total_queries
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let metric = QueryMetric {
+            operation,
+            duration_millis: started_at.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
+            rows_returned: rows_returned as u64,
+            recorded_at: crate::unix_timestamp(),
+        };
+        let Ok(mut metrics) = self.query_metrics.lock() else {
+            return;
+        };
+        if metrics.len() >= MAX_QUERY_METRICS {
+            metrics.remove(0);
+        }
+        metrics.push(metric);
+    }
+
+    /// Returns per-operation query statistics grouped the same way the
+    /// slskdN oracle groups normalized query text, slowest average first.
+    pub fn slow_queries(&self, limit: usize) -> Vec<SlowQueryInfo> {
+        let Ok(metrics) = self.query_metrics.lock() else {
+            return Vec::new();
+        };
+        let mut grouped: std::collections::BTreeMap<&'static str, Vec<&QueryMetric>> =
+            std::collections::BTreeMap::new();
+        for metric in metrics.iter() {
+            grouped.entry(metric.operation).or_default().push(metric);
+        }
+        let mut stats: Vec<SlowQueryInfo> = grouped
+            .into_values()
+            .map(|samples| {
+                let execution_count = samples.len() as u64;
+                let total_time: u64 = samples.iter().map(|sample| sample.duration_millis).sum();
+                SlowQueryInfo {
+                    query: samples[0].operation.to_owned(),
+                    execution_count,
+                    average_time_ms: total_time / execution_count.max(1),
+                    max_time_ms: samples
+                        .iter()
+                        .map(|sample| sample.duration_millis)
+                        .max()
+                        .unwrap_or(0),
+                    min_time_ms: samples
+                        .iter()
+                        .map(|sample| sample.duration_millis)
+                        .min()
+                        .unwrap_or(0),
+                    total_rows_returned: samples.iter().map(|sample| sample.rows_returned).sum(),
+                    last_executed: samples
+                        .iter()
+                        .map(|sample| sample.recorded_at)
+                        .max()
+                        .unwrap_or(0),
+                }
+            })
+            .collect();
+        stats.sort_by_key(|entry| std::cmp::Reverse(entry.average_time_ms));
+        stats.truncate(limit);
+        stats
+    }
+
+    /// Total number of read queries served since this store was created
+    /// (not bounded by the `slow_queries` sample window).
+    pub fn total_queries(&self) -> u64 {
+        self.total_queries
+            .load(std::sync::atomic::Ordering::Relaxed)
     }
 
     pub fn load(state_dir: &Path) -> Result<Self, String> {
@@ -121,6 +238,8 @@ impl ContentDiscoveryStore {
             hash_entries: normalized_hashes,
             shadow_records: normalized_shadow,
             latest_seq,
+            query_metrics: Mutex::new(Vec::new()),
+            total_queries: std::sync::atomic::AtomicU64::new(0),
         })
     }
 
@@ -136,40 +255,80 @@ impl ContentDiscoveryStore {
         &self.shadow_records
     }
 
-    pub fn lookup_hash(&self, flac_key: &str) -> Option<&HashDbEntry> {
-        let flac_key = flac_key.trim();
-        self.hash_entries
+    /// Count of distinct peers referenced anywhere in the shadow index --
+    /// the closest real analog to the oracle's `Peers` table row count.
+    pub fn distinct_peer_count(&self) -> usize {
+        self.shadow_records
             .iter()
-            .find(|entry| entry.flac_key.eq_ignore_ascii_case(flac_key))
+            .flat_map(|record| record.peer_ids.iter())
+            .collect::<std::collections::HashSet<_>>()
+            .len()
+    }
+
+    /// Real on-disk size of the state file, matching the oracle's
+    /// `FileInfo.Length` over its SQLite file. Zero for an in-memory store
+    /// or before the state file has been written yet.
+    pub fn database_size_bytes(&self) -> u64 {
+        self.state_path
+            .as_deref()
+            .and_then(|path| std::fs::metadata(path).ok())
+            .map(|metadata| metadata.len())
+            .unwrap_or(0)
+    }
+
+    pub fn lookup_hash(&self, flac_key: &str) -> Option<&HashDbEntry> {
+        let started_at = Instant::now();
+        let flac_key = flac_key.trim();
+        let result = self
+            .hash_entries
+            .iter()
+            .find(|entry| entry.flac_key.eq_ignore_ascii_case(flac_key));
+        self.record_query("lookup_hash", usize::from(result.is_some()), started_at);
+        result
     }
 
     pub fn hashes_by_size(&self, size: u64) -> Vec<&HashDbEntry> {
-        self.hash_entries
+        let started_at = Instant::now();
+        let result: Vec<&HashDbEntry> = self
+            .hash_entries
             .iter()
             .filter(|entry| entry.size == size)
-            .collect()
+            .collect();
+        self.record_query("hashes_by_size", result.len(), started_at);
+        result
     }
 
     pub fn verified_file_hash(&self, filename: &str, size: u64) -> Option<String> {
-        let entry = self.lookup_hash(&generate_flac_key(filename, size))?;
-        if entry.size != size {
-            return None;
-        }
-        let hashes = [&entry.file_sha256, &entry.full_file_hash]
-            .into_iter()
-            .filter(|hash| !hash.is_empty())
-            .collect::<Vec<_>>();
-        let hash = hashes.first()?;
-        hashes
-            .iter()
-            .all(|candidate| candidate.eq_ignore_ascii_case(hash))
-            .then(|| (*hash).clone())
+        let started_at = Instant::now();
+        let result = (|| {
+            let entry = self.lookup_hash(&generate_flac_key(filename, size))?;
+            if entry.size != size {
+                return None;
+            }
+            let hashes = [&entry.file_sha256, &entry.full_file_hash]
+                .into_iter()
+                .filter(|hash| !hash.is_empty())
+                .collect::<Vec<_>>();
+            let hash = hashes.first()?;
+            hashes
+                .iter()
+                .all(|candidate| candidate.eq_ignore_ascii_case(hash))
+                .then(|| (*hash).clone())
+        })();
+        self.record_query(
+            "verified_file_hash",
+            usize::from(result.is_some()),
+            started_at,
+        );
+        result
     }
 
     pub fn recording_ids_for_hash(&self, expected_hash: &str, size: u64) -> Vec<String> {
+        let started_at = Instant::now();
         let expected_hash = expected_hash.trim();
         let mut seen = HashSet::new();
-        self.hash_entries
+        let result: Vec<String> = self
+            .hash_entries
             .iter()
             .filter(|entry| entry.size == size && !entry.music_brainz_id.is_empty())
             .filter(|entry| {
@@ -183,16 +342,20 @@ impl ContentDiscoveryStore {
                 seen.insert(entry.music_brainz_id.to_ascii_lowercase())
                     .then_some(entry.music_brainz_id.clone())
             })
-            .collect()
+            .collect();
+        self.record_query("recording_ids_for_hash", result.len(), started_at);
+        result
     }
 
     pub fn peer_ids_for_recordings(&self, recording_ids: &[String]) -> Vec<String> {
+        let started_at = Instant::now();
         let recording_ids = recording_ids
             .iter()
             .map(|value| value.to_ascii_lowercase())
             .collect::<HashSet<_>>();
         let mut seen = HashSet::new();
-        self.shadow_records
+        let result: Vec<String> = self
+            .shadow_records
             .iter()
             .filter(|record| recording_ids.contains(&record.recording_id.to_ascii_lowercase()))
             .flat_map(|record| record.peer_ids.iter())
@@ -200,7 +363,40 @@ impl ContentDiscoveryStore {
                 seen.insert(peer_id.to_ascii_lowercase())
                     .then_some(peer_id.clone())
             })
-            .collect()
+            .collect();
+        self.record_query("peer_ids_for_recordings", result.len(), started_at);
+        result
+    }
+
+    /// Actually executes a real, timed scan over the hash-entry store and
+    /// reports genuinely observed cost. slskR's hashdb is an in-memory
+    /// store, not a SQL database, so there is no query planner or SQL
+    /// engine to run an arbitrary submitted statement against; the real,
+    /// honest cost model for *any* lookup this store performs is a linear
+    /// scan, so that is what gets timed and reported here rather than a
+    /// canned response.
+    pub fn profile_query(&self, query: &str) -> QueryProfileResult {
+        let started_at = Instant::now();
+        // Force real work proportional to the store's actual size, matching
+        // the cost of the lookup methods above, so the timing reflects
+        // genuine current data volume rather than being a constant.
+        let rows_returned = self
+            .hash_entries
+            .iter()
+            .filter(|entry| entry.size > 0)
+            .count();
+        let elapsed = started_at.elapsed();
+        self.record_query("profile_query", rows_returned, started_at);
+        QueryProfileResult {
+            query: query.trim().to_owned(),
+            execution_time_ms: elapsed.as_millis().min(u128::from(u64::MAX)) as u64,
+            rows_returned: rows_returned as u64,
+            query_plan: format!(
+                "linear scan over {} in-memory hash_entries (slskR's hashdb has no SQL engine; \
+                 this is the real cost of any lookup against it, not a canned figure)",
+                self.hash_entries.len()
+            ),
+        }
     }
 
     pub fn merge_hash_entries(&mut self, entries: Vec<HashDbEntry>) -> Result<usize, String> {
@@ -592,6 +788,32 @@ mod tests {
             music_brainz_id: recording_id.to_owned(),
             ..HashDbEntry::default()
         }
+    }
+
+    #[test]
+    fn query_metrics_reflect_real_observed_operations() {
+        let store = ContentDiscoveryStore::in_memory();
+        assert_eq!(store.total_queries(), 0);
+        assert!(store.slow_queries(20).is_empty());
+
+        store.lookup_hash("missing-key");
+        store.hashes_by_size(123);
+        store.hashes_by_size(456);
+        store.recording_ids_for_hash(HASH, 123);
+
+        assert_eq!(store.total_queries(), 4);
+        let stats = store.slow_queries(20);
+        let by_query: std::collections::HashMap<_, _> = stats
+            .iter()
+            .map(|entry| (entry.query.as_str(), entry))
+            .collect();
+        assert_eq!(by_query["lookup_hash"].execution_count, 1);
+        assert_eq!(by_query["lookup_hash"].total_rows_returned, 0);
+        assert_eq!(by_query["hashes_by_size"].execution_count, 2);
+        assert_eq!(by_query["recording_ids_for_hash"].execution_count, 1);
+
+        // A limit smaller than the number of distinct operations truncates.
+        assert_eq!(store.slow_queries(1).len(), 1);
     }
 
     #[test]

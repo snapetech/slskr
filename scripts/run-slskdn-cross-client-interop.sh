@@ -409,7 +409,7 @@ YAML
   export SLSKR_AUTH_DISABLED=false
   export SLSKR_API_TOKEN="$api_token"
   export SLSKR_SHARE_DIRS="$slskr_share"
-  export SLSKR_LISTENER_BIND="127.0.0.1:$slskr_listen_port"
+  export SLSKR_LISTENER_BIND="0.0.0.0:$slskr_listen_port"
   export SLSK_LISTEN_PORT="$slskr_listen_port"
   export SLSKR_ADVERTISED_PORT="$slskr_listen_port"
   export SLSKR_PEER_HOST_OVERRIDE=127.0.0.1

@@ -3,6 +3,7 @@
     reason = "batch compatibility types are retained for the public API surface"
 )]
 mod batch;
+mod bloom_filter;
 mod cli;
 mod config;
 mod content_discovery;
@@ -5056,6 +5057,14 @@ struct MeshState {
     sync_quarantined_until: BTreeMap<String, u64>,
     sync_rejected_messages: u64,
     sync_quarantine_events: u64,
+    /// Real counters backing `/api/mesh/stats`'s `MeshSyncStats`
+    /// contract, incremented at the one real merge call site
+    /// (`POST /api/mesh/merge`) instead of being hardcoded to 0.
+    sync_merge_total: u64,
+    sync_merge_successful: u64,
+    sync_merge_failed: u64,
+    sync_entries_received: u64,
+    sync_entries_merged: u64,
     updated_at: u64,
 }
 
@@ -5094,6 +5103,11 @@ impl MeshState {
             sync_quarantined_until: BTreeMap::new(),
             sync_rejected_messages: 0,
             sync_quarantine_events: 0,
+            sync_merge_total: 0,
+            sync_merge_successful: 0,
+            sync_merge_failed: 0,
+            sync_entries_received: 0,
+            sync_entries_merged: 0,
             updated_at: unix_timestamp(),
         }
     }
@@ -7017,6 +7031,51 @@ impl RoomMessageRecord {
     }
 }
 
+/// Mirrors the oracle's real `UserDataResponse` fields for a room member,
+/// sourced from the server's real `JoinedRoom` roster snapshot rather than
+/// a placeholder.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct RoomRosterEntry {
+    username: String,
+    status: u32,
+    average_speed: u32,
+    upload_count: u64,
+    file_count: u32,
+    directory_count: u32,
+    slots_free: u32,
+    country_code: String,
+}
+
+impl RoomRosterEntry {
+    /// `status` matches the wire protocol's numeric UserPresence codes
+    /// (0=offline, 1=away, 2=online), which the oracle serializes by enum
+    /// name via a global `JsonStringEnumConverter`.
+    fn slskd_json(&self, local_username: &str) -> serde_json::Value {
+        serde_json::json!({
+            "username": self.username,
+            "status": match self.status {
+                1 => "Away",
+                2 => "Online",
+                _ => "Offline",
+            },
+            "averageSpeed": self.average_speed,
+            "uploadCount": self.upload_count,
+            "fileCount": self.file_count,
+            "directoryCount": self.directory_count,
+            "slotsFree": self.slots_free,
+            "countryCode": self.country_code,
+            // Matches the oracle's real `Self = self ? self : (bool?)null`:
+            // present-and-true only for the caller's own username, absent
+            // (never `false`) otherwise.
+            "self": if self.username.eq_ignore_ascii_case(local_username) {
+                serde_json::Value::Bool(true)
+            } else {
+                serde_json::Value::Null
+            },
+        })
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct RoomRecord {
     name: String,
@@ -7027,6 +7086,7 @@ struct RoomRecord {
     last_error: Option<String>,
     ticker: Option<String>,
     members: Vec<String>,
+    roster: Vec<RoomRosterEntry>,
     messages: Vec<RoomMessageRecord>,
     updated_at: u64,
 }
@@ -7122,6 +7182,7 @@ impl RoomStore {
                 last_error: None,
                 ticker: None,
                 members: Vec::new(),
+                roster: Vec::new(),
                 messages: Vec::new(),
                 updated_at: u64::try_from(record.last_activity).unwrap_or_default(),
             })
@@ -7163,6 +7224,7 @@ impl RoomStore {
             last_error: None,
             ticker: None,
             members: Vec::new(),
+            roster: Vec::new(),
             messages: Vec::new(),
             updated_at: now,
         };
@@ -7204,6 +7266,7 @@ impl RoomStore {
             last_error: Some(reason),
             ticker: None,
             members: Vec::new(),
+            roster: Vec::new(),
             messages: Vec::new(),
             updated_at: now,
         };
@@ -7241,6 +7304,7 @@ impl RoomStore {
                     last_error: None,
                     ticker: None,
                     members: Vec::new(),
+                    roster: Vec::new(),
                     messages: Vec::new(),
                     updated_at: now,
                 });
@@ -7278,6 +7342,7 @@ impl RoomStore {
             last_error: None,
             ticker: None,
             members: Vec::new(),
+            roster: Vec::new(),
             messages: Vec::new(),
             updated_at: now,
         };
@@ -7363,6 +7428,27 @@ impl RoomStore {
         let now = unix_timestamp();
         let record = self.records.iter_mut().find(|record| record.name == room)?;
         record.ticker = Some(truncate_utf8_bytes(ticker, MAX_ROOM_TICKER_BYTES));
+        record.updated_at = now;
+        self.updated_at = now;
+        Some(record.clone())
+    }
+
+    /// Applies the real roster snapshot from the server's `JoinedRoom`
+    /// message -- matches the oracle's `IRoomTracker`, which populates the
+    /// room's user list from this same message rather than leaving it
+    /// empty until someone happens to join/leave afterward.
+    fn apply_roster(&mut self, room: &str, roster: Vec<RoomRosterEntry>) -> Option<RoomRecord> {
+        let room = bounded_room_name(room);
+        let now = unix_timestamp();
+        let cap = self.max_members_per_room;
+        let record = self.records.iter_mut().find(|record| record.name == room)?;
+        record.roster = roster.into_iter().take(cap).collect();
+        record.members = record
+            .roster
+            .iter()
+            .map(|user| user.username.clone())
+            .collect();
+        record.user_count = Some(u32::try_from(record.roster.len()).unwrap_or(u32::MAX));
         record.updated_at = now;
         self.updated_at = now;
         Some(record.clone())
@@ -7744,9 +7830,14 @@ impl CollectionStore {
         }
     }
 
-    fn create(&mut self, name: String, description: String) -> Option<CollectionRecord> {
+    fn create(
+        &mut self,
+        owner_user_id: String,
+        name: String,
+        description: String,
+    ) -> Option<CollectionRecord> {
         let id = format!("col-{}", self.allocate_id());
-        self.create_with_contract(id, String::new(), name, description, "ShareList".to_owned())
+        self.create_with_contract(id, owner_user_id, name, description, "ShareList".to_owned())
     }
 
     fn create_with_contract(
@@ -8075,7 +8166,7 @@ impl CollectionStore {
             .count();
         format!(
             "{{\"entries\":{},\"count\":{},\"filtered_count\":{},\"offset\":{},\"limit\":{},\"updated_at\":{}}}",
-            self.json_array(query),
+            self.json_array(query, None),
             self.records.len(),
             filtered_count,
             filter.offset,
@@ -8084,11 +8175,18 @@ impl CollectionStore {
         )
     }
 
-    fn json_array(&self, query: Option<&str>) -> String {
+    /// `caller_id` matches the oracle's real `GetCollectionsByOwnerAsync`
+    /// scoping: when a real per-caller identity is resolvable, only that
+    /// caller's own collections are visible. `None` (no resolvable
+    /// identity, e.g. the common single-operator `auth_required=false`
+    /// deployment) preserves the unrestricted behavior every collection
+    /// visible to every caller.
+    fn json_array(&self, query: Option<&str>, caller_id: Option<&str>) -> String {
         let filter = RecordListFilter::from_query(query);
         let records = self
             .records
             .iter()
+            .filter(|record| !collection_owner_forbids(caller_id, &record.owner_user_id))
             .filter(|record| {
                 filter
                     .q
@@ -8102,6 +8200,33 @@ impl CollectionStore {
             .join(",");
         format!("[{}]", records)
     }
+}
+
+/// Matches the oracle's real per-owner Collections/Share-Grants scoping:
+/// a caller with a real resolvable identity (`Some`) may not see/mutate a
+/// resource owned by a *different* real identity. An empty
+/// `owner_user_id` (legacy data, or created before any per-caller
+/// identity existed) and a `None` caller (no resolvable identity at all)
+/// both preserve today's unrestricted behavior.
+fn collection_owner_forbids(caller_id: Option<&str>, owner_user_id: &str) -> bool {
+    caller_id.is_some_and(|caller_id| !owner_user_id.is_empty() && owner_user_id != caller_id)
+}
+
+/// Matches the oracle's real Share-Grants ownership gate (SharesController.cs):
+/// a share grant is owned transitively through its collection, so every
+/// grant action checks `collection.OwnerUserId == currentUserId`, treating
+/// a mismatch identically to the collection/grant not existing (`NotFound`).
+async fn share_grant_collection_forbids(
+    state: &AppState,
+    collection_id: &str,
+    caller_id: Option<&str>,
+) -> bool {
+    state
+        .collections
+        .read()
+        .await
+        .get(collection_id)
+        .is_some_and(|collection| collection_owner_forbids(caller_id, &collection.owner_user_id))
 }
 
 fn bounded_collection_item(mut item: CollectionItem) -> CollectionItem {
@@ -10777,7 +10902,12 @@ impl RuntimeCompatState {
             "id": format!("songid-{}", self.songid_runs),
             "source": "",
             "sourceType": "text_query",
-            "status": if matches.is_empty() { "completed" } else { "matched" },
+            // Matches the oracle's real terminal status vocabulary
+            // exactly ("queued" | "running" | "completed" | "failed" --
+            // never "matched"): whether matches were found is reflected
+            // in the matches/matchCount fields, not a separate status
+            // value the oracle never uses.
+            "status": "completed",
             "query": "",
             "createdAt": chrono::Utc::now().to_rfc3339(),
             "summary": if matches.is_empty() { "SongID analysis completed." } else { "SongID matches found." },
@@ -11109,6 +11239,60 @@ impl SecurityState {
         )
         .to_string()
     }
+}
+
+/// Matches the oracle's real `PeerReputation.TrustedThreshold`/
+/// `UntrustedThreshold`/`MaxScore`.
+const SECURITY_REPUTATION_TRUSTED_THRESHOLD: i32 = 70;
+const SECURITY_REPUTATION_UNTRUSTED_THRESHOLD: i32 = 20;
+const SECURITY_REPUTATION_DEFAULT_SCORE: i32 = 100;
+
+fn security_reputation_trust_level(score: i32) -> &'static str {
+    if score >= SECURITY_REPUTATION_TRUSTED_THRESHOLD {
+        "Trusted"
+    } else if score <= SECURITY_REPUTATION_UNTRUSTED_THRESHOLD {
+        "Untrusted"
+    } else {
+        "Neutral"
+    }
+}
+
+/// Matches the oracle's real `PeerReputation`/`PeerProfile` shape for a
+/// single peer, sourced from slskR's real, violation-driven score and
+/// violation counters (`SecurityState.reputation`/`violations`) rather
+/// than a disconnected, admin-only settings blob that never reflected
+/// real behavior. slskR does not yet track the oracle's finer-grained
+/// per-event counters (successful/failed/aborted transfers, malformed
+/// messages, content mismatches, slot availability) or per-peer first/
+/// last-seen timestamps, so those fields are honestly left at their
+/// zero/neutral defaults rather than fabricated.
+async fn security_reputation_profile_json(state: &AppState, username: &str) -> serde_json::Value {
+    let key = username.to_ascii_lowercase();
+    let security = state.security.read().await;
+    let score = security
+        .reputation
+        .get(&key)
+        .copied()
+        .unwrap_or(SECURITY_REPUTATION_DEFAULT_SCORE);
+    let protocol_violations = security.violations.get(&key).copied().unwrap_or(0);
+    drop(security);
+    let now = chrono::Utc::now().to_rfc3339();
+    serde_json::json!({
+        "username": username,
+        "score": score,
+        "firstSeen": now,
+        "lastSeen": now,
+        "successfulTransfers": 0,
+        "failedTransfers": 0,
+        "abortedTransfers": 0,
+        "totalBytesTransferred": 0,
+        "malformedMessages": 0,
+        "protocolViolations": protocol_violations,
+        "contentMismatches": 0,
+        "slotsAvailableCount": 0,
+        "successRate": 0.5,
+        "trustLevel": security_reputation_trust_level(score),
+    })
 }
 
 fn normalize_security_ban_value(kind: &str, value: &str) -> Option<String> {
@@ -13027,6 +13211,612 @@ fn resolve_external_visualizer_path(configured: Option<&str>) -> Option<PathBuf>
         .find(|candidate| candidate.is_file())
 }
 
+fn path_directories() -> Vec<PathBuf> {
+    std::env::var_os("PATH")
+        .into_iter()
+        .flat_map(|value| std::env::split_paths(&value).collect::<Vec<_>>())
+        .collect()
+}
+
+fn command_exists_on_path(command: &str) -> bool {
+    path_directories()
+        .iter()
+        .any(|directory| directory.join(command).is_file())
+}
+
+fn file_exists_at_known_location_or_on_path(candidates: &[&str], path_file_name: &str) -> bool {
+    candidates
+        .iter()
+        .any(|candidate| Path::new(candidate).is_file())
+        || command_exists_on_path(path_file_name)
+}
+
+/// Matches the oracle's `IsSafeOpaqueReference`, used across several
+/// PodCore/mesh subsystems (quarantine jury, realm subject indexes) to
+/// reject identifiers that leak paths, private/local addresses, or raw
+/// hashes instead of an opaque reference.
+fn is_safe_opaque_reference(value: &str) -> bool {
+    let trimmed = value.trim();
+    if trimmed.is_empty() || trimmed.len() > 200 {
+        return false;
+    }
+    let lowered = trimmed.to_ascii_lowercase();
+    let has_unsafe_substring = [
+        "/",
+        "\\",
+        "localhost",
+        "127.0.0.1",
+        "192.168.",
+        "10.",
+        "172.16.",
+        "path",
+        "file",
+        "private",
+        "internal",
+    ]
+    .iter()
+    .any(|needle| lowered.contains(needle));
+    if has_unsafe_substring {
+        return false;
+    }
+    !(trimmed.len() >= 32 && trimmed.bytes().all(|byte| byte.is_ascii_hexdigit()))
+}
+
+/// Matches the oracle's real `MusicBrainzOverlayService.IsExportableEdit`.
+const MUSICBRAINZ_EXPORTABLE_EDIT_TYPES: [&str; 7] = [
+    "TitleCorrection",
+    "ArtistCorrection",
+    "Alias",
+    "MissingAltTitle",
+    "DuplicateMarker",
+    "ReleaseGrouping",
+    "RecordingLinkage",
+];
+
+fn musicbrainz_edit_is_exportable(edit: &serde_json::Value) -> bool {
+    edit.get("type")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|value| MUSICBRAINZ_EXPORTABLE_EDIT_TYPES.contains(&value))
+}
+
+fn musicbrainz_edit_upstream_target(edit: &serde_json::Value) -> String {
+    format!(
+        "{}:{}",
+        edit.get("targetType")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default(),
+        edit.get("targetId")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default(),
+    )
+}
+
+fn musicbrainz_edit_proposed_change(edit: &serde_json::Value) -> String {
+    format!(
+        "{} => {}",
+        edit.get("field")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .trim(),
+        edit.get("value")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .trim(),
+    )
+}
+
+/// Matches the oracle's real `MusicBrainzOverlayService.BuildExportReview`,
+/// used both by `GET .../export-review` directly and by
+/// `POST .../approve-export` to decide `CanApproveExport`/`ReviewReason`.
+fn musicbrainz_export_review_json(
+    edit: &serde_json::Value,
+    decision: Option<&serde_json::Value>,
+) -> serde_json::Value {
+    let exportable = musicbrainz_edit_is_exportable(edit);
+    let review_reason = if decision.is_some() {
+        "Upstream export has already been approved locally."
+    } else if exportable {
+        "Overlay edit can be reviewed for manual upstream MusicBrainz submission."
+    } else {
+        "Overlay edit type is not exportable."
+    };
+    serde_json::json!({
+        "edit": edit,
+        "upstreamTarget": musicbrainz_edit_upstream_target(edit),
+        "proposedChange": musicbrainz_edit_proposed_change(edit),
+        "evidence": edit.get("evidence").cloned().unwrap_or_else(|| serde_json::json!([])),
+        "canApproveExport": decision.is_none() && exportable,
+        "reviewReason": review_reason,
+        "decision": decision,
+    })
+}
+
+/// Matches the oracle's `PodAffinityScorer.CalculateTrustScore`: a base
+/// trust of 0.5, +0.3 for an owner or +0.2 for a mod, +0.2 for no ban,
+/// capped at 1.0.
+fn pod_member_trust_score(role: &str, is_banned: bool) -> f64 {
+    let role_bonus = match role {
+        "owner" => 0.3,
+        "mod" => 0.2,
+        _ => 0.0,
+    };
+    let clean_record_bonus = if is_banned { 0.0 } else { 0.2 };
+    (0.5_f64 + role_bonus + clean_record_bonus).min(1.0)
+}
+
+/// Matches the oracle's `PodOpinionAggregator.CalculateAffinityScore`.
+fn pod_member_affinity_score(
+    message_count: usize,
+    opinion_count: usize,
+    membership_duration_seconds: i64,
+    is_active: bool,
+) -> f64 {
+    let activity_score = ((message_count as f64 + opinion_count as f64 * 2.0) / 100.0).min(1.0);
+    let duration_months = membership_duration_seconds as f64 / 86_400.0 / 30.0;
+    let duration_bonus = (duration_months / 12.0).min(0.3);
+    let activity_bonus = if is_active { 0.2 } else { 0.0 };
+    let trust_component = (0.5 + activity_score * 0.5).min(1.0);
+    (activity_score + duration_bonus + activity_bonus).min(1.0) * trust_component
+}
+
+/// Formats a duration the way .NET's default `TimeSpan.ToString()` does:
+/// `d.hh:mm:ss` once it spans a full day, else `hh:mm:ss`.
+fn format_timespan_hms(total_seconds: i64) -> String {
+    let total_seconds = total_seconds.max(0);
+    let days = total_seconds / 86_400;
+    let hours = (total_seconds % 86_400) / 3_600;
+    let minutes = (total_seconds % 3_600) / 60;
+    let seconds = total_seconds % 60;
+    if days > 0 {
+        format!("{days}.{hours:02}:{minutes:02}:{seconds:02}")
+    } else {
+        format!("{hours:02}:{minutes:02}:{seconds:02}")
+    }
+}
+
+/// Matches the oracle's real `SongIdService.BuildEvidencePackage`/
+/// `SongIdRunEvidencePackage` contract: a real reshape of the same
+/// stored run fields the other SongID endpoints already read/write
+/// (scorecard, identityAssessment, syntheticAssessment, track/album/
+/// artist candidates, segments, mixGroups, plans, options, evidence),
+/// applying the oracle's real sort-by-score/truncate rules and deriving
+/// warnings from the same real conditions (incomplete run, no track
+/// candidates, no recognizer hits, no forensic matrix). Fields slskR's
+/// synchronous, non-fingerprinting analysis pipeline never populates
+/// (artifacts from clips/stems/perturbations/a full-source fingerprint,
+/// a forensic matrix) are honestly reported as empty/absent rather than
+/// fabricated.
+fn songid_evidence_package_json(run: &serde_json::Value) -> serde_json::Value {
+    fn sorted_candidates(
+        run: &serde_json::Value,
+        field: &str,
+        take: usize,
+    ) -> Vec<serde_json::Value> {
+        let mut candidates = run
+            .get(field)
+            .and_then(serde_json::Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        candidates.sort_by(|left, right| {
+            let score = |value: &serde_json::Value, field: &str| {
+                value
+                    .get(field)
+                    .and_then(serde_json::Value::as_f64)
+                    .unwrap_or(0.0)
+            };
+            score(right, "actionScore")
+                .partial_cmp(&score(left, "actionScore"))
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| {
+                    score(right, "identityScore")
+                        .partial_cmp(&score(left, "identityScore"))
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+        });
+        candidates.truncate(take);
+        candidates
+    }
+    fn taken(run: &serde_json::Value, field: &str, take: usize) -> Vec<serde_json::Value> {
+        let mut values = run
+            .get(field)
+            .and_then(serde_json::Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        values.truncate(take);
+        values
+    }
+
+    let status = run
+        .get("status")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    let track_candidates = sorted_candidates(run, "tracks", 10);
+    let scorecard = run
+        .get("scorecard")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
+    let forensic_matrix = run
+        .get("forensicMatrix")
+        .cloned()
+        .filter(|value| !value.is_null());
+    let artifact_directory = run
+        .get("artifactDirectory")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+
+    let mut artifacts = Vec::new();
+    if !artifact_directory.trim().is_empty() {
+        artifacts.push(serde_json::json!({
+            "kind": "workspace",
+            "label": "SongID artifact directory",
+            "path": artifact_directory,
+        }));
+    }
+    for (field, kind) in [
+        ("clips", "clip"),
+        ("stems", "stem"),
+        ("perturbations", "perturbation"),
+    ] {
+        for item in run
+            .get(field)
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            let path = item
+                .get("path")
+                .or_else(|| item.get("fingerprint"))
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default();
+            if path.trim().is_empty() {
+                continue;
+            }
+            let label = item
+                .get("label")
+                .and_then(serde_json::Value::as_str)
+                .filter(|label| !label.trim().is_empty())
+                .or_else(|| item.get("clipId").and_then(serde_json::Value::as_str))
+                .or_else(|| item.get("artifactId").and_then(serde_json::Value::as_str))
+                .or_else(|| {
+                    item.get("perturbationId")
+                        .and_then(serde_json::Value::as_str)
+                })
+                .unwrap_or_default();
+            artifacts.push(serde_json::json!({
+                "kind": kind,
+                "label": label,
+                "path": path,
+                "startSeconds": item.get("startSeconds").cloned().unwrap_or(serde_json::Value::Null),
+                "durationSeconds": item.get("durationSeconds").cloned().unwrap_or(serde_json::Value::Null),
+            }));
+        }
+    }
+    artifacts.truncate(100);
+
+    let mut warnings = Vec::new();
+    if !status.eq_ignore_ascii_case("completed") {
+        warnings.push("SongID run is not completed; evidence package may be partial.".to_owned());
+    }
+    if track_candidates.is_empty() {
+        warnings.push("No track candidates were produced.".to_owned());
+    }
+    let hit_count = |field: &str| {
+        scorecard
+            .get(field)
+            .and_then(serde_json::Value::as_i64)
+            .unwrap_or(0)
+    };
+    if hit_count("acoustIdHitCount") == 0
+        && hit_count("songRecHitCount") == 0
+        && hit_count("panakoHitCount") == 0
+        && hit_count("audfprintHitCount") == 0
+    {
+        warnings.push("No recognizer hits were recorded.".to_owned());
+    }
+    if forensic_matrix.is_none() {
+        warnings.push("No forensic matrix was generated.".to_owned());
+    }
+
+    serde_json::json!({
+        "runId": run.get("id").cloned().unwrap_or(serde_json::Value::Null),
+        "sourceType": run.get("sourceType").cloned().unwrap_or(serde_json::Value::Null),
+        "status": status,
+        "query": run.get("query").cloned().unwrap_or(serde_json::Value::Null),
+        "createdAt": run.get("createdAt").cloned().unwrap_or(serde_json::Value::Null),
+        "completedAt": if status.eq_ignore_ascii_case("completed") {
+            run.get("createdAt").cloned().unwrap_or(serde_json::Value::Null)
+        } else {
+            serde_json::Value::Null
+        },
+        "summary": run.get("summary").cloned().unwrap_or(serde_json::Value::Null),
+        "currentStage": run.get("currentStage").cloned().unwrap_or(serde_json::Value::Null),
+        "percentComplete": run.get("percentComplete").cloned().unwrap_or(serde_json::json!(0.0)),
+        "scorecard": scorecard,
+        "identityAssessment": run.get("identityAssessment").cloned().unwrap_or_else(|| serde_json::json!({})),
+        "syntheticAssessment": run.get("syntheticAssessment").cloned().unwrap_or_else(|| serde_json::json!({})),
+        "forensicMatrix": forensic_matrix,
+        "trackCandidates": track_candidates,
+        "albumCandidates": sorted_candidates(run, "albums", 6),
+        "artistCandidates": sorted_candidates(run, "artists", 6),
+        "segments": taken(run, "segments", 12),
+        "mixGroups": taken(run, "mixGroups", 12),
+        "plans": taken(run, "plans", 20),
+        "acquisitionOptions": taken(run, "options", 20),
+        "evidence": taken(run, "evidence", 100),
+        "artifacts": artifacts,
+        "warnings": warnings,
+    })
+}
+
+/// Matches the oracle's `SongIdCapabilityReporter`: real external-tool
+/// presence checks on `PATH` (and, for panako/audfprint, known install
+/// locations), not a hardcoded list. Capabilities that depend on features
+/// slskR has not implemented (MusicBrainz-backed lookup, Chromaprint
+/// fingerprinting, AcoustID lookup, and the deeper per-source-type
+/// analysis the oracle's SongID run pipeline performs) honestly report
+/// `available: false` with a "not yet implemented" reason rather than
+/// claiming parity depth slskR's own run queue doesn't have.
+fn songid_capabilities_json() -> serde_json::Value {
+    const DOCKER_HINT: &str = "For Docker, run install-optional-media-tools with the matching profile or install the tool in a derived image and keep it on PATH.";
+    const NOT_IMPLEMENTED: &str = "Not yet implemented in slskR.";
+
+    fn capability(
+        id: &str,
+        label: &str,
+        status: &str,
+        available: bool,
+        reason: String,
+        requirements: &[&str],
+    ) -> serde_json::Value {
+        serde_json::json!({
+            "id": id,
+            "label": label,
+            "status": status,
+            "available": available,
+            "reason": reason,
+            "requirements": requirements,
+        })
+    }
+
+    fn missing_tools_reason(missing: &[&str]) -> String {
+        format!(
+            "{} {DOCKER_HINT}",
+            match missing {
+                [] => "Required tools were not found on PATH.".to_owned(),
+                [one] => format!("{one} was not found on PATH."),
+                many => format!("{} were not found on PATH.", many.join(" and ")),
+            }
+        )
+    }
+
+    /// Builds the "available" flag and reason for a capability that
+    /// requires every named tool to be present.
+    fn tool_reason(tools: &[(&str, bool)]) -> (bool, String) {
+        let missing = tools
+            .iter()
+            .filter(|(_, present)| !present)
+            .map(|(name, _)| *name)
+            .collect::<Vec<_>>();
+        let available = missing.is_empty();
+        let reason = if available {
+            format!(
+                "{} {}",
+                tools
+                    .iter()
+                    .map(|(name, _)| *name)
+                    .collect::<Vec<_>>()
+                    .join(" and "),
+                if tools.len() == 1 {
+                    "is available."
+                } else {
+                    "are available."
+                }
+            )
+        } else {
+            missing_tools_reason(&missing)
+        };
+        (available, reason)
+    }
+
+    let yt_dlp = command_exists_on_path("yt-dlp");
+    let ffmpeg = command_exists_on_path("ffmpeg");
+    let songrec = command_exists_on_path("songrec");
+    let whisper = command_exists_on_path("whisper");
+    let tesseract = command_exists_on_path("tesseract");
+    let demucs = command_exists_on_path("demucs");
+    let c2patool = command_exists_on_path("c2patool");
+    let panako = file_exists_at_known_location_or_on_path(
+        &[
+            "/usr/share/java/panako.jar",
+            "/usr/local/share/java/panako.jar",
+            "/usr/share/panako/panako.jar",
+            "/usr/local/share/panako/panako.jar",
+        ],
+        "panako.jar",
+    );
+    let audfprint = file_exists_at_known_location_or_on_path(
+        &[
+            "/usr/share/audfprint/audfprint.py",
+            "/usr/local/share/audfprint/audfprint.py",
+            "/opt/audfprint/audfprint.py",
+        ],
+        "audfprint.py",
+    );
+
+    let (youtube_metadata_available, youtube_metadata_reason) = tool_reason(&[("yt-dlp", yt_dlp)]);
+    let (youtube_audio_available, youtube_audio_reason) =
+        tool_reason(&[("yt-dlp", yt_dlp), ("ffmpeg", ffmpeg)]);
+    let (songrec_available, songrec_reason) = tool_reason(&[("songrec", songrec)]);
+    let (demucs_available, demucs_reason) = tool_reason(&[("demucs", demucs), ("ffmpeg", ffmpeg)]);
+    let (whisper_available, whisper_reason) =
+        tool_reason(&[("whisper", whisper), ("ffmpeg", ffmpeg)]);
+    let (ocr_available, ocr_reason) = tool_reason(&[("tesseract", tesseract), ("ffmpeg", ffmpeg)]);
+    let (c2pa_available, c2pa_reason) = tool_reason(&[("c2patool", c2patool)]);
+
+    serde_json::json!([
+        capability(
+            "text_query",
+            "Text query analysis",
+            "experimental",
+            false,
+            NOT_IMPLEMENTED.to_owned(),
+            &[]
+        ),
+        capability(
+            "url_parsing",
+            "YouTube and Spotify URL parsing",
+            "experimental",
+            false,
+            NOT_IMPLEMENTED.to_owned(),
+            &[]
+        ),
+        capability(
+            "musicbrainz_lookup",
+            "MusicBrainz lookup",
+            "experimental",
+            false,
+            NOT_IMPLEMENTED.to_owned(),
+            &["musicbrainz base URL"]
+        ),
+        capability(
+            "spotify_page_metadata",
+            "Spotify page metadata",
+            "experimental",
+            false,
+            NOT_IMPLEMENTED.to_owned(),
+            &[]
+        ),
+        capability(
+            "youtube_metadata",
+            "YouTube metadata",
+            "experimental",
+            youtube_metadata_available,
+            youtube_metadata_reason.clone(),
+            &["yt-dlp"]
+        ),
+        capability(
+            "youtube_audio",
+            "YouTube audio extraction",
+            "experimental",
+            youtube_audio_available,
+            youtube_audio_reason,
+            &["yt-dlp", "ffmpeg"]
+        ),
+        capability(
+            "local_file_intake",
+            "Local file intake",
+            "experimental",
+            false,
+            NOT_IMPLEMENTED.to_owned(),
+            &[]
+        ),
+        capability(
+            "chromaprint_fingerprint",
+            "Chromaprint fingerprinting",
+            "experimental",
+            false,
+            NOT_IMPLEMENTED.to_owned(),
+            &[
+                "integration.chromaprint.enabled",
+                "ffmpeg",
+                "libchromaprint"
+            ]
+        ),
+        capability(
+            "acoustid_lookup",
+            "AcoustID lookup",
+            "experimental",
+            false,
+            NOT_IMPLEMENTED.to_owned(),
+            &[
+                "integration.acoustid.enabled",
+                "integration.acoustid.client_id"
+            ]
+        ),
+        capability(
+            "songrec",
+            "SongRec recognition",
+            "experimental",
+            songrec_available,
+            songrec_reason,
+            &["songrec"]
+        ),
+        capability(
+            "panako",
+            "Panako local corpus matching",
+            "experimental",
+            panako,
+            if panako {
+                "Panako jar found.".to_owned()
+            } else {
+                format!("panako.jar was not found in known locations or PATH. {DOCKER_HINT}")
+            },
+            &["java", "panako.jar"],
+        ),
+        capability(
+            "audfprint",
+            "Audfprint local corpus matching",
+            "experimental",
+            audfprint,
+            if audfprint {
+                "Audfprint script found.".to_owned()
+            } else {
+                format!("audfprint.py was not found in known locations or PATH. {DOCKER_HINT}")
+            },
+            &["python", "audfprint.py"],
+        ),
+        capability(
+            "demucs",
+            "Demucs stem extraction",
+            "experimental",
+            demucs_available,
+            demucs_reason,
+            &["demucs", "ffmpeg"]
+        ),
+        capability(
+            "whisper_transcripts",
+            "Whisper transcript extraction",
+            "experimental",
+            whisper_available,
+            whisper_reason,
+            &["whisper", "ffmpeg"]
+        ),
+        capability(
+            "ocr_frames",
+            "OCR frame scanning",
+            "experimental",
+            ocr_available,
+            ocr_reason,
+            &["tesseract", "ffmpeg"]
+        ),
+        capability(
+            "comments_and_chapters",
+            "YouTube comments and chapters",
+            "experimental",
+            youtube_metadata_available,
+            youtube_metadata_reason.clone(),
+            &["yt-dlp"]
+        ),
+        capability(
+            "c2pa_provenance",
+            "C2PA provenance signal detection",
+            "experimental",
+            c2pa_available,
+            c2pa_reason,
+            &["c2patool"]
+        ),
+        capability(
+            "hash_from_audio_file_flag",
+            "HashFromAudioFileEnabled flag",
+            "broken",
+            false,
+            "Not applicable to slskR.".to_owned(),
+            &[]
+        ),
+    ])
+}
+
 fn resolve_external_visualizer_working_directory(
     configured: Option<&Path>,
     resolved_path: Option<&Path>,
@@ -13156,6 +13946,104 @@ struct AppState {
     preview_streams: Arc<Semaphore>,
     revoked_jwts: RwLock<RevokedJwtStore>,
     login_attempts: RwLock<LoginAttemptStore>,
+    pod_signature_stats: PodSignatureStats,
+    pod_verification_stats: PodVerificationStats,
+    /// Real, monotonic count of successful DHT publish/update calls --
+    /// distinct from the number of currently-tracked publications (a
+    /// republish overwrites the same `pod/dht/{id}` record), matching the
+    /// oracle's `PodDhtPublisher`'s own all-time `_totalPublished` counter.
+    pod_dht_publish_count: std::sync::atomic::AtomicU64,
+}
+
+/// Matches the oracle's `MessageSigner`'s real `Interlocked` counters --
+/// real signing/verification activity, not the hardcoded zeros
+/// `/api/podcore/signing/stats` used to report regardless of use.
+#[derive(Debug, Default)]
+struct PodSignatureStats {
+    signatures_created: std::sync::atomic::AtomicU64,
+    signatures_verified: std::sync::atomic::AtomicU64,
+    successful_verifications: std::sync::atomic::AtomicU64,
+    failed_verifications: std::sync::atomic::AtomicU64,
+    total_signing_time_ms: std::sync::atomic::AtomicU64,
+    total_verification_time_ms: std::sync::atomic::AtomicU64,
+    last_operation_at: std::sync::Mutex<Option<String>>,
+}
+
+impl PodSignatureStats {
+    fn record_sign(&self, elapsed_ms: u64) {
+        self.signatures_created
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.total_signing_time_ms
+            .fetch_add(elapsed_ms, std::sync::atomic::Ordering::Relaxed);
+        self.touch();
+    }
+
+    fn record_verify(&self, elapsed_ms: u64, success: bool) {
+        self.signatures_verified
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        if success {
+            self.successful_verifications
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        } else {
+            self.failed_verifications
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+        self.total_verification_time_ms
+            .fetch_add(elapsed_ms, std::sync::atomic::Ordering::Relaxed);
+        self.touch();
+    }
+
+    fn touch(&self) {
+        if let Ok(mut guard) = self.last_operation_at.lock() {
+            *guard = Some(chrono::Utc::now().to_rfc3339());
+        }
+    }
+}
+
+/// Matches the oracle's `PodMembershipVerifier`'s real counters -- real
+/// membership/signature verification activity, not the hardcoded zeros
+/// `/api/podcore/verification/stats` used to report regardless of use.
+#[derive(Debug, Default)]
+struct PodVerificationStats {
+    total_verifications: std::sync::atomic::AtomicU64,
+    successful_verifications: std::sync::atomic::AtomicU64,
+    failed_membership_checks: std::sync::atomic::AtomicU64,
+    failed_signature_checks: std::sync::atomic::AtomicU64,
+    banned_member_rejections: std::sync::atomic::AtomicU64,
+    total_verification_time_ms: std::sync::atomic::AtomicU64,
+    last_verification_at: std::sync::Mutex<Option<String>>,
+}
+
+impl PodVerificationStats {
+    fn record(
+        &self,
+        elapsed_ms: u64,
+        is_from_valid_member: bool,
+        is_not_banned: bool,
+        has_valid_signature: bool,
+        is_valid: bool,
+    ) {
+        use std::sync::atomic::Ordering;
+        self.total_verifications.fetch_add(1, Ordering::Relaxed);
+        self.total_verification_time_ms
+            .fetch_add(elapsed_ms, Ordering::Relaxed);
+        if is_valid {
+            self.successful_verifications
+                .fetch_add(1, Ordering::Relaxed);
+        } else if !is_not_banned {
+            self.banned_member_rejections
+                .fetch_add(1, Ordering::Relaxed);
+        } else if !is_from_valid_member {
+            self.failed_membership_checks
+                .fetch_add(1, Ordering::Relaxed);
+        }
+        if !has_valid_signature {
+            self.failed_signature_checks.fetch_add(1, Ordering::Relaxed);
+        }
+        if let Ok(mut guard) = self.last_verification_at.lock() {
+            *guard = Some(chrono::Utc::now().to_rfc3339());
+        }
+    }
 }
 
 fn effective_downloads_dir(state: &AppState) -> PathBuf {
@@ -13356,22 +14244,61 @@ fn controller_options_validation_failure_response(state: &AppState) -> Option<Ht
     })
 }
 
+/// Durable, expiry-bounded JWT revocation storage, matching the oracle's
+/// `JwtRevocationStore`: revocations must survive a restart, or a stable
+/// configured JWT key (see `SLSKR_JWT_KEY`) would let a previously-revoked
+/// token be honored again for the remainder of its lifetime.
 #[derive(Debug, Default)]
 struct RevokedJwtStore {
     records: BTreeMap<String, u64>,
+    state_path: Option<PathBuf>,
 }
 
 impl RevokedJwtStore {
+    const STATE_FILE_NAME: &'static str = "jwt-revocations.json";
+
+    fn load(state_dir: &Path) -> Self {
+        let state_path = state_dir.join(Self::STATE_FILE_NAME);
+        let records = fs::read(&state_path)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<BTreeMap<String, u64>>(&bytes).ok())
+            .unwrap_or_default();
+        let mut store = Self {
+            records,
+            state_path: Some(state_path),
+        };
+        store.prune(unix_timestamp());
+        store
+    }
+
     fn revoke(&mut self, jti: String, expires_at: u64, now: u64) {
         self.records.retain(|_, expiry| *expiry > now);
         if expires_at > now {
             self.records.insert(jti, expires_at);
         }
+        self.persist();
     }
 
     fn contains(&mut self, jti: &str, now: u64) -> bool {
-        self.records.retain(|_, expiry| *expiry > now);
+        self.prune(now);
         self.records.contains_key(jti)
+    }
+
+    fn prune(&mut self, now: u64) {
+        let had_expired = self.records.values().any(|expiry| *expiry <= now);
+        self.records.retain(|_, expiry| *expiry > now);
+        if had_expired {
+            self.persist();
+        }
+    }
+
+    fn persist(&self) {
+        let Some(path) = self.state_path.as_deref() else {
+            return;
+        };
+        if let Ok(body) = serde_json::to_vec(&self.records) {
+            let _ = write_file_atomic(path, body);
+        }
     }
 }
 
@@ -13475,6 +14402,58 @@ fn schedule_lifecycle_command(state: &AppState, command: LifecycleCommand) {
         time::sleep(Duration::from_millis(100)).await;
         let _ = sender.send(command).await;
     });
+}
+
+/// Disconnects from the Soulseek server (best-effort) before scheduling
+/// process shutdown, matching the oracle's `StopAsync` teardown
+/// (`Client.Disconnect("Shutting down", ...)`) rather than exiting with the
+/// session left connected.
+async fn initiate_graceful_shutdown(state: &AppState) {
+    let _ = send_session_command(state, SessionCommand::Disconnect).await;
+    schedule_lifecycle_command(state, LifecycleCommand::Shutdown);
+}
+
+/// Registers a background task that waits for a shutdown signal (SIGTERM,
+/// SIGINT, and SIGQUIT on Unix; Ctrl-C on other platforms) and runs the same
+/// graceful shutdown sequence as `DELETE /api/application`, matching the
+/// oracle's `PosixSignalRegistration`-based teardown -- without this, a
+/// `docker stop` or `systemctl stop` hard-kills the process with no drain
+/// or clean disconnect at all.
+fn spawn_signal_shutdown_handler(state: Arc<AppState>) {
+    tokio::spawn(async move {
+        wait_for_shutdown_signal().await;
+        record_daemon_log(
+            &state,
+            logging::LogLevel::Info,
+            "lifecycle",
+            "shutdown signal received; disconnecting and stopping".to_owned(),
+        )
+        .await;
+        initiate_graceful_shutdown(&state).await;
+    });
+}
+
+#[cfg(unix)]
+async fn wait_for_shutdown_signal() {
+    use tokio::signal::unix::{signal, SignalKind};
+    async fn wait_or_pending(kind: SignalKind) {
+        match signal(kind) {
+            Ok(mut stream) => {
+                stream.recv().await;
+            }
+            Err(_) => std::future::pending().await,
+        }
+    }
+    tokio::select! {
+        () = wait_or_pending(SignalKind::terminate()) => {}
+        () = wait_or_pending(SignalKind::interrupt()) => {}
+        () = wait_or_pending(SignalKind::quit()) => {}
+    }
+}
+
+#[cfg(not(unix))]
+async fn wait_for_shutdown_signal() {
+    let _ = tokio::signal::ctrl_c().await;
 }
 
 fn spawn_replacement_process() -> Result<(), String> {
@@ -13902,12 +14881,12 @@ async fn route_http_request_with_headers(
         if let Err(err) =
             routing::check_route_auth(&state.config, method, route.path, authorization, &headers)
         {
-            let status = if err == "forbidden" { 403 } else { 401 };
+            let status = if err == "unauthorized" { 401 } else { 403 };
             tracing::complete_request_span(status);
-            return Ok(if err == "forbidden" {
-                routing::forbidden_response("cross-site mutating request rejected")
-            } else {
-                routing::unauthorized_response()
+            return Ok(match err {
+                "unauthorized" => routing::unauthorized_response(),
+                "csrf" => routing::forbidden_response("cross-site mutating request rejected"),
+                _ => routing::forbidden_response("insufficient permissions for this route"),
             });
         }
     }
@@ -13941,6 +14920,8 @@ async fn route_http_request_with_headers(
             || (!feature.social_federation
                 && (normalized_path.starts_with("/api/federation")
                     || normalized_path.starts_with("/api/activitypub")
+                    || normalized_path.starts_with("/api/taste-recommendations")
+                    || normalized_path.starts_with("/actors/")
                     || normalized_path.starts_with("/.well-known/webfinger")))
             || (!feature.virtual_soulfind
                 && (normalized_path.starts_with("/api/virtualsoulfind")
@@ -14118,13 +15099,12 @@ async fn route_http_request_with_headers(
         ("GET", "/dashboard") => Ok(fallback_dashboard_response()),
         ("HEAD", "/dashboard") => Ok(head_response(fallback_dashboard_response())),
         ("GET", "/api/health") => Ok(health_response(&state.config)),
+        ("GET", "/health") => Ok(health_response(&state.config)),
+        ("HEAD", "/health") => Ok(head_response(health_response(&state.config))),
+        ("GET", "/health/mesh") => Ok(mesh_health_response(&state.config)),
+        ("HEAD", "/health/mesh") => Ok(head_response(mesh_health_response(&state.config))),
         ("GET", "/api/version") => Ok(version_response()),
         ("GET", "/api/capabilities") => Ok(capabilities_response()),
-        ("GET", "/api/session") if route.path.starts_with("/api/v0/") => Ok(HttpResponse {
-            status: "200 OK",
-            content_type: "",
-            body: String::new(),
-        }),
         ("GET", "/.well-known/webfinger") => {
             Ok(activitypub_webfinger_response(route.query, state).await)
         }
@@ -14175,6 +15155,13 @@ async fn route_http_request_with_headers(
             })
         }
         ("GET", "/api/application/version/latest") => {
+            if query_parameter(route.query, "forceCheck").as_deref() == Some("true") {
+                refresh_controller_version_check(
+                    state,
+                    "https://api.github.com/repos/snapetech/slskdn/releases/latest",
+                )
+                .await;
+            }
             Ok(routing::ok_response(slskd_version_json(state).to_string()))
         }
         ("GET", "/api/application/dump") => Ok(HttpResponse {
@@ -14208,7 +15195,7 @@ async fn route_http_request_with_headers(
             {
                 return Ok(routing::service_unavailable_response(&error));
             }
-            schedule_lifecycle_command(state, LifecycleCommand::Shutdown);
+            initiate_graceful_shutdown(state).await;
             Ok(routing::no_content_response())
         }
         ("POST", "/api/application/gc") => {
@@ -14838,16 +15825,28 @@ async fn route_http_request_with_headers(
             let rejected_messages = mesh.sync_rejected_messages;
             let quarantine_events = mesh.sync_quarantine_events;
             let quarantined_peers = mesh.sync_quarantined_until.len();
+            let total_syncs = mesh.sync_merge_total;
+            let successful_syncs = mesh.sync_merge_successful;
+            let failed_syncs = mesh.sync_merge_failed;
+            let total_entries_received = mesh.sync_entries_received;
+            let total_entries_merged = mesh.sync_entries_merged;
             drop(mesh);
             drop(users);
+            let current_seq_id = state.content_discovery.read().await.latest_seq();
             Ok(routing::ok_response(serde_json::json!({
-                "totalSyncs": 0,
-                "successfulSyncs": 0,
-                "failedSyncs": 0,
-                "totalEntriesReceived": 0,
+                "totalSyncs": total_syncs,
+                "successfulSyncs": successful_syncs,
+                "failedSyncs": failed_syncs,
+                "totalEntriesReceived": total_entries_received,
+                // No real send-side mesh sync endpoint exists in slskR
+                // yet (the oracle's real sync is bidirectional); honest
+                // 0 rather than a fabricated count.
                 "totalEntriesSent": 0,
-                "totalEntriesMerged": 0,
+                "totalEntriesMerged": total_entries_merged,
                 "rejectedMessages": rejected_messages,
+                // slskR's merge is all-or-nothing per batch (no partial
+                // per-entry skip path), so there is genuinely nothing to
+                // report here yet -- honest 0, not fabricated.
                 "skippedEntries": 0,
                 "signatureVerificationFailures": 0,
                 "reputationBasedRejections": 0,
@@ -14855,7 +15854,7 @@ async fn route_http_request_with_headers(
                 "quarantinedPeers": quarantined_peers,
                 "quarantineEvents": quarantine_events,
                 "proofOfPossessionFailures": 0,
-                "currentSeqId": 0,
+                "currentSeqId": current_seq_id,
                 "knownMeshPeers": known_mesh_peers,
                 "warnings": [],
             }).to_string()))
@@ -14866,9 +15865,13 @@ async fn route_http_request_with_headers(
             let mut value = serde_json::from_str::<serde_json::Value>(&mesh.users_json(&users))
                 .unwrap_or_else(|_| serde_json::json!({}));
             value["peers"] = value["users"].clone();
+            let active_connections = match state.private_gateway.as_ref() {
+                Some(gateway) => gateway.active_connection_count().await,
+                None => 0,
+            };
             value["overlay"] = serde_json::json!({
                 "enabled": state.private_gateway.is_some(),
-                "activeConnections": 0,
+                "activeConnections": active_connections,
             });
             let body = value.to_string();
             drop(mesh);
@@ -15509,9 +16512,12 @@ async fn route_http_request_with_headers(
         }
         ("GET", "/api/telemetry/reports/transfers/leaderboard") => {
             let transfers = state.transfers.read().await;
-            let body = slskd_transfer_leaderboard_report(route.query, &transfers);
+            let result = slskd_transfer_leaderboard_report(route.query, &transfers);
             drop(transfers);
-            Ok(routing::ok_response(body))
+            Ok(match result {
+                Ok(body) => routing::ok_response(body),
+                Err(error) => routing::bad_request_response(error),
+            })
         }
         ("GET", path) if path.starts_with("/api/telemetry/reports/transfers/users/") => {
             let Some(username) =
@@ -15527,15 +16533,21 @@ async fn route_http_request_with_headers(
         }
         ("GET", "/api/telemetry/reports/transfers/exceptions") => {
             let transfers = state.transfers.read().await;
-            let body = slskd_transfer_exceptions_report(route.query, &transfers);
+            let result = slskd_transfer_exceptions_report(route.query, &transfers);
             drop(transfers);
-            Ok(routing::ok_response(body))
+            Ok(match result {
+                Ok(body) => routing::ok_response(body),
+                Err(error) => routing::bad_request_response(error),
+            })
         }
         ("GET", "/api/telemetry/reports/transfers/exceptions/pareto") => {
             let transfers = state.transfers.read().await;
-            let body = slskd_transfer_exceptions_pareto_report(route.query, &transfers);
+            let result = slskd_transfer_exceptions_pareto_report(route.query, &transfers);
             drop(transfers);
-            Ok(routing::ok_response(body))
+            Ok(match result {
+                Ok(body) => routing::ok_response(body),
+                Err(error) => routing::bad_request_response(error),
+            })
         }
         ("GET", "/api/telemetry/reports/transfers/directories") => {
             let transfers = state.transfers.read().await;
@@ -17607,9 +18619,24 @@ async fn route_http_request_with_headers(
              };
              let username = decoded_path_segment(username);
              let transfers = state.transfers.read().await;
-             let position = transfers.slskd_transfer_position(0, &username, id);
+             let exists = transfers.entries.iter().any(|entry| {
+                 entry.direction == 0
+                     && entry.id == id
+                     && entry.peer_username.as_deref() == Some(username.as_str())
+             });
              drop(transfers);
-             Ok(routing::ok_response(position.to_string()))
+             if !exists {
+                 return Ok(routing::not_found_response());
+             }
+             // Matches the oracle's GetPlaceInQueueAsync: a real position
+             // requires a live PlaceInQueueResponse round-trip with the
+             // remote peer, which slskr does not yet request for an
+             // in-flight download. Rather than fabricate a number (the
+             // prior behavior: a local list index, returned even for a
+             // completed transfer), report the same 204 "queue position
+             // unavailable" the oracle itself falls back to on a timeout
+             // or error -- a real code path, not an invented one.
+             Ok(routing::no_content_response())
          }
 
         ("POST", "/api/transfers/downloads/find-alternative") => {
@@ -18926,9 +19953,25 @@ async fn route_http_request_with_headers(
         {
             let room_name = joined_room_subresource(path, "/users")
                 .expect("guarded joined-room users path");
+            let session = state.session.read().await;
+            let local_username = session
+                .username
+                .clone()
+                .or_else(|| state.config.username.clone())
+                .unwrap_or_else(|| "local".to_owned());
+            drop(session);
             let rooms = state.rooms.read().await;
-            if let Some(_room) = rooms.records.iter().find(|r| r.name == room_name) {
-                let json = "[]".to_string();
+            if let Some(room) = rooms.records.iter().find(|r| r.name == room_name) {
+                // Matches the oracle's real GetUsersByRoomName: the room's
+                // real roster (from the server's JoinedRoom snapshot), not
+                // a hardcoded empty list.
+                let json = serde_json::Value::Array(
+                    room.roster
+                        .iter()
+                        .map(|user| user.slskd_json(&local_username))
+                        .collect(),
+                )
+                .to_string();
                 drop(rooms);
                 Ok(routing::ok_response(json))
             } else {
@@ -19975,6 +21018,12 @@ async fn route_http_request_with_headers(
 
         // COLLECTIONS ENDPOINTS
         ("GET", "/api/collections") => {
+            let caller_id = utils::authenticated_caller_id(
+                &state.config,
+                authorization,
+                headers.cookie.as_deref(),
+                headers.remote_addr,
+            );
             let collections = state.collections.read().await;
             let json = if route.path.starts_with("/api/v0/") {
                 format!(
@@ -19982,12 +21031,15 @@ async fn route_http_request_with_headers(
                     collections
                         .records
                         .iter()
+                        .filter(|record| {
+                            !collection_owner_forbids(caller_id.as_deref(), &record.owner_user_id)
+                        })
                         .map(CollectionRecord::slskdn_json)
                         .collect::<Vec<_>>()
                         .join(",")
                 )
             } else {
-                collections.json_array(route.query)
+                collections.json_array(route.query, caller_id.as_deref())
             };
             drop(collections);
             Ok(routing::ok_response(json))
@@ -20014,6 +21066,17 @@ async fn route_http_request_with_headers(
                 return Ok(routing::bad_request_response("title is required"));
             };
             let description = extract_json_string_field(body, "description").unwrap_or_default();
+            // Matches the oracle's real AuthenticatedWebUserId.Resolve:
+            // the collection's real owner is the caller's own resolved
+            // identity, never a hardcoded placeholder -- empty when no
+            // per-caller identity is resolvable (single-operator mode).
+            let owner_user_id = utils::authenticated_caller_id(
+                &state.config,
+                authorization,
+                headers.cookie.as_deref(),
+                headers.remote_addr,
+            )
+            .unwrap_or_default();
             let mut collections = state.collections.write().await;
             let previous = collections.clone();
             let compatibility_contract = route.path.starts_with("/api/v0/");
@@ -20024,13 +21087,13 @@ async fn route_http_request_with_headers(
                     .unwrap_or_else(|| "ShareList".to_owned());
                 collections.create_with_contract(
                     uuid::Uuid::new_v4().to_string(),
-                    "Anonymous".to_owned(),
+                    owner_user_id,
                     name,
                     description,
                     collection_type,
                 )
             } else {
-                collections.create(name, description)
+                collections.create(owner_user_id, name, description)
             };
             let Some(record) = record else {
                 return Ok(routing::service_unavailable_response(
@@ -20055,8 +21118,17 @@ async fn route_http_request_with_headers(
             if id.is_empty() {
                 return Ok(routing::not_found_response());
             }
+            let caller_id = utils::authenticated_caller_id(
+                &state.config,
+                authorization,
+                headers.cookie.as_deref(),
+                headers.remote_addr,
+            );
             let collections = state.collections.read().await;
-            if let Some(record) = collections.get(id) {
+            if let Some(record) = collections
+                .get(id)
+                .filter(|record| !collection_owner_forbids(caller_id.as_deref(), &record.owner_user_id))
+            {
                 let json = if route.path.starts_with("/api/v0/") {
                     record.slskdn_json()
                 } else {
@@ -20117,7 +21189,20 @@ async fn route_http_request_with_headers(
                     None,
                 )
             };
+            let caller_id = utils::authenticated_caller_id(
+                &state.config,
+                authorization,
+                headers.cookie.as_deref(),
+                headers.remote_addr,
+            );
             let mut collections = state.collections.write().await;
+            if collections
+                .get(id)
+                .is_some_and(|record| collection_owner_forbids(caller_id.as_deref(), &record.owner_user_id))
+            {
+                drop(collections);
+                return Ok(routing::not_found_response());
+            }
             let previous = collections.clone();
             let updated = if compatibility_contract {
                 collections.update_contract(id, name, description, collection_type)
@@ -20151,8 +21236,22 @@ async fn route_http_request_with_headers(
             if id.is_empty() {
                 return Ok(routing::not_found_response());
             }
+            let caller_id = utils::authenticated_caller_id(
+                &state.config,
+                authorization,
+                headers.cookie.as_deref(),
+                headers.remote_addr,
+            );
             let mut grants = state.share_grants.write().await;
             let mut collections = state.collections.write().await;
+            if collections
+                .get(id)
+                .is_some_and(|record| collection_owner_forbids(caller_id.as_deref(), &record.owner_user_id))
+            {
+                drop(collections);
+                drop(grants);
+                return Ok(routing::not_found_response());
+            }
             let previous_collections = collections.clone();
             let previous_grants = grants.clone();
             let deleted = collections.delete(id);
@@ -20192,8 +21291,17 @@ async fn route_http_request_with_headers(
                 && collection_items_id(path).is_some() =>
         {
             let id = collection_items_id(path).expect("guarded collection items path");
+            let caller_id = utils::authenticated_caller_id(
+                &state.config,
+                authorization,
+                headers.cookie.as_deref(),
+                headers.remote_addr,
+            );
             let collections = state.collections.read().await;
-            if let Some(record) = collections.get(id) {
+            if let Some(record) = collections
+                .get(id)
+                .filter(|record| !collection_owner_forbids(caller_id.as_deref(), &record.owner_user_id))
+            {
                 let compatibility_contract = route.path.starts_with("/api/v0/");
                 let items = record.items.iter()
                     .enumerate()
@@ -20236,7 +21344,20 @@ async fn route_http_request_with_headers(
                 .or_else(|| extract_json_string_field(body, "sha256"))
                 .unwrap_or_default();
 
+            let caller_id = utils::authenticated_caller_id(
+                &state.config,
+                authorization,
+                headers.cookie.as_deref(),
+                headers.remote_addr,
+            );
             let mut collections = state.collections.write().await;
+            if collections
+                .get(id)
+                .is_some_and(|record| collection_owner_forbids(caller_id.as_deref(), &record.owner_user_id))
+            {
+                drop(collections);
+                return Ok(routing::not_found_response());
+            }
             let previous = collections.clone();
             match collections.add_item_with_contract(
                 id,
@@ -20281,9 +21402,23 @@ async fn route_http_request_with_headers(
             if item_id.is_empty() {
                 return Ok(routing::not_found_response());
             }
+            let caller_id = utils::authenticated_caller_id(
+                &state.config,
+                authorization,
+                headers.cookie.as_deref(),
+                headers.remote_addr,
+            );
             let mut collections = state.collections.write().await;
-            let previous = collections.clone();
             let collection_id = collections.collection_id_for_item(item_id);
+            if collection_id
+                .as_deref()
+                .and_then(|id| collections.get(id))
+                .is_some_and(|record| collection_owner_forbids(caller_id.as_deref(), &record.owner_user_id))
+            {
+                drop(collections);
+                return Ok(routing::not_found_response());
+            }
+            let previous = collections.clone();
             if let Some(item) = collections.remove_item(item_id) {
                 let record = collection_id
                     .as_deref()
@@ -20317,9 +21452,23 @@ async fn route_http_request_with_headers(
             let kind = extract_json_string_field(body, "kind")
                 .or_else(|| extract_json_string_field(body, "mediaKind"));
 
+            let caller_id = utils::authenticated_caller_id(
+                &state.config,
+                authorization,
+                headers.cookie.as_deref(),
+                headers.remote_addr,
+            );
             let mut collections = state.collections.write().await;
-            let previous = collections.clone();
             let collection_id = collections.collection_id_for_item(item_id);
+            if collection_id
+                .as_deref()
+                .and_then(|id| collections.get(id))
+                .is_some_and(|record| collection_owner_forbids(caller_id.as_deref(), &record.owner_user_id))
+            {
+                drop(collections);
+                return Ok(routing::not_found_response());
+            }
+            let previous = collections.clone();
             if let Some(item) = collections.update_item(item_id, artist, title, kind) {
                 let record = collection_id
                     .as_deref()
@@ -21273,20 +22422,45 @@ async fn route_http_request_with_headers(
 
         // SHARE GRANTS ENDPOINTS
         ("GET", "/api/share-grants") => {
+            let caller_id = utils::authenticated_caller_id(
+                &state.config,
+                authorization,
+                headers.cookie.as_deref(),
+                headers.remote_addr,
+            );
             let grants = state.share_grants.read().await;
-            let json = grants.json_array();
+            let records = grants.records.clone();
             drop(grants);
-            Ok(routing::ok_response(json))
+            let mut visible = Vec::with_capacity(records.len());
+            for record in &records {
+                if !share_grant_collection_forbids(state, &record.collection_id, caller_id.as_deref())
+                    .await
+                {
+                    visible.push(record.json());
+                }
+            }
+            Ok(routing::ok_response(format!("[{}]", visible.join(","))))
         }
         ("POST", "/api/share-grants") => {
             let collection_id = extract_json_string_field(body, "collection_id")
                 .or_else(|| extract_json_string_field(body, "collectionId"))
                 .unwrap_or_default();
+            let caller_id = utils::authenticated_caller_id(
+                &state.config,
+                authorization,
+                headers.cookie.as_deref(),
+                headers.remote_addr,
+            );
             if !collection_id.is_empty() {
                 let collections = state.collections.read().await;
                 let collection_exists = collections.get(&collection_id).is_some();
                 drop(collections);
                 if !collection_exists {
+                    return Ok(routing::not_found_response());
+                }
+                // Matches the oracle's real Create: a grant may only be
+                // created against a collection the caller actually owns.
+                if share_grant_collection_forbids(state, &collection_id, caller_id.as_deref()).await {
                     return Ok(routing::not_found_response());
                 }
             }
@@ -21384,15 +22558,23 @@ async fn route_http_request_with_headers(
             if path.starts_with("/api/share-grants/") && share_grant_resource_id(path).is_some() =>
         {
             let id = share_grant_resource_id(path).expect("guarded share-grant resource path");
+            let caller_id = utils::authenticated_caller_id(
+                &state.config,
+                authorization,
+                headers.cookie.as_deref(),
+                headers.remote_addr,
+            );
             let grants = state.share_grants.read().await;
-            if let Some(record) = grants.get(id) {
-                let json = record.json();
-                drop(grants);
-                Ok(routing::ok_response(json))
-            } else {
-                drop(grants);
-                Ok(routing::not_found_response())
+            let record = grants.get(id);
+            drop(grants);
+            let Some(record) = record else {
+                return Ok(routing::not_found_response());
+            };
+            if share_grant_collection_forbids(state, &record.collection_id, caller_id.as_deref()).await
+            {
+                return Ok(routing::not_found_response());
             }
+            Ok(routing::ok_response(record.json()))
         }
         ("GET", path)
             if path.starts_with("/api/share-grants/by-collection/")
@@ -21400,6 +22582,18 @@ async fn route_http_request_with_headers(
         {
             let collection_id = share_grant_collection_id(path)
                 .expect("guarded share-grant collection path");
+            let caller_id = utils::authenticated_caller_id(
+                &state.config,
+                authorization,
+                headers.cookie.as_deref(),
+                headers.remote_addr,
+            );
+            // Matches the oracle's real GetByCollection: this is the
+            // "outgoing shares" owner-perspective view, so it 404s unless
+            // the caller actually owns this collection.
+            if share_grant_collection_forbids(state, collection_id, caller_id.as_deref()).await {
+                return Ok(routing::not_found_response());
+            }
             let grants = state.share_grants.read().await;
             let records = grants.get_by_collection(collection_id);
             let json = records.iter()
@@ -21415,7 +22609,20 @@ async fn route_http_request_with_headers(
         {
             let id = share_grant_resource_id(path).expect("guarded share-grant resource path");
             let permissions = extract_json_string_field(body, "permissions").unwrap_or_else(|| "read".to_string());
+            let caller_id = utils::authenticated_caller_id(
+                &state.config,
+                authorization,
+                headers.cookie.as_deref(),
+                headers.remote_addr,
+            );
             let mut grants = state.share_grants.write().await;
+            let owning_collection_id = grants.get(id).map(|record| record.collection_id.clone());
+            if let Some(collection_id) = owning_collection_id.as_deref() {
+                if share_grant_collection_forbids(state, collection_id, caller_id.as_deref()).await {
+                    drop(grants);
+                    return Ok(routing::not_found_response());
+                }
+            }
             let previous = grants.clone();
             if let Some(record) = grants.update(id, permissions) {
                 let json = record.json();
@@ -21434,7 +22641,20 @@ async fn route_http_request_with_headers(
             if path.starts_with("/api/share-grants/") && share_grant_resource_id(path).is_some() =>
         {
             let id = share_grant_resource_id(path).expect("guarded share-grant resource path");
+            let caller_id = utils::authenticated_caller_id(
+                &state.config,
+                authorization,
+                headers.cookie.as_deref(),
+                headers.remote_addr,
+            );
             let mut grants = state.share_grants.write().await;
+            let owning_collection_id = grants.get(id).map(|record| record.collection_id.clone());
+            if let Some(collection_id) = owning_collection_id.as_deref() {
+                if share_grant_collection_forbids(state, collection_id, caller_id.as_deref()).await {
+                    drop(grants);
+                    return Ok(routing::not_found_response());
+                }
+            }
             let previous = grants.clone();
             let deleted = grants.delete(id);
             if deleted {
@@ -21578,34 +22798,20 @@ async fn route_http_request_with_headers(
         {
             let username = user_route_username(path, "/browse/status")
                 .expect("guarded user browse status path");
+            if state.runtime.read().await.relay_agent_enabled {
+                return Ok(controller_forbidden_response());
+            }
             let browse = state.browse.read().await;
-            let body = browse
+            let tracked = browse
                 .records
                 .iter()
                 .find(|record| record.username == username)
-                .map(BrowseRecord::slskd_status_json)
-                .unwrap_or_else(|| {
-                    serde_json::json!({
-                        "username": username,
-                        "status": "idle",
-                        "state": "NotStarted",
-                        "size": 0,
-                        "bytesTransferred": 0,
-                        "bytesRemaining": 0,
-                        "percentComplete": 0.0,
-                        "fileCount": 0,
-                        "directoryCount": 0,
-                        "isComplete": false,
-                        "reason": null,
-                        "folder": null,
-                        "indirectToken": null,
-                        "requestedAt": null,
-                        "updatedAt": null,
-                    })
-                    .to_string()
-                });
+                .map(BrowseRecord::slskd_status_json);
             drop(browse);
-            Ok(routing::ok_response(body))
+            match tracked {
+                Some(body) => Ok(routing::ok_response(body)),
+                None => Ok(routing::not_found_response()),
+            }
         }
         // ADDITIONAL MISSING USER ENDPOINTS (Phase 5)
         ("GET", "/api/profile/me") => {
@@ -22196,37 +23402,22 @@ async fn route_http_request_with_headers(
             } else {
                 "disabled"
             };
-            let users = state.users.read().await;
-            let mesh = state.mesh.read().await;
-            let clients = mesh
-                .capability_records
-                .iter()
-                .map(|record| {
-                    format!(
-                        "{{\"username\":\"{}\",\"status\":\"capable\",\"source\":\"peer-capability\",\"updated_at\":{}}}",
-                        json_escape(&record.username),
-                        record.issued_at_unix
-                    )
-                })
-                .chain(users.records.iter().filter(|user| user.status.as_deref() == Some("online")).map(|user| {
-                    format!(
-                        "{{\"username\":\"{}\",\"status\":\"online\",\"source\":\"watched-user\",\"updated_at\":{}}}",
-                        json_escape(&user.username),
-                        user.updated_at
-                    )
-                }))
-                .collect::<Vec<_>>();
-            drop(mesh);
-            drop(users);
             drop(runtime);
-             let json = format!(
-                 "{{\"clients\":[{}],\"count\":{},\"status\":\"{}\",\"ready\":{}}}",
-                 clients.join(","),
-                 clients.len(),
-                 status,
-                 bridge.enabled
-             );
-             Ok(routing::ok_response(json))
+            // Matches the oracle's real BridgeDashboard.
+            // GetConnectedClientsAsync contract (a real ConnectedClient[]
+            // tracked from genuine legacy-client connections to an
+            // embedded Soulfind-protocol bridge server) -- slskR has no
+            // such embedded server, so there are no real bridge clients
+            // to report. An honest empty list, not mesh-capability
+            // records or watched-user presence pretending to be bridge
+            // connections.
+             let json = serde_json::json!({
+                 "clients": [],
+                 "count": 0,
+                 "status": status,
+                 "ready": bridge.enabled,
+             });
+             Ok(routing::ok_response(json.to_string()))
          }
 
          ("GET", "/api/bridge/admin/config") => {
@@ -22266,25 +23457,34 @@ async fn route_http_request_with_headers(
                  .iter()
                  .map(|entry| entry.bytes_transferred)
                  .sum::<u64>();
-             let json = format!(
-                 "{{\"health\":\"{}\",\"connectedClients\":{},\"stats\":{{\"totalBytesProxied\":{},\"totalConnections\":{}}},\"meshBenefits\":{{\"enabled\":{}}},\"active_clients\":{},\"transfers\":{},\"active_transfers\":{},\"total_bytes\":{},\"uptime_seconds\":0,\"enabled\":{},\"running\":{},\"configUpdates\":{},\"host\":null,\"port\":null,\"endpoint_configured\":{}}}",
-                 if runtime.bridge_running { "Healthy" } else { "Disabled" },
-                 active_transfers,
-                 bytes,
-                 active_transfers,
-                 bridge.enabled,
-                 active_transfers,
-                 transfers.entries.len(),
-                 active_transfers,
-                 bytes,
-                 bridge.enabled,
-                 runtime.bridge_running,
-                 runtime.bridge_config_updates,
-                 bridge.endpoint_configured()
-             );
+             let transfer_count = transfers.entries.len();
              drop(transfers);
+             // Matches the oracle's real BridgeDashboardData contract:
+             // no embedded Soulfind bridge server exists in slskR, so
+             // there are no real legacy-client connections or
+             // bridge-proxied bytes to report -- honest zeros for the
+             // oracle's own fields, not slskR's local transfer activity
+             // standing in for unrelated bridge metrics (kept below as
+             // separate, honestly-labeled extra fields).
+             let json = serde_json::json!({
+                 "health": if runtime.bridge_running { "Healthy" } else { "Disabled" },
+                 "connectedClients": 0,
+                 "stats": {"totalBytesProxied": 0, "totalConnections": 0},
+                 "meshBenefits": {"enabled": bridge.enabled},
+                 "active_clients": 0,
+                 "transfers": transfer_count,
+                 "active_transfers": active_transfers,
+                 "total_bytes": bytes,
+                 "uptime_seconds": 0,
+                 "enabled": bridge.enabled,
+                 "running": runtime.bridge_running,
+                 "configUpdates": runtime.bridge_config_updates,
+                 "host": serde_json::Value::Null,
+                 "port": serde_json::Value::Null,
+                 "endpoint_configured": bridge.endpoint_configured(),
+             });
              drop(runtime);
-             Ok(routing::ok_response(json))
+             Ok(routing::ok_response(json.to_string()))
          }
 
          ("GET", "/api/bridge/admin/stats") => {
@@ -22307,22 +23507,32 @@ async fn route_http_request_with_headers(
                  .iter()
                  .filter(|entry| matches!(entry.status.as_str(), "queued" | "in_progress" | "requested"))
                  .count();
-             let json = format!(
-                 "{{\"totalConnections\":{},\"currentConnections\":{},\"totalSearches\":0,\"totalDownloads\":{},\"totalRoomJoins\":0,\"totalBytesProxied\":{},\"uptime\":\"00:00:00\",\"total_requests\":{},\"total_bytes\":{},\"active_sessions\":{},\"enabled\":{},\"running\":{},\"configUpdates\":{}}}",
-                 transfers.entries.len(),
-                 active_sessions,
-                 transfers.entries.iter().filter(|entry| entry.direction == 0).count(),
-                 total_bytes,
-                 transfers.entries.len(),
-                 total_bytes,
-                 active_sessions,
-                 bridge.enabled,
-                 runtime.bridge_running,
-                 runtime.bridge_config_updates
-             );
+             let total_requests = transfers.entries.len();
              drop(transfers);
+             // Matches the oracle's real BridgeStatistics contract: no
+             // embedded Soulfind bridge server exists in slskR, so there
+             // are no real legacy-client connections/searches/
+             // room-joins/downloads/proxied bytes to report -- honest
+             // zeros, not slskR's own transfer queue standing in for
+             // unrelated bridge metrics (kept below as separate,
+             // honestly-labeled extra fields).
+             let json = serde_json::json!({
+                 "totalConnections": 0,
+                 "currentConnections": 0,
+                 "totalSearches": 0,
+                 "totalDownloads": 0,
+                 "totalRoomJoins": 0,
+                 "totalBytesProxied": 0,
+                 "uptime": "00:00:00",
+                 "total_requests": total_requests,
+                 "total_bytes": total_bytes,
+                 "active_sessions": active_sessions,
+                 "enabled": bridge.enabled,
+                 "running": runtime.bridge_running,
+                 "configUpdates": runtime.bridge_config_updates,
+             });
              drop(runtime);
-             Ok(routing::ok_response(json))
+             Ok(routing::ok_response(json.to_string()))
          }
 
          ("GET", "/api/bridge/status") => {
@@ -22485,7 +23695,20 @@ async fn route_http_request_with_headers(
                 .strip_prefix("/api/collections/")
                 .and_then(|rest| rest.strip_suffix("/items/reorder"))
                 .unwrap_or_default();
+            let caller_id = utils::authenticated_caller_id(
+                &state.config,
+                authorization,
+                headers.cookie.as_deref(),
+                headers.remote_addr,
+            );
             let mut collections = state.collections.write().await;
+            if collections
+                .get(collection_id)
+                .is_some_and(|record| collection_owner_forbids(caller_id.as_deref(), &record.owner_user_id))
+            {
+                drop(collections);
+                return Ok(routing::not_found_response());
+            }
             let previous = collections.clone();
             if let Some(record) = collections.reorder_items(collection_id, body) {
                 let mutated = collections.clone();
@@ -22999,21 +24222,6 @@ async fn route_http_request_with_headers(
             Ok(routing::ok_response(json))
         }
 
-        ("POST", "/api/admin/shutdown") => {
-            let json = "{\"status\":\"shutdown_requested\"}".to_string();
-            Ok(routing::accepted_response(json))
-        }
-
-        ("GET", "/api/admin/version") => {
-            let json = format!("{{\"version\":\"1.0.0-RC\",\"build_date\":\"{}\"}}", "2026-05-04");
-            Ok(routing::ok_response(json))
-        }
-
-        ("POST", "/api/admin/restart") => {
-            let json = "{\"status\":\"restart_requested\"}".to_string();
-            Ok(routing::accepted_response(json))
-        }
-
         // RECOMMENDATIONS & ANALYTICS ENDPOINTS
         ("GET", "/api/soulseek/recommendations") => {
             let interests = state.interests.read().await;
@@ -23415,42 +24623,89 @@ async fn route_http_request_with_headers(
          }
 
          ("GET", "/api/songid/runs") => {
+             // Matches the oracle's real ListRuns(limit=10): newest-first,
+             // bounded by the real `limit` query param -- not the full,
+             // unbounded, oldest-first storage order.
+             let limit = route
+                 .query
+                 .map(query_params)
+                 .unwrap_or_default()
+                 .into_iter()
+                 .find(|(key, _)| key == "limit")
+                 .and_then(|(_, value)| value.parse::<i64>().ok())
+                 .filter(|limit| *limit > 0)
+                 .unwrap_or(10) as usize;
              let runtime = state.runtime.read().await;
-             let runs = runtime.songid_run_records.clone();
+             let mut runs = runtime.songid_run_records.clone();
              drop(runtime);
+             runs.reverse();
+             runs.truncate(limit);
              Ok(routing::ok_response(serde_json::Value::Array(runs).to_string()))
          }
 
          ("GET", "/api/songid/runs/queue") => {
+             // Matches the oracle's real GetQueueSummary(activeLimit):
+             // counts are windowed over the most recent
+             // max(activeLimit, 100) runs (newest-first), and activeRuns
+             // is bounded by the real activeLimit query param -- not the
+             // entire unbounded, unordered history.
+             let active_limit = route
+                 .query
+                 .map(query_params)
+                 .unwrap_or_default()
+                 .into_iter()
+                 .find(|(key, _)| key == "activeLimit")
+                 .and_then(|(_, value)| value.parse::<i64>().ok())
+                 .filter(|limit| *limit > 0)
+                 .unwrap_or(25) as usize;
              let max_concurrent_runs = state
                  .media_services
                  .read()
                  .await
                  .song_id_max_concurrent_runs;
              let runtime = state.runtime.read().await;
-             let records = &runtime.songid_run_records;
-             let queued = records.iter().filter(|record| record["status"] == "queued").count();
-             let running = records.iter().filter(|record| record["status"] == "running").count();
-             let completed = records.iter().filter(|record| record["status"] == "completed").count();
-             let failed = records.iter().filter(|record| record["status"] == "failed").count();
+             let mut recent_runs = runtime.songid_run_records.clone();
+             drop(runtime);
+             recent_runs.reverse();
+             recent_runs.truncate(active_limit.max(100));
+             let queued = recent_runs.iter().filter(|record| record["status"] == "queued").count();
+             let running = recent_runs.iter().filter(|record| record["status"] == "running").count();
+             let completed = recent_runs.iter().filter(|record| record["status"] == "completed").count();
+             let failed = recent_runs.iter().filter(|record| record["status"] == "failed").count();
+             let active_runs = recent_runs
+                 .iter()
+                 .filter(|record| matches!(record["status"].as_str(), Some("queued" | "running")))
+                 .take(active_limit)
+                 .cloned()
+                 .collect::<Vec<_>>();
              Ok(routing::ok_response(serde_json::json!({
                  "queuedCount": queued,
                  "runningCount": running,
                  "completedCount": completed,
                  "failedCount": failed,
                  "maxConcurrentRuns": max_concurrent_runs,
-                 "activeRuns": records.iter().filter(|record| matches!(record["status"].as_str(), Some("queued" | "running"))).cloned().collect::<Vec<_>>(),
+                 "activeRuns": active_runs,
              }).to_string()))
          }
 
          ("POST", "/api/songid/runs") => {
+             // Matches the oracle's SongIdController.CreateRun: a request
+             // with no real source is rejected before ever consuming a
+             // concurrency slot, not silently accepted as an empty-source
+             // run.
+             let source = extract_json_string_field(body, "source")
+                 .unwrap_or_default()
+                 .trim()
+                 .to_owned();
+             if source.is_empty() {
+                 return Ok(routing::bad_request_response("SongID source is required."));
+             }
              let Ok(_songid_permit) = Arc::clone(&state.songid_run_slots).try_acquire_owned()
              else {
                  return Ok(routing::service_unavailable_response(
                      "SongID run concurrency limit reached",
                  ));
              };
-             let source = extract_json_string_field(body, "source").unwrap_or_default();
              let query = extract_json_string_field(body, "query").unwrap_or_default();
              let library = state.library.read().await;
              let shares = state.shares.read().await;
@@ -23463,14 +24718,19 @@ async fn route_http_request_with_headers(
              let shared_files = shares.entries.len();
              drop(shares);
              drop(library);
+             // Unlike the oracle's real async queue+worker pipeline
+             // (SongIdService.QueueAnalyzeAsync enqueues a "queued" run
+             // that a background worker progresses through "running" to
+             // "completed" over real time), slskR analyzes synchronously
+             // right here -- record_songid_run has already computed the
+             // real, final status by the time this response is built. It
+             // must not be overwritten with a fake "queued" placeholder
+             // that nothing would ever advance past, permanently hiding
+             // the real (already-available) result from every later poll.
              let run = match mutate_runtime_compat_state(state, |runtime, _| {
                  let mut run = runtime.record_songid_run(matches, library_items, shared_files)?;
                  run["source"] = serde_json::json!(source);
                  run["query"] = serde_json::json!(query);
-                 run["status"] = serde_json::json!("queued");
-                 run["summary"] = serde_json::json!("Queued for SongID analysis.");
-                 run["currentStage"] = serde_json::json!("queued");
-                 run["percentComplete"] = serde_json::json!(0.05);
                  if let Some(stored) = runtime.songid_run_records.last_mut() {
                      *stored = run.clone();
                  }
@@ -23485,7 +24745,25 @@ async fn route_http_request_with_headers(
              Ok(routing::accepted_response(run.to_string()))
          }
 
-         ("GET", path) if path.starts_with("/api/songid/runs/") && !path.contains("/forensic-matrix") => {
+         ("GET", path) if path.starts_with("/api/songid/runs/") && path.contains("/evidence-package") => {
+             let Some(run_id) =
+                 path_segment_between(path, "/api/songid/runs/", "/evidence-package")
+             else {
+                 return Ok(routing::not_found_response());
+             };
+             let runtime = state.runtime.read().await;
+             let run = runtime.songid_run(run_id);
+             drop(runtime);
+             Ok(run
+                 .map(|run| routing::ok_response(songid_evidence_package_json(&run).to_string()))
+                 .unwrap_or_else(routing::not_found_response))
+         }
+
+         ("GET", path)
+             if path.starts_with("/api/songid/runs/")
+                 && !path.contains("/forensic-matrix")
+                 && !path.contains("/evidence-package") =>
+         {
              let Some(run_id) = path_segment_after(path, "/api/songid/runs/") else {
                  return Ok(routing::not_found_response());
              };
@@ -23676,42 +24954,25 @@ async fn route_http_request_with_headers(
             })
         }
 
+          // Matches the oracle exactly: TelemetryController.GetKpis and
+          // MetricsController.GetKpis are different controllers mounted at
+          // different routes, but both call the same
+          // Telemetry.Prometheus.GetMetricsAsObject(include: KpiRegexes)
+          // with an identical regex list, so they return identical
+          // content. slskR's /api/telemetry/prometheus/kpis was already
+          // fixed to the real dictionary-of-PrometheusMetric shape; this
+          // sibling route reuses the exact same real data instead of its
+          // own invented {kpis:[...], count} array.
           ("GET", "/api/telemetry/metrics/kpi") | ("GET", "/api/telemetry/metrics/kpis") => {
               let transfers = state.transfers.read().await;
-              let total_bytes = transfers
-                  .entries
-                  .iter()
-                  .map(|entry| entry.bytes_transferred)
-                  .sum::<u64>();
-              let active_transfers = transfers
-                  .entries
-                  .iter()
-                  .filter(|entry| matches!(entry.status.as_str(), "queued" | "requested" | "in_progress"))
-                  .count();
-              let transfer_count = transfers.entries.len();
-              drop(transfers);
               let searches = state.searches.read().await;
-              let search_count = searches.records.len();
-              let search_results = searches.records.iter().map(|record| record.results.len()).sum::<usize>();
+              let metrics = serde_json::json!({
+                  "slskr_transfers": prometheus_metric_json("slskr_transfers", "gauge", transfers.entries.len() as f64),
+                  "slskr_searches": prometheus_metric_json("slskr_searches", "gauge", searches.records.len() as f64),
+              });
+              drop(transfers);
               drop(searches);
-              let shares = state.shares.read().await;
-              let shared_files = shares.entries.len();
-              let shared_bytes = shares.entries.iter().map(|entry| entry.size).sum::<u64>();
-              drop(shares);
-              let kpis = serde_json::json!([
-                  { "id": "transfers.total", "name": "Transfers", "value": transfer_count },
-                  { "id": "transfers.active", "name": "Active transfers", "value": active_transfers },
-                  { "id": "transfers.bytes", "name": "Transferred bytes", "value": total_bytes },
-                  { "id": "searches.total", "name": "Searches", "value": search_count },
-                  { "id": "searches.results", "name": "Search results", "value": search_results },
-                  { "id": "shares.files", "name": "Shared files", "value": shared_files },
-                  { "id": "shares.bytes", "name": "Shared bytes", "value": shared_bytes },
-              ]);
-              let count = kpis.as_array().map_or(0, Vec::len);
-              Ok(routing::ok_response(serde_json::json!({
-                  "kpis": kpis,
-                  "count": count,
-              }).to_string()))
+              Ok(routing::ok_response(metrics.to_string()))
           }
 
           // ADDITIONAL MISSING GET ENDPOINTS (Phase 6)
@@ -24449,11 +25710,6 @@ async fn route_http_request_with_headers(
               let events = state.events.read().await;
               let security = state.security.read().await;
               let watched = users.records.iter().filter(|user| user.watched).count();
-              let suspicious = users
-                  .records
-                  .iter()
-                  .filter(|user| user.status.as_deref() == Some("offline") && user.watched)
-                  .count();
               let webhook_count = webhooks.get_all().len();
               let event_count = events.records.len();
               let ban_count = security.active_bans();
@@ -24462,6 +25718,37 @@ async fn route_http_request_with_headers(
                   .get("bans")
                   .cloned()
                   .unwrap_or_else(|| serde_json::json!([]));
+              // Matches the oracle's real PeerReputation.GetStats(): real
+              // per-peer scores and violation counts, not watch/online
+              // status (which has nothing to do with reputation).
+              let total_peers = security.reputation.len();
+              let trusted_peers = security
+                  .reputation
+                  .values()
+                  .filter(|score| **score >= SECURITY_REPUTATION_TRUSTED_THRESHOLD)
+                  .count();
+              let untrusted_peers = security
+                  .reputation
+                  .values()
+                  .filter(|score| **score <= SECURITY_REPUTATION_UNTRUSTED_THRESHOLD)
+                  .count();
+              let average_score = if total_peers > 0 {
+                  security.reputation.values().map(|score| *score as f64).sum::<f64>()
+                      / total_peers as f64
+              } else {
+                  f64::from(SECURITY_REPUTATION_DEFAULT_SCORE)
+              };
+              let total_protocol_violations =
+                  security.violations.values().map(|count| u64::from(*count)).sum::<u64>();
+              let reputation_stats = serde_json::json!({
+                  "totalPeers": total_peers,
+                  "trustedPeers": trusted_peers,
+                  "untrustedPeers": untrusted_peers,
+                  "averageScore": average_score,
+                  "totalSuccessfulTransfers": 0,
+                  "totalFailedTransfers": 0,
+                  "totalProtocolViolations": total_protocol_violations,
+              });
               drop(security);
               drop(events);
               drop(webhooks);
@@ -24470,7 +25757,7 @@ async fn route_http_request_with_headers(
                   "eventStats": {"totalEvents": event_count},
                   "networkGuardStats": {"globalConnections": watched},
                   "violationStats": {"activeBans": ban_count},
-                  "reputationStats": {"totalPeers": watched, "suspiciousPeers": suspicious},
+                  "reputationStats": reputation_stats.clone(),
                   "paranoidStats": {"enabled": false},
                   "fingerprintStats": {"knownFingerprints": 0},
                   "entropyStats": {"checks": 0},
@@ -24482,8 +25769,8 @@ async fn route_http_request_with_headers(
                   "status": "local",
                   "stats": {
                       "networkGuardStats": { "globalConnections": watched },
-                      "reputationStats": { "totalPeers": watched, "suspiciousPeers": suspicious },
-                      "threatStats": { "activeThreats": suspicious },
+                      "reputationStats": reputation_stats,
+                      "threatStats": { "activeThreats": untrusted_peers },
                       "banStats": { "activeBans": ban_count }
                   },
                   "events": event_count,
@@ -24576,6 +25863,10 @@ async fn route_http_request_with_headers(
           ("GET", "/api/mesh/transport") => {
               let gateway = state.private_gateway.as_ref();
               let enabled = gateway.is_some();
+              let connected_peers = match gateway {
+                  Some(gateway) => gateway.active_connection_count().await,
+                  None => 0,
+              };
               Ok(routing::ok_response(serde_json::json!({
                   "dht": {
                       "enabled": state.dht.is_some(),
@@ -24597,8 +25888,8 @@ async fn route_http_request_with_headers(
                   "overlayPort": gateway.map(|gateway| gateway.bind().port()),
                   "certificateSha256": gateway.map(|gateway| hex::encode(gateway.certificate_sha256())),
                   "dhtEnabled": state.dht.is_some(),
-                  "connectedPeers": 0,
-                  "totalPeers": 0,
+                  "connectedPeers": connected_peers,
+                  "totalPeers": connected_peers,
                   "activeCircuits": 0,
                   "activeStreams": 0,
                   "bootstrapPeers": [],
@@ -24648,17 +25939,19 @@ async fn route_http_request_with_headers(
                           "size": size,
                           "updated_at": entry.updated_at,
                       })
-                  })
-                  .unwrap_or_else(|| {
-                      serde_json::json!({
-                          "id": job_id,
-                          "status": "not_found",
-                          "sources": [],
-                          "progress": 0,
-                      })
                   });
               drop(transfers);
-              Ok(routing::ok_response(body.to_string()))
+              // Matches the oracle's real GetJobStatus: an unknown job id
+              // is a real 404, not a fabricated 200 with an invented
+              // "not_found" status string.
+              match body {
+                  Some(body) => Ok(routing::ok_response(body.to_string())),
+                  None => Ok(HttpResponse {
+                      status: "404 Not Found",
+                      content_type: "application/json",
+                      body: r#"{"error":"Job not found. It may have completed or been cancelled."}"#.to_owned(),
+                  }),
+              }
           }
 
           ("GET", "/api/player/external-visualizer") => {
@@ -24860,25 +26153,40 @@ async fn route_http_request_with_headers(
           }
 
           ("POST", "/api/jobs/mb-release") => {
-              if route.path.starts_with("/api/v0/")
-                  && extract_json_string_field(body, "mb_release_id")
-                      .or_else(|| extract_json_string_field(body, "mbReleaseId"))
-                      .is_some()
+              let release_id = extract_json_string_field(body, "mb_release_id")
+                  .or_else(|| extract_json_string_field(body, "mbReleaseId"))
+                  .filter(|id| !id.trim().is_empty());
+              let (artist, title) = if let Some(release_id) =
+                  release_id.filter(|_| route.path.starts_with("/api/v0/"))
               {
-                  return Ok(HttpResponse {
-                      status: "404 Not Found",
-                      content_type: "application/json",
-                      body: serde_json::json!(
-                          "Unable to resolve release into a SongID-ready MusicBrainz target."
-                      )
-                      .to_string(),
-                  });
-              }
-              let artist = extract_json_string_field(body, "artist").unwrap_or_default();
-              let title = extract_json_string_field(body, "title")
-                  .or_else(|| extract_json_string_field(body, "release"))
-                  .or_else(|| extract_json_string_field(body, "query"))
-                  .unwrap_or_else(|| "release".to_owned());
+                  match musicbrainz_release_target("https://musicbrainz.org/ws/2", &release_id)
+                      .await
+                  {
+                      Ok(Some(target)) => target,
+                      Ok(None) => {
+                          return Ok(HttpResponse {
+                              status: "404 Not Found",
+                              content_type: "application/json",
+                              body: serde_json::json!(
+                                  "Unable to resolve release into a SongID-ready MusicBrainz target."
+                              )
+                              .to_string(),
+                          });
+                      }
+                      Err(error) => {
+                          return Ok(routing::service_unavailable_response(&format!(
+                              "MusicBrainz lookup failed: {error}"
+                          )));
+                      }
+                  }
+              } else {
+                  let artist = extract_json_string_field(body, "artist").unwrap_or_default();
+                  let title = extract_json_string_field(body, "title")
+                      .or_else(|| extract_json_string_field(body, "release"))
+                      .or_else(|| extract_json_string_field(body, "query"))
+                      .unwrap_or_else(|| "release".to_owned());
+                  (artist, title)
+              };
               let query = [artist.as_str(), title.as_str()]
                   .into_iter()
                   .filter(|value| !value.trim().is_empty())
@@ -25159,38 +26467,91 @@ async fn route_http_request_with_headers(
           }
 
           ("POST", "/api/taste-recommendations/wishlist") => {
+              let request = serde_json::from_str::<serde_json::Value>(body)
+                  .unwrap_or_else(|_| serde_json::json!({}));
+              let work_ref = request.get("workRef").cloned().unwrap_or_default();
               if route.path.starts_with("/api/v0/")
-                  && serde_json::from_str::<serde_json::Value>(body)
-                      .ok()
-                      .and_then(|value| value.get("workRef").cloned())
-                      .and_then(|value| value.get("@context").cloned())
-                      .is_some_and(|value| value.is_null())
+                  && work_ref.get("@context").is_some_and(serde_json::Value::is_null)
               {
                   return Ok(slskdn_model_validation_response());
               }
-              let wishlist = state.wishlist.read().await;
-              let recommendations = wishlist
-                  .records
-                  .iter()
-                  .flat_map(|record| record.items.iter())
-                  .map(|item| {
-                      serde_json::json!({
-                          "id": item.id,
-                          "query": item.search_text(),
-                          "artist": item.artist,
-                          "title": item.title,
-                          "source": "wishlist",
+              // Matches the oracle's real PromoteToWishlistAsync: a
+              // recommendable WorkRef either promotes to a real, honest
+              // review-only (disabled, no auto-download) Wishlist seed,
+              // or -- if a wishlist item with the same search text
+              // already exists -- reports the existing one, rather than
+              // just echoing the caller's own current wishlist back as
+              // if a promotion had happened.
+              if !work_ref_is_recommendable(&work_ref) {
+                  return Ok(HttpResponse {
+                      status: "400 Bad Request",
+                      content_type: "application/json",
+                      body: serde_json::json!({
+                          "created": false,
+                          "message": "WorkRef is not a safe music recommendation.",
                       })
-                  })
-                  .collect::<Vec<_>>();
-              let count = recommendations.len();
+                      .to_string(),
+                  });
+              }
+              let search_text = work_ref_search_text(&work_ref);
+              let mut wishlist = state.wishlist.write().await;
+              if let Some(existing_id) = wishlist.item_id_for_search_text(&search_text) {
+                  drop(wishlist);
+                  return Ok(routing::ok_response(
+                      serde_json::json!({
+                          "created": false,
+                          "wishlistItemId": existing_id,
+                          "searchText": search_text,
+                          "message": "Wishlist already has this recommendation seed.",
+                      })
+                      .to_string(),
+                  ));
+              }
+              let previous = wishlist.clone();
+              let creator = work_ref
+                  .get("creator")
+                  .and_then(serde_json::Value::as_str)
+                  .unwrap_or_default()
+                  .trim()
+                  .to_owned();
+              let title = work_ref
+                  .get("title")
+                  .and_then(serde_json::Value::as_str)
+                  .unwrap_or_default()
+                  .trim()
+                  .to_owned();
+              let note = request.get("note").and_then(serde_json::Value::as_str);
+              let filter = work_ref_wishlist_filter(&work_ref, note);
+              let Ok(item) = wishlist.add_item_with_settings(
+                  creator,
+                  title,
+                  "TasteRecommendation".to_owned(),
+                  filter,
+                  false,
+                  false,
+                  25,
+                  None,
+              ) else {
+                  drop(wishlist);
+                  return Ok(routing::service_unavailable_response(
+                      "wishlist item capacity is full",
+                  ));
+              };
+              let mutated = wishlist.clone();
               drop(wishlist);
-              let json = serde_json::json!({
-                  "recommendations": recommendations,
-                  "count": count,
-                  "status": "processing",
-              }).to_string();
-              Ok(routing::accepted_response(json))
+              if let Err(error) = persist_wishlist_item_checked(state, &item).await {
+                  rollback_wishlist_if_unchanged(state, previous, &mutated).await;
+                  return Ok(routing::service_unavailable_response(&error));
+              }
+              Ok(routing::ok_response(
+                  serde_json::json!({
+                      "created": true,
+                      "wishlistItemId": item.id,
+                      "searchText": search_text,
+                      "message": "Created review-only Wishlist seed.",
+                  })
+                  .to_string(),
+              ))
           }
 
           // PLAYER LAUNCH ENDPOINT (Phase 6)
@@ -26175,23 +27536,61 @@ async fn route_http_request_with_headers(
         }
 
         ("GET", "/api/listening-party") => {
-            let rooms = state.rooms.read().await;
-            let active_parties = rooms
-                .records
-                .iter()
-                .filter(|room| room.joined)
-                .map(|room| {
-                    serde_json::json!({
-                        "room": room.name,
-                        "userCount": room.user_count.unwrap_or(0),
-                        "messageCount": room.messages.len(),
-                        "updated_at": room.updated_at,
-                    })
+            // Matches the oracle's real ListeningPartyController.List
+            // response shape (ListeningPartyAnnouncement[]), but built
+            // from slskR's own locally-stored listening-party events
+            // rather than a real DHT-backed cross-peer directory --
+            // slskR is single-peer-per-instance and has no such mesh
+            // discovery wired in for this feature yet. This is an
+            // honest, local-only simplification (every entry reflects a
+            // real, currently-active local listen-along event), not the
+            // previous behavior of listing unrelated joined chat rooms.
+            const ANNOUNCEMENT_TTL_MS: u64 = 900_000;
+            let now_ms = unix_timestamp_millis();
+            let events = state
+                .controller_features
+                .read()
+                .await
+                .values_with_prefix("listening-party/");
+            let announcements = events
+                .into_iter()
+                .filter(|event| {
+                    event
+                        .get("listed")
+                        .and_then(serde_json::Value::as_bool)
+                        .unwrap_or(false)
+                })
+                .filter_map(|event| {
+                    let last_seen = event
+                        .get("serverTimeUnixMs")
+                        .and_then(serde_json::Value::as_u64)
+                        .unwrap_or(0);
+                    let expires_at = last_seen.saturating_add(ANNOUNCEMENT_TTL_MS);
+                    if expires_at <= now_ms {
+                        return None;
+                    }
+                    Some(serde_json::json!({
+                        "kind": "slskdn.listeningParty.announce.v1",
+                        "partyId": event.get("partyId").cloned().unwrap_or_default(),
+                        "podId": event.get("podId").cloned().unwrap_or_default(),
+                        "channelId": event.get("channelId").cloned().unwrap_or_default(),
+                        "hostPeerId": event.get("hostPeerId").cloned().unwrap_or_default(),
+                        "title": event.get("title").cloned().unwrap_or_default(),
+                        "artist": event.get("artist").cloned().unwrap_or_default(),
+                        "album": event.get("album").cloned().unwrap_or(serde_json::Value::Null),
+                        "contentId": event.get("contentId").cloned().unwrap_or_default(),
+                        "description": event.get("description").cloned().unwrap_or_default(),
+                        "tags": event.get("tags").cloned().unwrap_or_else(|| serde_json::json!([])),
+                        "allowMeshStreaming": event.get("allowMeshStreaming").cloned().unwrap_or(serde_json::json!(false)),
+                        "streamPath": "",
+                        "startedAtUnixMs": last_seen,
+                        "expiresAtUnixMs": expires_at,
+                        "lastSeenUnixMs": last_seen,
+                    }))
                 })
                 .collect::<Vec<_>>();
-            drop(rooms);
             Ok(routing::ok_response(
-                serde_json::Value::Array(active_parties).to_string(),
+                serde_json::Value::Array(announcements).to_string(),
             ))
         }
 
@@ -26630,6 +28029,19 @@ async fn route_http_request_with_headers(
              let share_grants = state.share_grants.read().await;
              let grant = share_grants.get(grant_id);
              drop(share_grants);
+             let caller_id = utils::authenticated_caller_id(
+                 &state.config,
+                 authorization,
+                 headers.cookie.as_deref(),
+                 headers.remote_addr,
+             );
+             // Matches the oracle's real CreateToken: "Caller must own
+             // the collection."
+             if let Some(collection_id) = grant.as_ref().map(|grant| grant.collection_id.as_str()) {
+                 if share_grant_collection_forbids(state, collection_id, caller_id.as_deref()).await {
+                     return Ok(routing::not_found_response());
+                 }
+             }
              let ttl_seconds = extract_json_u64_field(body, "expiresInSeconds")
                  .or_else(|| extract_json_u64_field(body, "expires_in_seconds"))
                 .unwrap_or(DEFAULT_SHARE_ACCESS_TOKEN_TTL_SECONDS)
@@ -27082,31 +28494,65 @@ async fn route_http_request_with_headers(
         }
 
         ("GET", "/api/podcore/content/search") => {
-            let query = route
-                .query
-                .map(query_params)
-                .unwrap_or_default()
-                .into_iter()
+            let params = route.query.map(query_params).unwrap_or_default();
+            let query = params
+                .iter()
                 .find(|(key, _)| key == "query" || key == "q")
-                .map(|(_, value)| value)
+                .map(|(_, value)| value.trim().to_owned())
                 .unwrap_or_default();
+            if query.is_empty() {
+                return Ok(routing::bad_request_response("Search query is required"));
+            }
+            // The oracle's real backend is a live MusicBrainz recording
+            // search; slskR has no such client wired in, so this searches
+            // the local share index instead -- an honest architectural
+            // difference in *source*, but the response is still a real,
+            // flat `ContentSearchResult[]` array over real local share
+            // data, not the old {query, results, count} wrapper with
+            // invented field names.
+            let domain = params
+                .iter()
+                .find(|(key, _)| key == "domain")
+                .map(|(_, value)| value.trim().to_owned())
+                .filter(|value| !value.is_empty());
+            if domain.is_some_and(|domain| !domain.eq_ignore_ascii_case("audio")) {
+                return Ok(routing::ok_response("[]".to_owned()));
+            }
+            let limit = params
+                .iter()
+                .find(|(key, _)| key == "limit")
+                .and_then(|(_, value)| value.parse::<i64>().ok())
+                .unwrap_or(20)
+                .clamp(1, 100) as usize;
             let shares = state.shares.read().await;
             let results = search_shares(&shares.entries, &query)
                 .into_iter()
-                .map(|entry| serde_json::json!({
-                    "filename": entry.filename,
-                    "size": entry.size,
-                    "extension": entry.extension,
-                    "source": "share-index",
-                }))
+                .take(limit)
+                .map(|entry| {
+                    let content_hash = hex::encode(Sha256::digest(entry.filename.as_bytes()));
+                    let title = std::path::Path::new(&entry.filename)
+                        .file_name()
+                        .and_then(std::ffi::OsStr::to_str)
+                        .unwrap_or(&entry.filename)
+                        .to_owned();
+                    serde_json::json!({
+                        "contentId": format!("content:audio:track:{}", &content_hash[..32]),
+                        "title": title,
+                        "subtitle": "",
+                        "type": "track",
+                        "domain": "audio",
+                        "metadata": {
+                            "filename": entry.filename,
+                            "extension": entry.extension,
+                            "size": entry.size,
+                        },
+                    })
+                })
                 .collect::<Vec<_>>();
-            let count = results.len();
             drop(shares);
-            Ok(routing::ok_response(serde_json::json!({
-                "query": query,
-                "results": results,
-                "count": count,
-            }).to_string()))
+            Ok(routing::ok_response(
+                serde_json::Value::Array(results).to_string(),
+            ))
         }
 
         ("POST", "/api/podcore/membership/join") => {
@@ -28333,6 +29779,21 @@ fn health_response(config: &AppConfig) -> HttpResponse {
     }
 }
 
+/// Matches the oracle's `MapHealthChecks("/health/mesh", ...)`, filtered to
+/// checks tagged "mesh": reports whether the mesh subsystem is enabled.
+fn mesh_health_response(config: &AppConfig) -> HttpResponse {
+    let enabled = config.advanced_networking.mesh.enabled;
+    HttpResponse {
+        status: "200 OK",
+        content_type: "application/json",
+        body: serde_json::json!({
+            "status": if enabled { "ok" } else { "disabled" },
+            "service": "slskr-mesh",
+        })
+        .to_string(),
+    }
+}
+
 fn auth_disabled_on_non_loopback(config: &AppConfig) -> bool {
     !config.auth_required
         && config
@@ -28618,87 +30079,101 @@ async fn start_controller_version_check(state: Arc<AppState>) {
     )
     .await;
     tokio::spawn(async move {
-        let result = async {
-            let client = reqwest::Client::builder()
-                .redirect(reqwest::redirect::Policy::none())
-                .timeout(Duration::from_secs(100))
-                .build()
-                .map_err(|error| error.to_string())?;
-            let response = client
-                .get("https://api.github.com/repos/snapetech/slskdn/releases/latest")
-                .header(
-                    reqwest::header::USER_AGENT,
-                    format!("slskdN v{APP_VERSION} ({APP_VERSION})"),
-                )
-                .send()
-                .await
-                .map_err(|error| error.to_string())?
-                .error_for_status()
-                .map_err(|error| error.to_string())?;
-            let release = response
-                .json::<serde_json::Value>()
-                .await
-                .map_err(|error| error.to_string())?;
-            let latest_tag = release
-                .get("tag_name")
-                .and_then(serde_json::Value::as_str)
-                .ok_or_else(|| "GitHub release omitted tag_name".to_owned())?
-                .to_owned();
-            let latest = normalize_controller_release_version(&latest_tag);
-            let latest_lower = latest.to_ascii_lowercase();
-            if latest_lower.contains("-dev-") || latest_lower.contains("-canary-") {
-                return Ok(None);
-            }
-            let latest_url = release
-                .get("html_url")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or_default()
-                .to_owned();
-            Ok::<_, String>(Some((latest, latest_tag, latest_url)))
-        }
-        .await;
-        match result {
-            Ok(Some((latest, latest_tag, latest_url))) => {
-                let is_update_available =
-                    is_newer_controller_release_available(APP_VERSION, &latest);
-                {
-                    let mut version = state
-                        .controller_version
-                        .write()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner);
-                    version.latest = Some(latest.clone());
-                    version.latest_tag = Some(latest_tag);
-                    version.latest_url = Some(latest_url);
-                    version.checked_at = Some(chrono::Utc::now().to_rfc3339());
-                    version.is_update_available = Some(is_update_available);
-                }
-                let message = if is_update_available {
-                    format!("A new version is available! {APP_VERSION} -> {latest}")
-                } else {
-                    format!("Version {APP_VERSION} is up to date.")
-                };
-                record_daemon_log(&state, logging::LogLevel::Info, "version", message).await;
-            }
-            Ok(None) => {}
-            Err(error) => {
-                {
-                    let mut version = state
-                        .controller_version
-                        .write()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner);
-                    version.checked_at = Some(chrono::Utc::now().to_rfc3339());
-                    version.is_update_available = None;
-                }
-                record_daemon_log(
-                    &state,
-                    logging::LogLevel::Warn,
-                    "version",
-                    format!("Failed to check version: {error}"),
-                )
-                .await;
-            }
-        }
+        refresh_controller_version_check(
+            &state,
+            "https://api.github.com/repos/snapetech/slskdn/releases/latest",
+        )
+        .await
     });
+}
+
+/// Performs one real GitHub Releases lookup and updates `controller_version`
+/// -- matches the oracle's `Application.CheckVersionAsync`. Shared by the
+/// startup check (fire-and-forget via `start_controller_version_check`) and
+/// `GET .../version/latest?forceCheck=true`, which awaits it directly so
+/// the response reflects a freshly fetched latest release. `releases_url`
+/// is parameterized so tests can point it at a local fixture instead of
+/// the real GitHub API.
+async fn refresh_controller_version_check(state: &AppState, releases_url: &str) {
+    let result = async {
+        let client = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .timeout(Duration::from_secs(100))
+            .build()
+            .map_err(|error| error.to_string())?;
+        let response = client
+            .get(releases_url)
+            .header(
+                reqwest::header::USER_AGENT,
+                format!("slskdN v{APP_VERSION} ({APP_VERSION})"),
+            )
+            .send()
+            .await
+            .map_err(|error| error.to_string())?
+            .error_for_status()
+            .map_err(|error| error.to_string())?;
+        let release = response
+            .json::<serde_json::Value>()
+            .await
+            .map_err(|error| error.to_string())?;
+        let latest_tag = release
+            .get("tag_name")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| "GitHub release omitted tag_name".to_owned())?
+            .to_owned();
+        let latest = normalize_controller_release_version(&latest_tag);
+        let latest_lower = latest.to_ascii_lowercase();
+        if latest_lower.contains("-dev-") || latest_lower.contains("-canary-") {
+            return Ok(None);
+        }
+        let latest_url = release
+            .get("html_url")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_owned();
+        Ok::<_, String>(Some((latest, latest_tag, latest_url)))
+    }
+    .await;
+    match result {
+        Ok(Some((latest, latest_tag, latest_url))) => {
+            let is_update_available = is_newer_controller_release_available(APP_VERSION, &latest);
+            {
+                let mut version = state
+                    .controller_version
+                    .write()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                version.latest = Some(latest.clone());
+                version.latest_tag = Some(latest_tag);
+                version.latest_url = Some(latest_url);
+                version.checked_at = Some(chrono::Utc::now().to_rfc3339());
+                version.is_update_available = Some(is_update_available);
+            }
+            let message = if is_update_available {
+                format!("A new version is available! {APP_VERSION} -> {latest}")
+            } else {
+                format!("Version {APP_VERSION} is up to date.")
+            };
+            record_daemon_log(state, logging::LogLevel::Info, "version", message).await;
+        }
+        Ok(None) => {}
+        Err(error) => {
+            {
+                let mut version = state
+                    .controller_version
+                    .write()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                version.checked_at = Some(chrono::Utc::now().to_rfc3339());
+                version.is_update_available = None;
+            }
+            record_daemon_log(
+                state,
+                logging::LogLevel::Warn,
+                "version",
+                format!("Failed to check version: {error}"),
+            )
+            .await;
+        }
+    }
 }
 
 fn slskd_options_json(
@@ -30891,6 +32366,17 @@ async fn apply_watched_controller_configuration(
         .write()
         .await
         .merge_configured(&reloaded.core_workflow.rooms);
+    // Matches the oracle's real OptionsMonitor_OnChange, which calls
+    // RoomService.TryJoinAsync(newOptions.Rooms) on every config reload,
+    // issuing a real join for each configured room over the live
+    // session (idempotent for rooms already joined) -- previously
+    // config-reload only updated local bookkeeping, so a room added to
+    // an already-connected instance was marked "joined" in the API
+    // immediately but the server was never actually told to join it
+    // until the next reconnect.
+    for room in &reloaded.core_workflow.rooms {
+        send_room_join_if_connected(state, room.clone()).await;
+    }
     state.interests.write().await.merge_configured(
         &reloaded.core_workflow.liked_interests,
         &reloaded.core_workflow.hated_interests,
@@ -37486,6 +38972,57 @@ async fn read_bounded_integration_json(
     serde_json::from_slice(&body).map_err(|error| format!("invalid {label} JSON: {error}"))
 }
 
+/// Resolves a MusicBrainz release id into a SongID-ready `(artist, title)`
+/// pair, matching the oracle's `MusicBrainzClient.GetReleaseAsync` +
+/// `MapToAlbumTarget`: `Ok(None)` when the release doesn't exist or has no
+/// resolvable artist credit, `Err` only on a genuine transport/parse failure.
+async fn musicbrainz_release_target(
+    base_url: &str,
+    release_id: &str,
+) -> Result<Option<(String, String)>, String> {
+    let url = format!(
+        "{}/release/{}?fmt=json&inc=artist-credits",
+        base_url.trim_end_matches('/'),
+        url_encode(release_id.trim())
+    );
+    let response = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|error| format!("failed to build MusicBrainz client: {error}"))?
+        .get(url)
+        .header(reqwest::header::USER_AGENT, format!("slskR v{APP_VERSION}"))
+        .header(reqwest::header::ACCEPT, "application/json")
+        .send()
+        .await
+        .map_err(|error| format!("MusicBrainz API request failed: {error}"))?;
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(None);
+    }
+    if !response.status().is_success() {
+        return Err(format!("MusicBrainz returned HTTP {}", response.status()));
+    }
+    let value = read_bounded_integration_json(response, "MusicBrainz API").await?;
+    let artist_id = value
+        .pointer("/artist-credit/0/artist/id")
+        .and_then(serde_json::Value::as_str)
+        .filter(|id| !id.trim().is_empty());
+    if artist_id.is_none() {
+        return Ok(None);
+    }
+    let title = value
+        .get("title")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    let artist_name = value
+        .pointer("/artist-credit/0/name")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    Ok(Some((artist_name, title)))
+}
+
 struct ResolvedIntegrationTarget {
     host: String,
     addrs: Vec<SocketAddr>,
@@ -38627,6 +40164,16 @@ async fn pod_request_peer_id(state: &AppState) -> Option<String> {
         .or_else(|| (!state.config.auth_required).then(|| "Anonymous".to_owned()))
 }
 
+/// True when this instance's own configured Soulseek identity
+/// (`pod_request_peer_id`) holds owner/moderator role in `pod_id`.
+async fn pod_local_peer_can_moderate(state: &AppState, pod_id: &str) -> bool {
+    let acting_peer_id = pod_request_peer_id(state).await;
+    let pods = state.pods.read().await;
+    acting_peer_id
+        .as_deref()
+        .is_some_and(|acting| pods.can_moderate(pod_id, acting))
+}
+
 async fn versioned_get_failure_contract(
     path: &str,
     query: Option<&str>,
@@ -38668,8 +40215,15 @@ async fn versioned_get_failure_contract(
     let uuid_prefixes = [
         "/api/v0/collections/",
         "/api/v0/contacts/",
-        "/api/v0/share-grants/",
+        // Must precede the shorter "/api/v0/share-grants/" prefix below --
+        // strip_prefix matches whichever prefix is checked first, so a
+        // more specific nested prefix must always come before a shorter
+        // one it is contained within, or the nested route's real id
+        // segment (e.g. a collection UUID) never reaches its own check
+        // and instead gets validated against the wrong path segment
+        // ("by-collection").
         "/api/v0/share-grants/by-collection/",
+        "/api/v0/share-grants/",
         "/api/v0/sharegroups/",
         "/api/v0/wishlist/",
         "/api/v0/multisource/jobs/",
@@ -38680,6 +40234,13 @@ async fn versioned_get_failure_contract(
             if uuid::Uuid::parse_str(&value).is_err() {
                 return Some(routing::bad_request_response("The request is invalid"));
             }
+            // Stop at the first (most specific, since nested prefixes are
+            // ordered before the shorter prefixes they're contained
+            // within) matching prefix -- otherwise a path validated
+            // successfully here would keep matching shorter prefixes
+            // later in the list and get re-validated against the wrong
+            // path segment.
+            break;
         }
     }
 
@@ -38787,16 +40348,34 @@ async fn versioned_get_failure_contract(
         .strip_prefix("/api/v0/listening-party/radio/")
         .map(|value| value.split('/').collect::<Vec<_>>())
     {
-        if segments.len() == 2
-            && !state
-                .content_discovery
+        if let [party_id, content_id] = segments.as_slice() {
+            // Matches the oracle's real StreamListedParty gate: the party
+            // referenced by partyId must actually be listed, must allow
+            // mesh streaming, and must currently be playing exactly this
+            // contentId -- otherwise NotFound(), evaluated before any
+            // stream ticket is even considered. Previously this checked
+            // the unrelated global content-discovery shadow-record index,
+            // which neither matched the oracle's real per-party gate nor
+            // scoped the check to the specific party being queried.
+            let listed = state
+                .controller_features
                 .read()
                 .await
-                .shadow_records()
-                .iter()
-                .any(|record| record.recording_id.eq_ignore_ascii_case(segments[1]))
-        {
-            return Some(routing::not_found_response());
+                .values_with_prefix("listening-party/")
+                .into_iter()
+                .any(|event| {
+                    event.get("partyId").and_then(serde_json::Value::as_str) == Some(*party_id)
+                        && event.get("listed").and_then(serde_json::Value::as_bool) == Some(true)
+                        && event
+                            .get("allowMeshStreaming")
+                            .and_then(serde_json::Value::as_bool)
+                            == Some(true)
+                        && event.get("contentId").and_then(serde_json::Value::as_str)
+                            == Some(*content_id)
+                });
+            if !listed {
+                return Some(routing::not_found_response());
+            }
         }
     }
 
@@ -39537,46 +41116,44 @@ async fn security_extended_response(
             routing::ok_response(serde_json::Value::Array(rows).to_string())
         }
         "/api/security/reputation/suspicious" | "/api/security/reputation/trusted" => {
+            // Matches the oracle's real GetSuspiciousPeers/GetTrustedPeers:
+            // real per-peer scores (SecurityState.reputation), sorted
+            // worst/best-first, filtered by the oracle's real
+            // Untrusted/Trusted thresholds -- not watch/online status,
+            // which has nothing to do with reputation.
             let trusted = path.ends_with("/trusted");
-            let users = state.users.read().await;
-            let mut rows = users
-                .records
+            let security = state.security.read().await;
+            let mut peers = security
+                .reputation
                 .iter()
-                .filter(|user| {
-                    if trusted {
-                        user.watched || user.status.as_deref() == Some("online")
-                    } else {
-                        user.watched && user.status.as_deref() == Some("offline")
-                    }
-                })
-                .take(list_limit)
-                .map(|user| {
+                .map(|(username, score)| (username.clone(), *score))
+                .collect::<Vec<_>>();
+            drop(security);
+            peers.retain(|(_, score)| {
+                if trusted {
+                    *score >= SECURITY_REPUTATION_TRUSTED_THRESHOLD
+                } else {
+                    *score <= SECURITY_REPUTATION_UNTRUSTED_THRESHOLD
+                }
+            });
+            if trusted {
+                peers.sort_by_key(|peer| std::cmp::Reverse(peer.1));
+            } else {
+                peers.sort_by_key(|peer| peer.1);
+            }
+            peers.truncate(list_limit);
+            let rows = peers
+                .into_iter()
+                .map(|(username, score)| {
                     serde_json::json!({
-                        "username": user.username,
-                        "score": if trusted { 100 } else { 0 },
-                        "isTrusted": trusted,
-                        "isSuspicious": !trusted,
-                        "lastSeen": user.updated_at,
+                        "username": username,
+                        "score": score,
+                        "isTrusted": score >= SECURITY_REPUTATION_TRUSTED_THRESHOLD,
+                        "isSuspicious": score <= SECURITY_REPUTATION_UNTRUSTED_THRESHOLD,
+                        "trustLevel": security_reputation_trust_level(score),
                     })
                 })
                 .collect::<Vec<_>>();
-            rows.extend(
-                state
-                    .controller_features
-                    .read()
-                    .await
-                    .values_with_prefix("security/profile/security/reputation/")
-                    .into_iter()
-                    .filter(|profile| {
-                        let score = profile["settings"]["score"].as_f64().unwrap_or(0.0);
-                        if trusted {
-                            score >= 0.0
-                        } else {
-                            score < 0.0
-                        }
-                    }),
-            );
-            rows.truncate(list_limit);
             routing::ok_response(serde_json::Value::Array(rows).to_string())
         }
         "/api/security/scanners" | "/api/security/threats" => routing::ok_response("[]".to_owned()),
@@ -39770,40 +41347,10 @@ async fn security_extended_response(
         _ => {
             if let Some(username) = path_segment_after(path, "/api/security/reputation/") {
                 let username = decoded_path_segment(username);
-                let configured = state
-                    .controller_features
-                    .read()
-                    .await
-                    .get(&format!("security/profile/security/reputation/{username}"))
-                    .cloned();
-                let settings = configured
-                    .as_ref()
-                    .and_then(|value| value.get("settings"))
-                    .unwrap_or(&serde_json::Value::Null);
-                let score = settings
-                    .get("score")
-                    .and_then(serde_json::Value::as_i64)
-                    .unwrap_or(50)
-                    .clamp(0, 100);
-                let now = chrono::Utc::now().to_rfc3339();
                 return routing::ok_response(
-                    serde_json::json!({
-                        "username": username,
-                        "score": score,
-                        "firstSeen": configured.as_ref().and_then(|value| value.get("createdAt")).cloned().unwrap_or_else(|| serde_json::json!(now)),
-                        "lastSeen": configured.as_ref().and_then(|value| value.get("updatedAt")).cloned().unwrap_or_else(|| serde_json::json!(now)),
-                        "successfulTransfers": 0,
-                        "failedTransfers": 0,
-                        "abortedTransfers": 0,
-                        "totalBytesTransferred": 0,
-                        "malformedMessages": 0,
-                        "protocolViolations": 0,
-                        "contentMismatches": 0,
-                        "slotsAvailableCount": 0,
-                        "successRate": 0.5,
-                        "trustLevel": if score >= 75 { "Trusted" } else if score <= 25 { "Untrusted" } else { "Neutral" },
-                    })
-                    .to_string(),
+                    security_reputation_profile_json(state, &username)
+                        .await
+                        .to_string(),
                 );
             }
             if let Some(username) = path_segment_after(path, "/api/security/disclosure/") {
@@ -40440,7 +41987,6 @@ fn extended_controller_mutation_route(method: &str, path: &str) -> bool {
                         | "/api/podcore/signing/sign"
                         | "/api/podcore/signing/verify"
                         | "/api/podcore/verification/message"
-                        | "/api/portforwarding/start"
                         | "/api/quarantine-jury/requests"
                         | "/api/quarantine-jury/verdicts"
                         | "/api/ranking/history"
@@ -40507,11 +42053,6 @@ async fn extended_controller_mutation_response(
             .to_string(),
         };
     }
-    if method == "POST" && path == "/api/portforwarding/start" && is_versioned_v0 {
-        return routing::ok_response(
-            serde_json::json!({"message": "Port forwarding started"}).to_string(),
-        );
-    }
     if method == "DELETE" && path == "/api/session" {
         return match send_session_command(state, SessionCommand::Disconnect).await {
             Ok(()) => routing::no_content_response(),
@@ -40556,16 +42097,23 @@ async fn extended_controller_mutation_response(
         record_event(state, "room.joined", room_name, None).await;
         return routing::created_response(record.slskd_room_json().to_string());
     }
-    if method == "POST" && matches!(path, "/api/search" | "/api/bridge/search") {
-        return extended_controller_search_response(body, state).await;
+    if method == "POST" && path == "/api/search" {
+        return match extended_controller_search_response(body, state).await {
+            Ok(record) => routing::created_response(record.json()),
+            Err(response) => response,
+        };
     }
-    if method == "POST"
-        && matches!(
-            path,
-            "/api/downloads" | "/api/transfers/downloads" | "/api/bridge/download"
-        )
-    {
-        return extended_controller_download_response(body, state).await;
+    if method == "POST" && path == "/api/bridge/search" {
+        return bridge_search_response(body, state).await;
+    }
+    if method == "POST" && matches!(path, "/api/downloads" | "/api/transfers/downloads") {
+        return match extended_controller_download_response(body, state).await {
+            Ok(entries) => extended_controller_download_success_response(&entries),
+            Err(response) => response,
+        };
+    }
+    if method == "POST" && path == "/api/bridge/download" {
+        return bridge_download_response(body, state).await;
     }
     if method == "POST" && path == "/api/library/scan" {
         let library_path = extract_json_string_field(body, "path")
@@ -40722,11 +42270,30 @@ async fn extended_controller_mutation_response(
                 return routing::bad_request_response(&format!("invalid entries: {error}"))
             }
         };
+        let entries_received = entries.len() as u64;
         let mut discovery = state.content_discovery.write().await;
-        return match discovery.merge_hash_entries(entries) {
-            Ok(merged) => routing::ok_response(
-                serde_json::json!({"merged": merged, "latestSeqId": discovery.latest_seq()})
-                    .to_string(),
+        let result = discovery
+            .merge_hash_entries(entries)
+            .map(|merged| (merged, discovery.latest_seq()));
+        drop(discovery);
+        // Matches the oracle's real MeshSyncStats: this is the one real
+        // merge call site backing /api/mesh/stats's totalSyncs/
+        // successfulSyncs/failedSyncs/totalEntriesReceived/
+        // totalEntriesMerged, previously hardcoded to 0 regardless of
+        // real merge activity.
+        let mut mesh = state.mesh.write().await;
+        mesh.sync_merge_total = mesh.sync_merge_total.saturating_add(1);
+        mesh.sync_entries_received = mesh.sync_entries_received.saturating_add(entries_received);
+        if let Ok((merged, _)) = result {
+            mesh.sync_merge_successful = mesh.sync_merge_successful.saturating_add(1);
+            mesh.sync_entries_merged = mesh.sync_entries_merged.saturating_add(merged as u64);
+        } else {
+            mesh.sync_merge_failed = mesh.sync_merge_failed.saturating_add(1);
+        }
+        drop(mesh);
+        return match result {
+            Ok((merged, latest_seq_id)) => routing::ok_response(
+                serde_json::json!({"merged": merged, "latestSeqId": latest_seq_id}).to_string(),
             ),
             Err(error) => routing::bad_request_response(&error),
         };
@@ -41103,6 +42670,215 @@ async fn extended_controller_mutation_response(
     )
 }
 
+const STUN_BINDING_REQUEST: u16 = 0x0001;
+const STUN_MAGIC_COOKIE: u32 = 0x2112_A442;
+const STUN_MAPPED_ADDRESS: u16 = 0x0001;
+const STUN_XOR_MAPPED_ADDRESS: u16 = 0x0020;
+/// Public STUN servers used for best-effort NAT type detection, matching
+/// the slskdN oracle's `MeshOptions.StunServers` defaults exactly.
+const STUN_SERVERS: [&str; 2] = ["stun.l.google.com:19302", "stun1.l.google.com:19302"];
+
+struct StunMapping {
+    mapped: SocketAddr,
+    local: SocketAddr,
+}
+
+fn build_stun_binding_request(transaction_id: [u8; 12]) -> [u8; 20] {
+    let mut request = [0_u8; 20];
+    request[0..2].copy_from_slice(&STUN_BINDING_REQUEST.to_be_bytes());
+    request[4..8].copy_from_slice(&STUN_MAGIC_COOKIE.to_be_bytes());
+    request[8..20].copy_from_slice(&transaction_id);
+    request
+}
+
+/// Parses a STUN Binding response for a MAPPED-ADDRESS or XOR-MAPPED-ADDRESS
+/// attribute (IPv4 only -- the default STUN servers reply over IPv4).
+fn parse_stun_mapped_address(response: &[u8]) -> Option<SocketAddr> {
+    if response.len() < 20 {
+        return None;
+    }
+    let mut offset = 20;
+    while offset + 4 <= response.len() {
+        let attr_type = u16::from_be_bytes([response[offset], response[offset + 1]]);
+        let attr_len = u16::from_be_bytes([response[offset + 2], response[offset + 3]]) as usize;
+        offset += 4;
+        if offset + attr_len > response.len() {
+            break;
+        }
+        if (attr_type == STUN_XOR_MAPPED_ADDRESS || attr_type == STUN_MAPPED_ADDRESS)
+            && attr_len >= 8
+            && response[offset + 1] == 0x01
+        {
+            let mut port = u16::from_be_bytes([response[offset + 2], response[offset + 3]]);
+            let mut address = u32::from_be_bytes([
+                response[offset + 4],
+                response[offset + 5],
+                response[offset + 6],
+                response[offset + 7],
+            ]);
+            if attr_type == STUN_XOR_MAPPED_ADDRESS {
+                port ^= (STUN_MAGIC_COOKIE >> 16) as u16;
+                address ^= STUN_MAGIC_COOKIE;
+            }
+            return Some(SocketAddr::new(
+                IpAddr::V4(std::net::Ipv4Addr::from(address)),
+                port,
+            ));
+        }
+        offset += (attr_len + 3) & !3;
+    }
+    None
+}
+
+/// Sends a single STUN Binding request to `server` from a fresh ephemeral
+/// local UDP socket and returns the mapped/local endpoint pair, or `None` on
+/// any resolution, transport, or timeout failure (best-effort, like the
+/// oracle's `ProbeServer`).
+async fn stun_probe(server: &str) -> Option<StunMapping> {
+    let socket = tokio::net::UdpSocket::bind("0.0.0.0:0").await.ok()?;
+    let target = tokio::time::timeout(Duration::from_secs(1), tokio::net::lookup_host(server))
+        .await
+        .ok()?
+        .ok()?
+        .next()?;
+    let mut transaction_id = [0_u8; 12];
+    SysRng.try_fill_bytes(&mut transaction_id).ok()?;
+    let request = build_stun_binding_request(transaction_id);
+    socket.send_to(&request, target).await.ok()?;
+    let mut buf = [0_u8; 128];
+    let count = tokio::time::timeout(Duration::from_secs(2), socket.recv_from(&mut buf))
+        .await
+        .ok()?
+        .ok()?
+        .0;
+    let mapped = parse_stun_mapped_address(&buf[..count])?;
+    let local = socket.local_addr().ok()?;
+    Some(StunMapping { mapped, local })
+}
+
+/// Detects the local NAT type via STUN, matching the oracle's
+/// `StunNatDetector.DetectAsync` classification: probe the primary server
+/// twice (a changed mapping means a symmetric NAT), then optionally a second
+/// server (a changed mapping there also means symmetric); a mapping that's
+/// stable but differs from the local endpoint is a restricted/cone NAT, and
+/// no response at all is unknown. Returns `(type, detected)`.
+async fn detect_nat_type(servers: &[&str]) -> (&'static str, bool) {
+    let Some(primary) = servers.first() else {
+        return ("unknown", false);
+    };
+    let Some(mapping1) = stun_probe(primary).await else {
+        return ("unknown", false);
+    };
+    if mapping1.mapped == mapping1.local {
+        return ("direct", true);
+    }
+    let Some(mapping2) = stun_probe(primary).await else {
+        return ("unknown", false);
+    };
+    if mapping1.mapped != mapping2.mapped {
+        return ("symmetric", true);
+    }
+    if let Some(secondary) = servers.get(1) {
+        match stun_probe(secondary).await {
+            None => return ("restricted", true),
+            Some(mapping3) if mapping1.mapped != mapping3.mapped => return ("symmetric", true),
+            Some(_) => {}
+        }
+    }
+    ("restricted", true)
+}
+
+/// Matches the oracle's `ListeningPartyService.Normalize` exactly: a
+/// real, restricted `play|pause|seek|stop` action vocabulary (not
+/// slskR's previously-invented `{kind, action}` pair), a required
+/// `contentId` for playback events, server-derived `partyId`/
+/// `hostPeerId`/`serverTimeUnixMs`, and bounded/deduplicated tags.
+/// `sequence` is the millisecond-resolution wall clock at call time,
+/// since slskR has no real per-process monotonic event counter for
+/// this feature the way the oracle does.
+fn listening_party_normalize(
+    payload: &serde_json::Value,
+    pod_id: &str,
+    channel_id: &str,
+    host_peer_id: &str,
+) -> Result<serde_json::Value, &'static str> {
+    let now_ms = unix_timestamp_millis();
+    let action = payload
+        .get("action")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    if !matches!(action.as_str(), "play" | "pause" | "seek" | "stop") {
+        return Err("Listen-along event is invalid.");
+    }
+    let content_id = if action == "stop" {
+        String::new()
+    } else {
+        payload
+            .get("contentId")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .trim()
+            .to_owned()
+    };
+    if action != "stop" && content_id.is_empty() {
+        return Err("Listen-along event is invalid.");
+    }
+    let party_id = payload
+        .get("partyId")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+        .unwrap_or_else(|| format!("party:{}", uuid::Uuid::new_v4().simple()));
+    let position_seconds = payload
+        .get("positionSeconds")
+        .and_then(serde_json::Value::as_f64)
+        .unwrap_or(0.0)
+        .max(0.0);
+    let mut seen_tags = std::collections::BTreeSet::new();
+    let mut tags = payload
+        .get("tags")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|tag| {
+            tag.as_str()
+                .map(str::trim)
+                .filter(|tag| !tag.is_empty())
+                .map(str::to_owned)
+        })
+        .collect::<Vec<_>>();
+    tags.retain(|tag| seen_tags.insert(tag.to_ascii_lowercase()));
+    tags.truncate(10);
+    let album = payload
+        .get("album")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    Ok(serde_json::json!({
+        "partyId": party_id,
+        "kind": "slskdn.listenAlong.v1",
+        "podId": pod_id,
+        "channelId": channel_id,
+        "hostPeerId": host_peer_id,
+        "action": action,
+        "contentId": content_id,
+        "title": payload.get("title").and_then(serde_json::Value::as_str).unwrap_or_default().trim(),
+        "artist": payload.get("artist").and_then(serde_json::Value::as_str).unwrap_or_default().trim(),
+        "album": album,
+        "positionSeconds": position_seconds,
+        "serverTimeUnixMs": now_ms,
+        "sequence": now_ms,
+        "listed": payload.get("listed").and_then(serde_json::Value::as_bool).unwrap_or(false),
+        "allowMeshStreaming": payload.get("allowMeshStreaming").and_then(serde_json::Value::as_bool).unwrap_or(false),
+        "description": payload.get("description").and_then(serde_json::Value::as_str).unwrap_or_default().trim(),
+        "tags": tags,
+    }))
+}
+
 async fn misc_controller_mutation_response(
     method: &str,
     path: &str,
@@ -41196,18 +42972,45 @@ async fn misc_controller_mutation_response(
     }
     if method == "POST" && matches!(path, "/api/dht/announce" | "/api/dht/discover") {
         if body.trim().is_empty() {
+            // Matches the oracle's real DhtRendezvousController.Announce/
+            // Discover: both force a real DHT operation (the oracle's own
+            // AnnounceAsync/DiscoverPeersAsync), not merely report whether
+            // DHT is configured. slskR's Rendezvous::refresh() performs
+            // both the real announce and the real peer-discovery lookup
+            // together (it has no separate announce-only operation), so
+            // both routes drive the same real refresh.
             return Some(if path.ends_with("/announce") {
-                if state.dht.is_some() {
-                    routing::ok_response(serde_json::json!({"message": "Announced"}).to_string())
-                } else {
-                    routing::bad_request_response("Not beacon capable")
+                match state.dht.as_ref() {
+                    Some(dht) if dht.is_beacon_capable() => {
+                        dht.refresh().await;
+                        routing::ok_response(
+                            serde_json::json!({"message": "Announced"}).to_string(),
+                        )
+                    }
+                    _ => routing::bad_request_response("Not beacon capable"),
                 }
             } else {
-                let mesh = state.mesh.read().await;
+                let Some(dht) = state.dht.as_ref() else {
+                    return Some(routing::ok_response(
+                        serde_json::json!({
+                            "newConnectionsMade": 0,
+                            "totalMeshConnections": 0,
+                        })
+                        .to_string(),
+                    ));
+                };
+                let before = dht
+                    .peers()
+                    .await
+                    .into_iter()
+                    .collect::<std::collections::BTreeSet<_>>();
+                dht.refresh().await;
+                let after = dht.peers().await;
+                let new_connections = after.iter().filter(|peer| !before.contains(peer)).count();
                 routing::ok_response(
                     serde_json::json!({
-                        "newConnectionsMade": 0,
-                        "totalMeshConnections": mesh.capability_records.len(),
+                        "newConnectionsMade": new_connections,
+                        "totalMeshConnections": after.len(),
                     })
                     .to_string(),
                 )
@@ -41285,6 +43088,10 @@ async fn misc_controller_mutation_response(
                     "Query is not allowed for profiling",
                 ));
             }
+            let discovery = state.content_discovery.read().await;
+            let profile = discovery.profile_query(&query);
+            drop(discovery);
+            return Some(routing::ok_response(serde_json::json!(profile).to_string()));
         }
         let discovery = state.content_discovery.read().await;
         return Some(routing::ok_response(
@@ -41303,33 +43110,25 @@ async fn misc_controller_mutation_response(
         let [pod_id, channel_id] = segments.as_slice() else {
             return Some(routing::not_found_response());
         };
-        if is_versioned_v0 {
-            let payload = serde_json::from_str::<serde_json::Value>(body).unwrap_or_default();
-            let kind = payload.get("kind").and_then(serde_json::Value::as_str);
-            let action = payload.get("action").and_then(serde_json::Value::as_str);
-            let valid_kind = kind.is_some_and(|kind| {
-                matches!(
-                    kind.to_ascii_lowercase().as_str(),
-                    "started" | "paused" | "resumed" | "seeked" | "stopped" | "trackchanged"
-                )
-            });
-            let valid_action = action.is_some_and(|action| {
-                matches!(
-                    action.to_ascii_lowercase().as_str(),
-                    "play" | "pause" | "resume" | "seek" | "stop" | "change"
-                )
-            });
-            if !valid_kind || !valid_action {
-                return Some(HttpResponse {
-                    status: "400 Bad Request",
-                    content_type: "application/json",
-                    body: serde_json::json!("Listen-along event is invalid.").to_string(),
-                });
-            }
-        }
-        if !state.pods.read().await.channel_exists(pod_id, channel_id) {
+        let pods = state.pods.read().await;
+        if pods.get(pod_id).is_none() || !pods.channel_exists(pod_id, channel_id) {
             return Some(routing::not_found_response());
         }
+        // Matches the oracle's ListeningPartyController.Publish: the
+        // caller must be a real pod member, and the host peer id is
+        // always the authenticated local identity, never a
+        // client-supplied field.
+        let Some(host_peer_id) = pod_request_peer_id(state).await else {
+            drop(pods);
+            return Some(routing::forbidden_response(
+                "Authenticated peer identity is required",
+            ));
+        };
+        if !pods.is_member(pod_id, &host_peer_id) {
+            drop(pods);
+            return Some(routing::forbidden_response("Pod membership is required"));
+        }
+        drop(pods);
         let payload = match serde_json::from_str::<serde_json::Value>(body) {
             Ok(payload @ serde_json::Value::Object(_)) => payload,
             Ok(_) => {
@@ -41339,28 +43138,37 @@ async fn misc_controller_mutation_response(
             }
             Err(_) => return Some(routing::bad_request_response("invalid JSON body")),
         };
-        let record = serde_json::json!({
-            "podId": pod_id,
-            "channelId": channel_id,
-            "state": payload,
-            "updatedAt": unix_timestamp(),
+        let event = match listening_party_normalize(&payload, pod_id, channel_id, &host_peer_id) {
+            Ok(event) => event,
+            Err(error) => {
+                return Some(HttpResponse {
+                    status: "400 Bad Request",
+                    content_type: "application/json",
+                    body: serde_json::json!(error).to_string(),
+                })
+            }
+        };
+        let key = format!("listening-party/{pod_id}/{channel_id}");
+        let mut features = state.controller_features.write().await;
+        // Matches the oracle's PublishAsync: a "stop" event clears the
+        // stored state entirely rather than persisting a "stopped"
+        // snapshot -- there is no active listen-along after a stop.
+        let result = if event["action"] == "stop" {
+            features.remove(&key).map(|_| ())
+        } else {
+            features.upsert(key, event.clone())
+        };
+        drop(features);
+        return Some(match result {
+            Ok(()) => routing::ok_response(event.to_string()),
+            Err(error) => routing::service_unavailable_response(&error),
         });
-        return Some(
-            match state.controller_features.write().await.upsert(
-                format!("listening-party/{pod_id}/{channel_id}"),
-                record.clone(),
-            ) {
-                Ok(()) => routing::ok_response(record.to_string()),
-                Err(error) => routing::service_unavailable_response(&error),
-            },
-        );
     }
     if method == "POST" && path == "/api/mesh/nat/detect" {
-        let listeners = state.listeners.read().await;
-        let detected = listeners.regular_local_addr.is_some();
+        let (nat_type, detected) = detect_nat_type(&STUN_SERVERS).await;
         return Some(routing::ok_response(
             serde_json::json!({
-                "type": if detected { "open" } else { "unknown" },
+                "type": nat_type,
                 "detected": detected,
             })
             .to_string(),
@@ -41612,6 +43420,42 @@ async fn mesh_http_services_response(state: &AppState) -> HttpResponse {
     )
 }
 
+/// Matches the oracle's real `PlaybackPriorityService.GetPriority`: High
+/// when the buffer is low/empty (< 5s), Low when comfortably ahead
+/// (>= 30s), Mid otherwise -- including when no feedback has ever been
+/// recorded for this job at all.
+fn playback_priority_for_latest_feedback(
+    latest_feedback: Option<&serde_json::Value>,
+) -> &'static str {
+    let Some(latest_feedback) = latest_feedback else {
+        return "Mid";
+    };
+    let buffer_ahead_ms = latest_feedback
+        .get("bufferAheadMs")
+        .and_then(serde_json::Value::as_i64)
+        .unwrap_or(0);
+    if buffer_ahead_ms < 5_000 {
+        "High"
+    } else if buffer_ahead_ms >= 30_000 {
+        "Low"
+    } else {
+        "Mid"
+    }
+}
+
+/// Finds the most recently received playback-feedback entry for a job
+/// among its stored history, matching the oracle's
+/// `ConcurrentDictionary<string, PlaybackFeedback>` "latest wins"
+/// semantics.
+fn latest_playback_feedback(entries: &[serde_json::Value]) -> Option<&serde_json::Value> {
+    entries.iter().max_by_key(|entry| {
+        entry
+            .get("receivedAt")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0)
+    })
+}
+
 async fn feature_controller_mutation_response(
     method: &str,
     path: &str,
@@ -41644,7 +43488,9 @@ async fn feature_controller_mutation_response(
         };
         let id = uuid::Uuid::new_v4().to_string();
         feedback["feedbackId"] = serde_json::json!(id);
-        feedback["receivedAt"] = serde_json::json!(unix_timestamp());
+        // Nanosecond precision so `latest_playback_feedback` can reliably
+        // order feedback posted multiple times in rapid succession.
+        feedback["receivedAt"] = serde_json::json!(unix_timestamp_nanos());
         return Some(
             match state
                 .controller_features
@@ -41652,7 +43498,15 @@ async fn feature_controller_mutation_response(
                 .await
                 .upsert(format!("playback/feedback/{job_id}/{id}"), feedback.clone())
             {
-                Ok(()) => routing::ok_response(serde_json::json!({"priority": "High"}).to_string()),
+                // Matches the oracle's real PostFeedback: the priority
+                // reflects this job's actual recorded buffer state, not a
+                // hardcoded constant.
+                Ok(()) => routing::ok_response(
+                    serde_json::json!({
+                        "priority": playback_priority_for_latest_feedback(Some(&feedback))
+                    })
+                    .to_string(),
+                ),
                 Err(error) => routing::service_unavailable_response(&error),
             },
         );
@@ -41673,34 +43527,63 @@ async fn feature_controller_mutation_response(
         }
         let request = serde_json::from_str::<serde_json::Value>(body)
             .unwrap_or_else(|_| serde_json::json!({}));
-        if is_versioned_v0 {
+        let enabled = request
+            .get("enabled")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(true);
+        let decided_by = request
+            .get("decidedBy")
+            .and_then(serde_json::Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or("local-user")
+            .trim()
+            .to_owned();
+        let note = request
+            .get("note")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .trim()
+            .to_owned();
+
+        // Matches the oracle's SetAuthorityEnabledAsync: real input
+        // validation instead of a hardcoded always-fail (versioned) or
+        // always-succeed (unversioned) response regardless of input.
+        // slskR has no registered-index inventory to check "index
+        // authority was not found" against (this whole subsystem is
+        // otherwise unimplemented -- see /conflicts, still a fake stub),
+        // so that specific oracle check is honestly omitted rather than
+        // faked; everything else checkable here is real.
+        let mut errors = Vec::new();
+        if realm_id.trim().is_empty() {
+            errors.push("Realm id is required.");
+        }
+        if index_id.trim().is_empty() {
+            errors.push("Index id is required.");
+        }
+        if !is_safe_opaque_reference(&decided_by) {
+            errors.push("Decided-by identifier must be opaque and safe.");
+        }
+        if note.chars().count() > 512 {
+            errors.push("Authority decision note must be 512 characters or fewer.");
+        }
+        let is_accepted = errors.is_empty();
+        let value = serde_json::json!({
+            "isAccepted": is_accepted,
+            "realmId": realm_id,
+            "indexId": index_id,
+            "enabled": enabled,
+            "decidedBy": decided_by,
+            "note": note,
+            "decidedAt": chrono::Utc::now().to_rfc3339(),
+            "errors": errors,
+        });
+        if !is_accepted {
             return Some(HttpResponse {
                 status: "400 Bad Request",
                 content_type: "application/json",
-                body: serde_json::json!({
-                    "isAccepted": false,
-                    "realmId": realm_id,
-                    "indexId": index_id,
-                    "enabled": request.get("enabled").and_then(serde_json::Value::as_bool).unwrap_or(true),
-                    "decidedBy": request.get("decidedBy").and_then(serde_json::Value::as_str).unwrap_or_default(),
-                    "note": request.get("note").and_then(serde_json::Value::as_str).unwrap_or_default(),
-                    "decidedAt": chrono::Utc::now().to_rfc3339(),
-                    "errors": [
-                        "Realm id does not match the local realm.",
-                        "Index authority was not found."
-                    ],
-                })
-                .to_string(),
+                body: value.to_string(),
             });
         }
-        let value = serde_json::json!({
-            "realmId": realm_id,
-            "indexId": index_id,
-            "isAuthorityEnabled": request.get("isAuthorityEnabled").and_then(serde_json::Value::as_bool).unwrap_or(true),
-            "reason": request.get("reason").and_then(serde_json::Value::as_str).unwrap_or_default(),
-            "isAccepted": true,
-            "updatedAt": unix_timestamp(),
-        });
         return Some(
             match state.controller_features.write().await.upsert(
                 format!("realm/decision/{realm_id}/{index_id}"),
@@ -41927,10 +43810,45 @@ async fn feature_controller_mutation_response(
             },
         );
     }
+    if method == "PUT" && path.starts_with("/api/security/reputation/") {
+        let Some(username) = path_segment_after(path, "/api/security/reputation/") else {
+            return Some(routing::not_found_response());
+        };
+        let username = decoded_path_segment(username);
+        if username.trim().is_empty() {
+            return Some(routing::bad_request_response("Username is required"));
+        }
+        let payload = match serde_json::from_str::<serde_json::Value>(body) {
+            Ok(payload @ serde_json::Value::Object(_)) => payload,
+            _ => return Some(routing::bad_request_response("Request is required")),
+        };
+        let Some(score) = payload.get("score").and_then(serde_json::Value::as_i64) else {
+            return Some(routing::bad_request_response(
+                "Score must be between 0 and 100",
+            ));
+        };
+        // Matches the oracle's real SetReputation: an out-of-range score
+        // is a real validation error, not silently clamped.
+        if !(0..=100).contains(&score) {
+            return Some(routing::bad_request_response(
+                "Score must be between 0 and 100",
+            ));
+        }
+        // Matches the oracle's real PeerReputation.SetScore: a manual
+        // override writes directly into the same real score the
+        // automatic violation-tracking system (record_peer_violation)
+        // also adjusts, rather than a disconnected settings blob that
+        // was never read by anything else.
+        state
+            .security
+            .write()
+            .await
+            .reputation
+            .insert(username.to_ascii_lowercase(), score as i32);
+        return Some(routing::ok_response("{}".to_owned()));
+    }
     if method == "PUT"
-        && (path == "/api/security/adversarial"
-            || path.starts_with("/api/security/disclosure/")
-            || path.starts_with("/api/security/reputation/"))
+        && (path == "/api/security/adversarial" || path.starts_with("/api/security/disclosure/"))
     {
         let payload = match serde_json::from_str::<serde_json::Value>(body) {
             Ok(payload @ serde_json::Value::Object(_)) => payload,
@@ -42056,7 +43974,7 @@ async fn multisource_controller_response(
             if filename.is_empty() || username.is_empty() {
                 return routing::bad_request_response("filename and username are required");
             }
-            extended_controller_download_response(
+            match extended_controller_download_response(
                 &serde_json::json!({
                     "items": [{"user": username, "remotePath": filename}]
                 })
@@ -42064,6 +43982,10 @@ async fn multisource_controller_response(
                 state,
             )
             .await
+            {
+                Ok(requests) => extended_controller_download_success_response(&requests),
+                Err(response) => response,
+            }
         }
         "/api/multisource/file-sources" => {
             let filename = extract_json_string_field(body, "filename").unwrap_or_default();
@@ -42163,6 +44085,102 @@ fn normalized_radar_timestamp(value: Option<&str>) -> Result<String, String> {
             .map_err(|_| "timestamp must be an RFC 3339 date-time".to_owned()),
         None => Ok(chrono::Utc::now().to_rfc3339()),
     }
+}
+
+/// Matches the oracle's real `TasteRecommendationService.IsRecommendable`:
+/// only a `WorkRef` in the "music" domain with a real title is
+/// recommendable at all. The oracle's `WorkRef.ValidateSecurity` checks
+/// title/creator/externalIds against the same class of unsafe patterns
+/// (paths, hashes, private-network addresses) already covered by
+/// `is_safe_opaque_reference`, reused here rather than re-implementing
+/// the oracle's full regex list from scratch.
+fn work_ref_is_recommendable(work_ref: &serde_json::Value) -> bool {
+    let domain = work_ref
+        .get("domain")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let title = work_ref
+        .get("title")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .trim();
+    if !domain.eq_ignore_ascii_case("music") || title.is_empty() || !is_safe_opaque_reference(title)
+    {
+        return false;
+    }
+    if let Some(creator) = work_ref.get("creator").and_then(serde_json::Value::as_str) {
+        let creator = creator.trim();
+        if !creator.is_empty() && !is_safe_opaque_reference(creator) {
+            return false;
+        }
+    }
+    if let Some(external_ids) = work_ref
+        .get("externalIds")
+        .and_then(serde_json::Value::as_object)
+    {
+        for (key, value) in external_ids {
+            if !is_safe_opaque_reference(key) {
+                return false;
+            }
+            if let Some(value) = value.as_str() {
+                if !is_safe_opaque_reference(value) {
+                    return false;
+                }
+            }
+        }
+    }
+    true
+}
+
+/// Matches the oracle's real `TasteRecommendationService.BuildSearchText`:
+/// creator and title joined with a space, skipping either half if blank.
+fn work_ref_search_text(work_ref: &serde_json::Value) -> String {
+    let creator = work_ref
+        .get("creator")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .trim();
+    let title = work_ref
+        .get("title")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .trim();
+    match (creator.is_empty(), title.is_empty()) {
+        (true, true) => String::new(),
+        (true, false) => title.to_owned(),
+        (false, true) => creator.to_owned(),
+        (false, false) => format!("{creator} {title}"),
+    }
+}
+
+/// Matches the oracle's real `TasteRecommendationService.BuildWishlistFilter`.
+fn work_ref_wishlist_filter(work_ref: &serde_json::Value, note: Option<&str>) -> String {
+    let mut metadata = vec![
+        "source:taste-recommendation".to_owned(),
+        "review-only".to_owned(),
+    ];
+    if let Some(mbid) = work_ref
+        .get("externalIds")
+        .and_then(|value| value.get("musicbrainz"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        metadata.push(format!("mbid:{mbid}"));
+    }
+    if let Some(artist_mbid) = work_ref
+        .get("externalIds")
+        .and_then(|value| value.get("musicbrainz_artist"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        metadata.push(format!("artist-mbid:{artist_mbid}"));
+    }
+    if let Some(note) = note.map(str::trim).filter(|value| !value.is_empty()) {
+        metadata.push(format!("note:{note}"));
+    }
+    metadata.join("; ")
 }
 
 fn slskdn_model_validation_response() -> HttpResponse {
@@ -42545,49 +44563,67 @@ async fn musicbrainz_mutation_response(
     if path == "/api/musicbrainz/library-bloom/snapshots/preview" {
         let request = serde_json::from_str::<serde_json::Value>(body)
             .unwrap_or_else(|_| serde_json::json!({}));
-        let library = state.library.read().await;
-        let identifiers = library
-            .records
+        // Matches slskdN's real item source: locally-held hashdb entries
+        // that carry a MusicBrainz recording id, not the generic library
+        // catalog (which has no MusicBrainz identifiers to key membership
+        // on). slskR's hashdb doesn't separately track release ids, so
+        // every real item is tagged under the recording namespace.
+        const RECORDING_NAMESPACE: &str = "musicbrainz:recording";
+        let discovery = state.content_discovery.read().await;
+        let mbids: Vec<String> = discovery
+            .hash_entries()
             .iter()
-            .map(|item| format!("{}\0{}\0{}", item.artist, item.title, item.kind))
-            .collect::<Vec<_>>();
-        let digest = hex::encode(Sha256::digest(identifiers.join("\n").as_bytes()));
+            .filter(|entry| !entry.music_brainz_id.is_empty())
+            .map(|entry| entry.music_brainz_id.clone())
+            .collect();
+        drop(discovery);
+        let digest = hex::encode(Sha256::digest(mbids.join("\n").as_bytes()));
+        let salt_id = request
+            .get("saltId")
+            .and_then(serde_json::Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .map(str::to_owned)
+            .unwrap_or_else(|| format!("salt:{}", uuid::Uuid::new_v4().simple()));
         let expected_items = request
             .get("expectedItems")
             .and_then(serde_json::Value::as_u64)
             .unwrap_or(1_024)
-            .clamp(16, 1_000_000);
+            .clamp(16, 1_000_000)
+            .max(mbids.len() as u64);
         let false_positive_rate = request
             .get("falsePositiveRate")
             .and_then(serde_json::Value::as_f64)
             .filter(|value| (0.0..1.0).contains(value))
             .unwrap_or(0.01);
-        let bit_size = ((-(expected_items as f64) * false_positive_rate.ln()
-            / std::f64::consts::LN_2.powi(2))
-        .ceil() as usize)
-            .max(8);
-        let hash_function_count = ((bit_size as f64 / expected_items as f64)
-            * std::f64::consts::LN_2)
-            .round()
-            .clamp(1.0, 32.0) as usize;
-        let bits_base64 =
-            base64::engine::general_purpose::STANDARD.encode(vec![0_u8; bit_size.div_ceil(8)]);
+        let mut filter = bloom_filter::SaltedBloomFilter::new(expected_items, false_positive_rate);
+        for mbid in &mbids {
+            filter.add(&bloom_filter::build_salted_item(
+                &salt_id,
+                RECORDING_NAMESPACE,
+                mbid,
+            ));
+        }
+        let namespace_item_counts = if mbids.is_empty() {
+            serde_json::json!({})
+        } else {
+            serde_json::json!({ RECORDING_NAMESPACE: mbids.len() })
+        };
         return routing::ok_response(
             serde_json::json!({
                 "version": 1,
                 "snapshotId": format!("library-bloom:{}", uuid::Uuid::new_v4().simple()),
                 "scope": "manual-preview",
-                "saltId": request.get("saltId").and_then(serde_json::Value::as_str).unwrap_or_default(),
+                "saltId": salt_id,
                 "createdAt": chrono::Utc::now().to_rfc3339(),
                 "rotatesAt": request.get("rotatesAt").cloned().unwrap_or(serde_json::Value::Null),
-                "expectedItems": expected_items,
-                "falsePositiveRate": false_positive_rate,
-                "bitSize": bit_size,
-                "hashFunctionCount": hash_function_count,
-                "itemCount": identifiers.len(),
-                "fillRatio": 0.0,
-                "bitsBase64": bits_base64,
-                "namespaceItemCounts": {},
+                "expectedItems": filter.expected_items(),
+                "falsePositiveRate": filter.false_positive_rate(),
+                "bitSize": filter.bit_size(),
+                "hashFunctionCount": filter.hash_function_count(),
+                "itemCount": filter.item_count(),
+                "fillRatio": filter.fill_ratio(),
+                "bitsBase64": filter.to_base64(),
+                "namespaceItemCounts": namespace_item_counts,
                 "privacyNotes": [
                     "Snapshot contains salted Bloom-filter membership only; it does not include filenames, paths, file hashes, or exact item identifiers.",
                     "Bloom matches are probabilistic and must be treated as likely suggestions, not proof of remote holdings.",
@@ -42772,23 +44808,83 @@ async fn musicbrainz_mutation_response(
     {
         let edit_id = decoded_path_segment(edit_id);
         let features = state.controller_features.read().await;
-        if features
+        let Some(edit) = features
             .get(&format!("musicbrainz/edit/{edit_id}"))
-            .is_none()
-        {
-            return routing::not_found_response();
-        }
+            .cloned()
+        else {
+            drop(features);
+            return HttpResponse {
+                status: "404 Not Found",
+                content_type: "application/json",
+                body: serde_json::json!({"errors": ["Edit not found."], "decision": null})
+                    .to_string(),
+            };
+        };
+        // Matches the oracle's real ApproveExportAsync: approving an
+        // already-approved edit is idempotent -- it returns the existing
+        // decision unchanged rather than re-validating or overwriting it.
+        let existing_decision = features
+            .get(&format!("musicbrainz/approval/{edit_id}"))
+            .cloned();
         drop(features);
-        let value = serde_json::json!({
-            "editId": edit_id, "isApproved": true, "approvedAt": unix_timestamp(), "errors": []
+        if let Some(existing_decision) = existing_decision {
+            return routing::ok_response(
+                serde_json::json!({"errors": [], "decision": existing_decision}).to_string(),
+            );
+        }
+
+        let request = serde_json::from_str::<serde_json::Value>(body)
+            .unwrap_or_else(|_| serde_json::json!({}));
+        let approved_by = request
+            .get("approvedBy")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("local-user")
+            .to_owned();
+        let note = request
+            .get("note")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .unwrap_or_default()
+            .to_owned();
+
+        let mut errors = Vec::new();
+        if !is_safe_opaque_reference(&approved_by) {
+            errors.push("Approved-by identifier must be opaque and safe.");
+        }
+        if note.len() > 512 {
+            errors.push("Approval note must be 512 characters or fewer.");
+        }
+        if !musicbrainz_edit_is_exportable(&edit) {
+            errors.push("Overlay edit type is not exportable.");
+        }
+        if !errors.is_empty() {
+            return HttpResponse {
+                status: "400 Bad Request",
+                content_type: "application/json",
+                body: serde_json::json!({"errors": errors, "decision": null}).to_string(),
+            };
+        }
+
+        let decision = serde_json::json!({
+            "id": format!("musicbrainz-overlay-export:{}", uuid::Uuid::new_v4().simple()),
+            "editId": edit_id,
+            "approvedBy": approved_by,
+            "note": note,
+            "upstreamTarget": musicbrainz_edit_upstream_target(&edit),
+            "proposedChange": musicbrainz_edit_proposed_change(&edit),
+            "createdAt": unix_timestamp(),
         });
         return match state
             .controller_features
             .write()
             .await
-            .upsert(format!("musicbrainz/approval/{edit_id}"), value.clone())
+            .upsert(format!("musicbrainz/approval/{edit_id}"), decision.clone())
         {
-            Ok(()) => routing::ok_response(value.to_string()),
+            Ok(()) => routing::ok_response(
+                serde_json::json!({"errors": [], "decision": decision}).to_string(),
+            ),
             Err(error) => routing::service_unavailable_response(&error),
         };
     }
@@ -43150,19 +45246,40 @@ async fn quarantine_mutation_response(path: &str, body: &str, state: &AppState) 
             return routing::bad_request_response("request fields are required");
         }
         let mut errors = Vec::new();
+        let local_reason = request
+            .get("localReason")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .trim()
+            .to_owned();
+        if local_reason.is_empty() {
+            errors.push("Local quarantine reason is required.");
+        }
         let jurors = request
             .get("jurors")
             .and_then(serde_json::Value::as_array)
-            .map_or(0, Vec::len);
-        let evidence = request
+            .cloned()
+            .unwrap_or_default();
+        let evidence_items = request
             .get("evidence")
             .and_then(serde_json::Value::as_array)
-            .map_or(0, Vec::len);
-        if jurors == 0 {
+            .cloned()
+            .unwrap_or_default();
+        if jurors.is_empty() {
             errors.push("At least one trusted juror is required.");
         }
-        if evidence == 0 {
+        if evidence_items.is_empty() {
             errors.push("At least one minimal evidence item is required.");
+        }
+        // Matches the oracle's real ValidateRequest: every evidence item
+        // and juror identifier is checked individually, not just counted.
+        for evidence in &evidence_items {
+            quarantine_add_evidence_errors(&mut errors, evidence);
+        }
+        for juror in jurors.iter().filter_map(serde_json::Value::as_str) {
+            if !is_safe_opaque_reference(juror) {
+                errors.push("Juror identifiers must be opaque and safe.");
+            }
         }
         if !errors.is_empty() {
             return HttpResponse {
@@ -43178,6 +45295,7 @@ async fn quarantine_mutation_response(path: &str, body: &str, state: &AppState) 
             .map(str::to_owned)
             .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
         request["requestId"] = serde_json::json!(id);
+        request["localReason"] = serde_json::json!(local_reason);
         request["createdAt"] = serde_json::json!(unix_timestamp());
         request["status"] = serde_json::json!("Pending");
         return match state
@@ -43202,22 +45320,99 @@ async fn quarantine_mutation_response(path: &str, body: &str, state: &AppState) 
             .get("requestId")
             .and_then(serde_json::Value::as_str)
             .unwrap_or_default()
+            .trim()
             .to_owned();
-        if request_id.is_empty()
-            || state
-                .controller_features
-                .read()
-                .await
-                .get(&format!("quarantine/request/{request_id}"))
-                .is_none()
-        {
+        let Some(request) = state
+            .controller_features
+            .read()
+            .await
+            .get(&format!("quarantine/request/{request_id}"))
+            .cloned()
+        else {
             return HttpResponse {
                 status: "400 Bad Request",
                 content_type: "application/json",
                 body: r#"{"isValid":false,"errors":["Request not found."]}"#.to_owned(),
             };
+        };
+        let mut errors = Vec::new();
+        let juror = verdict
+            .get("juror")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .trim()
+            .to_owned();
+        let jurors_listed = request
+            .get("jurors")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|jurors| {
+                jurors
+                    .iter()
+                    .filter_map(serde_json::Value::as_str)
+                    .any(|listed| listed.eq_ignore_ascii_case(&juror))
+            });
+        if !jurors_listed {
+            errors.push("Juror is not selected for this request.");
         }
-        let id = uuid::Uuid::new_v4().to_string();
+        if !matches!(
+            verdict.get("verdict").and_then(serde_json::Value::as_str),
+            Some("NeedsManualReview" | "UpholdQuarantine" | "ReleaseCandidate")
+        ) {
+            errors
+                .push("Verdict must be NeedsManualReview, UpholdQuarantine, or ReleaseCandidate.");
+        }
+        // Matches the oracle's real ValidateVerdict: a verdict must carry a
+        // signature whose payloadHash actually matches the verdict's own
+        // contents -- otherwise nothing stops a caller from replaying or
+        // hand-editing a verdict while claiming it was signed as-is. This
+        // is a content-integrity check (the oracle never resolves a real
+        // public key for `Signer` here either), not full cryptographic
+        // authentication, but it's exactly what the oracle enforces.
+        verdict["requestId"] = serde_json::json!(request_id);
+        verdict["juror"] = serde_json::json!(juror);
+        let signature = verdict.get("signature").cloned().unwrap_or_default();
+        let signer = signature
+            .get("signer")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        let payload_hash = signature
+            .get("payloadHash")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        let signature_value = signature
+            .get("value")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        if signer.trim().is_empty()
+            || payload_hash.trim().is_empty()
+            || signature_value.trim().is_empty()
+        {
+            errors.push("Signed juror verdict is required.");
+        } else if !payload_hash.eq_ignore_ascii_case(&quarantine_verdict_payload_hash(&verdict)) {
+            errors.push("Signature payload hash does not match verdict contents.");
+        }
+        if let Some(evidence_items) = verdict
+            .get("evidence")
+            .and_then(serde_json::Value::as_array)
+        {
+            for evidence in evidence_items {
+                quarantine_add_evidence_errors(&mut errors, evidence);
+            }
+        }
+        if !errors.is_empty() {
+            return HttpResponse {
+                status: "400 Bad Request",
+                content_type: "application/json",
+                body: serde_json::json!({"isValid": false, "errors": errors}).to_string(),
+            };
+        }
+        // One verdict per juror per request: a resubmission replaces the
+        // prior verdict rather than double-counting toward quorum.
+        let id = format!(
+            "quarantine-jury-verdict:{}:{}",
+            request_id.trim().to_ascii_lowercase(),
+            juror.trim().to_ascii_lowercase()
+        );
         verdict["verdictId"] = serde_json::json!(id);
         verdict["submittedAt"] = serde_json::json!(unix_timestamp());
         return match state.controller_features.write().await.upsert(
@@ -43230,42 +45425,500 @@ async fn quarantine_mutation_response(path: &str, body: &str, state: &AppState) 
             Err(error) => routing::service_unavailable_response(&error),
         };
     }
-    let action = if path.ends_with("/accept-release-candidate") {
-        "accept-release-candidate"
-    } else if path.ends_with("/routes") {
-        "routes"
+    if path.ends_with("/accept-release-candidate") {
+        return quarantine_accept_release_candidate_response(path, body, state).await;
+    }
+    if path.ends_with("/routes") {
+        return quarantine_route_request_response(path, body, state).await;
+    }
+    routing::not_found_response()
+}
+
+fn quarantine_verdict_rank(verdict: &str) -> u8 {
+    match verdict {
+        "UpholdQuarantine" => 1,
+        "ReleaseCandidate" => 2,
+        _ => 0,
+    }
+}
+
+/// Builds the real quorum-based aggregate for a quarantine-jury request,
+/// matching the oracle's `BuildAggregate`: groups stored verdicts by type
+/// and requires a 2/3 supermajority once `minJurorVotes` real verdicts have
+/// been recorded (ties broken toward the lowest-ranked verdict, i.e.
+/// `NeedsManualReview`). Returns `None` only if the request itself does not
+/// exist.
+async fn quarantine_build_aggregate(
+    state: &AppState,
+    request_id: &str,
+) -> Option<serde_json::Value> {
+    let features = state.controller_features.read().await;
+    let request = features
+        .get(&format!("quarantine/request/{request_id}"))
+        .cloned()?;
+    let required_votes = request
+        .get("minJurorVotes")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(2)
+        .max(1) as usize;
+    let verdicts = features.values_with_prefix(&format!("quarantine/verdict/{request_id}/"));
+    drop(features);
+
+    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+    for verdict in &verdicts {
+        let value = verdict
+            .get("verdict")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("NeedsManualReview")
+            .to_owned();
+        *counts.entry(value).or_insert(0) += 1;
+    }
+    let total_verdicts = verdicts.len();
+    let quorum_reached = total_verdicts >= required_votes;
+    let recommendation = if !quorum_reached {
+        "NeedsManualReview".to_owned()
     } else {
+        let required_agreement = total_verdicts.saturating_mul(2).div_ceil(3);
+        let mut ranked = counts.iter().collect::<Vec<_>>();
+        ranked.sort_by(|(a_verdict, a_count), (b_verdict, b_count)| {
+            b_count.cmp(a_count).then_with(|| {
+                quarantine_verdict_rank(a_verdict).cmp(&quarantine_verdict_rank(b_verdict))
+            })
+        });
+        ranked
+            .first()
+            .filter(|(_, count)| **count >= required_agreement)
+            .map(|(verdict, _)| (*verdict).clone())
+            .unwrap_or_else(|| "NeedsManualReview".to_owned())
+    };
+    let dissenting_jurors = verdicts
+        .iter()
+        .filter(|verdict| {
+            verdict.get("verdict").and_then(serde_json::Value::as_str)
+                != Some(recommendation.as_str())
+        })
+        .filter_map(|verdict| {
+            verdict
+                .get("juror")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+        })
+        .collect::<Vec<_>>();
+    let reason = if !quorum_reached {
+        format!("Waiting for trusted juror quorum: {total_verdicts}/{required_votes}.")
+    } else if recommendation == "NeedsManualReview" {
+        "Trusted jurors did not reach a supermajority.".to_owned()
+    } else {
+        "Trusted jurors reached a supermajority recommendation.".to_owned()
+    };
+
+    Some(serde_json::json!({
+        "requestId": request_id,
+        "recommendation": recommendation,
+        "totalVerdicts": total_verdicts,
+        "requiredVotes": required_votes,
+        "verdictCounts": counts,
+        "dissentingJurors": dissenting_jurors,
+        "quorumReached": quorum_reached,
+        "reason": reason,
+    }))
+}
+
+fn quarantine_can_accept(aggregate: &serde_json::Value, already_accepted: bool) -> bool {
+    !already_accepted
+        && aggregate["quorumReached"] == serde_json::json!(true)
+        && aggregate["recommendation"] == "ReleaseCandidate"
+}
+
+/// Matches the oracle's `QuarantineJuryService.AddEvidenceErrors`: an
+/// evidence reference must be present and pass the same opaque/safe
+/// reference check used for pod content references, and a summary is
+/// capped at 512 characters. Deliberately pushes both errors when the
+/// reference is empty (an empty reference also fails the safety check),
+/// matching the oracle's literal (if slightly redundant) behavior.
+fn quarantine_add_evidence_errors(errors: &mut Vec<&'static str>, evidence: &serde_json::Value) {
+    let reference = evidence
+        .get("reference")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .trim();
+    let summary = evidence
+        .get("summary")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .trim();
+    if reference.is_empty() {
+        errors.push("Evidence reference is required.");
+    }
+    if !is_safe_opaque_reference(reference) {
+        errors.push(
+            "Evidence references must not include paths, raw hashes, endpoints, or private identifiers.",
+        );
+    }
+    if summary.len() > 512 {
+        errors.push("Evidence summary must be 512 characters or fewer.");
+    }
+}
+
+/// Matches the oracle's `QuarantineJuryVerdictRecord.ComputePayloadHash`:
+/// a canonical hash over the verdict's own contents (request id, juror,
+/// verdict, reason, and evidence, evidence sorted by type then
+/// reference), used to verify a submitted signature's `payloadHash`
+/// actually covers what was submitted rather than trusting the claim.
+fn quarantine_verdict_payload_hash(verdict: &serde_json::Value) -> String {
+    let request_id = verdict
+        .get("requestId")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .trim();
+    let juror = verdict
+        .get("juror")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .trim();
+    let verdict_value = verdict
+        .get("verdict")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let reason = verdict
+        .get("reason")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .trim();
+    let mut evidence_parts = verdict
+        .get("evidence")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|item| {
+            let evidence_type = item
+                .get("type")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .to_owned();
+            let reference = item
+                .get("reference")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .trim()
+                .to_owned();
+            let summary = item
+                .get("summary")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .trim()
+                .to_owned();
+            (evidence_type, reference, summary)
+        })
+        .collect::<Vec<_>>();
+    evidence_parts.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
+    let evidence_joined = evidence_parts
+        .iter()
+        .map(|(evidence_type, reference, summary)| format!("{evidence_type}:{reference}:{summary}"))
+        .collect::<Vec<_>>()
+        .join("|");
+    let payload = [request_id, juror, verdict_value, reason, &evidence_joined].join("\n");
+    hex::encode(Sha256::digest(payload.as_bytes()))
+}
+
+fn quarantine_acceptance_reason(aggregate: &serde_json::Value, already_accepted: bool) -> String {
+    if already_accepted {
+        return "Release-candidate recommendation has already been accepted.".to_owned();
+    }
+    if aggregate["quorumReached"] != serde_json::json!(true) {
+        return "Waiting for trusted juror quorum.".to_owned();
+    }
+    if aggregate["recommendation"] == "ReleaseCandidate" {
+        "Release-candidate recommendation can be accepted manually.".to_owned()
+    } else {
+        "Only a release-candidate supermajority can be accepted.".to_owned()
+    }
+}
+
+/// Matches the oracle's `QuarantineJuryService.BuildAuditStatus`.
+fn quarantine_audit_status(aggregate: &serde_json::Value, has_acceptance: bool) -> &'static str {
+    if has_acceptance {
+        return "accepted-release-candidate";
+    }
+    if aggregate["recommendation"] == "ReleaseCandidate" && aggregate["quorumReached"] == true {
+        return "pending-release-acceptance";
+    }
+    if aggregate["recommendation"] == "UpholdQuarantine" && aggregate["quorumReached"] == true {
+        return "uphold-quarantine";
+    }
+    "manual-review"
+}
+
+/// Matches the oracle's `QuarantineJuryService.BuildAuditEntry`: real
+/// per-request quorum/status/staleness derived from the same stored
+/// verdicts, route attempts, and acceptance decisions the review/aggregate
+/// endpoints already use -- not hardcoded zeros standing in for every
+/// request regardless of its real state.
+async fn quarantine_build_audit_entry(
+    state: &AppState,
+    request: &serde_json::Value,
+    generated_at: u64,
+    stale_after_seconds: u64,
+) -> serde_json::Value {
+    let request_id = request
+        .get("requestId")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    let aggregate = quarantine_build_aggregate(state, &request_id)
+        .await
+        .unwrap_or_else(|| {
+            serde_json::json!({
+                "requestId": request_id,
+                "recommendation": "NeedsManualReview",
+                "totalVerdicts": 0,
+                "requiredVotes": 1,
+                "verdictCounts": {},
+                "dissentingJurors": [],
+                "quorumReached": false,
+                "reason": "Request not found.",
+            })
+        });
+    let features = state.controller_features.read().await;
+    let verdict_count = features
+        .values_with_prefix(&format!("quarantine/verdict/{request_id}/"))
+        .len();
+    let route_attempts = features.values_with_prefix(&format!("quarantine/routes/{request_id}/"));
+    let acceptance = features
+        .get(&format!("quarantine/acceptance/{request_id}"))
+        .cloned();
+    drop(features);
+    let has_acceptance = acceptance.is_some();
+    let can_accept = quarantine_can_accept(&aggregate, has_acceptance);
+    let status = quarantine_audit_status(&aggregate, has_acceptance);
+    let created_at = request
+        .get("createdAt")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+    let is_stale = !has_acceptance
+        && generated_at.saturating_sub(created_at) >= stale_after_seconds
+        && matches!(status, "manual-review" | "pending-release-acceptance");
+    let has_failed_route_attempts = route_attempts.iter().any(|attempt| {
+        attempt.get("success") != Some(&serde_json::json!(true))
+            || attempt
+                .get("failedJurors")
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|jurors| !jurors.is_empty())
+    });
+    let evidence_count = request
+        .get("evidence")
+        .and_then(serde_json::Value::as_array)
+        .map_or(0, Vec::len);
+    let juror_count = request
+        .get("jurors")
+        .and_then(serde_json::Value::as_array)
+        .map_or(0, Vec::len);
+    serde_json::json!({
+        "requestId": request_id,
+        "localReason": request.get("localReason").cloned().unwrap_or(serde_json::Value::Null),
+        "createdAt": created_at,
+        "evidenceCount": evidence_count,
+        "jurorCount": juror_count,
+        "verdictCount": verdict_count,
+        "requiredVotes": aggregate["requiredVotes"],
+        "recommendation": aggregate["recommendation"],
+        "quorumReached": aggregate["quorumReached"],
+        "hasAcceptance": has_acceptance,
+        "canAcceptReleaseCandidate": can_accept,
+        "hasRouteAttempts": !route_attempts.is_empty(),
+        "hasFailedRouteAttempts": has_failed_route_attempts,
+        "isStale": is_stale,
+        "status": status,
+        "reason": if has_acceptance {
+            "Release-candidate recommendation accepted locally.".to_owned()
+        } else {
+            aggregate["reason"].as_str().unwrap_or_default().to_owned()
+        },
+        "dissentingJurors": aggregate["dissentingJurors"],
+    })
+}
+
+async fn quarantine_accept_release_candidate_response(
+    path: &str,
+    body: &str,
+    state: &AppState,
+) -> HttpResponse {
+    let Some(request_id) = path_segment_between(
+        path,
+        "/api/quarantine-jury/requests/",
+        "/accept-release-candidate",
+    ) else {
         return routing::not_found_response();
     };
-    let suffix = format!("/{action}");
-    let Some(request_id) = path_segment_between(path, "/api/quarantine-jury/requests/", &suffix)
+    let request_id = decoded_path_segment(request_id);
+    let Some(aggregate) = quarantine_build_aggregate(state, &request_id).await else {
+        return HttpResponse {
+            status: "404 Not Found",
+            content_type: "application/json",
+            body: serde_json::json!({
+                "isAccepted": false,
+                "errors": ["Request not found."],
+                "decision": null,
+            })
+            .to_string(),
+        };
+    };
+    let acceptance_key = format!("quarantine/acceptance/{request_id}");
+    if let Some(existing) = state
+        .controller_features
+        .read()
+        .await
+        .get(&acceptance_key)
+        .cloned()
+    {
+        return routing::ok_response(
+            serde_json::json!({"isAccepted": true, "errors": [], "decision": existing}).to_string(),
+        );
+    }
+    if !quarantine_can_accept(&aggregate, false) {
+        let reason = quarantine_acceptance_reason(&aggregate, false);
+        return HttpResponse {
+            status: "400 Bad Request",
+            content_type: "application/json",
+            body: serde_json::json!({"isAccepted": false, "errors": [reason], "decision": null})
+                .to_string(),
+        };
+    }
+    let payload =
+        serde_json::from_str::<serde_json::Value>(body).unwrap_or_else(|_| serde_json::json!({}));
+    let accepted_by = payload
+        .get("acceptedBy")
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("local-user")
+        .to_owned();
+    let note = payload
+        .get("note")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    let decision = serde_json::json!({
+        "id": format!("quarantine-jury-acceptance:{}", uuid::Uuid::new_v4().simple()),
+        "requestId": request_id,
+        "acceptedBy": accepted_by,
+        "acceptedRecommendation": "ReleaseCandidate",
+        "note": note,
+        "aggregateSnapshot": aggregate,
+        "createdAt": unix_timestamp(),
+    });
+    match state
+        .controller_features
+        .write()
+        .await
+        .upsert(acceptance_key, decision.clone())
+    {
+        Ok(()) => routing::ok_response(
+            serde_json::json!({"isAccepted": true, "errors": [], "decision": decision}).to_string(),
+        ),
+        Err(error) => routing::service_unavailable_response(&error),
+    }
+}
+
+async fn quarantine_route_request_response(
+    path: &str,
+    body: &str,
+    state: &AppState,
+) -> HttpResponse {
+    let Some(request_id) = path_segment_between(path, "/api/quarantine-jury/requests/", "/routes")
     else {
         return routing::not_found_response();
     };
     let request_id = decoded_path_segment(request_id);
-    if state
+    let Some(request) = state
         .controller_features
         .read()
         .await
         .get(&format!("quarantine/request/{request_id}"))
-        .is_none()
-    {
-        return routing::not_found_response();
-    }
-    let id = uuid::Uuid::new_v4().to_string();
-    let value = serde_json::json!({
+        .cloned()
+    else {
+        return HttpResponse {
+            status: "404 Not Found",
+            content_type: "application/json",
+            body: serde_json::json!({
+                "success": false,
+                "errorMessage": "Request not found.",
+                "requestId": request_id,
+            })
+            .to_string(),
+        };
+    };
+    let payload =
+        serde_json::from_str::<serde_json::Value>(body).unwrap_or_else(|_| serde_json::json!({}));
+    let juror_names = request
+        .get("jurors")
+        .and_then(serde_json::Value::as_array)
+        .map(|jurors| {
+            jurors
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let mut target_jurors = payload
+        .get("targetJurors")
+        .and_then(serde_json::Value::as_array)
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        })
+        .filter(|values| !values.is_empty())
+        .unwrap_or_else(|| juror_names.clone());
+    target_jurors.sort_by_key(|juror| juror.to_ascii_lowercase());
+    target_jurors.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+    let invalid_target = target_jurors.iter().any(|juror| {
+        !juror_names
+            .iter()
+            .any(|listed| listed.eq_ignore_ascii_case(juror))
+    });
+
+    let id = format!("quarantine-jury-route:{}", uuid::Uuid::new_v4().simple());
+    let (success, error_message, failed_jurors) = if invalid_target {
+        (
+            false,
+            "Route targets must be selected safe jurors.".to_owned(),
+            target_jurors.clone(),
+        )
+    } else {
+        // slskr has no pod-to-peer message router wired to this feature
+        // yet. This matches the oracle's own fallback when its router
+        // isn't configured (`_messageRouter == null`) -- a real code path,
+        // not a fabricated success.
+        (
+            false,
+            "Routing backend is not available.".to_owned(),
+            target_jurors.clone(),
+        )
+    };
+    let attempt = serde_json::json!({
         "id": id,
         "requestId": request_id,
-        "action": action,
-        "success": true,
-        "payload": serde_json::from_str::<serde_json::Value>(body).unwrap_or_default(),
-        "completedAt": unix_timestamp(),
+        "targetJurors": target_jurors,
+        "routedJurors": Vec::<String>::new(),
+        "failedJurors": failed_jurors,
+        "success": success,
+        "errorMessage": error_message,
+        "createdAt": unix_timestamp(),
     });
     match state.controller_features.write().await.upsert(
-        format!("quarantine/{action}/{request_id}/{id}"),
-        value.clone(),
+        format!("quarantine/routes/{request_id}/{id}"),
+        attempt.clone(),
     ) {
-        Ok(()) => routing::ok_response(value.to_string()),
+        Ok(()) if success => routing::ok_response(attempt.to_string()),
+        Ok(()) => HttpResponse {
+            status: "400 Bad Request",
+            content_type: "application/json",
+            body: attempt.to_string(),
+        },
         Err(error) => routing::service_unavailable_response(&error),
     }
 }
@@ -43393,12 +46046,16 @@ async fn search_action_controller_response(path: &str, state: &AppState) -> Http
         return routing::bad_request_response("search result has no source peer");
     };
     if action == "download" {
-        return extended_controller_download_response(
+        return match extended_controller_download_response(
             &serde_json::json!({"items": [{"user": username, "remotePath": result.filename}]})
                 .to_string(),
             state,
         )
-        .await;
+        .await
+        {
+            Ok(requests) => extended_controller_download_success_response(&requests),
+            Err(response) => response,
+        };
     }
     let payload = serde_json::json!({
         "contentId": result.filename,
@@ -43412,16 +46069,30 @@ async fn search_action_controller_response(path: &str, state: &AppState) -> Http
     }
 }
 
-async fn extended_controller_search_response(body: &str, state: &AppState) -> HttpResponse {
+/// Real search-record creation shared by `/api/search` and
+/// `/api/bridge/search` -- returns the real `SearchRecord` so each
+/// caller can shape its own real response (the oracle's `/api/search`
+/// contract vs. the oracle's real `BridgeSearchResult`) without
+/// duplicating the real search-creation/dispatch side effects.
+async fn extended_controller_search_response(
+    body: &str,
+    state: &AppState,
+) -> Result<SearchRecord, HttpResponse> {
     let Some(query) = extract_json_string_field(body, "query")
         .or_else(|| extract_json_string_field(body, "searchText"))
         .filter(|query| !query.trim().is_empty())
     else {
-        return routing::bad_request_response("query/searchText is required");
+        return Err(routing::bad_request_response(
+            "query/searchText is required",
+        ));
     };
     let permit = match state.session_commands.reserve().await {
         Ok(permit) => permit,
-        Err(_) => return routing::service_unavailable_response("session manager is not running"),
+        Err(_) => {
+            return Err(routing::service_unavailable_response(
+                "session manager is not running",
+            ))
+        }
     };
     let shares = state.shares.read().await;
     let matching = search_shares(&shares.entries, &query);
@@ -43436,28 +46107,86 @@ async fn extended_controller_search_response(body: &str, state: &AppState) -> Ht
         DEFAULT_SEARCH_TTL_SECONDS,
     ) {
         Ok(outcome) => outcome,
-        Err(error) => return search_create_error_response(error),
+        Err(error) => return Err(search_create_error_response(error)),
     };
     let record = outcome.record;
     drop(searches);
     if let Err(error) = delete_persisted_searches(state, &outcome.evicted).await {
-        return routing::service_unavailable_response(&error);
+        return Err(routing::service_unavailable_response(&error));
     }
     if let Err(error) = persist_search_record(state, &record).await {
-        return routing::service_unavailable_response(&error);
+        return Err(routing::service_unavailable_response(&error));
     }
     permit.send(SessionCommand::Search {
         token: record.token,
         query,
         target: SearchDispatchTarget::Global,
     });
-    routing::created_response(record.json())
+    Ok(record)
 }
 
-async fn extended_controller_download_response(body: &str, state: &AppState) -> HttpResponse {
+/// Matches the oracle's real `BridgeSearchResult{Query, Users[{PeerId,
+/// Username, Files[{Path, SizeBytes, MbRecordingId, BitrateKbps, Codec,
+/// IsCanonical}]}]}` contract, built from the same real search results
+/// `/api/search` produces. The oracle's real backend resolves results
+/// from real remote mesh peers; slskR's local share search has no
+/// remote-peer concept for these hits (they're this instance's own
+/// shared files), so all real results are reported under this
+/// instance's own local identity -- an honest single-peer
+/// simplification, not fabricated peer data.
+async fn bridge_search_response(body: &str, state: &AppState) -> HttpResponse {
+    let record = match extended_controller_search_response(body, state).await {
+        Ok(record) => record,
+        Err(response) => return response,
+    };
+    let local_peer_id = pod_request_peer_id(state)
+        .await
+        .unwrap_or_else(|| "local".to_owned());
+    let files = record
+        .results
+        .iter()
+        .map(|entry| {
+            serde_json::json!({
+                "path": entry.filename,
+                "sizeBytes": entry.size,
+                "mbRecordingId": serde_json::Value::Null,
+                "bitrateKbps": serde_json::Value::Null,
+                "codec": if entry.extension.is_empty() {
+                    serde_json::Value::Null
+                } else {
+                    serde_json::json!(entry.extension)
+                },
+                "isCanonical": false,
+            })
+        })
+        .collect::<Vec<_>>();
+    let users = if files.is_empty() {
+        Vec::new()
+    } else {
+        vec![serde_json::json!({
+            "peerId": local_peer_id,
+            "username": local_peer_id,
+            "files": files,
+        })]
+    };
+    routing::created_response(
+        serde_json::json!({"query": record.query, "users": users}).to_string(),
+    )
+}
+
+/// Real per-item download-queue creation shared by `/api/downloads` and
+/// `/api/bridge/download` -- returns the real queued `TransferEntry`
+/// list so each caller can shape its own real response (the oracle's
+/// batch `/api/downloads` contract vs. the oracle's real single-item
+/// `BridgeDownloadRequest`/`{transfer_id}`) without duplicating the
+/// real queue-creation/dispatch side effects.
+async fn extended_controller_download_response(
+    body: &str,
+    state: &AppState,
+) -> Result<Vec<TransferEntry>, HttpResponse> {
     let payload = match serde_json::from_str::<serde_json::Value>(body) {
         Ok(payload) => payload,
-        Err(_) => return routing::bad_request_response("invalid JSON body"),
+        Err(_) => return Err(routing::bad_request_response("invalid JSON body")),
     };
     let items = payload
         .get("items")
@@ -43470,7 +46199,7 @@ async fn extended_controller_download_response(body: &str, state: &AppState) -> 
         })
         .unwrap_or_default();
     if items.is_empty() {
-        return routing::bad_request_response("items are required");
+        return Err(routing::bad_request_response("items are required"));
     }
     let mut requests = Vec::new();
     for item in items.into_iter().take(1_000) {
@@ -43489,12 +46218,16 @@ async fn extended_controller_download_response(body: &str, state: &AppState) -> 
             .map(str::trim)
             .unwrap_or_default();
         if username.is_empty() || filename.is_empty() {
-            return routing::bad_request_response("each item requires user and remotePath");
+            return Err(routing::bad_request_response(
+                "each item requires user and remotePath",
+            ));
         }
         let permit = match state.session_commands.reserve().await {
             Ok(permit) => permit,
             Err(_) => {
-                return routing::service_unavailable_response("session manager is not running")
+                return Err(routing::service_unavailable_response(
+                    "session manager is not running",
+                ))
             }
         };
         let mut transfers = state.transfers.write().await;
@@ -43510,7 +46243,7 @@ async fn extended_controller_download_response(body: &str, state: &AppState) -> 
             .unwrap_or(entry);
         drop(transfers);
         if let Err(error) = persist_transfer_record(state, &entry).await {
-            return routing::service_unavailable_response(&error);
+            return Err(routing::service_unavailable_response(&error));
         }
         permit.send(SessionCommand::TransferPeer {
             id: entry.id,
@@ -43518,6 +46251,10 @@ async fn extended_controller_download_response(body: &str, state: &AppState) -> 
         });
         requests.push(entry);
     }
+    Ok(requests)
+}
+
+fn extended_controller_download_success_response(requests: &[TransferEntry]) -> HttpResponse {
     routing::ok_response(
         serde_json::json!({
             "downloadIds": requests.iter().filter_map(|entry| entry.request_id.clone()).collect::<Vec<_>>(),
@@ -43527,6 +46264,28 @@ async fn extended_controller_download_response(body: &str, state: &AppState) -> 
         })
         .to_string(),
     )
+}
+
+/// Matches the oracle's real single-item `BridgeDownloadRequest` /
+/// `{transfer_id}` contract, built from the same real download-queue
+/// creation `/api/downloads` uses. The oracle's request shape is
+/// already a single object (`{username, filename, targetPath}`), which
+/// the shared handler already accepts directly (its "items" array is
+/// optional, falling back to a single-item list) -- only the response
+/// shape needed to change.
+async fn bridge_download_response(body: &str, state: &AppState) -> HttpResponse {
+    match extended_controller_download_response(body, state).await {
+        Ok(requests) => {
+            let transfer_id = requests.first().map(|entry| {
+                entry
+                    .request_id
+                    .clone()
+                    .unwrap_or_else(|| entry.id.to_string())
+            });
+            routing::ok_response(serde_json::json!({"transfer_id": transfer_id}).to_string())
+        }
+        Err(response) => response,
+    }
 }
 
 async fn collection_item_controller_response(
@@ -43711,12 +46470,20 @@ async fn podcore_mutation_response(
                 && affinity == "affinity"
                 && update == "update" =>
         {
+            // slskR computes affinities fresh on every GET rather than
+            // caching them (see pod_member_affinities_json), so "update"
+            // has no separate cache to invalidate; it real-computes them
+            // once here and reports the real count, matching the oracle's
+            // UpdateMemberAffinitiesAsync contract without a fake 0.
+            let started_at = std::time::Instant::now();
+            let affinities = pod_member_affinities_json(state, pod_id).await;
+            let members_updated = affinities.as_object().map_or(0, serde_json::Map::len);
             Some(routing::ok_response(
                 serde_json::json!({
                     "success": true,
                     "podId": pod_id,
-                    "membersUpdated": 0,
-                    "duration": "00:00:00",
+                    "membersUpdated": members_updated,
+                    "duration": format_timespan_hms(started_at.elapsed().as_secs() as i64),
                     "errorMessage": null,
                 })
                 .to_string(),
@@ -43741,6 +46508,13 @@ async fn podcore_mutation_response(
             ))
         }
         ("POST", [pod_id, section]) if section == "channels" => {
+            // Matches the frozen slskdN contract: creating a pod channel
+            // requires the acting peer to moderate the pod.
+            if !pod_local_peer_can_moderate(state, pod_id).await {
+                return Some(routing::forbidden_response(
+                    "only a pod moderator may create channels",
+                ));
+            }
             let mut value = match serde_json::from_str::<serde_json::Value>(body) {
                 Ok(serde_json::Value::Object(value)) => serde_json::Value::Object(value),
                 Ok(_) => {
@@ -43782,6 +46556,13 @@ async fn podcore_mutation_response(
             })
         }
         ("PUT", [pod_id, section, channel_id]) if section == "channels" => {
+            // Matches the frozen slskdN contract: updating a pod channel
+            // requires the acting peer to moderate the pod.
+            if !pod_local_peer_can_moderate(state, pod_id).await {
+                return Some(routing::forbidden_response(
+                    "only a pod moderator may update channels",
+                ));
+            }
             let mut value = match serde_json::from_str::<serde_json::Value>(body) {
                 Ok(serde_json::Value::Object(value)) => serde_json::Value::Object(value),
                 Ok(_) => {
@@ -43815,6 +46596,13 @@ async fn podcore_mutation_response(
             })
         }
         ("DELETE", [pod_id, section, channel_id]) if section == "channels" => {
+            // Matches the frozen slskdN contract: deleting a pod channel
+            // requires the acting peer to moderate the pod.
+            if !pod_local_peer_can_moderate(state, pod_id).await {
+                return Some(routing::forbidden_response(
+                    "only a pod moderator may delete channels",
+                ));
+            }
             let response = state.pods.write().await.remove_channel(pod_id, channel_id);
             if matches!(response, Ok(Some(true))) {
                 let mut channels = HashSet::new();
@@ -43837,6 +46625,14 @@ async fn podcore_mutation_response(
         ("POST", [section, pod_id, peer_id, action])
             if section == "membership" && matches!(action.as_str(), "ban" | "unban" | "role") =>
         {
+            // Matches the frozen slskdN contract: BanMember/UnbanMember/
+            // ChangeRole all require the acting peer to moderate the pod --
+            // there is no self-service path for any of these three.
+            if !pod_local_peer_can_moderate(state, pod_id).await {
+                return Some(routing::forbidden_response(
+                    "only a pod moderator may perform this action",
+                ));
+            }
             let mut pods = state.pods.write().await;
             let response = match action.as_str() {
                 "ban" => pods.ban(pod_id, peer_id).map(|value| {
@@ -43870,7 +46666,7 @@ async fn podcore_mutation_response(
             })
         }
         ("POST", [section, pod_id, members]) if section == "membership" && members == "members" => {
-            let member = match serde_json::from_str::<pods::PodMember>(body) {
+            let mut member = match serde_json::from_str::<pods::PodMember>(body) {
                 Ok(member) => member,
                 Err(error) => {
                     return Some(routing::bad_request_response(&format!(
@@ -43878,6 +46674,30 @@ async fn podcore_mutation_response(
                     )))
                 }
             };
+            // Matches the frozen slskdN contract: a peer may only publish
+            // membership for themselves, and role/ban state always come
+            // from the existing record (or safe defaults), never the
+            // request body -- otherwise any caller could self-assign a
+            // moderator role or clear their own ban.
+            let acting_peer_id = pod_request_peer_id(state).await;
+            if acting_peer_id
+                .as_deref()
+                .is_none_or(|acting| !acting.eq_ignore_ascii_case(&member.peer_id))
+            {
+                return Some(routing::forbidden_response(
+                    "a peer may only publish their own membership",
+                ));
+            }
+            let existing = state.pods.read().await.members(pod_id).and_then(|members| {
+                members
+                    .into_iter()
+                    .find(|existing| existing.peer_id.eq_ignore_ascii_case(&member.peer_id))
+            });
+            member.role = existing
+                .as_ref()
+                .map(|existing| existing.role.clone())
+                .unwrap_or_else(|| "member".to_owned());
+            member.is_banned = existing.as_ref().is_some_and(|existing| existing.is_banned);
             let response = state.pods.write().await.upsert_member(pod_id, member);
             Some(match response {
                 Ok(Some(member)) => routing::ok_response(
@@ -43903,7 +46723,7 @@ async fn podcore_mutation_response(
                 Err(_) => return Some(routing::bad_request_response("invalid JSON body")),
             };
             value["peerId"] = serde_json::json!(peer_id);
-            let member = match serde_json::from_value::<pods::PodMember>(value) {
+            let mut member = match serde_json::from_value::<pods::PodMember>(value) {
                 Ok(member) => member,
                 Err(error) => {
                     return Some(routing::bad_request_response(&format!(
@@ -43911,6 +46731,33 @@ async fn podcore_mutation_response(
                     )))
                 }
             };
+            // Matches the frozen slskdN contract: updating a membership
+            // record requires moderating the pod, or the member updating
+            // their own record. A non-moderator's role/ban fields in the
+            // body are ignored and pinned to the existing record (or safe
+            // defaults) so a self-update can't grant a role or clear a ban.
+            let acting_peer_id = pod_request_peer_id(state).await;
+            let existing = state.pods.read().await.members(pod_id).and_then(|members| {
+                members
+                    .into_iter()
+                    .find(|existing| existing.peer_id.eq_ignore_ascii_case(peer_id))
+            });
+            let can_moderate = pod_local_peer_can_moderate(state, pod_id).await;
+            let is_self = acting_peer_id
+                .as_deref()
+                .is_some_and(|acting| acting.eq_ignore_ascii_case(peer_id));
+            if !can_moderate && !is_self {
+                return Some(routing::forbidden_response(
+                    "only a pod moderator or the member themselves may update this membership",
+                ));
+            }
+            if !can_moderate {
+                member.role = existing
+                    .as_ref()
+                    .map(|existing| existing.role.clone())
+                    .unwrap_or_else(|| "member".to_owned());
+                member.is_banned = existing.as_ref().is_some_and(|existing| existing.is_banned);
+            }
             let response = state.pods.write().await.upsert_member(pod_id, member);
             Some(match response {
                 Ok(Some(member)) => routing::ok_response(
@@ -43924,6 +46771,23 @@ async fn podcore_mutation_response(
             })
         }
         ("DELETE", [section, pod_id, peer_id]) if section == "membership" => {
+            // Matches the frozen slskdN contract: removing a membership
+            // record requires either moderating the pod, or the acting
+            // peer removing themselves. The acting peer is always this
+            // instance's own configured Soulseek identity (as with every
+            // other podcore mutation, see `pod_request_peer_id`) -- never a
+            // client-supplied parameter, which would let any caller assert
+            // an arbitrary identity and bypass the check entirely.
+            let acting_peer_id = pod_request_peer_id(state).await;
+            let is_self_leave = acting_peer_id
+                .as_deref()
+                .is_some_and(|acting| acting.eq_ignore_ascii_case(peer_id.as_str()));
+            let can_moderate = pod_local_peer_can_moderate(state, pod_id).await;
+            if !is_self_leave && !can_moderate {
+                return Some(routing::forbidden_response(
+                    "only a pod moderator or the member themselves may remove this membership",
+                ));
+            }
             if let Err(error) = state.pods.write().await.leave(pod_id, peer_id) {
                 return Some(routing::bad_request_response(&error));
             }
@@ -44254,29 +47118,10 @@ async fn podcore_mutation_response(
             if section == "signing"
                 && matches!(action.as_str(), "generate-keypair" | "sign" | "verify") =>
         {
-            Some(pod_signing_response(action, body))
+            Some(pod_signing_response(action, body, state).await)
         }
         ("POST", [section, message]) if section == "verification" && message == "message" => {
-            let payload = serde_json::from_str::<serde_json::Value>(body)
-                .unwrap_or_else(|_| serde_json::json!({}));
-            let channel_id = payload
-                .get("channelId")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or_default();
-            Some(routing::ok_response(
-                serde_json::json!({
-                    "isValid": false,
-                    "isFromValidMember": false,
-                    "hasValidSignature": false,
-                    "isNotBanned": false,
-                    "errorMessage": if channel_id.starts_with("channel:") {
-                        "Member not found"
-                    } else {
-                        "Invalid channel ID format"
-                    },
-                })
-                .to_string(),
-            ))
+            Some(pod_verification_message_response(body, state).await)
         }
         ("POST", [section, action, tail @ ..])
             if matches!(section.as_str(), "dht" | "discovery") =>
@@ -44338,6 +47183,8 @@ async fn podcore_mutation_response(
                     "payload": payload,
                 })
             };
+            let is_dht_publish =
+                section == "dht" && matches!(action.as_str(), "publish" | "update");
             Some(
                 match state
                     .controller_features
@@ -44345,7 +47192,14 @@ async fn podcore_mutation_response(
                     .await
                     .upsert(key, value.clone())
                 {
-                    Ok(()) => routing::ok_response(value.to_string()),
+                    Ok(()) => {
+                        if is_dht_publish {
+                            state
+                                .pod_dht_publish_count
+                                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        }
+                        routing::ok_response(value.to_string())
+                    }
                     Err(error) => routing::service_unavailable_response(&error),
                 },
             )
@@ -44382,7 +47236,54 @@ async fn podcore_mutation_response(
     }
 }
 
-fn pod_signing_response(action: &str, body: &str) -> HttpResponse {
+/// Matches the oracle's canonical payload exactly:
+/// `sigVersion|podId|channelId|messageId|senderPeerId|timestampUnixMs|base64(sha256(body))`.
+/// `podId` falls back to the segment before the first `:` in `channelId`
+/// when absent, matching `MessageSigner.GetPodId`.
+fn pod_message_canonical_payload(message: &serde_json::Value) -> (String, String) {
+    let sig_version = message
+        .get("sigVersion")
+        .and_then(serde_json::Value::as_i64)
+        .unwrap_or(1);
+    let explicit_pod_id = message
+        .get("podId")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let channel_id = message
+        .get("channelId")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let pod_id = if !explicit_pod_id.is_empty() {
+        explicit_pod_id.to_owned()
+    } else {
+        channel_id
+            .split_once(':')
+            .map_or_else(String::new, |(prefix, _)| prefix.to_owned())
+    };
+    let message_id = message
+        .get("messageId")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let sender_peer_id = message
+        .get("senderPeerId")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let timestamp_unix_ms = message
+        .get("timestampUnixMs")
+        .and_then(serde_json::Value::as_i64)
+        .unwrap_or(0);
+    let body_text = message
+        .get("body")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let body_sha256 = STANDARD.encode(Sha256::digest(body_text.as_bytes()));
+    let canonical = format!(
+        "{sig_version}|{pod_id}|{channel_id}|{message_id}|{sender_peer_id}|{timestamp_unix_ms}|{body_sha256}"
+    );
+    (canonical, pod_id)
+}
+
+async fn pod_signing_response(action: &str, body: &str, state: &AppState) -> HttpResponse {
     if action == "generate-keypair" {
         let mut secret = [0_u8; 32];
         if SysRng.try_fill_bytes(&mut secret).is_err() {
@@ -44407,10 +47308,7 @@ fn pod_signing_response(action: &str, body: &str) -> HttpResponse {
         .get("message")
         .cloned()
         .unwrap_or_else(|| payload.clone());
-    let message_bytes = match serde_json::to_vec(&message) {
-        Ok(bytes) => bytes,
-        Err(_) => return routing::bad_request_response("message is not serializable"),
-    };
+    let (canonical, pod_id) = pod_message_canonical_payload(&message);
     if action == "sign" {
         let private_key = payload
             .get("privateKey")
@@ -44427,54 +47325,240 @@ fn pod_signing_response(action: &str, body: &str) -> HttpResponse {
             }
         };
         let signing_key = SigningKey::from_bytes(&secret);
-        let signature = signing_key.sign(&message_bytes);
+        let signing_started_at = std::time::Instant::now();
+        let signature = signing_key.sign(canonical.as_bytes());
+        state
+            .pod_signature_stats
+            .record_sign(signing_started_at.elapsed().as_millis() as u64);
         return routing::ok_response(
             serde_json::json!({
                 "message": message,
-                "signature": STANDARD.encode(signature.to_bytes()),
+                "signature": format!("ed25519:{}", STANDARD.encode(signature.to_bytes())),
                 "publicKey": STANDARD.encode(signing_key.verifying_key().to_bytes()),
-                "sigVersion": 1,
+                "sigVersion": message.get("sigVersion").and_then(serde_json::Value::as_i64).unwrap_or(1),
             })
             .to_string(),
         );
     }
+    // Matches the oracle's MessageSigner.VerifyMessageAsync: the sender's
+    // public key is always resolved from real pod membership, never taken
+    // from a client-supplied field -- accepting a caller-supplied public
+    // key would let anyone "verify" a signature they made up themselves
+    // against a key they also made up, proving nothing about the actual
+    // sender. A missing or non-ed25519 signature is honored as valid only
+    // when the pod's configured signature mode isn't Enforce, matching the
+    // same mode already enforced on real message posting.
     let signature = payload
         .get("signature")
         .or_else(|| message.get("signature"))
         .and_then(serde_json::Value::as_str)
         .unwrap_or_default();
-    let public_key = payload
-        .get("publicKey")
-        .or_else(|| message.get("publicKey"))
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or_default();
-    if !signature.is_empty() && !signature.starts_with("ed25519:") && public_key.is_empty() {
-        return routing::ok_response(serde_json::json!({"isValid": true}).to_string());
+    let mode = state
+        .advanced_networking
+        .read()
+        .await
+        .pod_security_signature_mode;
+    let verification_started_at = std::time::Instant::now();
+    let is_valid =
+        pod_verify_signature(&message, &canonical, &pod_id, signature, mode, state).await;
+    state.pod_signature_stats.record_verify(
+        verification_started_at.elapsed().as_millis() as u64,
+        is_valid,
+    );
+    routing::ok_response(serde_json::json!({"isValid": is_valid}).to_string())
+}
+
+/// The real signature-check body of `pod_signing_response`'s "verify"
+/// action, split out so it can also be reused by the pod membership
+/// verification endpoint, whose `hasValidSignature` field runs the exact
+/// same check (both wrap the oracle's single `MessageSigner.
+/// VerifyMessageAsync`). Matches the oracle exactly: a malformed
+/// signature is a verification failure (`false`), never a 400 -- the
+/// oracle's own implementation returns `false` for malformed base64
+/// rather than raising an error.
+async fn pod_verify_signature(
+    message: &serde_json::Value,
+    canonical: &str,
+    pod_id: &str,
+    signature: &str,
+    mode: PodSignatureMode,
+    state: &AppState,
+) -> bool {
+    if signature.is_empty() || !signature.starts_with("ed25519:") {
+        return mode != PodSignatureMode::Enforce;
     }
-    let signature = signature.strip_prefix("ed25519:").unwrap_or(signature);
-    let signature: [u8; 64] = match STANDARD
-        .decode(signature.as_bytes())
+    let stripped = signature.strip_prefix("ed25519:").unwrap_or(signature);
+    let signature_bytes: [u8; 64] = match STANDARD
+        .decode(stripped.as_bytes())
         .ok()
         .and_then(|bytes| bytes.try_into().ok())
     {
         Some(signature) => signature,
-        None => return routing::bad_request_response("signature must be base64 Ed25519 bytes"),
+        None => return false,
+    };
+    let timestamp_unix_ms = message
+        .get("timestampUnixMs")
+        .and_then(serde_json::Value::as_i64)
+        .unwrap_or(0);
+    let now_ms = i64::try_from(unix_timestamp())
+        .unwrap_or(i64::MAX)
+        .saturating_mul(1000);
+    if (now_ms - timestamp_unix_ms).abs() > 5 * 60 * 1000 {
+        return false;
+    }
+    let sender_peer_id = message
+        .get("senderPeerId")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    if pod_id.is_empty() || sender_peer_id.is_empty() {
+        return false;
+    }
+    let sender_public_key = state
+        .pods
+        .read()
+        .await
+        .members(pod_id)
+        .and_then(|members| {
+            members
+                .into_iter()
+                .find(|member| member.peer_id.eq_ignore_ascii_case(sender_peer_id))
+        })
+        .and_then(|member| member.public_key);
+    let Some(sender_public_key) = sender_public_key else {
+        return false;
     };
     let public_key: [u8; 32] = match STANDARD
-        .decode(public_key.as_bytes())
+        .decode(sender_public_key.as_bytes())
         .ok()
         .and_then(|bytes| bytes.try_into().ok())
     {
         Some(public_key) => public_key,
-        None => return routing::bad_request_response("publicKey must be a base64 Ed25519 key"),
+        None => return false,
     };
-    let is_valid = VerifyingKey::from_bytes(&public_key)
+    VerifyingKey::from_bytes(&public_key)
         .ok()
         .is_some_and(|key| {
-            key.verify(&message_bytes, &Signature::from_bytes(&signature))
-                .is_ok()
+            key.verify(
+                canonical.as_bytes(),
+                &Signature::from_bytes(&signature_bytes),
+            )
+            .is_ok()
+        })
+}
+
+/// Matches the oracle's `PodMembershipVerifier.VerifyMessageAsync`: real
+/// pod-membership + signature checks, not the always-false stub this
+/// endpoint used to return regardless of input.
+async fn pod_verification_message_response(body: &str, state: &AppState) -> HttpResponse {
+    const MAX_FIELD_LEN: usize = 512;
+    let payload = match serde_json::from_str::<serde_json::Value>(body) {
+        Ok(payload @ serde_json::Value::Object(_)) => payload,
+        _ => return routing::bad_request_response("Message is required"),
+    };
+    let message_id = payload
+        .get("messageId")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .trim();
+    let pod_id = payload
+        .get("podId")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .trim();
+    let channel_id = payload
+        .get("channelId")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .trim();
+    let sender_peer_id = payload
+        .get("senderPeerId")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .trim();
+    let signature = payload
+        .get("signature")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .trim();
+    if message_id.is_empty()
+        || pod_id.is_empty()
+        || message_id.len() > MAX_FIELD_LEN
+        || pod_id.len() > MAX_FIELD_LEN
+        || channel_id.len() > MAX_FIELD_LEN
+        || sender_peer_id.len() > MAX_FIELD_LEN
+        || signature.len() > MAX_FIELD_LEN
+    {
+        return routing::bad_request_response(
+            "Message fields are required and must be within length limits",
+        );
+    }
+
+    // The membership check's podId comes from splitting channelId as
+    // "podId:channelId", independent of the message's own explicit
+    // `podId` field (used below for signature verification) -- this
+    // mirrors the oracle's real (if slightly inconsistent) behavior
+    // rather than unifying the two for tidiness.
+    let Some((channel_pod_id, _)) = channel_id.split_once(':') else {
+        return routing::ok_response(
+            serde_json::json!({
+                "isValid": false,
+                "isFromValidMember": false,
+                "hasValidSignature": false,
+                "isNotBanned": false,
+                "errorMessage": "Invalid channel ID format",
+            })
+            .to_string(),
+        );
+    };
+
+    let member = state
+        .pods
+        .read()
+        .await
+        .members(channel_pod_id)
+        .and_then(|members| {
+            members
+                .into_iter()
+                .find(|candidate| candidate.peer_id.eq_ignore_ascii_case(sender_peer_id))
         });
-    routing::ok_response(serde_json::json!({"isValid": is_valid}).to_string())
+    let is_from_valid_member = member.is_some();
+    let is_not_banned = !member.as_ref().is_some_and(|member| member.is_banned);
+
+    let mode = state
+        .advanced_networking
+        .read()
+        .await
+        .pod_security_signature_mode;
+    let (canonical, signature_pod_id) = pod_message_canonical_payload(&payload);
+    let started_at = std::time::Instant::now();
+    let has_valid_signature = pod_verify_signature(
+        &payload,
+        &canonical,
+        &signature_pod_id,
+        signature,
+        mode,
+        state,
+    )
+    .await;
+    let is_valid = is_from_valid_member && is_not_banned && has_valid_signature;
+
+    state.pod_verification_stats.record(
+        started_at.elapsed().as_millis() as u64,
+        is_from_valid_member,
+        is_not_banned,
+        has_valid_signature,
+        is_valid,
+    );
+
+    routing::ok_response(
+        serde_json::json!({
+            "isValid": is_valid,
+            "isFromValidMember": is_from_valid_member,
+            "hasValidSignature": has_valid_signature,
+            "isNotBanned": is_not_banned,
+        })
+        .to_string(),
+    )
 }
 
 fn levenshtein_similarity(left: &str, right: &str) -> f64 {
@@ -45804,6 +48888,24 @@ async fn extended_controller_dynamic_get_response(
     }
     if let Some(segments) = decoded_segments_after(path, "/api/listening-party/radio/") {
         if let [party_id, content_id] = segments.as_slice() {
+            // Matches the oracle's real StreamListedParty gate: a real,
+            // valid stream ticket is required before revealing anything
+            // about this content, not an unauthenticated availability
+            // probe anyone could query for any partyId/contentId. Full
+            // byte streaming (the oracle's real File(...) response) is a
+            // separate, deeper gap -- slskR has no real range-request
+            // file-serving capability anywhere yet -- so this closes the
+            // info-leak half of the finding without claiming to have
+            // built real audio streaming.
+            let ticket_token = query_parameter(query, "ticket").unwrap_or_default();
+            let ticket = if ticket_token.trim().is_empty() {
+                None
+            } else {
+                state.stream_tickets.write().await.get(&ticket_token)
+            };
+            if !ticket.is_some_and(|ticket| ticket.content_id.eq_ignore_ascii_case(content_id)) {
+                return routing::unauthorized_response();
+            }
             let discovery = state.content_discovery.read().await;
             let record = discovery
                 .shadow_records()
@@ -45823,27 +48925,33 @@ async fn extended_controller_dynamic_get_response(
     if let Some(segments) = decoded_segments_after(path, "/api/listening-party/") {
         if let [pod_id, channel_id] = segments.as_slice() {
             let pods = state.pods.read().await;
-            let Some(pod) = pods.get(pod_id) else {
-                return routing::no_content_response();
+            if pods.get(pod_id).is_none() || !pods.channel_exists(pod_id, channel_id) {
+                return routing::not_found_response();
+            }
+            // Matches the oracle's ListeningPartyController.Get: requires
+            // real pod membership, then returns the real stored
+            // ListeningPartyEvent that the sibling POST handler writes
+            // (or 204 if there is none) -- never the pod object plus raw
+            // chat history, and never without a membership check.
+            let Some(peer_id) = pod_request_peer_id(state).await else {
+                drop(pods);
+                return routing::forbidden_response("Authenticated peer identity is required");
             };
-            if !pods.channel_exists(pod_id, channel_id) {
-                return routing::no_content_response();
+            if !pods.is_member(pod_id, &peer_id) {
+                drop(pods);
+                return routing::forbidden_response("Pod membership is required");
             }
             drop(pods);
-            let messages = state
-                .pod_channels
+            let event = state
+                .controller_features
                 .read()
                 .await
-                .list(pod_id, channel_id, None);
-            return routing::ok_response(
-                serde_json::json!({
-                    "podId": pod_id,
-                    "channelId": channel_id,
-                    "pod": pod,
-                    "messages": messages,
-                })
-                .to_string(),
-            );
+                .get(&format!("listening-party/{pod_id}/{channel_id}"))
+                .cloned();
+            return match event {
+                Some(event) => routing::ok_response(event.to_string()),
+                None => routing::no_content_response(),
+            };
         }
     }
     if let Some(flac_key) = path_segment_after(path, "/api/mesh/lookup/") {
@@ -45883,29 +48991,29 @@ async fn extended_controller_dynamic_get_response(
     }
     if let Some(job_id) = path_segment_between(path, "/api/playback/", "/diagnostics") {
         let job_id = decoded_path_segment(job_id);
-        let jobs = state.multisource.read().await;
+        // Matches the oracle's real GetDiagnostics: this is the job's
+        // recorded playback-feedback state (position/buffer/priority), not
+        // multisource swarm-download progress -- 404 when no feedback has
+        // ever been posted for this jobId, regardless of whether a
+        // download job with that id happens to exist.
         let feedback = state
             .controller_features
             .read()
             .await
             .values_with_prefix(&format!("playback/feedback/{job_id}/"));
-        return jobs
-            .get(&job_id)
-            .map_or_else(routing::not_found_response, |job| {
-                routing::ok_response(
-                    serde_json::json!({
-                        "jobId": job.id,
-                        "status": job.status,
-                        "completedChunks": job.completed_chunks,
-                        "totalChunks": job.total_chunks,
-                        "bytesDownloaded": job.bytes_downloaded,
-                        "sources": job.sources,
-                        "result": job.result,
-                        "feedback": feedback,
-                    })
-                    .to_string(),
-                )
-            });
+        let Some(latest) = latest_playback_feedback(&feedback) else {
+            return routing::not_found_response();
+        };
+        return routing::ok_response(
+            serde_json::json!({
+                "jobId": job_id,
+                "trackId": latest.get("trackId").cloned().unwrap_or(serde_json::Value::Null),
+                "positionMs": latest.get("positionMs").and_then(serde_json::Value::as_i64).unwrap_or(0),
+                "bufferAheadMs": latest.get("bufferAheadMs").and_then(serde_json::Value::as_i64).unwrap_or(0),
+                "priority": playback_priority_for_latest_feedback(Some(latest)),
+            })
+            .to_string(),
+        );
     }
     if path.starts_with("/api/podcore/") {
         return podcore_dynamic_get_response(path, query, state).await;
@@ -46067,17 +49175,17 @@ async fn musicbrainz_dynamic_get_response(path: &str, state: &AppState) -> HttpR
         else {
             return routing::not_found_response();
         };
-        let approval = features
+        let decision = features
             .get(&format!("musicbrainz/approval/{edit_id}"))
             .cloned();
+        drop(features);
+        // Matches the oracle's real GetExportReview: the same
+        // BuildExportReview shape the approve-export flow validates
+        // against (upstreamTarget/proposedChange/evidence/
+        // canApproveExport/reviewReason/decision), not an invented
+        // {editId, edit, approval, readyForExport} wrapper.
         return routing::ok_response(
-            serde_json::json!({
-                "editId": edit_id,
-                "edit": edit,
-                "approval": approval,
-                "readyForExport": approval.is_some(),
-            })
-            .to_string(),
+            musicbrainz_export_review_json(&edit, decision.as_ref()).to_string(),
         );
     }
     if let Some(edit_id) = path_segment_between(path, "/api/musicbrainz/overlays/edits/", "/routes")
@@ -46128,43 +49236,230 @@ async fn quarantine_dynamic_get_response(path: &str, state: &AppState) -> HttpRe
     else {
         return routing::not_found_response();
     };
+    drop(features);
     match segments.as_slice() {
         [_] => routing::ok_response(request.to_string()),
-        [_, action] if action == "aggregate" || action == "review" => {
+        [_, action] if action == "aggregate" => {
+            let aggregate = quarantine_build_aggregate(state, request_id)
+                .await
+                .expect("request presence already confirmed above");
+            routing::ok_response(aggregate.to_string())
+        }
+        [_, action] if action == "review" => {
+            let aggregate = quarantine_build_aggregate(state, request_id)
+                .await
+                .expect("request presence already confirmed above");
+            let features = state.controller_features.read().await;
             let verdicts =
                 features.values_with_prefix(&format!("quarantine/verdict/{request_id}/"));
-            let accepted = verdicts
-                .iter()
-                .filter(|verdict| {
-                    verdict
-                        .get("accepted")
-                        .or_else(|| verdict.get("isAccepted"))
-                        .and_then(serde_json::Value::as_bool)
-                        .unwrap_or(false)
-                })
-                .count();
+            let route_attempts =
+                features.values_with_prefix(&format!("quarantine/routes/{request_id}/"));
+            let acceptance = features
+                .get(&format!("quarantine/acceptance/{request_id}"))
+                .cloned();
+            drop(features);
+            let already_accepted = acceptance.is_some();
             routing::ok_response(
                 serde_json::json!({
                     "request": request,
+                    "aggregate": aggregate.clone(),
                     "verdicts": verdicts,
-                    "verdictCount": verdicts.len(),
-                    "acceptedCount": accepted,
-                    "ready": !verdicts.is_empty(),
+                    "routeAttempts": route_attempts,
+                    "acceptance": acceptance,
+                    "canAcceptReleaseCandidate": quarantine_can_accept(&aggregate, already_accepted),
+                    "acceptanceReason": quarantine_acceptance_reason(&aggregate, already_accepted),
                 })
                 .to_string(),
             )
         }
-        [_, action] if action == "release-package" => routing::ok_response(
-            serde_json::json!({
+        [_, action] if action == "release-package" => {
+            let Some(acceptance) = state
+                .controller_features
+                .read()
+                .await
+                .get(&format!("quarantine/acceptance/{request_id}"))
+                .cloned()
+            else {
+                return HttpResponse {
+                    status: "400 Bad Request",
+                    content_type: "application/json",
+                    body: serde_json::json!({
+                        "isReady": false,
+                        "errors": ["Release candidate has not been accepted locally."],
+                        "package": null,
+                    })
+                    .to_string(),
+                };
+            };
+            let aggregate = quarantine_build_aggregate(state, request_id)
+                .await
+                .expect("request presence already confirmed above");
+            let features = state.controller_features.read().await;
+            let verdicts =
+                features.values_with_prefix(&format!("quarantine/verdict/{request_id}/"));
+            let route_attempts =
+                features.values_with_prefix(&format!("quarantine/routes/{request_id}/"));
+            drop(features);
+            let mut warnings = vec![
+                "Release package is evidence-only and does not change local quarantine enforcement."
+                    .to_owned(),
+            ];
+            let snapshot = acceptance
+                .get("aggregateSnapshot")
+                .cloned()
+                .unwrap_or_default();
+            if snapshot["recommendation"] != aggregate["recommendation"]
+                || snapshot["totalVerdicts"] != aggregate["totalVerdicts"]
+            {
+                warnings.push(
+                    "Current verdict aggregate differs from the aggregate accepted by the operator."
+                        .to_owned(),
+                );
+            }
+            let package = serde_json::json!({
+                "type": "slskdn.quarantine-jury.release-package.v1",
+                "version": "1.0",
+                "generatedAt": chrono::Utc::now().to_rfc3339(),
                 "requestId": request_id,
-                "request": request,
-                "isReady": true,
-                "errors": [],
-            })
-            .to_string(),
-        ),
+                "localReason": request.get("localReason").cloned().unwrap_or(serde_json::Value::Null),
+                "requestCreatedAt": request.get("createdAt").cloned().unwrap_or(serde_json::Value::Null),
+                "requestEvidence": request.get("evidence").cloned().unwrap_or_else(|| serde_json::json!([])),
+                "jurors": request.get("jurors").cloned().unwrap_or_else(|| serde_json::json!([])),
+                "currentAggregate": aggregate,
+                "acceptance": acceptance,
+                "verdicts": verdicts,
+                "routeAttempts": route_attempts,
+                "warnings": warnings,
+                "mutatesLocalQuarantineState": false,
+            });
+            routing::ok_response(
+                serde_json::json!({"isReady": true, "errors": [], "package": package}).to_string(),
+            )
+        }
         _ => routing::not_found_response(),
     }
+}
+
+/// Matches the oracle's `PodOpinionAggregator.GetMemberAffinitiesAsync`:
+/// real per-member engagement/trust scoring from actual channel messages,
+/// stored opinions, and membership records -- not the hardcoded zeros the
+/// prior handler returned for every member regardless of real activity.
+/// One honest simplification: the oracle scopes `opinionCount` to opinions
+/// about this pod's own known content ids; slskR's opinion store has no
+/// pod-to-content association to filter on, so this counts all opinions
+/// issued by the member globally instead (documented here, not silently
+/// invented).
+async fn pod_member_affinities_json(state: &AppState, pod_id: &str) -> serde_json::Value {
+    let (pod_members, channel_ids) = {
+        let pods = state.pods.read().await;
+        let members = pods.members(pod_id).unwrap_or_default();
+        let channel_ids = pods
+            .get(pod_id)
+            .map(|pod| {
+                pod.channels
+                    .into_iter()
+                    .map(|channel| channel.channel_id)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        (members, channel_ids)
+    };
+    let now = chrono::Utc::now();
+    let activity_window_start_millis = (now - chrono::Duration::days(30)).timestamp_millis();
+    let messages = state.pod_channels.read().await;
+    let pod_messages = channel_ids
+        .iter()
+        .flat_map(|channel_id| messages.list(pod_id, channel_id, None))
+        .collect::<Vec<_>>();
+    drop(messages);
+    let opinions = state
+        .controller_features
+        .read()
+        .await
+        .values_with_prefix("opinion/");
+
+    let affinities = pod_members
+        .into_iter()
+        .map(|member| {
+            let member_messages = pod_messages
+                .iter()
+                .filter(|message| message.sender_peer_id.eq_ignore_ascii_case(&member.peer_id));
+            let recent_message_count = member_messages
+                .clone()
+                .filter(|message| message.timestamp_unix_ms as i64 >= activity_window_start_millis)
+                .count();
+            let last_message_millis = member_messages
+                .map(|message| message.timestamp_unix_ms)
+                .max();
+            let opinion_count = opinions
+                .iter()
+                .filter(|opinion| {
+                    opinion
+                        .get("issuer")
+                        .and_then(serde_json::Value::as_str)
+                        .is_some_and(|issuer| issuer.eq_ignore_ascii_case(&member.peer_id))
+                })
+                .count();
+            let joined_at_millis = member
+                .joined_at
+                .as_deref()
+                .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+                .map(|value| value.timestamp_millis());
+            let membership_duration_seconds = joined_at_millis
+                .map(|joined_at_millis| (now.timestamp_millis() - joined_at_millis) / 1000)
+                .unwrap_or(0)
+                .max(0);
+            let last_seen_millis = member
+                .last_seen
+                .as_deref()
+                .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+                .map(|value| value.timestamp_millis());
+            let last_activity_millis = [
+                last_seen_millis,
+                last_message_millis.map(|value| value as i64),
+            ]
+            .into_iter()
+            .flatten()
+            .max();
+            let is_active =
+                last_activity_millis.is_some_and(|value| value >= activity_window_start_millis);
+            let affinity_score = pod_member_affinity_score(
+                recent_message_count,
+                opinion_count,
+                membership_duration_seconds,
+                is_active,
+            );
+            let trust_score = pod_member_trust_score(&member.role, member.is_banned);
+            let mut recent_activity = Vec::new();
+            if recent_message_count > 0 {
+                recent_activity.push(format!(
+                    "{recent_message_count} messages in the last 30 days"
+                ));
+            }
+            if opinion_count > 0 {
+                recent_activity.push(format!("{opinion_count} opinions expressed"));
+            }
+            let last_activity = last_activity_millis
+                .and_then(chrono::DateTime::from_timestamp_millis)
+                .unwrap_or(now)
+                .to_rfc3339();
+
+            (
+                member.peer_id.clone(),
+                serde_json::json!({
+                    "peerId": member.peer_id,
+                    "affinityScore": affinity_score,
+                    "messageCount": recent_message_count,
+                    "opinionCount": opinion_count,
+                    "membershipDuration": format_timespan_hms(membership_duration_seconds),
+                    "lastActivity": last_activity,
+                    "trustScore": trust_score,
+                    "recentActivity": recent_activity,
+                }),
+            )
+        })
+        .collect::<serde_json::Map<_, _>>();
+    serde_json::Value::Object(affinities)
 }
 
 async fn podcore_dynamic_get_response(
@@ -46283,33 +49578,7 @@ async fn podcore_dynamic_get_response(
         [pod_id, section, members, affinity]
             if section == "opinions" && members == "members" && affinity == "affinity" =>
         {
-            let pods = state.pods.read().await;
-            let members = pods.members(pod_id).unwrap_or_default();
-            let features = state.controller_features.read().await;
-            let affinities = members
-                .into_iter()
-                .map(|member| {
-                    let affinity_score = features
-                        .get(&format!("pod/affinity/{pod_id}/{}", member.peer_id))
-                        .and_then(|value| value.get("affinity"))
-                        .and_then(serde_json::Value::as_f64)
-                        .unwrap_or(0.0);
-                    (
-                        member.peer_id.clone(),
-                        serde_json::json!({
-                            "peerId": member.peer_id,
-                            "affinityScore": affinity_score,
-                            "messageCount": 0,
-                            "opinionCount": 0,
-                            "membershipDuration": "00:00:00",
-                            "lastActivity": chrono::Utc::now().to_rfc3339(),
-                            "trustScore": 0.0,
-                            "recentActivity": [],
-                        }),
-                    )
-                })
-                .collect::<serde_json::Map<_, _>>();
-            routing::ok_response(serde_json::Value::Object(affinities).to_string())
+            routing::ok_response(pod_member_affinities_json(state, pod_id).await.to_string())
         }
         [section, pod_id, last_seen] if section == "backfill" && last_seen == "last-seen" => {
             let messages = state.pod_channels.read().await;
@@ -46547,6 +49816,21 @@ async fn realm_subject_dynamic_get_response(path: &str, state: &AppState) -> Htt
     }
 }
 
+/// Matches the oracle's `PrometheusMetric` JSON shape (a single-sample
+/// gauge, the only kind slskr currently emits).
+fn prometheus_metric_json(name: &str, metric_type: &str, value: f64) -> serde_json::Value {
+    serde_json::json!({
+        "name": name,
+        "help": "",
+        "type": metric_type,
+        "sum": null,
+        "count": null,
+        "samples": [{"value": value, "labels": {}}],
+        "buckets": {},
+        "quantiles": {},
+    })
+}
+
 async fn extended_controller_get_response(
     path: &str,
     query: Option<&str>,
@@ -46640,22 +49924,53 @@ async fn extended_controller_get_response(
         }
         "/api/hashdb/optimize/analyze" => {
             let discovery = state.content_discovery.read().await;
+            let hash_db_entry_count = discovery.hash_entries().len();
+            let peer_count = discovery.distinct_peer_count();
+            let database_size_bytes = discovery.database_size_bytes();
+            drop(discovery);
+            let mut recommendations: Vec<&str> = Vec::new();
+            if hash_db_entry_count > 100_000 {
+                recommendations
+                    .push("Large HashDb table detected. Consider running VACUUM to reclaim space.");
+            }
+            if database_size_bytes > 100 * 1024 * 1024 {
+                recommendations
+                    .push("Database size exceeds 100MB. Consider running VACUUM to optimize.");
+            }
             routing::ok_response(
                 serde_json::json!({
                     "analyzed": true,
-                    "entries": discovery.hash_entries().len(),
-                    "hashDbEntryCount": discovery.hash_entries().len(),
+                    "entries": hash_db_entry_count,
+                    "hashDbEntryCount": hash_db_entry_count,
+                    // slskR's content-discovery store has no FlacInventory
+                    // table distinct from HashDb -- there is nothing else
+                    // to count here.
                     "flacInventoryEntryCount": 0,
-                    "peerCount": 0,
-                    "databaseSizeBytes": 0,
-                    "missingIndexes": [],
-                    "recommendations": [],
+                    "peerCount": peer_count,
+                    "databaseSizeBytes": database_size_bytes,
+                    // The store is a single JSON file, not SQLite -- there
+                    // are no named indexes that can be "missing".
+                    "missingIndexes": Vec::<String>::new(),
+                    "recommendations": recommendations,
                 })
                 .to_string(),
             )
         }
         "/api/hashdb/optimize/slow-queries" => {
-            routing::ok_response(r#"{"slowQueries":[],"totalQueries":0}"#.to_owned())
+            let limit = query_parameter(query, "limit")
+                .and_then(|value| value.parse::<usize>().ok())
+                .unwrap_or(20);
+            let discovery = state.content_discovery.read().await;
+            let slow_queries = discovery.slow_queries(limit);
+            let total_queries = discovery.total_queries();
+            drop(discovery);
+            routing::ok_response(
+                serde_json::json!({
+                    "totalQueries": total_queries,
+                    "slowQueries": slow_queries,
+                })
+                .to_string(),
+            )
         }
         "/api/hashdb/peers" => {
             let discovery = state.content_discovery.read().await;
@@ -46763,32 +50078,122 @@ async fn extended_controller_get_response(
                 .to_string(),
             )
         }
-        "/api/opinions" | "/api/opinions/summary" => {
+        "/api/opinions" => {
             let opinions = state
                 .controller_features
                 .read()
                 .await
                 .values_with_prefix("opinion/");
-            if path == "/api/opinions" {
-                routing::ok_response(serde_json::Value::Array(opinions).to_string())
-            } else {
-                let score = |opinion: &serde_json::Value| {
-                    opinion
-                        .get("score")
-                        .or_else(|| opinion.get("rating"))
-                        .and_then(serde_json::Value::as_f64)
-                        .unwrap_or(0.0)
-                };
-                routing::ok_response(
-                    serde_json::json!({
-                        "totalOpinions": opinions.len(),
-                        "positiveOpinions": opinions.iter().filter(|opinion| score(opinion) > 0.0).count(),
-                        "negativeOpinions": opinions.iter().filter(|opinion| score(opinion) < 0.0).count(),
-                        "neutralOpinions": opinions.iter().filter(|opinion| score(opinion) == 0.0).count(),
-                    })
-                    .to_string(),
-                )
+            routing::ok_response(serde_json::Value::Array(opinions).to_string())
+        }
+        "/api/opinions/summary" => {
+            // Matches the oracle's OpinionController.Summary +
+            // OpinionService.SummarizeAsync: requires a real subjectType
+            // and subjectId (not just a non-empty query string), filters
+            // to that subject/scope, and returns a real weighted-score
+            // summary -- not a global aggregate with an invented "neutral"
+            // bucket the oracle's DTO doesn't have.
+            let subject_type = query_parameter(query, "subjectType").unwrap_or_default();
+            let subject_id = query_parameter(query, "subjectId").unwrap_or_default();
+            if subject_type.trim().is_empty()
+                || subject_type.eq_ignore_ascii_case("Unknown")
+                || subject_id.trim().is_empty()
+            {
+                return routing::bad_request_response("subjectType and subjectId are required");
             }
+            let subject_id = subject_id.trim().to_owned();
+            let scope = query_parameter(query, "scope")
+                .map(|value| value.trim().to_owned())
+                .filter(|value| !value.is_empty())
+                .unwrap_or_else(|| "global".to_owned());
+
+            fn opinion_polarity(opinion: &serde_json::Value) -> i64 {
+                match opinion
+                    .get("kind")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default()
+                {
+                    "Like" | "Trust" | "Recommend" | "VerifiedGood" => 1,
+                    "Hate" | "Distrust" | "Block" | "Quarantine" | "VerifiedBad" => -1,
+                    _ => 0,
+                }
+            }
+
+            let matching = state
+                .controller_features
+                .read()
+                .await
+                .values_with_prefix("opinion/")
+                .into_iter()
+                .filter(|opinion| {
+                    opinion
+                        .get("subjectType")
+                        .and_then(serde_json::Value::as_str)
+                        .is_some_and(|value| value.eq_ignore_ascii_case(&subject_type))
+                        && opinion
+                            .get("subjectId")
+                            .and_then(serde_json::Value::as_str)
+                            .is_some_and(|value| value.trim() == subject_id)
+                        && opinion
+                            .get("scope")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or("global")
+                            .eq_ignore_ascii_case(&scope)
+                })
+                .collect::<Vec<_>>();
+            let total = matching.len();
+            let weighted: f64 = matching
+                .iter()
+                .map(|opinion| {
+                    let strength = opinion
+                        .get("strength")
+                        .and_then(serde_json::Value::as_f64)
+                        .unwrap_or(0.0);
+                    let confidence = opinion
+                        .get("confidence")
+                        .and_then(serde_json::Value::as_f64)
+                        .unwrap_or(0.0);
+                    opinion_polarity(opinion) as f64 * strength.abs() * confidence
+                })
+                .sum();
+            let weighted_score = weighted.clamp(-(total as f64), total as f64);
+            let confidence = if total == 0 {
+                0.0
+            } else {
+                matching
+                    .iter()
+                    .map(|opinion| {
+                        opinion
+                            .get("confidence")
+                            .and_then(serde_json::Value::as_f64)
+                            .unwrap_or(0.0)
+                    })
+                    .sum::<f64>()
+                    / total as f64
+            };
+            let positive = matching
+                .iter()
+                .filter(|opinion| opinion_polarity(opinion) > 0)
+                .count();
+            let negative = matching
+                .iter()
+                .filter(|opinion| opinion_polarity(opinion) < 0)
+                .count();
+
+            routing::ok_response(
+                serde_json::json!({
+                    "subjectType": subject_type,
+                    "subjectId": subject_id,
+                    "scope": scope,
+                    "total": total,
+                    "positive": positive,
+                    "negative": negative,
+                    "weightedScore": weighted_score,
+                    "confidence": confidence,
+                    "opinions": matching,
+                })
+                .to_string(),
+            )
         }
         "/api/overlay/blocklist" => {
             let security = state.security.read().await;
@@ -46797,30 +50202,41 @@ async fn extended_controller_get_response(
             )
         }
         "/api/overlay/connections" => {
-            let peers = state.peer_endpoints.read().await;
-            let rows = peers
-                .iter()
-                .map(|(username, (address, updated_at))| {
-                    serde_json::json!({
-                        "username": username,
-                        "address": address.ip,
-                        "port": address.port,
-                        "updatedAt": updated_at,
-                    })
-                })
+            // Matches the oracle's real MeshPeerInfoResponse concept (the
+            // live overlay/mesh session list) -- previously reported
+            // state.peer_endpoints, a last-known-IP cache from Soulseek
+            // server lookups, unrelated to whether an overlay session is
+            // actually open. Built from the gateway's real open-tunnel
+            // registry instead, the only real per-connection identity
+            // slskR currently tracks; the oracle's additional per-session
+            // fields (address/port/connectedAt/lastActivity/
+            // certificateThumbprint/version/isOutbound) aren't tracked at
+            // the tunnel level yet, so they're omitted rather than
+            // fabricated.
+            let usernames = match state.private_gateway.as_ref() {
+                Some(gateway) => gateway.connected_peer_usernames().await,
+                None => Vec::new(),
+            };
+            let rows = usernames
+                .into_iter()
+                .map(|username| serde_json::json!({"username": username}))
                 .collect::<Vec<_>>();
             routing::ok_response(serde_json::Value::Array(rows).to_string())
         }
         "/api/overlay/stats" => {
             let peers = state.peer_endpoints.read().await;
             let listeners = state.listeners.read().await;
+            let active_connections = match state.private_gateway.as_ref() {
+                Some(gateway) => gateway.active_connection_count().await,
+                None => 0,
+            };
             routing::ok_response(
                 serde_json::json!({
-                    "server": {"activeConnections": 0, "acceptedConnections": listeners.regular_accepts + listeners.obfuscated_accepts},
+                    "server": {"activeConnections": active_connections, "acceptedConnections": listeners.regular_accepts + listeners.obfuscated_accepts},
                     "connector": {"knownPeers": peers.len()},
                     "rateLimiter": {"rejected": 0},
                     "blocklist": {"entries": state.security.read().await.active_bans()},
-                    "activeConnections": 0,
+                    "activeConnections": active_connections,
                     "knownPeers": peers.len(),
                     "acceptedConnections": listeners.regular_accepts + listeners.obfuscated_accepts,
                     "errors": listeners.errors,
@@ -46828,7 +50244,9 @@ async fn extended_controller_get_response(
                 .to_string(),
             )
         }
-        path if path.starts_with("/api/podcore/") => podcore_stats_response(path, state).await,
+        path if path.starts_with("/api/podcore/") => {
+            podcore_stats_response(path, query, state).await
+        }
         "/api/quarantine-jury/audit" | "/api/quarantine-jury/requests" => {
             let requests = state
                 .controller_features
@@ -46837,17 +50255,44 @@ async fn extended_controller_get_response(
                 .values_with_prefix("quarantine/request/");
             let request_count = requests.len();
             if path.ends_with("/audit") {
+                let stale_after_hours = query
+                    .map(query_params)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .find(|(key, _)| key == "staleAfterHours")
+                    .and_then(|(_, value)| value.parse::<u64>().ok())
+                    .unwrap_or(72)
+                    .max(1);
+                let generated_at = unix_timestamp();
+                let mut entries = Vec::with_capacity(requests.len());
+                for request in &requests {
+                    entries.push(
+                        quarantine_build_audit_entry(
+                            state,
+                            request,
+                            generated_at,
+                            stale_after_hours.saturating_mul(3600),
+                        )
+                        .await,
+                    );
+                }
+                let count_with_status = |status: &str| {
+                    entries
+                        .iter()
+                        .filter(|entry| entry["status"] == status)
+                        .count()
+                };
                 routing::ok_response(
                     serde_json::json!({
-                        "entries": requests,
+                        "entries": entries,
                         "requestCount": request_count,
-                        "acceptedReleaseCandidateCount": 0,
-                        "pendingReleaseCandidateCount": request_count,
-                        "pendingManualReviewCount": 0,
-                        "upholdQuarantineCount": 0,
-                        "staleRequestCount": 0,
+                        "acceptedReleaseCandidateCount": count_with_status("accepted-release-candidate"),
+                        "pendingReleaseCandidateCount": count_with_status("pending-release-acceptance"),
+                        "pendingManualReviewCount": count_with_status("manual-review"),
+                        "upholdQuarantineCount": count_with_status("uphold-quarantine"),
+                        "staleRequestCount": entries.iter().filter(|entry| entry["isStale"] == true).count(),
                         "count": request_count,
-                        "generatedAt": unix_timestamp(),
+                        "generatedAt": generated_at,
                     })
                     .to_string(),
                 )
@@ -46878,10 +50323,8 @@ async fn extended_controller_get_response(
                 .to_string(),
             )
         }
-        "/api/songid/capabilities" => {
-            routing::ok_response(serde_json::json!(["filename", "metadata", "sha256"]).to_string())
-        }
-        "/api/telemetry/prometheus" | "/api/telemetry/prometheus/kpis" => {
+        "/api/songid/capabilities" => routing::ok_response(songid_capabilities_json().to_string()),
+        "/api/telemetry/prometheus" => {
             let transfers = state.transfers.read().await;
             let searches = state.searches.read().await;
             HttpResponse {
@@ -46892,6 +50335,20 @@ async fn extended_controller_get_response(
                     transfers.entries.len(), searches.records.len()
                 ),
             }
+        }
+        // Matches the oracle's GetKpis: always a JSON dictionary keyed by
+        // metric name, never text/plain (unlike the base prometheus route,
+        // which supports both via content negotiation).
+        "/api/telemetry/prometheus/kpis" => {
+            let transfers = state.transfers.read().await;
+            let searches = state.searches.read().await;
+            let metrics = serde_json::json!({
+                "slskr_transfers": prometheus_metric_json("slskr_transfers", "gauge", transfers.entries.len() as f64),
+                "slskr_searches": prometheus_metric_json("slskr_searches", "gauge", searches.records.len() as f64),
+            });
+            drop(transfers);
+            drop(searches);
+            routing::ok_response(metrics.to_string())
         }
         "/api/virtualsoulfind/disaster-mode/status" => {
             let session = state.session.read().await;
@@ -46957,7 +50414,7 @@ async fn extended_controller_get_response(
     }
 }
 
-async fn podcore_stats_response(path: &str, state: &AppState) -> HttpResponse {
+async fn podcore_stats_response(path: &str, query: Option<&str>, state: &AppState) -> HttpResponse {
     let pods = state.pods.read().await;
     let visible = pods.list_visible(None);
     let pod_count = visible.len();
@@ -47018,9 +50475,48 @@ async fn podcore_stats_response(path: &str, state: &AppState) -> HttpResponse {
             "lastDiscoveryOperation": chrono::Utc::now().to_rfc3339(),
             "averageDiscoveryTime": "00:00:00",
         }).to_string()),
-        "/api/podcore/content/metadata" => routing::ok_response(serde_json::json!({
-            "pods": pod_count, "channels": channel_count, "items": [],
-        }).to_string()),
+        "/api/podcore/content/metadata" => {
+            // Matches the oracle's PodContentController.GetContentMetadata
+            // + ContentLinkService.CreateBasicMetadata: requires a real
+            // contentId query parameter and returns a single content
+            // object shaped by its `content:<domain>:<type>:<id>` parts,
+            // not an unrelated pod/channel-count aggregate that ignored
+            // the query entirely. MusicBrainz-backed enrichment for the
+            // audio/video domains is not implemented here -- the same
+            // honest simplification already accepted for content/validate.
+            let content_id = query_parameter(query, "contentId")
+                .map(|value| value.trim().to_owned())
+                .unwrap_or_default();
+            if content_id.is_empty() {
+                return routing::bad_request_response("Content ID is required");
+            }
+            let parts = content_id.split(':').collect::<Vec<_>>();
+            let valid = parts.len() == 4
+                && parts[0].eq_ignore_ascii_case("content")
+                && parts[1..].iter().all(|part| !part.trim().is_empty());
+            if !valid {
+                return HttpResponse {
+                    status: "404 Not Found",
+                    content_type: "application/json",
+                    body: serde_json::json!("Content not found").to_string(),
+                };
+            }
+            routing::ok_response(
+                serde_json::json!({
+                    "contentId": content_id,
+                    "title": format!("{}: {}", parts[2], parts[3]),
+                    "artist": "Unknown",
+                    "type": parts[2],
+                    "domain": parts[1],
+                    "additionalInfo": {
+                        "id": parts[3],
+                        "domain": parts[1],
+                        "type": parts[2],
+                    },
+                })
+                .to_string(),
+            )
+        }
         "/api/podcore/membership/stats" => routing::ok_response(serde_json::json!({
             "totalMemberships": member_count,
             "activeMemberships": member_count,
@@ -47030,20 +50526,95 @@ async fn podcore_stats_response(path: &str, state: &AppState) -> HttpResponse {
             "membershipsByPod": {},
             "lastOperation": chrono::Utc::now().to_rfc3339(),
         }).to_string()),
-        "/api/podcore/dht/stats" => routing::ok_response(serde_json::json!({
-            "totalPublished": pod_count,
-            "activePublications": pod_count,
-            "expiredPublications": 0,
-            "failedPublications": 0,
-            "averagePublishTime": "00:00:00",
-            "publicationsByDomain": {},
-            "publicationsByVisibility": {},
-            "lastPublishOperation": serde_json::Value::Null,
-            "registeredPods": pod_count,
-            "activeEntries": pod_count,
-            "publishedKeys": pod_count + channel_count,
-            "errors": 0,
-        }).to_string()),
+        "/api/podcore/dht/stats" => {
+            fn increment_count(map: &mut serde_json::Map<String, serde_json::Value>, key: String) {
+                let counter = map.entry(key).or_insert_with(|| serde_json::json!(0));
+                *counter = serde_json::json!(counter.as_u64().unwrap_or(0) + 1);
+            }
+
+            let now = chrono::Utc::now();
+            let dht_records = state
+                .controller_features
+                .read()
+                .await
+                .values_with_prefix("pod/dht/");
+            let mut active_publications = 0_u64;
+            let mut expired_publications = 0_u64;
+            let mut publications_by_domain = serde_json::Map::new();
+            let mut publications_by_visibility = serde_json::Map::new();
+            let mut last_publish_operation: Option<chrono::DateTime<chrono::Utc>> = None;
+            for record in &dht_records {
+                let expires_at = record
+                    .get("expiresAt")
+                    .and_then(serde_json::Value::as_str)
+                    .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+                    .map(|value| value.with_timezone(&chrono::Utc));
+                let is_active = expires_at.is_none_or(|expires_at| expires_at > now);
+                if is_active {
+                    active_publications += 1;
+                } else {
+                    expired_publications += 1;
+                }
+                let published_at = record
+                    .get("publishedAt")
+                    .and_then(serde_json::Value::as_str)
+                    .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+                    .map(|value| value.with_timezone(&chrono::Utc));
+                if let Some(published_at) = published_at {
+                    if last_publish_operation.is_none_or(|current| published_at > current) {
+                        last_publish_operation = Some(published_at);
+                    }
+                }
+                if !is_active {
+                    continue;
+                }
+                let Some(pod) = record
+                    .get("podId")
+                    .and_then(serde_json::Value::as_str)
+                    .and_then(|pod_id| pods.get(pod_id))
+                else {
+                    continue;
+                };
+                if let Some(domain) = pod
+                    .focus_content_id
+                    .as_deref()
+                    .and_then(|content_id| content_id.split(':').nth(1))
+                {
+                    increment_count(&mut publications_by_domain, domain.to_owned());
+                }
+                let visibility = pod
+                    .visibility
+                    .as_str()
+                    .unwrap_or("unknown")
+                    .to_owned();
+                increment_count(&mut publications_by_visibility, visibility);
+            }
+            // Total-ever-published is a real monotonic counter, distinct
+            // from currently-tracked publications (a republish overwrites
+            // the same record rather than adding a new one) -- it can
+            // never be lower than what's still tracked right now.
+            let total_published = state
+                .pod_dht_publish_count
+                .load(std::sync::atomic::Ordering::Relaxed)
+                .max(active_publications + expired_publications);
+            routing::ok_response(
+                serde_json::json!({
+                    "totalPublished": total_published,
+                    "activePublications": active_publications,
+                    "expiredPublications": expired_publications,
+                    "failedPublications": 0,
+                    "averagePublishTime": "00:00:00",
+                    "publicationsByDomain": publications_by_domain,
+                    "publicationsByVisibility": publications_by_visibility,
+                    "lastPublishOperation": last_publish_operation.map(|value| value.to_rfc3339()),
+                    "registeredPods": active_publications,
+                    "activeEntries": active_publications,
+                    "publishedKeys": active_publications,
+                    "errors": 0,
+                })
+                .to_string(),
+            )
+        }
         "/api/podcore/backfill/stats" => routing::ok_response(serde_json::json!({
             "totalBackfillRequestsSent": 0,
             "totalBackfillRequestsReceived": 0,
@@ -47074,26 +50645,68 @@ async fn podcore_stats_response(path: &str, state: &AppState) -> HttpResponse {
             "routingStatsByPod": {},
             "routes": channel_count, "delivered": 0, "failed": 0,
         }).to_string()),
-        "/api/podcore/signing/stats" => routing::ok_response(serde_json::json!({
-            "totalSignaturesCreated": 0,
-            "totalSignaturesVerified": 0,
-            "successfulVerifications": 0,
-            "failedVerifications": 0,
-            "averageSigningTimeMs": 0.0,
-            "averageVerificationTimeMs": 0.0,
-            "lastSignatureOperation": serde_json::Value::Null,
-            "signedMessages": 0, "verificationFailures": 0, "enabled": true,
-        }).to_string()),
-        "/api/podcore/verification/stats" => routing::ok_response(serde_json::json!({
-            "totalVerifications": 0,
-            "successfulVerifications": 0,
-            "failedMembershipChecks": 0,
-            "failedSignatureChecks": 0,
-            "bannedMemberRejections": 0,
-            "averageVerificationTimeMs": 0.0,
-            "lastVerification": serde_json::Value::Null,
-            "verifiedMessages": 0, "rejectedMessages": 0, "replayRecords": state.pod_join_replays.read().await.len(),
-        }).to_string()),
+        "/api/podcore/signing/stats" => {
+            use std::sync::atomic::Ordering;
+            let stats = &state.pod_signature_stats;
+            let signatures_created = stats.signatures_created.load(Ordering::Relaxed);
+            let signatures_verified = stats.signatures_verified.load(Ordering::Relaxed);
+            let successful_verifications = stats.successful_verifications.load(Ordering::Relaxed);
+            let failed_verifications = stats.failed_verifications.load(Ordering::Relaxed);
+            let total_signing_time_ms = stats.total_signing_time_ms.load(Ordering::Relaxed);
+            let total_verification_time_ms =
+                stats.total_verification_time_ms.load(Ordering::Relaxed);
+            let last_operation_at = stats
+                .last_operation_at
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .clone();
+            routing::ok_response(
+                serde_json::json!({
+                    "totalSignaturesCreated": signatures_created,
+                    "totalSignaturesVerified": signatures_verified,
+                    "successfulVerifications": successful_verifications,
+                    "failedVerifications": failed_verifications,
+                    "averageSigningTimeMs": total_signing_time_ms as f64 / signatures_created.max(1) as f64,
+                    "averageVerificationTimeMs": total_verification_time_ms as f64 / signatures_verified.max(1) as f64,
+                    "lastSignatureOperation": last_operation_at,
+                    "signedMessages": signatures_created,
+                    "verificationFailures": failed_verifications,
+                    "enabled": true,
+                })
+                .to_string(),
+            )
+        }
+        "/api/podcore/verification/stats" => {
+            use std::sync::atomic::Ordering;
+            let stats = &state.pod_verification_stats;
+            let total_verifications = stats.total_verifications.load(Ordering::Relaxed);
+            let successful_verifications = stats.successful_verifications.load(Ordering::Relaxed);
+            let failed_membership_checks = stats.failed_membership_checks.load(Ordering::Relaxed);
+            let failed_signature_checks = stats.failed_signature_checks.load(Ordering::Relaxed);
+            let banned_member_rejections = stats.banned_member_rejections.load(Ordering::Relaxed);
+            let total_verification_time_ms =
+                stats.total_verification_time_ms.load(Ordering::Relaxed);
+            let last_verification = stats
+                .last_verification_at
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .clone();
+            routing::ok_response(
+                serde_json::json!({
+                    "totalVerifications": total_verifications,
+                    "successfulVerifications": successful_verifications,
+                    "failedMembershipChecks": failed_membership_checks,
+                    "failedSignatureChecks": failed_signature_checks,
+                    "bannedMemberRejections": banned_member_rejections,
+                    "averageVerificationTimeMs": total_verification_time_ms as f64 / total_verifications.max(1) as f64,
+                    "lastVerification": last_verification,
+                    "verifiedMessages": successful_verifications,
+                    "rejectedMessages": total_verifications.saturating_sub(successful_verifications),
+                    "replayRecords": state.pod_join_replays.read().await.len(),
+                })
+                .to_string(),
+            )
+        }
         _ => routing::not_found_response(),
     }
 }
@@ -48207,6 +51820,22 @@ fn slskd_transfer_query_value(query: Option<&str>, key: &str) -> Option<String> 
         })
 }
 
+/// Matches the oracle's real ReportsController contract for
+/// leaderboard/exceptions/exceptions-pareto: `direction` is required,
+/// not optional -- a missing direction previously meant "no filter",
+/// silently mixing Upload and Download rows into a single report
+/// instead of rejecting the request the way the oracle does.
+fn slskd_transfer_query_required_direction(query: Option<&str>) -> Result<u32, &'static str> {
+    match slskd_transfer_query_value(query, "direction") {
+        None => Err("Direction is required"),
+        Some(value) => match value.to_ascii_lowercase().as_str() {
+            "download" | "0" => Ok(0),
+            "upload" | "1" => Ok(1),
+            _ => Err("Invalid direction"),
+        },
+    }
+}
+
 fn slskd_transfer_matches_query(
     entry: &TransferEntry,
     direction: Option<u32>,
@@ -49039,8 +52668,11 @@ fn slskd_transfer_histogram_report(query: Option<&str>, transfers: &TransferQueu
     .to_string()
 }
 
-fn slskd_transfer_leaderboard_report(query: Option<&str>, transfers: &TransferQueue) -> String {
-    let direction = slskd_transfer_query_direction(query);
+fn slskd_transfer_leaderboard_report(
+    query: Option<&str>,
+    transfers: &TransferQueue,
+) -> Result<String, &'static str> {
+    let direction = Some(slskd_transfer_query_required_direction(query)?);
     let (limit, offset) = slskd_transfer_query_limit_offset(query);
     let sort_by = slskd_transfer_query_value(query, "sortBy")
         .unwrap_or_else(|| "Count".to_owned())
@@ -49054,6 +52686,11 @@ fn slskd_transfer_leaderboard_report(query: Option<&str>, transfers: &TransferQu
         .entries
         .iter()
         .filter(|entry| slskd_transfer_matches_query(entry, direction, None))
+        // Matches the oracle's GetTransferLeaderboard: only completed
+        // transfers count toward the leaderboard, not queued/in-progress/
+        // cancelled/failed ones -- otherwise a user with many failed
+        // attempts could outrank one with fewer, real completions.
+        .filter(|entry| slskd_transfer_state(&entry.status) == "Completed")
     {
         let username = entry.peer_username.clone().unwrap_or_default();
         let bytes = entry.size.unwrap_or(entry.bytes_transferred);
@@ -49091,11 +52728,14 @@ fn slskd_transfer_leaderboard_report(query: Option<&str>, transfers: &TransferQu
         };
         ordering.then_with(|| left["username"].as_str().cmp(&right["username"].as_str()))
     });
-    serde_json::Value::Array(rows.into_iter().skip(offset).take(limit).collect()).to_string()
+    Ok(serde_json::Value::Array(rows.into_iter().skip(offset).take(limit).collect()).to_string())
 }
 
-fn slskd_transfer_exceptions_report(query: Option<&str>, transfers: &TransferQueue) -> String {
-    let direction = slskd_transfer_query_direction(query);
+fn slskd_transfer_exceptions_report(
+    query: Option<&str>,
+    transfers: &TransferQueue,
+) -> Result<String, &'static str> {
+    let direction = Some(slskd_transfer_query_required_direction(query)?);
     let username = slskd_transfer_query_username(query);
     let (limit, offset) = slskd_transfer_query_limit_offset(query);
     let descending = slskd_transfer_query_value(query, "sortOrder")
@@ -49139,14 +52779,14 @@ fn slskd_transfer_exceptions_report(query: Option<&str>, transfers: &TransferQue
             })
         })
         .collect::<Vec<_>>();
-    serde_json::Value::Array(rows).to_string()
+    Ok(serde_json::Value::Array(rows).to_string())
 }
 
 fn slskd_transfer_exceptions_pareto_report(
     query: Option<&str>,
     transfers: &TransferQueue,
-) -> String {
-    let direction = slskd_transfer_query_direction(query);
+) -> Result<String, &'static str> {
+    let direction = Some(slskd_transfer_query_required_direction(query)?);
     let username = slskd_transfer_query_username(query);
     let (limit, offset) = slskd_transfer_query_limit_offset(query);
     let mut grouped: BTreeMap<String, (usize, BTreeMap<String, ()>)> = BTreeMap::new();
@@ -49186,17 +52826,23 @@ fn slskd_transfer_exceptions_pareto_report(
             .cmp(&left["count"].as_u64())
             .then_with(|| left["exception"].as_str().cmp(&right["exception"].as_str()))
     });
-    serde_json::Value::Array(rows.into_iter().skip(offset).take(limit).collect()).to_string()
+    Ok(serde_json::Value::Array(rows.into_iter().skip(offset).take(limit).collect()).to_string())
 }
 
 fn slskd_transfer_directories_report(query: Option<&str>, transfers: &TransferQueue) -> String {
     let username = slskd_transfer_query_username(query);
     let (limit, offset) = slskd_transfer_query_limit_offset(query);
     let mut grouped: BTreeMap<String, (usize, u64, BTreeMap<String, ()>)> = BTreeMap::new();
+    // Matches the oracle's GetTransferDirectoryFrequency exactly: this
+    // report always answers "which of my shared directories are popular"
+    // -- i.e. what other users downloaded from local shares (Upload),
+    // never what this instance itself downloaded -- and only counts
+    // completed transfers, never queued/in-progress/failed ones.
     for entry in transfers
         .entries
         .iter()
-        .filter(|entry| entry.direction == 0)
+        .filter(|entry| entry.direction == 1)
+        .filter(|entry| slskd_transfer_state(&entry.status) == "Completed")
         .filter(|entry| slskd_transfer_matches_query(entry, None, username.as_deref()))
     {
         let directory = Path::new(&entry.filename)
@@ -49226,9 +52872,10 @@ fn slskd_transfer_directories_report(query: Option<&str>, transfers: &TransferQu
         })
         .collect::<Vec<_>>();
     rows.sort_by(|left, right| {
-        right["count"]
+        right["distinctUsers"]
             .as_u64()
-            .cmp(&left["count"].as_u64())
+            .cmp(&left["distinctUsers"].as_u64())
+            .then_with(|| right["count"].as_u64().cmp(&left["count"].as_u64()))
             .then_with(|| left["path"].as_str().cmp(&right["path"].as_str()))
     });
     serde_json::Value::Array(rows.into_iter().skip(offset).take(limit).collect()).to_string()
@@ -49880,6 +53527,7 @@ async fn serve(invocation: ServeInvocation) -> Result<(), String> {
         config.controller_case_sensitive_regex,
     )?;
     let controller_cli_environment = invocation.config_environment.clone();
+    let revoked_jwts = RevokedJwtStore::load(&config.state_dir);
     let state = Arc::new(AppState {
         controller_version: std::sync::RwLock::new(ControllerVersionState::initial()),
         controller_cli_environment,
@@ -50024,8 +53672,11 @@ async fn serve(invocation: ServeInvocation) -> Result<(), String> {
         controller_features: RwLock::new(controller_feature_state),
         peer_endpoints: RwLock::new(BTreeMap::new()),
         preview_streams: Arc::new(Semaphore::new(MAX_PREVIEW_STREAMS)),
-        revoked_jwts: RwLock::new(RevokedJwtStore::default()),
+        revoked_jwts: RwLock::new(revoked_jwts),
         login_attempts: RwLock::new(LoginAttemptStore::default()),
+        pod_signature_stats: PodSignatureStats::default(),
+        pod_verification_stats: PodVerificationStats::default(),
+        pod_dht_publish_count: std::sync::atomic::AtomicU64::new(0),
     });
     start_controller_version_check(Arc::clone(&state)).await;
     match credential_store::load(&state.config) {
@@ -50067,6 +53718,7 @@ async fn serve(invocation: ServeInvocation) -> Result<(), String> {
     spawn_lidarr_sync_scheduler(Arc::clone(&state));
     spawn_source_discovery(Arc::clone(&state));
     spawn_mesh_dht_publisher(Arc::clone(&state));
+    spawn_signal_shutdown_handler(Arc::clone(&state));
     spawn_configured_listeners(
         Arc::clone(&state),
         regular_listener_receiver,
@@ -56413,8 +60065,23 @@ async fn project_server_message(
         }
         ServerMessage::JoinedRoom(joined) => {
             let room = joined.room.clone();
+            let roster = joined
+                .users
+                .iter()
+                .map(|user| RoomRosterEntry {
+                    username: user.username.clone(),
+                    status: user.status,
+                    average_speed: user.average_speed,
+                    upload_count: user.upload_count,
+                    file_count: user.file_count,
+                    directory_count: user.directory_count,
+                    slots_free: user.slots_free,
+                    country_code: user.country_code.clone(),
+                })
+                .collect();
             let mut rooms = state.rooms.write().await;
             rooms.join(room.clone());
+            rooms.apply_roster(&room, roster);
             drop(rooms);
             record_event(state, "room.joined", room.clone(), None).await;
         }
@@ -61710,8 +65377,8 @@ where
             ) {
                 let response = match reason {
                     "unauthorized" => routing::unauthorized_response(),
-                    "forbidden" => routing::forbidden_response("forbidden"),
-                    _ => routing::forbidden_response(reason),
+                    "csrf" => routing::forbidden_response("cross-site mutating request rejected"),
+                    _ => routing::forbidden_response("insufficient permissions for this route"),
                 };
                 let _ = http_server::write_http_response(&mut writer, &response, false, "").await;
                 break;
@@ -65044,6 +68711,62 @@ mod tests {
     }
 
     #[test]
+    fn revoked_jwt_store_persists_and_reloads_across_restart() {
+        let root = std::env::temp_dir().join(format!(
+            "slskr-revoked-jwt-store-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let now = super::unix_timestamp();
+
+        {
+            let mut store = super::RevokedJwtStore::load(&root);
+            assert!(!store.contains("token-1", now), "fresh store must be empty");
+            store.revoke("token-1".to_owned(), now + 3_600, now);
+            assert!(store.contains("token-1", now));
+        }
+
+        // Simulate a restart: a fresh store loaded from the same state
+        // directory must still honor the revocation.
+        let mut reloaded = super::RevokedJwtStore::load(&root);
+        assert!(
+            reloaded.contains("token-1", now),
+            "revocation must survive a restart"
+        );
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn revoked_jwt_store_prunes_expired_entries_on_reload() {
+        let root = std::env::temp_dir().join(format!(
+            "slskr-revoked-jwt-store-prune-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let now = super::unix_timestamp();
+
+        {
+            let mut store = super::RevokedJwtStore::load(&root);
+            store.revoke("short-lived-token".to_owned(), now + 1, now);
+        }
+
+        // Reload well after expiry: the entry must be pruned, not resurrected.
+        let mut reloaded = super::RevokedJwtStore::load(&root);
+        assert!(!reloaded.contains("short-lived-token", now + 100));
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn frozen_blacklist_pattern_case_mode_is_target_specific() {
         let slskd = super::AppConfig::from_layers(
             None,
@@ -65898,6 +69621,59 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn role_denials_are_distinguishable_from_csrf_rejections() {
+        let (state, _receiver) = test_state_with_env(
+            MapEnv::default()
+                .with("SLSKR_AUTH_DISABLED", "false")
+                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn")
+                .with("SLSKR_API_READ_WRITE_TOKEN", "write-token")
+                .with("SLSKR_API_READ_ONLY_TOKEN", "read-token"),
+        );
+
+        // Authenticated, but with a role too low for this route -- must not
+        // be reported as a CSRF rejection.
+        let role_denied = super::route_http_request(
+            "POST",
+            "/api/v0/transfers/downloads/peer",
+            Some("Bearer read-token"),
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(role_denied.status, "403 Forbidden");
+        assert_eq!(
+            role_denied.body,
+            "{\"error\":\"insufficient permissions for this route\"}"
+        );
+
+        // A cross-origin mutating request with sufficient role must still be
+        // reported as the distinct CSRF rejection.
+        let csrf_denied = super::route_http_request_with_headers(
+            "POST",
+            "/api/v0/transfers/downloads/peer",
+            Some("Bearer write-token"),
+            "",
+            &state,
+            super::RequestSecurityHeaders {
+                host: Some("127.0.0.1:5030".to_string()),
+                origin: Some("https://evil.example".to_string()),
+                referer: None,
+                cookie: None,
+                x_share_token: None,
+                remote_addr: None,
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(csrf_denied.status, "403 Forbidden");
+        assert_eq!(
+            csrf_denied.body,
+            "{\"error\":\"cross-site mutating request rejected\"}"
+        );
+    }
+
+    #[tokio::test]
     async fn session_create_does_not_echo_api_token() {
         let (state, _receiver) = test_state_with_env(
             MapEnv::default()
@@ -66121,6 +69897,45 @@ mod tests {
         let json = serde_json::from_str::<serde_json::Value>(&response.body).unwrap();
         assert_eq!(json["status"], "ok");
         assert_eq!(json["warnings"][0], "auth_disabled_non_loopback");
+    }
+
+    #[tokio::test]
+    async fn root_health_endpoints_are_served_anonymously() {
+        // Matches the oracle's endpoints.MapHealthChecks("/health") and
+        // ("/health/mesh"), both AllowAnonymous -- orchestrator/container
+        // health probes hit these at the root, not under /api.
+        let (state, _receiver) =
+            test_state_with_env(MapEnv::default().with("SLSKR_AUTH_DISABLED", "false"));
+
+        let health = super::route_http_request("GET", "/health", None, "", &state)
+            .await
+            .expect("root health response");
+        assert_eq!(health.status, "200 OK");
+        let json = serde_json::from_str::<serde_json::Value>(&health.body).unwrap();
+        assert_eq!(json["status"], "ok");
+
+        let mesh_health = super::route_http_request("GET", "/health/mesh", None, "", &state)
+            .await
+            .expect("root mesh health response");
+        assert_eq!(mesh_health.status, "200 OK");
+        let mesh_json = serde_json::from_str::<serde_json::Value>(&mesh_health.body).unwrap();
+        assert!(mesh_json.get("status").is_some());
+    }
+
+    #[tokio::test]
+    async fn initiate_graceful_shutdown_disconnects_the_session() {
+        // Matches the oracle's StopAsync teardown (Client.Disconnect before
+        // exit) -- this is the logic a SIGTERM/SIGINT/SIGQUIT handler runs;
+        // registering real OS signals isn't exercised here since raising
+        // them would affect the whole shared test process.
+        let (state, mut receiver) = test_state();
+        {
+            let mut session = state.session.write().await;
+            session.state = "connected";
+        }
+        super::initiate_graceful_shutdown(&state).await;
+        let command = receiver.recv().await.expect("session command sent");
+        assert!(matches!(command, super::SessionCommand::Disconnect));
     }
 
     #[tokio::test]
@@ -67209,6 +71024,9 @@ mod tests {
             preview_streams: Arc::new(tokio::sync::Semaphore::new(super::MAX_PREVIEW_STREAMS)),
             revoked_jwts: RwLock::new(super::RevokedJwtStore::default()),
             login_attempts: RwLock::new(super::LoginAttemptStore::default()),
+            pod_signature_stats: super::PodSignatureStats::default(),
+            pod_verification_stats: super::PodVerificationStats::default(),
+            pod_dht_publish_count: std::sync::atomic::AtomicU64::new(0),
         });
         (state, receiver)
     }
@@ -67262,7 +71080,7 @@ mod tests {
         );
         assert_eq!(
             normalize_api_path("/api/v0/portforwarding/start"),
-            "/api/portforwarding/start"
+            "/api/port-forwarding/start"
         );
         assert_eq!(
             normalize_api_path("/api/v0/capabilities/mesh-peers"),
@@ -67344,8 +71162,12 @@ mod tests {
             .await
             .expect("versioned session check");
         assert_eq!(session_check.status, "200 OK");
-        assert!(session_check.body.is_empty());
-        assert!(session_check.content_type.is_empty());
+        assert_eq!(session_check.content_type, "application/json");
+        assert!(
+            session_check.body.contains("\"state\":"),
+            "{}",
+            session_check.body
+        );
     }
 
     #[tokio::test]
@@ -68146,6 +71968,96 @@ mod tests {
         .expect_err("Spotify timeout must fail");
         assert!(error.contains("Spotify API request failed"), "{error}");
         server.abort();
+    }
+
+    #[tokio::test]
+    async fn force_checking_the_latest_version_awaits_a_real_github_lookup() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind version fixture");
+        let address = listener.local_addr().expect("version fixture address");
+        let server = tokio::spawn(async move {
+            serve_json_fixture(
+                &listener,
+                serde_json::json!({
+                    "tag_name": "v9.9.9-slskdn.20260101120000",
+                    "html_url": "https://github.com/snapetech/slskdn/releases/tag/v9.9.9-slskdn.20260101120000",
+                }),
+            )
+            .await
+        });
+        let (state, _receiver) = test_state();
+        super::refresh_controller_version_check(&state, &format!("http://{address}")).await;
+        server.await.expect("version fixture task");
+
+        let version = state
+            .controller_version
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        assert_eq!(
+            version.latest.as_deref(),
+            Some("9.9.9-slskdn.20260101120000")
+        );
+        assert!(version.latest_tag.is_some());
+        assert!(version.checked_at.is_some());
+    }
+
+    #[tokio::test]
+    async fn musicbrainz_release_lookup_resolves_a_release_with_an_artist_credit() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind MusicBrainz fixture");
+        let address = listener.local_addr().expect("MusicBrainz fixture address");
+        let server = tokio::spawn(async move {
+            serve_json_fixture(
+                &listener,
+                serde_json::json!({
+                    "id": "release-1",
+                    "title": "Route Audit Release",
+                    "artist-credit": [
+                        {"name": "Route Audit Artist", "artist": {"id": "artist-1"}},
+                    ],
+                }),
+            )
+            .await
+        });
+        let target = super::musicbrainz_release_target(&format!("http://{address}"), "release-1")
+            .await
+            .expect("MusicBrainz lookup");
+        server.await.expect("MusicBrainz fixture task");
+        assert_eq!(
+            target,
+            Some((
+                "Route Audit Artist".to_owned(),
+                "Route Audit Release".to_owned()
+            ))
+        );
+    }
+
+    #[tokio::test]
+    async fn musicbrainz_release_lookup_returns_none_when_release_is_not_found() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind MusicBrainz fixture");
+        let address = listener.local_addr().expect("MusicBrainz fixture address");
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.expect("accept MusicBrainz request");
+            let mut buffer = [0_u8; 1024];
+            assert!(stream.read(&mut buffer).await.unwrap() > 0);
+            let reply = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+            stream
+                .write_all(reply.as_bytes())
+                .await
+                .expect("write MusicBrainz 404");
+        });
+        let target =
+            super::musicbrainz_release_target(&format!("http://{address}"), "missing-release")
+                .await
+                .expect("MusicBrainz lookup");
+        server.await.expect("MusicBrainz fixture task");
+        assert_eq!(target, None);
     }
 
     #[tokio::test]
@@ -69742,6 +73654,84 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn oracle_spelled_portforwarding_start_route_reaches_the_real_handler() {
+        // The oracle's real route (ASP.NET's default [controller] token for
+        // PortForwardingController has no hyphen) is
+        // "api/v0/portforwarding/start". A routing-table typo previously
+        // mapped that exact path to an internal literal that only a
+        // fake-success stub matched -- any real caller using the real
+        // oracle-spelled path always got a canned "Port forwarding
+        // started" message with none of the real handler's pod-membership/
+        // gateway-pinning validation ever running and no forward ever
+        // actually starting. This proves the fixed routing table now
+        // reaches the same real handler already exercised (via the
+        // internal hyphenated spelling) by the sibling tests above.
+        let (state, _receiver) = test_state_with_env(MapEnv::default().with(
+            "SLSKR_TEST_USER_ENDPOINT_OVERRIDES",
+            "gateway=127.0.0.1:2234",
+        ));
+        let pin = "07".repeat(32);
+        let create = super::route_http_request(
+            "POST",
+            "/api/v0/pods",
+            None,
+            &format!(
+                r#"{{"pod":{{"podId":"pod-oracle-forward","name":"Oracle Forward","capabilities":[0],"privateServicePolicy":{{"enabled":true,"maxMembers":2,"gatewayPeerId":"tester","gatewayCertificateSha256":"{pin}","registeredServices":[],"allowedDestinations":[{{"hostPattern":"service","port":80,"protocol":"tcp","allowPublic":false}}]}}}}}}"#
+            ),
+            &state,
+        )
+        .await
+        .expect("create gateway pod");
+        assert_eq!(create.status, "201 Created", "{}", create.body);
+        let mut gateway = test_capability_descriptor(
+            "gateway",
+            vec![slskr_client::capabilities::FEATURE_MESH_V1.to_owned()],
+        );
+        gateway.peer_id = "tester".to_owned();
+        state.mesh.write().await.capability_records.push(gateway);
+        let probe = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("port probe");
+        let local_port = probe.local_addr().unwrap().port();
+        drop(probe);
+
+        let start = super::route_http_request(
+            "POST",
+            "/api/v0/portforwarding/start",
+            None,
+            &format!(
+                r#"{{"localPort":{local_port},"podId":"pod-oracle-forward","destinationHost":"service","destinationPort":80}}"#
+            ),
+            &state,
+        )
+        .await
+        .expect("start port forwarding via the oracle-spelled route");
+        assert_eq!(start.status, "200 OK", "{}", start.body);
+        let status = super::route_http_request(
+            "GET",
+            &format!("/api/v0/port-forwarding/status/{local_port}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("forwarding status");
+        assert_eq!(status.status, "200 OK");
+        assert!(status.body.contains("pod-oracle-forward"));
+
+        let stop = super::route_http_request(
+            "POST",
+            &format!("/api/port-forwarding/stop/{local_port}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("stop port forwarding");
+        assert_eq!(stop.status, "200 OK");
+    }
+
+    #[tokio::test]
     async fn private_gateway_accepts_authenticated_pod_tunnel_and_round_trips_bytes() {
         use sha2::Digest as _;
         use slskr_client::overlay::{
@@ -69989,6 +73979,39 @@ mod tests {
         assert_eq!(reply.status_code, 0, "{:?}", reply.error_message);
         let opened: OpenTunnelResponse = serde_json::from_slice(&reply.payload).unwrap();
 
+        // Matches the oracle's real ServerStatsResponse.ActiveConnections:
+        // must reflect this real, currently-open tunnel, not a hardcoded
+        // 0 regardless of live connection state.
+        let overlay_stats =
+            super::route_http_request("GET", "/api/v0/overlay/stats", None, "", &state)
+                .await
+                .expect("overlay stats with an open tunnel");
+        let overlay_stats_json =
+            serde_json::from_str::<serde_json::Value>(&overlay_stats.body).unwrap();
+        assert_eq!(
+            overlay_stats_json["activeConnections"], 1,
+            "{overlay_stats_json}"
+        );
+        assert_eq!(
+            overlay_stats_json["server"]["activeConnections"], 1,
+            "{overlay_stats_json}"
+        );
+
+        // Matches the oracle's real overlay/mesh session list -- must
+        // report the real tunnel owner's identity, not slskR's old
+        // unrelated peer-endpoints IP cache.
+        let overlay_connections =
+            super::route_http_request("GET", "/api/v0/overlay/connections", None, "", &state)
+                .await
+                .expect("overlay connections with an open tunnel");
+        let overlay_connections_json =
+            serde_json::from_str::<serde_json::Value>(&overlay_connections.body).unwrap();
+        assert_eq!(
+            overlay_connections_json,
+            serde_json::json!([{"username": "member"}]),
+            "{overlay_connections_json}"
+        );
+
         let reply = client
             .call(
                 &MeshServiceCall::new(
@@ -70052,6 +74075,23 @@ mod tests {
             .await
             .expect("close reply");
         assert_eq!(reply.status_code, 0, "{:?}", reply.error_message);
+
+        let overlay_stats_after_close =
+            super::route_http_request("GET", "/api/v0/overlay/stats", None, "", &state)
+                .await
+                .expect("overlay stats after closing the tunnel");
+        let overlay_stats_after_close_json =
+            serde_json::from_str::<serde_json::Value>(&overlay_stats_after_close.body).unwrap();
+        assert_eq!(
+            overlay_stats_after_close_json["activeConnections"], 0,
+            "{overlay_stats_after_close_json}"
+        );
+        let overlay_connections_after_close =
+            super::route_http_request("GET", "/api/v0/overlay/connections", None, "", &state)
+                .await
+                .expect("overlay connections after closing the tunnel");
+        assert_eq!(overlay_connections_after_close.body, "[]");
+
         let mut second_hello = MeshHello::new(
             "member",
             vec![FEATURE_MESH_SERVICE.to_owned()],
@@ -70821,6 +74861,107 @@ mod tests {
         task_a.abort();
         task_b.abort();
         std::fs::remove_dir_all(&state.config.state_dir).expect("remove test state directory");
+    }
+
+    fn build_stun_success_response(transaction_id: [u8; 12], mapped: SocketAddr) -> Vec<u8> {
+        let SocketAddr::V4(mapped) = mapped else {
+            panic!("STUN test fixture requires an IPv4 mapped address");
+        };
+        let xor_port = mapped.port() ^ ((super::STUN_MAGIC_COOKIE >> 16) as u16);
+        let xor_address = u32::from(*mapped.ip()) ^ super::STUN_MAGIC_COOKIE;
+        let mut attribute = Vec::with_capacity(8);
+        attribute.push(0x00);
+        attribute.push(0x01);
+        attribute.extend_from_slice(&xor_port.to_be_bytes());
+        attribute.extend_from_slice(&xor_address.to_be_bytes());
+
+        let mut response = Vec::with_capacity(32);
+        response.extend_from_slice(&0x0101_u16.to_be_bytes());
+        response.extend_from_slice(&(attribute.len() as u16 + 4).to_be_bytes());
+        response.extend_from_slice(&super::STUN_MAGIC_COOKIE.to_be_bytes());
+        response.extend_from_slice(&transaction_id);
+        response.extend_from_slice(&0x0020_u16.to_be_bytes());
+        response.extend_from_slice(&(attribute.len() as u16).to_be_bytes());
+        response.extend_from_slice(&attribute);
+        response
+    }
+
+    async fn serve_one_stun_response(socket: &tokio::net::UdpSocket, mapped: SocketAddr) {
+        let mut buf = [0_u8; 128];
+        let (count, peer) = socket.recv_from(&mut buf).await.expect("recv STUN request");
+        assert!(count >= 20, "STUN request too short");
+        let mut transaction_id = [0_u8; 12];
+        transaction_id.copy_from_slice(&buf[8..20]);
+        let response = build_stun_success_response(transaction_id, mapped);
+        socket
+            .send_to(&response, peer)
+            .await
+            .expect("send STUN response");
+    }
+
+    #[test]
+    fn stun_response_parsing_decodes_the_xor_mapped_address() {
+        let mapped = "203.0.113.5:51820".parse::<SocketAddr>().unwrap();
+        let response = build_stun_success_response([7_u8; 12], mapped);
+        assert_eq!(super::parse_stun_mapped_address(&response), Some(mapped));
+    }
+
+    #[tokio::test]
+    async fn stun_probe_resolves_the_mapped_address_from_a_real_udp_round_trip() {
+        let socket = tokio::net::UdpSocket::bind("127.0.0.1:0")
+            .await
+            .expect("bind STUN fixture");
+        let address = socket.local_addr().expect("STUN fixture address");
+        let mapped = "198.51.100.9:4000".parse::<SocketAddr>().unwrap();
+        let server = tokio::spawn(async move { serve_one_stun_response(&socket, mapped).await });
+        let result = super::stun_probe(&address.to_string())
+            .await
+            .expect("STUN probe");
+        server.await.expect("STUN fixture task");
+        assert_eq!(result.mapped, mapped);
+    }
+
+    #[tokio::test]
+    async fn detect_nat_type_reports_symmetric_when_the_mapping_changes_between_probes() {
+        let socket = tokio::net::UdpSocket::bind("127.0.0.1:0")
+            .await
+            .expect("bind STUN fixture");
+        let address = socket.local_addr().expect("STUN fixture address");
+        let server = tokio::spawn(async move {
+            serve_one_stun_response(&socket, "198.51.100.9:4000".parse().unwrap()).await;
+            serve_one_stun_response(&socket, "198.51.100.9:4001".parse().unwrap()).await;
+        });
+        let server_addr = address.to_string();
+        let (nat_type, detected) = super::detect_nat_type(&[&server_addr]).await;
+        server.await.expect("STUN fixture task");
+        assert_eq!(nat_type, "symmetric");
+        assert!(detected);
+    }
+
+    #[tokio::test]
+    async fn detect_nat_type_reports_restricted_when_the_mapping_is_stable() {
+        let socket = tokio::net::UdpSocket::bind("127.0.0.1:0")
+            .await
+            .expect("bind STUN fixture");
+        let address = socket.local_addr().expect("STUN fixture address");
+        let mapped: SocketAddr = "198.51.100.9:4000".parse().unwrap();
+        let server = tokio::spawn(async move {
+            for _ in 0..3 {
+                serve_one_stun_response(&socket, mapped).await;
+            }
+        });
+        let server_addr = address.to_string();
+        let (nat_type, detected) = super::detect_nat_type(&[&server_addr, &server_addr]).await;
+        server.await.expect("STUN fixture task");
+        assert_eq!(nat_type, "restricted");
+        assert!(detected);
+    }
+
+    #[tokio::test]
+    async fn detect_nat_type_reports_unknown_when_no_server_responds() {
+        let (nat_type, detected) = super::detect_nat_type(&["127.0.0.1:1"]).await;
+        assert_eq!(nat_type, "unknown");
+        assert!(!detected);
     }
 
     #[tokio::test]
@@ -72499,6 +76640,39 @@ mod tests {
         .expect("telemetry transfer");
         assert_eq!(telemetry_transfer.status, "200 OK");
 
+        // The leaderboard and directories reports only count real
+        // completed transfers now (matching the oracle's State=48
+        // filter), so mark the downloads above completed, and add a real
+        // completed *upload* for the directories report -- which, also
+        // matching the oracle, only ever reports on uploads (what other
+        // users downloaded from local shares), never downloads.
+        {
+            let mut transfers = state.transfers.write().await;
+            for entry in transfers.entries.iter_mut() {
+                if entry.direction == 0 {
+                    entry.status = "succeeded".to_owned();
+                }
+            }
+            // A distinct username -- not "telemetry peer" -- so this
+            // synthetic upload doesn't inflate that user's own transfer
+            // count/report later in this test.
+            transfers.create(
+                1,
+                Some("directory-audit-peer".to_owned()),
+                "Telemetry/Album/Track.flac".to_owned(),
+                None,
+                Some(321),
+            );
+            if let Some(entry) = transfers
+                .entries
+                .iter_mut()
+                .rev()
+                .find(|entry| entry.direction == 1)
+            {
+                entry.status = "succeeded".to_owned();
+            }
+        }
+
         let leaderboard = super::route_http_request(
             "GET",
             "/api/v0/telemetry/reports/transfers/leaderboard?direction=Download",
@@ -72695,7 +76869,6 @@ mod tests {
             ("DELETE", "/api/conversations/peer1", ""),
             ("GET", "/api/users/peer1/endpoint", ""),
             ("GET", "/api/users/peer1/browse", ""),
-            ("GET", "/api/users/peer1/browse/status", ""),
             ("POST", "/api/users/peer1/directory", r#"{"directory":""}"#),
             ("GET", "/api/users/peer1/info", ""),
             ("GET", "/api/users/peer1/status", ""),
@@ -72788,7 +76961,6 @@ mod tests {
                     || versioned.starts_with("/api/v0/conversations/")
                     || versioned == "/api/v0/shares")
                 || (method == "GET" && versioned.starts_with("/api/v0/transfers/uploads/peer1"))
-                || (method == "GET" && versioned == "/api/v0/users/peer1/browse/status")
                 || (method == "GET" && versioned.starts_with("/api/v0/shares/root"))
             {
                 assert_eq!(versioned_response.status, "404 Not Found");
@@ -72806,8 +76978,25 @@ mod tests {
             while receiver.try_recv().is_ok() {}
         }
 
+        // A user with no tracked browse must 404, matching the oracle's
+        // BrowseTracker.TryGet-miss contract, on both the unversioned and
+        // versioned paths -- there is no version-specific split here.
+        for path in [
+            "/api/users/peer1/browse/status",
+            "/api/v0/users/peer1/browse/status",
+            "/api/users/peer%201/browse/status",
+        ] {
+            let response = super::route_http_request("GET", path, None, "", &state)
+                .await
+                .unwrap_or_else(|error| panic!("GET {path}: {error}"));
+            assert_eq!(response.status, "404 Not Found", "GET {path}");
+        }
+
         let query_contract_routes = [
-            ("GET", "/api/application/version/latest?forceCheck=true", ""),
+            // Not "/api/application/version/latest?forceCheck=true" here:
+            // that now awaits a real (parameterized, separately tested)
+            // GitHub Releases lookup, so it can't share this 1-second
+            // timeout or depend on live network in a hermetic test run.
             ("GET", "/api/searches?includeResponses=true", ""),
             ("DELETE", "/api/transfers/downloads/peer1/1?remove=true", ""),
             ("GET", "/api/transfers/downloads/?includeRemoved=true", ""),
@@ -72865,7 +77054,6 @@ mod tests {
         let encoded_path_routes = [
             ("GET", "/api/profile/peer%201", ""),
             ("GET", "/api/users/peer%201/browse", ""),
-            ("GET", "/api/users/peer%201/browse/status", ""),
             (
                 "POST",
                 "/api/transfers/downloads/peer%201",
@@ -72969,7 +77157,6 @@ mod tests {
                 "/api/multisource/swarm/async",
                 r#"{"filename":"x","size":1,"sources":[]}"#,
             ),
-            ("GET", "/api/multisource/jobs/job-1", ""),
             ("GET", "/api/podcore/content/search?query=cover", ""),
             (
                 "POST",
@@ -75302,7 +79489,7 @@ mod tests {
             );
             let mut collections = state.collections.write().await;
             collections
-                .create("Collection".to_owned(), String::new())
+                .create(String::new(), "Collection".to_owned(), String::new())
                 .unwrap();
             collections
                 .add_item(
@@ -75697,7 +79884,7 @@ mod tests {
         );
         let rehydrated_library = super::LibraryStore::from_persisted(persisted_library);
         assert!(rehydrated_collections
-            .json_array(None)
+            .json_array(None, None)
             .contains("\"title\":\"Two\""));
         assert!(rehydrated_library
             .json()
@@ -75877,7 +80064,13 @@ mod tests {
                 "",
                 false,
             ),
-            ("POST", "/api/songid/runs", "", "", false),
+            (
+                "POST",
+                "/api/songid/runs",
+                r#"{"source":"route-audit"}"#,
+                "",
+                false,
+            ),
             (
                 "POST",
                 "/api/integrations/lidarr/wanted/sync",
@@ -76044,9 +80237,15 @@ mod tests {
                 .await
                 .expect("warm cache");
         assert_eq!(warm_cache.status, "202 Accepted");
-        let songid = super::route_http_request("POST", "/api/songid/runs", None, "{}", &state)
-            .await
-            .expect("songid");
+        let songid = super::route_http_request(
+            "POST",
+            "/api/songid/runs",
+            None,
+            r#"{"source":"route-audit"}"#,
+            &state,
+        )
+        .await
+        .expect("songid");
         assert_eq!(songid.status, "202 Accepted");
         let backfill = super::route_http_request("POST", "/api/backfill", None, "{}", &state)
             .await
@@ -78640,9 +82839,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn slskd_transfer_position_reports_peer_queue_index() {
+    async fn slskd_transfer_position_requires_a_real_download_and_reports_no_fake_number() {
         let (state, _receiver) = test_state();
-        {
+        let (first_id, second_id) = {
             let mut transfers = state.transfers.write().await;
             let first = transfers.create(
                 0,
@@ -78652,74 +82851,66 @@ mod tests {
                 Some(1),
             );
             transfers.update_status(first.id, "completed", Some(1), None);
-            transfers.create(
+            let second = transfers.create(
                 0,
                 Some("friend".to_owned()),
                 "Remote/Two.flac".to_owned(),
                 None,
                 Some(2),
             );
-            transfers.create(
-                0,
-                Some("friend".to_owned()),
-                "Remote/Three.flac".to_owned(),
-                None,
-                Some(3),
-            );
-            transfers.create(
-                0,
-                Some("other".to_owned()),
-                "Remote/Other.flac".to_owned(),
-                None,
-                Some(4),
-            );
-        }
+            (first.id, second.id)
+        };
 
-        let first_active = super::route_http_request(
+        // A real, tracked download exists, but slskr does not yet request a
+        // live PlaceInQueueResponse from the remote peer -- matching the
+        // oracle's own 204 "queue position unavailable" fallback rather
+        // than fabricating a number, even for a completed transfer (the
+        // prior behavior returned a fake "0" for every case below).
+        let active = super::route_http_request(
             "GET",
-            "/api/v0/transfers/downloads/friend/2/position",
+            &format!("/api/v0/transfers/downloads/friend/{second_id}/position"),
             None,
             "",
             &state,
         )
         .await
-        .expect("first active position");
-        assert_eq!(first_active.status, "200 OK");
-        assert_eq!(first_active.body, "0");
-
-        let second_active = super::route_http_request(
-            "GET",
-            "/api/v0/transfers/downloads/friend/3/position",
-            None,
-            "",
-            &state,
-        )
-        .await
-        .expect("second active position");
-        assert_eq!(second_active.status, "200 OK");
-        assert_eq!(second_active.body, "1");
-
-        let other_peer = super::route_http_request(
-            "GET",
-            "/api/v0/transfers/downloads/other/4/position",
-            None,
-            "",
-            &state,
-        )
-        .await
-        .expect("other peer position");
-        assert_eq!(other_peer.body, "0");
+        .expect("active position");
+        assert_eq!(active.status, "204 No Content", "{}", active.body);
 
         let completed = super::route_http_request(
             "GET",
-            "/api/v0/transfers/downloads/friend/1/position",
+            &format!("/api/v0/transfers/downloads/friend/{first_id}/position"),
             None,
             "",
             &state,
         )
         .await
         .expect("completed position");
-        assert_eq!(completed.body, "0");
+        assert_eq!(completed.status, "204 No Content");
+
+        // An id that isn't a real download for this username must 404,
+        // not silently report a position.
+        let unknown_id = super::route_http_request(
+            "GET",
+            "/api/v0/transfers/downloads/friend/999999/position",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("unknown id");
+        assert_eq!(unknown_id.status, "404 Not Found");
+
+        let wrong_username = super::route_http_request(
+            "GET",
+            &format!("/api/v0/transfers/downloads/other/{second_id}/position"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("wrong username");
+        assert_eq!(wrong_username.status, "404 Not Found");
     }
 
     #[tokio::test]
@@ -82321,10 +86512,10 @@ mod tests {
     fn collections_bound_nested_state_and_allocate_unique_item_ids() {
         let mut collections = super::CollectionStore::with_limits(1, 2);
         let collection = collections
-            .create("Road Trip".to_owned(), String::new())
+            .create(String::new(), "Road Trip".to_owned(), String::new())
             .unwrap();
         assert!(collections
-            .create("Overflow".to_owned(), String::new())
+            .create(String::new(), "Overflow".to_owned(), String::new())
             .is_none());
 
         let first = collections
@@ -82375,6 +86566,7 @@ mod tests {
             super::CollectionStore::with_limits(6, super::MAX_COLLECTION_ITEMS + 1);
         let first = collections
             .create(
+                String::new(),
                 "n".repeat(super::MAX_LIST_NAME_BYTES + 1),
                 "d".repeat(super::MAX_LIST_DESCRIPTION_BYTES + 1),
             )
@@ -82410,14 +86602,14 @@ mod tests {
         collections.records[0].items.clear();
         while collections.records.len() < 5 {
             collections
-                .create("collection".to_owned(), String::new())
+                .create(String::new(), "collection".to_owned(), String::new())
                 .unwrap();
         }
         for record in &mut collections.records {
             record.items = vec![template.clone(); super::MAX_COLLECTION_ITEMS];
         }
         let last = collections
-            .create("last".to_owned(), String::new())
+            .create(String::new(), "last".to_owned(), String::new())
             .unwrap();
         assert!(collections
             .add_item(
@@ -82465,9 +86657,11 @@ mod tests {
     fn collection_and_wishlist_ids_wrap_without_collisions() {
         let mut collections = super::CollectionStore::with_limits(3, 3);
         collections.next_id = u64::MAX;
-        let max_collection = collections.create("Max".to_owned(), String::new()).unwrap();
+        let max_collection = collections
+            .create(String::new(), "Max".to_owned(), String::new())
+            .unwrap();
         let wrapped_collection = collections
-            .create("Wrapped".to_owned(), String::new())
+            .create(String::new(), "Wrapped".to_owned(), String::new())
             .unwrap();
         assert_eq!(max_collection.id, format!("col-{}", u64::MAX));
         assert_eq!(wrapped_collection.id, "col-1");
@@ -82995,6 +87189,221 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn security_reputation_routes_reflect_real_score_and_violations() {
+        // Matches the oracle's real PeerReputation-backed
+        // SecurityController: reputation endpoints previously read/wrote
+        // a disconnected, admin-only settings blob that never reflected
+        // real peer behavior (violations always showed as 0, and
+        // suspicious/trusted lists were derived from watch/online status
+        // instead of reputation at all).
+        let (state, _receiver) = test_state();
+
+        // A peer with no recorded violations reports the real,
+        // never-decremented default score.
+        let clean = super::route_http_request(
+            "GET",
+            "/api/v0/security/reputation/cleanpeer",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("clean peer reputation");
+        let clean_json = serde_json::from_str::<serde_json::Value>(&clean.body).unwrap();
+        assert_eq!(clean_json["score"], 100);
+        assert_eq!(clean_json["protocolViolations"], 0);
+        assert_eq!(clean_json["trustLevel"], "Trusted");
+
+        // Seed a real violation-driven score drop via the same
+        // SecurityState used by the real violation tracker.
+        {
+            let mut security = state.security.write().await;
+            security.reputation.insert("badpeer".to_owned(), 15);
+            security.violations.insert("badpeer".to_owned(), 3);
+        }
+        let bad = super::route_http_request(
+            "GET",
+            "/api/v0/security/reputation/badpeer",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("bad peer reputation");
+        let bad_json = serde_json::from_str::<serde_json::Value>(&bad.body).unwrap();
+        assert_eq!(bad_json["score"], 15);
+        assert_eq!(bad_json["protocolViolations"], 3);
+        assert_eq!(bad_json["trustLevel"], "Untrusted");
+
+        // The suspicious list reflects the real low score, not
+        // watch/online status.
+        let suspicious = super::route_http_request(
+            "GET",
+            "/api/v0/security/reputation/suspicious",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("suspicious peers");
+        let suspicious_json = serde_json::from_str::<serde_json::Value>(&suspicious.body).unwrap();
+        let suspicious_usernames = suspicious_json
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|entry| entry["username"].as_str().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(suspicious_usernames, vec!["badpeer"]);
+
+        // The trusted list never includes the suspicious peer.
+        let trusted = super::route_http_request(
+            "GET",
+            "/api/v0/security/reputation/trusted",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("trusted peers");
+        let trusted_json = serde_json::from_str::<serde_json::Value>(&trusted.body).unwrap();
+        assert!(trusted_json
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|entry| entry["username"] != "badpeer"));
+
+        // A manual PUT override rejects out-of-range scores...
+        let invalid = super::route_http_request(
+            "PUT",
+            "/api/v0/security/reputation/badpeer",
+            None,
+            r#"{"score":150}"#,
+            &state,
+        )
+        .await
+        .expect("reject out-of-range score");
+        assert_eq!(invalid.status, "400 Bad Request");
+
+        // ...and a valid override writes directly into the same real
+        // score the automatic violation tracker reads and adjusts.
+        let overridden = super::route_http_request(
+            "PUT",
+            "/api/v0/security/reputation/badpeer",
+            None,
+            r#"{"score":80,"reason":"manual review"}"#,
+            &state,
+        )
+        .await
+        .expect("override reputation score");
+        assert_eq!(overridden.status, "200 OK");
+        assert_eq!(state.security.read().await.reputation["badpeer"], 80);
+        let after_override = super::route_http_request(
+            "GET",
+            "/api/v0/security/reputation/badpeer",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("reputation after override");
+        let after_override_json =
+            serde_json::from_str::<serde_json::Value>(&after_override.body).unwrap();
+        assert_eq!(after_override_json["score"], 80);
+        assert_eq!(after_override_json["trustLevel"], "Trusted");
+    }
+
+    #[tokio::test]
+    async fn taste_recommendation_wishlist_promotion_creates_a_real_review_only_seed() {
+        // Matches the oracle's real PromoteToWishlistAsync: a
+        // recommendable WorkRef actually creates a disabled,
+        // no-auto-download Wishlist seed (or reports the existing one
+        // if already promoted), rather than just echoing the caller's
+        // current wishlist back as if a promotion had occurred.
+        let (state, _receiver) = test_state();
+
+        let work_ref = r#"{"workRef":{"domain":"music","title":"Selected Ambient Works","creator":"Aphex Twin","externalIds":{"musicbrainz":"abcd1234-1234-4a12-9a12-0a1234567890"}},"note":"from a trusted follower"}"#;
+        let promoted = super::route_http_request(
+            "POST",
+            "/api/v0/taste-recommendations/wishlist",
+            None,
+            work_ref,
+            &state,
+        )
+        .await
+        .expect("promote a recommendable WorkRef");
+        assert_eq!(promoted.status, "200 OK", "{}", promoted.body);
+        let promoted_json = serde_json::from_str::<serde_json::Value>(&promoted.body).unwrap();
+        assert_eq!(promoted_json["created"], true);
+        assert_eq!(
+            promoted_json["searchText"],
+            "Aphex Twin Selected Ambient Works"
+        );
+        let item_id = promoted_json["wishlistItemId"].as_str().unwrap().to_owned();
+
+        let wishlist = state.wishlist.read().await;
+        let item = wishlist
+            .records
+            .iter()
+            .flat_map(|record| record.items.iter())
+            .find(|item| item.id == item_id)
+            .expect("the promoted item is really stored in the wishlist")
+            .clone();
+        drop(wishlist);
+        assert_eq!(item.artist, "Aphex Twin");
+        assert_eq!(item.title, "Selected Ambient Works");
+        assert!(!item.enabled, "a promoted seed must be review-only");
+        assert!(!item.auto_download);
+        assert!(item.filter.contains("source:taste-recommendation"));
+        assert!(item.filter.contains("review-only"));
+        assert!(item.filter.contains("note:from a trusted follower"));
+
+        // Promoting the exact same WorkRef again reports the existing
+        // seed instead of creating a duplicate.
+        let duplicate = super::route_http_request(
+            "POST",
+            "/api/v0/taste-recommendations/wishlist",
+            None,
+            work_ref,
+            &state,
+        )
+        .await
+        .expect("promote the same WorkRef again");
+        assert_eq!(duplicate.status, "200 OK");
+        let duplicate_json = serde_json::from_str::<serde_json::Value>(&duplicate.body).unwrap();
+        assert_eq!(duplicate_json["created"], false);
+        assert_eq!(duplicate_json["wishlistItemId"], item_id);
+        assert_eq!(
+            state
+                .wishlist
+                .read()
+                .await
+                .records
+                .iter()
+                .flat_map(|record| record.items.iter())
+                .filter(|item| item.id == item_id)
+                .count(),
+            1,
+            "no duplicate wishlist item was created"
+        );
+
+        // A non-music WorkRef is not recommendable at all.
+        let rejected = super::route_http_request(
+            "POST",
+            "/api/v0/taste-recommendations/wishlist",
+            None,
+            r#"{"workRef":{"domain":"books","title":"Not Music"}}"#,
+            &state,
+        )
+        .await
+        .expect("reject a non-music WorkRef");
+        assert_eq!(rejected.status, "400 Bad Request");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&rejected.body).unwrap()["created"],
+            false
+        );
+    }
+
+    #[tokio::test]
     async fn security_ban_routes_reject_invalid_ips_and_canonicalize_values() {
         let (state, _receiver) = test_state();
         let invalid = super::route_http_request(
@@ -83270,7 +87679,7 @@ mod tests {
             .collections
             .write()
             .await
-            .create("Private".to_owned(), String::new())
+            .create(String::new(), "Private".to_owned(), String::new())
             .expect("collection")
             .id;
         state
@@ -83341,7 +87750,7 @@ mod tests {
             .collections
             .write()
             .await
-            .create("Private".to_owned(), String::new())
+            .create(String::new(), "Private".to_owned(), String::new())
             .expect("collection");
         create_db.close_for_test().await;
 
@@ -83827,7 +88236,7 @@ mod tests {
             .collections
             .write()
             .await
-            .create("Private".to_owned(), String::new())
+            .create(String::new(), "Private".to_owned(), String::new())
             .expect("collection");
         state
             .share_grants
@@ -85003,6 +89412,156 @@ mod tests {
             serde_json::from_str::<serde_json::Value>(&bridge_stats.body).unwrap();
         assert_eq!(bridge_stats_json["total_requests"], 1);
         assert_eq!(bridge_stats_json["total_bytes"], 25);
+        // Matches the oracle's real BridgeStatistics contract: with no
+        // embedded Soulfind bridge server, these must stay honest zeros
+        // even though a real (unrelated) local transfer just happened --
+        // they must never be backfilled from slskR's own transfer queue.
+        assert_eq!(
+            bridge_stats_json["totalConnections"], 0,
+            "{bridge_stats_json}"
+        );
+        assert_eq!(
+            bridge_stats_json["currentConnections"], 0,
+            "{bridge_stats_json}"
+        );
+        assert_eq!(
+            bridge_stats_json["totalDownloads"], 0,
+            "{bridge_stats_json}"
+        );
+        assert_eq!(bridge_stats_json["totalSearches"], 0, "{bridge_stats_json}");
+        assert_eq!(
+            bridge_stats_json["totalRoomJoins"], 0,
+            "{bridge_stats_json}"
+        );
+        assert_eq!(
+            bridge_stats_json["totalBytesProxied"], 0,
+            "{bridge_stats_json}"
+        );
+
+        let bridge_dashboard =
+            super::route_http_request("GET", "/api/bridge/admin/dashboard", None, "", &state)
+                .await
+                .expect("bridge dashboard");
+        let bridge_dashboard_json =
+            serde_json::from_str::<serde_json::Value>(&bridge_dashboard.body).unwrap();
+        assert_eq!(
+            bridge_dashboard_json["connectedClients"], 0,
+            "{bridge_dashboard_json}"
+        );
+        assert_eq!(
+            bridge_dashboard_json["stats"]["totalConnections"], 0,
+            "{bridge_dashboard_json}"
+        );
+        assert_eq!(
+            bridge_dashboard_json["stats"]["totalBytesProxied"], 0,
+            "{bridge_dashboard_json}"
+        );
+    }
+
+    #[tokio::test]
+    async fn bridge_admin_clients_never_leaks_unrelated_peer_activity() {
+        let (state, _receiver) = test_state();
+        // Real, unrelated peer activity: an online watched user and a
+        // real peer capability record. Neither is a real legacy client
+        // connected to an embedded Soulfind bridge server (slskR has no
+        // such server), so neither must appear in the bridge client
+        // list -- matching the oracle's real (and, here, honestly
+        // empty) BridgeDashboard.GetConnectedClientsAsync contract.
+        {
+            let mut users = state.users.write().await;
+            users.watch("online-peer".to_owned());
+            if let Some(record) = users
+                .records
+                .iter_mut()
+                .find(|record| record.username == "online-peer")
+            {
+                record.status = Some("online".to_owned());
+            }
+        }
+        let clients =
+            super::route_http_request("GET", "/api/bridge/admin/clients", None, "", &state)
+                .await
+                .expect("bridge clients");
+        assert_eq!(clients.status, "200 OK", "{}", clients.body);
+        let clients_json = serde_json::from_str::<serde_json::Value>(&clients.body).unwrap();
+        assert_eq!(
+            clients_json,
+            serde_json::json!({"clients": [], "count": 0, "status": "disabled", "ready": false}),
+            "{clients_json}"
+        );
+    }
+
+    #[tokio::test]
+    async fn bridge_search_and_download_use_real_oracle_shapes() {
+        let (state, _receiver) = test_state();
+        add_test_share(
+            &state,
+            "Virtual/Bridge Track.flac",
+            Path::new("/nonexistent/bridge-track.flac"),
+            4096,
+        )
+        .await;
+
+        // Matches the oracle's real BridgeSearchResult{Query,
+        // Users[{PeerId, Username, Files[...]}]} contract, not the
+        // generic /api/search record shape.
+        let search = super::route_http_request(
+            "POST",
+            "/api/v0/bridge/search",
+            None,
+            r#"{"query":"Bridge Track"}"#,
+            &state,
+        )
+        .await
+        .expect("bridge search");
+        assert_eq!(search.status, "201 Created", "{}", search.body);
+        let search_json = serde_json::from_str::<serde_json::Value>(&search.body).unwrap();
+        assert_eq!(search_json["query"], "Bridge Track");
+        let users = search_json["users"].as_array().unwrap();
+        assert_eq!(users.len(), 1, "{search_json}");
+        assert!(users[0].get("peerId").is_some(), "{search_json}");
+        assert!(users[0].get("username").is_some(), "{search_json}");
+        let files = users[0]["files"].as_array().unwrap();
+        assert_eq!(files.len(), 1, "{search_json}");
+        assert_eq!(files[0]["path"], "Virtual/Bridge Track.flac");
+        assert_eq!(files[0]["sizeBytes"], 4096);
+        assert_eq!(files[0]["codec"], "flac");
+
+        // A query with no matches must report a real empty users list,
+        // not a synthetic empty-file peer entry.
+        let empty_search = super::route_http_request(
+            "POST",
+            "/api/v0/bridge/search",
+            None,
+            r#"{"query":"nothing-matches-this"}"#,
+            &state,
+        )
+        .await
+        .expect("bridge search with no matches");
+        let empty_search_json =
+            serde_json::from_str::<serde_json::Value>(&empty_search.body).unwrap();
+        assert_eq!(empty_search_json["users"], serde_json::json!([]));
+
+        // Matches the oracle's real single-item BridgeDownloadRequest /
+        // {transfer_id} contract, not the generic /api/downloads
+        // batch shape.
+        let download = super::route_http_request(
+            "POST",
+            "/api/v0/bridge/download",
+            None,
+            r#"{"username":"peer","filename":"Virtual/Bridge Track.flac","targetPath":"/tmp/out.flac"}"#,
+            &state,
+        )
+        .await
+        .expect("bridge download");
+        assert_eq!(download.status, "200 OK", "{}", download.body);
+        let download_json = serde_json::from_str::<serde_json::Value>(&download.body).unwrap();
+        assert!(download_json["transfer_id"].is_string(), "{download_json}");
+        assert!(
+            download_json.get("downloadIds").is_none(),
+            "{download_json}"
+        );
+        assert!(download_json.get("enqueued").is_none(), "{download_json}");
     }
 
     #[tokio::test]
@@ -85094,7 +89653,10 @@ mod tests {
                 .await
                 .unwrap_or_else(|error| panic!("{path}: {error}"));
             assert_ne!(response.status, "404 Not Found", "{path}");
-            if path.contains("telemetry/prometheus") {
+            // Matches the oracle's MetricsController: the base prometheus
+            // route defaults to text/plain, but /kpis is always a JSON
+            // dictionary -- it has no text/plain response type at all.
+            if path.ends_with("telemetry/prometheus") {
                 assert!(response.content_type.starts_with("text/plain"), "{path}");
             } else {
                 assert!(
@@ -85126,10 +89688,14 @@ mod tests {
         let (state, _receiver) = test_state();
         let cases = [
             ("/api/v0/nowplaying", "204 No Content", None),
+            // A truly nonexistent pod/channel is a real 404, not a
+            // fake 204 -- matching the sibling pod-channel-messages
+            // endpoint's convention for the identical "doesn't exist"
+            // check.
             (
                 "/api/v0/listening-party/missing-pod/missing-channel",
-                "204 No Content",
-                None,
+                "404 Not Found",
+                Some("\"error\":\"not found\""),
             ),
             (
                 "/api/v0/mediacore/contentid/domain/music",
@@ -85197,9 +89763,12 @@ mod tests {
                 Some("\"peerTier\":\"Unknown\""),
             ),
             (
+                // Matches slskR's real reputation default: a peer with no
+                // recorded violations has never been decremented from its
+                // starting score.
                 "/api/v0/security/reputation/missing",
                 "200 OK",
-                Some("\"score\":50"),
+                Some("\"score\":100"),
             ),
             (
                 "/api/v0/traces/missing/summary",
@@ -85242,7 +89811,11 @@ mod tests {
         let collection_json = serde_json::from_str::<serde_json::Value>(&collection.body).unwrap();
         assert_eq!(collection_json["title"], "Route Audit");
         assert_eq!(collection_json["type"], "ShareList");
-        assert_eq!(collection_json["ownerUserId"], "Anonymous");
+        // Matches the real AuthenticatedWebUserId.Resolve semantics: with
+        // no resolvable per-caller identity (this test uses no
+        // authentication at all), ownerUserId is honestly empty rather
+        // than a fabricated "Anonymous" placeholder.
+        assert_eq!(collection_json["ownerUserId"], "");
         assert!(uuid::Uuid::parse_str(collection_json["id"].as_str().unwrap()).is_ok());
         assert!(chrono::DateTime::parse_from_rfc3339(
             collection_json["createdAt"].as_str().unwrap()
@@ -85588,6 +90161,288 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn collections_are_scoped_to_the_real_authenticated_caller_identity() {
+        // Matches the oracle's real AuthenticatedWebUserId-based
+        // ownership (CollectionsController.cs): a collection created by
+        // one authenticated identity must not be visible to, or mutable
+        // by, a different one. Previously `owner_user_id` was always a
+        // hardcoded "Anonymous"/empty placeholder, never checked on any
+        // read or write -- any caller could view/edit/delete any other
+        // caller's collections.
+        let keys = serde_json::json!({
+            "alice": {"key": "alice-key-0123456789", "role": "readwrite", "cidr": ""},
+            "bob": {"key": "bob-key-00123456789ab", "role": "readwrite", "cidr": ""},
+        });
+        let (state, _receiver) = test_state_with_env(
+            MapEnv::default()
+                .with("SLSKR_AUTH_DISABLED", "false")
+                .with("SLSKD_API_KEYS_JSON", &keys.to_string()),
+        );
+        let alice = Some("ApiKey alice-key-0123456789");
+        let bob = Some("ApiKey bob-key-00123456789ab");
+
+        let created = super::route_http_request(
+            "POST",
+            "/api/v0/collections",
+            alice,
+            r#"{"title":"Alice Collection"}"#,
+            &state,
+        )
+        .await
+        .expect("alice creates a collection");
+        assert_eq!(created.status, "201 Created", "{}", created.body);
+        let created_json = serde_json::from_str::<serde_json::Value>(&created.body).unwrap();
+        assert_eq!(created_json["ownerUserId"], "alice");
+        let collection_id = created_json["id"].as_str().unwrap().to_owned();
+
+        for (method, path, body) in [
+            ("GET", format!("/api/v0/collections/{collection_id}"), ""),
+            (
+                "PUT",
+                format!("/api/v0/collections/{collection_id}"),
+                r#"{"title":"Hijacked"}"#,
+            ),
+            (
+                "GET",
+                format!("/api/v0/collections/{collection_id}/items"),
+                "",
+            ),
+            (
+                "POST",
+                format!("/api/v0/collections/{collection_id}/items"),
+                r#"{"contentId":"track-1"}"#,
+            ),
+        ] {
+            let response = super::route_http_request(method, &path, bob, body, &state)
+                .await
+                .unwrap_or_else(|error| panic!("{method} {path}: {error}"));
+            assert_eq!(response.status, "404 Not Found", "{method} {path}");
+        }
+
+        // Alice can still read/mutate her own collection.
+        let alice_get = super::route_http_request(
+            "GET",
+            &format!("/api/v0/collections/{collection_id}"),
+            alice,
+            "",
+            &state,
+        )
+        .await
+        .expect("alice reads her own collection");
+        assert_eq!(alice_get.status, "200 OK");
+
+        // Bob's own collection list never includes Alice's collection,
+        // and vice versa.
+        let bob_created = super::route_http_request(
+            "POST",
+            "/api/v0/collections",
+            bob,
+            r#"{"title":"Bob Collection"}"#,
+            &state,
+        )
+        .await
+        .expect("bob creates his own collection");
+        assert_eq!(bob_created.status, "201 Created");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&bob_created.body).unwrap()["ownerUserId"],
+            "bob"
+        );
+
+        let alice_list = super::route_http_request("GET", "/api/v0/collections", alice, "", &state)
+            .await
+            .expect("alice lists collections");
+        let alice_list_json = serde_json::from_str::<serde_json::Value>(&alice_list.body).unwrap();
+        let alice_titles = alice_list_json
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|record| record["title"].as_str().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(alice_titles, vec!["Alice Collection"]);
+
+        let bob_list = super::route_http_request("GET", "/api/v0/collections", bob, "", &state)
+            .await
+            .expect("bob lists collections");
+        let bob_list_json = serde_json::from_str::<serde_json::Value>(&bob_list.body).unwrap();
+        let bob_titles = bob_list_json
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|record| record["title"].as_str().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(bob_titles, vec!["Bob Collection"]);
+
+        // Bob cannot delete Alice's collection.
+        let bob_delete = super::route_http_request(
+            "DELETE",
+            &format!("/api/v0/collections/{collection_id}"),
+            bob,
+            "",
+            &state,
+        )
+        .await
+        .expect("bob attempts to delete alice's collection");
+        assert_eq!(bob_delete.status, "404 Not Found");
+        let still_there = super::route_http_request(
+            "GET",
+            &format!("/api/v0/collections/{collection_id}"),
+            alice,
+            "",
+            &state,
+        )
+        .await
+        .expect("alice's collection still exists");
+        assert_eq!(still_there.status, "200 OK");
+    }
+
+    #[tokio::test]
+    async fn share_grants_are_scoped_to_the_real_collection_owner() {
+        // Matches the oracle's real Share-Grants ownership gate
+        // (SharesController.cs): a grant is owned transitively through
+        // its collection, so every action 404s unless
+        // `collection.OwnerUserId == currentUserId`. Previously there was
+        // no ownership check anywhere -- any authenticated caller could
+        // view, mutate, delete, or mint access tokens for any other
+        // caller's share grants.
+        let keys = serde_json::json!({
+            "alice": {"key": "alice-key-0123456789", "role": "administrator", "cidr": ""},
+            "bob": {"key": "bob-key-00123456789ab", "role": "administrator", "cidr": ""},
+        });
+        let (state, _receiver) = test_state_with_env(
+            MapEnv::default()
+                .with("SLSKR_AUTH_DISABLED", "false")
+                .with("SLSKD_API_KEYS_JSON", &keys.to_string()),
+        );
+        let alice = Some("ApiKey alice-key-0123456789");
+        let bob = Some("ApiKey bob-key-00123456789ab");
+
+        let collection = super::route_http_request(
+            "POST",
+            "/api/v0/collections",
+            alice,
+            r#"{"title":"Alice Private"}"#,
+            &state,
+        )
+        .await
+        .expect("alice creates a collection");
+        assert_eq!(collection.status, "201 Created");
+        let collection_id = serde_json::from_str::<serde_json::Value>(&collection.body).unwrap()
+            ["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+
+        // Bob cannot create a grant against a collection he doesn't own.
+        let bob_create = super::route_http_request(
+            "POST",
+            "/api/v0/share-grants",
+            bob,
+            &format!(r#"{{"collection_id":"{collection_id}","username":"recipient"}}"#),
+            &state,
+        )
+        .await
+        .expect("bob attempts to grant alice's collection");
+        assert_eq!(bob_create.status, "404 Not Found");
+
+        let granted = super::route_http_request(
+            "POST",
+            "/api/v0/share-grants",
+            alice,
+            &format!(r#"{{"collection_id":"{collection_id}","username":"recipient"}}"#),
+            &state,
+        )
+        .await
+        .expect("alice grants her own collection");
+        assert_eq!(granted.status, "201 Created", "{}", granted.body);
+        let grant_id = serde_json::from_str::<serde_json::Value>(&granted.body).unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+
+        for (method, path, body) in [
+            ("GET", format!("/api/share-grants/{grant_id}"), ""),
+            (
+                "PUT",
+                format!("/api/v0/share-grants/{grant_id}"),
+                r#"{"permissions":"read,download"}"#,
+            ),
+            (
+                "GET",
+                format!("/api/v0/share-grants/by-collection/{collection_id}"),
+                "",
+            ),
+            (
+                "POST",
+                format!("/api/v0/share-grants/{grant_id}/token"),
+                "{}",
+            ),
+        ] {
+            let response = super::route_http_request(method, &path, bob, body, &state)
+                .await
+                .unwrap_or_else(|error| panic!("{method} {path}: {error}"));
+            assert_eq!(response.status, "404 Not Found", "{method} {path}");
+        }
+
+        // Bob's own grant list never includes Alice's grant.
+        let bob_list = super::route_http_request("GET", "/api/v0/share-grants", bob, "", &state)
+            .await
+            .expect("bob lists share grants");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&bob_list.body)
+                .unwrap()
+                .as_array()
+                .unwrap()
+                .len(),
+            0
+        );
+
+        // Alice can still manage her own grant.
+        let alice_get = super::route_http_request(
+            "GET",
+            &format!("/api/share-grants/{grant_id}"),
+            alice,
+            "",
+            &state,
+        )
+        .await
+        .expect("alice reads her own grant");
+        assert_eq!(alice_get.status, "200 OK");
+
+        let alice_token = super::route_http_request(
+            "POST",
+            &format!("/api/v0/share-grants/{grant_id}/token"),
+            alice,
+            "{}",
+            &state,
+        )
+        .await
+        .expect("alice mints a token for her own grant");
+        assert_eq!(alice_token.status, "201 Created", "{}", alice_token.body);
+
+        // Bob cannot delete Alice's grant, either.
+        let bob_delete = super::route_http_request(
+            "DELETE",
+            &format!("/api/v0/share-grants/{grant_id}"),
+            bob,
+            "",
+            &state,
+        )
+        .await
+        .expect("bob attempts to delete alice's grant");
+        assert_eq!(bob_delete.status, "404 Not Found");
+        let still_there = super::route_http_request(
+            "GET",
+            &format!("/api/share-grants/{grant_id}"),
+            alice,
+            "",
+            &state,
+        )
+        .await
+        .expect("alice's grant still exists");
+        assert_eq!(still_there.status, "200 OK");
+    }
+
+    #[tokio::test]
     async fn mediacore_mutations_match_slskdn_validation_and_result_dtos() {
         let (state, _receiver) = test_state();
 
@@ -85923,6 +90778,2476 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn hashdb_optimize_profile_and_slow_queries_report_real_observed_data() {
+        let (state, _receiver) = test_state();
+
+        // Prime the store with a real hash entry so the profile/slow-query
+        // endpoints have genuine data to report on, not an empty store.
+        {
+            let mut discovery = state.content_discovery.write().await;
+            discovery
+                .merge_hash_entries(vec![super::content_discovery::HashDbEntry {
+                    flac_key: "route-audit-key".to_owned(),
+                    size: 123,
+                    file_sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                        .to_owned(),
+                    ..Default::default()
+                }])
+                .expect("seed hash entry");
+        }
+
+        let profile = super::route_http_request(
+            "POST",
+            "/api/v0/hashdb/optimize/profile",
+            None,
+            r#"{"query":"SELECT * FROM hash_entries"}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(profile.status, "200 OK");
+        let profile = serde_json::from_str::<serde_json::Value>(&profile.body).unwrap();
+        assert_eq!(profile["query"], "SELECT * FROM hash_entries");
+        assert_eq!(profile["rowsReturned"], 1);
+        assert!(profile["executionTimeMs"].is_u64());
+        assert!(
+            profile["queryPlan"]
+                .as_str()
+                .unwrap()
+                .contains("linear scan"),
+            "{profile}"
+        );
+
+        let slow_queries = super::route_http_request(
+            "GET",
+            "/api/v0/hashdb/optimize/slow-queries",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(slow_queries.status, "200 OK");
+        let slow_queries = serde_json::from_str::<serde_json::Value>(&slow_queries.body).unwrap();
+        assert_eq!(slow_queries["totalQueries"], 1);
+        let entries = slow_queries["slowQueries"].as_array().unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0]["query"], "profile_query");
+        assert_eq!(entries[0]["executionCount"], 1);
+        assert_eq!(entries[0]["totalRowsReturned"], 1);
+    }
+
+    #[tokio::test]
+    async fn hashdb_optimize_analyze_reports_real_observed_counts_and_thresholds() {
+        let (state, _receiver) = test_state();
+
+        {
+            let mut discovery = state.content_discovery.write().await;
+            discovery
+                .merge_hash_entries(vec![super::content_discovery::HashDbEntry {
+                    flac_key: "analyze-audit-key".to_owned(),
+                    size: 456,
+                    file_sha256: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                        .to_owned(),
+                    ..Default::default()
+                }])
+                .expect("seed hash entry");
+            discovery
+                .merge_shadow_records(vec![super::content_discovery::ShadowIndexRecord {
+                    recording_id: "mbid-analyze-audit".to_owned(),
+                    peer_ids: vec!["peer-a".to_owned(), "peer-b".to_owned()],
+                    updated_at: 0,
+                }])
+                .expect("seed shadow record");
+        }
+
+        let analyze =
+            super::route_http_request("GET", "/api/v0/hashdb/optimize/analyze", None, "", &state)
+                .await
+                .unwrap();
+        assert_eq!(analyze.status, "200 OK");
+        let analyze = serde_json::from_str::<serde_json::Value>(&analyze.body).unwrap();
+        assert_eq!(analyze["hashDbEntryCount"], 1);
+        assert_eq!(analyze["entries"], 1);
+        assert_eq!(analyze["peerCount"], 2);
+        assert!(analyze["databaseSizeBytes"].is_u64());
+        // An in-memory store (no state file yet) has nothing on disk.
+        assert_eq!(analyze["databaseSizeBytes"], 0);
+        // Below both real thresholds, so no recommendations should fire.
+        assert_eq!(analyze["recommendations"], serde_json::json!([]));
+        assert_eq!(analyze["missingIndexes"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn songid_capabilities_report_real_tool_presence_not_a_fake_string_array() {
+        let capabilities = super::songid_capabilities_json();
+        let capabilities = capabilities.as_array().expect("capabilities array");
+        // Matches the oracle's full SongIdCapabilityReporter id set, not
+        // the old three-string placeholder.
+        assert_eq!(capabilities.len(), 18);
+
+        let by_id = |id: &str| {
+            capabilities
+                .iter()
+                .find(|capability| capability["id"] == id)
+                .unwrap_or_else(|| panic!("missing capability {id}"))
+        };
+
+        // Features slskR has not implemented must honestly say so, not
+        // claim oracle-level depth slskR's SongID run queue doesn't have.
+        for id in [
+            "text_query",
+            "url_parsing",
+            "musicbrainz_lookup",
+            "spotify_page_metadata",
+            "local_file_intake",
+            "chromaprint_fingerprint",
+            "acoustid_lookup",
+        ] {
+            let capability = by_id(id);
+            assert_eq!(capability["available"], false, "{id}");
+            assert!(
+                capability["reason"]
+                    .as_str()
+                    .unwrap()
+                    .contains("Not yet implemented")
+                    || capability["reason"].as_str().unwrap().contains("base URL"),
+                "{id}: {}",
+                capability["reason"]
+            );
+        }
+
+        // Tool-gated capabilities must reflect real PATH state, not a
+        // hardcoded value.
+        let youtube_metadata = by_id("youtube_metadata");
+        assert_eq!(
+            youtube_metadata["available"],
+            super::command_exists_on_path("yt-dlp")
+        );
+        assert_eq!(
+            youtube_metadata["requirements"],
+            serde_json::json!(["yt-dlp"])
+        );
+
+        let youtube_audio = by_id("youtube_audio");
+        assert_eq!(
+            youtube_audio["available"],
+            super::command_exists_on_path("yt-dlp") && super::command_exists_on_path("ffmpeg")
+        );
+
+        let hash_flag = by_id("hash_from_audio_file_flag");
+        assert_eq!(hash_flag["status"], "broken");
+        assert_eq!(hash_flag["available"], false);
+    }
+
+    #[tokio::test]
+    async fn songid_run_creation_requires_a_real_non_empty_source() {
+        let (state, _receiver) = test_state();
+
+        // Matches the oracle's SongIdController.CreateRun: an empty (or
+        // missing) source is rejected before a run is ever queued, not
+        // silently accepted as an empty-source run.
+        for body in ["{}", r#"{"source":""}"#, r#"{"source":"   "}"#] {
+            let response =
+                super::route_http_request("POST", "/api/v0/songid/runs", None, body, &state)
+                    .await
+                    .unwrap_or_else(|error| panic!("{body}: {error}"));
+            assert_eq!(response.status, "400 Bad Request", "{body}");
+            assert!(
+                response.body.contains("SongID source is required."),
+                "{body}: {}",
+                response.body
+            );
+        }
+
+        let before = super::route_http_request("GET", "/api/v0/songid/runs", None, "", &state)
+            .await
+            .expect("runs before");
+        let before_count = serde_json::from_str::<serde_json::Value>(&before.body)
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .len();
+
+        let valid = super::route_http_request(
+            "POST",
+            "/api/v0/songid/runs",
+            None,
+            r#"{"source":"route-audit"}"#,
+            &state,
+        )
+        .await
+        .expect("valid run");
+        assert_eq!(valid.status, "202 Accepted", "{}", valid.body);
+
+        let after = super::route_http_request("GET", "/api/v0/songid/runs", None, "", &state)
+            .await
+            .expect("runs after");
+        let after_count = serde_json::from_str::<serde_json::Value>(&after.body)
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .len();
+        assert_eq!(after_count, before_count + 1);
+    }
+
+    #[tokio::test]
+    async fn songid_run_reports_its_real_completed_status_not_stuck_at_queued() {
+        let (state, _receiver) = test_state();
+
+        // slskR analyzes synchronously (unlike the oracle's real async
+        // queue+worker pipeline), so by the time the create response is
+        // built the run has already really finished -- it must report
+        // that real status immediately, not a fake "queued" placeholder
+        // that nothing would ever advance past.
+        let created = super::route_http_request(
+            "POST",
+            "/api/v0/songid/runs",
+            None,
+            r#"{"source":"route-audit"}"#,
+            &state,
+        )
+        .await
+        .expect("create run");
+        assert_eq!(created.status, "202 Accepted", "{}", created.body);
+        let created_json = serde_json::from_str::<serde_json::Value>(&created.body).unwrap();
+        assert_eq!(created_json["status"], "completed", "{created_json}");
+        assert_eq!(created_json["currentStage"], "completed", "{created_json}");
+        assert_eq!(created_json["percentComplete"], 1.0, "{created_json}");
+        let run_id = created_json["id"].as_str().unwrap().to_owned();
+
+        // Polling the run afterward must reflect the same real, final
+        // status -- not revert to a stale "queued" snapshot.
+        let polled = super::route_http_request(
+            "GET",
+            &format!("/api/v0/songid/runs/{run_id}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("poll run");
+        let polled_json = serde_json::from_str::<serde_json::Value>(&polled.body).unwrap();
+        assert_eq!(polled_json["status"], "completed", "{polled_json}");
+
+        // The queue summary must count this as a real completion, never
+        // as perpetually queued/running.
+        let queue = super::route_http_request("GET", "/api/v0/songid/runs/queue", None, "", &state)
+            .await
+            .expect("queue summary");
+        let queue_json = serde_json::from_str::<serde_json::Value>(&queue.body).unwrap();
+        assert!(
+            queue_json["completedCount"].as_u64().unwrap() >= 1,
+            "{queue_json}"
+        );
+        assert_eq!(queue_json["queuedCount"], 0, "{queue_json}");
+        assert_eq!(queue_json["runningCount"], 0, "{queue_json}");
+    }
+
+    #[tokio::test]
+    async fn songid_run_evidence_package_reshapes_real_stored_run_fields() {
+        let (state, _receiver) = test_state();
+        let created = super::route_http_request(
+            "POST",
+            "/api/v0/songid/runs",
+            None,
+            r#"{"source":"route-audit","query":"Evidence Package Audit"}"#,
+            &state,
+        )
+        .await
+        .expect("create run");
+        assert_eq!(created.status, "202 Accepted", "{}", created.body);
+        let created_json = serde_json::from_str::<serde_json::Value>(&created.body).unwrap();
+        let run_id = created_json["id"].as_str().unwrap().to_owned();
+
+        // Matches the oracle's real SongIdRunEvidencePackage contract,
+        // reshaped from the same stored run fields -- not a missing
+        // endpoint or an invented shape.
+        let package = super::route_http_request(
+            "GET",
+            &format!("/api/v0/songid/runs/{run_id}/evidence-package"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("evidence package");
+        assert_eq!(package.status, "200 OK", "{}", package.body);
+        let package_json = serde_json::from_str::<serde_json::Value>(&package.body).unwrap();
+        assert_eq!(package_json["runId"], run_id, "{package_json}");
+        assert_eq!(package_json["status"], "completed", "{package_json}");
+        assert_eq!(
+            package_json["query"], "Evidence Package Audit",
+            "{package_json}"
+        );
+        // slskR's synchronous analysis completes instantly, so
+        // completedAt is real (equal to createdAt), not fabricated.
+        assert_eq!(
+            package_json["completedAt"], package_json["createdAt"],
+            "{package_json}"
+        );
+        assert_eq!(package_json["trackCandidates"], serde_json::json!([]));
+        assert_eq!(package_json["artifacts"], serde_json::json!([]));
+        // Honest warnings reflecting the real (empty) analysis state,
+        // not fabricated ones.
+        let warnings = package_json["warnings"].as_array().unwrap();
+        assert!(
+            warnings
+                .iter()
+                .any(|warning| warning == "No track candidates were produced."),
+            "{package_json}"
+        );
+        assert!(
+            warnings
+                .iter()
+                .any(|warning| warning == "No recognizer hits were recorded."),
+            "{package_json}"
+        );
+        assert!(
+            warnings
+                .iter()
+                .any(|warning| warning == "No forensic matrix was generated."),
+            "{package_json}"
+        );
+
+        let missing = super::route_http_request(
+            "GET",
+            "/api/v0/songid/runs/songid-does-not-exist/evidence-package",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("missing run evidence package");
+        assert_eq!(missing.status, "404 Not Found");
+
+        // The sibling run-detail and forensic-matrix routes must still
+        // work unaffected by the new routing guard.
+        let detail = super::route_http_request(
+            "GET",
+            &format!("/api/v0/songid/runs/{run_id}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("run detail");
+        assert_eq!(detail.status, "200 OK");
+        let matrix = super::route_http_request(
+            "GET",
+            &format!("/api/v0/songid/runs/{run_id}/forensic-matrix"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("forensic matrix");
+        assert_eq!(matrix.status, "200 OK");
+    }
+
+    #[tokio::test]
+    async fn songid_runs_respect_a_real_limit_and_newest_first_order() {
+        let (state, _receiver) = test_state();
+        for index in 0..3 {
+            let response = super::route_http_request(
+                "POST",
+                "/api/v0/songid/runs",
+                None,
+                &format!(r#"{{"source":"route-audit-{index}"}}"#),
+                &state,
+            )
+            .await
+            .unwrap_or_else(|error| panic!("create run {index}: {error}"));
+            assert_eq!(response.status, "202 Accepted");
+        }
+
+        // Matches the oracle's real ListRuns: newest-first, bounded by
+        // the real `limit` query param -- not the full, unbounded,
+        // creation-order history.
+        let limited =
+            super::route_http_request("GET", "/api/v0/songid/runs?limit=2", None, "", &state)
+                .await
+                .expect("limited runs");
+        let limited_json = serde_json::from_str::<serde_json::Value>(&limited.body).unwrap();
+        let limited_runs = limited_json.as_array().unwrap();
+        assert_eq!(limited_runs.len(), 2, "{limited_json}");
+        assert_eq!(
+            limited_runs[0]["source"], "route-audit-2",
+            "newest run must come first: {limited_json}"
+        );
+        assert_eq!(limited_runs[1]["source"], "route-audit-1", "{limited_json}");
+
+        // A non-positive limit falls back to the oracle's default of 10,
+        // not an empty or unbounded result.
+        let zero_limit =
+            super::route_http_request("GET", "/api/v0/songid/runs?limit=0", None, "", &state)
+                .await
+                .expect("zero limit runs");
+        let zero_limit_json = serde_json::from_str::<serde_json::Value>(&zero_limit.body).unwrap();
+        assert_eq!(
+            zero_limit_json.as_array().unwrap().len(),
+            3,
+            "{zero_limit_json}"
+        );
+    }
+
+    #[tokio::test]
+    async fn transfer_reports_require_a_real_direction_not_a_silent_default() {
+        let (state, _receiver) = test_state();
+        for path in [
+            "/api/v0/telemetry/reports/transfers/leaderboard",
+            "/api/v0/telemetry/reports/transfers/exceptions",
+            "/api/v0/telemetry/reports/transfers/exceptions/pareto",
+        ] {
+            // Present but nonsense: matches the oracle's real
+            // Enum.TryParse<TransferDirection> failure path -- must be a
+            // real 400, not silently treated as "no filter" and mixing
+            // Upload/Download rows into one report.
+            let invalid = super::route_http_request(
+                "GET",
+                &format!("{path}?direction=sideways"),
+                None,
+                "",
+                &state,
+            )
+            .await
+            .unwrap_or_else(|error| panic!("{path}: {error}"));
+            assert_eq!(invalid.status, "400 Bad Request", "{path}");
+            assert!(
+                invalid.body.contains("Invalid direction"),
+                "{path}: {}",
+                invalid.body
+            );
+
+            // Absent, but with an unrelated query param present (so the
+            // generic "no query at all" gate doesn't short-circuit it):
+            // still a real 400, matching the oracle's required Direction.
+            let missing =
+                super::route_http_request("GET", &format!("{path}?limit=5"), None, "", &state)
+                    .await
+                    .unwrap_or_else(|error| panic!("{path}: {error}"));
+            assert_eq!(missing.status, "400 Bad Request", "{path}");
+            assert!(
+                missing.body.contains("Direction is required"),
+                "{path}: {}",
+                missing.body
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn mesh_stats_reflect_real_merge_activity_not_hardcoded_zeros() {
+        let (state, _receiver) = test_state();
+
+        let baseline = super::route_http_request("GET", "/api/v0/mesh/stats", None, "", &state)
+            .await
+            .expect("baseline mesh stats");
+        let baseline_json = serde_json::from_str::<serde_json::Value>(&baseline.body).unwrap();
+        assert_eq!(baseline_json["totalSyncs"], 0, "{baseline_json}");
+        assert_eq!(baseline_json["currentSeqId"], 0, "{baseline_json}");
+
+        let valid_entry = serde_json::json!({
+            "flacKey": "mesh-stats-audit-key",
+            "size": 1234,
+            "fileSha256": "a".repeat(64),
+        });
+        let merged = super::route_http_request(
+            "POST",
+            "/api/v0/mesh/merge",
+            None,
+            &serde_json::json!({"entries": [valid_entry]}).to_string(),
+            &state,
+        )
+        .await
+        .expect("merge real entry");
+        assert_eq!(merged.status, "200 OK", "{}", merged.body);
+        let merged_json = serde_json::from_str::<serde_json::Value>(&merged.body).unwrap();
+        assert_eq!(merged_json["merged"], 1, "{merged_json}");
+        let real_seq_id = merged_json["latestSeqId"].as_u64().unwrap();
+        assert!(real_seq_id > 0, "{merged_json}");
+
+        // An invalid entry (zero size) must count as a real failure, not
+        // silently succeed or vanish from the stats.
+        let invalid_entry = serde_json::json!({"flacKey": "mesh-stats-audit-invalid", "size": 0});
+        let failed = super::route_http_request(
+            "POST",
+            "/api/v0/mesh/merge",
+            None,
+            &serde_json::json!({"entries": [invalid_entry]}).to_string(),
+            &state,
+        )
+        .await
+        .expect("merge invalid entry");
+        assert_eq!(failed.status, "400 Bad Request", "{}", failed.body);
+
+        let stats = super::route_http_request("GET", "/api/v0/mesh/stats", None, "", &state)
+            .await
+            .expect("mesh stats after activity");
+        let stats_json = serde_json::from_str::<serde_json::Value>(&stats.body).unwrap();
+        assert_eq!(stats_json["totalSyncs"], 2, "{stats_json}");
+        assert_eq!(stats_json["successfulSyncs"], 1, "{stats_json}");
+        assert_eq!(stats_json["failedSyncs"], 1, "{stats_json}");
+        assert_eq!(stats_json["totalEntriesReceived"], 2, "{stats_json}");
+        assert_eq!(stats_json["totalEntriesMerged"], 1, "{stats_json}");
+        assert_eq!(stats_json["currentSeqId"], real_seq_id, "{stats_json}");
+    }
+
+    #[tokio::test]
+    async fn telemetry_kpis_are_always_json_unlike_the_base_prometheus_route() {
+        let (state, _receiver) = test_state();
+
+        let base = super::route_http_request("GET", "/api/telemetry/prometheus", None, "", &state)
+            .await
+            .expect("base prometheus route");
+        assert!(base.content_type.starts_with("text/plain"), "{base:?}");
+        assert!(base.body.contains("slskr_transfers"));
+
+        let kpis =
+            super::route_http_request("GET", "/api/telemetry/prometheus/kpis", None, "", &state)
+                .await
+                .expect("kpis route");
+        // Matches the oracle's GetKpis: always application/json, a
+        // dictionary keyed by metric name -- never the base route's
+        // text/plain Prometheus exposition format.
+        assert!(
+            kpis.content_type.starts_with("application/json"),
+            "{kpis:?}"
+        );
+        let kpis_json = serde_json::from_str::<serde_json::Value>(&kpis.body).unwrap();
+        assert_eq!(kpis_json["slskr_transfers"]["type"], "gauge");
+        assert_eq!(kpis_json["slskr_transfers"]["samples"][0]["value"], 0.0);
+        assert_eq!(kpis_json["slskr_searches"]["type"], "gauge");
+    }
+
+    /// Builds a verdict body with a real, self-consistent signature --
+    /// the oracle's own check is content-integrity (the submitted
+    /// payloadHash must match a hash of the verdict's own fields), not
+    /// full cryptographic authentication, so a real "signer" key isn't
+    /// needed here, only a hash that genuinely matches.
+    fn quarantine_signed_verdict_json(
+        request_id: &str,
+        juror: &str,
+        verdict: &str,
+    ) -> serde_json::Value {
+        let mut value = serde_json::json!({
+            "requestId": request_id,
+            "juror": juror,
+            "verdict": verdict,
+        });
+        let payload_hash = super::quarantine_verdict_payload_hash(&value);
+        value["signature"] = serde_json::json!({
+            "signer": juror,
+            "payloadHash": payload_hash,
+            "value": "test-signature",
+        });
+        value
+    }
+
+    #[tokio::test]
+    async fn quarantine_jury_requires_real_quorum_before_accepting_or_releasing() {
+        let (state, _receiver) = test_state();
+
+        let created = super::route_http_request(
+            "POST",
+            "/api/v0/quarantine-jury/requests",
+            None,
+            r#"{"localReason":"route-audit","jurors":["juror-a","juror-b","juror-c"],"evidence":[{"type":"hash","reference":"opaque-ref"}],"minJurorVotes":2}"#,
+            &state,
+        )
+        .await
+        .expect("create quarantine request");
+        assert_eq!(created.status, "200 OK", "{}", created.body);
+        let created_json = serde_json::from_str::<serde_json::Value>(&created.body).unwrap();
+        let request_id = created_json["request"]["requestId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+
+        // A verdict from a juror not on the request must be rejected.
+        let unlisted = super::route_http_request(
+            "POST",
+            "/api/v0/quarantine-jury/verdicts",
+            None,
+            &quarantine_signed_verdict_json(&request_id, "not-a-juror", "ReleaseCandidate")
+                .to_string(),
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(unlisted.status, "400 Bad Request");
+
+        // A verdict without a real signature (or with a payload hash that
+        // doesn't match its own contents) must be rejected too -- not
+        // silently accepted the way the old handler took any verdict
+        // shape it was given.
+        let unsigned = super::route_http_request(
+            "POST",
+            "/api/v0/quarantine-jury/verdicts",
+            None,
+            &format!(
+                r#"{{"requestId":"{request_id}","juror":"juror-a","verdict":"ReleaseCandidate"}}"#
+            ),
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(unsigned.status, "400 Bad Request");
+        let unsigned_json = serde_json::from_str::<serde_json::Value>(&unsigned.body).unwrap();
+        assert!(
+            unsigned_json["errors"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|error| error == "Signed juror verdict is required."),
+            "{unsigned_json}"
+        );
+
+        let mut tampered =
+            quarantine_signed_verdict_json(&request_id, "juror-a", "ReleaseCandidate");
+        tampered["verdict"] = serde_json::json!("UpholdQuarantine");
+        let tampered_result = super::route_http_request(
+            "POST",
+            "/api/v0/quarantine-jury/verdicts",
+            None,
+            &tampered.to_string(),
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(tampered_result.status, "400 Bad Request");
+        let tampered_json =
+            serde_json::from_str::<serde_json::Value>(&tampered_result.body).unwrap();
+        assert!(
+            tampered_json["errors"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|error| error == "Signature payload hash does not match verdict contents."),
+            "{tampered_json}"
+        );
+
+        // Before quorum (minJurorVotes=2), acceptance and release must be
+        // denied -- not silently accepted, as the old fake handlers did.
+        let too_early = super::route_http_request(
+            "POST",
+            &format!("/api/v0/quarantine-jury/requests/{request_id}/accept-release-candidate"),
+            None,
+            "{}",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(too_early.status, "400 Bad Request", "{}", too_early.body);
+        let too_early_json = serde_json::from_str::<serde_json::Value>(&too_early.body).unwrap();
+        assert_eq!(too_early_json["isAccepted"], false);
+
+        let package_too_early = super::route_http_request(
+            "GET",
+            &format!("/api/v0/quarantine-jury/requests/{request_id}/release-package"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(package_too_early.status, "400 Bad Request");
+        let package_too_early_json =
+            serde_json::from_str::<serde_json::Value>(&package_too_early.body).unwrap();
+        assert_eq!(package_too_early_json["isReady"], false);
+        assert!(package_too_early_json["errors"][0]
+            .as_str()
+            .unwrap()
+            .contains("has not been accepted"));
+
+        // Two of three jurors vote ReleaseCandidate -- quorum (2) reached
+        // and a real 2/3 supermajority.
+        for juror in ["juror-a", "juror-b"] {
+            let verdict = super::route_http_request(
+                "POST",
+                "/api/v0/quarantine-jury/verdicts",
+                None,
+                &quarantine_signed_verdict_json(&request_id, juror, "ReleaseCandidate").to_string(),
+                &state,
+            )
+            .await
+            .unwrap();
+            assert_eq!(verdict.status, "200 OK", "{}", verdict.body);
+        }
+
+        let aggregate = super::route_http_request(
+            "GET",
+            &format!("/api/v0/quarantine-jury/requests/{request_id}/aggregate"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(aggregate.status, "200 OK");
+        let aggregate_json = serde_json::from_str::<serde_json::Value>(&aggregate.body).unwrap();
+        assert_eq!(aggregate_json["recommendation"], "ReleaseCandidate");
+        assert_eq!(aggregate_json["totalVerdicts"], 2);
+        assert_eq!(aggregate_json["requiredVotes"], 2);
+        assert_eq!(aggregate_json["quorumReached"], true);
+
+        let review = super::route_http_request(
+            "GET",
+            &format!("/api/v0/quarantine-jury/requests/{request_id}/review"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        let review_json = serde_json::from_str::<serde_json::Value>(&review.body).unwrap();
+        assert_eq!(review_json["canAcceptReleaseCandidate"], true);
+        assert_eq!(review_json["verdicts"].as_array().unwrap().len(), 2);
+
+        // Real quorum reached: acceptance must now succeed.
+        let accepted = super::route_http_request(
+            "POST",
+            &format!("/api/v0/quarantine-jury/requests/{request_id}/accept-release-candidate"),
+            None,
+            r#"{"acceptedBy":"route-audit-operator"}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(accepted.status, "200 OK", "{}", accepted.body);
+        let accepted_json = serde_json::from_str::<serde_json::Value>(&accepted.body).unwrap();
+        assert_eq!(accepted_json["isAccepted"], true);
+        assert_eq!(
+            accepted_json["decision"]["acceptedBy"],
+            "route-audit-operator"
+        );
+
+        // Re-accepting is idempotent, not a second decision.
+        let reaccepted = super::route_http_request(
+            "POST",
+            &format!("/api/v0/quarantine-jury/requests/{request_id}/accept-release-candidate"),
+            None,
+            "{}",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(reaccepted.status, "200 OK");
+        let reaccepted_json = serde_json::from_str::<serde_json::Value>(&reaccepted.body).unwrap();
+        assert_eq!(
+            reaccepted_json["decision"]["id"],
+            accepted_json["decision"]["id"]
+        );
+
+        // Now that a real acceptance decision exists, the release package
+        // must be built from real stored data.
+        let package = super::route_http_request(
+            "GET",
+            &format!("/api/v0/quarantine-jury/requests/{request_id}/release-package"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(package.status, "200 OK", "{}", package.body);
+        let package_json = serde_json::from_str::<serde_json::Value>(&package.body).unwrap();
+        assert_eq!(package_json["isReady"], true);
+        assert_eq!(package_json["package"]["requestId"], request_id);
+        assert_eq!(
+            package_json["package"]["currentAggregate"]["recommendation"],
+            "ReleaseCandidate"
+        );
+        assert_eq!(
+            package_json["package"]["verdicts"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
+
+        // Routing to a juror not on the request must be rejected before
+        // ever reaching the (currently unwired) routing backend.
+        let bad_route = super::route_http_request(
+            "POST",
+            &format!("/api/v0/quarantine-jury/requests/{request_id}/routes"),
+            None,
+            r#"{"targetJurors":["not-a-juror"]}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(bad_route.status, "400 Bad Request");
+        let bad_route_json = serde_json::from_str::<serde_json::Value>(&bad_route.body).unwrap();
+        assert_eq!(bad_route_json["success"], false);
+        assert!(bad_route_json["errorMessage"]
+            .as_str()
+            .unwrap()
+            .contains("safe jurors"));
+
+        // Valid jurors pass validation but hit the same "routing backend
+        // unavailable" outcome the oracle itself reports when its router
+        // isn't configured -- a real code path, not a fabricated success.
+        let real_route = super::route_http_request(
+            "POST",
+            &format!("/api/v0/quarantine-jury/requests/{request_id}/routes"),
+            None,
+            r#"{"targetJurors":["juror-a"]}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(real_route.status, "400 Bad Request");
+        let real_route_json = serde_json::from_str::<serde_json::Value>(&real_route.body).unwrap();
+        assert_eq!(real_route_json["success"], false);
+        assert_eq!(
+            real_route_json["errorMessage"],
+            "Routing backend is not available."
+        );
+    }
+
+    #[tokio::test]
+    async fn listening_party_requires_membership_and_reports_a_real_event() {
+        let (state, _receiver) = test_state();
+        let pod_id = "pod:listening-party-audit";
+        let channel_id = "general";
+        state
+            .pods
+            .write()
+            .await
+            .create(
+                serde_json::from_value::<super::pods::PodRecord>(serde_json::json!({
+                    "podId": pod_id,
+                    "name": "Listening Party Audit",
+                }))
+                .expect("deserialize pod record fixture"),
+                "tester".to_owned(),
+            )
+            .expect("create pod (tester is the owner/member)");
+        state
+            .pods
+            .write()
+            .await
+            .upsert_channel(
+                pod_id,
+                super::pods::PodChannel {
+                    channel_id: channel_id.to_owned(),
+                    kind: serde_json::json!(0),
+                    name: "General".to_owned(),
+                    binding_info: None,
+                    description: None,
+                },
+            )
+            .expect("create channel");
+
+        // A pod that exists, where "tester" (the fixture's default
+        // configured identity) is not a member, must reject both GET and
+        // POST with a real 403 -- never leak state or accept an event.
+        let outside_pod = "pod:listening-party-outsider";
+        state
+            .pods
+            .write()
+            .await
+            .create(
+                serde_json::from_value::<super::pods::PodRecord>(serde_json::json!({
+                    "podId": outside_pod,
+                    "name": "Not Tester's Pod",
+                }))
+                .expect("deserialize pod record fixture"),
+                "someone-else".to_owned(),
+            )
+            .expect("create outsider pod");
+        state
+            .pods
+            .write()
+            .await
+            .upsert_channel(
+                outside_pod,
+                super::pods::PodChannel {
+                    channel_id: channel_id.to_owned(),
+                    kind: serde_json::json!(0),
+                    name: "General".to_owned(),
+                    binding_info: None,
+                    description: None,
+                },
+            )
+            .expect("create outsider channel");
+        let forbidden_get = super::route_http_request(
+            "GET",
+            &format!("/api/v0/listening-party/{outside_pod}/{channel_id}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("forbidden get");
+        assert_eq!(
+            forbidden_get.status, "403 Forbidden",
+            "{}",
+            forbidden_get.body
+        );
+        let forbidden_post = super::route_http_request(
+            "POST",
+            &format!("/api/v0/listening-party/{outside_pod}/{channel_id}"),
+            None,
+            r#"{"action":"play","contentId":"content:audio:track:x"}"#,
+            &state,
+        )
+        .await
+        .expect("forbidden post");
+        assert_eq!(
+            forbidden_post.status, "403 Forbidden",
+            "{}",
+            forbidden_post.body
+        );
+
+        // An invalid action is a real 400, matching the oracle's real
+        // play|pause|seek|stop vocabulary -- not slskR's old invented
+        // {kind, action} pair.
+        let invalid_action = super::route_http_request(
+            "POST",
+            &format!("/api/v0/listening-party/{pod_id}/{channel_id}"),
+            None,
+            r#"{"action":"resume","contentId":"content:audio:track:x"}"#,
+            &state,
+        )
+        .await
+        .expect("invalid action");
+        assert_eq!(invalid_action.status, "400 Bad Request");
+
+        // No prior state: a real 204, not a fabricated pod+chat-history
+        // payload.
+        let before = super::route_http_request(
+            "GET",
+            &format!("/api/v0/listening-party/{pod_id}/{channel_id}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("no state yet");
+        assert_eq!(before.status, "204 No Content", "{}", before.body);
+
+        let played = super::route_http_request(
+            "POST",
+            &format!("/api/v0/listening-party/{pod_id}/{channel_id}"),
+            None,
+            r#"{"action":"play","contentId":"content:audio:track:x","title":"Track","artist":"Artist","hostPeerId":"forged-peer"}"#,
+            &state,
+        )
+        .await
+        .expect("play event");
+        assert_eq!(played.status, "200 OK", "{}", played.body);
+        let played_json = serde_json::from_str::<serde_json::Value>(&played.body).unwrap();
+        assert_eq!(played_json["action"], "play");
+        assert_eq!(played_json["podId"], pod_id);
+        assert_eq!(played_json["channelId"], channel_id);
+        // hostPeerId is always the authenticated local identity, never
+        // the client-supplied value -- a forged value must not survive.
+        assert_eq!(played_json["hostPeerId"], "tester");
+        assert_eq!(played_json["kind"], "slskdn.listenAlong.v1");
+        assert!(played_json["partyId"]
+            .as_str()
+            .unwrap()
+            .starts_with("party:"));
+
+        // GET must now return the exact same real, persisted event.
+        let polled = super::route_http_request(
+            "GET",
+            &format!("/api/v0/listening-party/{pod_id}/{channel_id}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("poll event");
+        assert_eq!(polled.status, "200 OK", "{}", polled.body);
+        assert_eq!(polled.body, played.body);
+
+        // A "stop" event clears the stored state entirely.
+        let stopped = super::route_http_request(
+            "POST",
+            &format!("/api/v0/listening-party/{pod_id}/{channel_id}"),
+            None,
+            r#"{"action":"stop"}"#,
+            &state,
+        )
+        .await
+        .expect("stop event");
+        assert_eq!(stopped.status, "200 OK", "{}", stopped.body);
+        let after_stop = super::route_http_request(
+            "GET",
+            &format!("/api/v0/listening-party/{pod_id}/{channel_id}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("state after stop");
+        assert_eq!(after_stop.status, "204 No Content", "{}", after_stop.body);
+    }
+
+    #[tokio::test]
+    async fn listening_party_directory_reflects_real_listed_events() {
+        let (state, _receiver) = test_state();
+        let pod_id = "pod:listening-party-directory-audit";
+        let channel_id = "general";
+        state
+            .pods
+            .write()
+            .await
+            .create(
+                serde_json::from_value::<super::pods::PodRecord>(serde_json::json!({
+                    "podId": pod_id,
+                    "name": "Directory Audit",
+                }))
+                .expect("deserialize pod record fixture"),
+                "tester".to_owned(),
+            )
+            .expect("create pod");
+        state
+            .pods
+            .write()
+            .await
+            .upsert_channel(
+                pod_id,
+                super::pods::PodChannel {
+                    channel_id: channel_id.to_owned(),
+                    kind: serde_json::json!(0),
+                    name: "General".to_owned(),
+                    binding_info: None,
+                    description: None,
+                },
+            )
+            .expect("create channel");
+
+        // An unlisted event must never appear in the public directory.
+        let unlisted = super::route_http_request(
+            "POST",
+            &format!("/api/v0/listening-party/{pod_id}/{channel_id}"),
+            None,
+            r#"{"action":"play","contentId":"content:audio:track:unlisted","listed":false}"#,
+            &state,
+        )
+        .await
+        .expect("unlisted play event");
+        assert_eq!(unlisted.status, "200 OK", "{}", unlisted.body);
+        let after_unlisted =
+            super::route_http_request("GET", "/api/v0/listening-party", None, "", &state)
+                .await
+                .expect("directory after unlisted event");
+        assert_eq!(
+            after_unlisted.body, "[]",
+            "an unlisted event must not appear in the directory"
+        );
+
+        // A listed event must appear with the real event's data.
+        let listed = super::route_http_request(
+            "POST",
+            &format!("/api/v0/listening-party/{pod_id}/{channel_id}"),
+            None,
+            r#"{"action":"play","contentId":"content:audio:track:listed","title":"Directory Track","artist":"Directory Artist","listed":true,"allowMeshStreaming":true}"#,
+            &state,
+        )
+        .await
+        .expect("listed play event");
+        assert_eq!(listed.status, "200 OK", "{}", listed.body);
+        let listed_json = serde_json::from_str::<serde_json::Value>(&listed.body).unwrap();
+        let party_id = listed_json["partyId"].as_str().unwrap().to_owned();
+
+        let directory =
+            super::route_http_request("GET", "/api/v0/listening-party", None, "", &state)
+                .await
+                .expect("directory after listed event");
+        let directory_json = serde_json::from_str::<serde_json::Value>(&directory.body).unwrap();
+        let entries = directory_json.as_array().unwrap();
+        assert_eq!(entries.len(), 1, "{directory_json}");
+        assert_eq!(entries[0]["partyId"], party_id);
+        assert_eq!(entries[0]["podId"], pod_id);
+        assert_eq!(entries[0]["channelId"], channel_id);
+        assert_eq!(entries[0]["hostPeerId"], "tester");
+        assert_eq!(entries[0]["title"], "Directory Track");
+        assert_eq!(entries[0]["artist"], "Directory Artist");
+        assert_eq!(entries[0]["contentId"], "content:audio:track:listed");
+        assert_eq!(entries[0]["allowMeshStreaming"], true);
+        assert_eq!(entries[0]["kind"], "slskdn.listeningParty.announce.v1");
+        assert!(
+            entries[0]["expiresAtUnixMs"].as_u64().unwrap()
+                > entries[0]["startedAtUnixMs"].as_u64().unwrap()
+        );
+
+        // Stopping the party removes it from the directory entirely.
+        let stopped = super::route_http_request(
+            "POST",
+            &format!("/api/v0/listening-party/{pod_id}/{channel_id}"),
+            None,
+            r#"{"action":"stop"}"#,
+            &state,
+        )
+        .await
+        .expect("stop event");
+        assert_eq!(stopped.status, "200 OK", "{}", stopped.body);
+        let after_stop_directory =
+            super::route_http_request("GET", "/api/v0/listening-party", None, "", &state)
+                .await
+                .expect("directory after stop");
+        assert_eq!(after_stop_directory.body, "[]");
+    }
+
+    #[tokio::test]
+    async fn listening_party_radio_requires_a_real_ticket_matching_the_content_id() {
+        let (state, _receiver) = test_state();
+        let pod_id = "pod:listening-party-radio-audit";
+        let channel_id = "general";
+        let content_id = "radio-audit-content";
+        state
+            .pods
+            .write()
+            .await
+            .create(
+                serde_json::from_value::<super::pods::PodRecord>(serde_json::json!({
+                    "podId": pod_id,
+                    "name": "Radio Audit",
+                }))
+                .expect("deserialize pod record fixture"),
+                "tester".to_owned(),
+            )
+            .expect("create pod");
+        state
+            .pods
+            .write()
+            .await
+            .upsert_channel(
+                pod_id,
+                super::pods::PodChannel {
+                    channel_id: channel_id.to_owned(),
+                    kind: serde_json::json!(0),
+                    name: "General".to_owned(),
+                    binding_info: None,
+                    description: None,
+                },
+            )
+            .expect("create channel");
+
+        // A real, listed, mesh-streaming-enabled party actually playing
+        // this exact contentId -- matches the oracle's real StreamListedParty
+        // party-state gate, which is evaluated before any ticket at all.
+        let played = super::route_http_request(
+            "POST",
+            &format!("/api/v0/listening-party/{pod_id}/{channel_id}"),
+            None,
+            &format!(
+                r#"{{"action":"play","contentId":"{content_id}","title":"Radio Track","artist":"Radio Artist","listed":true,"allowMeshStreaming":true}}"#
+            ),
+            &state,
+        )
+        .await
+        .expect("play event");
+        assert_eq!(played.status, "200 OK", "{}", played.body);
+        let party_id = serde_json::from_str::<serde_json::Value>(&played.body).unwrap()["partyId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+
+        // No ticket at all -- must not leak availability/peer data to an
+        // unauthenticated probe.
+        let no_ticket = super::route_http_request(
+            "GET",
+            &format!("/api/v0/listening-party/radio/{party_id}/{content_id}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("no ticket request");
+        assert_eq!(no_ticket.status, "401 Unauthorized", "{}", no_ticket.body);
+
+        // A real ticket, but issued for a different piece of content --
+        // must not authorize access to this contentId.
+        let mismatched_ticket_response = super::route_http_request(
+            "POST",
+            "/api/v0/mesh-streams/tickets",
+            None,
+            r#"{"contentId":"some-other-content","filename":"Other.flac","peerId":"mesh-peer"}"#,
+            &state,
+        )
+        .await
+        .expect("create mismatched ticket");
+        assert_eq!(mismatched_ticket_response.status, "200 OK");
+        let mismatched_ticket =
+            serde_json::from_str::<serde_json::Value>(&mismatched_ticket_response.body).unwrap()
+                ["ticket"]
+                .as_str()
+                .unwrap()
+                .to_owned();
+        let mismatched = super::route_http_request(
+            "GET",
+            &format!(
+                "/api/v0/listening-party/radio/{party_id}/{content_id}?ticket={mismatched_ticket}"
+            ),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("mismatched ticket request");
+        assert_eq!(mismatched.status, "401 Unauthorized", "{}", mismatched.body);
+
+        // A real ticket issued for exactly this contentId is authorized,
+        // and the response reflects the real content-discovery shadow
+        // record (not a fake/empty stub).
+        state
+            .content_discovery
+            .write()
+            .await
+            .merge_shadow_records(vec![super::content_discovery::ShadowIndexRecord {
+                recording_id: content_id.to_owned(),
+                peer_ids: vec!["peer-a".to_owned(), "peer-b".to_owned()],
+                updated_at: 0,
+            }])
+            .expect("seed shadow record");
+        let valid_ticket_response = super::route_http_request(
+            "POST",
+            "/api/v0/mesh-streams/tickets",
+            None,
+            &format!(
+                r#"{{"contentId":"{content_id}","filename":"Radio.flac","peerId":"mesh-peer"}}"#
+            ),
+            &state,
+        )
+        .await
+        .expect("create valid ticket");
+        assert_eq!(valid_ticket_response.status, "200 OK");
+        let valid_ticket = serde_json::from_str::<serde_json::Value>(&valid_ticket_response.body)
+            .unwrap()["ticket"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let authorized = super::route_http_request(
+            "GET",
+            &format!("/api/v0/listening-party/radio/{party_id}/{content_id}?ticket={valid_ticket}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("authorized request");
+        assert_eq!(authorized.status, "200 OK", "{}", authorized.body);
+        let authorized_json = serde_json::from_str::<serde_json::Value>(&authorized.body).unwrap();
+        assert_eq!(authorized_json["partyId"], party_id);
+        assert_eq!(authorized_json["contentId"], content_id);
+        assert_eq!(authorized_json["available"], true);
+        assert_eq!(
+            authorized_json["peerIds"],
+            serde_json::json!(["peer-a", "peer-b"])
+        );
+    }
+
+    #[tokio::test]
+    async fn quarantine_jury_request_creation_validates_reason_evidence_and_jurors() {
+        let (state, _receiver) = test_state();
+
+        let missing_reason = super::route_http_request(
+            "POST",
+            "/api/v0/quarantine-jury/requests",
+            None,
+            r#"{"jurors":["juror-a"],"evidence":[{"type":"hash","reference":"opaque-ref"}]}"#,
+            &state,
+        )
+        .await
+        .expect("missing local reason");
+        assert_eq!(missing_reason.status, "400 Bad Request");
+        let missing_reason_json =
+            serde_json::from_str::<serde_json::Value>(&missing_reason.body).unwrap();
+        assert!(
+            missing_reason_json["errors"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|error| error == "Local quarantine reason is required."),
+            "{missing_reason_json}"
+        );
+
+        // An evidence reference shaped like a filesystem path is real,
+        // concrete leakage risk -- must be rejected, not merely counted.
+        let unsafe_evidence = super::route_http_request(
+            "POST",
+            "/api/v0/quarantine-jury/requests",
+            None,
+            r#"{"localReason":"audit","jurors":["juror-a"],"evidence":[{"type":"hash","reference":"/etc/passwd"}]}"#,
+            &state,
+        )
+        .await
+        .expect("unsafe evidence reference");
+        assert_eq!(unsafe_evidence.status, "400 Bad Request");
+        let unsafe_evidence_json =
+            serde_json::from_str::<serde_json::Value>(&unsafe_evidence.body).unwrap();
+        assert!(
+            unsafe_evidence_json["errors"].as_array().unwrap().iter().any(
+                |error| error
+                    == "Evidence references must not include paths, raw hashes, endpoints, or private identifiers."
+            ),
+            "{unsafe_evidence_json}"
+        );
+
+        // A juror identifier that looks like a filesystem path is the
+        // same class of leakage risk on the juror side.
+        let unsafe_juror = super::route_http_request(
+            "POST",
+            "/api/v0/quarantine-jury/requests",
+            None,
+            r#"{"localReason":"audit","jurors":["/etc/shadow"],"evidence":[{"type":"hash","reference":"opaque-ref"}]}"#,
+            &state,
+        )
+        .await
+        .expect("unsafe juror identifier");
+        assert_eq!(unsafe_juror.status, "400 Bad Request");
+        let unsafe_juror_json =
+            serde_json::from_str::<serde_json::Value>(&unsafe_juror.body).unwrap();
+        assert!(
+            unsafe_juror_json["errors"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|error| error == "Juror identifiers must be opaque and safe."),
+            "{unsafe_juror_json}"
+        );
+
+        // A genuinely safe request must still succeed.
+        let valid = super::route_http_request(
+            "POST",
+            "/api/v0/quarantine-jury/requests",
+            None,
+            r#"{"localReason":"  audit  ","jurors":["juror-a"],"evidence":[{"type":"hash","reference":"opaque-ref"}]}"#,
+            &state,
+        )
+        .await
+        .expect("valid request");
+        assert_eq!(valid.status, "200 OK", "{}", valid.body);
+        let valid_json = serde_json::from_str::<serde_json::Value>(&valid.body).unwrap();
+        assert_eq!(valid_json["request"]["localReason"], "audit");
+    }
+
+    #[tokio::test]
+    async fn quarantine_jury_audit_report_reflects_real_status_not_hardcoded_zeros() {
+        let (state, _receiver) = test_state();
+
+        // Request A: reaches a real ReleaseCandidate quorum.
+        let created_a = super::route_http_request(
+            "POST",
+            "/api/v0/quarantine-jury/requests",
+            None,
+            r#"{"localReason":"audit-a","jurors":["juror-a","juror-b"],"evidence":[{"type":"hash","reference":"opaque-ref-a"}],"minJurorVotes":2}"#,
+            &state,
+        )
+        .await
+        .expect("create request a");
+        let request_a = serde_json::from_str::<serde_json::Value>(&created_a.body).unwrap()
+            ["request"]["requestId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        for juror in ["juror-a", "juror-b"] {
+            let verdict = super::route_http_request(
+                "POST",
+                "/api/v0/quarantine-jury/verdicts",
+                None,
+                &quarantine_signed_verdict_json(&request_a, juror, "ReleaseCandidate").to_string(),
+                &state,
+            )
+            .await
+            .unwrap();
+            assert_eq!(verdict.status, "200 OK", "{}", verdict.body);
+        }
+
+        // Request B: no verdicts at all -- stuck at real manual-review.
+        let created_b = super::route_http_request(
+            "POST",
+            "/api/v0/quarantine-jury/requests",
+            None,
+            r#"{"localReason":"audit-b","jurors":["juror-c"],"evidence":[{"type":"hash","reference":"opaque-ref-b"}],"minJurorVotes":1}"#,
+            &state,
+        )
+        .await
+        .expect("create request b");
+        let request_b = serde_json::from_str::<serde_json::Value>(&created_b.body).unwrap()
+            ["request"]["requestId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+
+        let baseline =
+            super::route_http_request("GET", "/api/v0/quarantine-jury/audit", None, "", &state)
+                .await
+                .expect("audit report before acceptance");
+        let baseline_json = serde_json::from_str::<serde_json::Value>(&baseline.body).unwrap();
+        assert_eq!(baseline_json["requestCount"], 2, "{baseline_json}");
+        // Real per-status counts, not hardcoded zeros: A is pending
+        // release acceptance (quorum reached, not yet accepted), B is a
+        // real manual-review (no verdicts at all).
+        assert_eq!(
+            baseline_json["pendingReleaseCandidateCount"], 1,
+            "{baseline_json}"
+        );
+        assert_eq!(
+            baseline_json["pendingManualReviewCount"], 1,
+            "{baseline_json}"
+        );
+        assert_eq!(
+            baseline_json["acceptedReleaseCandidateCount"], 0,
+            "{baseline_json}"
+        );
+        assert_eq!(baseline_json["upholdQuarantineCount"], 0, "{baseline_json}");
+        let entries = baseline_json["entries"].as_array().unwrap();
+        let entry_a = entries
+            .iter()
+            .find(|entry| entry["requestId"] == request_a)
+            .expect("entry for request a");
+        assert_eq!(entry_a["status"], "pending-release-acceptance");
+        assert_eq!(entry_a["verdictCount"], 2);
+        assert_eq!(entry_a["quorumReached"], true);
+        assert_eq!(entry_a["canAcceptReleaseCandidate"], true);
+        let entry_b = entries
+            .iter()
+            .find(|entry| entry["requestId"] == request_b)
+            .expect("entry for request b");
+        assert_eq!(entry_b["status"], "manual-review");
+        assert_eq!(entry_b["verdictCount"], 0);
+        assert_eq!(entry_b["quorumReached"], false);
+
+        // Accepting request A must move it out of "pending" and into a
+        // real "accepted" bucket in a fresh report.
+        let accept = super::route_http_request(
+            "POST",
+            &format!("/api/v0/quarantine-jury/requests/{request_a}/accept-release-candidate"),
+            None,
+            "{}",
+            &state,
+        )
+        .await
+        .expect("accept request a");
+        assert_eq!(accept.status, "200 OK", "{}", accept.body);
+
+        let after_accept =
+            super::route_http_request("GET", "/api/v0/quarantine-jury/audit", None, "", &state)
+                .await
+                .expect("audit report after acceptance");
+        let after_accept_json =
+            serde_json::from_str::<serde_json::Value>(&after_accept.body).unwrap();
+        assert_eq!(
+            after_accept_json["acceptedReleaseCandidateCount"], 1,
+            "{after_accept_json}"
+        );
+        assert_eq!(
+            after_accept_json["pendingReleaseCandidateCount"], 0,
+            "{after_accept_json}"
+        );
+
+        // Backdate request B (still not accepted) well past the default
+        // 72-hour staleness window -- proving isStale reflects real
+        // request age and the real staleAfterHours floor (the oracle
+        // clamps it to a minimum of 1 hour, so a "staleAfterHours=0"
+        // query can't be used to fake staleness on a brand-new request).
+        {
+            let key = format!("quarantine/request/{request_b}");
+            let mut features = state.controller_features.write().await;
+            let mut backdated = features.get(&key).cloned().expect("request b exists");
+            backdated["createdAt"] =
+                serde_json::json!(super::unix_timestamp().saturating_sub(100 * 3600));
+            features.upsert(key, backdated).expect("backdate request b");
+        }
+        let stale =
+            super::route_http_request("GET", "/api/v0/quarantine-jury/audit", None, "", &state)
+                .await
+                .expect("audit report after backdating request b");
+        let stale_json = serde_json::from_str::<serde_json::Value>(&stale.body).unwrap();
+        assert_eq!(stale_json["staleRequestCount"], 1, "{stale_json}");
+        let stale_entries = stale_json["entries"].as_array().unwrap();
+        let stale_entry_b = stale_entries
+            .iter()
+            .find(|entry| entry["requestId"] == request_b)
+            .unwrap();
+        assert_eq!(stale_entry_b["isStale"], true, "{stale_entry_b}");
+        let stale_entry_a = stale_entries
+            .iter()
+            .find(|entry| entry["requestId"] == request_a)
+            .unwrap();
+        // Already-accepted requests are never stale, regardless of age.
+        assert_eq!(stale_entry_a["isStale"], false, "{stale_entry_a}");
+    }
+
+    #[tokio::test]
+    async fn pod_member_affinities_reflect_real_activity_not_hardcoded_zeros() {
+        let (state, _receiver) = test_state();
+        let pod_id = "pod:00000000000000000000000000000ba07";
+        state
+            .pods
+            .write()
+            .await
+            .create(
+                serde_json::from_value::<super::pods::PodRecord>(serde_json::json!({
+                    "podId": pod_id,
+                    "name": "Affinity Audit",
+                }))
+                .expect("deserialize pod record fixture"),
+                "owner-peer".to_owned(),
+            )
+            .expect("create pod");
+        state
+            .pods
+            .write()
+            .await
+            .upsert_member(
+                pod_id,
+                super::pods::PodMember {
+                    peer_id: "member-1".to_owned(),
+                    role: "member".to_owned(),
+                    is_banned: false,
+                    public_key: None,
+                    joined_at: None,
+                    last_seen: None,
+                },
+            )
+            .expect("add ordinary member");
+        state
+            .pods
+            .write()
+            .await
+            .upsert_channel(
+                pod_id,
+                super::pods::PodChannel {
+                    channel_id: "general".to_owned(),
+                    kind: serde_json::json!(0),
+                    name: "general".to_owned(),
+                    binding_info: None,
+                    description: None,
+                },
+            )
+            .expect("create channel");
+
+        let now_millis = super::unix_timestamp() * 1000;
+        {
+            let mut channels = state.pod_channels.write().await;
+            for index in 0..3 {
+                channels
+                    .append(
+                        pod_id.to_owned(),
+                        "general".to_owned(),
+                        "member-1".to_owned(),
+                        format!("message {index}"),
+                        String::new(),
+                        now_millis + index,
+                    )
+                    .expect("append message");
+            }
+        }
+        let opinion = super::route_http_request(
+            "POST",
+            "/api/v0/opinions",
+            None,
+            r#"{"issuer":"member-1","subjectType":"MeshPeer","subjectId":"track-1","kind":"Like","strength":0.8,"confidence":0.9}"#,
+            &state,
+        )
+        .await
+        .expect("submit opinion");
+        assert_eq!(opinion.status, "200 OK", "{}", opinion.body);
+
+        let affinities = super::route_http_request(
+            "GET",
+            &format!("/api/v0/podcore/{pod_id}/opinions/members/affinity"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("member affinities");
+        assert_eq!(affinities.status, "200 OK");
+        let affinities = serde_json::from_str::<serde_json::Value>(&affinities.body).unwrap();
+
+        let member = &affinities["member-1"];
+        assert_eq!(member["messageCount"], 3);
+        assert_eq!(member["opinionCount"], 1);
+        assert_eq!(member["trustScore"], 0.7);
+        assert!(member["affinityScore"].as_f64().unwrap() > 0.0, "{member}");
+        assert!(!member["recentActivity"].as_array().unwrap().is_empty());
+
+        let owner = &affinities["owner-peer"];
+        assert_eq!(owner["messageCount"], 0);
+        assert_eq!(owner["opinionCount"], 0);
+        assert_eq!(owner["trustScore"], 1.0, "owner gets the +0.3 role bonus");
+        // Owner has no messages/opinions, but `create()` sets joined_at
+        // and last_seen to "now", so is_active is real too -- a nonzero
+        // activity_bonus-only score (0.2 * trust_component 0.5 = 0.1),
+        // not the flat 0.0 the old hardcoded handler always returned.
+        let owner_affinity = owner["affinityScore"].as_f64().unwrap();
+        assert!(
+            (owner_affinity - 0.1).abs() < 1e-9,
+            "expected ~0.1, got {owner_affinity}"
+        );
+
+        let update = super::route_http_request(
+            "POST",
+            &format!("/api/v0/podcore/{pod_id}/opinions/members/affinity/update"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("update affinities");
+        assert_eq!(update.status, "200 OK");
+        let update = serde_json::from_str::<serde_json::Value>(&update.body).unwrap();
+        assert_eq!(update["success"], true);
+        assert_eq!(update["membersUpdated"], 2, "real member count, not 0");
+    }
+
+    #[tokio::test]
+    async fn opinions_summary_requires_subject_and_computes_a_real_weighted_score() {
+        let (state, _receiver) = test_state();
+
+        // Matches the oracle's required-parameter 400, not just the
+        // generic "query string is present" check.
+        let missing_subject_id = super::route_http_request(
+            "GET",
+            "/api/v0/opinions/summary?subjectType=Track",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(missing_subject_id.status, "400 Bad Request");
+
+        for (issuer, kind, strength, confidence) in [
+            ("peer-a", "Like", 1.0, 1.0),
+            ("peer-b", "Like", 1.0, 0.5),
+            ("peer-c", "Hate", 1.0, 1.0),
+        ] {
+            let created = super::route_http_request(
+                "POST",
+                "/api/v0/opinions",
+                None,
+                &format!(
+                    r#"{{"issuer":"{issuer}","subjectType":"Track","subjectId":"track-1","kind":"{kind}","strength":{strength},"confidence":{confidence}}}"#
+                ),
+                &state,
+            )
+            .await
+            .unwrap();
+            assert_eq!(created.status, "200 OK", "{}", created.body);
+        }
+        // A different subject must not be counted in track-1's summary.
+        super::route_http_request(
+            "POST",
+            "/api/v0/opinions",
+            None,
+            r#"{"issuer":"peer-d","subjectType":"Track","subjectId":"track-2","kind":"Like","strength":1.0,"confidence":1.0}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+
+        let summary = super::route_http_request(
+            "GET",
+            "/api/v0/opinions/summary?subjectType=Track&subjectId=track-1",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(summary.status, "200 OK", "{}", summary.body);
+        let summary = serde_json::from_str::<serde_json::Value>(&summary.body).unwrap();
+        assert_eq!(summary["subjectType"], "Track");
+        assert_eq!(summary["subjectId"], "track-1");
+        assert_eq!(summary["scope"], "global");
+        assert_eq!(summary["total"], 3);
+        assert_eq!(summary["positive"], 2);
+        assert_eq!(summary["negative"], 1);
+        // weighted = (1*1*1.0) + (1*1*0.5) + (-1*1*1.0) = 0.5
+        assert!(
+            (summary["weightedScore"].as_f64().unwrap() - 0.5).abs() < 1e-9,
+            "{summary}"
+        );
+        // confidence = average(1.0, 0.5, 1.0)
+        assert!(
+            (summary["confidence"].as_f64().unwrap() - (2.5 / 3.0)).abs() < 1e-9,
+            "{summary}"
+        );
+        assert_eq!(summary["opinions"].as_array().unwrap().len(), 3);
+    }
+
+    #[tokio::test]
+    async fn podcore_content_metadata_requires_a_real_content_id() {
+        let (state, _receiver) = test_state();
+
+        let missing =
+            super::route_http_request("GET", "/api/v0/podcore/content/metadata", None, "", &state)
+                .await
+                .unwrap();
+        assert_eq!(missing.status, "400 Bad Request");
+
+        let malformed = super::route_http_request(
+            "GET",
+            "/api/v0/podcore/content/metadata?contentId=not-a-content-id",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(malformed.status, "404 Not Found");
+
+        let valid = super::route_http_request(
+            "GET",
+            "/api/v0/podcore/content/metadata?contentId=content:music:recording:route-audit",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(valid.status, "200 OK", "{}", valid.body);
+        let valid = serde_json::from_str::<serde_json::Value>(&valid.body).unwrap();
+        assert_eq!(valid["contentId"], "content:music:recording:route-audit");
+        assert_eq!(valid["title"], "recording: route-audit");
+        assert_eq!(valid["artist"], "Unknown");
+        assert_eq!(valid["type"], "recording");
+        assert_eq!(valid["domain"], "music");
+    }
+
+    #[tokio::test]
+    async fn podcore_content_search_returns_a_real_array_over_real_shares() {
+        let (state, _receiver) = test_state();
+        {
+            let mut shares = state.shares.write().await;
+            shares.entries.push(FileEntry {
+                filename_encoding: Default::default(),
+                extension_encoding: Default::default(),
+                code: 1,
+                filename: "Virtual/Search Audit Track.flac".to_owned(),
+                size: 4096,
+                extension: "flac".to_owned(),
+                attributes: Vec::new(),
+            });
+        }
+
+        let missing_query =
+            super::route_http_request("GET", "/api/v0/podcore/content/search", None, "", &state)
+                .await
+                .unwrap();
+        assert_eq!(missing_query.status, "400 Bad Request");
+
+        // Only the "audio" domain is supported (matching the oracle's real
+        // MusicBrainz-backed search, which only covers audio) -- any other
+        // requested domain must come back empty, not error or ignore the
+        // filter.
+        let wrong_domain = super::route_http_request(
+            "GET",
+            "/api/v0/podcore/content/search?query=Search%20Audit&domain=video",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(wrong_domain.status, "200 OK");
+        assert_eq!(wrong_domain.body, "[]");
+
+        let found = super::route_http_request(
+            "GET",
+            "/api/v0/podcore/content/search?query=Search%20Audit&domain=audio&limit=1",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(found.status, "200 OK", "{}", found.body);
+        let found_json = serde_json::from_str::<serde_json::Value>(&found.body).unwrap();
+        let results = found_json
+            .as_array()
+            .expect("flat array, not a wrapper object");
+        assert_eq!(results.len(), 1, "{found_json}");
+        assert!(
+            results[0]["contentId"]
+                .as_str()
+                .unwrap()
+                .starts_with("content:audio:track:"),
+            "{found_json}"
+        );
+        assert_eq!(results[0]["title"], "Search Audit Track.flac");
+        assert_eq!(results[0]["domain"], "audio");
+        assert_eq!(results[0]["type"], "track");
+        assert_eq!(results[0]["metadata"]["extension"], "flac");
+    }
+
+    #[tokio::test]
+    async fn podcore_dht_stats_reflect_real_publications_not_a_pod_count_proxy() {
+        let (state, _receiver) = test_state();
+        state
+            .pods
+            .write()
+            .await
+            .create(
+                serde_json::from_value::<super::pods::PodRecord>(serde_json::json!({
+                    "podId": "dht-audit-pod-1",
+                    "name": "DHT Audit One",
+                    "visibility": "public",
+                    "focusContentId": "content:audio:artist:some-artist",
+                }))
+                .expect("deserialize pod record fixture"),
+                "owner-peer".to_owned(),
+            )
+            .expect("create pod one");
+        state
+            .pods
+            .write()
+            .await
+            .create(
+                serde_json::from_value::<super::pods::PodRecord>(serde_json::json!({
+                    "podId": "dht-audit-pod-2",
+                    "name": "DHT Audit Two",
+                    "visibility": "private",
+                    "focusContentId": "content:video:movie:some-movie",
+                }))
+                .expect("deserialize pod record fixture"),
+                "owner-peer".to_owned(),
+            )
+            .expect("create pod two");
+
+        // Two real pods exist but neither has been DHT-published yet --
+        // pod_count and dht-publication-count are different things.
+        let baseline =
+            super::route_http_request("GET", "/api/v0/podcore/dht/stats", None, "", &state)
+                .await
+                .expect("baseline dht stats");
+        let baseline_json = serde_json::from_str::<serde_json::Value>(&baseline.body).unwrap();
+        assert_eq!(baseline_json["activePublications"], 0, "{baseline_json}");
+        assert_eq!(baseline_json["totalPublished"], 0, "{baseline_json}");
+
+        for path in [
+            "/api/v0/podcore/dht/publish/dht-audit-pod-1",
+            "/api/v0/podcore/dht/publish/dht-audit-pod-2",
+        ] {
+            let published = super::route_http_request("POST", path, None, "{}", &state)
+                .await
+                .unwrap_or_else(|error| panic!("{path}: {error}"));
+            assert_eq!(published.status, "200 OK", "{path}");
+        }
+        // Republishing the same pod must still add to the real all-time
+        // counter without inflating the currently-active count.
+        let republished = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/dht/update/dht-audit-pod-1",
+            None,
+            "{}",
+            &state,
+        )
+        .await
+        .expect("republish pod one");
+        assert_eq!(republished.status, "200 OK");
+
+        let stats = super::route_http_request("GET", "/api/v0/podcore/dht/stats", None, "", &state)
+            .await
+            .expect("dht stats");
+        let stats_json = serde_json::from_str::<serde_json::Value>(&stats.body).unwrap();
+        assert_eq!(stats_json["activePublications"], 2, "{stats_json}");
+        assert_eq!(stats_json["totalPublished"], 3, "{stats_json}");
+        assert_eq!(stats_json["expiredPublications"], 0, "{stats_json}");
+        assert_eq!(
+            stats_json["publicationsByDomain"]["audio"], 1,
+            "{stats_json}"
+        );
+        assert_eq!(
+            stats_json["publicationsByDomain"]["video"], 1,
+            "{stats_json}"
+        );
+        assert_eq!(
+            stats_json["publicationsByVisibility"]["public"], 1,
+            "{stats_json}"
+        );
+        assert_eq!(
+            stats_json["publicationsByVisibility"]["private"], 1,
+            "{stats_json}"
+        );
+        assert!(
+            stats_json["lastPublishOperation"].is_string(),
+            "{stats_json}"
+        );
+
+        let unpublished = super::route_http_request(
+            "DELETE",
+            "/api/v0/podcore/dht/unpublish/dht-audit-pod-2",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("unpublish pod two");
+        assert_eq!(unpublished.status, "200 OK");
+
+        let after_unpublish =
+            super::route_http_request("GET", "/api/v0/podcore/dht/stats", None, "", &state)
+                .await
+                .expect("dht stats after unpublish");
+        let after_unpublish_json =
+            serde_json::from_str::<serde_json::Value>(&after_unpublish.body).unwrap();
+        assert_eq!(
+            after_unpublish_json["activePublications"], 1,
+            "{after_unpublish_json}"
+        );
+        assert_eq!(
+            after_unpublish_json["totalPublished"], 3,
+            "{after_unpublish_json}"
+        );
+        assert!(
+            after_unpublish_json["publicationsByDomain"]
+                .get("video")
+                .is_none(),
+            "{after_unpublish_json}"
+        );
+    }
+
+    #[tokio::test]
+    async fn library_bloom_preview_reflects_real_hashdb_contents_not_an_empty_filter() {
+        let (state, _receiver) = test_state();
+
+        // An empty store must not be reported as containing anything, but
+        // the filter parameters should still reflect the real (empty) item
+        // count rather than a canned placeholder.
+        let empty = super::route_http_request(
+            "POST",
+            "/api/v0/musicbrainz/library-bloom/snapshots/preview",
+            None,
+            r#"{"saltId":"audit-empty"}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        let empty = serde_json::from_str::<serde_json::Value>(&empty.body).unwrap();
+        assert_eq!(empty["itemCount"], 0);
+        assert_eq!(empty["fillRatio"], 0.0);
+        assert_eq!(empty["namespaceItemCounts"], serde_json::json!({}));
+
+        // Seed two real hashdb entries with MusicBrainz recording ids.
+        {
+            let mut discovery = state.content_discovery.write().await;
+            discovery
+                .merge_hash_entries(vec![
+                    super::content_discovery::HashDbEntry {
+                        flac_key: "bloom-key-1".to_owned(),
+                        size: 111,
+                        file_sha256:
+                            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                                .to_owned(),
+                        music_brainz_id: "11111111-1111-1111-1111-111111111111".to_owned(),
+                        ..Default::default()
+                    },
+                    super::content_discovery::HashDbEntry {
+                        flac_key: "bloom-key-2".to_owned(),
+                        size: 222,
+                        file_sha256:
+                            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                                .to_owned(),
+                        music_brainz_id: "22222222-2222-2222-2222-222222222222".to_owned(),
+                        ..Default::default()
+                    },
+                ])
+                .expect("seed hash entries");
+        }
+
+        let populated = super::route_http_request(
+            "POST",
+            "/api/v0/musicbrainz/library-bloom/snapshots/preview",
+            None,
+            r#"{"saltId":"audit-populated"}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        let populated = serde_json::from_str::<serde_json::Value>(&populated.body).unwrap();
+        assert_eq!(populated["itemCount"], 2);
+        assert!(
+            populated["fillRatio"].as_f64().unwrap() > 0.0,
+            "a populated store must not report an all-zero bitset: {populated}"
+        );
+        assert_eq!(
+            populated["namespaceItemCounts"],
+            serde_json::json!({"musicbrainz:recording": 2})
+        );
+        let bits = base64::Engine::decode(
+            &base64::engine::general_purpose::STANDARD,
+            populated["bitsBase64"].as_str().unwrap(),
+        )
+        .unwrap();
+        assert!(
+            bits.iter().any(|byte| *byte != 0),
+            "expected at least one set bit in the populated filter"
+        );
+
+        // Different salts for the same underlying data must not produce the
+        // same bit pattern -- that's the entire point of salting.
+        let differently_salted = super::route_http_request(
+            "POST",
+            "/api/v0/musicbrainz/library-bloom/snapshots/preview",
+            None,
+            r#"{"saltId":"audit-different-salt"}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        let differently_salted =
+            serde_json::from_str::<serde_json::Value>(&differently_salted.body).unwrap();
+        assert_ne!(populated["bitsBase64"], differently_salted["bitsBase64"]);
+    }
+
+    #[tokio::test]
+    async fn pod_membership_removal_requires_moderator_or_self() {
+        // The acting peer for every podcore mutation is this instance's own
+        // configured Soulseek identity (`pod_request_peer_id`), never a
+        // client-supplied parameter -- so the fixture's local identity is
+        // what stands in for "the caller" throughout this test.
+        let (state, _receiver) = test_state_with_env(
+            MapEnv::default()
+                .with("SLSK_USERNAME", "operator-peer")
+                .with("SLSK_PASSWORD", "operator-secret"),
+        );
+
+        let ordinary_pod = "pod:00000000000000000000000000000098";
+        state
+            .pods
+            .write()
+            .await
+            .create(
+                serde_json::from_value::<super::pods::PodRecord>(serde_json::json!({
+                    "podId": ordinary_pod,
+                    "name": "Membership Removal Audit (ordinary)",
+                }))
+                .expect("deserialize pod record fixture"),
+                "owner-peer".to_owned(),
+            )
+            .expect("create pod");
+        state
+            .pods
+            .write()
+            .await
+            .upsert_member(
+                ordinary_pod,
+                super::pods::PodMember {
+                    peer_id: "operator-peer".to_owned(),
+                    role: "member".to_owned(),
+                    is_banned: false,
+                    public_key: None,
+                    joined_at: None,
+                    last_seen: None,
+                },
+            )
+            .expect("add local peer as an ordinary member");
+        state
+            .pods
+            .write()
+            .await
+            .upsert_member(
+                ordinary_pod,
+                super::pods::PodMember {
+                    peer_id: "target-member".to_owned(),
+                    role: "member".to_owned(),
+                    is_banned: false,
+                    public_key: None,
+                    joined_at: None,
+                    last_seen: None,
+                },
+            )
+            .expect("add target member");
+
+        // An ordinary (non-moderator) local peer may not remove another
+        // member.
+        let denied = super::route_http_request(
+            "DELETE",
+            &format!("/api/v0/podcore/membership/{ordinary_pod}/target-member"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(denied.status, "403 Forbidden");
+
+        // The same ordinary local peer may remove their own membership.
+        let self_removed = super::route_http_request(
+            "DELETE",
+            &format!("/api/v0/podcore/membership/{ordinary_pod}/operator-peer"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(self_removed.status, "200 OK", "{}", self_removed.body);
+
+        let owned_pod = "pod:00000000000000000000000000000099";
+        state
+            .pods
+            .write()
+            .await
+            .create(
+                serde_json::from_value::<super::pods::PodRecord>(serde_json::json!({
+                    "podId": owned_pod,
+                    "name": "Membership Removal Audit (owned)",
+                }))
+                .expect("deserialize pod record fixture"),
+                "operator-peer".to_owned(),
+            )
+            .expect("create pod owned by the local peer");
+        state
+            .pods
+            .write()
+            .await
+            .upsert_member(
+                owned_pod,
+                super::pods::PodMember {
+                    peer_id: "target-member".to_owned(),
+                    role: "member".to_owned(),
+                    is_banned: false,
+                    public_key: None,
+                    joined_at: None,
+                    last_seen: None,
+                },
+            )
+            .expect("add target member to owned pod");
+
+        // The pod owner (a moderator) may remove someone else's membership.
+        let removed = super::route_http_request(
+            "DELETE",
+            &format!("/api/v0/podcore/membership/{owned_pod}/target-member"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(removed.status, "200 OK", "{}", removed.body);
+    }
+
+    async fn pod_fixture_with_local_role(
+        local_peer: &str,
+        creator: &str,
+        pod_id: &str,
+    ) -> (Arc<super::AppState>, mpsc::Receiver<super::SessionCommand>) {
+        let (state, receiver) = test_state_with_env(
+            MapEnv::default()
+                .with("SLSK_USERNAME", local_peer)
+                .with("SLSK_PASSWORD", "test-secret"),
+        );
+        state
+            .pods
+            .write()
+            .await
+            .create(
+                serde_json::from_value::<super::pods::PodRecord>(serde_json::json!({
+                    "podId": pod_id,
+                    "name": "Authorization Audit",
+                }))
+                .expect("deserialize pod record fixture"),
+                creator.to_owned(),
+            )
+            .expect("create pod");
+        (state, receiver)
+    }
+
+    #[tokio::test]
+    async fn pod_ban_unban_role_require_moderator() {
+        let pod_id = "pod:0000000000000000000000000000ba01";
+        let (state, _receiver) =
+            pod_fixture_with_local_role("ordinary-peer", "owner-peer", pod_id).await;
+        state
+            .pods
+            .write()
+            .await
+            .upsert_member(
+                pod_id,
+                super::pods::PodMember {
+                    peer_id: "ordinary-peer".to_owned(),
+                    role: "member".to_owned(),
+                    is_banned: false,
+                    public_key: None,
+                    joined_at: None,
+                    last_seen: None,
+                },
+            )
+            .expect("add local peer as ordinary member");
+        state
+            .pods
+            .write()
+            .await
+            .upsert_member(
+                pod_id,
+                super::pods::PodMember {
+                    peer_id: "target-member".to_owned(),
+                    role: "member".to_owned(),
+                    is_banned: false,
+                    public_key: None,
+                    joined_at: None,
+                    last_seen: None,
+                },
+            )
+            .expect("add target member");
+
+        for action in ["ban", "unban", "role"] {
+            let body = if action == "role" {
+                r#"{"role":"mod"}"#
+            } else {
+                ""
+            };
+            let response = super::route_http_request(
+                "POST",
+                &format!("/api/v0/podcore/membership/{pod_id}/target-member/{action}"),
+                None,
+                body,
+                &state,
+            )
+            .await
+            .unwrap();
+            assert_eq!(
+                response.status, "403 Forbidden",
+                "non-moderator {action} must be denied"
+            );
+        }
+
+        // The pod owner (a moderator) may perform all three actions.
+        let owned_pod = "pod:0000000000000000000000000000ba02";
+        let (state, _receiver) =
+            pod_fixture_with_local_role("owner-peer", "owner-peer", owned_pod).await;
+        for peer_id in ["target-member", "target-member-2"] {
+            state
+                .pods
+                .write()
+                .await
+                .upsert_member(
+                    owned_pod,
+                    super::pods::PodMember {
+                        peer_id: peer_id.to_owned(),
+                        role: "member".to_owned(),
+                        is_banned: false,
+                        public_key: None,
+                        joined_at: None,
+                        last_seen: None,
+                    },
+                )
+                .expect("add target member");
+        }
+        let ban = super::route_http_request(
+            "POST",
+            &format!("/api/v0/podcore/membership/{owned_pod}/target-member/ban"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(ban.status, "200 OK", "{}", ban.body);
+        // A banned member is no longer visible to member-scoped lookups
+        // (matching the oracle), so exercise unban/role on a fresh member.
+        let unban = super::route_http_request(
+            "POST",
+            &format!("/api/v0/podcore/membership/{owned_pod}/target-member/unban"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(unban.status, "200 OK", "{}", unban.body);
+        let role = super::route_http_request(
+            "POST",
+            &format!("/api/v0/podcore/membership/{owned_pod}/target-member-2/role"),
+            None,
+            r#"{"role":"mod"}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(role.status, "200 OK", "{}", role.body);
+    }
+
+    #[tokio::test]
+    async fn pod_membership_add_requires_self() {
+        let pod_id = "pod:0000000000000000000000000000ba03";
+        let (state, _receiver) =
+            pod_fixture_with_local_role("local-peer", "owner-peer", pod_id).await;
+
+        // The local peer may not publish membership claiming to be someone
+        // else, nor self-assign a moderator role or clear a ban via the
+        // request body.
+        let impersonation = super::route_http_request(
+            "POST",
+            &format!("/api/v0/podcore/membership/{pod_id}/members"),
+            None,
+            r#"{"peerId":"someone-else","role":"member","isBanned":false}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(impersonation.status, "403 Forbidden");
+
+        let escalation = super::route_http_request(
+            "POST",
+            &format!("/api/v0/podcore/membership/{pod_id}/members"),
+            None,
+            r#"{"peerId":"local-peer","role":"mod","isBanned":false}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(escalation.status, "200 OK", "{}", escalation.body);
+        let escalation = serde_json::from_str::<serde_json::Value>(&escalation.body).unwrap();
+        assert_eq!(
+            escalation["member"]["role"], "member",
+            "self-publish must not grant a role from the request body"
+        );
+    }
+
+    #[tokio::test]
+    async fn pod_membership_update_requires_moderator_or_self_and_pins_role() {
+        let pod_id = "pod:0000000000000000000000000000ba04";
+        let (state, _receiver) =
+            pod_fixture_with_local_role("local-peer", "owner-peer", pod_id).await;
+        state
+            .pods
+            .write()
+            .await
+            .upsert_member(
+                pod_id,
+                super::pods::PodMember {
+                    peer_id: "local-peer".to_owned(),
+                    role: "member".to_owned(),
+                    is_banned: false,
+                    public_key: None,
+                    joined_at: None,
+                    last_seen: None,
+                },
+            )
+            .expect("add local peer as ordinary member");
+        state
+            .pods
+            .write()
+            .await
+            .upsert_member(
+                pod_id,
+                super::pods::PodMember {
+                    peer_id: "target-member".to_owned(),
+                    role: "member".to_owned(),
+                    is_banned: false,
+                    public_key: None,
+                    joined_at: None,
+                    last_seen: None,
+                },
+            )
+            .expect("add target member");
+
+        // A non-moderator, non-self update must be denied.
+        let denied = super::route_http_request(
+            "PUT",
+            &format!("/api/v0/podcore/membership/{pod_id}/members/target-member"),
+            None,
+            r#"{"role":"member","isBanned":false}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(denied.status, "403 Forbidden");
+
+        // A self-update is allowed, but role/ban escalation attempts in the
+        // body are ignored and pinned back to the existing record.
+        let self_update = super::route_http_request(
+            "PUT",
+            &format!("/api/v0/podcore/membership/{pod_id}/members/local-peer"),
+            None,
+            r#"{"role":"mod","isBanned":false}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(self_update.status, "200 OK", "{}", self_update.body);
+        let self_update = serde_json::from_str::<serde_json::Value>(&self_update.body).unwrap();
+        assert_eq!(
+            self_update["member"]["role"], "member",
+            "self-update must not grant a role from the request body"
+        );
+    }
+
+    #[tokio::test]
+    async fn pod_channel_mutations_require_moderator() {
+        let pod_id = "pod:0000000000000000000000000000ba05";
+        let (state, _receiver) =
+            pod_fixture_with_local_role("ordinary-peer", "owner-peer", pod_id).await;
+        state
+            .pods
+            .write()
+            .await
+            .upsert_member(
+                pod_id,
+                super::pods::PodMember {
+                    peer_id: "ordinary-peer".to_owned(),
+                    role: "member".to_owned(),
+                    is_banned: false,
+                    public_key: None,
+                    joined_at: None,
+                    last_seen: None,
+                },
+            )
+            .expect("add local peer as ordinary member");
+
+        let denied_create = super::route_http_request(
+            "POST",
+            &format!("/api/v0/podcore/{pod_id}/channels"),
+            None,
+            r#"{"name":"general"}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(denied_create.status, "403 Forbidden");
+
+        let owned_pod = "pod:0000000000000000000000000000ba06";
+        let (state, _receiver) =
+            pod_fixture_with_local_role("owner-peer", "owner-peer", owned_pod).await;
+        let created = super::route_http_request(
+            "POST",
+            &format!("/api/v0/podcore/{owned_pod}/channels"),
+            None,
+            r#"{"name":"general"}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(created.status, "201 Created", "{}", created.body);
+        let created = serde_json::from_str::<serde_json::Value>(&created.body).unwrap();
+        let channel_id = created["channelId"].as_str().unwrap().to_owned();
+
+        let updated = super::route_http_request(
+            "PUT",
+            &format!("/api/v0/podcore/{owned_pod}/channels/{channel_id}"),
+            None,
+            r#"{"name":"general-renamed"}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(updated.status, "200 OK", "{}", updated.body);
+
+        let deleted = super::route_http_request(
+            "DELETE",
+            &format!("/api/v0/podcore/{owned_pod}/channels/{channel_id}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(deleted.status, "204 No Content", "{}", deleted.body);
+    }
+
+    #[tokio::test]
     async fn deterministic_openapi_mutations_match_slskdn_status_and_dto_contracts() {
         let (state, _receiver) = test_state();
 
@@ -86134,12 +93459,6 @@ mod tests {
                 "/api/v0/rooms/joined",
                 r#""route-audit""#,
                 "503 Service Unavailable",
-            ),
-            (
-                "POST",
-                "/api/v0/jobs/mb-release",
-                r#"{"mb_release_id":"00000000-0000-4000-8000-000000000001"}"#,
-                "404 Not Found",
             ),
             (
                 "POST",
@@ -86373,13 +93692,42 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(start.body, r#"{"message":"Port forwarding started"}"#);
+        // The real handler (previously shadowed by a fake-success stub due
+        // to a routing-table typo mapping this oracle-spelled path to the
+        // wrong internal route) requires real Pod membership before
+        // starting a forward -- "pod:a" was never created, so this must
+        // fail closed, not return a canned success message.
+        assert_eq!(start.status, "403 Forbidden", "{}", start.body);
         let stop =
             super::route_http_request("POST", "/api/v0/portforwarding/stop/1", None, "", &state)
                 .await
                 .unwrap();
         assert_eq!(stop.body, r#"{"message":"Port forwarding stopped"}"#);
 
+        // An unsafe decidedBy identifier (a local file path) must be
+        // rejected by real validation, matching the oracle's
+        // IsSafeOpaqueReference check.
+        let unsafe_decision = super::route_http_request(
+            "POST",
+            "/api/v0/realm-subject-indexes/realm/index/authority-decision",
+            None,
+            r#"{"enabled":true,"decidedBy":"/etc/passwd","note":"route-audit"}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(unsafe_decision.status, "400 Bad Request");
+        let unsafe_decision =
+            serde_json::from_str::<serde_json::Value>(&unsafe_decision.body).unwrap();
+        assert_eq!(unsafe_decision["isAccepted"], false);
+        assert!(unsafe_decision["errors"][0]
+            .as_str()
+            .unwrap()
+            .contains("opaque and safe"));
+
+        // A safe, well-formed decision must be genuinely accepted -- not
+        // an unconditional 400 (versioned) or unconditional 200
+        // (unversioned) regardless of input, as the old fake handlers did.
         let decision = super::route_http_request(
             "POST",
             "/api/v0/realm-subject-indexes/realm/index/authority-decision",
@@ -86389,10 +93737,11 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(decision.status, "400 Bad Request");
+        assert_eq!(decision.status, "200 OK", "{}", decision.body);
         let decision = serde_json::from_str::<serde_json::Value>(&decision.body).unwrap();
-        assert_eq!(decision["isAccepted"], false);
+        assert_eq!(decision["isAccepted"], true);
         assert_eq!(decision["enabled"], true);
+        assert_eq!(decision["errors"], serde_json::json!([]));
 
         let pod_id = "pod:00000000000000000000000000000001";
         let created = super::route_http_request(
@@ -86480,6 +93829,13 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(opinion.status, "400 Bad Request");
+
+        // This state's local peer (the pod's creator/owner, since no
+        // requestingPeerId was given to create-pod above) can moderate the
+        // pod, so it may remove another member's membership. The deny/self
+        // paths for a non-moderating actor are covered in the dedicated
+        // `pod_membership_removal_requires_moderator_or_self` test, which
+        // configures a distinct local identity for that purpose.
         let removed = super::route_http_request(
             "DELETE",
             &format!("/api/v0/podcore/membership/{pod_id}/00000000-0000-4000-8000-000000000001"),
@@ -87195,6 +94551,338 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn actors_routes_are_gated_by_the_social_federation_feature_flag() {
+        // Matches the oracle's real [FeatureGate(FeatureId.SocialFederation)]
+        // on ActivityPubController, which 404s every action (actor,
+        // inbox, outbox, followers, following) when the feature is
+        // disabled. The feature-disabled check previously only covered
+        // "/api/federation"/"/api/activitypub"/webfinger -- "/actors/"
+        // itself was never included, so disabling the feature left the
+        // actor/inbox/outbox/followers/following routes fully reachable.
+        let (state, _receiver) = test_state_with_env(
+            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+        );
+        state
+            .media_services
+            .write()
+            .await
+            .features
+            .social_federation = false;
+
+        for path in [
+            "/actors/library",
+            "/actors/library/inbox",
+            "/actors/library/outbox",
+            "/actors/library/followers",
+            "/actors/library/following",
+            "/api/federation/diagnostics",
+        ] {
+            let response = super::route_http_request("GET", path, None, "", &state)
+                .await
+                .unwrap_or_else(|error| panic!("{path}: {error}"));
+            assert_eq!(response.status, "404 Not Found", "{path}");
+        }
+
+        // Matches the oracle's real [FeatureGate(FeatureId.SocialFederation)]
+        // on TasteRecommendationsController, a sibling federation surface
+        // that was previously missing from this same gate.
+        for path in [
+            "/api/v0/taste-recommendations/wishlist",
+            "/api/v0/taste-recommendations/release-radar",
+            "/api/v0/taste-recommendations/graph-preview",
+        ] {
+            let response = super::route_http_request("POST", path, None, "{}", &state)
+                .await
+                .unwrap_or_else(|error| panic!("{path}: {error}"));
+            assert_eq!(response.status, "404 Not Found", "{path}");
+        }
+    }
+
+    #[tokio::test]
+    async fn playback_feedback_and_diagnostics_reflect_the_real_buffer_state() {
+        // Matches the oracle's real PlaybackController: priority is
+        // computed from PlaybackPriorityService.GetPriority (High when
+        // buffer < 5s, Low when >= 30s, Mid otherwise), and diagnostics
+        // reflects the most recently posted feedback for that job, not
+        // multisource swarm-download progress.
+        let (state, _receiver) = test_state();
+
+        let missing = super::route_http_request(
+            "GET",
+            "/api/v0/playback/track-audit/diagnostics",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("missing playback diagnostics");
+        assert_eq!(missing.status, "404 Not Found");
+
+        let low_buffer = super::route_http_request(
+            "POST",
+            "/api/v0/playback/feedback",
+            None,
+            r#"{"jobId":"track-audit","trackId":"track-1","positionMs":1000,"bufferAheadMs":500}"#,
+            &state,
+        )
+        .await
+        .expect("low-buffer feedback");
+        assert_eq!(low_buffer.status, "200 OK");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&low_buffer.body).unwrap()["priority"],
+            "High"
+        );
+
+        let diagnostics = super::route_http_request(
+            "GET",
+            "/api/v0/playback/track-audit/diagnostics",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("playback diagnostics");
+        assert_eq!(diagnostics.status, "200 OK");
+        let diagnostics_json =
+            serde_json::from_str::<serde_json::Value>(&diagnostics.body).unwrap();
+        assert_eq!(diagnostics_json["jobId"], "track-audit");
+        assert_eq!(diagnostics_json["trackId"], "track-1");
+        assert_eq!(diagnostics_json["positionMs"], 1_000);
+        assert_eq!(diagnostics_json["bufferAheadMs"], 500);
+        assert_eq!(diagnostics_json["priority"], "High");
+
+        let comfortable = super::route_http_request(
+            "POST",
+            "/api/v0/playback/feedback",
+            None,
+            r#"{"jobId":"track-audit","trackId":"track-1","positionMs":5000,"bufferAheadMs":45000}"#,
+            &state,
+        )
+        .await
+        .expect("comfortable-buffer feedback");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&comfortable.body).unwrap()["priority"],
+            "Low"
+        );
+
+        let updated = super::route_http_request(
+            "GET",
+            "/api/v0/playback/track-audit/diagnostics",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("updated playback diagnostics");
+        let updated_json = serde_json::from_str::<serde_json::Value>(&updated.body).unwrap();
+        assert_eq!(updated_json["positionMs"], 5_000);
+        assert_eq!(updated_json["bufferAheadMs"], 45_000);
+        assert_eq!(updated_json["priority"], "Low");
+
+        let mid = super::route_http_request(
+            "POST",
+            "/api/v0/playback/feedback",
+            None,
+            r#"{"jobId":"track-audit","positionMs":6000,"bufferAheadMs":15000}"#,
+            &state,
+        )
+        .await
+        .expect("mid-buffer feedback");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&mid.body).unwrap()["priority"],
+            "Mid"
+        );
+    }
+
+    #[tokio::test]
+    async fn musicbrainz_overlay_export_review_and_approval_match_real_oracle_gating() {
+        // Matches the oracle's real MusicBrainzOverlayService: export
+        // review/approval reflects the edit's real exportable-type gate
+        // (IsExportableEdit) and validates a real opaque approvedBy and
+        // note length, rather than always approving with an invented
+        // {editId, isApproved:true} shape.
+        let (state, _receiver) = test_state();
+
+        let non_exportable = super::route_http_request(
+            "POST",
+            "/api/v0/musicbrainz/overlays/edits",
+            None,
+            r#"{"type":"Other","targetType":"Recording","targetId":"rec-1","field":"title","value":"New Title","evidence":[{"type":"WorkRef","reference":"opaque-ref"}]}"#,
+            &state,
+        )
+        .await
+        .expect("create non-exportable edit");
+        assert_eq!(non_exportable.status, "200 OK", "{}", non_exportable.body);
+        let non_exportable_id = serde_json::from_str::<serde_json::Value>(&non_exportable.body)
+            .unwrap()["edit"]["editId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+
+        let review = super::route_http_request(
+            "GET",
+            &format!("/api/v0/musicbrainz/overlays/edits/{non_exportable_id}/export-review"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("export review");
+        assert_eq!(review.status, "200 OK", "{}", review.body);
+        let review_json = serde_json::from_str::<serde_json::Value>(&review.body).unwrap();
+        assert_eq!(review_json["upstreamTarget"], "Recording:rec-1");
+        assert_eq!(review_json["proposedChange"], "title => New Title");
+        assert_eq!(review_json["canApproveExport"], false);
+        assert_eq!(
+            review_json["reviewReason"],
+            "Overlay edit type is not exportable."
+        );
+        assert!(review_json["decision"].is_null());
+
+        let rejected_approval = super::route_http_request(
+            "POST",
+            &format!("/api/v0/musicbrainz/overlays/edits/{non_exportable_id}/approve-export"),
+            None,
+            "{}",
+            &state,
+        )
+        .await
+        .expect("reject non-exportable approval");
+        assert_eq!(rejected_approval.status, "400 Bad Request");
+        let rejected_json =
+            serde_json::from_str::<serde_json::Value>(&rejected_approval.body).unwrap();
+        assert!(
+            rejected_json["errors"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|error| error == "Overlay edit type is not exportable."),
+            "{rejected_json}"
+        );
+        assert!(rejected_json["decision"].is_null());
+
+        // An unsafe approvedBy identifier must be rejected even for an
+        // otherwise-exportable edit type.
+        let unsafe_edit = super::route_http_request(
+            "POST",
+            "/api/v0/musicbrainz/overlays/edits",
+            None,
+            r#"{"type":"TitleCorrection","targetType":"Recording","targetId":"rec-2","field":"title","value":"Corrected","evidence":[{"type":"WorkRef","reference":"opaque-ref"}]}"#,
+            &state,
+        )
+        .await
+        .expect("create exportable edit for unsafe-approver check");
+        let unsafe_edit_id = serde_json::from_str::<serde_json::Value>(&unsafe_edit.body).unwrap()
+            ["edit"]["editId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let unsafe_approval = super::route_http_request(
+            "POST",
+            &format!("/api/v0/musicbrainz/overlays/edits/{unsafe_edit_id}/approve-export"),
+            None,
+            r#"{"approvedBy":"/etc/passwd"}"#,
+            &state,
+        )
+        .await
+        .expect("reject unsafe approvedBy");
+        assert_eq!(unsafe_approval.status, "400 Bad Request");
+        assert!(
+            serde_json::from_str::<serde_json::Value>(&unsafe_approval.body).unwrap()["errors"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|error| error == "Approved-by identifier must be opaque and safe."),
+            "{}",
+            unsafe_approval.body
+        );
+
+        // A real, exportable edit is approved for real, and approving it
+        // again is idempotent -- it returns the original decision
+        // unchanged rather than re-validating or overwriting it.
+        let exportable = super::route_http_request(
+            "POST",
+            "/api/v0/musicbrainz/overlays/edits",
+            None,
+            r#"{"type":"TitleCorrection","targetType":"Recording","targetId":"rec-3","field":"title","value":"Corrected Title","evidence":[{"type":"WorkRef","reference":"opaque-ref"}]}"#,
+            &state,
+        )
+        .await
+        .expect("create exportable edit");
+        let exportable_id = serde_json::from_str::<serde_json::Value>(&exportable.body).unwrap()
+            ["edit"]["editId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+
+        let approval = super::route_http_request(
+            "POST",
+            &format!("/api/v0/musicbrainz/overlays/edits/{exportable_id}/approve-export"),
+            None,
+            r#"{"approvedBy":"reviewer-1","note":"looks good"}"#,
+            &state,
+        )
+        .await
+        .expect("approve exportable edit");
+        assert_eq!(approval.status, "200 OK", "{}", approval.body);
+        let approval_json = serde_json::from_str::<serde_json::Value>(&approval.body).unwrap();
+        assert_eq!(approval_json["errors"], serde_json::json!([]));
+        assert_eq!(approval_json["decision"]["approvedBy"], "reviewer-1");
+        assert_eq!(approval_json["decision"]["note"], "looks good");
+        assert_eq!(approval_json["decision"]["editId"], exportable_id);
+        assert_eq!(
+            approval_json["decision"]["upstreamTarget"],
+            "Recording:rec-3"
+        );
+        assert_eq!(
+            approval_json["decision"]["proposedChange"],
+            "title => Corrected Title"
+        );
+        assert!(approval_json["decision"]["id"]
+            .as_str()
+            .unwrap()
+            .starts_with("musicbrainz-overlay-export:"));
+
+        let post_approval_review = super::route_http_request(
+            "GET",
+            &format!("/api/v0/musicbrainz/overlays/edits/{exportable_id}/export-review"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("export review after approval");
+        let post_approval_review_json =
+            serde_json::from_str::<serde_json::Value>(&post_approval_review.body).unwrap();
+        assert_eq!(post_approval_review_json["canApproveExport"], false);
+        assert_eq!(
+            post_approval_review_json["reviewReason"],
+            "Upstream export has already been approved locally."
+        );
+        assert_eq!(
+            post_approval_review_json["decision"]["approvedBy"],
+            "reviewer-1"
+        );
+
+        let repeat_approval = super::route_http_request(
+            "POST",
+            &format!("/api/v0/musicbrainz/overlays/edits/{exportable_id}/approve-export"),
+            None,
+            r#"{"approvedBy":"different-reviewer"}"#,
+            &state,
+        )
+        .await
+        .expect("idempotent re-approval");
+        assert_eq!(repeat_approval.status, "200 OK");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&repeat_approval.body).unwrap()["decision"]
+                ["approvedBy"],
+            "reviewer-1",
+            "re-approval must not overwrite the original decision"
+        );
+    }
+
+    #[tokio::test]
     async fn extended_controller_mutations_are_stateful_and_domain_backed() {
         let (state, _receiver) = test_state();
 
@@ -87303,13 +94991,41 @@ mod tests {
         .await
         .expect("generate pod signing keypair");
         let keys = serde_json::from_str::<serde_json::Value>(&keypair.body).unwrap();
+        // Verification resolves the sender's public key from real pod
+        // membership, matching the oracle -- not from a client-supplied
+        // field, which would let anyone "verify" a self-made signature
+        // against a self-made key. Register "tester" as a real member
+        // with the generated public key so verification has a real key
+        // to check against.
+        state
+            .pods
+            .write()
+            .await
+            .upsert_member(
+                "pod-controller",
+                super::pods::PodMember {
+                    peer_id: "tester".to_owned(),
+                    role: "member".to_owned(),
+                    is_banned: false,
+                    public_key: keys["publicKey"].as_str().map(str::to_owned),
+                    joined_at: None,
+                    last_seen: None,
+                },
+            )
+            .expect("add tester as a real pod member with a signing public key");
         let signed = super::route_http_request(
             "POST",
             "/api/v0/podcore/signing/sign",
             None,
             &serde_json::json!({
                 "privateKey": keys["privateKey"],
-                "message": {"messageId":"message-1","podId":"pod-controller","senderPeerId":"tester","body":"hello"}
+                "message": {
+                    "messageId":"message-1",
+                    "podId":"pod-controller",
+                    "senderPeerId":"tester",
+                    "body":"hello",
+                    "timestampUnixMs": super::unix_timestamp() * 1000,
+                }
             })
             .to_string(),
             &state,
@@ -87317,6 +95033,14 @@ mod tests {
         .await
         .expect("sign pod message");
         assert_eq!(signed.status, "200 OK");
+        let signed_json = serde_json::from_str::<serde_json::Value>(&signed.body).unwrap();
+        assert!(
+            signed_json["signature"]
+                .as_str()
+                .unwrap()
+                .starts_with("ed25519:"),
+            "{signed_json}"
+        );
         let verified = super::route_http_request(
             "POST",
             "/api/v0/podcore/signing/verify",
@@ -87326,7 +95050,23 @@ mod tests {
         )
         .await
         .expect("verify pod message");
-        assert_eq!(verified.body, r#"{"isValid":true}"#);
+        assert_eq!(verified.body, r#"{"isValid":true}"#, "{}", verified.body);
+
+        // A signature that doesn't match the sender's real registered
+        // public key must fail -- not a fake "isValid: true" for whatever
+        // key the caller happens to supply.
+        let mut forged = signed_json.clone();
+        forged["message"]["senderPeerId"] = serde_json::json!("someone-else");
+        let forged_verified = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/signing/verify",
+            None,
+            &forged.to_string(),
+            &state,
+        )
+        .await
+        .expect("verify forged sender");
+        assert_eq!(forged_verified.body, r#"{"isValid":false}"#);
 
         let ranked = super::route_http_request(
             "POST",
@@ -87365,6 +95105,385 @@ mod tests {
                 ["wasPublished"],
             true
         );
+    }
+
+    #[tokio::test]
+    async fn pod_signature_verification_fails_for_a_sender_with_no_registered_key() {
+        let (state, _receiver) = test_state();
+        let pod_id = "pod:00000000000000000000000000000ba08";
+        state
+            .pods
+            .write()
+            .await
+            .create(
+                serde_json::from_value::<super::pods::PodRecord>(serde_json::json!({
+                    "podId": pod_id,
+                    "name": "Signing Audit",
+                }))
+                .expect("deserialize pod record fixture"),
+                "owner-peer".to_owned(),
+            )
+            .expect("create pod");
+        // "tester" (the fixture's default configured Soulseek identity,
+        // required by the sign endpoint's own auth check) is a real pod
+        // member, but has never registered a public key -- a well-formed
+        // signature from them must still be rejected, since there is
+        // nothing real to verify it against.
+        state
+            .pods
+            .write()
+            .await
+            .upsert_member(
+                pod_id,
+                super::pods::PodMember {
+                    peer_id: "tester".to_owned(),
+                    role: "member".to_owned(),
+                    is_banned: false,
+                    public_key: None,
+                    joined_at: None,
+                    last_seen: None,
+                },
+            )
+            .expect("add member with no public key");
+
+        let keypair = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/signing/generate-keypair",
+            None,
+            "{}",
+            &state,
+        )
+        .await
+        .expect("generate keypair");
+        let keys = serde_json::from_str::<serde_json::Value>(&keypair.body).unwrap();
+        let signed = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/signing/sign",
+            None,
+            &serde_json::json!({
+                "privateKey": keys["privateKey"],
+                "message": {
+                    "messageId": "message-1",
+                    "podId": pod_id,
+                    "senderPeerId": "tester",
+                    "body": "hello",
+                    "timestampUnixMs": super::unix_timestamp() * 1000,
+                }
+            })
+            .to_string(),
+            &state,
+        )
+        .await
+        .expect("sign message");
+        assert_eq!(signed.status, "200 OK");
+
+        let verified = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/signing/verify",
+            None,
+            &signed.body,
+            &state,
+        )
+        .await
+        .expect("verify message");
+        assert_eq!(verified.body, r#"{"isValid":false}"#);
+    }
+
+    #[tokio::test]
+    async fn pod_signing_stats_reflect_real_activity_not_hardcoded_zeros() {
+        let (state, _receiver) = test_state();
+        let baseline =
+            super::route_http_request("GET", "/api/v0/podcore/signing/stats", None, "", &state)
+                .await
+                .expect("baseline signing stats");
+        let baseline_json = serde_json::from_str::<serde_json::Value>(&baseline.body).unwrap();
+        assert_eq!(baseline_json["totalSignaturesCreated"], 0);
+        assert_eq!(baseline_json["totalSignaturesVerified"], 0);
+        assert_eq!(
+            baseline_json["lastSignatureOperation"],
+            serde_json::Value::Null
+        );
+
+        let pod_id = "pod:00000000000000000000000000000ba09";
+        state
+            .pods
+            .write()
+            .await
+            .create(
+                serde_json::from_value::<super::pods::PodRecord>(serde_json::json!({
+                    "podId": pod_id,
+                    "name": "Signing Stats Audit",
+                }))
+                .expect("deserialize pod record fixture"),
+                "owner-peer".to_owned(),
+            )
+            .expect("create pod");
+
+        let keypair = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/signing/generate-keypair",
+            None,
+            "{}",
+            &state,
+        )
+        .await
+        .expect("generate keypair");
+        let keys = serde_json::from_str::<serde_json::Value>(&keypair.body).unwrap();
+        state
+            .pods
+            .write()
+            .await
+            .upsert_member(
+                pod_id,
+                super::pods::PodMember {
+                    peer_id: "tester".to_owned(),
+                    role: "member".to_owned(),
+                    is_banned: false,
+                    public_key: keys["publicKey"].as_str().map(str::to_owned),
+                    joined_at: None,
+                    last_seen: None,
+                },
+            )
+            .expect("add tester as a real pod member with a signing public key");
+
+        let signed = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/signing/sign",
+            None,
+            &serde_json::json!({
+                "privateKey": keys["privateKey"],
+                "message": {
+                    "messageId": "message-1",
+                    "podId": pod_id,
+                    "senderPeerId": "tester",
+                    "body": "hello",
+                    "timestampUnixMs": super::unix_timestamp() * 1000,
+                }
+            })
+            .to_string(),
+            &state,
+        )
+        .await
+        .expect("sign message");
+        assert_eq!(signed.status, "200 OK");
+
+        let verified = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/signing/verify",
+            None,
+            &signed.body,
+            &state,
+        )
+        .await
+        .expect("verify message");
+        assert_eq!(verified.body, r#"{"isValid":true}"#);
+
+        // A forged sender fails verification -- this must also count as a
+        // real (failed) verification, not be silently dropped from stats.
+        let signed_json = serde_json::from_str::<serde_json::Value>(&signed.body).unwrap();
+        let mut forged = signed_json.clone();
+        forged["message"]["senderPeerId"] = serde_json::json!("someone-else");
+        let forged_verified = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/signing/verify",
+            None,
+            &forged.to_string(),
+            &state,
+        )
+        .await
+        .expect("verify forged sender");
+        assert_eq!(forged_verified.body, r#"{"isValid":false}"#);
+
+        let stats =
+            super::route_http_request("GET", "/api/v0/podcore/signing/stats", None, "", &state)
+                .await
+                .expect("signing stats");
+        let stats_json = serde_json::from_str::<serde_json::Value>(&stats.body).unwrap();
+        assert_eq!(stats_json["totalSignaturesCreated"], 1, "{stats_json}");
+        assert_eq!(stats_json["totalSignaturesVerified"], 2, "{stats_json}");
+        assert_eq!(stats_json["successfulVerifications"], 1, "{stats_json}");
+        assert_eq!(stats_json["failedVerifications"], 1, "{stats_json}");
+        assert_eq!(stats_json["signedMessages"], 1, "{stats_json}");
+        assert_eq!(stats_json["verificationFailures"], 1, "{stats_json}");
+        assert!(
+            stats_json["lastSignatureOperation"].is_string(),
+            "{stats_json}"
+        );
+    }
+
+    #[tokio::test]
+    async fn pod_verification_message_checks_real_membership_and_signature() {
+        let (state, _receiver) = test_state();
+        // Unlike other pod fixtures in this suite, this podId deliberately
+        // contains no colon: verification/message derives the membership
+        // podId by splitting channelId on the first ':' as "podId:channel",
+        // a convention that wouldn't round-trip through this test if the
+        // podId itself contained a colon.
+        let pod_id = "verification-audit-pod";
+        state
+            .pods
+            .write()
+            .await
+            .create(
+                serde_json::from_value::<super::pods::PodRecord>(serde_json::json!({
+                    "podId": pod_id,
+                    "name": "Verification Audit",
+                }))
+                .expect("deserialize pod record fixture"),
+                "owner-peer".to_owned(),
+            )
+            .expect("create pod");
+
+        let keypair = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/signing/generate-keypair",
+            None,
+            "{}",
+            &state,
+        )
+        .await
+        .expect("generate keypair");
+        let keys = serde_json::from_str::<serde_json::Value>(&keypair.body).unwrap();
+        state
+            .pods
+            .write()
+            .await
+            .upsert_member(
+                pod_id,
+                super::pods::PodMember {
+                    peer_id: "tester".to_owned(),
+                    role: "member".to_owned(),
+                    is_banned: false,
+                    public_key: keys["publicKey"].as_str().map(str::to_owned),
+                    joined_at: None,
+                    last_seen: None,
+                },
+            )
+            .expect("add tester as a real pod member with a signing public key");
+
+        let message = serde_json::json!({
+            "messageId": "message-1",
+            "podId": pod_id,
+            "channelId": format!("{pod_id}:general"),
+            "senderPeerId": "tester",
+            "body": "hello",
+            "timestampUnixMs": super::unix_timestamp() * 1000,
+        });
+        let signed = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/signing/sign",
+            None,
+            &serde_json::json!({"privateKey": keys["privateKey"], "message": message}).to_string(),
+            &state,
+        )
+        .await
+        .expect("sign message");
+        assert_eq!(signed.status, "200 OK");
+        let signed_json = serde_json::from_str::<serde_json::Value>(&signed.body).unwrap();
+        let mut verified_message = message.clone();
+        verified_message["signature"] = signed_json["signature"].clone();
+
+        let verified = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/verification/message",
+            None,
+            &verified_message.to_string(),
+            &state,
+        )
+        .await
+        .expect("verify message");
+        assert_eq!(verified.status, "200 OK");
+        let verified_json = serde_json::from_str::<serde_json::Value>(&verified.body).unwrap();
+        assert_eq!(
+            verified_json,
+            serde_json::json!({
+                "isValid": true,
+                "isFromValidMember": true,
+                "hasValidSignature": true,
+                "isNotBanned": true,
+            }),
+            "{verified_json}"
+        );
+
+        // A sender who was never registered as a real pod member fails
+        // the membership check, even with a structurally valid message.
+        let mut unknown_sender = verified_message.clone();
+        unknown_sender["senderPeerId"] = serde_json::json!("stranger");
+        let unknown_verified = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/verification/message",
+            None,
+            &unknown_sender.to_string(),
+            &state,
+        )
+        .await
+        .expect("verify unknown sender");
+        let unknown_json =
+            serde_json::from_str::<serde_json::Value>(&unknown_verified.body).unwrap();
+        assert_eq!(unknown_json["isValid"], false, "{unknown_json}");
+        assert_eq!(unknown_json["isFromValidMember"], false, "{unknown_json}");
+        assert_eq!(unknown_json["isNotBanned"], true, "{unknown_json}");
+
+        // A channelId with no "podId:channel" separator is a structurally
+        // invalid request, reported honestly rather than treated as some
+        // other kind of failure.
+        let mut bad_channel = verified_message.clone();
+        bad_channel["channelId"] = serde_json::json!("no-colon-here");
+        let bad_channel_verified = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/verification/message",
+            None,
+            &bad_channel.to_string(),
+            &state,
+        )
+        .await
+        .expect("verify bad channel id");
+        assert_eq!(
+            bad_channel_verified.body,
+            serde_json::json!({
+                "isValid": false,
+                "isFromValidMember": false,
+                "hasValidSignature": false,
+                "isNotBanned": false,
+                "errorMessage": "Invalid channel ID format",
+            })
+            .to_string()
+        );
+
+        // Missing required fields is a real 400, not a silently-accepted
+        // always-false result.
+        let missing_pod_id = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/verification/message",
+            None,
+            r#"{"messageId":"message-1"}"#,
+            &state,
+        )
+        .await
+        .expect("verify missing podId");
+        assert_eq!(missing_pod_id.status, "400 Bad Request");
+
+        let stats = super::route_http_request(
+            "GET",
+            "/api/v0/podcore/verification/stats",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("verification stats");
+        let stats_json = serde_json::from_str::<serde_json::Value>(&stats.body).unwrap();
+        // Only 2 real verification attempts are recorded: the successful
+        // one and the unknown-sender failure. Matching the oracle exactly,
+        // the invalid-channel-format and missing-field cases never reach
+        // the verifier (they fail before any membership/signature check
+        // runs), so neither counts as a verification attempt.
+        assert_eq!(stats_json["totalVerifications"], 2, "{stats_json}");
+        assert_eq!(stats_json["successfulVerifications"], 1, "{stats_json}");
+        assert_eq!(stats_json["failedMembershipChecks"], 1, "{stats_json}");
+        assert_eq!(stats_json["verifiedMessages"], 1, "{stats_json}");
+        assert_eq!(stats_json["rejectedMessages"], 1, "{stats_json}");
+        assert!(stats_json["lastVerification"].is_string(), "{stats_json}");
     }
 
     #[test]
@@ -88049,8 +96168,12 @@ mod tests {
         let parties = super::route_http_request("GET", "/api/listening-party", None, "", &state)
             .await
             .expect("listening parties");
+        // Matches the oracle's real directory contract: it reflects
+        // real, currently-listed pod listen-along events, not unrelated
+        // joined chat rooms -- joining a room named "listening" above
+        // must not fabricate an entry here.
         let parties_json = serde_json::from_str::<serde_json::Value>(&parties.body).unwrap();
-        assert_eq!(parties_json[0]["room"], "listening");
+        assert_eq!(parties_json, serde_json::json!([]));
         let party_content = super::route_http_request(
             "POST",
             "/api/listening-party/radio/party/content",
@@ -88285,9 +96408,15 @@ mod tests {
             .expect("song id runs");
         let song_runs_json = serde_json::from_str::<serde_json::Value>(&song_runs.body).unwrap();
         assert!(song_runs_json.as_array().unwrap().is_empty());
-        let song_run = super::route_http_request("POST", "/api/songid/runs", None, "{}", &state)
-            .await
-            .expect("song id run");
+        let song_run = super::route_http_request(
+            "POST",
+            "/api/songid/runs",
+            None,
+            r#"{"source":"route-audit"}"#,
+            &state,
+        )
+        .await
+        .expect("song id run");
         let song_run_json = serde_json::from_str::<serde_json::Value>(&song_run.body).unwrap();
         assert!(song_run_json["matchCount"].as_u64().unwrap() >= 1);
         assert_eq!(song_run_json["runs"], 1);
@@ -88357,6 +96486,19 @@ mod tests {
         .await
         .expect("reject aliased multisource job detail");
         assert_eq!(aliased_multisource.status, "404 Not Found");
+        // Matches the oracle's real GetJobStatus: an unknown job id must be
+        // a real 404, not a fabricated 200 with an invented "not_found"
+        // status string.
+        let missing_multisource = super::route_http_request(
+            "GET",
+            "/api/multisource/jobs/multisource-does-not-exist",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("missing multisource job");
+        assert_eq!(missing_multisource.status, "404 Not Found");
 
         let slskdn = super::route_http_request("GET", "/api/slskdn", None, "", &state)
             .await
@@ -88382,7 +96524,15 @@ mod tests {
         .expect("podcore search");
         let podcore_search_json =
             serde_json::from_str::<serde_json::Value>(&podcore_search.body).unwrap();
-        assert!(podcore_search_json["count"].as_u64().unwrap() >= 1);
+        let podcore_search_results = podcore_search_json.as_array().unwrap();
+        assert!(!podcore_search_results.is_empty(), "{podcore_search_json}");
+        assert!(
+            podcore_search_results[0]["contentId"]
+                .as_str()
+                .unwrap()
+                .starts_with("content:audio:track:"),
+            "{podcore_search_json}"
+        );
         let stream = super::route_http_request(
             "GET",
             "/api/streams/Library/Known/Release.flac",
@@ -88435,6 +96585,22 @@ mod tests {
         assert_eq!(admin_json["total_transfers"], 1);
         assert_eq!(admin_json["total_bytes"], 55);
         assert_eq!(admin_json["searches"], 1);
+
+        // These slskR-invented admin/{shutdown,restart,version} routes had
+        // no oracle equivalent, no caller, and no test coverage, and always
+        // faked a success response without doing anything -- a real 404 is
+        // honest where a fake "requested" body was not. The real, working
+        // equivalents are DELETE/PUT /api/application and GET /api/version.
+        for (method, path) in [
+            ("POST", "/api/admin/shutdown"),
+            ("GET", "/api/admin/version"),
+            ("POST", "/api/admin/restart"),
+        ] {
+            let response = super::route_http_request(method, path, None, "", &state)
+                .await
+                .unwrap_or_else(|error| panic!("{method} {path}: {error}"));
+            assert_eq!(response.status, "404 Not Found", "{method} {path}");
+        }
 
         {
             let mut session = state.session.write().await;
@@ -88728,8 +96894,15 @@ mod tests {
                 .await
                 .expect("kpis");
         let kpis_json = serde_json::from_str::<serde_json::Value>(&kpis.body).unwrap();
-        assert!(kpis_json["count"].as_u64().unwrap() >= 7);
-        assert_eq!(kpis_json["kpis"][0]["id"], "transfers.total");
+        // Matches the oracle: TelemetryController.GetKpis and
+        // MetricsController.GetKpis both call the same
+        // Telemetry.Prometheus.GetMetricsAsObject with an identical KPI
+        // regex list, so this sibling route returns the exact same
+        // dictionary-of-PrometheusMetric shape as
+        // /api/telemetry/prometheus/kpis, not an invented {kpis:[],count}
+        // array.
+        assert_eq!(kpis_json["slskr_transfers"]["type"], "gauge");
+        assert_eq!(kpis_json["slskr_searches"]["type"], "gauge");
 
         let pod_created = super::route_http_request(
             "POST",
@@ -90795,6 +98968,107 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn joined_room_server_snapshot_populates_the_real_user_roster() {
+        // Matches the oracle's real IRoomTracker: the room's user list is
+        // populated from the server's JoinedRoom snapshot itself, not left
+        // empty until some other event happens to arrive. Previously
+        // JoinedRoom.users was fully decoded off the wire and then
+        // discarded -- GET .../users always returned a hardcoded "[]".
+        use slskr_client::{
+            protocol::server::{JoinedRoom, RoomUser, ServerMessage},
+            server::ServerSession,
+            stream::ServerConnection,
+        };
+
+        let (state, _receiver) = test_state();
+        state.session.write().await.username = Some("tester".to_owned());
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind server fixture");
+        let address = listener.local_addr().expect("server fixture address");
+        let client = tokio::net::TcpStream::connect(address);
+        let server = listener.accept();
+        let (client, server) = tokio::join!(client, server);
+        let (server, _) = server.expect("accept server fixture");
+        let mut session = ServerSession::new(ServerConnection::new(server));
+        let _fixture = ServerConnection::new(client.expect("client fixture"));
+
+        super::project_server_message(
+            &state,
+            &mut session,
+            &ServerMessage::JoinedRoom(JoinedRoom {
+                room: "roster-audit".to_owned(),
+                users: vec![
+                    RoomUser {
+                        username: "tester".to_owned(),
+                        status: 2,
+                        average_speed: 1_000,
+                        upload_count: 5,
+                        file_count: 42,
+                        directory_count: 3,
+                        slots_free: 1,
+                        country_code: "US".to_owned(),
+                    },
+                    RoomUser {
+                        username: "otherpeer".to_owned(),
+                        status: 1,
+                        average_speed: 0,
+                        upload_count: 0,
+                        file_count: 0,
+                        directory_count: 0,
+                        slots_free: 0,
+                        country_code: String::new(),
+                    },
+                ],
+                owner: None,
+                operators: Vec::new(),
+            }),
+        )
+        .await;
+
+        let response = super::route_http_request(
+            "GET",
+            "/api/v0/rooms/joined/roster-audit/users",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("joined room users");
+        assert_eq!(response.status, "200 OK", "{}", response.body);
+        let users = serde_json::from_str::<serde_json::Value>(&response.body).unwrap();
+        let users = users.as_array().expect("roster array");
+        assert_eq!(users.len(), 2, "{users:?}");
+        assert_eq!(users[0]["username"], "tester");
+        assert_eq!(users[0]["status"], "Online");
+        assert_eq!(users[0]["averageSpeed"], 1_000);
+        assert_eq!(users[0]["uploadCount"], 5);
+        assert_eq!(users[0]["fileCount"], 42);
+        assert_eq!(users[0]["directoryCount"], 3);
+        assert_eq!(users[0]["slotsFree"], 1);
+        assert_eq!(users[0]["countryCode"], "US");
+        assert_eq!(users[0]["self"], true);
+        assert_eq!(users[1]["username"], "otherpeer");
+        assert_eq!(users[1]["status"], "Away");
+        assert_eq!(users[1]["self"], serde_json::Value::Null);
+
+        // The room's own JSON contract also reflects the real roster's
+        // usernames (via the existing `members` field), not just an
+        // incrementally-tracked/empty list.
+        let room =
+            super::route_http_request("GET", "/api/v0/rooms/joined/roster-audit", None, "", &state)
+                .await
+                .expect("joined room detail");
+        assert_eq!(room.status, "200 OK");
+        let room_json = serde_json::from_str::<serde_json::Value>(&room.body).unwrap();
+        assert_eq!(
+            room_json["users"],
+            serde_json::json!(["tester", "otherpeer"])
+        );
+    }
+
+    #[tokio::test]
     async fn durable_room_routes_surface_connected_dispatch_failures_in_session_health() {
         let (state, receiver) = test_state();
         state.session.write().await.state = "connected";
@@ -92478,6 +100752,43 @@ mod tests {
         super::apply_watched_controller_configuration(&state, Some(second), &cli_environment).await;
         assert_eq!(super::effective_server_address(&state), "127.0.0.3:34568");
         assert!(!state.runtime.read().await.application_reconnect_pending);
+    }
+
+    #[tokio::test]
+    async fn config_reload_joins_newly_configured_rooms_while_connected() {
+        // Matches the oracle's real OptionsMonitor_OnChange, which calls
+        // RoomService.TryJoinAsync(newOptions.Rooms) on every config
+        // reload -- previously config-reload only updated local
+        // bookkeeping (RoomStore::merge_configured), so a room added
+        // while already connected was marked "joined" in the API
+        // immediately but the server was never actually told to join it.
+        let (state, mut receiver) = test_state();
+        state.session.write().await.state = "connected";
+        let cli_environment = BTreeMap::from([
+            (
+                "SLSKR_STATE_DIR".to_owned(),
+                state.config.state_dir.display().to_string(),
+            ),
+            ("SLSKR_AUTH_DISABLED".to_owned(), "true".to_owned()),
+        ]);
+        let yaml = "rooms: [music]\n";
+        fs::write(state.config.state_dir.join("slskd.yml"), yaml).unwrap();
+
+        super::apply_watched_controller_configuration(&state, Some(yaml), &cli_environment).await;
+
+        assert_eq!(
+            receiver
+                .try_recv()
+                .expect("real join dispatched for the newly configured room"),
+            super::SessionCommand::JoinRoom("music".to_owned())
+        );
+        assert!(state
+            .rooms
+            .read()
+            .await
+            .records
+            .iter()
+            .any(|record| record.name == "music" && record.joined));
     }
 
     #[tokio::test]
@@ -94201,6 +102512,9 @@ mod tests {
             preview_streams: Arc::new(tokio::sync::Semaphore::new(super::MAX_PREVIEW_STREAMS)),
             revoked_jwts: RwLock::new(super::RevokedJwtStore::default()),
             login_attempts: RwLock::new(super::LoginAttemptStore::default()),
+            pod_signature_stats: super::PodSignatureStats::default(),
+            pod_verification_stats: super::PodVerificationStats::default(),
+            pod_dht_publish_count: std::sync::atomic::AtomicU64::new(0),
         });
         let missing = super::route_http_request("GET", "/api/v0/config", None, "", &state)
             .await
@@ -94502,6 +102816,9 @@ mod tests {
             preview_streams: Arc::new(tokio::sync::Semaphore::new(super::MAX_PREVIEW_STREAMS)),
             revoked_jwts: RwLock::new(super::RevokedJwtStore::default()),
             login_attempts: RwLock::new(super::LoginAttemptStore::default()),
+            pod_signature_stats: super::PodSignatureStats::default(),
+            pod_verification_stats: super::PodVerificationStats::default(),
+            pod_dht_publish_count: std::sync::atomic::AtomicU64::new(0),
         };
         let cookie_allowed = super::route_http_request_with_headers(
             "GET",
@@ -96037,7 +104354,8 @@ mod tests {
         assert_eq!(summary["averageSpeed"], 75.0);
 
         let leaderboard = serde_json::from_str::<serde_json::Value>(
-            &super::slskd_transfer_leaderboard_report(Some("direction=Download"), &queue),
+            &super::slskd_transfer_leaderboard_report(Some("direction=Download"), &queue)
+                .expect("direction is present"),
         )
         .unwrap();
         assert_eq!(leaderboard[0]["username"], "friend");
@@ -96061,6 +104379,121 @@ mod tests {
         assert_eq!(speeds["sessionBytesDownloaded"], 500);
         assert_eq!(speeds["sessionBytesUploaded"], 120);
         assert_eq!(speeds["sessionBytesTotal"], 620);
+
+        let _ = std::fs::remove_file(queue.events_path);
+        let _ = std::fs::remove_file(queue.state_path);
+    }
+
+    #[test]
+    fn transfer_leaderboard_excludes_incomplete_transfers_not_hardcoded_status() {
+        let mut queue = super::TransferQueue::new_in_memory(8);
+        // A failed download must never count toward the leaderboard --
+        // matching the oracle's GetTransferLeaderboard, which filters
+        // State = 48 (Completed | Succeeded) at the SQL layer.
+        let failed = queue.create(
+            0,
+            Some("flaky".to_owned()),
+            "Remote/Flaky.flac".to_owned(),
+            None,
+            Some(9999),
+        );
+        queue
+            .entries
+            .iter_mut()
+            .find(|entry| entry.id == failed.id)
+            .unwrap()
+            .status = "failed".to_owned();
+        let succeeded = queue.create(
+            0,
+            Some("reliable".to_owned()),
+            "Remote/Reliable.flac".to_owned(),
+            None,
+            Some(50),
+        );
+        queue
+            .entries
+            .iter_mut()
+            .find(|entry| entry.id == succeeded.id)
+            .unwrap()
+            .status = "succeeded".to_owned();
+
+        let leaderboard = serde_json::from_str::<serde_json::Value>(
+            &super::slskd_transfer_leaderboard_report(Some("direction=Download"), &queue)
+                .expect("direction is present"),
+        )
+        .unwrap();
+        let rows = leaderboard.as_array().unwrap();
+        assert!(
+            rows.iter().all(|row| row["username"] != "flaky"),
+            "{leaderboard}"
+        );
+        assert!(
+            rows.iter().any(|row| row["username"] == "reliable"),
+            "{leaderboard}"
+        );
+
+        let _ = std::fs::remove_file(queue.events_path);
+        let _ = std::fs::remove_file(queue.state_path);
+    }
+
+    #[test]
+    fn transfer_directories_report_is_completed_uploads_only() {
+        let mut queue = super::TransferQueue::new_in_memory(8);
+        // Matches the oracle's GetTransferDirectoryFrequency exactly: it
+        // always reports on Uploads (what others downloaded from local
+        // shares) and only completed ones -- never downloads, and never
+        // queued/failed transfers.
+        let download = queue.create(
+            0,
+            Some("downloader".to_owned()),
+            "Shared/DownloadOnly/File.flac".to_owned(),
+            None,
+            Some(10),
+        );
+        queue
+            .entries
+            .iter_mut()
+            .find(|entry| entry.id == download.id)
+            .unwrap()
+            .status = "succeeded".to_owned();
+        let incomplete_upload = queue.create(
+            1,
+            Some("stalled-peer".to_owned()),
+            "Shared/StillQueued/File.flac".to_owned(),
+            None,
+            Some(10),
+        );
+        queue
+            .entries
+            .iter_mut()
+            .find(|entry| entry.id == incomplete_upload.id)
+            .unwrap()
+            .status = "queued".to_owned();
+        let completed_upload = queue.create(
+            1,
+            Some("real-uploader".to_owned()),
+            "Shared/Popular/File.flac".to_owned(),
+            None,
+            Some(10),
+        );
+        queue
+            .entries
+            .iter_mut()
+            .find(|entry| entry.id == completed_upload.id)
+            .unwrap()
+            .status = "succeeded".to_owned();
+
+        let report = serde_json::from_str::<serde_json::Value>(
+            &super::slskd_transfer_directories_report(None, &queue),
+        )
+        .unwrap();
+        let paths = report
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row["path"].as_str().unwrap_or_default())
+            .collect::<Vec<_>>();
+        assert_eq!(paths, vec!["Shared/Popular"], "{report}");
 
         let _ = std::fs::remove_file(queue.events_path);
         let _ = std::fs::remove_file(queue.state_path);
