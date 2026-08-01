@@ -731,7 +731,7 @@ pub fn normalize_api_path(path: &str) -> &str {
         "/api/v0/transfers/downloads/auto-replace/status" => "/api/autoreplace",
         "/api/v0/portforwarding/available-ports" => "/api/port-forwarding/available-ports",
         "/api/v0/portforwarding/stream-stats" => "/api/port-forwarding/stream-stats",
-        "/api/v0/portforwarding/start" => "/api/portforwarding/start",
+        "/api/v0/portforwarding/start" => "/api/port-forwarding/start",
         _ => path,
     }
 }

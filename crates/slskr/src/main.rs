@@ -41440,7 +41440,6 @@ fn extended_controller_mutation_route(method: &str, path: &str) -> bool {
                         | "/api/podcore/signing/sign"
                         | "/api/podcore/signing/verify"
                         | "/api/podcore/verification/message"
-                        | "/api/portforwarding/start"
                         | "/api/quarantine-jury/requests"
                         | "/api/quarantine-jury/verdicts"
                         | "/api/ranking/history"
@@ -41506,11 +41505,6 @@ async fn extended_controller_mutation_response(
             })
             .to_string(),
         };
-    }
-    if method == "POST" && path == "/api/portforwarding/start" && is_versioned_v0 {
-        return routing::ok_response(
-            serde_json::json!({"message": "Port forwarding started"}).to_string(),
-        );
     }
     if method == "DELETE" && path == "/api/session" {
         return match send_session_command(state, SessionCommand::Disconnect).await {
@@ -70260,7 +70254,7 @@ mod tests {
         );
         assert_eq!(
             normalize_api_path("/api/v0/portforwarding/start"),
-            "/api/portforwarding/start"
+            "/api/port-forwarding/start"
         );
         assert_eq!(
             normalize_api_path("/api/v0/capabilities/mesh-peers"),
@@ -72830,6 +72824,84 @@ mod tests {
         )
         .await
         .expect("stop operator-pinned port forwarding");
+        assert_eq!(stop.status, "200 OK");
+    }
+
+    #[tokio::test]
+    async fn oracle_spelled_portforwarding_start_route_reaches_the_real_handler() {
+        // The oracle's real route (ASP.NET's default [controller] token for
+        // PortForwardingController has no hyphen) is
+        // "api/v0/portforwarding/start". A routing-table typo previously
+        // mapped that exact path to an internal literal that only a
+        // fake-success stub matched -- any real caller using the real
+        // oracle-spelled path always got a canned "Port forwarding
+        // started" message with none of the real handler's pod-membership/
+        // gateway-pinning validation ever running and no forward ever
+        // actually starting. This proves the fixed routing table now
+        // reaches the same real handler already exercised (via the
+        // internal hyphenated spelling) by the sibling tests above.
+        let (state, _receiver) = test_state_with_env(MapEnv::default().with(
+            "SLSKR_TEST_USER_ENDPOINT_OVERRIDES",
+            "gateway=127.0.0.1:2234",
+        ));
+        let pin = "07".repeat(32);
+        let create = super::route_http_request(
+            "POST",
+            "/api/v0/pods",
+            None,
+            &format!(
+                r#"{{"pod":{{"podId":"pod-oracle-forward","name":"Oracle Forward","capabilities":[0],"privateServicePolicy":{{"enabled":true,"maxMembers":2,"gatewayPeerId":"tester","gatewayCertificateSha256":"{pin}","registeredServices":[],"allowedDestinations":[{{"hostPattern":"service","port":80,"protocol":"tcp","allowPublic":false}}]}}}}}}"#
+            ),
+            &state,
+        )
+        .await
+        .expect("create gateway pod");
+        assert_eq!(create.status, "201 Created", "{}", create.body);
+        let mut gateway = test_capability_descriptor(
+            "gateway",
+            vec![slskr_client::capabilities::FEATURE_MESH_V1.to_owned()],
+        );
+        gateway.peer_id = "tester".to_owned();
+        state.mesh.write().await.capability_records.push(gateway);
+        let probe = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("port probe");
+        let local_port = probe.local_addr().unwrap().port();
+        drop(probe);
+
+        let start = super::route_http_request(
+            "POST",
+            "/api/v0/portforwarding/start",
+            None,
+            &format!(
+                r#"{{"localPort":{local_port},"podId":"pod-oracle-forward","destinationHost":"service","destinationPort":80}}"#
+            ),
+            &state,
+        )
+        .await
+        .expect("start port forwarding via the oracle-spelled route");
+        assert_eq!(start.status, "200 OK", "{}", start.body);
+        let status = super::route_http_request(
+            "GET",
+            &format!("/api/v0/port-forwarding/status/{local_port}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("forwarding status");
+        assert_eq!(status.status, "200 OK");
+        assert!(status.body.contains("pod-oracle-forward"));
+
+        let stop = super::route_http_request(
+            "POST",
+            &format!("/api/port-forwarding/stop/{local_port}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("stop port forwarding");
         assert_eq!(stop.status, "200 OK");
     }
 
@@ -92286,7 +92358,12 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(start.body, r#"{"message":"Port forwarding started"}"#);
+        // The real handler (previously shadowed by a fake-success stub due
+        // to a routing-table typo mapping this oracle-spelled path to the
+        // wrong internal route) requires real Pod membership before
+        // starting a forward -- "pod:a" was never created, so this must
+        // fail closed, not return a canned success message.
+        assert_eq!(start.status, "403 Forbidden", "{}", start.body);
         let stop =
             super::route_http_request("POST", "/api/v0/portforwarding/stop/1", None, "", &state)
                 .await
