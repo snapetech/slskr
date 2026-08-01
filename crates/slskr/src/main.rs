@@ -11082,6 +11082,10 @@ impl SecurityState {
         }
     }
 
+    /// Convenience default over `ban_with_options`, exercised directly by
+    /// several unit tests below; every real HTTP call site now passes
+    /// real reason/duration/permanent via `security_ban_options`.
+    #[allow(dead_code)]
     fn ban(&mut self, kind: &str, value: String) -> Option<SecurityBanRecord> {
         self.ban_with_options(kind, value, "Manual ban".to_owned(), 3_600, false)
     }
@@ -42424,8 +42428,17 @@ async fn extended_controller_mutation_response(
             return routing::bad_request_response("blocklist value is required");
         };
         if method == "POST" {
+            // Matches the oracle's real BlockIp/BlockUsername: reason,
+            // durationMinutes, and permanent are real inputs that
+            // determine the real ban record, not silently discarded in
+            // favor of a fixed 1-hour "Manual ban" default -- the
+            // sibling /api/security/bans endpoints already do this
+            // correctly via the same helpers.
+            let (reason, duration_seconds, is_permanent) = security_ban_options(body);
             let mut security = state.security.write().await;
-            let Some(record) = security.ban(kind, value) else {
+            let Some(record) =
+                security.ban_with_options(kind, value, reason, duration_seconds, is_permanent)
+            else {
                 return routing::bad_request_response(
                     "invalid blocklist value or capacity reached",
                 );
@@ -43794,27 +43807,34 @@ async fn feature_controller_mutation_response(
         });
     }
     if method == "PUT" && path.starts_with("/api/overlay/pins/") {
+        // Matches the oracle's real RotateCertificatePin: the wire field
+        // is "thumbprint" (not "certificateSha256"/"pin"), the pin is
+        // stored upper-invariant, and success is a real 204 No Content
+        // rather than a 200 with a body.
         let username = decoded_path_segment(path.trim_start_matches("/api/overlay/pins/"));
-        let pin = extract_json_string_field(body, "certificateSha256")
-            .or_else(|| extract_json_string_field(body, "pin"));
-        let Some(pin) =
-            pin.filter(|pin| pin.len() == 64 && pin.bytes().all(|byte| byte.is_ascii_hexdigit()))
-        else {
+        if username.trim().is_empty() {
+            return Some(routing::bad_request_response("Username required"));
+        }
+        let thumbprint =
+            extract_json_string_field(body, "thumbprint").map(|value| value.trim().to_owned());
+        let Some(thumbprint) = thumbprint.filter(|value| {
+            value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+        }) else {
             return Some(routing::bad_request_response(
-                "certificateSha256 must be 64 hexadecimal digits",
+                "Thumbprint must be a 64-character SHA-256 hexadecimal value",
             ));
         };
         let value = serde_json::json!({
-            "username": username, "certificateSha256": pin.to_ascii_lowercase(), "updatedAt": unix_timestamp()
+            "username": username, "certificateSha256": thumbprint.to_ascii_uppercase(), "updatedAt": unix_timestamp()
         });
         return Some(
             match state
                 .controller_features
                 .write()
                 .await
-                .upsert(format!("overlay/pin/{username}"), value.clone())
+                .upsert(format!("overlay/pin/{username}"), value)
             {
-                Ok(()) => routing::ok_response(value.to_string()),
+                Ok(()) => routing::no_content_response(),
                 Err(error) => routing::service_unavailable_response(&error),
             },
         );
@@ -50205,10 +50225,27 @@ async fn extended_controller_get_response(
             )
         }
         "/api/overlay/blocklist" => {
+            // Matches the oracle's real GetBlocklist/BlockedEntryResponse
+            // shape (target/type/reason/blockedAt/expiresAt/isPermanent),
+            // not the generic {kind,type,value,created_at} ban-listing
+            // shape used elsewhere.
             let security = state.security.read().await;
-            routing::ok_response(
-                serde_json::json!({"entries": security.json_value()["bans"]}).to_string(),
-            )
+            let entries = security
+                .bans
+                .iter()
+                .map(|record| {
+                    serde_json::json!({
+                        "target": record.value,
+                        "type": record.kind,
+                        "reason": record.reason,
+                        "blockedAt": unix_seconds_rfc3339(record.created_at),
+                        "expiresAt": unix_seconds_rfc3339(record.expires_at),
+                        "isPermanent": record.is_permanent,
+                    })
+                })
+                .collect::<Vec<_>>();
+            drop(security);
+            routing::ok_response(serde_json::json!({"entries": entries}).to_string())
         }
         "/api/overlay/connections" => {
             // Matches the oracle's real MeshPeerInfoResponse concept (the
@@ -87442,6 +87479,121 @@ mod tests {
             serde_json::from_str::<serde_json::Value>(&rejected.body).unwrap()["created"],
             false
         );
+    }
+
+    #[tokio::test]
+    async fn overlay_pin_rotation_uses_the_real_thumbprint_field_and_no_content_response() {
+        // Matches the oracle's real RotateCertificatePin
+        // (DhtRendezvousController.cs): the wire field is "thumbprint",
+        // not "certificateSha256"/"pin", the pin is stored
+        // upper-invariant, and a successful rotation is a real 204 No
+        // Content, not a 200 with a JSON body.
+        let (state, _receiver) = test_state();
+
+        let missing_field = super::route_http_request(
+            "PUT",
+            "/api/overlay/pins/peer1",
+            None,
+            r#"{"certificateSha256":"07070707070707070707070707070707070707070707070707070707070707"}"#,
+            &state,
+        )
+        .await
+        .expect("reject the wrong field name");
+        assert_eq!(missing_field.status, "400 Bad Request");
+
+        let too_short = super::route_http_request(
+            "PUT",
+            "/api/overlay/pins/peer1",
+            None,
+            r#"{"thumbprint":"abc123"}"#,
+            &state,
+        )
+        .await
+        .expect("reject a too-short thumbprint");
+        assert_eq!(too_short.status, "400 Bad Request");
+
+        let rotated = super::route_http_request(
+            "PUT",
+            "/api/overlay/pins/peer1",
+            None,
+            r#"{"thumbprint":"0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"}"#,
+            &state,
+        )
+        .await
+        .expect("rotate the pin");
+        assert_eq!(rotated.status, "204 No Content", "{}", rotated.body);
+        assert!(rotated.body.is_empty());
+
+        let stored = state
+            .controller_features
+            .read()
+            .await
+            .get("overlay/pin/peer1")
+            .cloned()
+            .expect("pin was really stored");
+        assert_eq!(
+            stored["certificateSha256"],
+            "0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A"
+        );
+    }
+
+    #[tokio::test]
+    async fn overlay_blocklist_honors_real_reason_duration_and_permanent_fields() {
+        // Matches the oracle's real BlockIp/BlockUsername/GetBlocklist
+        // (DhtRendezvousController.cs): reason/durationMinutes/permanent
+        // are real inputs, and the listing reflects the oracle's real
+        // BlockedEntryResponse shape (target/type/reason/blockedAt/
+        // expiresAt/isPermanent) -- previously these fields were
+        // silently discarded in favor of a fixed 1-hour "Manual ban"
+        // default, and the listing used an unrelated shape.
+        let (state, _receiver) = test_state();
+
+        let blocked = super::route_http_request(
+            "POST",
+            "/api/overlay/blocklist/username",
+            None,
+            r#"{"value":"forever-banned","reason":"repeated abuse","permanent":true}"#,
+            &state,
+        )
+        .await
+        .expect("block a username permanently");
+        assert_eq!(blocked.status, "200 OK", "{}", blocked.body);
+
+        let listed = super::route_http_request("GET", "/api/overlay/blocklist", None, "", &state)
+            .await
+            .expect("list the blocklist");
+        assert_eq!(listed.status, "200 OK");
+        let listed_json = serde_json::from_str::<serde_json::Value>(&listed.body).unwrap();
+        let entries = listed_json["entries"].as_array().unwrap();
+        assert_eq!(entries.len(), 1, "{entries:?}");
+        assert_eq!(entries[0]["target"], "forever-banned");
+        assert_eq!(entries[0]["type"], "username");
+        assert_eq!(entries[0]["reason"], "repeated abuse");
+        assert_eq!(entries[0]["isPermanent"], true);
+        assert!(entries[0]["blockedAt"].as_str().is_some());
+        assert!(entries[0]["expiresAt"].as_str().is_some());
+
+        let timed = super::route_http_request(
+            "POST",
+            "/api/overlay/blocklist/ip",
+            None,
+            r#"{"value":"203.0.113.5","durationMinutes":5}"#,
+            &state,
+        )
+        .await
+        .expect("block an ip for a real, non-default duration");
+        assert_eq!(timed.status, "200 OK");
+        let ban = state
+            .security
+            .read()
+            .await
+            .bans
+            .iter()
+            .find(|record| record.kind == "ip")
+            .cloned()
+            .expect("ip ban recorded");
+        assert!(!ban.is_permanent);
+        assert_eq!(ban.expires_at - ban.created_at, 5 * 60);
     }
 
     #[tokio::test]
