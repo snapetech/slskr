@@ -40052,8 +40052,15 @@ async fn versioned_get_failure_contract(
     let uuid_prefixes = [
         "/api/v0/collections/",
         "/api/v0/contacts/",
-        "/api/v0/share-grants/",
+        // Must precede the shorter "/api/v0/share-grants/" prefix below --
+        // strip_prefix matches whichever prefix is checked first, so a
+        // more specific nested prefix must always come before a shorter
+        // one it is contained within, or the nested route's real id
+        // segment (e.g. a collection UUID) never reaches its own check
+        // and instead gets validated against the wrong path segment
+        // ("by-collection").
         "/api/v0/share-grants/by-collection/",
+        "/api/v0/share-grants/",
         "/api/v0/sharegroups/",
         "/api/v0/wishlist/",
         "/api/v0/multisource/jobs/",
@@ -40064,6 +40071,13 @@ async fn versioned_get_failure_contract(
             if uuid::Uuid::parse_str(&value).is_err() {
                 return Some(routing::bad_request_response("The request is invalid"));
             }
+            // Stop at the first (most specific, since nested prefixes are
+            // ordered before the shorter prefixes they're contained
+            // within) matching prefix -- otherwise a path validated
+            // successfully here would keep matching shorter prefixes
+            // later in the list and get re-validated against the wrong
+            // path segment.
+            break;
         }
     }
 
@@ -89845,7 +89859,7 @@ mod tests {
             ),
             (
                 "GET",
-                format!("/api/share-grants/by-collection/{collection_id}"),
+                format!("/api/v0/share-grants/by-collection/{collection_id}"),
                 "",
             ),
             (
