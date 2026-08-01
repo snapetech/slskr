@@ -336,10 +336,7 @@ impl Rule {
             bytes_forwarded,
             stream_mapping_enabled: true,
             stream_stats: None,
-            performance: Performance {
-                active_connections,
-                total_bytes_transferred: bytes_forwarded,
-            },
+            performance: Performance::new(active_connections, bytes_forwarded),
         }
     }
 }
@@ -521,6 +518,35 @@ pub struct Status {
 pub struct Performance {
     pub active_connections: usize,
     pub total_bytes_transferred: u64,
+    pub average_bytes_per_connection: u64,
+    pub is_high_throughput: bool,
+    pub efficiency_rating: f64,
+}
+
+impl Performance {
+    /// Matches the oracle's real `PortForwardingPerformance` computed
+    /// properties (`AverageBytesPerConnection`, `IsHighThroughput`,
+    /// `EfficiencyRating`), derived from the same two raw counters.
+    fn new(active_connections: usize, total_bytes_transferred: u64) -> Self {
+        let average_bytes_per_connection = if active_connections > 0 {
+            total_bytes_transferred / active_connections as u64
+        } else {
+            0
+        };
+        let is_high_throughput = total_bytes_transferred > 1024 * 1024;
+        let efficiency_rating = if active_connections > 0 && total_bytes_transferred > 0 {
+            total_bytes_transferred as f64 / (active_connections as f64 * 1000.0)
+        } else {
+            0.0
+        };
+        Self {
+            active_connections,
+            total_bytes_transferred,
+            average_bytes_per_connection,
+            is_high_throughput,
+            efficiency_rating,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -549,6 +575,22 @@ mod tests {
             local_username: "local".to_owned(),
             authentication_key: Arc::new(SigningKey::from_bytes(&[9; 32])),
         }
+    }
+
+    #[test]
+    fn performance_computes_real_oracle_derived_metrics() {
+        let idle = Performance::new(0, 0);
+        assert_eq!(idle.average_bytes_per_connection, 0);
+        assert!(!idle.is_high_throughput);
+        assert_eq!(idle.efficiency_rating, 0.0);
+
+        let active = Performance::new(4, 8_000);
+        assert_eq!(active.average_bytes_per_connection, 2_000);
+        assert!(!active.is_high_throughput);
+        assert_eq!(active.efficiency_rating, 2.0);
+
+        let high_throughput = Performance::new(2, 2 * 1024 * 1024);
+        assert!(high_throughput.is_high_throughput);
     }
 
     #[tokio::test]
