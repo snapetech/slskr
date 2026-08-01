@@ -1,7 +1,6 @@
 use std::{
     net::TcpListener,
     process::{Child, Command, Stdio},
-    sync::Mutex,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 

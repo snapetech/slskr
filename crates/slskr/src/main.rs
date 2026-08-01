@@ -35987,6 +35987,142 @@ fn capabilities_negotiate_response(body: &str) -> HttpResponse {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ParsedCapabilityDescription {
+    flags: i32,
+    client_version: String,
+    protocol_version: i32,
+}
+
+const CAPABILITY_SUPPORTS_DHT: i32 = 1 << 0;
+const CAPABILITY_SUPPORTS_HASH_EXCHANGE: i32 = 1 << 1;
+const CAPABILITY_SUPPORTS_PARTIAL_DOWNLOAD: i32 = 1 << 2;
+const CAPABILITY_SUPPORTS_MESH_SYNC: i32 = 1 << 3;
+const CAPABILITY_SUPPORTS_FLAC_HASH_DB: i32 = 1 << 4;
+const CAPABILITY_SUPPORTS_SWARM: i32 = 1 << 5;
+
+fn capability_flag_value(name: &str) -> i32 {
+    match name.to_ascii_lowercase().as_str() {
+        "dht" => CAPABILITY_SUPPORTS_DHT,
+        "hashx" => CAPABILITY_SUPPORTS_HASH_EXCHANGE,
+        "partial" => CAPABILITY_SUPPORTS_PARTIAL_DOWNLOAD,
+        "mesh" => CAPABILITY_SUPPORTS_MESH_SYNC,
+        "flacdb" => CAPABILITY_SUPPORTS_FLAC_HASH_DB,
+        "swarm" => CAPABILITY_SUPPORTS_SWARM,
+        _ => 0,
+    }
+}
+
+fn capability_flags_from_tag(flags: &str) -> i32 {
+    flags
+        .split(';')
+        .filter_map(|part| {
+            let mut fields = part.split('=');
+            let name = fields.next()?;
+            let value = fields.next()?;
+            (fields.next().is_none() && value == "1").then(|| capability_flag_value(name))
+        })
+        .sum()
+}
+
+fn capability_flags_from_version(tokens: &str) -> i32 {
+    tokens
+        .split('+')
+        .filter(|token| !token.is_empty())
+        .map(capability_flag_value)
+        .sum()
+}
+
+fn capability_flags_string(flags: i32) -> String {
+    [
+        (CAPABILITY_SUPPORTS_DHT, "SupportsDHT"),
+        (CAPABILITY_SUPPORTS_HASH_EXCHANGE, "SupportsHashExchange"),
+        (
+            CAPABILITY_SUPPORTS_PARTIAL_DOWNLOAD,
+            "SupportsPartialDownload",
+        ),
+        (CAPABILITY_SUPPORTS_MESH_SYNC, "SupportsMeshSync"),
+        (CAPABILITY_SUPPORTS_FLAC_HASH_DB, "SupportsFlacHashDb"),
+        (CAPABILITY_SUPPORTS_SWARM, "SupportsSwarm"),
+    ]
+    .into_iter()
+    .filter_map(|(flag, name)| (flags & flag != 0).then_some(name))
+    .collect::<Vec<_>>()
+    .join(", ")
+}
+
+fn parse_capability_tag(description: &str) -> Option<ParsedCapabilityDescription> {
+    let matcher = fancy_regex::Regex::new(r"(?i)slskdn_caps:v(\d+);?(.*)").ok()?;
+    let captures = matcher.captures(description).ok()??;
+    let protocol_version = captures.get(1)?.as_str().parse::<i32>().ok()?;
+    let flags = captures
+        .get(2)
+        .map(|value| capability_flags_from_tag(value.as_str()))
+        .unwrap_or_default();
+    Some(ParsedCapabilityDescription {
+        flags,
+        client_version: String::new(),
+        protocol_version,
+    })
+}
+
+fn parse_capability_version(version: &str) -> Option<ParsedCapabilityDescription> {
+    let matcher = fancy_regex::Regex::new(r"(?i)slskdn/([^+\s]+)(\+.*)?").ok()?;
+    let captures = matcher.captures(version).ok()??;
+    let client_version = captures.get(1)?.as_str().to_owned();
+    let flags = captures
+        .get(2)
+        .map(|value| capability_flags_from_version(value.as_str()))
+        .unwrap_or_default();
+    Some(ParsedCapabilityDescription {
+        flags,
+        client_version,
+        protocol_version: 1,
+    })
+}
+
+fn capabilities_parse_response(body: &str) -> HttpResponse {
+    let payload = match serde_json::from_str::<serde_json::Value>(body) {
+        Ok(payload) => payload,
+        Err(_) => return routing::bad_request_response("invalid JSON body"),
+    };
+    let description = payload
+        .get("description")
+        .or_else(|| payload.get("Description"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default();
+    let version = payload
+        .get("versionString")
+        .or_else(|| payload.get("VersionString"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default();
+    let parsed = (!description.is_empty())
+        .then(|| parse_capability_tag(description))
+        .flatten()
+        .or_else(|| {
+            (!version.is_empty())
+                .then(|| parse_capability_version(version))
+                .flatten()
+        });
+    let Some(parsed) = parsed else {
+        return routing::ok_response(serde_json::json!({"isSlskdn": false}).to_string());
+    };
+    routing::ok_response(
+        serde_json::json!({
+            "isSlskdn": true,
+            "flags": capability_flags_string(parsed.flags),
+            "flagsValue": parsed.flags,
+            "protocolVersion": parsed.protocol_version,
+            "clientVersion": parsed.client_version,
+            "canSwarm": parsed.flags & CAPABILITY_SUPPORTS_SWARM != 0,
+            "canMeshSync": parsed.flags & CAPABILITY_SUPPORTS_MESH_SYNC != 0,
+        })
+        .to_string(),
+    )
+}
+
 fn url_encode(value: &str) -> String {
     let mut encoded = String::new();
     for byte in value.bytes() {
@@ -42250,36 +42386,7 @@ async fn extended_controller_mutation_response(
         return collection_item_controller_response(method, path, body, state).await;
     }
     if method == "POST" && path == "/api/capabilities/parse" {
-        let payload = match serde_json::from_str::<serde_json::Value>(body) {
-            Ok(payload) => payload,
-            Err(_) => return routing::bad_request_response("invalid JSON body"),
-        };
-        let description = payload
-            .get("description")
-            .or_else(|| payload.get("Description"))
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or_default();
-        let version = payload
-            .get("versionString")
-            .or_else(|| payload.get("VersionString"))
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or_default();
-        let lower = format!("{description} {version}").to_ascii_lowercase();
-        let is_slskdn = lower.contains("slskdn") || lower.contains("slskd-n");
-        let value = if is_slskdn {
-            serde_json::json!({
-                "isSlskdn": true,
-                "flags": if lower.contains("mesh") { "Swarm, MeshSync" } else { "Swarm" },
-                "flagsValue": if lower.contains("mesh") { 3 } else { 1 },
-                "protocolVersion": 1,
-                "clientVersion": version,
-                "canSwarm": true,
-                "canMeshSync": lower.contains("mesh"),
-            })
-        } else {
-            serde_json::json!({"isSlskdn": false})
-        };
-        return routing::ok_response(value.to_string());
+        return capabilities_parse_response(body);
     }
     if method == "POST" && path == "/api/mesh/merge" {
         let payload = match serde_json::from_str::<serde_json::Value>(body) {
@@ -73269,6 +73376,74 @@ mod tests {
         assert!(response.body.contains("\"unsupported\":[\"bogus\"]"));
         assert!(response.body.contains("\"server_capabilities\":["));
         assert!(!response.body.contains("secret"));
+    }
+
+    #[tokio::test]
+    async fn capabilities_parse_uses_real_tag_and_version_grammar() {
+        let (state, _receiver) = test_state();
+
+        let tagged = super::route_http_request(
+            "POST",
+            "/api/capabilities/parse",
+            None,
+            r#"{"description":"Client slskdn_caps:v7;dht=1;mesh=1;swarm=1;hashx=1;flacdb=1;partial=1"}"#,
+            &state,
+        )
+        .await
+        .expect("tag capability parse response");
+        assert_eq!(tagged.status, "200 OK");
+        let tagged_json = serde_json::from_str::<serde_json::Value>(&tagged.body).unwrap();
+        assert_eq!(tagged_json["isSlskdn"], true);
+        assert_eq!(tagged_json["flags"], "SupportsDHT, SupportsHashExchange, SupportsPartialDownload, SupportsMeshSync, SupportsFlacHashDb, SupportsSwarm");
+        assert_eq!(tagged_json["flagsValue"], 63);
+        assert_eq!(tagged_json["protocolVersion"], 7);
+        assert_eq!(tagged_json["clientVersion"], "");
+        assert_eq!(tagged_json["canSwarm"], true);
+        assert_eq!(tagged_json["canMeshSync"], true);
+
+        let version = super::route_http_request(
+            "POST",
+            "/api/capabilities/parse",
+            None,
+            r#"{"description":"ordinary client","versionString":"slskdn/2.4.1+dht+mesh+swarm"}"#,
+            &state,
+        )
+        .await
+        .expect("version capability parse response");
+        let version_json = serde_json::from_str::<serde_json::Value>(&version.body).unwrap();
+        assert_eq!(
+            version_json["flags"],
+            "SupportsDHT, SupportsMeshSync, SupportsSwarm"
+        );
+        assert_eq!(version_json["flagsValue"], 41);
+        assert_eq!(version_json["protocolVersion"], 1);
+        assert_eq!(version_json["clientVersion"], "2.4.1");
+
+        let tag_takes_precedence = super::route_http_request(
+            "POST",
+            "/api/capabilities/parse",
+            None,
+            r#"{"description":"slskdn_caps:v3;mesh=1","versionString":"slskdn/9.9+swarm"}"#,
+            &state,
+        )
+        .await
+        .expect("tag precedence response");
+        let precedence_json =
+            serde_json::from_str::<serde_json::Value>(&tag_takes_precedence.body).unwrap();
+        assert_eq!(precedence_json["flagsValue"], 8);
+        assert_eq!(precedence_json["protocolVersion"], 3);
+        assert_eq!(precedence_json["clientVersion"], "");
+
+        let false_positive = super::route_http_request(
+            "POST",
+            "/api/capabilities/parse",
+            None,
+            r#"{"description":"ordinary slskdn client"}"#,
+            &state,
+        )
+        .await
+        .expect("non-capability response");
+        assert_eq!(false_positive.body, r#"{"isSlskdn":false}"#);
     }
 
     #[tokio::test]
