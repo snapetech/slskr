@@ -66,15 +66,24 @@ pub struct QueryProfileResult {
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct HashDbEntry {
+    #[serde(alias = "flac_key")]
     pub flac_key: String,
+    #[serde(alias = "byte_hash")]
     pub byte_hash: String,
     pub size: u64,
+    #[serde(alias = "full_file_hash")]
     pub full_file_hash: String,
+    #[serde(alias = "music_brainz_id")]
     pub music_brainz_id: String,
+    #[serde(alias = "file_sha256")]
     pub file_sha256: String,
+    #[serde(alias = "first_seen_at")]
     pub first_seen_at: u64,
+    #[serde(alias = "last_updated_at")]
     pub last_updated_at: u64,
+    #[serde(alias = "seq_id")]
     pub seq_id: u64,
+    #[serde(alias = "use_count")]
     pub use_count: u32,
 }
 
@@ -557,6 +566,30 @@ impl ContentDiscoveryStore {
             return Err(error);
         }
         Ok(merged)
+    }
+
+    /// Merges mesh entries after the target service's per-entry validation
+    /// boundary. Structurally usable entries are handed to the normal
+    /// transactional merge, while malformed hashes are counted as skipped
+    /// instead of aborting an otherwise valid batch.
+    pub fn merge_hash_entries_skipping_invalid(
+        &mut self,
+        entries: Vec<HashDbEntry>,
+    ) -> Result<(usize, usize), String> {
+        let now = crate::unix_timestamp();
+        let mut valid = Vec::with_capacity(entries.len());
+        let mut skipped = 0;
+        for entry in entries {
+            match normalize_hash_entry(entry, now) {
+                Ok(entry) => valid.push(entry),
+                Err(_) => skipped += 1,
+            }
+        }
+        if valid.is_empty() {
+            return Ok((0, skipped));
+        }
+        let merged = self.merge_hash_entries(valid)?;
+        Ok((merged, skipped))
     }
 
     pub fn merge_shadow_records(
