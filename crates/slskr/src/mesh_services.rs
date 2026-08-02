@@ -17,7 +17,9 @@ use crate::config::TrustedMeshPeer;
 const CONTENT_CHUNK_BYTES: u64 = 32 * 1024;
 const MAX_CONTENT_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 const MAX_CONTENT_ID_BYTES: usize = 512;
+const MAX_POD_MESSAGE_BYTES: usize = 16 * 1024;
 const CONTENT_CALL_TIMEOUT: Duration = Duration::from_secs(30);
+const POD_MESSAGE_CALL_TIMEOUT: Duration = Duration::from_secs(10);
 
 struct StagingFileGuard {
     file: Option<tokio::fs::File>,
@@ -75,6 +77,84 @@ pub async fn fetch_content(
         output,
     )
     .await
+}
+
+/// Deliver a PodCore message to a configured trusted mesh peer through the
+/// same authenticated `pods/PostMessage` service used by the frozen runtime's
+/// mesh adapter.  The caller must supply a trusted certificate pin; capability
+/// records alone are not sufficient to authenticate an overlay connection.
+pub async fn post_pod_message(
+    peer: &TrustedMeshPeer,
+    local_username: &str,
+    authentication_key: &SigningKey,
+    pod_id: &str,
+    channel_id: &str,
+    body: &str,
+    signature: &str,
+) -> Result<String, String> {
+    validate_pod_message(local_username, pod_id, channel_id, body, signature)?;
+    let mut hello = MeshHello::new(
+        local_username,
+        vec![FEATURE_MESH_SERVICE.to_owned()],
+        None,
+        None,
+        uuid::Uuid::new_v4().simple().to_string(),
+    )
+    .map_err(|error| format!("pod message hello failed: {error}"))?;
+    hello
+        .authenticate(authentication_key, &peer.certificate_sha256)
+        .map_err(|error| format!("pod message hello authentication failed: {error}"))?;
+    let mut client = connect_tls_overlay(peer.overlay_endpoint, peer.certificate_sha256, hello)
+        .await
+        .map_err(|error| format!("pod message connection failed: {error}"))?;
+    if !client.remote_username.eq_ignore_ascii_case(&peer.username) {
+        return Err("pod message overlay identity did not match the trusted peer".to_owned());
+    }
+
+    let payload = serde_json::to_vec(&serde_json::json!({
+        "PodId": pod_id,
+        "ChannelId": channel_id,
+        "Body": body,
+        "Signature": signature,
+    }))
+    .map_err(|error| format!("pod message request encode failed: {error}"))?;
+    let call = MeshServiceCall::new(
+        uuid::Uuid::new_v4().to_string(),
+        "pods",
+        "PostMessage",
+        payload,
+    )
+    .map_err(|error| format!("pod message request failed: {error}"))?;
+    let reply = bounded_mesh_operation(
+        client.call(&call),
+        "pod message call",
+        POD_MESSAGE_CALL_TIMEOUT,
+    )
+    .await?;
+    if reply.status_code != 0 {
+        return Err(format!(
+            "pod message peer rejected delivery with status {}: {}",
+            reply.status_code,
+            reply.error_message.as_deref().unwrap_or("remote error")
+        ));
+    }
+    let response = serde_json::from_slice::<serde_json::Value>(&reply.payload)
+        .map_err(|error| format!("pod message response decode failed: {error}"))?;
+    if !response
+        .get("Success")
+        .or_else(|| response.get("success"))
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+    {
+        return Err("pod message peer reported unsuccessful delivery".to_owned());
+    }
+    response
+        .get("MessageId")
+        .or_else(|| response.get("messageId"))
+        .and_then(serde_json::Value::as_str)
+        .filter(|message_id| !message_id.trim().is_empty())
+        .map(str::to_owned)
+        .ok_or_else(|| "pod message peer omitted the delivered message ID".to_owned())
 }
 
 async fn fetch_content_inner(
@@ -211,6 +291,28 @@ fn validate_request(
         || !expected_sha256.bytes().all(|byte| byte.is_ascii_hexdigit())
     {
         return Err("mesh content request is invalid".to_owned());
+    }
+    Ok(())
+}
+
+fn validate_pod_message(
+    local_username: &str,
+    pod_id: &str,
+    channel_id: &str,
+    body: &str,
+    signature: &str,
+) -> Result<(), String> {
+    if local_username.trim().is_empty()
+        || pod_id.trim().is_empty()
+        || channel_id.trim().is_empty()
+        || body.trim().is_empty()
+        || body.len() > MAX_POD_MESSAGE_BYTES
+        || signature.len() > 2 * 1024
+        || [local_username, pod_id, channel_id, body, signature]
+            .iter()
+            .any(|value| value.chars().any(char::is_control))
+    {
+        return Err("pod message request is invalid".to_owned());
     }
     Ok(())
 }

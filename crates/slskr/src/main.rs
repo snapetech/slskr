@@ -330,7 +330,7 @@ use crate::config::{
     json_bool_option, json_escape, json_option, json_u32_option, json_u64_option,
     json_usize_option, parse_compat_ip_address, AppConfig, ConfigEnv,
     ControllerCompatibilityTarget, MusicBrainzIntegrationSettings, PodSignatureMode, ProcessEnv,
-    ShareDirectory,
+    ShareDirectory, TrustedMeshPeer,
 };
 use crate::utils::*;
 
@@ -47515,6 +47515,88 @@ async fn quarantine_accept_release_candidate_response(
     }
 }
 
+fn trusted_mesh_peer_for(state: &AppState, identity: &str) -> Option<TrustedMeshPeer> {
+    let identity = identity.trim();
+    if identity.is_empty() {
+        return None;
+    }
+    state
+        .config
+        .trusted_mesh_peers
+        .iter()
+        .find(|peer| peer.matches(identity))
+        .cloned()
+}
+
+async fn route_pod_message_to_peer(
+    state: &AppState,
+    message: &serde_json::Value,
+    peer_identity: &str,
+) -> Result<String, String> {
+    let peer = trusted_mesh_peer_for(state, peer_identity).ok_or_else(|| {
+        format!(
+            "no authenticated mesh endpoint is configured for peer {}",
+            peer_identity.trim()
+        )
+    })?;
+    let local_username = pod_request_peer_id(state)
+        .await
+        .or_else(|| state.config.username.clone())
+        .unwrap_or_else(|| "slskr".to_owned());
+    let pod_id = message
+        .get("podId")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let channel_id = message
+        .get("channelId")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let body = message
+        .get("body")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let signature = message
+        .get("signature")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    mesh_services::post_pod_message(
+        &peer,
+        &local_username,
+        &state.capability_signing_key,
+        pod_id,
+        channel_id,
+        body,
+        signature,
+    )
+    .await
+}
+
+fn quarantine_safe_opaque_reference(value: &str) -> bool {
+    let value = value.trim();
+    if value.is_empty() || value.len() > 200 {
+        return false;
+    }
+    let lowered = value.to_ascii_lowercase();
+    if value.contains(['/', '\\'])
+        || [
+            "localhost",
+            "127.0.0.1",
+            "192.168.",
+            "10.",
+            "172.16.",
+            "path",
+            "file",
+            "private",
+            "internal",
+        ]
+        .iter()
+        .any(|fragment| lowered.contains(fragment))
+    {
+        return false;
+    }
+    !(value.len() >= 32 && value.bytes().all(|byte| byte.is_ascii_hexdigit()))
+}
+
 async fn quarantine_route_request_response(
     path: &str,
     body: &str,
@@ -47545,6 +47627,10 @@ async fn quarantine_route_request_response(
     };
     let payload =
         serde_json::from_str::<serde_json::Value>(body).unwrap_or_else(|_| serde_json::json!({}));
+    let unsafe_metadata = ["senderPeerId", "podId", "channelId"]
+        .into_iter()
+        .filter_map(|field| payload.get(field).and_then(serde_json::Value::as_str))
+        .any(|value| !quarantine_safe_opaque_reference(value));
     let juror_names = request
         .get("jurors")
         .and_then(serde_json::Value::as_array)
@@ -47574,31 +47660,114 @@ async fn quarantine_route_request_response(
         !juror_names
             .iter()
             .any(|listed| listed.eq_ignore_ascii_case(juror))
+            || !quarantine_safe_opaque_reference(juror)
     });
 
     let id = format!("quarantine-jury-route:{}", uuid::Uuid::new_v4().simple());
-    let (success, error_message, failed_jurors) = if invalid_target {
-        (
-            false,
-            "Route targets must be selected safe jurors.".to_owned(),
-            target_jurors.clone(),
-        )
-    } else {
-        // slskr has no pod-to-peer message router wired to this feature
-        // yet. This matches the oracle's own fallback when its router
-        // isn't configured (`_messageRouter == null`) -- a real code path,
-        // not a fabricated success.
-        (
-            false,
-            "Routing backend is not available.".to_owned(),
-            target_jurors.clone(),
-        )
-    };
+    let (success, error_message, routed_jurors, failed_jurors, message_id, pod_id, channel_id) =
+        if unsafe_metadata {
+            (
+                false,
+                Some("Route metadata must be opaque and safe.".to_owned()),
+                Vec::<String>::new(),
+                Vec::<String>::new(),
+                String::new(),
+                String::new(),
+                String::new(),
+            )
+        } else if invalid_target {
+            (
+                false,
+                Some("Route targets must be selected safe jurors.".to_owned()),
+                Vec::<String>::new(),
+                target_jurors.clone(),
+                String::new(),
+                String::new(),
+                String::new(),
+            )
+        } else {
+            let pod_id = payload
+                .get("podId")
+                .and_then(serde_json::Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .unwrap_or("quarantine-jury")
+                .to_owned();
+            let channel_id = payload
+                .get("channelId")
+                .and_then(serde_json::Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned)
+                .unwrap_or_else(|| format!("request:{request_id}"));
+            let message_id = format!("quarantine-jury-request:{}", uuid::Uuid::new_v4().simple());
+            let body = serde_json::json!({
+            "type": "slskdn.quarantine-jury.request.v1",
+            "requestId": request_id,
+            "localReason": request.get("localReason").cloned().unwrap_or(serde_json::Value::Null),
+            "evidence": request.get("evidence").cloned().unwrap_or_else(|| serde_json::json!([])),
+            "requiredVotes": request.get("minJurorVotes").cloned().unwrap_or(serde_json::json!(0)),
+            "targetJurors": target_jurors,
+            "createdAt": chrono::Utc::now().to_rfc3339(),
+        })
+        .to_string();
+            let message = serde_json::json!({
+                "messageId": message_id,
+                "podId": pod_id,
+                "channelId": channel_id,
+                "senderPeerId": payload
+                    .get("senderPeerId")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .unwrap_or("local-quarantine-jury"),
+                "body": body,
+                "signature": "local-quarantine-jury-route",
+                "timestampUnixMs": unix_timestamp_millis(),
+                "sigVersion": 1,
+            });
+            let has_configured_backend = target_jurors
+                .iter()
+                .any(|juror| trusted_mesh_peer_for(state, juror).is_some());
+            if !has_configured_backend {
+                (
+                    false,
+                    Some("Routing backend is not available.".to_owned()),
+                    Vec::<String>::new(),
+                    target_jurors.clone(),
+                    message_id,
+                    pod_id,
+                    channel_id,
+                )
+            } else {
+                let mut routed_jurors = Vec::new();
+                let mut failed_jurors = Vec::new();
+                for juror in &target_jurors {
+                    match route_pod_message_to_peer(state, &message, juror).await {
+                        Ok(_) => routed_jurors.push(juror.clone()),
+                        Err(_) => failed_jurors.push(juror.clone()),
+                    }
+                }
+                let success = failed_jurors.is_empty();
+                (
+                    success,
+                    (!success).then(|| "One or more jurors could not be reached.".to_owned()),
+                    routed_jurors,
+                    failed_jurors,
+                    message_id,
+                    pod_id,
+                    channel_id,
+                )
+            }
+        };
     let attempt = serde_json::json!({
         "id": id,
         "requestId": request_id,
+        "messageId": message_id,
+        "podId": pod_id,
+        "channelId": channel_id,
         "targetJurors": target_jurors,
-        "routedJurors": Vec::<String>::new(),
+        "routedJurors": routed_jurors,
         "failedJurors": failed_jurors,
         "success": success,
         "errorMessage": error_message,
@@ -48921,18 +49090,26 @@ async fn podcore_mutation_response(
                     .and_then(serde_json::Value::as_str)
                     .map(str::trim)
                     .unwrap_or_default();
+                let mut successfully_routed = 0_usize;
+                let mut failed_peer_ids = Vec::new();
+                for peer_id in &peer_ids {
+                    match route_pod_message_to_peer(state, message, peer_id).await {
+                        Ok(_) => successfully_routed += 1,
+                        Err(_) => failed_peer_ids.push(peer_id.clone()),
+                    }
+                }
                 let duration = format_timespan_hms(started_at.elapsed().as_secs() as i64);
                 return Some(routing::ok_response(
                     serde_json::json!({
-                        "success": true,
+                        "success": failed_peer_ids.is_empty(),
                         "messageId": message_id,
                         "podId": pod_id,
                         "targetPeerCount": peer_ids.len(),
-                        "successfullyRoutedCount": peer_ids.len(),
-                        "failedRoutingCount": 0,
+                        "successfullyRoutedCount": successfully_routed,
+                        "failedRoutingCount": failed_peer_ids.len(),
                         "routingDuration": duration,
                         "errorMessage": null,
-                        "failedPeerIds": [],
+                        "failedPeerIds": failed_peer_ids,
                     })
                     .to_string(),
                 ));
@@ -49034,14 +49211,27 @@ async fn podcore_mutation_response(
             }
 
             let target_count = peer_ids.len();
+            let mut successfully_routed = 0_usize;
+            let mut failed_peer_ids = Vec::new();
+            for peer_id in &peer_ids {
+                match route_pod_message_to_peer(state, &payload, peer_id).await {
+                    Ok(_) => successfully_routed += 1,
+                    Err(_) => failed_peer_ids.push(peer_id.clone()),
+                }
+            }
             if target_count > 0 {
                 state.podcore_runtime_stats.record_routing(
                     pod_id,
                     target_count,
-                    target_count,
-                    0,
+                    successfully_routed,
+                    failed_peer_ids.len(),
                     started_at.elapsed().as_millis() as u64,
                 );
+            }
+            if !failed_peer_ids.is_empty() {
+                return Some(routing::internal_server_error_response(
+                    "Failed to route message",
+                ));
             }
             Some(routing::ok_response(
                 serde_json::json!({
@@ -49049,7 +49239,7 @@ async fn podcore_mutation_response(
                     "messageId": message_id,
                     "podId": pod_id,
                     "targetPeerCount": target_count,
-                    "successfullyRoutedCount": target_count,
+                    "successfullyRoutedCount": successfully_routed,
                     "failedRoutingCount": 0,
                     "routingDuration": format_timespan_hms(started_at.elapsed().as_secs() as i64),
                     "errorMessage": null,
@@ -76829,6 +77019,17 @@ mod tests {
         Arc::get_mut(&mut state)
             .expect("unshared state")
             .private_gateway = Some(gateway.clone());
+        Arc::get_mut(&mut state)
+            .expect("unshared state")
+            .config
+            .trusted_mesh_peers
+            .push(super::TrustedMeshPeer {
+                peer_id: "tester".to_owned(),
+                username: "tester".to_owned(),
+                overlay_endpoint: endpoint,
+                certificate_sha256: certificate_pin,
+                range_endpoint: None,
+            });
         let mesh_content = b"frozen mesh content bytes";
         let mesh_content_path = root.join("mesh-content.flac");
         std::fs::write(&mesh_content_path, mesh_content).expect("write mesh content fixture");
@@ -76918,8 +77119,43 @@ mod tests {
             .await
             .update_capability(descriptor)
             .expect("register member capability");
+        let local_descriptor = super::local_capability_descriptor(&state)
+            .await
+            .expect("local capability descriptor");
+        state
+            .mesh
+            .write()
+            .await
+            .update_capability(local_descriptor)
+            .expect("register local capability");
+        super::remember_peer_endpoint(
+            &state,
+            super::PeerAddress {
+                username: "tester".to_owned(),
+                ip: std::net::Ipv4Addr::LOCALHOST,
+                port: 1,
+                obfuscation_type: 0,
+                obfuscated_port: 0,
+            },
+        )
+        .await;
 
         let gateway_server = tokio::spawn(gateway.run(Arc::clone(&state)));
+        let routed_message_id = super::route_pod_message_to_peer(
+            &state,
+            &serde_json::json!({
+                "messageId": "routed-message",
+                "podId": "pod-gateway",
+                "channelId": "general",
+                "body": "routed through trusted mesh",
+                "signature": "",
+            }),
+            "tester",
+        )
+        .await
+        .expect("trusted mesh pod route");
+        assert!(!routed_message_id.is_empty());
+
         let mut hello = MeshHello::new(
             "member",
             vec![FEATURE_MESH_SERVICE.to_owned()],
@@ -76978,8 +77214,17 @@ mod tests {
         );
         let messages =
             serde_json::from_slice::<serde_json::Value>(&messages_reply.payload).unwrap();
-        assert_eq!(messages[0]["senderPeerId"], "member");
-        assert_eq!(messages[0]["body"], "mesh hello");
+        assert!(messages
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|message| message["senderPeerId"] == "member" && message["body"] == "mesh hello"));
+        assert!(messages
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|message| message["senderPeerId"] == "tester"
+                && message["body"] == "routed through trusted mesh"));
 
         let shadow_reply = client
             .call(
@@ -97078,16 +97323,15 @@ mod tests {
         )
         .await
         .expect("route message");
-        assert_eq!(routed.status, "200 OK", "{}", routed.body);
-        let routed_json = serde_json::from_str::<serde_json::Value>(&routed.body).unwrap();
-        assert_eq!(routed_json["success"], true);
-        assert_eq!(routed_json["messageId"], "routing-message-1");
-        assert_eq!(routed_json["podId"], pod_id);
-        assert_eq!(routed_json["targetPeerCount"], 1);
-        assert_eq!(routed_json["successfullyRoutedCount"], 1);
-        assert_eq!(routed_json["failedRoutingCount"], 0);
-        assert_eq!(routed_json["failedPeerIds"], serde_json::json!([]));
-        assert!(routed_json["routingDuration"].is_string());
+        assert_eq!(
+            routed.status, "500 Internal Server Error",
+            "{}",
+            routed.body
+        );
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&routed.body).unwrap()["error"],
+            "Failed to route message"
+        );
 
         let direct = super::route_http_request(
             "POST",
@@ -97109,9 +97353,14 @@ mod tests {
         .expect("route message to peers");
         assert_eq!(direct.status, "200 OK", "{}", direct.body);
         let direct_json = serde_json::from_str::<serde_json::Value>(&direct.body).unwrap();
+        assert_eq!(direct_json["success"], false);
         assert_eq!(direct_json["targetPeerCount"], 1);
-        assert_eq!(direct_json["successfullyRoutedCount"], 1);
-        assert_eq!(direct_json["failedRoutingCount"], 0);
+        assert_eq!(direct_json["successfullyRoutedCount"], 0);
+        assert_eq!(direct_json["failedRoutingCount"], 1);
+        assert_eq!(
+            direct_json["failedPeerIds"],
+            serde_json::json!(["target-peer"])
+        );
 
         let stats =
             super::route_http_request("GET", "/api/v0/podcore/routing/stats", None, "", &state)
@@ -97120,8 +97369,8 @@ mod tests {
         let stats_json = serde_json::from_str::<serde_json::Value>(&stats.body).unwrap();
         assert_eq!(stats_json["totalMessagesRouted"], 1);
         assert_eq!(stats_json["totalRoutingAttempts"], 1);
-        assert_eq!(stats_json["successfulRoutingCount"], 1);
-        assert_eq!(stats_json["failedRoutingCount"], 0);
+        assert_eq!(stats_json["successfulRoutingCount"], 0);
+        assert_eq!(stats_json["failedRoutingCount"], 1);
         assert_eq!(stats_json["activeDeduplicationItems"], 1);
         assert_eq!(stats_json["routingStatsByPod"][pod_id], 1);
         assert!(stats_json["bloomFilterFillRatio"].as_f64().unwrap() > 0.0);
