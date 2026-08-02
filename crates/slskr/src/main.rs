@@ -46512,15 +46512,25 @@ async fn misc_controller_mutation_response(
             "receivedAt": unix_timestamp(),
         });
         let key = format!("activitypub/{actor}/{direction}/{id}");
-        return Some(
-            match state.controller_features.write().await.upsert(key, record) {
+        let activity_store_result = { state.controller_features.write().await.upsert(key, record) };
+        return Some(match activity_store_result {
+            Ok(()) => match activitypub_apply_relationship(
+                actor,
+                direction,
+                activity_type,
+                &response_activity,
+                state,
+            )
+            .await
+            {
                 Ok(()) if direction == "outbox" => {
                     routing::ok_response(response_activity.to_string())
                 }
                 Ok(()) => routing::accepted_response(String::new()),
                 Err(error) => routing::service_unavailable_response(&error),
             },
-        );
+            Err(error) => routing::service_unavailable_response(&error),
+        });
     }
     if method == "POST" && path == "/api/audio/analyzers/migrate" {
         let discovery = state.content_discovery.read().await;
@@ -46975,6 +46985,160 @@ async fn activitypub_actor_exists(actor: &str, state: &AppState) -> bool {
         .is_empty()
 }
 
+fn activitypub_value_string(value: Option<&serde_json::Value>) -> Option<String> {
+    match value {
+        Some(serde_json::Value::String(value)) if !value.trim().is_empty() => {
+            Some(value.trim().to_owned())
+        }
+        Some(serde_json::Value::Object(object)) => object
+            .get("id")
+            .and_then(serde_json::Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .map(|value| value.trim().to_owned()),
+        _ => None,
+    }
+}
+
+fn activitypub_object_type(value: Option<&serde_json::Value>) -> Option<&str> {
+    value
+        .and_then(serde_json::Value::as_object)
+        .and_then(|object| object.get("type"))
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+}
+
+fn activitypub_object_actor_id(value: Option<&serde_json::Value>) -> Option<String> {
+    match value {
+        Some(serde_json::Value::String(value)) if !value.trim().is_empty() => {
+            Some(value.trim().to_owned())
+        }
+        Some(serde_json::Value::Object(object)) => object
+            .get("actor")
+            .or_else(|| object.get("object"))
+            .or_else(|| object.get("id"))
+            .and_then(|value| activitypub_value_string(Some(value))),
+        _ => None,
+    }
+}
+
+fn activitypub_relationship_key(actor: &str, collection: &str, remote_actor_id: &str) -> String {
+    let remote_digest = hex::encode(Sha256::digest(remote_actor_id.as_bytes()));
+    format!("activitypub/{actor}/relationships/{collection}/{remote_digest}")
+}
+
+fn activitypub_relationship_items(
+    features: &ControllerFeatureState,
+    actor: &str,
+    collection: &str,
+    limit: usize,
+) -> Vec<String> {
+    let prefix = format!("activitypub/{actor}/relationships/{collection}/");
+    let mut records = features
+        .entries_with_prefix(&prefix)
+        .into_iter()
+        .filter_map(|(key, value)| {
+            let remote_actor_id = value
+                .get("remoteActorId")
+                .and_then(serde_json::Value::as_str)
+                .filter(|value| !value.trim().is_empty())?
+                .trim()
+                .to_owned();
+            let updated_at = value
+                .get("updatedAt")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or_default();
+            Some((key, remote_actor_id, updated_at))
+        })
+        .collect::<Vec<_>>();
+    records.sort_by(|left, right| right.2.cmp(&left.2).then_with(|| right.0.cmp(&left.0)));
+    records
+        .into_iter()
+        .take(limit)
+        .map(|(_, remote_actor_id, _)| remote_actor_id)
+        .collect()
+}
+
+async fn activitypub_apply_relationship(
+    actor: &str,
+    direction: &str,
+    activity_type: &str,
+    activity: &serde_json::Value,
+    state: &AppState,
+) -> Result<(), String> {
+    let is_inbox = direction == "inbox";
+    let is_outbox = direction == "outbox";
+    if !is_inbox && !is_outbox {
+        return Ok(());
+    }
+
+    let activity_type = activity_type.trim();
+    let object = activity.get("object");
+    let object_is_follow =
+        activitypub_object_type(object).is_some_and(|value| value.eq_ignore_ascii_case("Follow"));
+    let mut upserts = Vec::new();
+    let mut removals = Vec::new();
+
+    if is_outbox && activity_type.eq_ignore_ascii_case("Follow") {
+        if let Some(remote_actor_id) = activitypub_object_actor_id(object) {
+            upserts.push(("following", remote_actor_id));
+        }
+    } else if is_inbox && activity_type.eq_ignore_ascii_case("Follow") {
+        if let Some(remote_actor_id) = activitypub_value_string(activity.get("actor")) {
+            upserts.push(("followers", remote_actor_id));
+        }
+    } else if activity_type.eq_ignore_ascii_case("Undo")
+        || activity_type.eq_ignore_ascii_case("Remove")
+    {
+        if object_is_follow {
+            let remote_actor_id = activitypub_object_actor_id(object)
+                .or_else(|| activitypub_value_string(activity.get("actor")));
+            if let Some(remote_actor_id) = remote_actor_id {
+                if is_inbox {
+                    removals.push(("followers", remote_actor_id.clone()));
+                    if activity_type.eq_ignore_ascii_case("Remove") {
+                        removals.push(("following", remote_actor_id));
+                    }
+                } else {
+                    removals.push(("following", remote_actor_id));
+                }
+            }
+        }
+    } else if is_inbox
+        && (activity_type.eq_ignore_ascii_case("Accept")
+            || activity_type.eq_ignore_ascii_case("Reject"))
+        && object_is_follow
+    {
+        if let Some(remote_actor_id) = activitypub_value_string(activity.get("actor")) {
+            if activity_type.eq_ignore_ascii_case("Accept") {
+                upserts.push(("following", remote_actor_id));
+            } else {
+                removals.push(("following", remote_actor_id));
+            }
+        }
+    }
+
+    if upserts.is_empty() && removals.is_empty() {
+        return Ok(());
+    }
+
+    let mut features = state.controller_features.write().await;
+    for (collection, remote_actor_id) in upserts {
+        let key = activitypub_relationship_key(actor, collection, &remote_actor_id);
+        features.upsert(
+            key,
+            serde_json::json!({
+                "remoteActorId": remote_actor_id,
+                "updatedAt": unix_timestamp_millis(),
+            }),
+        )?;
+    }
+    for (collection, remote_actor_id) in removals {
+        let key = activitypub_relationship_key(actor, collection, &remote_actor_id);
+        features.remove(&key)?;
+    }
+    Ok(())
+}
+
 async fn activitypub_music_activities(
     actor_id: &str,
     base_url: &str,
@@ -47088,12 +47252,18 @@ async fn activitypub_get_response(path: &str, state: &AppState) -> HttpResponse 
             }))
         }
         [collection] if matches!(collection.as_str(), "followers" | "following") => {
+            let items = activitypub_relationship_items(
+                &*state.controller_features.read().await,
+                actor,
+                collection,
+                page_size,
+            );
             activitypub_response(serde_json::json!({
                 "@context": "https://www.w3.org/ns/activitystreams",
                 "id": format!("{actor_id}/{collection}"),
                 "type": "OrderedCollection",
-                "totalItems": 0,
-                "orderedItems": [],
+                "totalItems": items.len(),
+                "orderedItems": items,
             }))
         }
         _ => routing::not_found_response(),
@@ -103574,6 +103744,208 @@ mod tests {
             .await
             .expect("generic actor response");
         assert_eq!(generic.status, "404 Not Found");
+    }
+
+    #[tokio::test]
+    async fn activitypub_relationship_collections_track_target_lifecycle() {
+        let (state, _receiver) = test_state_with_env(
+            MapEnv::default()
+                .with("FEDERATION_ENABLED", "true")
+                .with("FEDERATION_MODE", "Public")
+                .with("FEDERATION_DOMAIN", "social.example")
+                .with("FEDERATION_BASE_URL", "https://social.example/")
+                .with("FEDERATION_PAGE_SIZE", "10"),
+        );
+        let follower_one = "https://remote.example/actors/follower-one";
+        let follower_two = "https://remote.example/actors/follower-two";
+        let following_one = "https://remote.example/actors/following-one";
+
+        let response = super::route_http_request(
+            "POST",
+            "/actors/music/inbox",
+            None,
+            &serde_json::json!({
+                "id": "follow-one",
+                "type": "Follow",
+                "actor": follower_one,
+                "object": "https://social.example/actors/music"
+            })
+            .to_string(),
+            &state,
+        )
+        .await
+        .expect("inbound follow");
+        assert_eq!(response.status, "202 Accepted");
+
+        let response = super::route_http_request(
+            "POST",
+            "/actors/music/outbox",
+            None,
+            &serde_json::json!({
+                "id": "follow-two",
+                "type": "Follow",
+                "object": following_one
+            })
+            .to_string(),
+            &state,
+        )
+        .await
+        .expect("outbound follow");
+        assert_eq!(response.status, "200 OK");
+
+        let response = super::route_http_request(
+            "POST",
+            "/actors/music/inbox",
+            None,
+            &serde_json::json!({
+                "id": "accept-two",
+                "type": "Accept",
+                "actor": follower_two,
+                "object": {"type": "Follow", "object": "https://social.example/actors/music"}
+            })
+            .to_string(),
+            &state,
+        )
+        .await
+        .expect("inbound accept");
+        assert_eq!(response.status, "202 Accepted");
+
+        let response =
+            super::route_http_request("GET", "/actors/music/followers", None, "", &state)
+                .await
+                .expect("followers collection");
+        let followers = serde_json::from_str::<serde_json::Value>(&response.body).unwrap();
+        assert_eq!(followers["totalItems"], 1);
+        assert_eq!(followers["orderedItems"][0], follower_one);
+
+        let response =
+            super::route_http_request("GET", "/actors/music/following", None, "", &state)
+                .await
+                .expect("following collection");
+        let following = serde_json::from_str::<serde_json::Value>(&response.body).unwrap();
+        assert_eq!(following["totalItems"], 2);
+        assert!(following["orderedItems"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item == following_one));
+        assert!(following["orderedItems"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item == follower_two));
+
+        let response = super::route_http_request(
+            "POST",
+            "/actors/music/inbox",
+            None,
+            &serde_json::json!({
+                "id": "reject-two",
+                "type": "Reject",
+                "actor": follower_two,
+                "object": {"type": "Follow", "object": "https://social.example/actors/music"}
+            })
+            .to_string(),
+            &state,
+        )
+        .await
+        .expect("inbound reject");
+        assert_eq!(response.status, "202 Accepted");
+
+        let response = super::route_http_request(
+            "POST",
+            "/actors/music/inbox",
+            None,
+            &serde_json::json!({
+                "id": "follow-three",
+                "type": "Follow",
+                "actor": follower_two,
+                "object": "https://social.example/actors/music"
+            })
+            .to_string(),
+            &state,
+        )
+        .await
+        .expect("second inbound follow");
+        assert_eq!(response.status, "202 Accepted");
+
+        let response = super::route_http_request(
+            "POST",
+            "/actors/music/outbox",
+            None,
+            &serde_json::json!({
+                "id": "follow-three-outbound",
+                "type": "Follow",
+                "object": follower_two
+            })
+            .to_string(),
+            &state,
+        )
+        .await
+        .expect("second outbound follow");
+        assert_eq!(response.status, "200 OK");
+
+        let response = super::route_http_request(
+            "POST",
+            "/actors/music/inbox",
+            None,
+            &serde_json::json!({
+                "id": "remove-three",
+                "type": "Remove",
+                "actor": follower_two,
+                "object": {"type": "Follow", "actor": follower_two}
+            })
+            .to_string(),
+            &state,
+        )
+        .await
+        .expect("inbound remove");
+        assert_eq!(response.status, "202 Accepted");
+
+        let response = super::route_http_request(
+            "POST",
+            "/actors/music/inbox",
+            None,
+            &serde_json::json!({
+                "id": "undo-one",
+                "type": "Undo",
+                "actor": follower_one,
+                "object": {"type": "Follow", "actor": follower_one}
+            })
+            .to_string(),
+            &state,
+        )
+        .await
+        .expect("inbound undo");
+        assert_eq!(response.status, "202 Accepted");
+
+        let response = super::route_http_request(
+            "POST",
+            "/actors/music/outbox",
+            None,
+            &serde_json::json!({
+                "id": "undo-one-outbound",
+                "type": "Undo",
+                "object": {"type": "Follow", "object": following_one}
+            })
+            .to_string(),
+            &state,
+        )
+        .await
+        .expect("outbound undo");
+        assert_eq!(response.status, "200 OK");
+
+        for (path, expected) in [
+            ("/actors/music/followers", 0),
+            ("/actors/music/following", 0),
+        ] {
+            let response = super::route_http_request("GET", path, None, "", &state)
+                .await
+                .expect("empty relationship collection");
+            let collection = serde_json::from_str::<serde_json::Value>(&response.body).unwrap();
+            assert_eq!(collection["totalItems"], expected, "{path}");
+            assert!(collection["orderedItems"].as_array().unwrap().is_empty());
+        }
     }
 
     #[tokio::test]
