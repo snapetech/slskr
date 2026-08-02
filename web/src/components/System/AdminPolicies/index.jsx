@@ -89,6 +89,8 @@ const buildForm = (options = {}) => {
     getOption(options, 'scheduledLimits', 'scheduled_limits', 'ScheduledLimits') || {};
   const filters = getOption(options, 'filters', 'Filters') || {};
   const searchFilters = getOption(filters, 'search', 'Search') || {};
+  const searchRetention =
+    getOption(filters, 'searchRetention', 'search_retention', 'SearchRetention') || {};
   const blacklist = getOption(options, 'blacklist', 'Blacklist') || {};
   const throttling = getOption(options, 'throttling', 'Throttling') || {};
   const incoming =
@@ -123,7 +125,7 @@ const buildForm = (options = {}) => {
     getOption(download, 'scheduledLimits', 'scheduled_limits', 'ScheduledLimits') ||
     scheduledLimits;
   const shares = getShareOptions(options);
-  const features = getOption(options, 'features', 'Features') || {};
+  const features = getOption(options, 'feature', 'Feature', 'features', 'Features') || {};
   const dht = getOption(options, 'dht', 'dhtRendezvous', 'DhtRendezvous') || {};
   const rescueMode = getOption(options, 'rescueMode', 'rescue_mode', 'RescueMode') || {};
 
@@ -207,6 +209,20 @@ const buildForm = (options = {}) => {
     retentionDownloadErrored: String(getOption(retentionDownload, 'errored', 'Errored') ?? ''),
     retentionDownloadSucceeded: String(getOption(retentionDownload, 'succeeded', 'Succeeded') ?? ''),
     retentionSearch: String(getOption(retention, 'search', 'Search') ?? ''),
+    searchRetentionMaxAgeDays: String(
+      getOption(searchRetention, 'maxAgeDays', 'max_age_days', 'MaxAgeDays') ?? 30,
+    ),
+    searchRetentionMaxCount: String(
+      getOption(searchRetention, 'maxCount', 'max_count', 'MaxCount') ?? 1000,
+    ),
+    searchRetentionCleanupInterval: String(
+      getOption(
+        searchRetention,
+        'cleanupIntervalSeconds',
+        'cleanup_interval_seconds',
+        'CleanupIntervalSeconds',
+      ) ?? 86400,
+    ),
     retentionUploadCancelled: String(getOption(retentionUpload, 'cancelled', 'Cancelled') ?? ''),
     retentionUploadErrored: String(getOption(retentionUpload, 'errored', 'Errored') ?? ''),
     retentionUploadSucceeded: String(getOption(retentionUpload, 'succeeded', 'Succeeded') ?? ''),
@@ -356,7 +372,6 @@ const AdminPolicies = ({ options = {} }) => {
         Number.parseFloat(form.autoReplaceThreshold) || 0,
       );
       document.setIn(['auto_replace', 'max_retries'], toNumber(form.autoReplaceMaxRetries, 3));
-      document.setIn(['scheduled_limits', 'enabled'], form.scheduledLimitsEnabled);
       document.setIn(
         ['transfers', 'upload', 'scheduled_limits', 'enabled'],
         form.uploadScheduledLimitsEnabled,
@@ -420,6 +435,18 @@ const AdminPolicies = ({ options = {} }) => {
       );
 
       document.setIn(['filters', 'search', 'request'], parseLines(form.searchFilterRequest));
+      document.setIn(
+        ['filters', 'search_retention', 'max_age_days'],
+        toNumber(form.searchRetentionMaxAgeDays, 30),
+      );
+      document.setIn(
+        ['filters', 'search_retention', 'max_count'],
+        toNumber(form.searchRetentionMaxCount, 1000),
+      );
+      document.setIn(
+        ['filters', 'search_retention', 'cleanup_interval_seconds'],
+        toNumber(form.searchRetentionCleanupInterval, 86400),
+      );
       document.setIn(['blacklist', 'enabled'], form.blacklistEnabled);
       document.setIn(['blacklist', 'file'], form.blacklistFile.trim());
       document.setIn(['dht', 'enabled'], form.dhtEnabled);
@@ -431,7 +458,7 @@ const AdminPolicies = ({ options = {} }) => {
         ['dht', 'announce_interval_seconds'],
         toNumber(form.dhtAnnounceIntervalSeconds, 900),
       );
-      document.setIn(['features', 'scene_pod_bridge'], form.featureScenePodBridge);
+      document.setIn(['feature', 'scene_pod_bridge'], form.featureScenePodBridge);
       document.setIn(['rescue_mode', 'enabled'], form.rescueModeEnabled);
       document.setIn(
         ['rescue_mode', 'max_queue_time_seconds'],

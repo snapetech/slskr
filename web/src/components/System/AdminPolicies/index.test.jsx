@@ -139,6 +139,13 @@ describe('AdminPolicies', () => {
     expect(saved.dht.lan_only).toBe(true);
     expect(saved.shares.probe_media_attributes).toBe(false);
     expect(saved.retention.logs).toBe(180);
+    expect(saved.filters.search_retention).toEqual({
+      max_age_days: 30,
+      max_count: 1000,
+      cleanup_interval_seconds: 86400,
+    });
+    expect(saved.feature.scene_pod_bridge).toBe(false);
+    expect(saved.scheduled_limits).toBeUndefined();
   });
 
   it('keeps save disabled when remote configuration is off', () => {
