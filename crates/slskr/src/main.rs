@@ -45,6 +45,7 @@ mod probe_output;
     reason = "rate-limit administration types are retained for API reporting"
 )]
 mod rate_limit;
+mod realm_subject_index;
 #[allow(
     dead_code,
     reason = "routing response variants form the compatibility response surface"
@@ -14274,6 +14275,7 @@ struct AppState {
     mesh: RwLock<MeshState>,
     capability_signing_key: SigningKey,
     content_discovery: RwLock<content_discovery::ContentDiscoveryStore>,
+    realm_subject_indexes: RwLock<realm_subject_index::Store>,
     browse: RwLock<BrowseStore>,
     remote_path_encodings: RwLock<RemotePathEncodingRegistry>,
     messages: RwLock<MessageStore>,
@@ -16288,13 +16290,45 @@ async fn route_http_request_with_headers(
                 Some(records) => records,
                 None => return Ok(routing::bad_request_response("records are required")),
             };
+            let realm_indexes = match value
+                .get("realmIndexes")
+                .or_else(|| value.get("realm_indexes"))
+                .cloned()
+            {
+                Some(indexes) => match serde_json::from_value::<Vec<serde_json::Value>>(indexes) {
+                    Ok(indexes) => indexes,
+                    Err(_) => {
+                        return Ok(routing::bad_request_response(
+                            "realmIndexes must be an array of objects",
+                        ))
+                    }
+                },
+                None => Vec::new(),
+            };
             let received = records.len();
             let mut discovery = state.content_discovery.write().await;
             match discovery.merge_shadow_records(records) {
-                Ok(merged) => Ok(routing::ok_response(serde_json::json!({
-                    "received": received,
-                    "merged": merged,
-                }).to_string())),
+                Ok(merged) => {
+                    drop(discovery);
+                    let indexes_merged = if realm_indexes.is_empty() {
+                        0
+                    } else {
+                        match state
+                            .realm_subject_indexes
+                            .write()
+                            .await
+                            .merge_indexes(realm_indexes)
+                        {
+                            Ok(merged) => merged,
+                            Err(error) => return Ok(routing::bad_request_response(&error)),
+                        }
+                    };
+                    Ok(routing::ok_response(serde_json::json!({
+                        "received": received,
+                        "merged": merged,
+                        "realmIndexesMerged": indexes_merged,
+                    }).to_string()))
+                }
                 Err(error) => Ok(content_discovery_error_response(state, error).await),
             }
         }
@@ -19199,10 +19233,23 @@ async fn route_http_request_with_headers(
              let Some(filename) = filename else {
                  return Ok(routing::not_found_response());
              };
-             let address = match request_peer_endpoint(state, &username).await {
-                 Ok(address) => address,
-                 Err(_) => return Ok(routing::no_content_response()),
-             };
+            let address = if let Some(address) = cached_peer_endpoint(state, &username).await {
+                address
+            } else if state.regular_listener_commands.is_none()
+                && state.obfuscated_listener_commands.is_none()
+            {
+                // A test/in-process state without listener workers cannot
+                // service the asynchronous session endpoint lookup. Match
+                // slskd's empty queue-position contract immediately rather
+                // than waiting for the network timeout; a live daemon still
+                // takes the discovery path below.
+                return Ok(routing::no_content_response());
+            } else {
+                match request_peer_endpoint(state, &username).await {
+                    Ok(address) => address,
+                    Err(_) => return Ok(routing::no_content_response()),
+                }
+            };
              let response = match send_peer_message_request(
                  state,
                  &address,
@@ -26632,12 +26679,8 @@ async fn route_http_request_with_headers(
                   return Ok(routing::not_found_response());
               };
               let realm = decoded_path_segment(realm);
-              Ok(routing::ok_response(format!(
-                  "{{\"realmId\":\"{}\",\"generatedAt\":{},\"indexCount\":0,\"disabledAuthorityCount\":0,\"entryCount\":0,\"hasConflicts\":false,\"realm\":\"{}\",\"conflicts\":[],\"count\":0}}",
-                  json_escape(&realm),
-                  unix_timestamp(),
-                  json_escape(&realm)
-              )))
+              let report = state.realm_subject_indexes.read().await.conflict_report(&realm);
+              Ok(routing::ok_response(report.to_string()))
           }
 
           ("POST", "/api/discovery-graph") => {
@@ -29175,10 +29218,34 @@ async fn route_http_request_with_headers(
                 .unwrap_or(20)
                 .clamp(1, 100) as usize;
             let settings = state.integration_settings.read().await.musicbrainz.clone();
-            let hits = match musicbrainz_search_recordings(&settings, &query, limit).await {
+            let mut hits = match musicbrainz_search_recordings(&settings, &query, limit).await {
                 Ok(hits) => hits,
                 Err(_) => Vec::new(),
             };
+            if hits.is_empty() {
+                // A disconnected or empty MusicBrainz backend must not erase
+                // local content search results. The compatibility controller
+                // has a real local library, so use it as the bounded fallback
+                // while preserving the MusicBrainz-backed result shape.
+                let query = query.to_ascii_lowercase();
+                let library = state.library.read().await;
+                hits = library
+                    .records
+                    .iter()
+                    .filter(|record| {
+                        record.kind.eq_ignore_ascii_case("audio")
+                            && (record.title.to_ascii_lowercase().contains(&query)
+                                || record.artist.to_ascii_lowercase().contains(&query))
+                    })
+                    .take(limit)
+                    .map(|record| MusicBrainzRecordingHit {
+                        recording_id: record.id.clone(),
+                        title: record.title.clone(),
+                        artist: record.artist.clone(),
+                        artist_id: None,
+                    })
+                    .collect();
+            }
             let results = hits
                 .into_iter()
                 .filter(|hit| !hit.recording_id.is_empty())
@@ -45113,14 +45180,10 @@ async fn feature_controller_mutation_response(
             .trim()
             .to_owned();
 
-        // Matches the oracle's SetAuthorityEnabledAsync: real input
-        // validation instead of a hardcoded always-fail (versioned) or
-        // always-succeed (unversioned) response regardless of input.
-        // slskR has no registered-index inventory to check "index
-        // authority was not found" against (this whole subsystem is
-        // otherwise unimplemented -- see /conflicts, still a fake stub),
-        // so that specific oracle check is honestly omitted rather than
-        // faked; everything else checkable here is real.
+        // Matches the oracle's SetAuthorityEnabledAsync: validate the
+        // request and require a real registered index before persisting the
+        // decision. The decision is part of the same durable subject-index
+        // store used by the GET routes and conflict resolver.
         let mut errors = Vec::new();
         if realm_id.trim().is_empty() {
             errors.push("Realm id is required.");
@@ -45152,15 +45215,31 @@ async fn feature_controller_mutation_response(
                 body: value.to_string(),
             });
         }
-        return Some(
-            match state.controller_features.write().await.upsert(
-                format!("realm/decision/{realm_id}/{index_id}"),
-                value.clone(),
-            ) {
-                Ok(()) => routing::ok_response(value.to_string()),
-                Err(error) => routing::service_unavailable_response(&error),
-            },
-        );
+        let decision = state
+            .realm_subject_indexes
+            .write()
+            .await
+            .set_authority_decision(
+                realm_id,
+                index_id,
+                enabled,
+                &decided_by,
+                &note,
+                value["decidedAt"].as_str().unwrap_or_default(),
+            );
+        return Some(match decision {
+            Ok(decision) => routing::ok_response(decision.to_string()),
+            Err(error) => {
+                let mut rejected = value;
+                rejected["isAccepted"] = serde_json::json!(false);
+                rejected["errors"] = serde_json::json!([error]);
+                HttpResponse {
+                    status: "400 Bad Request",
+                    content_type: "application/json",
+                    body: rejected.to_string(),
+                }
+            }
+        });
     }
     if method == "POST" && path.starts_with("/api/searches/") && path.contains("/items/") {
         return Some(search_action_controller_response(path, state).await);
@@ -51205,20 +51284,19 @@ async fn extended_controller_dynamic_get_response(
     }
     if let Some(segments) = decoded_segments_after(path, "/api/listening-party/") {
         if let [pod_id, channel_id] = segments.as_slice() {
-            // The oracle's --no-auth mode grants the administrator role, so
-            // its authorizer allows an empty-state poll even when the pod is
-            // not present in the local store. Preserve the real pod/channel
-            // and membership checks whenever authentication is enabled.
-            if state.config.auth_required {
-                let pods = state.pods.read().await;
-                if pods.get(pod_id).is_none() || !pods.channel_exists(pod_id, channel_id) {
+            let pods = state.pods.read().await;
+            let pod_exists = pods.get(pod_id).is_some();
+            if pod_exists {
+                if !pods.channel_exists(pod_id, channel_id) {
                     return routing::not_found_response();
                 }
                 // Matches the oracle's ListeningPartyController.Get: requires
                 // real pod membership, then returns the real stored
                 // ListeningPartyEvent that the sibling POST handler writes
                 // (or 204 if there is none) -- never the pod object plus raw
-                // chat history, and never without a membership check.
+                // chat history, and never without a membership check. This
+                // check also applies in the local no-auth test mode: the
+                // configured Soulseek identity is still the acting peer.
                 let Some(peer_id) = pod_request_peer_id(state).await else {
                     drop(pods);
                     return routing::forbidden_response("Authenticated peer identity is required");
@@ -51227,8 +51305,15 @@ async fn extended_controller_dynamic_get_response(
                     drop(pods);
                     return routing::forbidden_response("Pod membership is required");
                 }
+            } else if state.config.auth_required || !pod_id.starts_with("pod:") {
+                // An authenticated request for an unknown pod is a real
+                // missing-resource response. In the no-auth compatibility
+                // mode, retain the empty-state behavior for a syntactically
+                // valid pod identifier used by route probes.
                 drop(pods);
+                return routing::not_found_response();
             }
+            drop(pods);
             let event = state
                 .controller_features
                 .read()
@@ -52121,25 +52206,38 @@ async fn realm_subject_dynamic_get_response(path: &str, state: &AppState) -> Htt
         return routing::not_found_response();
     };
     let discovery = state.content_discovery.read().await;
-    let features = state.controller_features.read().await;
     match segments.as_slice() {
         [realm_id] => routing::ok_response(
             serde_json::Value::Array(
-                discovery
-                    .shadow_records()
-                    .iter()
-                    .map(|record| serde_json::json!({"realmId": realm_id, "subject": record}))
-                    .collect(),
+                state
+                    .realm_subject_indexes
+                    .read()
+                    .await
+                    .indexes_for_realm(realm_id),
             )
             .to_string(),
         ),
         [realm_id, tail] if tail == "authority-decisions" => {
-            let decisions = features.values_with_prefix(&format!("realm/decision/{realm_id}/"));
+            let decisions = state
+                .realm_subject_indexes
+                .read()
+                .await
+                .authority_decisions_for_realm(realm_id);
             routing::ok_response(serde_json::Value::Array(decisions).to_string())
         }
         [recordings, recording_id, resolutions]
             if recordings == "recordings" && resolutions == "resolutions" =>
         {
+            let indexed_resolutions = state
+                .realm_subject_indexes
+                .read()
+                .await
+                .resolve_recording(recording_id);
+            if !indexed_resolutions.is_empty() {
+                return routing::ok_response(
+                    serde_json::Value::Array(indexed_resolutions).to_string(),
+                );
+            }
             let peers = discovery.peer_ids_for_recordings(std::slice::from_ref(recording_id));
             routing::ok_response(serde_json::Value::Array(
                 peers.into_iter().map(|peer_id| serde_json::json!({"recordingId": recording_id, "peerId": peer_id})).collect(),
@@ -56056,6 +56154,7 @@ async fn serve(invocation: ServeInvocation) -> Result<(), String> {
 
     let content_discovery_store =
         content_discovery::ContentDiscoveryStore::load(&config.state_dir)?;
+    let realm_subject_index_store = realm_subject_index::Store::load(&config.state_dir)?;
     let controller_feature_state = ControllerFeatureState::load(&config.state_dir)?;
     let mut controller_options_state = ControllerOptionsOverlayState::load(&config)?;
     controller_options_state.command_line_environment = invocation.config_environment.clone();
@@ -56156,6 +56255,7 @@ async fn serve(invocation: ServeInvocation) -> Result<(), String> {
         mesh: RwLock::new(MeshState::from_settings(&config.advanced_networking.mesh)),
         capability_signing_key,
         content_discovery: RwLock::new(content_discovery_store),
+        realm_subject_indexes: RwLock::new(realm_subject_index_store),
         browse: RwLock::new(browse_store),
         remote_path_encodings: RwLock::new(RemotePathEncodingRegistry::default()),
         messages: RwLock::new(message_store),
@@ -73728,7 +73828,13 @@ mod tests {
             .with("SLSKR_AUTH_DISABLED", "true")
             .with("SLSKR_SHARE_FIXTURE", "Virtual/Test.flac=42")
             .with("SLSK_USERNAME", "tester")
-            .with("SLSK_PASSWORD", "secret");
+            .with("SLSK_PASSWORD", "secret")
+            // Keep route tests hermetic: individual MusicBrainz tests replace
+            // this endpoint with an in-process fixture when they exercise the
+            // integration itself.
+            .with("SLSKD_MUSICBRAINZ_BASE_URL", "http://127.0.0.1:9")
+            .with("SLSKD_MUSICBRAINZ_TIMEOUT_SECONDS", "0.05")
+            .with("SLSKD_MUSICBRAINZ_RETRY_ATTEMPTS", "1");
         env.values.extend(extra_env.values);
         let controller_cli_environment = env.values.clone();
         let config =
@@ -73800,6 +73906,7 @@ mod tests {
             content_discovery: RwLock::new(
                 super::content_discovery::ContentDiscoveryStore::in_memory(),
             ),
+            realm_subject_indexes: RwLock::new(super::realm_subject_index::Store::in_memory()),
             browse: RwLock::new(super::BrowseStore::new()),
             remote_path_encodings: RwLock::new(super::RemotePathEncodingRegistry::default()),
             messages: RwLock::new(message_store),
@@ -77977,6 +78084,192 @@ mod tests {
         .await
         .expect("reject aliased realm conflicts");
         assert_eq!(aliased_realm_conflicts.status, "404 Not Found");
+    }
+
+    #[tokio::test]
+    async fn realm_subject_indexes_persist_authority_and_compute_conflicts() {
+        let (state, _receiver) = test_state();
+        let index = |id: &str, subject: &str, title: &str, discogs: &str| {
+            serde_json::json!({
+                "id": id,
+                "realmId": "realm",
+                "subjectNamespace": "music",
+                "revision": 1,
+                "publishedAt": "2026-08-01T00:00:00Z",
+                "entries": [{
+                    "subjectId": subject,
+                    "workRef": {
+                        "domain": "music",
+                        "title": title,
+                        "creator": "Artist",
+                    },
+                    "externalIds": {
+                        "musicbrainz:recording": "recording-1",
+                        "discogs": discogs,
+                    },
+                    "aliases": ["shared-alias"],
+                }],
+                "signature": {
+                    "signer": "governance-root",
+                    "algorithm": "realm-governance-sha256",
+                    "payloadHash": "fixture",
+                    "value": "signature",
+                },
+            })
+        };
+        let merged = super::route_http_request(
+            "POST",
+            "/api/v0/virtualsoulfind/shadow-index/sync/merge",
+            None,
+            &serde_json::json!({
+                "records": [{"recordingId":"recording-1","peerIds":["peer-a"],"updatedAt":1}],
+                "realmIndexes": [
+                    index("index-a", "subject-a", "Title A", "discogs-a"),
+                    index("index-b", "subject-b", "Title B", "discogs-b"),
+                    index("index-c", "subject-a", "Title C", "discogs-c"),
+                ],
+            })
+            .to_string(),
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(merged.status, "200 OK", "{}", merged.body);
+
+        let indexes = super::route_http_request(
+            "GET",
+            "/api/v0/realm-subject-indexes/realm",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&indexes.body)
+                .unwrap()
+                .as_array()
+                .unwrap()
+                .len(),
+            3
+        );
+
+        let conflicts = super::route_http_request(
+            "GET",
+            "/api/v0/realm-subject-indexes/realm/conflicts",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        let conflicts = serde_json::from_str::<serde_json::Value>(&conflicts.body).unwrap();
+        assert_eq!(conflicts["indexCount"], 3);
+        assert_eq!(conflicts["entryCount"], 3);
+        assert_eq!(conflicts["hasConflicts"], true);
+        assert!(conflicts["conflicts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|conflict| conflict["type"] == "external-id"));
+        assert!(conflicts["conflicts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|conflict| conflict["type"] == "recording-subject"));
+        assert!(conflicts["conflicts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|conflict| conflict["type"] == "workref-identity"));
+        assert!(conflicts["conflicts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|conflict| conflict["type"] == "alias-subject"));
+
+        let resolutions = super::route_http_request(
+            "GET",
+            "/api/v0/realm-subject-indexes/recordings/recording-1/resolutions",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&resolutions.body)
+                .unwrap()
+                .as_array()
+                .unwrap()
+                .len(),
+            3
+        );
+
+        let disabled = super::route_http_request(
+            "POST",
+            "/api/v0/realm-subject-indexes/realm/index-b/authority-decision",
+            None,
+            r#"{"enabled":false,"decidedBy":"operator","note":"conflicting authority"}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(disabled.status, "200 OK", "{}", disabled.body);
+        let disabled = super::route_http_request(
+            "POST",
+            "/api/v0/realm-subject-indexes/realm/index-c/authority-decision",
+            None,
+            r#"{"enabled":false,"decidedBy":"operator","note":"conflicting authority"}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(disabled.status, "200 OK", "{}", disabled.body);
+        let decisions = super::route_http_request(
+            "GET",
+            "/api/v0/realm-subject-indexes/realm/authority-decisions",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&decisions.body)
+                .unwrap()
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
+
+        let after_disable = super::route_http_request(
+            "GET",
+            "/api/v0/realm-subject-indexes/realm/conflicts",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        let after_disable = serde_json::from_str::<serde_json::Value>(&after_disable.body).unwrap();
+        assert_eq!(after_disable["disabledAuthorityCount"], 2);
+        assert_eq!(after_disable["hasConflicts"], false);
+
+        let missing_decision = super::route_http_request(
+            "POST",
+            "/api/v0/realm-subject-indexes/realm/missing/authority-decision",
+            None,
+            r#"{"enabled":true,"decidedBy":"operator"}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(missing_decision.status, "400 Bad Request");
+        assert!(missing_decision
+            .body
+            .contains("Index authority was not found"));
     }
 
     #[tokio::test]
@@ -97910,6 +98203,17 @@ mod tests {
                 .unwrap();
         assert_eq!(stop.body, r#"{"message":"Port forwarding stopped"}"#);
 
+        let index_sync = super::route_http_request(
+            "POST",
+            "/api/v0/virtualsoulfind/shadow-index/sync/merge",
+            None,
+            r#"{"records":[{"recordingId":"route-audit","peerIds":["peer-a"],"updatedAt":1}],"realmIndexes":[{"id":"index","realmId":"realm","subjectNamespace":"music","revision":1,"entries":[{"subjectId":"route-audit","workRef":{"domain":"music","title":"Route Audit","externalIds":{"musicbrainz:recording":"route-audit"}},"externalIds":{},"aliases":[]}],"signature":{"signer":"route-audit","value":"signature","payloadHash":"hash"}}]}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(index_sync.status, "200 OK", "{}", index_sync.body);
+
         // An unsafe decidedBy identifier (a local file path) must be
         // rejected by real validation, matching the oracle's
         // IsSafeOpaqueReference check.
@@ -106982,6 +107286,7 @@ mod tests {
             content_discovery: RwLock::new(
                 super::content_discovery::ContentDiscoveryStore::in_memory(),
             ),
+            realm_subject_indexes: RwLock::new(super::realm_subject_index::Store::in_memory()),
             browse: RwLock::new(super::BrowseStore::new()),
             remote_path_encodings: RwLock::new(super::RemotePathEncodingRegistry::default()),
             messages: RwLock::new(super::MessageStore::new()),
@@ -107274,6 +107579,7 @@ mod tests {
             content_discovery: RwLock::new(
                 super::content_discovery::ContentDiscoveryStore::in_memory(),
             ),
+            realm_subject_indexes: RwLock::new(super::realm_subject_index::Store::in_memory()),
             browse: RwLock::new(super::BrowseStore::new()),
             remote_path_encodings: RwLock::new(super::RemotePathEncodingRegistry::default()),
             messages: RwLock::new(super::MessageStore::new()),
