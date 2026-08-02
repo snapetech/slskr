@@ -903,25 +903,32 @@ class Response extends Component {
               disabled={downloadRequest === 'inProgress'}
               files={tree[directory]}
               footer={
-                <button
-                  disabled={fetchingDirectoryContents}
-                  onClick={() =>
-                    this.getFullDirectory(response.username, directory)
-                  }
-                  style={{
-                    backgroundColor: 'transparent',
-                    border: 'none',
-                    cursor: 'pointer',
-                    width: '100%',
-                  }}
-                  type="button"
-                >
-                  <Icon
+                <Button.Group fluid size="tiny">
+                  <Button
+                    disabled={fetchingDirectoryContents}
+                    icon={fetchingDirectoryContents ? 'circle notch' : 'search'}
                     loading={fetchingDirectoryContents}
-                    name={fetchingDirectoryContents ? 'circle notch' : 'search'}
+                    onClick={() =>
+                      this.getFullDirectory(response.username, directory)
+                    }
+                    content="Find More Files"
                   />
-                  Search for Additional Files in This Directory
-                </button>
+                  {this.props.onIgnoreDirectory && (
+                    <Popup
+                      content="Hide this peer’s copy of this folder from every future run of this wishlist item without blocking the peer or hiding their other results."
+                      trigger={
+                        <Button
+                          color="red"
+                          content="Ignore for Wishlist"
+                          icon="eye slash"
+                          onClick={() =>
+                            this.props.onIgnoreDirectory(directory)
+                          }
+                        />
+                      }
+                    />
+                  )}
+                </Button.Group>
               }
               key={directory}
               locked={tree[directory].find((file) => file.locked)}

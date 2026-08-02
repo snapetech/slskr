@@ -152,8 +152,52 @@ const WishlistModal = ({ item, onClose, onSave }) => {
   const [autoDownload, setAutoDownload] = useState(item?.autoDownload ?? false);
   const [maxResults, setMaxResults] = useState(item?.maxResults ?? 100);
   const [saving, setSaving] = useState(false);
+  const [ignoredResults, setIgnoredResults] = useState([]);
+  const [loadingIgnoredResults, setLoadingIgnoredResults] = useState(false);
 
   const isEdit = Boolean(item?.id);
+
+  useEffect(() => {
+    if (!isEdit) return undefined;
+
+    let cancelled = false;
+    setLoadingIgnoredResults(true);
+    wishlistAPI
+      .getIgnoredResults(item.id)
+      .then((rules) => {
+        if (!cancelled) {
+          setIgnoredResults(Array.isArray(rules) ? rules : []);
+        }
+      })
+      .catch((error) => {
+        console.error(error);
+        if (!cancelled) {
+          toast.error('Failed to load ignored wishlist folders');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoadingIgnoredResults(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isEdit, item?.id]);
+
+  const restoreIgnoredResult = async (rule) => {
+    try {
+      await wishlistAPI.removeIgnoredResult(item.id, rule.id);
+      setIgnoredResults((current) =>
+        current.filter((candidate) => candidate.id !== rule.id),
+      );
+      toast.info(`Restored ${rule.directory} from ${rule.username}`);
+    } catch (error) {
+      console.error(error);
+      toast.error(error?.response?.data ?? error?.message ?? String(error));
+    }
+  };
 
   const handleSave = async () => {
     if (!searchText.trim()) {
@@ -231,6 +275,58 @@ const WishlistModal = ({ item, onClose, onSave }) => {
             />
           </Form.Field>
         </Form>
+        {isEdit && (
+          <Segment>
+            <Header as="h4">
+              <Icon name="eye slash" />
+              <Header.Content>
+                Ignored Result Folders
+                <Header.Subheader>
+                  These peer folders stay hidden only for this wishlist item.
+                  Restore one to allow it in future searches and auto-download
+                  decisions.
+                </Header.Subheader>
+              </Header.Content>
+            </Header>
+            {loadingIgnoredResults ? (
+              <Icon loading name="spinner" />
+            ) : ignoredResults.length === 0 ? (
+              <span>No folders are ignored.</span>
+            ) : (
+              <Table basic="very" compact>
+                <Table.Body>
+                  {ignoredResults.map((rule) => (
+                    <Table.Row key={rule.id}>
+                      <Table.Cell>
+                        <strong>{rule.username}</strong>
+                        <div
+                          className="truncate-cell"
+                          title={rule.directory}
+                        >
+                          {rule.directory}
+                        </div>
+                      </Table.Cell>
+                      <Table.Cell collapsing>
+                        <Popup
+                          content="Allow this peer folder to appear again in future runs of this wishlist item."
+                          trigger={
+                            <Button
+                              aria-label={`Restore ignored folder ${rule.directory}`}
+                              compact
+                              icon="undo"
+                              onClick={() => restoreIgnoredResult(rule)}
+                              size="tiny"
+                            />
+                          }
+                        />
+                      </Table.Cell>
+                    </Table.Row>
+                  ))}
+                </Table.Body>
+              </Table>
+            )}
+          </Segment>
+        )}
       </Modal.Content>
       <Modal.Actions>
         <Button onClick={onClose}>Cancel</Button>

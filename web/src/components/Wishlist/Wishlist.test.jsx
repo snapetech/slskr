@@ -7,8 +7,10 @@ import { MemoryRouter } from 'react-router-dom';
 
 vi.mock('../../lib/wishlist', () => ({
   create: vi.fn(),
+  getIgnoredResults: vi.fn(),
   getAll: vi.fn(),
   importCsv: vi.fn(),
+  removeIgnoredResult: vi.fn(),
   remove: vi.fn(),
   runSearch: vi.fn(),
   update: vi.fn(),
@@ -61,6 +63,8 @@ describe('Wishlist', () => {
         totalSearchCount: 2,
       },
     ]);
+    wishlistAPI.getIgnoredResults.mockResolvedValue([]);
+    wishlistAPI.removeIgnoredResult.mockResolvedValue(undefined);
   });
 
   it('shows unified request states for wishlist rows', async () => {
@@ -108,5 +112,39 @@ describe('Wishlist', () => {
     expect(wishlistAPI.runSearch).toHaveBeenCalledWith('wish-1');
     expect(wishlistAPI.runSearch).toHaveBeenCalledWith('wish-2');
     expect(screen.getByText(/Ran 2 enabled Wishlist searches/)).toBeInTheDocument();
+  });
+
+  it('loads and restores ignored folders from the wishlist editor', async () => {
+    wishlistAPI.getIgnoredResults.mockResolvedValue([
+      {
+        directory: 'Artist/Album',
+        id: 'ignored-1',
+        username: 'peer',
+      },
+    ]);
+
+    renderWishlist();
+
+    expect(await screen.findByText('rare album')).toBeInTheDocument();
+    fireEvent.click(screen.getAllByTitle('Edit')[0]);
+
+    expect(await screen.findByText('Ignored Result Folders')).toBeInTheDocument();
+    expect(wishlistAPI.getIgnoredResults).toHaveBeenCalledWith('wish-1');
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Restore ignored folder Artist/Album',
+      }),
+    );
+
+    await waitFor(() =>
+      expect(wishlistAPI.removeIgnoredResult).toHaveBeenCalledWith(
+        'wish-1',
+        'ignored-1',
+      ),
+    );
+    await waitFor(() =>
+      expect(screen.getByText('No folders are ignored.')).toBeInTheDocument(),
+    );
   });
 });
