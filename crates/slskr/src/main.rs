@@ -142,6 +142,52 @@ use tokio::{
 };
 
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+const FAILED_UPLOAD_PEER_COOLDOWN_SECONDS: u64 = 30;
+
+#[derive(Debug, Default)]
+struct UploadPeerCooldowns {
+    retry_after: BTreeMap<String, u64>,
+}
+
+impl UploadPeerCooldowns {
+    fn record_failure(&mut self, username: &str, now: u64) {
+        let key = username.trim().to_ascii_lowercase();
+        if key.is_empty() {
+            return;
+        }
+        self.retry_after
+            .insert(key, now.saturating_add(FAILED_UPLOAD_PEER_COOLDOWN_SECONDS));
+    }
+
+    fn remaining(&mut self, username: &str, now: u64) -> Option<u64> {
+        let key = username.trim().to_ascii_lowercase();
+        let retry_after = self.retry_after.get(&key).copied()?;
+        if retry_after > now {
+            return Some(retry_after.saturating_sub(now));
+        }
+        self.retry_after.remove(&key);
+        None
+    }
+}
+
+fn is_expected_remote_upload_failure(error: &str) -> bool {
+    let error = error.to_ascii_lowercase();
+    if error.contains("local") || error.contains("shared file") {
+        return false;
+    }
+    [
+        "timed out",
+        "timeout",
+        "connection",
+        "broken pipe",
+        "unexpected end",
+        "transport",
+        "peer",
+        "file-transfer connect",
+    ]
+    .iter()
+    .any(|marker| error.contains(marker))
+}
 
 fn print_controller_logo(target: ControllerCompatibilityTarget) {
     let full_version = format!("{APP_VERSION} ({APP_VERSION})");
@@ -228,6 +274,37 @@ mod disaster_mode_regression_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod upload_peer_cooldown_regression_tests {
+    #[test]
+    fn cooldown_is_case_insensitive_and_expires() {
+        let mut cooldowns = super::UploadPeerCooldowns::default();
+        cooldowns.record_failure(" PeerOne ", 100);
+
+        assert_eq!(cooldowns.remaining("peerone", 100), Some(30));
+        assert_eq!(cooldowns.remaining("PEERONE", 129), Some(1));
+        assert_eq!(cooldowns.remaining("peerone", 130), None);
+        assert_eq!(cooldowns.remaining("peerone", 131), None);
+    }
+
+    #[test]
+    fn only_expected_remote_failures_start_a_cooldown() {
+        assert!(super::is_expected_remote_upload_failure(
+            "file-transfer connect failed: connection refused"
+        ));
+        assert!(super::is_expected_remote_upload_failure(
+            "file upload chunk send timed out"
+        ));
+        assert!(!super::is_expected_remote_upload_failure(
+            "local file read failed: permission denied"
+        ));
+        assert!(!super::is_expected_remote_upload_failure(
+            "upload filename is not available from local shares"
+        ));
+    }
+}
+
 const MAX_WEBHOOK_DELIVERY_TASKS: usize = 32;
 #[cfg(test)]
 const MAX_INCOMING_CONNECTION_TASKS: usize = 128;
@@ -14131,6 +14208,7 @@ struct AppState {
     transfer_upload_settings: RwLock<crate::config::TransferUploadSettings>,
     transfer_download_settings: RwLock<crate::config::TransferDownloadSettings>,
     transfer_groups_settings: RwLock<crate::config::TransferGroupsSettings>,
+    failed_upload_peer_cooldowns: RwLock<UploadPeerCooldowns>,
     private_message_auto_responses: RwLock<PrivateMessageAutoResponseTracker>,
     rooms: RwLock<RoomStore>,
     pod_join_replays: RwLock<BTreeMap<String, u64>>,
@@ -54826,6 +54904,7 @@ async fn serve(invocation: ServeInvocation) -> Result<(), String> {
         transfer_upload_settings: RwLock::new(config.transfer_upload.clone()),
         transfer_download_settings: RwLock::new(config.transfer_download.clone()),
         transfer_groups_settings: RwLock::new(config.transfer_groups.clone()),
+        failed_upload_peer_cooldowns: RwLock::new(UploadPeerCooldowns::default()),
         private_message_auto_responses: RwLock::new(PrivateMessageAutoResponseTracker::default()),
         rooms: RwLock::new(room_store),
         pod_join_replays: RwLock::new(BTreeMap::new()),
@@ -57577,6 +57656,9 @@ async fn handle_inbound_file_transfer(
     } else {
         upload_file_transfer_with_connection(state, &transfer, &mut file).await
     };
+    if let Err(error) = &result {
+        record_expected_upload_failure(state, &transfer, error).await;
+    }
     let (status, bytes_transferred, size, reason) = match result {
         Ok((bytes_transferred, size)) => ("succeeded", bytes_transferred, Some(size), None),
         Err(error) => (
@@ -59916,6 +59998,15 @@ async fn inbound_upload_policy(
     filename: &str,
     requested_size: u64,
 ) -> Result<String, String> {
+    if state
+        .failed_upload_peer_cooldowns
+        .write()
+        .await
+        .remaining(username, unix_timestamp())
+        .is_some()
+    {
+        return Err("Recent transfer failed; retry later.".to_owned());
+    }
     if !state.config.transfer_allow_inbound {
         return Err("inbound transfers are disabled".to_owned());
     }
@@ -60028,6 +60119,20 @@ async fn inbound_upload_policy(
         return Err("Queued".to_owned());
     }
     Ok(group_name)
+}
+
+async fn record_expected_upload_failure(state: &AppState, transfer: &TransferEntry, error: &str) {
+    if transfer.direction != 1 || !is_expected_remote_upload_failure(error) {
+        return;
+    }
+    let Some(username) = transfer.peer_username.as_deref() else {
+        return;
+    };
+    state
+        .failed_upload_peer_cooldowns
+        .write()
+        .await
+        .record_failure(username, unix_timestamp());
 }
 
 async fn handle_peer_message<F, Fut>(
@@ -62376,6 +62481,9 @@ async fn execute_accepted_file_transfer(
     if transfer_is_cancelled(state, transfer.id).await {
         return;
     }
+    if let Err(error) = &result {
+        record_expected_upload_failure(state, transfer, error).await;
+    }
     let (status, bytes_transferred, size, reason) = match result {
         Ok((bytes_transferred, size)) => ("succeeded", bytes_transferred, Some(size), None),
         Err(error) => {
@@ -62482,6 +62590,9 @@ async fn project_indirect_transfer_response(state: &AppState, response: &Connect
     let result = execute_indirect_file_transfer(state, response, &transfer).await;
     if transfer_is_cancelled(state, transfer.id).await {
         return;
+    }
+    if let Err(error) = &result {
+        record_expected_upload_failure(state, &transfer, error).await;
     }
     let (status, bytes_transferred, size, reason) = match result {
         Ok((bytes_transferred, size)) => ("succeeded", bytes_transferred, Some(size), None),
@@ -72307,6 +72418,7 @@ mod tests {
             transfer_upload_settings: RwLock::new(config.transfer_upload.clone()),
             transfer_download_settings: RwLock::new(config.transfer_download.clone()),
             transfer_groups_settings: RwLock::new(config.transfer_groups.clone()),
+            failed_upload_peer_cooldowns: RwLock::new(super::UploadPeerCooldowns::default()),
             private_message_auto_responses: RwLock::new(
                 super::PrivateMessageAutoResponseTracker::default(),
             ),
@@ -104787,6 +104899,7 @@ mod tests {
             transfer_upload_settings: RwLock::new(config.transfer_upload.clone()),
             transfer_download_settings: RwLock::new(config.transfer_download.clone()),
             transfer_groups_settings: RwLock::new(config.transfer_groups.clone()),
+            failed_upload_peer_cooldowns: RwLock::new(super::UploadPeerCooldowns::default()),
             private_message_auto_responses: RwLock::new(
                 super::PrivateMessageAutoResponseTracker::default(),
             ),
@@ -105080,6 +105193,7 @@ mod tests {
                 cookie_enabled_config.transfer_download.clone(),
             ),
             transfer_groups_settings: RwLock::new(cookie_enabled_config.transfer_groups.clone()),
+            failed_upload_peer_cooldowns: RwLock::new(super::UploadPeerCooldowns::default()),
             private_message_auto_responses: RwLock::new(
                 super::PrivateMessageAutoResponseTracker::default(),
             ),
