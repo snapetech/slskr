@@ -404,6 +404,10 @@ const MAX_LIST_ARTIST_BYTES: usize = 4 * 1024;
 const MAX_LIST_TITLE_BYTES: usize = 4 * 1024;
 const MAX_LIST_KIND_BYTES: usize = 256;
 const MAX_LIBRARY_HEALTH_SCANS: usize = 256;
+const MAX_LIBRARY_REMEDIATION_JOBS: usize = 256;
+
+type UserInterestWaiter =
+    oneshot::Sender<Result<slskr_client::protocol::server::UserInterests, String>>;
 const MAX_SONGID_RUNS: usize = 256;
 const MAX_USER_NOTES: usize = 4_096;
 const MAX_USER_NOTE_BYTES: usize = 16 * 1024;
@@ -10421,28 +10425,6 @@ impl InterestStore {
         )
     }
 
-    fn user_interests_json(&self, username: &str) -> String {
-        let liked = self
-            .liked
-            .iter()
-            .map(InterestRecord::json)
-            .collect::<Vec<_>>();
-        let hated = self
-            .hated
-            .iter()
-            .map(InterestRecord::json)
-            .collect::<Vec<_>>();
-        format!(
-            "{{\"username\":\"{}\",\"liked\":[{}],\"hated\":[{}],\"interests\":[{}],\"count\":{},\"updated_at\":{}}}",
-            json_escape(username),
-            liked.join(","),
-            hated.join(","),
-            liked.join(","),
-            self.liked.len() + self.hated.len(),
-            self.updated_at
-        )
-    }
-
     fn recommendations_json(&self, field: &str) -> String {
         let recommendations = self
             .liked
@@ -12180,6 +12162,32 @@ struct LibraryHealthScanRecord {
     updated_at: u64,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct LibraryRemediationJob {
+    id: String,
+    issue_ids: Vec<String>,
+    status: String,
+    fixed_count: usize,
+    error: Option<String>,
+    created_at: u64,
+    updated_at: u64,
+}
+
+impl LibraryRemediationJob {
+    fn json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "id": self.id,
+            "kind": "library_remediation",
+            "issueIds": self.issue_ids,
+            "status": self.status,
+            "fixedCount": self.fixed_count,
+            "error": self.error,
+            "createdAt": self.created_at,
+            "updatedAt": self.updated_at,
+        })
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct LibraryHealthIssueQuery {
     library_path: String,
@@ -12482,6 +12490,8 @@ struct LibraryStore {
     health_scans: Vec<LibraryHealthScanRecord>,
     next_health_scan_id: u64,
     updated_at: u64,
+    remediation_jobs: Vec<LibraryRemediationJob>,
+    next_remediation_job_id: u64,
 }
 
 impl LibraryStore {
@@ -12492,6 +12502,8 @@ impl LibraryStore {
             health_scans: Vec::new(),
             next_health_scan_id: 1,
             updated_at: unix_timestamp(),
+            remediation_jobs: Vec::new(),
+            next_remediation_job_id: 1,
         }
     }
 
@@ -12530,6 +12542,8 @@ impl LibraryStore {
             health_scans: Vec::new(),
             next_health_scan_id: 1,
             updated_at,
+            remediation_jobs: Vec::new(),
+            next_remediation_job_id: 1,
         }
     }
 
@@ -12551,6 +12565,60 @@ impl LibraryStore {
 
     fn health_scan(&self, id: &str) -> Option<LibraryHealthScanRecord> {
         self.health_scans.iter().find(|scan| scan.id == id).cloned()
+    }
+
+    fn remediation_job(&self, id: &str) -> Option<LibraryRemediationJob> {
+        self.remediation_jobs
+            .iter()
+            .find(|job| job.id == id)
+            .cloned()
+    }
+
+    fn remediate_selected(
+        &mut self,
+        issue_ids: &[String],
+    ) -> Result<LibraryRemediationJob, String> {
+        let issues = self.health_issues();
+        let mut fixed = Vec::new();
+        for issue_id in issue_ids {
+            let Some(issue) = issues
+                .iter()
+                .find(|issue| issue["id"].as_str() == Some(issue_id.as_str()))
+            else {
+                continue;
+            };
+            if issue["type"].as_str() != Some("missing_kind") {
+                continue;
+            }
+            let Some(item_id) = issue["item_id"].as_str() else {
+                continue;
+            };
+            if let Some(item) = self.records.iter_mut().find(|item| item.id == item_id) {
+                item.kind = "Audio".to_owned();
+                fixed.push(issue_id.clone());
+            }
+        }
+        if fixed.is_empty() {
+            return Err("no fixable issues provided".to_owned());
+        }
+        let now = unix_timestamp();
+        self.updated_at = now;
+        let fixed_count = fixed.len();
+        let job = LibraryRemediationJob {
+            id: format!("library-remediation-{}", self.next_remediation_job_id),
+            issue_ids: fixed,
+            status: "completed".to_owned(),
+            fixed_count,
+            error: None,
+            created_at: now,
+            updated_at: now,
+        };
+        self.next_remediation_job_id = self.next_remediation_job_id.saturating_add(1).max(1);
+        if self.remediation_jobs.len() == MAX_LIBRARY_REMEDIATION_JOBS {
+            self.remediation_jobs.remove(0);
+        }
+        self.remediation_jobs.push(job.clone());
+        Ok(job)
     }
 
     fn create(&mut self, artist: String, title: String, kind: String) -> Option<LibraryItemRecord> {
@@ -12775,6 +12843,9 @@ impl LibraryStore {
                     .get("type")
                     .and_then(serde_json::Value::as_str)
                     .unwrap_or("missing_metadata");
+                let remediation = self.remediation_jobs.iter().find(|job| {
+                    job.issue_ids.iter().any(|id| id == issue_id)
+                });
                 let detected_at = issue
                     .get("item_id")
                     .and_then(serde_json::Value::as_str)
@@ -12800,12 +12871,14 @@ impl LibraryStore {
                         "itemId": issue.get("item_id").and_then(serde_json::Value::as_str).unwrap_or_default(),
                         "missingField": issue_kind,
                     },
-                    "canAutoFix": true,
+                    "canAutoFix": issue_kind == "missing_kind",
                     "suggestedAction": "Review and complete the missing library metadata",
-                    "remediationJobId": "",
-                    "status": "Detected",
+                    "remediationJobId": remediation.map(|job| job.id.clone()).unwrap_or_default(),
+                    "status": if remediation.is_some() { "Resolved" } else { "Detected" },
                     "detectedAt": detected_at,
-                    "resolvedAt": serde_json::Value::Null,
+                    "resolvedAt": remediation
+                        .map(|job| unix_seconds_rfc3339(job.updated_at))
+                        .map_or(serde_json::Value::Null, serde_json::Value::String),
                     "resolvedBy": "",
                 })
             })
@@ -14039,6 +14112,40 @@ impl ControllerFeatureState {
         Ok(removed)
     }
 
+    fn record_warm_cache_accesses(&mut self, content_ids: &[String]) -> Result<(), String> {
+        let previous = self.records.clone();
+        let now = unix_timestamp();
+        for content_id in content_ids {
+            let key = format!("warm-cache/popularity/{content_id}");
+            let hits = self
+                .records
+                .get(&key)
+                .and_then(|value| value.get("hits"))
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0)
+                .saturating_add(1);
+            if self.records.len() >= MAX_CONTROLLER_FEATURE_RECORDS
+                && !self.records.contains_key(&key)
+            {
+                self.records = previous;
+                return Err("warm cache popularity capacity is full".to_owned());
+            }
+            self.records.insert(
+                key,
+                serde_json::json!({
+                    "contentId": content_id,
+                    "hits": hits,
+                    "lastUpdated": now,
+                }),
+            );
+        }
+        if let Err(error) = self.persist() {
+            self.records = previous;
+            return Err(error);
+        }
+        Ok(())
+    }
+
     fn persist(&self) -> Result<(), String> {
         let bytes = serde_json::to_vec(&ControllerFeatureStateFile {
             version: 1,
@@ -15127,6 +15234,7 @@ struct AppState {
     destinations: RwLock<DestinationStore>,
     db: Option<crate::persistence::DatabaseManager>,
     session_commands: mpsc::Sender<SessionCommand>,
+    pending_user_interests: RwLock<BTreeMap<String, Vec<UserInterestWaiter>>>,
     lifecycle_commands: Option<mpsc::Sender<LifecycleCommand>>,
     rate_limiter: rate_limit::RateLimiter,
     oauth_states: RwLock<OAuthStateStore>,
@@ -16144,6 +16252,7 @@ enum SessionCommand {
         token: u32,
     },
     RequestUserStats(String),
+    RequestUserInterests(String),
     TransferPeer {
         id: u64,
         username: String,
@@ -16303,6 +16412,16 @@ async fn route_http_request_with_headers(
         if feature_disabled {
             return Ok(controller_swagger_not_found_response());
         }
+    }
+
+    if route.path == "/api/v0/application/dump"
+        && ((state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskd
+            && method == "POST")
+            || (state.config.controller_compatibility_target
+                == ControllerCompatibilityTarget::Slskdn
+                && method == "GET"))
+    {
+        return Ok(routing::method_not_allowed_response());
     }
 
     if (normalized_path.starts_with("/actors/") || normalized_path == "/.well-known/webfinger")
@@ -21088,10 +21207,74 @@ async fn route_http_request_with_headers(
                 return Ok(routing::not_found_response());
             };
             let username = decoded_path_segment(username);
-            let interests = state.interests.read().await;
-            let json = interests.user_interests_json(&username);
-            drop(interests);
-            Ok(routing::ok_response(json))
+            if username.trim().is_empty() || username.len() > MAX_USER_USERNAME_BYTES {
+                return Ok(routing::bad_request_response("username is required"));
+            }
+            if state.session.read().await.state != "connected" {
+                return Ok(routing::service_unavailable_response(
+                    "server session is disconnected",
+                ));
+            }
+            let (sender, receiver) = oneshot::channel::<
+                Result<slskr_client::protocol::server::UserInterests, String>,
+            >();
+            let key = username.to_ascii_lowercase();
+            {
+                let mut pending = state.pending_user_interests.write().await;
+                if pending.values().map(Vec::len).sum::<usize>() >= 128 {
+                    return Ok(routing::service_unavailable_response(
+                        "user-interest request capacity is full",
+                    ));
+                }
+                pending.entry(key).or_default().push(sender);
+            }
+            if let Err(error) = send_session_command(
+                state,
+                SessionCommand::RequestUserInterests(username.clone()),
+            )
+            .await
+            {
+                state
+                    .pending_user_interests
+                    .write()
+                    .await
+                    .remove(&username.to_ascii_lowercase());
+                return Ok(routing::service_unavailable_response(&error));
+            }
+            let interests = match time::timeout(
+                state.config.soulseek_connection.timeout_inactivity,
+                receiver,
+            )
+            .await
+            {
+                Ok(Ok(Ok(interests))) => interests,
+                Ok(Ok(Err(error))) => {
+                    return Ok(routing::service_unavailable_response(&error));
+                }
+                Ok(Err(_)) => {
+                    return Ok(routing::service_unavailable_response(
+                        "user-interest request was cancelled",
+                    ));
+                }
+                Err(_) => {
+                    state
+                        .pending_user_interests
+                        .write()
+                        .await
+                        .remove(&username.to_ascii_lowercase());
+                    return Ok(routing::service_unavailable_response(
+                        "user-interest request timed out",
+                    ));
+                }
+            };
+            Ok(routing::ok_response(
+                serde_json::json!({
+                    "username": interests.username,
+                    "liked": interests.liked,
+                    "hated": interests.hated,
+                })
+                .to_string(),
+            ))
         }
 
 
@@ -24692,6 +24875,9 @@ async fn route_http_request_with_headers(
                 })
                 .to_string();
             drop(transfers);
+            if let Some(job) = state.library.read().await.remediation_job(&job_id) {
+                return Ok(routing::ok_response(job.json().to_string()));
+            }
             Ok(routing::ok_response(body))
         }
 
@@ -42093,12 +42279,10 @@ fn unversioned_mutation_requires_api_version(method: &str, path: &str) -> bool {
             | ("POST", "/api/jobs/label-crate")
             | ("POST", "/api/library/health/scans")
             | ("POST", "/api/library/health/issues/fix")
-            | ("POST", "/api/slskdn/library/remediate")
             | ("POST", "/api/source-feed-imports/preview")
             | ("POST", "/api/hashdb/backfill/from-history")
             | ("POST", "/api/integrations/spotify/authorize")
             | ("DELETE", "/api/integrations/spotify")
-            | ("POST", "/api/slskdn/warm-cache/hints")
     ) || (method == "PATCH"
         && path
             .strip_prefix("/api/library/health/issues/")
@@ -45502,34 +45686,134 @@ async fn extended_controller_mutation_response(
         return routing::accepted_response(scan.json());
     }
     if method == "POST" && path == "/api/slskdn/library/remediate" {
-        let issue_ids = serde_json::from_str::<serde_json::Value>(body)
+        let payload = match serde_json::from_str::<serde_json::Value>(body) {
+            Ok(payload) => payload,
+            Err(_) => return routing::bad_request_response("issue_ids is required"),
+        };
+        let Some(values) = payload
+            .get("issue_ids")
+            .or_else(|| payload.get("issueIds"))
+            .and_then(serde_json::Value::as_array)
+        else {
+            return routing::bad_request_response("issue_ids is required");
+        };
+        let mut issue_ids = Vec::new();
+        for value in values {
+            let Some(issue_id) = value.as_str().map(str::trim).filter(|id| !id.is_empty()) else {
+                return routing::bad_request_response("issue_ids must contain strings");
+            };
+            if !issue_ids.iter().any(|existing| existing == issue_id) {
+                issue_ids.push(issue_id.to_owned());
+            }
+        }
+        if issue_ids.is_empty() || issue_ids.len() > 25 {
+            return routing::bad_request_response("issue_ids must contain 1 to 25 values");
+        }
+        let mut library = state.library.write().await;
+        let previous = library.clone();
+        let job = match library.remediate_selected(&issue_ids) {
+            Ok(job) => job,
+            Err(error) => return routing::bad_request_response(&error),
+        };
+        let records = library.records.clone();
+        let mutated = library.clone();
+        drop(library);
+        if let Err(error) = persist_library_items_checked(state, &records).await {
+            rollback_library_if_unchanged(state, previous, &mutated).await;
+            return routing::service_unavailable_response(&error);
+        }
+        return routing::ok_response(job.json().to_string());
+    }
+    if method == "POST" && path == "/api/slskdn/warm-cache/hints" {
+        let yaml = read_controller_compatibility_yaml(&state.config)
             .ok()
-            .and_then(|value| value.get("issue_ids").cloned())
-            .and_then(|value| value.as_array().cloned())
-            .unwrap_or_default();
-        if issue_ids
-            .iter()
-            .filter_map(serde_json::Value::as_str)
-            .all(|issue_id| issue_id.trim().is_empty())
-        {
+            .flatten()
+            .and_then(|text| parse_controller_yaml(&text).ok())
+            .and_then(|value| {
+                value
+                    .get("warm_cache")
+                    .or_else(|| value.get("warmCache"))
+                    .and_then(|warm_cache| warm_cache.get("enabled"))
+                    .and_then(serde_json::Value::as_bool)
+            })
+            .unwrap_or(false);
+        if !yaml {
             return HttpResponse {
                 status: "400 Bad Request",
                 content_type: "application/json",
-                body: r#"{"error":"issue_ids is required"}"#.to_owned(),
+                body: r#"{"error":"Warm cache not enabled"}"#.to_owned(),
             };
         }
-        let mut library = state.library.write().await;
-        let fixed = library.fix_health_issues();
-        return routing::ok_response(
-            serde_json::json!({"fixed": fixed, "fixedCount": fixed.len()}).to_string(),
-        );
-    }
-    if method == "POST" && path == "/api/slskdn/warm-cache/hints" {
-        return HttpResponse {
-            status: "400 Bad Request",
-            content_type: "application/json",
-            body: r#"{"error":"Warm cache not enabled"}"#.to_owned(),
+        let payload = match serde_json::from_str::<serde_json::Value>(body) {
+            Ok(payload) => payload,
+            Err(_) => return routing::bad_request_response("Request is required"),
         };
+        let raw_arrays = ["mb_release_ids", "mb_artist_ids", "mb_label_ids"]
+            .into_iter()
+            .map(|field| payload.get(field).and_then(serde_json::Value::as_array))
+            .collect::<Vec<_>>();
+        let raw_count = raw_arrays
+            .iter()
+            .filter_map(|values| *values)
+            .map(Vec::len)
+            .sum::<usize>();
+        if raw_count > 100 {
+            return HttpResponse {
+                status: "413 Payload Too Large",
+                content_type: "application/json",
+                body: r#"{"error":"At most 100 hints are accepted per request"}"#.to_owned(),
+            };
+        }
+        let mut identifiers = Vec::new();
+        for field in ["mb_release_ids", "mb_artist_ids", "mb_label_ids"] {
+            let Some(values) = payload.get(field) else {
+                continue;
+            };
+            if values.is_null() {
+                continue;
+            }
+            let Some(values) = values.as_array() else {
+                return routing::bad_request_response("Invalid warm cache hints");
+            };
+            for value in values {
+                let Some(value) = value.as_str() else {
+                    return routing::bad_request_response("Invalid warm cache hints");
+                };
+                let value = value.trim();
+                if !value.is_empty() && value.len() <= 128 {
+                    let prefix = match field {
+                        "mb_release_ids" => "release",
+                        "mb_artist_ids" => "artist",
+                        _ => "label",
+                    };
+                    let content_id = format!("mb:{prefix}:{value}");
+                    if !identifiers
+                        .iter()
+                        .any(|existing: &String| existing.eq_ignore_ascii_case(&content_id))
+                    {
+                        identifiers.push(content_id);
+                    }
+                } else if value.len() > 128 {
+                    return routing::bad_request_response(
+                        "MusicBrainz identifiers cannot exceed 128 characters",
+                    );
+                }
+            }
+        }
+        if identifiers.is_empty() {
+            return routing::bad_request_response(
+                "At least one MusicBrainz identifier is required",
+            );
+        }
+        if let Err(error) = state
+            .controller_features
+            .write()
+            .await
+            .record_warm_cache_accesses(&identifiers)
+        {
+            return routing::service_unavailable_response(&error);
+        }
+        return routing::ok_response(r#"{"accepted":true}"#.to_owned());
     }
     if method == "POST" && path == "/api/application/dump" {
         let session = state.session.read().await;
@@ -56500,25 +56784,31 @@ async fn extended_controller_get_response(
                 // capability flags. The unversioned route remains the
                 // historical local inventory projection below.
                 let mesh = state.mesh.read().await;
-                let mut peers = mesh
+                let peer_records = mesh
                     .capability_service_peers_json()
                     .into_iter()
                     .filter(|peer| peer["flagsValue"].as_i64().unwrap_or(0) > 0)
-                    .map(|peer| {
-                        let last_seen = peer["lastSeen"]
-                            .as_u64()
-                            .map(unix_seconds_rfc3339)
-                            .unwrap_or_else(|| unix_seconds_rfc3339(0));
-                        serde_json::json!({
-                            "peerId": peer["username"],
-                            "caps": peer["flagsValue"],
-                            "capsFlags": peer["flags"],
-                            "clientVersion": peer["clientVersion"],
-                            "lastSeen": last_seen,
-                            "backfillsToday": 0,
-                        })
-                    })
                     .collect::<Vec<_>>();
+                drop(mesh);
+                let mut peers = Vec::with_capacity(peer_records.len());
+                for peer in peer_records {
+                    let last_seen = peer["lastSeen"]
+                        .as_u64()
+                        .map(unix_seconds_rfc3339)
+                        .unwrap_or_else(|| unix_seconds_rfc3339(0));
+                    let backfills_today = state.backfill.write().await.peer_count_today(
+                        peer["username"].as_str().unwrap_or_default(),
+                        unix_timestamp(),
+                    );
+                    peers.push(serde_json::json!({
+                        "peerId": peer["username"],
+                        "caps": peer["flagsValue"],
+                        "capsFlags": peer["flags"],
+                        "clientVersion": peer["clientVersion"],
+                        "lastSeen": last_seen,
+                        "backfillsToday": backfills_today,
+                    }));
+                }
                 peers.sort_by(|left, right| {
                     right["lastSeen"].as_str().cmp(&left["lastSeen"].as_str())
                 });
@@ -60460,6 +60750,7 @@ async fn serve(invocation: ServeInvocation) -> Result<(), String> {
         db,
         config,
         session_commands,
+        pending_user_interests: RwLock::new(BTreeMap::new()),
         lifecycle_commands,
         rate_limiter,
         oauth_states: RwLock::new(oauth_state_store),
@@ -62518,6 +62809,30 @@ async fn handle_session_command(
             )
             .await;
         }
+        SessionCommand::RequestUserInterests(username) => {
+            let result = match session.as_mut() {
+                Some(active_session) => active_session
+                    .send_server_message(ServerMessage::GetUserInterestsRequest {
+                        username: username.clone(),
+                    })
+                    .await
+                    .map(|_| ())
+                    .map_err(|error| format!("request user interests failed: {error}")),
+                None => Err("server session is disconnected".to_owned()),
+            };
+            if let Err(error) = result {
+                if let Some(waiters) = state
+                    .pending_user_interests
+                    .write()
+                    .await
+                    .remove(&username.to_ascii_lowercase())
+                {
+                    for waiter in waiters {
+                        let _ = waiter.send(Err(error.clone()));
+                    }
+                }
+            }
+        }
         SessionCommand::TransferPeer { id, username } => {
             send_active_server_message(
                 state,
@@ -64029,14 +64344,7 @@ struct LocalStreamFile {
 
 fn application_dump_path(path: &str) -> bool {
     let route = routing::parse_route("GET", path);
-    let normalized = route
-        .normalized_path
-        .strip_prefix("/api/v0/")
-        .or_else(|| route.normalized_path.strip_prefix("/api/v1/"))
-        .or_else(|| route.normalized_path.strip_prefix("/api/v2/"))
-        .map(|path| format!("/api/{path}"))
-        .unwrap_or_else(|| route.normalized_path.to_owned());
-    normalized == "/api/application/dump"
+    route.path == "/api/v0/application/dump"
 }
 
 fn application_dump_request(method: &str, path: &str, config: &AppConfig) -> bool {
@@ -66918,6 +67226,14 @@ async fn project_server_message(
         }
     }
     match message {
+        ServerMessage::UserInterests(interests) => {
+            let key = interests.username.to_ascii_lowercase();
+            if let Some(waiters) = state.pending_user_interests.write().await.remove(&key) {
+                for waiter in waiters {
+                    let _ = waiter.send(Ok(interests.clone()));
+                }
+            }
+        }
         ServerMessage::WatchUserResponse(user) => {
             let record = {
                 let mut users = state.users.write().await;
@@ -78449,6 +78765,7 @@ mod tests {
             db,
             config,
             session_commands: sender.clone(),
+            pending_user_interests: RwLock::new(BTreeMap::new()),
             lifecycle_commands: None,
             rate_limiter,
             oauth_states: RwLock::new(super::OAuthStateStore::default()),
@@ -85430,7 +85747,9 @@ mod tests {
 
     #[tokio::test]
     async fn slskd_application_dump_route_is_a_binary_stream_surface() {
-        let (state, _receiver) = test_state();
+        let (state, _receiver) = test_state_with_env(
+            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd"),
+        );
         let response =
             super::route_http_request("GET", "/api/v0/application/dump", None, "", &state)
                 .await
@@ -85439,9 +85758,15 @@ mod tests {
         assert_eq!(response.content_type, "application/octet-stream");
         assert!(response.body.is_empty());
         assert!(super::application_dump_path("/api/v0/application/dump"));
+        assert!(!super::application_dump_path("/api/v1/application/dump"));
         assert!(!super::application_dump_path(
             "/api/v0/application/dump/extra"
         ));
+        let wrong_method =
+            super::route_http_request("POST", "/api/v0/application/dump", None, "", &state)
+                .await
+                .expect("slskd wrong dump method");
+        assert_eq!(wrong_method.status, "405 Method Not Allowed");
     }
 
     #[tokio::test]
@@ -85499,6 +85824,12 @@ mod tests {
         .await
         .expect("remote dump allowance");
         assert_eq!(remote.status, "200 OK");
+
+        let wrong_method =
+            super::route_http_request("GET", "/api/v0/application/dump", None, "", &local_only)
+                .await
+                .expect("slskdN wrong dump method");
+        assert_eq!(wrong_method.status, "405 Method Not Allowed");
     }
 
     #[tokio::test]
@@ -95735,6 +96066,17 @@ mod tests {
         );
         assert!(hash_peers_json["peers"][0]["lastSeen"].is_string());
         assert_eq!(hash_peers_json["peers"][0]["backfillsToday"], 0);
+
+        state
+            .backfill
+            .write()
+            .await
+            .record_peer_success("mesh-capable-peer", super::unix_timestamp());
+        let hash_peers = super::route_http_request("GET", "/api/v0/hashdb/peers", None, "", &state)
+            .await
+            .expect("list hashdb peers after a backfill");
+        let hash_peers_json = serde_json::from_str::<serde_json::Value>(&hash_peers.body).unwrap();
+        assert_eq!(hash_peers_json["peers"][0]["backfillsToday"], 1);
     }
 
     #[tokio::test]
@@ -97627,8 +97969,10 @@ mod tests {
         .expect("user interests");
         let user_interests_json =
             serde_json::from_str::<serde_json::Value>(&user_interests.body).unwrap();
-        assert_eq!(user_interests_json["liked"][0]["name"], "ambient");
-        assert_eq!(user_interests_json["hated"][0]["name"], "low bitrate");
+        assert_eq!(user_interests.status, "503 Service Unavailable");
+        assert!(user_interests_json["error"]
+            .as_str()
+            .is_some_and(|error| error.contains("session")));
 
         let recommendations =
             super::route_http_request("GET", "/api/soulseek/recommendations", None, "", &state)
@@ -103853,9 +104197,8 @@ mod tests {
         .unwrap();
         assert_eq!(unversioned_warm_cache.status, "400 Bad Request");
         assert_eq!(
-            serde_json::from_str::<serde_json::Value>(&unversioned_warm_cache.body).unwrap()
-                ["code"],
-            "ApiVersionUnspecified"
+            unversioned_warm_cache.body,
+            r#"{"error":"Warm cache not enabled"}"#
         );
         let versioned_warm_cache = super::route_http_request(
             "POST",
@@ -104047,6 +104390,65 @@ mod tests {
             serde_json::from_str::<serde_json::Value>(&verdict.body).unwrap(),
             serde_json::json!({"isValid": false, "errors": ["Request not found."]})
         );
+    }
+
+    #[tokio::test]
+    async fn enabled_warm_cache_hints_normalize_persist_and_bound_popularity() {
+        let (state, _receiver) = test_state();
+        std::fs::write(
+            state.config.state_dir.join("slskd.yml"),
+            "warmCache:\n  enabled: true\n",
+        )
+        .unwrap();
+
+        let accepted = super::route_http_request(
+            "POST",
+            "/api/v0/slskdn/warm-cache/hints",
+            None,
+            r#"{"mb_release_ids":[" rel-1 ","REL-1"],"mb_artist_ids":["artist-1"],"mb_label_ids":[]}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(accepted.status, "200 OK", "{}", accepted.body);
+        assert_eq!(accepted.body, r#"{"accepted":true}"#);
+
+        let features = state.controller_features.read().await;
+        assert_eq!(
+            features
+                .get("warm-cache/popularity/mb:release:rel-1")
+                .unwrap()["hits"],
+            1
+        );
+        assert_eq!(
+            features
+                .get("warm-cache/popularity/mb:artist:artist-1")
+                .unwrap()["hits"],
+            1
+        );
+        drop(features);
+
+        let invalid = super::route_http_request(
+            "POST",
+            "/api/v0/slskdn/warm-cache/hints",
+            None,
+            r#"{"mb_release_ids":[42]}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(invalid.status, "400 Bad Request");
+
+        let oversized = super::route_http_request(
+            "POST",
+            "/api/v0/slskdn/warm-cache/hints",
+            None,
+            &serde_json::json!({"mb_release_ids": ["x".repeat(129)]}).to_string(),
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(oversized.status, "400 Bad Request");
     }
 
     #[tokio::test]
@@ -106501,17 +106903,36 @@ mod tests {
         assert_eq!(aliased_scan.status, "404 Not Found");
         let fixed = super::route_http_request(
             "POST",
-            "/api/v0/library/health/issues/fix",
+            "/api/v0/slskdn/library/remediate",
             None,
-            "{}",
+            r#"{"issue_ids":["lib-3-missing-kind"]}"#,
             &state,
         )
         .await
         .expect("fix library issues");
         let fixed_json = serde_json::from_str::<serde_json::Value>(&fixed.body).unwrap();
-        assert_eq!(fixed_json["fixed"], 1);
-        assert_eq!(fixed_json["issues"][0]["type"], "missing_kind");
-        assert_eq!(fixed_json["remaining"], 0);
+        assert!(fixed_json["id"].as_str().is_some());
+        assert_eq!(fixed_json["kind"], "library_remediation");
+        assert_eq!(fixed_json["status"], "completed");
+        assert_eq!(fixed_json["fixedCount"], 1);
+        assert_eq!(
+            fixed_json["issueIds"],
+            serde_json::json!(["lib-3-missing-kind"])
+        );
+        let job = super::route_http_request(
+            "GET",
+            &format!("/api/jobs/{}", fixed_json["id"].as_str().unwrap()),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&job.body).unwrap()["id"],
+            fixed_json["id"]
+        );
+        assert_eq!(fixed_json["remaining"], serde_json::Value::Null);
         let stored_scan = super::route_http_request(
             "GET",
             &format!(
@@ -109938,6 +110359,55 @@ mod tests {
             room_json["users"],
             serde_json::json!(["tester", "otherpeer"])
         );
+    }
+
+    #[tokio::test]
+    async fn soulseek_user_interests_route_returns_remote_server_response() {
+        use slskr_client::protocol::server::{ServerMessage, UserInterests};
+
+        let (state, mut receiver) = test_state();
+        state.session.write().await.state = "connected";
+        let task_state = Arc::clone(&state);
+        let task = tokio::spawn(async move {
+            super::route_http_request(
+                "GET",
+                "/api/v0/soulseek/users/remote-peer/interests",
+                None,
+                "",
+                &task_state,
+            )
+            .await
+        });
+        assert_eq!(
+            receiver.recv().await.unwrap(),
+            super::SessionCommand::RequestUserInterests("remote-peer".to_owned())
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let client = tokio::net::TcpStream::connect(address);
+        let server = listener.accept();
+        let (client, server) = tokio::join!(client, server);
+        let (server, _) = server.unwrap();
+        let mut session = slskr_client::server::ServerSession::new(
+            slskr_client::stream::ServerConnection::new(server),
+        );
+        let _client = slskr_client::stream::ServerConnection::new(client.unwrap());
+        super::project_server_message(
+            &state,
+            &mut session,
+            &ServerMessage::UserInterests(UserInterests {
+                username: "remote-peer".to_owned(),
+                liked: vec!["drum and bass".to_owned()],
+                hated: vec!["bad rips".to_owned()],
+            }),
+        )
+        .await;
+        let response = task.await.unwrap().unwrap();
+        assert_eq!(response.status, "200 OK");
+        let json = serde_json::from_str::<serde_json::Value>(&response.body).unwrap();
+        assert_eq!(json["username"], "remote-peer");
+        assert_eq!(json["liked"], serde_json::json!(["drum and bass"]));
+        assert_eq!(json["hated"], serde_json::json!(["bad rips"]));
     }
 
     #[tokio::test]
@@ -113669,6 +114139,7 @@ mod tests {
             db: None,
             config,
             session_commands: sender.clone(),
+            pending_user_interests: RwLock::new(BTreeMap::new()),
             lifecycle_commands: None,
             rate_limiter,
             oauth_states: RwLock::new(super::OAuthStateStore::default()),
@@ -113981,6 +114452,7 @@ mod tests {
             db: None,
             config: cookie_enabled_config,
             session_commands: sender.clone(),
+            pending_user_interests: RwLock::new(BTreeMap::new()),
             lifecycle_commands: None,
             rate_limiter: super::rate_limit::RateLimiter::new(super::rate_limit::RateLimitConfig {
                 max_requests_anonymous: 1000,

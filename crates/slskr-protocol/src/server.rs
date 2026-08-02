@@ -574,6 +574,13 @@ pub struct UserStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UserInterests {
+    pub username: String,
+    pub liked: Vec<String>,
+    pub hated: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RoomListEntry {
     pub name: String,
     pub user_count: u32,
@@ -681,6 +688,10 @@ pub enum ServerMessage {
         username: String,
         stats: UserStats,
     },
+    GetUserInterestsRequest {
+        username: String,
+    },
+    UserInterests(UserInterests),
     Relogged,
     UserSearch(TargetedSearchRequest),
     AddThingILike {
@@ -908,6 +919,18 @@ impl ServerMessage {
                 username: reader.read_string()?,
                 stats: decode_user_stats(&mut reader)?,
             },
+            (ServerCode::UserInterests, Direction::ClientToServer) => {
+                Self::GetUserInterestsRequest {
+                    username: reader.read_string()?,
+                }
+            }
+            (ServerCode::UserInterests, Direction::ServerToClient) => {
+                Self::UserInterests(UserInterests {
+                    username: reader.read_string()?,
+                    liked: decode_string_vec(&mut reader)?,
+                    hated: decode_string_vec(&mut reader)?,
+                })
+            }
             (ServerCode::Relogged, Direction::ServerToClient) => Self::Relogged,
             (ServerCode::UserSearch, Direction::ClientToServer) => {
                 Self::UserSearch(decode_targeted_search_request(&mut reader)?)
@@ -1205,6 +1228,16 @@ impl ServerMessage {
                 writer.write_string(username)?;
                 encode_user_stats(&mut writer, stats);
                 ServerCode::GetUserStats
+            }
+            Self::GetUserInterestsRequest { username } => {
+                writer.write_string(username)?;
+                ServerCode::UserInterests
+            }
+            Self::UserInterests(value) => {
+                writer.write_string(&value.username)?;
+                encode_string_vec(&mut writer, &value.liked)?;
+                encode_string_vec(&mut writer, &value.hated)?;
+                ServerCode::UserInterests
             }
             Self::Relogged => ServerCode::Relogged,
             Self::UserSearch(value) => {

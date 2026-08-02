@@ -114,6 +114,14 @@ pub fn not_found_response() -> HttpResponse {
     }
 }
 
+pub fn method_not_allowed_response() -> HttpResponse {
+    HttpResponse {
+        status: "405 Method Not Allowed",
+        content_type: "application/json",
+        body: "{\"error\":\"method not allowed\"}".to_owned(),
+    }
+}
+
 pub fn unmatched_route_response() -> HttpResponse {
     HttpResponse {
         status: "404 Not Found",

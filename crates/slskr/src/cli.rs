@@ -4702,6 +4702,8 @@ fn server_message_name(message: &ServerMessage) -> &'static str {
         ServerMessage::SharedFoldersFiles { .. } => "shared_folders_files",
         ServerMessage::GetUserStatsRequest { .. } => "get_user_stats_request",
         ServerMessage::GetUserStats { .. } => "get_user_stats",
+        ServerMessage::GetUserInterestsRequest { .. } => "get_user_interests_request",
+        ServerMessage::UserInterests(_) => "user_interests",
         ServerMessage::Relogged => "relogged",
         ServerMessage::UserSearch(_) => "user_search",
         ServerMessage::AddThingILike { .. } => "add_thing_i_like",

@@ -4,8 +4,8 @@ use slskr_protocol::{
     frame::MessageFrame,
     server::{
         Direction, JoinedRoom, LoginRequest, LoginResponse, ObfuscatedPort, PeerAddress, RoomList,
-        RoomListEntry, RoomUser, ServerCode, ServerMessage, TargetedSearchRequest, UserStats,
-        WaitPort,
+        RoomListEntry, RoomUser, ServerCode, ServerMessage, TargetedSearchRequest, UserInterests,
+        UserStats, WaitPort,
     },
     Writer,
 };
@@ -109,6 +109,27 @@ fn peer_address_response_round_trips() {
     let decoded =
         ServerMessage::decode(message.encode().unwrap(), Direction::ServerToClient).unwrap();
     assert_eq!(decoded, message);
+}
+
+#[test]
+fn user_interests_messages_round_trip() {
+    let request = ServerMessage::GetUserInterestsRequest {
+        username: "remote".to_owned(),
+    };
+    assert_eq!(
+        ServerMessage::decode(request.encode().unwrap(), Direction::ClientToServer,).unwrap(),
+        request
+    );
+
+    let response = ServerMessage::UserInterests(UserInterests {
+        username: "remote".to_owned(),
+        liked: vec!["ambient".to_owned()],
+        hated: vec!["low bitrate".to_owned()],
+    });
+    assert_eq!(
+        ServerMessage::decode(response.encode().unwrap(), Direction::ServerToClient).unwrap(),
+        response
+    );
 }
 
 #[test]
