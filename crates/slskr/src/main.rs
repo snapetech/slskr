@@ -56311,20 +56311,30 @@ async fn extended_controller_get_response(
                 let mut mesh = state.mesh.write().await;
                 mesh.sync_entries_sent = mesh.sync_entries_sent.saturating_add(sent);
             }
-            routing::ok_response(serde_json::json!({
-                "type": "hashdb_delta",
-                "fromSeqId": since_seq,
-                "toSeqId": latest_seq_id,
-                "sinceSeq": since_seq,
-                "latest_seq_id": latest_seq_id,
-                "entries": entries,
-                "hasMore": has_more,
-                "has_more": has_more,
-                "proto_version": 1,
-                "public_key": STANDARD.encode(state.capability_signing_key.verifying_key().as_bytes()),
-                "signature": "",
-                "timestamp_ms": unix_timestamp_millis(),
-            }).to_string())
+            let wire_entries = entries
+                .into_iter()
+                .map(|entry| {
+                    serde_json::json!({
+                        "seq_id": entry.seq_id,
+                        "flac_key": entry.flac_key,
+                        "byte_hash": entry.byte_hash,
+                        "size": entry.size,
+                    })
+                })
+                .collect::<Vec<_>>();
+            routing::ok_response(
+                serde_json::json!({
+                    "type": 3,
+                    "proto_version": 1,
+                    "public_key": "",
+                    "signature": "",
+                    "timestamp_ms": 0,
+                    "latest_seq_id": latest_seq_id,
+                    "entries": wire_entries,
+                    "has_more": has_more,
+                })
+                .to_string(),
+            )
         }
         "/api/mesh/hello" => {
             let discovery = state.content_discovery.read().await;
@@ -99717,12 +99727,21 @@ mod tests {
         .expect("generate a real mesh delta");
         assert_eq!(delta.status, "200 OK", "{}", delta.body);
         let delta_json = serde_json::from_str::<serde_json::Value>(&delta.body).unwrap();
+        assert_eq!(delta_json["type"], 3, "{delta_json}");
         assert_eq!(
             delta_json["entries"].as_array().unwrap().len(),
             1,
             "{delta_json}"
         );
-        assert_eq!(delta_json["hasMore"], false, "{delta_json}");
+        assert_eq!(
+            delta_json["entries"][0]["seq_id"], real_seq_id,
+            "{delta_json}"
+        );
+        assert!(
+            delta_json["entries"][0].get("flacKey").is_none(),
+            "{delta_json}"
+        );
+        assert_eq!(delta_json["has_more"], false, "{delta_json}");
         assert_eq!(delta_json["latest_seq_id"], real_seq_id, "{delta_json}");
 
         // A structurally usable but malformed hash is retained through the
