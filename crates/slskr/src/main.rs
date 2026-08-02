@@ -32699,29 +32699,6 @@ async fn apply_watched_controller_configuration(
     cli_environment: &BTreeMap<String, String>,
 ) {
     let parsed = text.and_then(|text| parse_controller_yaml(text).ok());
-    {
-        let mut overlay = state.options_overlay.write().await;
-        overlay.apply_yaml(
-            parsed
-                .clone()
-                .map(controller_yaml_api_projection)
-                .unwrap_or(serde_json::Value::Null),
-        );
-        overlay.watched_share_directories = Some(
-            parsed
-                .as_ref()
-                .and_then(|value| value.pointer("/shares/directories"))
-                .and_then(serde_json::Value::as_array)
-                .map(|values| {
-                    values
-                        .iter()
-                        .filter_map(serde_json::Value::as_str)
-                        .map(str::to_owned)
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default(),
-        );
-    }
     let reloaded = match load_watched_controller_configuration(cli_environment.clone()) {
         Ok(config) => config,
         Err(error) => {
@@ -32745,6 +32722,34 @@ async fn apply_watched_controller_configuration(
             return;
         }
     };
+    {
+        // Keep the last validated projection visible when a watched reload is
+        // rejected.  This is the same retain-last-valid contract as the
+        // upstream options monitor; applying the parsed YAML before loading
+        // the full configuration briefly exposed an invalid or incomplete
+        // overlay even though runtime consumers correctly kept old settings.
+        let mut overlay = state.options_overlay.write().await;
+        overlay.apply_yaml(
+            parsed
+                .clone()
+                .map(controller_yaml_api_projection)
+                .unwrap_or(serde_json::Value::Null),
+        );
+        overlay.watched_share_directories = Some(
+            parsed
+                .as_ref()
+                .and_then(|value| value.pointer("/shares/directories"))
+                .and_then(serde_json::Value::as_array)
+                .map(|values| {
+                    values
+                        .iter()
+                        .filter_map(serde_json::Value::as_str)
+                        .map(str::to_owned)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default(),
+        );
+    }
     *state
         .controller_options_validation_error
         .write()
@@ -33031,11 +33036,6 @@ async fn apply_watched_controller_configuration(
                     obfuscated_port: effective_obfuscated_advertised_port(state),
                 })
                 .await;
-            if state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
-                && state.session.read().await.state == "connected"
-            {
-                state.runtime.write().await.set_reconnect_pending(true);
-            }
         }
         (Ok(_), Ok(_)) => {}
         (regular, obfuscated) => {
@@ -102944,6 +102944,61 @@ mod tests {
         .await;
 
         assert!(state.runtime.read().await.application_restart_requested);
+    }
+
+    #[tokio::test]
+    async fn watched_live_listener_rebind_does_not_require_reconnect() {
+        let (state, _receiver) = test_state_with_env(
+            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+        );
+        state.session.write().await.state = "connected";
+        let yaml = "soulseek:\n  listen_port: 50301\n";
+        fs::write(state.config.state_dir.join("slskd.yml"), yaml).unwrap();
+
+        super::apply_watched_controller_configuration(
+            &state,
+            Some(yaml),
+            &state.controller_cli_environment,
+        )
+        .await;
+
+        assert!(!state.runtime.read().await.application_reconnect_pending);
+    }
+
+    #[tokio::test]
+    async fn rejected_watched_reload_retains_last_valid_options_projection() {
+        let (state, _receiver) = test_state_with_env(MapEnv::default());
+        let valid = "soulseek:\n  description: retained description\n";
+        fs::write(state.config.state_dir.join("slskd.yml"), valid).unwrap();
+        super::apply_watched_controller_configuration(
+            &state,
+            Some(valid),
+            &state.controller_cli_environment,
+        )
+        .await;
+
+        let invalid = "soulseek: [\n";
+        fs::write(state.config.state_dir.join("slskd.yml"), invalid).unwrap();
+        super::apply_watched_controller_configuration(
+            &state,
+            Some(invalid),
+            &state.controller_cli_environment,
+        )
+        .await;
+
+        let overlay = state.options_overlay.read().await;
+        let current = serde_json::from_str::<serde_json::Value>(&super::slskd_options_json(
+            &state.config,
+            &overlay,
+            true,
+        ))
+        .unwrap();
+        assert_eq!(current["soulseek"]["description"], "retained description");
+        assert!(state
+            .controller_options_validation_error
+            .read()
+            .unwrap()
+            .is_none());
     }
 
     #[tokio::test]
