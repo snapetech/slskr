@@ -55094,15 +55094,21 @@ async fn extended_controller_dynamic_get_response(
         }
     }
     if let Some(flac_key) = path_segment_after(path, "/api/mesh/lookup/") {
-        let flac_key = decoded_path_segment(flac_key);
+        let flac_key = decoded_path_segment(flac_key).trim().to_owned();
+        if flac_key.is_empty() {
+            return routing::bad_request_response("flacKey required");
+        }
         let discovery = state.content_discovery.read().await;
-        return discovery.lookup_hash(&flac_key).map_or_else(routing::not_found_response, |entry| {
-            routing::ok_response(serde_json::json!({
-                "flacKey": flac_key,
-                "entry": entry,
-                "peers": discovery.peer_ids_for_recordings(std::slice::from_ref(&entry.music_brainz_id)),
-            }).to_string())
-        });
+        return discovery.lookup_hash(&flac_key).map_or_else(
+            || HttpResponse {
+                status: "404 Not Found",
+                content_type: "application/json; charset=utf-8",
+                body: serde_json::json!({"found": false}).to_string(),
+            },
+            |entry| {
+                routing::ok_response(serde_json::json!({"found": true, "entry": entry}).to_string())
+            },
+        );
     }
     if let Some(username) = path_segment_between(path, "/api/multisource/users/", "/files") {
         let username = decoded_path_segment(username);
@@ -95136,6 +95142,10 @@ mod tests {
                 .await
                 .expect("lookup before publish");
         assert_eq!(missing.status, "404 Not Found");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&missing.body).unwrap()["found"],
+            false
+        );
 
         let byte_hash = "a".repeat(64);
         let published = super::route_http_request(
@@ -95159,9 +95169,12 @@ mod tests {
                 .expect("lookup after publish");
         assert_eq!(found.status, "200 OK", "{}", found.body);
         let found_json = serde_json::from_str::<serde_json::Value>(&found.body).unwrap();
+        assert_eq!(found_json["found"], true);
         assert_eq!(found_json["entry"]["flacKey"], "round-trip-key");
         assert_eq!(found_json["entry"]["byteHash"], byte_hash);
         assert_eq!(found_json["entry"]["size"], 4096);
+        assert!(found_json.get("flacKey").is_none());
+        assert!(found_json.get("peers").is_none());
 
         // The "key"/"contentId" aliases the previous implementation
         // accepted (and used to bypass byteHash/size validation) are no
