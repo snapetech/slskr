@@ -15331,12 +15331,18 @@ async fn route_http_request_with_headers(
         || normalized_path.starts_with("/api/pod")
     {
         let advanced = state.advanced_networking.read().await;
-        let disabled = (normalized_path.starts_with("/api/mesh") && !advanced.mesh.enabled)
+        let mesh_nat_detect = normalized_path == "/api/mesh/nat/detect";
+        let disabled = (normalized_path.starts_with("/api/mesh")
+            && !mesh_nat_detect
+            && (!advanced.mesh.enabled || !advanced.mesh.enable_overlay))
+            || (mesh_nat_detect && (!advanced.mesh.enabled || !advanced.mesh.enable_stun))
             || (normalized_path.starts_with("/api/dht")
                 && normalized_path != "/api/dht/status"
-                && !advanced.dht.enabled)
-            || (normalized_path.starts_with("/api/overlay/data") && !advanced.overlay_data.enable)
-            || (normalized_path.starts_with("/api/overlay") && !advanced.overlay.enable);
+                && (!advanced.dht.enabled || !advanced.mesh.enable_dht))
+            || (normalized_path.starts_with("/api/overlay/data")
+                && (!advanced.mesh.enable_overlay || !advanced.overlay_data.enable))
+            || (normalized_path.starts_with("/api/overlay")
+                && (!advanced.mesh.enable_overlay || !advanced.overlay.enable));
         if disabled {
             return Ok(controller_swagger_not_found_response());
         }
@@ -31319,6 +31325,29 @@ fn slskd_options_json(
                 _ => "Disabled",
             },
         });
+        let signal_system = &advanced.signal_system;
+        let format_ttl = |ttl: Duration| {
+            let total_seconds = ttl.as_secs();
+            let hours = total_seconds / 3_600;
+            let minutes = (total_seconds % 3_600) / 60;
+            let seconds = total_seconds % 60;
+            format!("{hours:02}:{minutes:02}:{seconds:02}")
+        };
+        response["signalSystem"] = serde_json::json!({
+            "enabled": signal_system.enabled,
+            "deduplicationCacheSize": signal_system.deduplication_cache_size,
+            "defaultTtl": format_ttl(signal_system.default_ttl),
+            "meshChannel": {
+                "enabled": signal_system.mesh_channel.enabled,
+                "priority": signal_system.mesh_channel.priority,
+                "requireActiveSession": signal_system.mesh_channel.require_active_session,
+            },
+            "btExtensionChannel": {
+                "enabled": signal_system.bt_extension_channel.enabled,
+                "priority": signal_system.bt_extension_channel.priority,
+                "requireActiveSession": signal_system.bt_extension_channel.require_active_session,
+            },
+        });
         response["relay"] = serde_json::json!({
             "enabled": advanced.relay.enabled,
             "mode": advanced.relay.mode,
@@ -44049,6 +44078,10 @@ async fn misc_controller_mutation_response(
         });
     }
     if method == "POST" && path == "/api/mesh/nat/detect" {
+        let mesh_settings = state.advanced_networking.read().await.mesh.clone();
+        if !mesh_settings.enabled || !mesh_settings.enable_stun {
+            return Some(controller_swagger_not_found_response());
+        }
         let (nat_type, detected) = detect_nat_type(&STUN_SERVERS).await;
         return Some(routing::ok_response(
             serde_json::json!({
@@ -51453,25 +51486,53 @@ async fn extended_controller_get_response(
                 routing::ok_response(serde_json::Value::Array(requests).to_string())
             }
         }
-        "/api/signals/config" => routing::ok_response(
-            serde_json::json!({
-                "enabled": true,
-                "deduplicationCacheSize": EVENT_HISTORY_LIMIT,
-                "retentionSeconds": 3600,
-                "channelCapacity": EVENT_HISTORY_LIMIT,
-            })
-            .to_string(),
-        ),
-        "/api/signals/status" => {
-            let events = state.events.read().await;
+        "/api/signals/config" => {
+            let advanced = state.advanced_networking.read().await;
+            let signal_system = &advanced.signal_system;
             routing::ok_response(
                 serde_json::json!({
-                    "enabled": true,
+                    "enabled": signal_system.enabled,
+                    "deduplicationCacheSize": signal_system.deduplication_cache_size,
+                    "defaultTtlSeconds": signal_system.default_ttl.as_secs(),
+                    "retentionSeconds": signal_system.default_ttl.as_secs(),
+                    "channelCapacity": signal_system.deduplication_cache_size,
+                    "meshChannel": {
+                        "enabled": signal_system.mesh_channel.enabled,
+                        "priority": signal_system.mesh_channel.priority,
+                        "requireActiveSession": signal_system.mesh_channel.require_active_session,
+                    },
+                    "btExtensionChannel": {
+                        "enabled": signal_system.bt_extension_channel.enabled,
+                        "priority": signal_system.bt_extension_channel.priority,
+                        "requireActiveSession": signal_system.bt_extension_channel.require_active_session,
+                    },
+                })
+                .to_string(),
+            )
+        }
+        "/api/signals/status" => {
+            let events = state.events.read().await;
+            let advanced = state.advanced_networking.read().await;
+            let signal_system = &advanced.signal_system;
+            let active_channels = [
+                signal_system.mesh_channel.enabled.then_some("mesh"),
+                signal_system
+                    .bt_extension_channel
+                    .enabled
+                    .then_some("btExtension"),
+            ]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>();
+            routing::ok_response(
+                serde_json::json!({
+                    "enabled": signal_system.enabled,
                     "signalsReceived": events.records.len(),
                     "signalsPublished": events.records.len(),
                     "duplicateSignalsDropped": 0,
                     "expiredSignalsDropped": 0,
                     "subscriberCount": state.event_tx.receiver_count(),
+                    "activeChannels": active_channels,
                 })
                 .to_string(),
             )
@@ -54766,14 +54827,20 @@ async fn serve(invocation: ServeInvocation) -> Result<(), String> {
     let backfill_state = BackfillState::load(&config.state_dir)?;
     let pod_channel_store = pod_channels::PodChannelStore::load(&config.state_dir)?;
     let pod_store = pods::PodStore::load(&config.state_dir)?;
-    let private_gateway = if let Some(bind) = config.overlay_bind {
-        Some(Arc::new(
-            private_gateway::Gateway::load_or_create(bind, &config.state_dir).await?,
-        ))
+    let private_gateway = if config.advanced_networking.mesh.enabled
+        && config.advanced_networking.mesh.enable_overlay
+    {
+        if let Some(bind) = config.overlay_bind {
+            Some(Arc::new(
+                private_gateway::Gateway::load_or_create(bind, &config.state_dir).await?,
+            ))
+        } else {
+            None
+        }
     } else {
         None
     };
-    let dht = if config.dht_enabled {
+    let dht = if config.dht_enabled && config.advanced_networking.mesh.enable_dht {
         Some(Arc::new(dht::Rendezvous::new(
             &config.advanced_networking.dht,
         )?))
@@ -55563,7 +55630,10 @@ async fn run_lidarr_sync_scheduler_cycle(state: &AppState) -> Duration {
 }
 
 fn spawn_mesh_dht_publisher(state: Arc<AppState>) {
-    if state.config.trusted_mesh_peers.is_empty() {
+    if state.config.trusted_mesh_peers.is_empty()
+        || !state.config.advanced_networking.mesh.enabled
+        || !state.config.advanced_networking.mesh.enable_dht
+    {
         return;
     }
     tokio::spawn(async move {
@@ -71379,6 +71449,66 @@ mod tests {
         let json = serde_json::from_str::<serde_json::Value>(&response.body).unwrap();
         assert_eq!(json["status"], "ok");
         assert_eq!(json["warnings"][0], "auth_disabled_non_loopback");
+    }
+
+    #[tokio::test]
+    async fn mesh_and_signal_routes_honor_configured_runtime_switches() {
+        let advanced = serde_json::json!({
+            "mesh": {
+                "enabled": true,
+                "enableOverlay": false,
+                "enableDht": false,
+                "enableStun": false
+            },
+            "SignalSystem": {
+                "enabled": false,
+                "deduplicationCacheSize": 2048,
+                "defaultTtl": "00:07:30",
+                "meshChannel": {
+                    "enabled": false,
+                    "priority": 3,
+                    "requireActiveSession": true
+                },
+                "btExtensionChannel": {
+                    "enabled": true,
+                    "priority": 4,
+                    "requireActiveSession": false
+                }
+            }
+        });
+        let (state, _receiver) = test_state_with_env(
+            MapEnv::default().with("SLSKR_ADVANCED_NETWORKING_JSON", &advanced.to_string()),
+        );
+
+        let config = super::route_http_request("GET", "/api/signals/config", None, "", &state)
+            .await
+            .expect("signal config response");
+        let config_json = serde_json::from_str::<serde_json::Value>(&config.body).unwrap();
+        assert!(!config_json["enabled"].as_bool().unwrap());
+        assert_eq!(config_json["deduplicationCacheSize"], 2_048);
+        assert_eq!(config_json["defaultTtlSeconds"], 450);
+        assert!(!config_json["meshChannel"]["enabled"].as_bool().unwrap());
+        assert_eq!(config_json["btExtensionChannel"]["priority"], 4);
+
+        let status = super::route_http_request("GET", "/api/signals/status", None, "", &state)
+            .await
+            .expect("signal status response");
+        let status_json = serde_json::from_str::<serde_json::Value>(&status.body).unwrap();
+        assert_eq!(
+            status_json["activeChannels"],
+            serde_json::json!(["btExtension"])
+        );
+
+        for (method, path) in [
+            ("GET", "/api/mesh/stats"),
+            ("GET", "/api/dht/peers"),
+            ("POST", "/api/mesh/nat/detect"),
+        ] {
+            let response = super::route_http_request(method, path, None, "", &state)
+                .await
+                .expect("disabled mesh route response");
+            assert_eq!(response.status, "404 Not Found", "{method} {path}");
+        }
     }
 
     #[tokio::test]

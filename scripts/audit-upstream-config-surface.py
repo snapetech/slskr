@@ -992,6 +992,9 @@ ADVANCED_NETWORKING_SECURITY_CONFIG_PATHS = {
     "dht.overlay_port",
     "dht.vpn_port_sync",
     "mesh.dht.bootstrap_nodes",
+    "mesh.enable_dht",
+    "mesh.enable_overlay",
+    "mesh.enable_stun",
     "mesh.enable_soulseek_capability_handshake",
     "mesh.enable_soulseek_rendezvous",
     "mesh.enabled",
@@ -1052,6 +1055,9 @@ ADVANCED_NETWORKING_SECURITY_CONFIG_PATHS = {
     "security.violation_tracker.base_ban_duration_minutes",
     "security.violation_tracker.enabled",
     "security.violation_tracker.violations_before_auto_ban",
+    "signalSystem.btExtensionChannel.enabled",
+    "signalSystem.enabled",
+    "signalSystem.meshChannel.enabled",
 }
 
 for path in ADVANCED_NETWORKING_SECURITY_CONFIG_PATHS:
@@ -1073,7 +1079,21 @@ for path, environment, command_line in [
         environment=[environment], commandLine=[command_line]
     )
 
+for path, environment in [
+    ("signalSystem.enabled", "SLSKD_SIGNALSYSTEM_ENABLED"),
+    (
+        "signalSystem.btExtensionChannel.enabled",
+        "SLSKD_SIGNALSYSTEM_BTEXTENSIONCHANNEL_ENABLED",
+    ),
+    (
+        "signalSystem.meshChannel.enabled",
+        "SLSKD_SIGNALSYSTEM_MESHCHANNEL_ENABLED",
+    ),
+]:
+    SLSKR_RUNTIME_CONFIG_MAPPINGS[path].update(environment=[environment])
+
 MEDIA_ADVANCED_SERVICE_CONFIG_PATHS = {
+    "feature",
     "feature.CollectionsSharing",
     "feature.Dht",
     "feature.IdentityFriends",
@@ -1116,6 +1136,7 @@ MEDIA_ADVANCED_SERVICE_CONFIG_PATHS = {
     "virtualSoulfind.disasterMode.recoveryCheckIntervalMinutes",
     "virtualSoulfind.disasterMode.recoveryHealthyChecksRequired",
     "virtualSoulfind.disasterMode.unavailableThresholdMinutes",
+    "virtualSoulfindV2.enabled",
 }
 
 for path in MEDIA_ADVANCED_SERVICE_CONFIG_PATHS:
@@ -1127,6 +1148,27 @@ for path in MEDIA_ADVANCED_SERVICE_CONFIG_PATHS:
 SLSKR_RUNTIME_CONFIG_MAPPINGS["song_id.max_concurrent_runs"].update(
     environment=["SLSKD_SONGID_MAX_CONCURRENT_RUNS"],
     commandLine=["--songid-max-concurrent-runs"],
+)
+
+for path, environment in [
+    (
+        "integrations.lidarr.delete_rejected_downloads",
+        "SLSKD_LIDARR_DELETE_REJECTED_DOWNLOADS",
+    ),
+    (
+        "integrations.lidarr.blacklist_rejected_downloads",
+        "SLSKD_LIDARR_BLACKLIST_REJECTED_DOWNLOADS",
+    ),
+    ("integrations.vpn.self_hosted_relay", "SLSKD_VPN_SELF_HOSTED_RELAY"),
+]:
+    SLSKR_RUNTIME_CONFIG_MAPPINGS[path] = {
+        "environment": [environment],
+        "commandLine": [],
+        "runtime": "startup layering, sanitized options projection, real integration consumers, validation, and watched lifecycle",
+    }
+SLSKR_RUNTIME_CONFIG_MAPPINGS["virtualSoulfindV2.enabled"].update(
+    environment=["SLSKR_VIRTUAL_SOULFIND_V2_ENABLED"],
+    commandLine=[],
 )
 
 # Paths enter this set only after startup layering, validation, live mutation,
@@ -1317,6 +1359,13 @@ FULLY_PROVEN_CONFIG_PATHS.update(DAEMON_FOUNDATION_CONFIG_PATHS)
 FULLY_PROVEN_CONFIG_PATHS.update(CORE_WORKFLOW_CONFIG_PATHS)
 FULLY_PROVEN_CONFIG_PATHS.update(ADVANCED_NETWORKING_SECURITY_CONFIG_PATHS)
 FULLY_PROVEN_CONFIG_PATHS.update(MEDIA_ADVANCED_SERVICE_CONFIG_PATHS)
+FULLY_PROVEN_CONFIG_PATHS.update(
+    {
+        "integrations.lidarr.blacklist_rejected_downloads",
+        "integrations.lidarr.delete_rejected_downloads",
+        "integrations.vpn.self_hosted_relay",
+    }
+)
 
 
 def uncomment_yaml_line(raw: str) -> str:

@@ -1826,6 +1826,7 @@ pub enum PodSignatureMode {
 pub struct AdvancedNetworkingSettings {
     pub dht: DhtSettings,
     pub mesh: MeshRuntimeSettings,
+    pub signal_system: SignalSystemSettings,
     pub mesh_sync_security: MeshSyncSecuritySettings,
     pub pod_join_signature_mode: PodSignatureMode,
     pub pod_security_signature_mode: PodSignatureMode,
@@ -1867,6 +1868,9 @@ impl DhtSettings {
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct MeshRuntimeSettings {
     pub enabled: bool,
+    pub enable_overlay: bool,
+    pub enable_dht: bool,
+    pub enable_stun: bool,
     pub enable_soulseek_capability_handshake: bool,
     pub enable_soulseek_rendezvous: bool,
     pub probe_soulseek_rendezvous_capabilities: bool,
@@ -1875,6 +1879,22 @@ pub struct MeshRuntimeSettings {
     pub quic_port: u16,
     pub enforce_remote_payload_limits: bool,
     pub max_remote_payload_size: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct SignalSystemSettings {
+    pub enabled: bool,
+    pub deduplication_cache_size: usize,
+    pub default_ttl: Duration,
+    pub mesh_channel: SignalChannelSettings,
+    pub bt_extension_channel: SignalChannelSettings,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct SignalChannelSettings {
+    pub enabled: bool,
+    pub priority: u8,
+    pub require_active_session: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -4238,6 +4258,12 @@ pub struct FileConfig {
     #[serde(rename = "Mesh")]
     mesh_sync: MeshSyncRootFileConfig,
     mesh: MeshFileConfig,
+    #[serde(
+        rename = "SignalSystem",
+        alias = "signalSystem",
+        alias = "signal_system"
+    )]
+    signal_system: SignalSystemFileConfig,
     overlay: OverlayFileConfig,
     overlay_data: OverlayDataFileConfig,
     relay: RelayFileConfig,
@@ -4714,6 +4740,12 @@ pub struct DhtFileConfig {
 pub struct MeshFileConfig {
     trusted_peers: Vec<TrustedMeshPeerInput>,
     enabled: Option<bool>,
+    #[serde(alias = "enableOverlay", alias = "EnableOverlay")]
+    enable_overlay: Option<bool>,
+    #[serde(alias = "enableDht", alias = "EnableDht")]
+    enable_dht: Option<bool>,
+    #[serde(alias = "enableStun", alias = "EnableStun")]
+    enable_stun: Option<bool>,
     enable_soulseek_capability_handshake: Option<bool>,
     enable_soulseek_rendezvous: Option<bool>,
     probe_soulseek_rendezvous_capabilities: Option<bool>,
@@ -4763,6 +4795,200 @@ pub struct MeshSyncSecurityFileConfig {
     alert_threshold_signature_failures: Option<u32>,
     alert_threshold_rate_limit_violations: Option<u32>,
     alert_threshold_quarantine_events: Option<u32>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields, rename_all = "camelCase")]
+pub struct SignalSystemFileConfig {
+    #[serde(alias = "Enabled")]
+    enabled: Option<bool>,
+    #[serde(alias = "DeduplicationCacheSize")]
+    deduplication_cache_size: Option<usize>,
+    #[serde(
+        alias = "DefaultTtl",
+        alias = "defaultTTL",
+        alias = "default_ttl_seconds"
+    )]
+    default_ttl: Option<SignalDurationFileValue>,
+    #[serde(alias = "MeshChannel")]
+    mesh_channel: SignalChannelFileConfig,
+    #[serde(alias = "BtExtensionChannel")]
+    bt_extension_channel: SignalChannelFileConfig,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields, rename_all = "camelCase")]
+pub struct SignalChannelFileConfig {
+    #[serde(alias = "Enabled")]
+    enabled: Option<bool>,
+    #[serde(alias = "Priority")]
+    priority: Option<u8>,
+    #[serde(alias = "RequireActiveSession")]
+    require_active_session: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+pub enum SignalDurationFileValue {
+    Seconds(u64),
+    Text(String),
+}
+
+impl SignalSystemSettings {
+    fn from_layers<E: ConfigEnv>(file: &SignalSystemFileConfig, env: &E) -> Result<Self, String> {
+        let enabled = env_bool_any_layer(
+            env,
+            &["SLSKD_SIGNALSYSTEM_ENABLED", "SLSKR_SIGNAL_SYSTEM_ENABLED"],
+            file.enabled.unwrap_or(true),
+        )?;
+        let deduplication_cache_size = env_parse_any_layer(
+            env,
+            &[
+                "SLSKD_SIGNALSYSTEM_DEDUPLICATIONCACHESIZE",
+                "SLSKR_SIGNAL_SYSTEM_DEDUPLICATION_CACHE_SIZE",
+            ],
+            file.deduplication_cache_size,
+            10_000_usize,
+        )?;
+        if !(100..=1_000_000).contains(&deduplication_cache_size) {
+            return Err(
+                "SignalSystem.DeduplicationCacheSize must be between 100 and 1000000".to_owned(),
+            );
+        }
+
+        let default_ttl = match optional_env_any(
+            env,
+            &[
+                "SLSKD_SIGNALSYSTEM_DEFAULTTTL",
+                "SLSKR_SIGNAL_SYSTEM_DEFAULT_TTL",
+            ],
+        ) {
+            Some(value) => parse_signal_duration("SignalSystem.DefaultTtl", &value)?,
+            None => match file.default_ttl.as_ref() {
+                Some(SignalDurationFileValue::Seconds(value)) => {
+                    signal_duration_from_seconds("SignalSystem.DefaultTtl", *value)?
+                }
+                Some(SignalDurationFileValue::Text(value)) => {
+                    parse_signal_duration("SignalSystem.DefaultTtl", value)?
+                }
+                None => Duration::from_secs(5 * 60),
+            },
+        };
+
+        let channel = |file: &SignalChannelFileConfig,
+                       enabled_names: &[&str],
+                       priority_names: &[&str],
+                       session_names: &[&str],
+                       default_priority: u8,
+                       default_session: bool|
+         -> Result<SignalChannelSettings, String> {
+            let enabled = env_bool_any_layer(env, enabled_names, file.enabled.unwrap_or(true))?;
+            let priority =
+                env_parse_any_layer(env, priority_names, file.priority, default_priority)?;
+            let require_active_session = env_bool_any_layer(
+                env,
+                session_names,
+                file.require_active_session.unwrap_or(default_session),
+            )?;
+            if !(1..=10).contains(&priority) {
+                return Err(format!(
+                    "SignalSystem channel priority must be between 1 and 10, got {priority}"
+                ));
+            }
+            Ok(SignalChannelSettings {
+                enabled,
+                priority,
+                require_active_session,
+            })
+        };
+
+        Ok(Self {
+            enabled,
+            deduplication_cache_size,
+            default_ttl,
+            mesh_channel: channel(
+                &file.mesh_channel,
+                &[
+                    "SLSKD_SIGNALSYSTEM_MESHCHANNEL_ENABLED",
+                    "SLSKR_SIGNAL_SYSTEM_MESH_CHANNEL_ENABLED",
+                ],
+                &[
+                    "SLSKD_SIGNALSYSTEM_MESHCHANNEL_PRIORITY",
+                    "SLSKR_SIGNAL_SYSTEM_MESH_CHANNEL_PRIORITY",
+                ],
+                &[
+                    "SLSKD_SIGNALSYSTEM_MESHCHANNEL_REQUIREACTIVESESSION",
+                    "SLSKR_SIGNAL_SYSTEM_MESH_CHANNEL_REQUIRE_ACTIVE_SESSION",
+                ],
+                1,
+                false,
+            )?,
+            bt_extension_channel: channel(
+                &file.bt_extension_channel,
+                &[
+                    "SLSKD_SIGNALSYSTEM_BTEXTENSIONCHANNEL_ENABLED",
+                    "SLSKR_SIGNAL_SYSTEM_BT_EXTENSION_CHANNEL_ENABLED",
+                ],
+                &[
+                    "SLSKD_SIGNALSYSTEM_BTEXTENSIONCHANNEL_PRIORITY",
+                    "SLSKR_SIGNAL_SYSTEM_BT_EXTENSION_CHANNEL_PRIORITY",
+                ],
+                &[
+                    "SLSKD_SIGNALSYSTEM_BTEXTENSIONCHANNEL_REQUIREACTIVESESSION",
+                    "SLSKR_SIGNAL_SYSTEM_BT_EXTENSION_CHANNEL_REQUIRE_ACTIVE_SESSION",
+                ],
+                2,
+                true,
+            )?,
+        })
+    }
+}
+
+fn signal_duration_from_seconds(path: &str, seconds: u64) -> Result<Duration, String> {
+    if seconds == 0 {
+        return Err(format!("{path} must be greater than zero"));
+    }
+    Ok(Duration::from_secs(seconds))
+}
+
+fn parse_signal_duration(path: &str, value: &str) -> Result<Duration, String> {
+    let value = value.trim();
+    if let Ok(seconds) = value.parse::<u64>() {
+        return signal_duration_from_seconds(path, seconds);
+    }
+    let (days, clock) = if let Some((days, clock)) = value.split_once('.') {
+        (
+            days.parse::<u64>()
+                .map_err(|_| format!("invalid {path}: invalid day count"))?,
+            clock,
+        )
+    } else {
+        (0_u64, value)
+    };
+    let components = clock.split(':').collect::<Vec<_>>();
+    if components.len() != 3 {
+        return Err(format!("invalid {path}: expected seconds or HH:MM:SS"));
+    }
+    let hours = components[0]
+        .parse::<u64>()
+        .map_err(|_| format!("invalid {path}: invalid hours"))?;
+    let minutes = components[1]
+        .parse::<u64>()
+        .map_err(|_| format!("invalid {path}: invalid minutes"))?;
+    let seconds = components[2]
+        .parse::<u64>()
+        .map_err(|_| format!("invalid {path}: invalid seconds"))?;
+    if minutes >= 60 || seconds >= 60 {
+        return Err(format!(
+            "invalid {path}: minutes and seconds must be below 60"
+        ));
+    }
+    let total = days
+        .saturating_mul(24 * 60 * 60)
+        .saturating_add(hours.saturating_mul(60 * 60))
+        .saturating_add(minutes.saturating_mul(60))
+        .saturating_add(seconds);
+    signal_duration_from_seconds(path, total)
 }
 
 impl MeshSyncSecurityFileConfig {
@@ -4931,6 +5157,12 @@ struct AdvancedNetworkingFileOverlay {
     #[serde(rename = "Mesh")]
     mesh_sync: Option<MeshSyncRootFileConfig>,
     mesh: Option<MeshFileConfig>,
+    #[serde(
+        rename = "SignalSystem",
+        alias = "signalSystem",
+        alias = "signal_system"
+    )]
+    signal_system: Option<SignalSystemFileConfig>,
     overlay: Option<OverlayFileConfig>,
     overlay_data: Option<OverlayDataFileConfig>,
     relay: Option<RelayFileConfig>,
@@ -5005,6 +5237,10 @@ impl AdvancedNetworkingSettings {
             .unwrap_or_default();
         let dht_file = yaml_overlay.dht.as_ref().unwrap_or(&file.dht);
         let mesh_file = yaml_overlay.mesh.as_ref().unwrap_or(&file.mesh);
+        let signal_system_file = yaml_overlay
+            .signal_system
+            .as_ref()
+            .unwrap_or(&file.signal_system);
         let mesh_sync_file = yaml_overlay.mesh_sync.as_ref().unwrap_or(&file.mesh_sync);
         let overlay_file = yaml_overlay.overlay.as_ref().unwrap_or(&file.overlay);
         let overlay_data_file = yaml_overlay
@@ -5102,6 +5338,9 @@ impl AdvancedNetworkingSettings {
 
         let mesh = MeshRuntimeSettings {
             enabled: mesh_file.enabled.unwrap_or(slskdn),
+            enable_overlay: mesh_file.enable_overlay.unwrap_or(true),
+            enable_dht: mesh_file.enable_dht.unwrap_or(true),
+            enable_stun: mesh_file.enable_stun.unwrap_or(true),
             enable_soulseek_capability_handshake: mesh_file
                 .enable_soulseek_capability_handshake
                 .unwrap_or(true),
@@ -5132,6 +5371,8 @@ impl AdvancedNetworkingSettings {
                 "mesh.security.maxRemotePayloadSize must be between 1024 and 16777216".to_owned(),
             );
         }
+
+        let signal_system = SignalSystemSettings::from_layers(signal_system_file, env)?;
 
         // .NET configuration keys are case-insensitive, so the documented
         // `Mesh:SyncSecurity` section and the lower-case YAML `mesh` section
@@ -5441,6 +5682,7 @@ impl AdvancedNetworkingSettings {
         Ok(Self {
             dht,
             mesh,
+            signal_system,
             mesh_sync_security,
             pod_join_signature_mode: PodSignatureMode::parse(
                 env.var("SLSKR_POD_JOIN_SIGNATURE_MODE")
@@ -6899,6 +7141,36 @@ const CONTROLLER_YAML_CORE_MAPPINGS: &[(&str, &str)] = &[
     ("blacklist.enabled", "SLSKD_BLACKLIST"),
     ("blacklist.file", "SLSKD_BLACKLIST_FILE"),
     ("feature.swagger", "SLSKD_SWAGGER"),
+    ("SignalSystem.Enabled", "SLSKD_SIGNALSYSTEM_ENABLED"),
+    (
+        "SignalSystem.DeduplicationCacheSize",
+        "SLSKD_SIGNALSYSTEM_DEDUPLICATIONCACHESIZE",
+    ),
+    ("SignalSystem.DefaultTtl", "SLSKD_SIGNALSYSTEM_DEFAULTTTL"),
+    (
+        "SignalSystem.MeshChannel.Enabled",
+        "SLSKD_SIGNALSYSTEM_MESHCHANNEL_ENABLED",
+    ),
+    (
+        "SignalSystem.MeshChannel.Priority",
+        "SLSKD_SIGNALSYSTEM_MESHCHANNEL_PRIORITY",
+    ),
+    (
+        "SignalSystem.MeshChannel.RequireActiveSession",
+        "SLSKD_SIGNALSYSTEM_MESHCHANNEL_REQUIREACTIVESESSION",
+    ),
+    (
+        "SignalSystem.BtExtensionChannel.Enabled",
+        "SLSKD_SIGNALSYSTEM_BTEXTENSIONCHANNEL_ENABLED",
+    ),
+    (
+        "SignalSystem.BtExtensionChannel.Priority",
+        "SLSKD_SIGNALSYSTEM_BTEXTENSIONCHANNEL_PRIORITY",
+    ),
+    (
+        "SignalSystem.BtExtensionChannel.RequireActiveSession",
+        "SLSKD_SIGNALSYSTEM_BTEXTENSIONCHANNEL_REQUIREACTIVESESSION",
+    ),
     ("flags.force_migrations", "SLSKD_FORCE_MIGRATIONS"),
     (
         "flags.legacy_windows_tcp_keepalive",
@@ -7554,7 +7826,11 @@ fn controller_yaml_environment(
                 continue;
             }
         }
-        let Some(value) = controller_yaml_value(&root, yaml_path) else {
+        let Some(value) = (if yaml_path.starts_with("SignalSystem.") {
+            controller_yaml_value_case_insensitive(&root, yaml_path)
+        } else {
+            controller_yaml_value(&root, yaml_path)
+        }) else {
             continue;
         };
         let value = match value {
@@ -7669,6 +7945,23 @@ fn controller_yaml_value<'a>(
     for key in path.split('.') {
         let mapping = current.as_mapping()?;
         current = mapping.get(serde_yaml::Value::String(key.to_owned()))?;
+    }
+    Some(current)
+}
+
+fn controller_yaml_value_case_insensitive<'a>(
+    root: &'a serde_yaml::Value,
+    path: &str,
+) -> Option<&'a serde_yaml::Value> {
+    let mut current = root;
+    for key in path.split('.') {
+        let mapping = current.as_mapping()?;
+        current = mapping.iter().find_map(|(candidate, value)| {
+            candidate
+                .as_str()
+                .filter(|candidate| candidate.eq_ignore_ascii_case(key))
+                .map(|_| value)
+        })?;
     }
     Some(current)
 }
@@ -12034,6 +12327,9 @@ throttling:
   enable_stun: false
 mesh:
   enabled: true
+  EnableOverlay: false
+  EnableDht: false
+  EnableStun: false
   enable_soulseek_capability_handshake: false
   enable_soulseek_rendezvous: true
   probe_soulseek_rendezvous_capabilities: false
@@ -12052,6 +12348,18 @@ mesh:
     alert_threshold_signature_failures: 9
     alert_threshold_rate_limit_violations: 8
     alert_threshold_quarantine_events: 7
+SignalSystem:
+  Enabled: false
+  DeduplicationCacheSize: 2048
+  DefaultTtl: "00:07:30"
+  MeshChannel:
+    Enabled: false
+    Priority: 3
+    RequireActiveSession: true
+  BtExtensionChannel:
+    Enabled: true
+    Priority: 4
+    RequireActiveSession: false
 PodCore:
   Join: { SignatureMode: warn }
   Security: { SignatureMode: enforce }
@@ -12127,8 +12435,25 @@ security:
         assert_eq!(advanced.dht.vpn_port_sync, "target_port");
         assert!(advanced.dht.lan_only);
         assert_eq!(advanced.mesh.dht_bootstrap_nodes, 17);
+        assert!(!advanced.mesh.enable_overlay);
+        assert!(!advanced.mesh.enable_dht);
+        assert!(!advanced.mesh.enable_stun);
         assert!(!advanced.mesh.enable_soulseek_capability_handshake);
         assert_eq!(advanced.mesh.max_remote_payload_size, 262_144);
+        assert!(!advanced.signal_system.enabled);
+        assert_eq!(advanced.signal_system.deduplication_cache_size, 2_048);
+        assert_eq!(advanced.signal_system.default_ttl.as_secs(), 450);
+        assert!(!advanced.signal_system.mesh_channel.enabled);
+        assert_eq!(advanced.signal_system.mesh_channel.priority, 3);
+        assert!(advanced.signal_system.mesh_channel.require_active_session);
+        assert!(advanced.signal_system.bt_extension_channel.enabled);
+        assert_eq!(advanced.signal_system.bt_extension_channel.priority, 4);
+        assert!(
+            !advanced
+                .signal_system
+                .bt_extension_channel
+                .require_active_session
+        );
         assert_eq!(advanced.mesh_sync_security.consensus_min_agreements, 2);
         assert_eq!(
             advanced.pod_join_signature_mode,
@@ -12171,6 +12496,67 @@ security:
         .expect_err("inconsistent consensus must fail");
         assert!(error.contains("sync_security"), "{error}");
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn signal_system_environment_layers_and_bounds_match_slskdn() {
+        let file = super::FileConfig {
+            signal_system: super::SignalSystemFileConfig {
+                enabled: Some(false),
+                deduplication_cache_size: Some(2_000),
+                default_ttl: Some(super::SignalDurationFileValue::Text("00:06:00".to_owned())),
+                mesh_channel: super::SignalChannelFileConfig {
+                    enabled: Some(false),
+                    priority: Some(4),
+                    require_active_session: Some(true),
+                },
+                bt_extension_channel: super::SignalChannelFileConfig {
+                    enabled: Some(false),
+                    priority: Some(5),
+                    require_active_session: Some(false),
+                },
+            },
+            ..super::FileConfig::default()
+        };
+        let config = super::AppConfig::from_layers(
+            None,
+            file,
+            &MapEnv::default()
+                .with("SLSKR_AUTH_DISABLED", "true")
+                .with("SLSKD_SIGNALSYSTEM_ENABLED", "true")
+                .with("SLSKD_SIGNALSYSTEM_DEDUPLICATIONCACHESIZE", "4096")
+                .with("SLSKD_SIGNALSYSTEM_DEFAULTTTL", "00:08:30")
+                .with("SLSKD_SIGNALSYSTEM_MESHCHANNEL_ENABLED", "true")
+                .with("SLSKD_SIGNALSYSTEM_MESHCHANNEL_PRIORITY", "2")
+                .with("SLSKD_SIGNALSYSTEM_BTEXTENSIONCHANNEL_ENABLED", "true"),
+        )
+        .expect("SignalSystem environment overrides");
+        let signal = &config.advanced_networking.signal_system;
+        assert!(signal.enabled);
+        assert_eq!(signal.deduplication_cache_size, 4_096);
+        assert_eq!(signal.default_ttl.as_secs(), 510);
+        assert!(signal.mesh_channel.enabled);
+        assert_eq!(signal.mesh_channel.priority, 2);
+        assert!(signal.mesh_channel.require_active_session);
+        assert!(signal.bt_extension_channel.enabled);
+        assert_eq!(signal.bt_extension_channel.priority, 5);
+
+        for (name, value) in [
+            ("SLSKD_SIGNALSYSTEM_DEDUPLICATIONCACHESIZE", "99"),
+            ("SLSKD_SIGNALSYSTEM_DEFAULTTTL", "00:00:00"),
+            ("SLSKD_SIGNALSYSTEM_MESHCHANNEL_PRIORITY", "11"),
+            ("SLSKD_SIGNALSYSTEM_BTEXTENSIONCHANNEL_PRIORITY", "0"),
+        ] {
+            let error = super::AppConfig::from_layers(
+                None,
+                super::FileConfig::default(),
+                &MapEnv::default()
+                    .with("SLSKR_AUTH_DISABLED", "true")
+                    .with(name, value),
+            )
+            .expect_err("invalid SignalSystem setting must fail startup");
+            assert!(error.contains("SignalSystem"), "{name}={value}: {error}");
+        }
     }
 
     #[test]
