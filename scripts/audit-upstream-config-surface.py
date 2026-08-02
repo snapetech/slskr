@@ -1171,6 +1171,24 @@ SLSKR_RUNTIME_CONFIG_MAPPINGS["virtualSoulfindV2.enabled"].update(
     commandLine=[],
 )
 
+# These controls are deliberately slskR-only.  They must remain visible in the
+# report, but they are not frozen target leaves and therefore cannot be used to
+# claim target configuration parity.  Keep this allowlist explicit so adding a
+# new local mapping still fails the frozen inventory check by default.
+LOCAL_EXTENSION_CONFIG_PATHS = {
+    "feature",
+    "integrations.lidarr.blacklist_rejected_downloads",
+    "integrations.lidarr.delete_rejected_downloads",
+    "integrations.vpn.self_hosted_relay",
+    "mesh.enable_dht",
+    "mesh.enable_overlay",
+    "mesh.enable_stun",
+    "signalSystem.btExtensionChannel.enabled",
+    "signalSystem.enabled",
+    "signalSystem.meshChannel.enabled",
+    "virtualSoulfindV2.enabled",
+}
+
 # Paths enter this set only after startup layering, validation, live mutation,
 # lifecycle state, explicit runtime application, failure paths, persistence,
 # restart, and both frozen target profiles are covered by executable proof.
@@ -1582,6 +1600,7 @@ def main() -> None:
             "commonCount": len(slskd_paths & slskdn_paths),
             "slskdOnly": sorted(slskd_paths - slskdn_paths),
             "slskdnOnly": sorted(slskdn_paths - slskd_paths),
+            "slskrLocalExtensionConfigPaths": sorted(LOCAL_EXTENSION_CONFIG_PATHS),
             "leafStatus": leaf_status,
             "leafStatusCounts": status_counts,
         },
@@ -1600,7 +1619,17 @@ def main() -> None:
             )
             if actual != expected:
                 failures.append(f"{name}: expected {expected!r}, got {actual!r}")
-        unknown_mappings = sorted(set(SLSKR_RUNTIME_CONFIG_MAPPINGS) - union_paths)
+        local_extensions_in_frozen_union = sorted(
+            LOCAL_EXTENSION_CONFIG_PATHS & union_paths
+        )
+        if local_extensions_in_frozen_union:
+            failures.append(
+                "slskr local extension paths unexpectedly became frozen leaves: "
+                f"{local_extensions_in_frozen_union!r}"
+            )
+        unknown_mappings = sorted(
+            set(SLSKR_RUNTIME_CONFIG_MAPPINGS) - union_paths - LOCAL_EXTENSION_CONFIG_PATHS
+        )
         if unknown_mappings:
             failures.append(
                 f"slskr runtime config mappings are not frozen leaves: {unknown_mappings!r}"

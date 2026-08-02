@@ -6913,41 +6913,64 @@ struct ManagedBlacklistRuntime {
 struct ControllerRegex {
     expression: String,
     matcher: crate::dotnet_regex::DotNetRegex,
+    match_timeout: Option<Duration>,
 }
 
 impl ControllerRegex {
-    fn compile(expression: &str, case_sensitive: bool) -> Result<Self, String> {
+    fn compile_with_timeout(
+        expression: &str,
+        case_sensitive: bool,
+        match_timeout: Option<Duration>,
+    ) -> Result<Self, String> {
         let matcher = crate::dotnet_regex::DotNetRegex::compile(expression, case_sensitive)
             .map_err(|error| format!("invalid regular expression {expression:?}: {error}"))?;
         Ok(Self {
             expression: expression.to_owned(),
             matcher,
+            match_timeout,
         })
     }
 
     fn is_match(&self, value: &str) -> bool {
-        self.matcher.is_match(value).unwrap_or(false)
+        match self.match_timeout {
+            Some(timeout) => self
+                .matcher
+                .is_match_with_timeout(value, timeout)
+                .unwrap_or(false),
+            None => self.matcher.is_match(value).unwrap_or(false),
+        }
     }
+}
+
+const SLSKDN_REGEX_MATCH_TIMEOUT: Duration = Duration::from_millis(250);
+
+fn controller_regex_timeout(target: ControllerCompatibilityTarget) -> Option<Duration> {
+    (target == ControllerCompatibilityTarget::Slskdn).then_some(SLSKDN_REGEX_MATCH_TIMEOUT)
 }
 
 fn compile_controller_regexes(
     expressions: &[String],
     case_sensitive: bool,
+    target: ControllerCompatibilityTarget,
 ) -> Result<Vec<ControllerRegex>, String> {
+    let match_timeout = controller_regex_timeout(target);
     expressions
         .iter()
-        .map(|expression| ControllerRegex::compile(expression, case_sensitive))
+        .map(|expression| {
+            ControllerRegex::compile_with_timeout(expression, case_sensitive, match_timeout)
+        })
         .collect()
 }
 
 fn compile_controller_regexes_for_request(
     expressions: Vec<String>,
     case_sensitive: bool,
+    target: ControllerCompatibilityTarget,
 ) -> Result<Vec<ControllerRegex>, String> {
     std::thread::Builder::new()
         .name("slskr-regex-compile".to_owned())
         .stack_size(16 * 1024 * 1024)
-        .spawn(move || compile_controller_regexes(&expressions, case_sensitive))
+        .spawn(move || compile_controller_regexes(&expressions, case_sensitive, target))
         .map_err(|error| format!("failed to start regular-expression compilation: {error}"))?
         .join()
         .map_err(|_| "regular-expression compilation panicked".to_owned())?
@@ -6981,8 +7004,9 @@ impl ManagedBlacklistRuntime {
     ) -> Self {
         let pattern_case_sensitive =
             target == ControllerCompatibilityTarget::Slskd && case_sensitive_regex;
-        let patterns = compile_controller_regexes(&settings.patterns, pattern_case_sensitive)
-            .expect("validated blacklist patterns must compile");
+        let patterns =
+            compile_controller_regexes(&settings.patterns, pattern_case_sensitive, target)
+                .expect("validated blacklist patterns must compile");
         Self {
             settings,
             patterns,
@@ -6999,8 +7023,9 @@ impl ManagedBlacklistRuntime {
     ) {
         let pattern_case_sensitive =
             target == ControllerCompatibilityTarget::Slskd && case_sensitive_regex;
-        self.patterns = compile_controller_regexes(&settings.patterns, pattern_case_sensitive)
-            .expect("validated blacklist patterns must compile");
+        self.patterns =
+            compile_controller_regexes(&settings.patterns, pattern_case_sensitive, target)
+                .expect("validated blacklist patterns must compile");
         self.settings = settings;
         self.target = target;
         self.decisions.clear();
@@ -12289,9 +12314,12 @@ async fn slskdn_library_items_search_json(state: &AppState, raw_query: Option<&s
             .controller_case_sensitive_regex
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let filters =
-            compile_controller_regexes_for_request(settings.filters.clone(), case_sensitive)
-                .expect("validated share filters must compile");
+        let filters = compile_controller_regexes_for_request(
+            settings.filters.clone(),
+            case_sensitive,
+            state.config.controller_compatibility_target,
+        )
+        .expect("validated share filters must compile");
         let scan = scan_share_dirs(
             &settings.directories,
             settings.follow_symlinks,
@@ -34109,6 +34137,7 @@ async fn apply_watched_controller_configuration(
         *state.search_request_filters.write().await = compile_controller_regexes(
             &reloaded.controller_search_request_filters,
             reloaded.controller_case_sensitive_regex,
+            reloaded.controller_compatibility_target,
         )
         .expect("validated search request filters must compile");
     }
@@ -58106,6 +58135,7 @@ async fn serve(invocation: ServeInvocation) -> Result<(), String> {
     let search_request_filters = compile_controller_regexes(
         &config.controller_search_request_filters,
         config.controller_case_sensitive_regex,
+        config.controller_compatibility_target,
     )?;
     let controller_cli_environment = invocation.config_environment.clone();
     let revoked_jwts = RevokedJwtStore::load(&config.state_dir);
@@ -71845,6 +71875,7 @@ fn build_share_index(config: &AppConfig) -> ShareIndexSnapshot {
     let filters = compile_controller_regexes(
         &config.share_settings.filters,
         config.controller_case_sensitive_regex,
+        config.controller_compatibility_target,
     )
     .expect("validated share filters must compile");
     let mut scan = scan_share_dirs(
@@ -73167,7 +73198,7 @@ mod tests {
         net::{IpAddr, SocketAddr},
         path::{Path, PathBuf},
         sync::Arc,
-        time::{Duration, SystemTime, UNIX_EPOCH},
+        time::{Duration, Instant, SystemTime, UNIX_EPOCH},
     };
 
     use base64::Engine;
@@ -73599,7 +73630,7 @@ mod tests {
         ];
 
         for (expression, value, expected) in cases {
-            let matcher = super::ControllerRegex::compile(expression, true)
+            let matcher = super::ControllerRegex::compile_with_timeout(expression, true, None)
                 .unwrap_or_else(|error| panic!("failed to compile {expression:?}: {error}"));
             assert_eq!(
                 matcher.is_match(value),
@@ -73611,13 +73642,33 @@ mod tests {
 
     #[test]
     fn controller_regex_applies_global_case_mode_to_backreferences() {
-        let insensitive = super::ControllerRegex::compile(r"^(?<word>abc)\k<word>$", false)
-            .expect("case-insensitive named backreference");
-        let sensitive = super::ControllerRegex::compile(r"^(?<word>abc)\k<word>$", true)
-            .expect("case-sensitive named backreference");
+        let insensitive =
+            super::ControllerRegex::compile_with_timeout(r"^(?<word>abc)\k<word>$", false, None)
+                .expect("case-insensitive named backreference");
+        let sensitive =
+            super::ControllerRegex::compile_with_timeout(r"^(?<word>abc)\k<word>$", true, None)
+                .expect("case-sensitive named backreference");
 
         assert!(insensitive.is_match("abcABC"));
         assert!(!sensitive.is_match("abcABC"));
+    }
+
+    #[test]
+    fn slskdn_controller_regex_timeout_is_fail_closed() {
+        let matcher = super::ControllerRegex::compile_with_timeout(
+            r"^(?=(a+)+$).*$",
+            true,
+            Some(super::SLSKDN_REGEX_MATCH_TIMEOUT),
+        )
+        .expect("pathological regex");
+        let hostile_username = format!("{}!", "a".repeat(255));
+        let started = Instant::now();
+
+        assert!(!matcher.is_match(&hostile_username));
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "regex timeout guard exceeded the bounded execution window"
+        );
     }
 
     #[tokio::test]
@@ -75844,6 +75895,7 @@ mod tests {
                 super::compile_controller_regexes(
                     &config.controller_search_request_filters,
                     config.controller_case_sensitive_regex,
+                    config.controller_compatibility_target,
                 )
                 .unwrap(),
             ),
@@ -109743,6 +109795,7 @@ mod tests {
                 super::compile_controller_regexes(
                     &config.controller_search_request_filters,
                     config.controller_case_sensitive_regex,
+                    config.controller_compatibility_target,
                 )
                 .unwrap(),
             ),
@@ -110036,6 +110089,7 @@ mod tests {
                 super::compile_controller_regexes(
                     &cookie_enabled_config.controller_search_request_filters,
                     cookie_enabled_config.controller_case_sensitive_regex,
+                    cookie_enabled_config.controller_compatibility_target,
                 )
                 .unwrap(),
             ),

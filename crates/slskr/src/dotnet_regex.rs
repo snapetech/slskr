@@ -1,7 +1,11 @@
+use std::sync::mpsc::{self, RecvTimeoutError};
+use std::time::Duration;
+
 #[derive(Clone, Debug)]
 pub struct DotNetRegex {
     matcher: fancy_regex::Regex,
     lowercase_input: bool,
+    may_backtrack: bool,
 }
 
 impl DotNetRegex {
@@ -15,6 +19,7 @@ impl DotNetRegex {
         } else {
             normalized
         };
+        let may_backtrack = pattern_may_backtrack(&normalized);
         let matcher = fancy_regex::RegexBuilder::new(&normalized)
             .case_insensitive(!case_sensitive && !lowercase_input)
             .build()
@@ -22,6 +27,7 @@ impl DotNetRegex {
         Ok(Self {
             matcher,
             lowercase_input,
+            may_backtrack,
         })
     }
 
@@ -41,6 +47,77 @@ impl DotNetRegex {
             .is_match(value)
             .map_err(|error| error.to_string())
     }
+
+    /// Match with a wall-clock deadline for target profiles that construct
+    /// regular expressions with .NET's per-match timeout.  The Rust matcher
+    /// itself is synchronous, so a bounded worker is used only for patterns
+    /// that can enter fancy-regex's backtracking VM.  The caller never waits
+    /// beyond the target deadline; the matcher also retains fancy-regex's
+    /// deterministic backtrack limit so an expired worker cannot run without
+    /// bound.
+    pub fn is_match_with_timeout(&self, value: &str, timeout: Duration) -> Result<bool, String> {
+        if !self.may_backtrack {
+            return self.is_match(value);
+        }
+
+        let folded = self.lowercase_input.then(|| value.to_lowercase());
+        let value = folded.as_deref().unwrap_or(value).to_owned();
+        let matcher = self.matcher.clone();
+        let (sender, receiver) = mpsc::sync_channel(1);
+        std::thread::Builder::new()
+            .name("slskr-regex-match".to_owned())
+            .stack_size(16 * 1024 * 1024)
+            .spawn(move || {
+                let result = matcher.is_match(&value).map_err(|error| error.to_string());
+                let _ = sender.send(result);
+            })
+            .map_err(|error| format!("failed to start regular-expression match: {error}"))?;
+
+        match receiver.recv_timeout(timeout) {
+            Ok(result) => result,
+            Err(RecvTimeoutError::Timeout) => Err(format!(
+                "regular-expression match timed out after {} ms",
+                timeout.as_millis()
+            )),
+            Err(RecvTimeoutError::Disconnected) => {
+                Err("regular-expression match worker terminated unexpectedly".to_owned())
+            }
+        }
+    }
+}
+
+fn pattern_may_backtrack(expression: &str) -> bool {
+    let bytes = expression.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'\\' {
+            if matches!(bytes.get(index + 1), Some(b'k' | b'K' | b'0'..=b'9')) {
+                return true;
+            }
+            index += escaped_token_len(expression, index);
+            continue;
+        }
+        if bytes[index] == b'(' && bytes.get(index + 1) == Some(&b'?') {
+            let remaining = &expression[index..];
+            if remaining.starts_with("(?=")
+                || remaining.starts_with("(?!")
+                || remaining.starts_with("(?<=")
+                || remaining.starts_with("(?<!")
+                || remaining.starts_with("(?>")
+                || remaining.starts_with("(?(")
+                || remaining.starts_with("(?R")
+                || remaining.starts_with("(?&")
+            {
+                return true;
+            }
+        }
+        index += expression[index..]
+            .chars()
+            .next()
+            .expect("index is within expression")
+            .len_utf8();
+    }
+    false
 }
 
 fn pattern_has_inline_case_mode(expression: &str) -> bool {
