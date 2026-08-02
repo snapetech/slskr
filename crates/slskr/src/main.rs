@@ -30866,7 +30866,7 @@ async fn route_http_request_with_headers(
             Ok(routing::accepted_response(body))
         }
         ("GET", path) if path.starts_with("/api/mediacore/") => {
-            Ok(mediacore_extended_response(path, state).await)
+            Ok(mediacore_extended_response(path, route.query, state).await)
         }
         ("GET", path) if extended_controller_get_route(path) => {
             Ok(extended_controller_get_response(path, route.query, state).await)
@@ -44094,7 +44094,19 @@ async fn security_extended_response(
     }
 }
 
-async fn mediacore_extended_response(path: &str, state: &AppState) -> HttpResponse {
+async fn mediacore_extended_response(
+    path: &str,
+    query: Option<&str>,
+    state: &AppState,
+) -> HttpResponse {
+    // MediaCoreStatsService owns a process-local stopwatch in the frozen
+    // runtime. Keep the dashboard's uptime tied to this daemon process rather
+    // than returning the old fixed zero-duration compatibility value.
+    static MEDIA_CORE_STARTED_AT: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+    let media_core_uptime = MEDIA_CORE_STARTED_AT
+        .get_or_init(Instant::now)
+        .elapsed()
+        .as_millis() as u64;
     let discovery = state.content_discovery.read().await;
     let library = state.library.read().await;
     let shares = state.shares.read().await;
@@ -44109,10 +44121,21 @@ async fn mediacore_extended_response(path: &str, state: &AppState) -> HttpRespon
             ))
         })
         .collect::<Vec<_>>();
-    let published_descriptors = controller_features.values_with_prefix("mediacore/descriptor/");
+    let descriptor_records = controller_features.values_with_prefix("mediacore/descriptor/");
+    // Metadata portability writes descriptor records, but the frozen
+    // ContentDescriptorPublisher only counts descriptors that it itself has
+    // successfully published.  Publication metadata is the durable marker
+    // for that local publisher projection.
+    let published_descriptors = descriptor_records
+        .iter()
+        .filter(|descriptor| descriptor.get("publishedAt").is_some())
+        .cloned()
+        .collect::<Vec<_>>();
+    let cache_records = controller_features.values_with_prefix("mediacore/cache/");
     let ipld_link_records = controller_features.values_with_prefix("mediacore/ipld/");
     let mediacore_metrics = controller_features.values_with_prefix("mediacore/metrics/");
     drop(controller_features);
+    let now = chrono::Utc::now();
     let metric_sum = |operation: &str, field: &str| -> u64 {
         mediacore_metrics
             .iter()
@@ -44138,7 +44161,17 @@ async fn mediacore_extended_response(path: &str, state: &AppState) -> HttpRespon
         registered_domains.insert("music".to_owned());
     }
     let domains = registered_domains.len();
-    let descriptors = published_descriptors.len();
+    let active_cache_records = cache_records
+        .iter()
+        .filter(|record| {
+            record
+                .get("expiresAt")
+                .and_then(serde_json::Value::as_str)
+                .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+                .is_some_and(|value| value.with_timezone(&chrono::Utc) > now)
+        })
+        .collect::<Vec<_>>();
+    let descriptors = active_cache_records.len();
     let mut mappings_by_domain = BTreeMap::<String, usize>::new();
     let mut mappings_by_type = BTreeMap::<String, usize>::new();
     for content_id in registered_mappings
@@ -44161,9 +44194,14 @@ async fn mediacore_extended_response(path: &str, state: &AppState) -> HttpRespon
     let total_retrievals = metric_sum("retrieve", "count");
     let cache_hits = metric_sum("retrieve", "hits");
     let cache_misses = metric_sum("retrieve", "misses");
-    let cache_size_bytes = published_descriptors
+    let cache_size_bytes = active_cache_records
         .iter()
-        .filter_map(|descriptor| serde_json::to_vec(descriptor).ok())
+        .filter_map(|record| {
+            record
+                .get("descriptor")
+                .or_else(|| Some(*record))
+                .and_then(|descriptor| serde_json::to_vec(descriptor).ok())
+        })
         .map(|descriptor| descriptor.len() as u64)
         .sum::<u64>();
     let total_fuzzy_matches = metric_count("fuzzy");
@@ -44183,7 +44221,64 @@ async fn mediacore_extended_response(path: &str, state: &AppState) -> HttpRespon
     let successful_imports = metric_sum("portability", "successfulImports");
     let total_exports = metric_sum("portability", "exports");
     let total_data_transferred = metric_sum("portability", "dataTransferred");
+    let expiring_cutoff = now + chrono::Duration::minutes(60);
+    let mut active_publications = 0_u64;
+    let mut expiring_publications = 0_u64;
+    let mut total_storage_bytes = 0_u64;
+    let mut total_remaining_ttl_hours = 0.0_f64;
+    let mut publications_by_domain = BTreeMap::<String, u64>::new();
+    let mut last_publish_operation = None;
+    for descriptor in &published_descriptors {
+        let content_id = descriptor
+            .get("contentId")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        let domain = content_id
+            .strip_prefix("content:")
+            .and_then(|value| value.split(':').next())
+            .map(|domain| {
+                if domain.eq_ignore_ascii_case("mb") {
+                    "audio".to_owned()
+                } else {
+                    domain.to_owned()
+                }
+            })
+            .unwrap_or_else(|| "unknown".to_owned());
+        let published_at = descriptor
+            .get("publishedAt")
+            .and_then(serde_json::Value::as_str)
+            .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+            .map(|value| value.with_timezone(&chrono::Utc));
+        if published_at > last_publish_operation {
+            last_publish_operation = published_at;
+        }
+        let expires_at = descriptor
+            .get("expiresAt")
+            .and_then(serde_json::Value::as_str)
+            .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+            .map(|value| value.with_timezone(&chrono::Utc));
+        if let Some(expires_at) = expires_at.filter(|expires_at| *expires_at > now) {
+            active_publications = active_publications.saturating_add(1);
+            if expires_at <= expiring_cutoff {
+                expiring_publications = expiring_publications.saturating_add(1);
+            }
+            total_remaining_ttl_hours += (expires_at - now).num_milliseconds() as f64 / 3_600_000.0;
+            *publications_by_domain.entry(domain).or_default() += 1;
+            total_storage_bytes = total_storage_bytes.saturating_add(
+                descriptor
+                    .get("sizeBytes")
+                    .or_else(|| descriptor.get("size"))
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or_default(),
+            );
+        }
+    }
     let total_published = published_descriptors.len() as u64;
+    let average_ttl_hours = if active_publications == 0 {
+        0.0
+    } else {
+        total_remaining_ttl_hours / active_publications as f64
+    };
     let successful_publishes = metric_sum("publish", "count");
     let republished_descriptors = metric_sum("publish", "republished");
     let registry = serde_json::json!({
@@ -44247,10 +44342,10 @@ async fn mediacore_extended_response(path: &str, state: &AppState) -> HttpRespon
     });
     let publishing = serde_json::json!({
         "totalPublished": total_published,
-        "activePublications": total_published,
-        "expiredPublications": 0,
+        "activePublications": active_publications,
+        "expiredPublications": expiring_publications,
         "publicationSuccessRate": if successful_publishes == 0 { 0.0 } else { 1.0 },
-        "publicationsByDomain": if total_published == 0 { serde_json::json!({}) } else { serde_json::json!({"Music": total_published}) },
+        "publicationsByDomain": publications_by_domain,
         "averagePublishTime": "00:00:00",
         "republishedDescriptors": republished_descriptors,
         "failedPublications": 0,
@@ -44414,25 +44509,83 @@ async fn mediacore_extended_response(path: &str, state: &AppState) -> HttpRespon
             serde_json::json!({"inboundLinks": inbound_links}).to_string(),
         );
     }
+    if let Some(raw_content_id) = path.strip_prefix("/api/mediacore/retrieve/descriptor/") {
+        let content_id = decoded_path_segment(raw_content_id).trim().to_owned();
+        if content_id.is_empty() {
+            return routing::bad_request_response("ContentID is required");
+        }
+        let bypass_cache = query_parameter(query, "bypassCache")
+            .as_deref()
+            .and_then(parse_bool_value)
+            .unwrap_or(false);
+        return match mediacore_retrieve_descriptor(&content_id, bypass_cache, state).await {
+            Ok(result) if result.found => routing::ok_response(result.value.to_string()),
+            Ok(_) => HttpResponse {
+                status: "404 Not Found",
+                content_type: "application/json",
+                body: serde_json::json!({
+                    "contentId": content_id,
+                    "found": false,
+                    "error": "Descriptor not found",
+                })
+                .to_string(),
+            },
+            Err(error) => routing::service_unavailable_response(&error),
+        };
+    }
     if let Some(domain) = path_segment_after(path, "/api/mediacore/retrieve/query/domain/") {
-        let domain = decoded_path_segment(domain);
-        let descriptors = published_descriptors
+        let domain = decoded_path_segment(domain).trim().to_ascii_lowercase();
+        if domain.is_empty() {
+            return routing::bad_request_response("Domain is required");
+        }
+        let type_filter = query_parameter(query, "type")
+            .map(|value| value.trim().to_ascii_lowercase())
+            .filter(|value| !value.is_empty());
+        let max_results = match query_parameter(query, "maxResults") {
+            None => 50,
+            Some(value) => match value.parse::<usize>() {
+                Ok(value) if (1..=500).contains(&value) => value,
+                _ => return routing::bad_request_response("Max results must be between 1 and 500"),
+            },
+        };
+        let mut descriptors = active_cache_records
             .iter()
+            .filter_map(|record| record.get("descriptor"))
             .filter(|descriptor| {
-                descriptor
+                let content_id = descriptor
+                    .get("contentId")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default();
+                let content_parts = content_id.split(':').collect::<Vec<_>>();
+                let descriptor_domain = descriptor
                     .get("domain")
                     .and_then(serde_json::Value::as_str)
-                    .is_some_and(|value| value.eq_ignore_ascii_case(&domain))
+                    .or_else(|| content_parts.get(1).copied())
+                    .unwrap_or_default()
+                    .to_ascii_lowercase();
+                let descriptor_type = descriptor
+                    .get("type")
+                    .and_then(serde_json::Value::as_str)
+                    .or_else(|| content_parts.get(2).copied())
+                    .unwrap_or_default()
+                    .to_ascii_lowercase();
+                descriptor_domain == domain
+                    && type_filter
+                        .as_deref()
+                        .is_none_or(|requested| descriptor_type == requested)
             })
             .cloned()
             .collect::<Vec<_>>();
+        let has_more_results = descriptors.len() > max_results;
+        descriptors.truncate(max_results);
         return routing::ok_response(
             serde_json::json!({
                 "domain": domain,
+                "type": type_filter,
                 "totalFound": descriptors.len(),
                 "queryDuration": "00:00:00",
                 "descriptors": descriptors,
-                "hasMoreResults": false,
+                "hasMoreResults": has_more_results,
             })
             .to_string(),
         );
@@ -44525,12 +44678,14 @@ async fn mediacore_extended_response(path: &str, state: &AppState) -> HttpRespon
         }),
         "/api/mediacore/publish/stats" => serde_json::json!({
             "totalPublishedDescriptors": total_published,
-            "activePublications": total_published,
-            "expiringSoon": 0,
-            "lastPublishOperation": chrono::Utc::now().to_rfc3339(),
-            "publicationsByDomain": publishing["publicationsByDomain"],
-            "totalStorageBytes": shares.entries.iter().map(|entry| entry.size).sum::<u64>(),
-            "averageTtlHours": 0,
+            "activePublications": active_publications,
+            "expiringSoon": expiring_publications,
+            "lastPublishOperation": last_publish_operation
+                .map(|value| value.to_rfc3339())
+                .unwrap_or_else(|| "0001-01-01T00:00:00+00:00".to_owned()),
+            "publicationsByDomain": publications_by_domain,
+            "totalStorageBytes": total_storage_bytes,
+            "averageTtlHours": average_ttl_hours,
         }),
         "/api/mediacore/retrieve/stats" | "/api/mediacore/stats/descriptors" => descriptor_stats,
         "/api/mediacore/stats/fuzzy" => fuzzy,
@@ -44540,8 +44695,8 @@ async fn mediacore_extended_response(path: &str, state: &AppState) -> HttpRespon
         "/api/mediacore/stats/publishing" => publishing,
         "/api/mediacore/stats/registry" => registry,
         "/api/mediacore/stats/dashboard" => serde_json::json!({
-            "timestamp": chrono::Utc::now().to_rfc3339(),
-            "uptime": "00:00:00",
+            "timestamp": now.to_rfc3339(),
+            "uptime": format_timespan_millis(media_core_uptime),
             "contentRegistry": registry,
             "descriptors": descriptor_stats,
             "fuzzyMatching": fuzzy,
@@ -53018,6 +53173,14 @@ async fn mediacore_mutation_response(
             );
             if let Some(descriptor_object) = descriptor.as_object_mut() {
                 descriptor_object.insert("version".to_owned(), serde_json::json!(version));
+                descriptor_object.insert(
+                    "publishedAt".to_owned(),
+                    serde_json::json!(updated_at.to_rfc3339()),
+                );
+                descriptor_object.insert(
+                    "expiresAt".to_owned(),
+                    serde_json::json!((updated_at + chrono::Duration::hours(1)).to_rfc3339()),
+                );
             }
             let upsert_result = state
                 .controller_features
@@ -53099,6 +53262,17 @@ async fn mediacore_mutation_response(
             published_at.timestamp_millis(),
             &hex::encode(Sha256::digest(version_seed.as_bytes()))[..8]
         );
+        if let Some(descriptor_object) = descriptor.as_object_mut() {
+            descriptor_object.insert("version".to_owned(), serde_json::json!(version));
+            descriptor_object.insert(
+                "publishedAt".to_owned(),
+                serde_json::json!(published_at.to_rfc3339()),
+            );
+            descriptor_object.insert(
+                "expiresAt".to_owned(),
+                serde_json::json!((published_at + chrono::Duration::hours(1)).to_rfc3339()),
+            );
+        }
         let key = format!("mediacore/descriptor/{content_id}");
         let upsert_result = state
             .controller_features
@@ -53169,6 +53343,27 @@ async fn mediacore_mutation_response(
                     )
                 });
             descriptor["contentId"] = serde_json::json!(id);
+            let published_at = chrono::Utc::now();
+            let version_seed = format!(
+                "{}:{}:{}",
+                id,
+                descriptor
+                    .get("codec")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default(),
+                descriptor
+                    .get("sizeBytes")
+                    .and_then(serde_json::Value::as_i64)
+                    .unwrap_or_default()
+            );
+            descriptor["version"] = serde_json::json!(format!(
+                "{}-{}",
+                published_at.timestamp_millis(),
+                &hex::encode(Sha256::digest(version_seed.as_bytes()))[..8]
+            ));
+            descriptor["publishedAt"] = serde_json::json!(published_at.to_rfc3339());
+            descriptor["expiresAt"] =
+                serde_json::json!((published_at + chrono::Duration::hours(1)).to_rfc3339());
             if let Err(error) =
                 features.upsert(format!("mediacore/descriptor/{id}"), descriptor.clone())
             {
@@ -53244,29 +53439,54 @@ async fn mediacore_mutation_response(
                 value
                     .get("contentIds")
                     .and_then(serde_json::Value::as_array)
-                    .cloned()
+                    .map(|ids| {
+                        let mut seen = HashSet::new();
+                        ids.iter()
+                            .filter_map(serde_json::Value::as_str)
+                            .map(str::trim)
+                            .filter(|id| !id.is_empty())
+                            .filter(|id| seen.insert(id.to_ascii_lowercase()))
+                            .map(str::to_owned)
+                            .collect::<Vec<_>>()
+                    })
             })
             .unwrap_or_default();
         if ids.is_empty() {
-            return Some(routing::bad_request_response("contentIds are required"));
+            return Some(routing::bad_request_response(
+                "At least one ContentID is required",
+            ));
         }
-        let features = state.controller_features.read().await;
-        let descriptors = ids
-            .iter()
-            .filter_map(serde_json::Value::as_str)
-            .filter_map(|id| features.get(&format!("mediacore/descriptor/{id}")).cloned())
-            .collect::<Vec<_>>();
-        let hits = descriptors.len();
-        let misses = ids.len().saturating_sub(hits);
-        drop(features);
-        let _ = record_mediacore_metric(
-            state,
-            "retrieve",
-            serde_json::json!({"count": ids.len(), "hits": hits, "misses": misses}),
-        )
-        .await;
+        let started_at = Instant::now();
+        let mut found = 0_usize;
+        let mut failed = 0_usize;
+        let mut results = Vec::with_capacity(ids.len());
+        for content_id in &ids {
+            match mediacore_retrieve_descriptor(content_id, false, state).await {
+                Ok(result) => {
+                    found += usize::from(result.found);
+                    results.push(result.value);
+                }
+                Err(error) => {
+                    failed = failed.saturating_add(1);
+                    results.push(serde_json::json!({
+                        "found": false,
+                        "retrievedAt": chrono::Utc::now().to_rfc3339(),
+                        "retrievalDuration": "00:00:00",
+                        "fromCache": false,
+                        "errorMessage": error,
+                    }));
+                }
+            }
+        }
         return Some(routing::ok_response(
-            serde_json::json!({"descriptors": descriptors, "count": descriptors.len()}).to_string(),
+            serde_json::json!({
+                "requested": ids.len(),
+                "found": found,
+                "failed": failed,
+                "totalDuration": format_timespan_millis(started_at.elapsed().as_millis() as u64),
+                "results": results,
+            })
+            .to_string(),
         ));
     }
     if path == "/api/mediacore/retrieve/verify" {
@@ -53333,25 +53553,25 @@ async fn mediacore_mutation_response(
         ));
     }
     if path == "/api/mediacore/retrieve/cache/clear" {
-        return Some(
-            match state
-                .controller_features
-                .write()
-                .await
-                .remove_prefix("mediacore/cache/")
-            {
-                Ok(removed) => routing::ok_response(
-                    serde_json::json!({
-                        "success": true,
-                        "entriesCleared": removed,
-                        "bytesFreed": 0,
-                        "errorMessage": null,
-                    })
-                    .to_string(),
-                ),
-                Err(error) => routing::service_unavailable_response(&error),
-            },
-        );
+        let mut features = state.controller_features.write().await;
+        let bytes_freed = features
+            .values_with_prefix("mediacore/cache/")
+            .iter()
+            .filter_map(|record| record.get("descriptor"))
+            .filter_map(|descriptor| serde_json::to_vec(descriptor).ok())
+            .map(|descriptor| descriptor.len() as u64)
+            .sum::<u64>();
+        return Some(match features.remove_prefix("mediacore/cache/") {
+            Ok(entries_cleared) => routing::ok_response(
+                serde_json::json!({
+                    "success": true,
+                    "entriesCleared": entries_cleared,
+                    "bytesFreed": bytes_freed,
+                })
+                .to_string(),
+            ),
+            Err(error) => routing::service_unavailable_response(&error),
+        });
     }
     if path.starts_with("/api/mediacore/portability/") {
         let payload = match serde_json::from_str::<serde_json::Value>(body) {
@@ -53634,6 +53854,156 @@ async fn record_mediacore_metric(
         .write()
         .await
         .upsert(format!("mediacore/metrics/{id}"), record)
+}
+
+struct MediaCoreRetrievalResult {
+    found: bool,
+    value: serde_json::Value,
+}
+
+fn mediacore_descriptor_verification(
+    descriptor: &serde_json::Value,
+    retrieved_at: chrono::DateTime<chrono::Utc>,
+) -> serde_json::Value {
+    let age_ms = chrono::Utc::now()
+        .signed_duration_since(retrieved_at)
+        .num_milliseconds()
+        .max(0) as u64;
+    let has_hashes = descriptor
+        .get("hashes")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|hashes| !hashes.is_empty());
+    let signature_valid = descriptor
+        .get("signature")
+        .filter(|value| value.is_object())
+        .is_some_and(|signature| {
+            signature
+                .get("publicKey")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|value| !value.trim().is_empty())
+                && signature
+                    .get("signature")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|value| {
+                        !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+                    })
+        });
+    serde_json::json!({
+        "isValid": has_hashes && signature_valid,
+        "signatureValid": signature_valid,
+        "freshnessValid": has_hashes,
+        "age": format_timespan_millis(age_ms),
+        "validationError": if has_hashes { serde_json::Value::Null } else { serde_json::json!("At least one hash is required") },
+    })
+}
+
+async fn mediacore_retrieve_descriptor(
+    content_id: &str,
+    bypass_cache: bool,
+    state: &AppState,
+) -> Result<MediaCoreRetrievalResult, String> {
+    let started_at = Instant::now();
+    let now = chrono::Utc::now();
+    let cache_key = format!("mediacore/cache/{content_id}");
+    if !bypass_cache {
+        let cached = state
+            .controller_features
+            .read()
+            .await
+            .get(&cache_key)
+            .cloned();
+        if let Some(cached) = cached {
+            let expires_at = cached
+                .get("expiresAt")
+                .and_then(serde_json::Value::as_str)
+                .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+                .map(|value| value.with_timezone(&chrono::Utc));
+            if let (Some(descriptor), Some(expires_at)) =
+                (cached.get("descriptor").cloned(), expires_at)
+            {
+                if expires_at > now {
+                    let retrieved_at = cached
+                        .get("retrievedAt")
+                        .and_then(serde_json::Value::as_str)
+                        .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+                        .map(|value| value.with_timezone(&chrono::Utc))
+                        .unwrap_or(now);
+                    let _ = record_mediacore_metric(
+                        state,
+                        "retrieve",
+                        serde_json::json!({"count": 1, "hits": 1, "misses": 0}),
+                    )
+                    .await;
+                    return Ok(MediaCoreRetrievalResult {
+                        found: true,
+                        value: serde_json::json!({
+                            "found": true,
+                            "descriptor": descriptor.clone(),
+                            "retrievedAt": retrieved_at.to_rfc3339(),
+                            "retrievalDuration": format_timespan_millis(started_at.elapsed().as_millis() as u64),
+                            "fromCache": true,
+                            "verification": mediacore_descriptor_verification(&descriptor, retrieved_at),
+                        }),
+                    });
+                }
+            }
+        }
+    }
+
+    let descriptor = state
+        .controller_features
+        .read()
+        .await
+        .get(&format!("mediacore/descriptor/{content_id}"))
+        .cloned();
+    let retrieved_at = chrono::Utc::now();
+    let Some(descriptor) = descriptor else {
+        let _ = record_mediacore_metric(
+            state,
+            "retrieve",
+            serde_json::json!({"count": 1, "hits": 0, "misses": 1}),
+        )
+        .await;
+        return Ok(MediaCoreRetrievalResult {
+            found: false,
+            value: serde_json::json!({
+                "found": false,
+                "retrievedAt": retrieved_at.to_rfc3339(),
+                "retrievalDuration": format_timespan_millis(started_at.elapsed().as_millis() as u64),
+                "fromCache": false,
+            }),
+        });
+    };
+
+    let expires_at = retrieved_at + chrono::Duration::hours(1);
+    let cache_record = serde_json::json!({
+        "contentId": content_id,
+        "descriptor": descriptor,
+        "retrievedAt": retrieved_at.to_rfc3339(),
+        "expiresAt": expires_at.to_rfc3339(),
+    });
+    state
+        .controller_features
+        .write()
+        .await
+        .upsert(cache_key, cache_record)?;
+    let _ = record_mediacore_metric(
+        state,
+        "retrieve",
+        serde_json::json!({"count": 1, "hits": 0, "misses": 1}),
+    )
+    .await;
+    Ok(MediaCoreRetrievalResult {
+        found: true,
+        value: serde_json::json!({
+            "found": true,
+            "descriptor": descriptor,
+            "retrievedAt": retrieved_at.to_rfc3339(),
+            "retrievalDuration": format_timespan_millis(started_at.elapsed().as_millis() as u64),
+            "fromCache": false,
+            "verification": mediacore_descriptor_verification(&descriptor, retrieved_at),
+        }),
+    })
 }
 
 fn dynamic_podcore_get_route(path: &str) -> bool {
@@ -97527,7 +97897,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             cache.body,
-            r#"{"bytesFreed":0,"entriesCleared":0,"errorMessage":null,"success":true}"#
+            r#"{"bytesFreed":0,"entriesCleared":0,"success":true}"#
         );
 
         let reset =
@@ -97585,10 +97955,10 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(retrieved.status, "200 OK", "{}", retrieved.body);
-        assert_eq!(
-            serde_json::from_str::<serde_json::Value>(&retrieved.body).unwrap()["count"],
-            1
-        );
+        let retrieved_json = serde_json::from_str::<serde_json::Value>(&retrieved.body).unwrap();
+        assert_eq!(retrieved_json["requested"], 2);
+        assert_eq!(retrieved_json["found"], 1);
+        assert_eq!(retrieved_json["results"].as_array().unwrap().len(), 2);
 
         let stats =
             super::route_http_request("GET", "/api/v0/mediacore/retrieve/stats", None, "", &state)
@@ -97596,8 +97966,23 @@ mod tests {
                 .unwrap();
         let stats = serde_json::from_str::<serde_json::Value>(&stats.body).unwrap();
         assert_eq!(stats["totalRetrievals"], 2);
-        assert_eq!(stats["cacheHits"], 1);
-        assert_eq!(stats["cacheMisses"], 1);
+        assert_eq!(stats["cacheHits"], 0);
+        assert_eq!(stats["cacheMisses"], 2);
+        assert_eq!(stats["activeCacheEntries"], 1);
+
+        let cached = super::route_http_request(
+            "GET",
+            &format!("/api/v0/mediacore/retrieve/descriptor/{content_id}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        let cached_json = serde_json::from_str::<serde_json::Value>(&cached.body).unwrap();
+        assert_eq!(cached.status, "200 OK");
+        assert_eq!(cached_json["found"], true);
+        assert_eq!(cached_json["fromCache"], true);
 
         let imported = super::route_http_request(
             "POST",
@@ -97635,7 +98020,20 @@ mod tests {
         .await
         .unwrap();
         let publishing = serde_json::from_str::<serde_json::Value>(&publishing.body).unwrap();
-        assert_eq!(publishing["totalPublished"], 2);
+        assert_eq!(publishing["totalPublished"], 1);
+        assert_eq!(publishing["activePublications"], 1);
+        assert_eq!(publishing["publicationsByDomain"]["test"], 1);
+
+        let publisher_stats =
+            super::route_http_request("GET", "/api/v0/mediacore/publish/stats", None, "", &state)
+                .await
+                .unwrap();
+        let publisher_stats =
+            serde_json::from_str::<serde_json::Value>(&publisher_stats.body).unwrap();
+        assert_eq!(publisher_stats["totalPublishedDescriptors"], 1);
+        assert_eq!(publisher_stats["activePublications"], 1);
+        assert_eq!(publisher_stats["publicationsByDomain"]["test"], 1);
+        assert!(publisher_stats["averageTtlHours"].as_f64().unwrap() > 0.0);
 
         let reset =
             super::route_http_request("POST", "/api/v0/mediacore/stats/reset", None, "", &state)
@@ -102959,12 +103357,10 @@ mod tests {
         )
         .await
         .expect("descriptor stats");
-        assert!(
+        assert_eq!(
             serde_json::from_str::<serde_json::Value>(&descriptor_stats.body).unwrap()
-                ["activeCacheEntries"]
-                .as_u64()
-                .unwrap()
-                >= 1
+                ["activeCacheEntries"],
+            0
         );
 
         let created_pod = super::route_http_request(
