@@ -328,7 +328,8 @@ const WEBSOCKET_AUTH_PROTOCOL_PREFIX: &str = "slskr.api-token.";
 use crate::config::{
     json_bool_option, json_escape, json_option, json_u32_option, json_u64_option,
     json_usize_option, parse_compat_ip_address, AppConfig, ConfigEnv,
-    ControllerCompatibilityTarget, PodSignatureMode, ProcessEnv, ShareDirectory,
+    ControllerCompatibilityTarget, MusicBrainzIntegrationSettings, PodSignatureMode, ProcessEnv,
+    ShareDirectory,
 };
 use crate::utils::*;
 
@@ -13894,13 +13895,13 @@ fn songid_evidence_package_json(run: &serde_json::Value) -> serde_json::Value {
 
 /// Matches the oracle's `SongIdCapabilityReporter`: real external-tool
 /// presence checks on `PATH` (and, for panako/audfprint, known install
-/// locations), not a hardcoded list. Capabilities that depend on features
-/// slskR has not implemented (MusicBrainz-backed lookup, Chromaprint
-/// fingerprinting, AcoustID lookup, and the deeper per-source-type
-/// analysis the oracle's SongID run pipeline performs) honestly report
-/// `available: false` with a "not yet implemented" reason rather than
-/// claiming parity depth slskR's own run queue doesn't have.
-fn songid_capabilities_json() -> serde_json::Value {
+/// locations), not a hardcoded list. MusicBrainz availability reflects the
+/// configured live client; Chromaprint fingerprinting, AcoustID lookup, and
+/// the deeper per-source-type analysis the oracle's SongID run pipeline
+/// performs remain separately unavailable.
+fn songid_capabilities_json(
+    musicbrainz: Option<&MusicBrainzIntegrationSettings>,
+) -> serde_json::Value {
     const DOCKER_HINT: &str = "For Docker, run install-optional-media-tools with the matching profile or install the tool in a derived image and keep it on PATH.";
     const NOT_IMPLEMENTED: &str = "Not yet implemented in slskR.";
 
@@ -13996,6 +13997,13 @@ fn songid_capabilities_json() -> serde_json::Value {
         tool_reason(&[("whisper", whisper), ("ffmpeg", ffmpeg)]);
     let (ocr_available, ocr_reason) = tool_reason(&[("tesseract", tesseract), ("ffmpeg", ffmpeg)]);
     let (c2pa_available, c2pa_reason) = tool_reason(&[("c2patool", c2patool)]);
+    let musicbrainz_configured =
+        musicbrainz.is_some_and(|settings| reqwest::Url::parse(&settings.base_url).is_ok());
+    let musicbrainz_reason = if musicbrainz_configured {
+        "MusicBrainz client is configured.".to_owned()
+    } else {
+        "MusicBrainz base URL is not valid.".to_owned()
+    };
 
     serde_json::json!([
         capability(
@@ -14018,8 +14026,8 @@ fn songid_capabilities_json() -> serde_json::Value {
             "musicbrainz_lookup",
             "MusicBrainz lookup",
             "experimental",
-            false,
-            NOT_IMPLEMENTED.to_owned(),
+            musicbrainz_configured,
+            musicbrainz_reason,
             &["musicbrainz base URL"]
         ),
         capability(
@@ -19129,24 +19137,41 @@ async fn route_http_request_with_headers(
              };
              let username = decoded_path_segment(username);
              let transfers = state.transfers.read().await;
-             let exists = transfers.entries.iter().any(|entry| {
-                 entry.direction == 0
-                     && entry.id == id
-                     && entry.peer_username.as_deref() == Some(username.as_str())
+             let filename = transfers.entries.iter().find_map(|entry| {
+                (entry.direction == 0
+                    && entry.id == id
+                    && entry.peer_username.as_deref() == Some(username.as_str()))
+                    .then(|| entry.filename.clone())
              });
              drop(transfers);
-             if !exists {
+             let Some(filename) = filename else {
                  return Ok(routing::not_found_response());
+             };
+             let address = match request_peer_endpoint(state, &username).await {
+                 Ok(address) => address,
+                 Err(_) => return Ok(routing::no_content_response()),
+             };
+             let response = match send_peer_message_request(
+                 state,
+                 &address,
+                 PeerMessage::PlaceInQueueRequest {
+                     filename: filename.clone(),
+                 },
+             )
+             .await
+             {
+                 Ok(response) => response,
+                 Err(_) => return Ok(routing::no_content_response()),
+             };
+             match response {
+                 PeerMessage::PlaceInQueueResponse {
+                     filename: response_filename,
+                     place,
+                 } if response_filename == filename => {
+                     Ok(routing::ok_response(place.to_string()))
+                 }
+                 _ => Ok(routing::no_content_response()),
              }
-             // Matches the oracle's GetPlaceInQueueAsync: a real position
-             // requires a live PlaceInQueueResponse round-trip with the
-             // remote peer, which slskr does not yet request for an
-             // in-flight download. Rather than fabricate a number (the
-             // prior behavior: a local list index, returned even for a
-             // completed transfer), report the same 204 "queue position
-             // unavailable" the oracle itself falls back to on a timeout
-             // or error -- a real code path, not an invented one.
-             Ok(routing::no_content_response())
          }
 
         ("POST", "/api/transfers/downloads/find-alternative") => {
@@ -26722,8 +26747,8 @@ async fn route_http_request_with_headers(
               let (artist, title) = if let Some(release_id) =
                   release_id.filter(|_| route.path.starts_with("/api/v0/"))
               {
-                  match musicbrainz_release_target("https://musicbrainz.org/ws/2", &release_id)
-                      .await
+                  let musicbrainz = state.integration_settings.read().await.musicbrainz.clone();
+                  match musicbrainz_release_target_with_settings(&musicbrainz, &release_id).await
                   {
                       Ok(Some(target)) => target,
                       Ok(None) => {
@@ -29081,12 +29106,8 @@ async fn route_http_request_with_headers(
                 return Ok(routing::bad_request_response("Search query is required"));
             }
             // The oracle's real backend is a live MusicBrainz recording
-            // search; slskR has no such client wired in, so this searches
-            // the local share index instead -- an honest architectural
-            // difference in *source*, but the response is still a real,
-            // flat `ContentSearchResult[]` array over real local share
-            // data, not the old {query, results, count} wrapper with
-            // invented field names.
+            // search. Keep the result as the flat `ContentSearchResult[]`
+            // contract rather than the old {query, results, count} wrapper.
             let domain = params
                 .iter()
                 .find(|(key, _)| key == "domain")
@@ -29101,32 +29122,30 @@ async fn route_http_request_with_headers(
                 .and_then(|(_, value)| value.parse::<i64>().ok())
                 .unwrap_or(20)
                 .clamp(1, 100) as usize;
-            let shares = state.shares.read().await;
-            let results = search_shares(&shares.entries, &query)
+            let settings = state.integration_settings.read().await.musicbrainz.clone();
+            let hits = match musicbrainz_search_recordings(&settings, &query, limit).await {
+                Ok(hits) => hits,
+                Err(_) => Vec::new(),
+            };
+            let results = hits
                 .into_iter()
-                .take(limit)
-                .map(|entry| {
-                    let content_hash = hex::encode(Sha256::digest(entry.filename.as_bytes()));
-                    let title = std::path::Path::new(&entry.filename)
-                        .file_name()
-                        .and_then(std::ffi::OsStr::to_str)
-                        .unwrap_or(&entry.filename)
-                        .to_owned();
+                .filter(|hit| !hit.recording_id.is_empty())
+                .map(|hit| {
                     serde_json::json!({
-                        "contentId": format!("content:audio:track:{}", &content_hash[..32]),
-                        "title": title,
-                        "subtitle": "",
+                        "contentId": format!("content:audio:track:{}", hit.recording_id),
+                        "title": hit.title,
+                        "subtitle": hit.artist,
                         "type": "track",
                         "domain": "audio",
                         "metadata": {
-                            "filename": entry.filename,
-                            "extension": entry.extension,
-                            "size": entry.size,
+                            "musicbrainz_recording_id": hit.recording_id,
+                            "artist": hit.artist,
+                            "title": hit.title,
+                            "musicbrainz_artist_id": hit.artist_id.unwrap_or_default(),
                         },
                     })
                 })
                 .collect::<Vec<_>>();
-            drop(shares);
             Ok(routing::ok_response(
                 serde_json::Value::Array(results).to_string(),
             ))
@@ -31590,6 +31609,13 @@ fn slskd_options_json(
         response["integration"]["lastFm"]["enabled"] =
             serde_json::json!(config.integrations.lastfm.enabled);
         response["integration"]["lastFm"]["apiKey"] = serde_json::json!("*****");
+        response["integration"]["musicBrainz"] = serde_json::json!({
+            "baseUrl": config.integrations.musicbrainz.base_url,
+            "retryAttempts": config.integrations.musicbrainz.retry_attempts,
+            "timeout": format_timespan_hms(config.integrations.musicbrainz.timeout_seconds as i64),
+            "timeoutSeconds": config.integrations.musicbrainz.timeout_seconds,
+            "userAgent": config.integrations.musicbrainz.user_agent,
+        });
         response["integration"]["ntfy"] = serde_json::json!({
             "enabled": config.integrations.ntfy.enabled,
             "url": config.integrations.ntfy.url,
@@ -39958,33 +39984,35 @@ async fn read_bounded_integration_json(
 /// pair, matching the oracle's `MusicBrainzClient.GetReleaseAsync` +
 /// `MapToAlbumTarget`: `Ok(None)` when the release doesn't exist or has no
 /// resolvable artist credit, `Err` only on a genuine transport/parse failure.
+#[cfg(test)]
 async fn musicbrainz_release_target(
     base_url: &str,
     release_id: &str,
 ) -> Result<Option<(String, String)>, String> {
-    let url = format!(
-        "{}/release/{}?fmt=json&inc=artist-credits",
-        base_url.trim_end_matches('/'),
-        url_encode(release_id.trim())
-    );
-    let response = reqwest::Client::builder()
-        .timeout(Duration::from_secs(10))
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .map_err(|error| format!("failed to build MusicBrainz client: {error}"))?
-        .get(url)
-        .header(reqwest::header::USER_AGENT, format!("slskR v{APP_VERSION}"))
-        .header(reqwest::header::ACCEPT, "application/json")
-        .send()
-        .await
-        .map_err(|error| format!("MusicBrainz API request failed: {error}"))?;
-    if response.status() == reqwest::StatusCode::NOT_FOUND {
+    let settings = MusicBrainzIntegrationSettings {
+        base_url: base_url.trim_end_matches('/').to_owned(),
+        user_agent: format!("slskR v{APP_VERSION}"),
+        timeout_seconds: 10.0,
+        retry_attempts: 1,
+    };
+    musicbrainz_release_target_with_settings(&settings, release_id).await
+}
+
+async fn musicbrainz_release_target_with_settings(
+    settings: &MusicBrainzIntegrationSettings,
+    release_id: &str,
+) -> Result<Option<(String, String)>, String> {
+    let Some(value) = musicbrainz_json_request(
+        settings,
+        &format!(
+            "/release/{}?fmt=json&inc=recordings+artists+labels+discids+isrcs",
+            url_encode(release_id.trim())
+        ),
+    )
+    .await?
+    else {
         return Ok(None);
-    }
-    if !response.status().is_success() {
-        return Err(format!("MusicBrainz returned HTTP {}", response.status()));
-    }
-    let value = read_bounded_integration_json(response, "MusicBrainz API").await?;
+    };
     let artist_id = value
         .pointer("/artist-credit/0/artist/id")
         .and_then(serde_json::Value::as_str)
@@ -40003,6 +40031,388 @@ async fn musicbrainz_release_target(
         .unwrap_or_default()
         .to_owned();
     Ok(Some((artist_name, title)))
+}
+
+#[derive(Clone, Debug)]
+struct MusicBrainzRecordingHit {
+    recording_id: String,
+    title: String,
+    artist: String,
+    artist_id: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+struct ParsedPodcoreContentId {
+    domain: String,
+    content_type: String,
+    domain_lower: String,
+    type_lower: String,
+    id: String,
+    full_id: String,
+}
+
+fn parse_podcore_content_id(content_id: &str) -> Option<ParsedPodcoreContentId> {
+    let content_id = content_id.trim();
+    let (prefix, remainder) = content_id.split_once(':')?;
+    if !prefix.eq_ignore_ascii_case("content") {
+        return None;
+    }
+    let (domain, remainder) = remainder.split_once(':')?;
+    let (content_type, id) = remainder.split_once(':')?;
+    if domain.trim().is_empty() || content_type.trim().is_empty() || id.trim().is_empty() {
+        return None;
+    }
+    let domain = domain.to_owned();
+    let content_type = content_type.to_owned();
+    let id = id.to_owned();
+    Some(ParsedPodcoreContentId {
+        domain_lower: domain.to_ascii_lowercase(),
+        type_lower: content_type.to_ascii_lowercase(),
+        full_id: format!("content:{domain}:{content_type}:{id}"),
+        domain,
+        content_type,
+        id,
+    })
+}
+
+fn musicbrainz_query_encode(value: &str) -> String {
+    let mut encoded = String::new();
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                encoded.push(byte as char)
+            }
+            b' ' => encoded.push('+'),
+            _ => encoded.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    encoded
+}
+
+async fn musicbrainz_json_request(
+    settings: &MusicBrainzIntegrationSettings,
+    path_and_query: &str,
+) -> Result<Option<serde_json::Value>, String> {
+    let timeout = Duration::try_from_secs_f64(settings.timeout_seconds)
+        .map_err(|error| format!("MusicBrainz timeout is invalid: {error}"))?;
+    let client = reqwest::Client::builder()
+        .timeout(timeout)
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|error| format!("failed to build MusicBrainz client: {error}"))?;
+    let url = format!(
+        "{}{}",
+        settings.base_url.trim_end_matches('/'),
+        path_and_query
+    );
+
+    for attempt in 0..settings.retry_attempts {
+        let response = client
+            .get(&url)
+            .header(reqwest::header::USER_AGENT, &settings.user_agent)
+            .header(reqwest::header::ACCEPT, "application/json")
+            .header(reqwest::header::ACCEPT_LANGUAGE, "en")
+            .send()
+            .await;
+        let response = match response {
+            Ok(response) => response,
+            Err(_error) if attempt + 1 < settings.retry_attempts => {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                continue;
+            }
+            Err(error) => {
+                return Err(format!("MusicBrainz API request failed: {error}"));
+            }
+        };
+        if response.status() == reqwest::StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+        if !response.status().is_success() {
+            return Err(format!("MusicBrainz returned HTTP {}", response.status()));
+        }
+        return read_bounded_integration_json(response, "MusicBrainz API")
+            .await
+            .map(Some);
+    }
+
+    Err("MusicBrainz request did not run".to_owned())
+}
+
+fn musicbrainz_artist_credit(value: &serde_json::Value) -> String {
+    value
+        .get("artist-credit")
+        .and_then(serde_json::Value::as_array)
+        .map(|credits| {
+            credits
+                .iter()
+                .map(|credit| {
+                    let name = credit
+                        .get("name")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or_default();
+                    let join_phrase = credit
+                        .get("joinphrase")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or_default();
+                    format!("{name}{join_phrase}")
+                })
+                .collect::<String>()
+                .trim()
+                .to_owned()
+        })
+        .unwrap_or_default()
+}
+
+fn musicbrainz_artist_id(value: &serde_json::Value) -> Option<String> {
+    value
+        .pointer("/artist-credit/0/artist/id")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(str::to_owned)
+}
+
+async fn musicbrainz_search_recordings(
+    settings: &MusicBrainzIntegrationSettings,
+    query: &str,
+    limit: usize,
+) -> Result<Vec<MusicBrainzRecordingHit>, String> {
+    let Some(value) = musicbrainz_json_request(
+        settings,
+        &format!(
+            "/recording?query={}&fmt=json&limit={}",
+            musicbrainz_query_encode(query.trim()),
+            limit.clamp(1, 100)
+        ),
+    )
+    .await?
+    else {
+        return Ok(Vec::new());
+    };
+    let Some(recordings) = value
+        .get("recordings")
+        .and_then(serde_json::Value::as_array)
+    else {
+        return Ok(Vec::new());
+    };
+    let mut seen = HashSet::new();
+    let mut hits = Vec::new();
+    for recording in recordings {
+        let recording_id = recording
+            .get("id")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .trim()
+            .to_owned();
+        let title = recording
+            .get("title")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .trim()
+            .to_owned();
+        let artist = musicbrainz_artist_credit(recording);
+        if recording_id.is_empty() && title.is_empty() && artist.is_empty() {
+            continue;
+        }
+        let key = if recording_id.is_empty() {
+            format!(
+                "{}\u{1f}{}",
+                artist.to_ascii_lowercase(),
+                title.to_ascii_lowercase()
+            )
+        } else {
+            recording_id.to_ascii_lowercase()
+        };
+        if !seen.insert(key) {
+            continue;
+        }
+        hits.push(MusicBrainzRecordingHit {
+            recording_id,
+            title,
+            artist,
+            artist_id: musicbrainz_artist_id(recording),
+        });
+    }
+    Ok(hits)
+}
+
+fn basic_podcore_metadata(
+    parsed: &ParsedPodcoreContentId,
+    title_override: Option<&str>,
+    artist_override: Option<&str>,
+    mut additional_info: BTreeMap<String, String>,
+) -> serde_json::Value {
+    additional_info.insert("id".to_owned(), parsed.id.clone());
+    additional_info.insert("domain".to_owned(), parsed.domain.clone());
+    additional_info.insert("type".to_owned(), parsed.content_type.clone());
+    let default_title = format!("{}: {}", parsed.content_type, parsed.id);
+    serde_json::json!({
+        "contentId": parsed.full_id,
+        "title": title_override.unwrap_or(&default_title),
+        "artist": artist_override.unwrap_or("Unknown"),
+        "type": parsed.content_type,
+        "domain": parsed.domain,
+        "additionalInfo": additional_info,
+    })
+}
+
+fn fallback_podcore_metadata(parsed: &ParsedPodcoreContentId) -> serde_json::Value {
+    let title = if parsed.domain_lower == "video" {
+        parsed.id.clone()
+    } else {
+        format!("{}: {}", parsed.content_type, parsed.id)
+    };
+    basic_podcore_metadata(parsed, Some(&title), None, BTreeMap::new())
+}
+
+async fn podcore_audio_metadata(
+    settings: &MusicBrainzIntegrationSettings,
+    parsed: &ParsedPodcoreContentId,
+) -> Result<serde_json::Value, String> {
+    match parsed.type_lower.as_str() {
+        "artist" => {
+            let hits = musicbrainz_search_recordings(settings, &parsed.id, 10).await?;
+            let matching = hits
+                .iter()
+                .find(|hit| {
+                    hit.artist_id
+                        .as_deref()
+                        .is_some_and(|id| id.eq_ignore_ascii_case(&parsed.id))
+                })
+                .or_else(|| {
+                    hits.iter()
+                        .find(|hit| hit.artist.eq_ignore_ascii_case(parsed.id.trim()))
+                });
+            let title = matching
+                .map(|hit| hit.artist.as_str())
+                .unwrap_or(parsed.id.as_str());
+            let mut additional_info = BTreeMap::new();
+            additional_info.insert("musicbrainz_id".to_owned(), parsed.id.clone());
+            additional_info.insert("type".to_owned(), "artist".to_owned());
+            additional_info.insert(
+                "musicbrainz_artist_id".to_owned(),
+                matching
+                    .and_then(|hit| hit.artist_id.as_deref())
+                    .unwrap_or(parsed.id.as_str())
+                    .to_owned(),
+            );
+            Ok(basic_podcore_metadata(
+                parsed,
+                Some(title),
+                Some(title),
+                additional_info,
+            ))
+        }
+        "album" => {
+            let Some(value) = musicbrainz_json_request(
+                settings,
+                &format!(
+                    "/release/{}?fmt=json&inc=recordings+artists+labels+discids+isrcs",
+                    url_encode(parsed.id.trim())
+                ),
+            )
+            .await?
+            else {
+                return Ok(fallback_podcore_metadata(parsed));
+            };
+            let title = value
+                .get("title")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default();
+            let release_date = value
+                .get("date")
+                .and_then(serde_json::Value::as_str)
+                .and_then(parse_musicbrainz_release_date)
+                .unwrap_or_else(|| "Unknown".to_owned());
+            let track_count = value
+                .get("media")
+                .and_then(serde_json::Value::as_array)
+                .into_iter()
+                .flat_map(|media| media.iter())
+                .filter_map(|media| media.get("tracks"))
+                .filter_map(serde_json::Value::as_array)
+                .flat_map(|tracks| tracks.iter())
+                .filter(|track| {
+                    track
+                        .get("recording")
+                        .is_some_and(serde_json::Value::is_object)
+                })
+                .count();
+            let label = value
+                .get("label-info")
+                .and_then(serde_json::Value::as_array)
+                .into_iter()
+                .flat_map(|labels| labels.iter())
+                .filter_map(|entry| entry.pointer("/label/name"))
+                .filter_map(serde_json::Value::as_str)
+                .map(str::trim)
+                .find(|name| !name.is_empty())
+                .unwrap_or("Unknown");
+            let mut additional_info = BTreeMap::new();
+            additional_info.insert("musicbrainz_id".to_owned(), parsed.id.clone());
+            additional_info.insert("release_date".to_owned(), release_date);
+            additional_info.insert("track_count".to_owned(), track_count.to_string());
+            additional_info.insert("label".to_owned(), label.to_owned());
+            Ok(serde_json::json!({
+                "contentId": parsed.full_id,
+                "title": title,
+                "artist": musicbrainz_artist_credit(&value),
+                "type": parsed.content_type,
+                "domain": parsed.domain,
+                "additionalInfo": additional_info,
+            }))
+        }
+        "track" => {
+            let Some(value) = musicbrainz_json_request(
+                settings,
+                &format!(
+                    "/recording/{}?fmt=json&inc=artists+isrcs",
+                    url_encode(parsed.id.trim())
+                ),
+            )
+            .await?
+            else {
+                return Ok(fallback_podcore_metadata(parsed));
+            };
+            let title = value
+                .get("title")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default();
+            let duration_ms = value
+                .get("length")
+                .and_then(serde_json::Value::as_i64)
+                .unwrap_or(0);
+            let mut additional_info = BTreeMap::new();
+            additional_info.insert("musicbrainz_id".to_owned(), parsed.id.clone());
+            additional_info.insert("duration_ms".to_owned(), duration_ms.to_string());
+            additional_info.insert("album".to_owned(), "Unknown".to_owned());
+            additional_info.insert("position".to_owned(), "0".to_owned());
+            Ok(serde_json::json!({
+                "contentId": parsed.full_id,
+                "title": title,
+                "artist": musicbrainz_artist_credit(&value),
+                "type": parsed.content_type,
+                "domain": parsed.domain,
+                "additionalInfo": additional_info,
+            }))
+        }
+        _ => Ok(fallback_podcore_metadata(parsed)),
+    }
+}
+
+fn parse_musicbrainz_release_date(value: &str) -> Option<String> {
+    let mut parts = value.split('-');
+    let year = parts.next()?.parse::<i32>().ok()?;
+    let month = parts
+        .next()
+        .and_then(|part| part.parse::<u32>().ok())
+        .unwrap_or(1);
+    let day = parts
+        .next()
+        .and_then(|part| part.parse::<u32>().ok())
+        .unwrap_or(1);
+    chrono::NaiveDate::from_ymd_opt(year, month, day)
+        .map(|date| date.format("%Y-%m-%d").to_string())
 }
 
 struct ResolvedIntegrationTarget {
@@ -51908,7 +52318,10 @@ async fn extended_controller_get_response(
                 .to_string(),
             )
         }
-        "/api/songid/capabilities" => routing::ok_response(songid_capabilities_json().to_string()),
+        "/api/songid/capabilities" => {
+            let musicbrainz = state.integration_settings.read().await.musicbrainz.clone();
+            routing::ok_response(songid_capabilities_json(Some(&musicbrainz)).to_string())
+        }
         "/api/telemetry/prometheus" => {
             let transfers = state.transfers.read().await;
             let searches = state.searches.read().await;
@@ -52132,41 +52545,38 @@ async fn podcore_stats_response(path: &str, query: Option<&str>, state: &AppStat
             // contentId query parameter and returns a single content
             // object shaped by its `content:<domain>:<type>:<id>` parts,
             // not an unrelated pod/channel-count aggregate that ignored
-            // the query entirely. MusicBrainz-backed enrichment for the
-            // audio/video domains is not implemented here -- the same
-            // honest simplification already accepted for content/validate.
+            // the query entirely. Audio metadata is enriched through the
+            // configured MusicBrainz client; other domains use the real
+            // basic metadata projection until their provider is available.
             let content_id = query_parameter(query, "contentId")
                 .map(|value| value.trim().to_owned())
                 .unwrap_or_default();
             if content_id.is_empty() {
                 return routing::bad_request_response("Content ID is required");
             }
-            let parts = content_id.split(':').collect::<Vec<_>>();
-            let valid = parts.len() == 4
-                && parts[0].eq_ignore_ascii_case("content")
-                && parts[1..].iter().all(|part| !part.trim().is_empty());
-            if !valid {
+            let Some(parsed) = parse_podcore_content_id(&content_id) else {
                 return HttpResponse {
                     status: "404 Not Found",
                     content_type: "application/json",
                     body: serde_json::json!("Content not found").to_string(),
                 };
-            }
-            routing::ok_response(
-                serde_json::json!({
-                    "contentId": content_id,
-                    "title": format!("{}: {}", parts[2], parts[3]),
-                    "artist": "Unknown",
-                    "type": parts[2],
-                    "domain": parts[1],
-                    "additionalInfo": {
-                        "id": parts[3],
-                        "domain": parts[1],
-                        "type": parts[2],
-                    },
-                })
-                .to_string(),
-            )
+            };
+            let metadata = if parsed.domain_lower == "audio" {
+                let settings = state.integration_settings.read().await.musicbrainz.clone();
+                match podcore_audio_metadata(&settings, &parsed).await {
+                    Ok(metadata) => metadata,
+                    Err(_) => {
+                        return HttpResponse {
+                            status: "404 Not Found",
+                            content_type: "application/json",
+                            body: serde_json::json!("Content not found").to_string(),
+                        };
+                    }
+                }
+            } else {
+                fallback_podcore_metadata(&parsed)
+            };
+            routing::ok_response(metadata.to_string())
         }
         "/api/podcore/membership/stats" => routing::ok_response(
             serde_json::json!({
@@ -84998,8 +85408,46 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn slskd_transfer_position_requires_a_real_download_and_reports_no_fake_number() {
-        let (state, _receiver) = test_state();
+    async fn slskd_transfer_position_requests_and_returns_the_remote_queue_place() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind queue position fixture");
+        let local_addr = listener
+            .local_addr()
+            .expect("queue position fixture address");
+        let server = tokio::spawn(async move {
+            for (expected_filename, expected_place) in
+                [("Remote/Two.flac", 4_u32), ("Remote/One.flac", 7_u32)]
+            {
+                let (stream, _) = listener.accept().await.expect("accept queue position");
+                let mut init = slskr_client::stream::InitConnection::new(stream);
+                assert_eq!(
+                    init.receive().await.expect("queue position init"),
+                    slskr_client::protocol::init::InitMessage::PeerInit {
+                        username: "tester".to_owned(),
+                        connection_type: "P".to_owned(),
+                        token: 0,
+                    }
+                );
+                let mut peer = slskr_client::stream::PeerMessageConnection::new(init.into_inner());
+                assert_eq!(
+                    peer.receive().await.expect("queue position request"),
+                    super::PeerMessage::PlaceInQueueRequest {
+                        filename: expected_filename.to_owned(),
+                    }
+                );
+                peer.send(&super::PeerMessage::PlaceInQueueResponse {
+                    filename: expected_filename.to_owned(),
+                    place: expected_place,
+                })
+                .await
+                .expect("queue position response");
+            }
+        });
+        let endpoint = format!("friend={local_addr}");
+        let (state, _receiver) = test_state_with_env(
+            MapEnv::default().with("SLSKR_TEST_USER_ENDPOINT_OVERRIDES", &endpoint),
+        );
         let (first_id, second_id) = {
             let mut transfers = state.transfers.write().await;
             let first = transfers.create(
@@ -85020,11 +85468,6 @@ mod tests {
             (first.id, second.id)
         };
 
-        // A real, tracked download exists, but slskr does not yet request a
-        // live PlaceInQueueResponse from the remote peer -- matching the
-        // oracle's own 204 "queue position unavailable" fallback rather
-        // than fabricating a number, even for a completed transfer (the
-        // prior behavior returned a fake "0" for every case below).
         let active = super::route_http_request(
             "GET",
             &format!("/api/v0/transfers/downloads/friend/{second_id}/position"),
@@ -85034,7 +85477,8 @@ mod tests {
         )
         .await
         .expect("active position");
-        assert_eq!(active.status, "204 No Content", "{}", active.body);
+        assert_eq!(active.status, "200 OK", "{}", active.body);
+        assert_eq!(active.body, "4");
 
         let completed = super::route_http_request(
             "GET",
@@ -85045,7 +85489,8 @@ mod tests {
         )
         .await
         .expect("completed position");
-        assert_eq!(completed.status, "204 No Content");
+        assert_eq!(completed.status, "200 OK");
+        assert_eq!(completed.body, "7");
 
         // An id that isn't a real download for this username must 404,
         // not silently report a position.
@@ -85070,6 +85515,7 @@ mod tests {
         .await
         .expect("wrong username");
         assert_eq!(wrong_username.status, "404 Not Found");
+        server.await.expect("queue position fixture task");
     }
 
     #[tokio::test]
@@ -93422,7 +93868,7 @@ mod tests {
 
     #[test]
     fn songid_capabilities_report_real_tool_presence_not_a_fake_string_array() {
-        let capabilities = super::songid_capabilities_json();
+        let capabilities = super::songid_capabilities_json(None);
         let capabilities = capabilities.as_array().expect("capabilities array");
         // Matches the oracle's full SongIdCapabilityReporter id set, not
         // the old three-string placeholder.
@@ -95109,19 +95555,189 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn podcore_content_search_returns_a_real_array_over_real_shares() {
+    async fn podcore_content_metadata_uses_musicbrainz_recording_release_and_artist_shapes() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind MusicBrainz metadata fixture");
+        let address = listener
+            .local_addr()
+            .expect("MusicBrainz metadata fixture address");
+        let server = tokio::spawn(async move {
+            let recording_request = serve_json_fixture(
+                &listener,
+                serde_json::json!({
+                    "id": "recording-metadata-audit",
+                    "title": "Metadata Track",
+                    "length": 187000,
+                    "artist-credit": [{
+                        "name": "Metadata Artist",
+                        "artist": {"id": "artist-metadata-audit"}
+                    }]
+                }),
+            )
+            .await;
+            assert!(
+                recording_request.starts_with(
+                    "GET /recording/recording-metadata-audit?fmt=json&inc=artists+isrcs HTTP/1.1"
+                ),
+                "{recording_request}"
+            );
+
+            let release_request = serve_json_fixture(
+                &listener,
+                serde_json::json!({
+                    "id": "release-metadata-audit",
+                    "title": "Metadata Album",
+                    "date": "2024-05",
+                    "artist-credit": [{
+                        "name": "Metadata Artist",
+                        "artist": {"id": "artist-metadata-audit"}
+                    }],
+                    "label-info": [{"label": {"name": "Audit Label"}}],
+                    "media": [{
+                        "tracks": [
+                            {"position": "1", "recording": {"id": "track-1"}},
+                            {"position": "2", "recording": {"id": "track-2"}}
+                        ]
+                    }]
+                }),
+            )
+            .await;
+            assert!(
+                release_request.starts_with(
+                    "GET /release/release-metadata-audit?fmt=json&inc=recordings+artists+labels+discids+isrcs HTTP/1.1"
+                ),
+                "{release_request}"
+            );
+
+            let artist_request = serve_json_fixture(
+                &listener,
+                serde_json::json!({
+                    "recordings": [{
+                        "id": "artist-track",
+                        "title": "Artist Track",
+                        "artist-credit": [{
+                            "name": "Metadata Artist",
+                            "artist": {"id": "artist-metadata-audit"}
+                        }]
+                    }]
+                }),
+            )
+            .await;
+            assert!(
+                artist_request.starts_with(
+                    "GET /recording?query=artist-metadata-audit&fmt=json&limit=10 HTTP/1.1"
+                ),
+                "{artist_request}"
+            );
+        });
+
         let (state, _receiver) = test_state();
         {
-            let mut shares = state.shares.write().await;
-            shares.entries.push(FileEntry {
-                filename_encoding: Default::default(),
-                extension_encoding: Default::default(),
-                code: 1,
-                filename: "Virtual/Search Audit Track.flac".to_owned(),
-                size: 4096,
-                extension: "flac".to_owned(),
-                attributes: Vec::new(),
-            });
+            let mut settings = state.integration_settings.write().await;
+            settings.musicbrainz.base_url = format!("http://{address}");
+            settings.musicbrainz.retry_attempts = 1;
+        }
+
+        let track = super::route_http_request(
+            "GET",
+            "/api/v0/podcore/content/metadata?contentId=content:audio:track:recording-metadata-audit",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("track metadata response");
+        assert_eq!(track.status, "200 OK", "{}", track.body);
+        let track = serde_json::from_str::<serde_json::Value>(&track.body).unwrap();
+        assert_eq!(
+            track["contentId"],
+            "content:audio:track:recording-metadata-audit"
+        );
+        assert_eq!(track["title"], "Metadata Track");
+        assert_eq!(track["artist"], "Metadata Artist");
+        assert_eq!(
+            track["additionalInfo"]["musicbrainz_id"],
+            "recording-metadata-audit"
+        );
+        assert_eq!(track["additionalInfo"]["duration_ms"], "187000");
+        assert_eq!(track["additionalInfo"]["album"], "Unknown");
+        assert_eq!(track["additionalInfo"]["position"], "0");
+
+        let album = super::route_http_request(
+            "GET",
+            "/api/v0/podcore/content/metadata?contentId=content:audio:album:release-metadata-audit",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("album metadata response");
+        assert_eq!(album.status, "200 OK", "{}", album.body);
+        let album = serde_json::from_str::<serde_json::Value>(&album.body).unwrap();
+        assert_eq!(album["title"], "Metadata Album");
+        assert_eq!(album["artist"], "Metadata Artist");
+        assert_eq!(album["additionalInfo"]["release_date"], "2024-05-01");
+        assert_eq!(album["additionalInfo"]["track_count"], "2");
+        assert_eq!(album["additionalInfo"]["label"], "Audit Label");
+
+        let artist = super::route_http_request(
+            "GET",
+            "/api/v0/podcore/content/metadata?contentId=content:audio:artist:artist-metadata-audit",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("artist metadata response");
+        assert_eq!(artist.status, "200 OK", "{}", artist.body);
+        let artist = serde_json::from_str::<serde_json::Value>(&artist.body).unwrap();
+        assert_eq!(artist["title"], "Metadata Artist");
+        assert_eq!(artist["artist"], "Metadata Artist");
+        assert_eq!(
+            artist["additionalInfo"]["musicbrainz_artist_id"],
+            "artist-metadata-audit"
+        );
+        server.await.expect("MusicBrainz metadata fixture task");
+    }
+
+    #[tokio::test]
+    async fn podcore_content_search_returns_musicbrainz_recording_results() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind MusicBrainz content search fixture");
+        let address = listener
+            .local_addr()
+            .expect("MusicBrainz content search fixture address");
+        let server = tokio::spawn(async move {
+            let request = serve_json_fixture(
+                &listener,
+                serde_json::json!({
+                    "recordings": [{
+                        "id": "recording-search-audit",
+                        "title": "Search Audit Track",
+                        "artist-credit": [{
+                            "name": "Audit Artist",
+                            "artist": {"id": "artist-search-audit"}
+                        }]
+                    }]
+                }),
+            )
+            .await;
+            assert!(
+                request.starts_with("GET /recording?query=Search+Audit&fmt=json&limit=1 HTTP/1.1"),
+                "{request}"
+            );
+            assert!(
+                request.to_ascii_lowercase().contains("accept-language: en"),
+                "{request}"
+            );
+        });
+        let (state, _receiver) = test_state();
+        {
+            let mut settings = state.integration_settings.write().await;
+            settings.musicbrainz.base_url = format!("http://{address}");
+            settings.musicbrainz.retry_attempts = 1;
         }
 
         let missing_query =
@@ -95168,10 +95784,25 @@ mod tests {
                 .starts_with("content:audio:track:"),
             "{found_json}"
         );
-        assert_eq!(results[0]["title"], "Search Audit Track.flac");
+        assert_eq!(
+            results[0]["contentId"],
+            "content:audio:track:recording-search-audit"
+        );
+        assert_eq!(results[0]["title"], "Search Audit Track");
+        assert_eq!(results[0]["subtitle"], "Audit Artist");
         assert_eq!(results[0]["domain"], "audio");
         assert_eq!(results[0]["type"], "track");
-        assert_eq!(results[0]["metadata"]["extension"], "flac");
+        assert_eq!(
+            results[0]["metadata"]["musicbrainz_recording_id"],
+            "recording-search-audit"
+        );
+        assert_eq!(
+            results[0]["metadata"]["musicbrainz_artist_id"],
+            "artist-search-audit"
+        );
+        server
+            .await
+            .expect("MusicBrainz content search fixture task");
     }
 
     #[tokio::test]

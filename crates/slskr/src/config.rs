@@ -2825,6 +2825,7 @@ impl TrustedProxyCidr {
 pub struct IntegrationSettings {
     pub spotify: Box<SpotifyIntegrationSettings>,
     pub lidarr: Box<LidarrIntegrationSettings>,
+    pub musicbrainz: MusicBrainzIntegrationSettings,
     pub youtube: SourceFeedApiKeySettings,
     pub lastfm: SourceFeedApiKeySettings,
     pub ntfy: NtfyIntegrationSettings,
@@ -2852,6 +2853,7 @@ impl IntegrationSettings {
                 file_config.lidarr,
                 env,
             )?),
+            musicbrainz: MusicBrainzIntegrationSettings::from_layers(file_config.musicbrainz, env)?,
             youtube: SourceFeedApiKeySettings::from_layers(
                 file_config.youtube,
                 env,
@@ -2883,9 +2885,10 @@ impl IntegrationSettings {
 
     pub fn sanitized_json(&self) -> String {
         format!(
-            "{{\"spotify\":{},\"lidarr\":{},\"youtube\":{},\"lastfm\":{},\"ntfy\":{},\"pushover\":{},\"pushbullet\":{},\"ftp\":{},\"vpn\":{},\"script_count\":{},\"webhook_count\":{},\"bridge\":{},\"external_visualizer\":{}}}",
+            "{{\"spotify\":{},\"lidarr\":{},\"musicbrainz\":{},\"youtube\":{},\"lastfm\":{},\"ntfy\":{},\"pushover\":{},\"pushbullet\":{},\"ftp\":{},\"vpn\":{},\"script_count\":{},\"webhook_count\":{},\"bridge\":{},\"external_visualizer\":{}}}",
             self.spotify.sanitized_json(),
             self.lidarr.sanitized_json(),
+            self.musicbrainz.sanitized_json(),
             self.youtube.sanitized_json(),
             self.lastfm.sanitized_json(),
             self.ntfy.sanitized_json(),
@@ -2898,6 +2901,84 @@ impl IntegrationSettings {
             self.bridge.sanitized_json(),
             self.external_visualizer.sanitized_json()
         )
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct MusicBrainzIntegrationSettings {
+    pub base_url: String,
+    pub user_agent: String,
+    pub timeout_seconds: f64,
+    pub retry_attempts: u32,
+}
+
+impl MusicBrainzIntegrationSettings {
+    fn from_layers<E: ConfigEnv>(
+        file_config: MusicBrainzFileConfig,
+        env: &E,
+    ) -> Result<Self, String> {
+        let settings = Self {
+            base_url: env
+                .var("SLSKD_MUSICBRAINZ_BASE_URL")
+                .or(file_config.base_url)
+                .unwrap_or_else(|| "https://musicbrainz.org/ws/2".to_owned())
+                .trim()
+                .to_owned(),
+            user_agent: env
+                .var("SLSKD_MUSICBRAINZ_USER_AGENT")
+                .or(file_config.user_agent)
+                .unwrap_or_else(|| "slskd/0.0.0 (https://github.com/snapetech/slskdn)".to_owned())
+                .trim()
+                .to_owned(),
+            timeout_seconds: env_parse_layer(
+                env,
+                "SLSKD_MUSICBRAINZ_TIMEOUT_SECONDS",
+                file_config.timeout_seconds,
+                20.0,
+            )?,
+            retry_attempts: env_parse_layer(
+                env,
+                "SLSKD_MUSICBRAINZ_RETRY_ATTEMPTS",
+                file_config.retry_attempts,
+                2,
+            )?,
+        };
+        let parsed = reqwest::Url::parse(&settings.base_url)
+            .map_err(|_| "The BaseUrl field must be an absolute URL.".to_owned())?;
+        if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
+            return Err("The BaseUrl field must be an absolute URL.".to_owned());
+        }
+        if settings.user_agent.is_empty() {
+            return Err("The UserAgent field must not be empty.".to_owned());
+        }
+        if !settings.timeout_seconds.is_finite() || settings.timeout_seconds <= 0.0 {
+            return Err("The TimeoutSeconds field must be a positive number.".to_owned());
+        }
+        if settings.retry_attempts == 0 {
+            return Err("The RetryAttempts field must be greater than zero.".to_owned());
+        }
+        Ok(settings)
+    }
+
+    pub fn sanitized_json(&self) -> String {
+        format!(
+            "{{\"base_url\":{},\"user_agent\":{},\"timeout_seconds\":{},\"retry_attempts\":{}}}",
+            json_escape(&self.base_url),
+            json_escape(&self.user_agent),
+            self.timeout_seconds,
+            self.retry_attempts,
+        )
+    }
+}
+
+impl Default for MusicBrainzIntegrationSettings {
+    fn default() -> Self {
+        Self {
+            base_url: "https://musicbrainz.org/ws/2".to_owned(),
+            user_agent: "slskd/0.0.0 (https://github.com/snapetech/slskdn)".to_owned(),
+            timeout_seconds: 20.0,
+            retry_attempts: 2,
+        }
     }
 }
 
@@ -6857,6 +6938,8 @@ pub struct PersistenceFileConfig {
 pub struct IntegrationsFileConfig {
     spotify: SpotifyFileConfig,
     lidarr: LidarrFileConfig,
+    #[serde(rename = "musicBrainz", alias = "musicbrainz")]
+    musicbrainz: MusicBrainzFileConfig,
     youtube: SourceFeedApiKeyFileConfig,
     lastfm: SourceFeedApiKeyFileConfig,
     ntfy: NtfyFileConfig,
@@ -6868,6 +6951,19 @@ pub struct IntegrationsFileConfig {
     webhooks: BTreeMap<String, FrozenWebhookSettings>,
     bridge: BridgeFileConfig,
     external_visualizer: ExternalVisualizerFileConfig,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct MusicBrainzFileConfig {
+    #[serde(alias = "baseUrl")]
+    base_url: Option<String>,
+    #[serde(alias = "userAgent")]
+    user_agent: Option<String>,
+    #[serde(alias = "timeoutSeconds")]
+    timeout_seconds: Option<f64>,
+    #[serde(alias = "retryAttempts")]
+    retry_attempts: Option<u32>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -7574,6 +7670,70 @@ const CONTROLLER_YAML_CORE_MAPPINGS: &[(&str, &str)] = &[
     (
         "integrations.lidarr.blacklist_rejected_downloads",
         "SLSKD_LIDARR_BLACKLIST_REJECTED_DOWNLOADS",
+    ),
+    (
+        "integrations.musicbrainz.base_url",
+        "SLSKD_MUSICBRAINZ_BASE_URL",
+    ),
+    (
+        "integrations.musicbrainz.baseUrl",
+        "SLSKD_MUSICBRAINZ_BASE_URL",
+    ),
+    (
+        "integrations.musicBrainz.baseUrl",
+        "SLSKD_MUSICBRAINZ_BASE_URL",
+    ),
+    (
+        "integration.musicBrainz.baseUrl",
+        "SLSKD_MUSICBRAINZ_BASE_URL",
+    ),
+    (
+        "integrations.musicbrainz.user_agent",
+        "SLSKD_MUSICBRAINZ_USER_AGENT",
+    ),
+    (
+        "integrations.musicbrainz.userAgent",
+        "SLSKD_MUSICBRAINZ_USER_AGENT",
+    ),
+    (
+        "integrations.musicBrainz.userAgent",
+        "SLSKD_MUSICBRAINZ_USER_AGENT",
+    ),
+    (
+        "integration.musicBrainz.userAgent",
+        "SLSKD_MUSICBRAINZ_USER_AGENT",
+    ),
+    (
+        "integrations.musicbrainz.timeout_seconds",
+        "SLSKD_MUSICBRAINZ_TIMEOUT_SECONDS",
+    ),
+    (
+        "integrations.musicbrainz.timeoutSeconds",
+        "SLSKD_MUSICBRAINZ_TIMEOUT_SECONDS",
+    ),
+    (
+        "integrations.musicBrainz.timeoutSeconds",
+        "SLSKD_MUSICBRAINZ_TIMEOUT_SECONDS",
+    ),
+    (
+        "integration.musicBrainz.timeoutSeconds",
+        "SLSKD_MUSICBRAINZ_TIMEOUT_SECONDS",
+    ),
+    (
+        "integrations.musicbrainz.retry_attempts",
+        "SLSKD_MUSICBRAINZ_RETRY_ATTEMPTS",
+    ),
+    (
+        "integrations.musicbrainz.retryAttempts",
+        "SLSKD_MUSICBRAINZ_RETRY_ATTEMPTS",
+    ),
+    (
+        "integrations.musicBrainz.retryAttempts",
+        "SLSKD_MUSICBRAINZ_RETRY_ATTEMPTS",
+    ),
+    (
+        "integration.musicBrainz.retryAttempts",
+        "SLSKD_MUSICBRAINZ_RETRY_ATTEMPTS",
     ),
     ("integrations.spotify.client_id", "SLSKD_SPOTIFY_CLIENT_ID"),
     (
@@ -10801,6 +10961,60 @@ mod tests {
         )
         .expect("frozen long instance name");
         assert_eq!(config.instance_name, long_name);
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn musicbrainz_yaml_projection_matches_frozen_integration_options() {
+        let root = std::env::temp_dir().join(format!(
+            "slskr-musicbrainz-config-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("slskd.yml"),
+            "integrations:\n  musicbrainz:\n    baseUrl: http://musicbrainz.fixture/ws/2\n    userAgent: fixture-agent/1.0\n    timeoutSeconds: 7.5\n    retryAttempts: 3\n",
+        )
+        .unwrap();
+
+        let config = super::AppConfig::from_layers(
+            None,
+            super::FileConfig::default(),
+            &MapEnv::default()
+                .with("SLSKR_STATE_DIR", root.to_str().unwrap())
+                .with("SLSKR_AUTH_DISABLED", "true"),
+        )
+        .expect("MusicBrainz YAML options");
+        assert_eq!(
+            config.integrations.musicbrainz.base_url,
+            "http://musicbrainz.fixture/ws/2"
+        );
+        assert_eq!(
+            config.integrations.musicbrainz.user_agent,
+            "fixture-agent/1.0"
+        );
+        assert_eq!(config.integrations.musicbrainz.timeout_seconds, 7.5);
+        assert_eq!(config.integrations.musicbrainz.retry_attempts, 3);
+
+        std::fs::write(
+            root.join("slskd.yml"),
+            "integrations:\n  musicbrainz:\n    timeoutSeconds: 0\n",
+        )
+        .unwrap();
+        let error = super::AppConfig::from_layers(
+            None,
+            super::FileConfig::default(),
+            &MapEnv::default()
+                .with("SLSKR_STATE_DIR", root.to_str().unwrap())
+                .with("SLSKR_AUTH_DISABLED", "true"),
+        )
+        .expect_err("non-positive MusicBrainz timeout");
+        assert!(error.contains("TimeoutSeconds"), "{error}");
 
         let _ = std::fs::remove_dir_all(root);
     }
