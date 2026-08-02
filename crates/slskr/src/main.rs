@@ -31130,7 +31130,13 @@ async fn route_http_request_with_headers(
             Ok(mediacore_extended_response(path, route.query, state).await)
         }
         ("GET", path) if extended_controller_get_route(path) => {
-            Ok(extended_controller_get_response(path, route.query, state).await)
+            Ok(extended_controller_get_response(
+                path,
+                route.query,
+                state,
+                route.path.starts_with("/api/v0/"),
+            )
+            .await)
         }
         ("GET", path) if extended_controller_dynamic_get_route(path) => {
             Ok(extended_controller_dynamic_get_response(path, route.query, state).await)
@@ -56314,6 +56320,7 @@ async fn extended_controller_get_response(
     path: &str,
     query: Option<&str>,
     state: &AppState,
+    versioned_v0: bool,
 ) -> HttpResponse {
     match path {
         "/api/bridge/rooms" => {
@@ -56488,23 +56495,59 @@ async fn extended_controller_get_response(
             )
         }
         "/api/hashdb/peers" => {
-            let discovery = state.content_discovery.read().await;
-            let mut peer_ids = discovery
-                .shadow_records()
-                .iter()
-                .flat_map(|record| record.peer_ids.iter().cloned())
-                .collect::<HashSet<_>>();
-            drop(discovery);
-            peer_ids.extend(hashdb_inventory_peer_ids(
-                &*state.controller_features.read().await,
-            ));
-            let mut peers = peer_ids
-                .into_iter()
-                .map(|peer_id| serde_json::json!({"peerId": peer_id}))
-                .collect::<Vec<_>>();
-            peers.sort_by(|left, right| left["peerId"].as_str().cmp(&right["peerId"].as_str()));
-            let count = peers.len();
-            routing::ok_response(serde_json::json!({"peers": peers, "count": count}).to_string())
+            if versioned_v0 {
+                // Frozen HashDbController reads the capability-backed Peer
+                // projection and includes only peers with non-zero HashDb
+                // capability flags. The unversioned route remains the
+                // historical local inventory projection below.
+                let mesh = state.mesh.read().await;
+                let mut peers = mesh
+                    .capability_service_peers_json()
+                    .into_iter()
+                    .filter(|peer| peer["flagsValue"].as_i64().unwrap_or(0) > 0)
+                    .map(|peer| {
+                        let last_seen = peer["lastSeen"]
+                            .as_u64()
+                            .map(unix_seconds_rfc3339)
+                            .unwrap_or_else(|| unix_seconds_rfc3339(0));
+                        serde_json::json!({
+                            "peerId": peer["username"],
+                            "caps": peer["flagsValue"],
+                            "capsFlags": peer["flags"],
+                            "clientVersion": peer["clientVersion"],
+                            "lastSeen": last_seen,
+                            "backfillsToday": 0,
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                peers.sort_by(|left, right| {
+                    right["lastSeen"].as_str().cmp(&left["lastSeen"].as_str())
+                });
+                let count = peers.len();
+                routing::ok_response(
+                    serde_json::json!({"count": count, "peers": peers}).to_string(),
+                )
+            } else {
+                let discovery = state.content_discovery.read().await;
+                let mut peer_ids = discovery
+                    .shadow_records()
+                    .iter()
+                    .flat_map(|record| record.peer_ids.iter().cloned())
+                    .collect::<HashSet<_>>();
+                drop(discovery);
+                peer_ids.extend(hashdb_inventory_peer_ids(
+                    &*state.controller_features.read().await,
+                ));
+                let mut peers = peer_ids
+                    .into_iter()
+                    .map(|peer_id| serde_json::json!({"peerId": peer_id}))
+                    .collect::<Vec<_>>();
+                peers.sort_by(|left, right| left["peerId"].as_str().cmp(&right["peerId"].as_str()));
+                let count = peers.len();
+                routing::ok_response(
+                    serde_json::json!({"peers": peers, "count": count}).to_string(),
+                )
+            }
         }
         "/api/hashdb/schema" => {
             let discovery = state.content_discovery.read().await;
@@ -95640,6 +95683,22 @@ mod tests {
         assert_eq!(peer.status, "200 OK");
         assert_eq!(peer_json["username"], "mesh-capable-peer");
         assert_eq!(peer_json["flagsValue"], 8);
+
+        let hash_peers = super::route_http_request("GET", "/api/v0/hashdb/peers", None, "", &state)
+            .await
+            .expect("list hashdb capability peers");
+        assert_eq!(hash_peers.status, "200 OK", "{}", hash_peers.body);
+        let hash_peers_json = serde_json::from_str::<serde_json::Value>(&hash_peers.body).unwrap();
+        assert_eq!(hash_peers_json["count"], 1);
+        assert_eq!(hash_peers_json["peers"][0]["peerId"], "mesh-capable-peer");
+        assert_eq!(hash_peers_json["peers"][0]["caps"], 8);
+        assert_eq!(hash_peers_json["peers"][0]["capsFlags"], "SupportsMeshSync");
+        assert_eq!(
+            hash_peers_json["peers"][0]["clientVersion"],
+            "slskdn/runtime-capability-v1"
+        );
+        assert!(hash_peers_json["peers"][0]["lastSeen"].is_string());
+        assert_eq!(hash_peers_json["peers"][0]["backfillsToday"], 0);
     }
 
     #[tokio::test]
@@ -107070,7 +107129,15 @@ mod tests {
             .await
             .expect("hashdb peers after backfill");
         let peers_json = serde_json::from_str::<serde_json::Value>(&peers.body).unwrap();
-        assert_eq!(peers_json["count"], 11);
+        assert_eq!(peers_json["count"], 0);
+
+        let compatibility_peers =
+            super::route_http_request("GET", "/api/hashdb/peers", None, "", &state)
+                .await
+                .expect("compatibility hashdb peers after backfill");
+        let compatibility_peers_json =
+            serde_json::from_str::<serde_json::Value>(&compatibility_peers.body).unwrap();
+        assert_eq!(compatibility_peers_json["count"], 11);
     }
 
     #[tokio::test]
