@@ -44249,15 +44249,15 @@ async fn mediacore_extended_response(
             .and_then(serde_json::Value::as_str)
             .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
             .map(|value| value.with_timezone(&chrono::Utc));
-        if published_at > last_publish_operation {
-            last_publish_operation = published_at;
-        }
         let expires_at = descriptor
             .get("expiresAt")
             .and_then(serde_json::Value::as_str)
             .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
             .map(|value| value.with_timezone(&chrono::Utc));
         if let Some(expires_at) = expires_at.filter(|expires_at| *expires_at > now) {
+            if published_at > last_publish_operation {
+                last_publish_operation = published_at;
+            }
             active_publications = active_publications.saturating_add(1);
             if expires_at <= expiring_cutoff {
                 expiring_publications = expiring_publications.saturating_add(1);
@@ -53105,27 +53105,42 @@ async fn mediacore_mutation_response(
             .map(decoded_path_segment);
         if method == "DELETE" {
             let Some(content_id) = route_id else {
-                return Some(routing::not_found_response());
+                return Some(routing::bad_request_response("ContentID is required"));
             };
-            return Some(
-                match state
+            if content_id.trim().is_empty() {
+                return Some(routing::bad_request_response("ContentID is required"));
+            }
+            let key = format!("mediacore/descriptor/{content_id}");
+            let existing = state.controller_features.read().await.get(&key).cloned();
+            let was_published = existing
+                .as_ref()
+                .is_some_and(|value| value.get("publishedAt").is_some());
+            if was_published {
+                let Some(mut descriptor) = existing else {
+                    unreachable!("publication record disappeared while holding a read snapshot")
+                };
+                if let Some(descriptor_object) = descriptor.as_object_mut() {
+                    descriptor_object.remove("version");
+                    descriptor_object.remove("publishedAt");
+                    descriptor_object.remove("expiresAt");
+                }
+                if let Err(error) = state
                     .controller_features
                     .write()
                     .await
-                    .remove(&format!("mediacore/descriptor/{content_id}"))
+                    .upsert(key, descriptor)
                 {
-                    Ok(removed) => routing::ok_response(
-                        serde_json::json!({
-                            "success": true,
-                            "contentId": content_id,
-                            "wasPublished": removed.is_some(),
-                            "errorMessage": null,
-                        })
-                        .to_string(),
-                    ),
-                    Err(error) => routing::service_unavailable_response(&error),
-                },
-            );
+                    return Some(routing::service_unavailable_response(&error));
+                }
+            }
+            return Some(routing::ok_response(
+                serde_json::json!({
+                    "success": true,
+                    "contentId": content_id,
+                    "wasPublished": was_published,
+                })
+                .to_string(),
+            ));
         }
         let request = match serde_json::from_str::<serde_json::Value>(body) {
             Ok(serde_json::Value::Object(value)) => serde_json::Value::Object(value),
@@ -53137,89 +53152,26 @@ async fn mediacore_mutation_response(
             Err(_) => return Some(routing::bad_request_response("invalid JSON body")),
         };
         if let Some(content_id) = route_id {
-            let Some(updates) = request
+            if content_id.trim().is_empty() {
+                return Some(routing::bad_request_response("ContentID is required"));
+            }
+            if request
                 .get("updates")
                 .and_then(serde_json::Value::as_object)
-            else {
-                return Some(routing::bad_request_response("Updates are required"));
-            };
-            let key = format!("mediacore/descriptor/{content_id}");
-            let Some(mut descriptor) = state.controller_features.read().await.get(&key).cloned()
-            else {
-                return Some(routing::bad_request_response("Failed to update descriptor"));
-            };
-            let previous_version = descriptor
-                .get("version")
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_owned);
-            let updated_at = chrono::Utc::now();
+                .is_none()
             {
-                let Some(descriptor_object) = descriptor.as_object_mut() else {
-                    return Some(routing::bad_request_response("Failed to update descriptor"));
-                };
-                for (field, value) in updates {
-                    descriptor_object.insert(field.clone(), value.clone());
-                }
-                descriptor_object.insert("contentId".to_owned(), serde_json::json!(content_id));
-                descriptor_object.insert(
-                    "updatedAt".to_owned(),
-                    serde_json::json!(updated_at.to_rfc3339()),
-                );
+                return Some(routing::bad_request_response("Updates are required"));
             }
-            let version = format!(
-                "{}-{}",
-                updated_at.timestamp_millis(),
-                &hex::encode(Sha256::digest(descriptor.to_string().as_bytes()))[..8]
-            );
-            if let Some(descriptor_object) = descriptor.as_object_mut() {
-                descriptor_object.insert("version".to_owned(), serde_json::json!(version));
-                descriptor_object.insert(
-                    "publishedAt".to_owned(),
-                    serde_json::json!(updated_at.to_rfc3339()),
-                );
-                descriptor_object.insert(
-                    "expiresAt".to_owned(),
-                    serde_json::json!((updated_at + chrono::Duration::hours(1)).to_rfc3339()),
-                );
-            }
-            let upsert_result = state
-                .controller_features
-                .write()
-                .await
-                .upsert(key, descriptor);
-            return Some(match upsert_result {
-                Ok(()) => {
-                    let _ = record_mediacore_metric(
-                        state,
-                        "publish",
-                        serde_json::json!({"count": 1, "updated": 1}),
-                    )
-                    .await;
-                    routing::ok_response(
-                        serde_json::json!({
-                            "success": true,
-                            "contentId": content_id,
-                            "version": version,
-                            "publishedAt": updated_at.to_rfc3339(),
-                            "ttl": "01:00:00",
-                            "errorMessage": null,
-                            "wasUpdated": true,
-                            "previousVersion": previous_version,
-                        })
-                        .to_string(),
-                    )
-                }
-                Err(error) => routing::service_unavailable_response(&error),
-            });
+            return Some(routing::bad_request_response("Failed to update descriptor"));
         }
-        let Some(mut descriptor) = request
+        let Some(descriptor) = request
             .get("descriptor")
             .cloned()
             .filter(|value| value.is_object())
         else {
             return Some(routing::bad_request_response("Descriptor is required"));
         };
-        let Some(content_id) = descriptor
+        let Some(_content_id) = descriptor
             .get("contentId")
             .and_then(serde_json::Value::as_str)
             .map(str::trim)
@@ -53230,78 +53182,27 @@ async fn mediacore_mutation_response(
                 "Descriptor ContentID is required",
             ));
         };
-        if descriptor.get("isAdvertisable") == Some(&serde_json::Value::Bool(false))
-            || descriptor
-                .get("signature")
-                .is_none_or(serde_json::Value::is_null)
-            || descriptor
-                .get("hashes")
-                .and_then(serde_json::Value::as_array)
-                .is_none_or(Vec::is_empty)
-        {
-            return Some(routing::bad_request_response(
-                "Failed to publish descriptor",
-            ));
-        }
-        descriptor["contentId"] = serde_json::json!(content_id);
-        let published_at = chrono::Utc::now();
-        let version_seed = format!(
-            "{}:{}:{}",
-            content_id,
-            descriptor
-                .get("codec")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or_default(),
-            descriptor
-                .get("sizeBytes")
-                .and_then(serde_json::Value::as_i64)
-                .unwrap_or_default()
-        );
-        let version = format!(
-            "{}-{}",
-            published_at.timestamp_millis(),
-            &hex::encode(Sha256::digest(version_seed.as_bytes()))[..8]
-        );
-        if let Some(descriptor_object) = descriptor.as_object_mut() {
-            descriptor_object.insert("version".to_owned(), serde_json::json!(version));
-            descriptor_object.insert(
-                "publishedAt".to_owned(),
-                serde_json::json!(published_at.to_rfc3339()),
-            );
-            descriptor_object.insert(
-                "expiresAt".to_owned(),
-                serde_json::json!((published_at + chrono::Duration::hours(1)).to_rfc3339()),
-            );
-        }
-        let key = format!("mediacore/descriptor/{content_id}");
-        let upsert_result = state
-            .controller_features
-            .write()
-            .await
-            .upsert(key, descriptor.clone());
-        return Some(match upsert_result {
-            Ok(()) => {
-                let _ = record_mediacore_metric(
-                    state,
-                    "publish",
-                    serde_json::json!({"count": 1, "updated": 0}),
-                )
-                .await;
-                routing::ok_response(
-                    serde_json::json!({
-                        "success": true,
-                        "contentId": content_id,
-                        "version": version,
-                        "publishedAt": published_at.to_rfc3339(),
-                        "ttl": "01:00:00",
-                        "errorMessage": null,
-                        "wasUpdated": false,
-                        "previousVersion": null,
-                    })
-                    .to_string(),
-                )
-            }
-            Err(error) => routing::service_unavailable_response(&error),
+        let force_update = request
+            .get("forceUpdate")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        let result = match mediacore_publish_descriptor(descriptor, force_update, state).await {
+            Ok(result) => result,
+            Err(error) => return Some(routing::service_unavailable_response(&error)),
+        };
+        return Some(if result["success"] == serde_json::Value::Bool(true) {
+            let _ = record_mediacore_metric(
+                state,
+                "publish",
+                serde_json::json!({
+                    "count": 1,
+                    "updated": usize::from(result["wasUpdated"].as_bool().unwrap_or(false)),
+                }),
+            )
+            .await;
+            routing::ok_response(result.to_string())
+        } else {
+            routing::bad_request_response("Failed to publish descriptor")
         });
     }
     if path == "/api/mediacore/publish/batch" {
@@ -53329,67 +53230,58 @@ async fn mediacore_mutation_response(
                 "Each descriptor requires a ContentID",
             ));
         }
-        let mut stored = Vec::new();
-        let mut features = state.controller_features.write().await;
-        for mut descriptor in descriptors.into_iter().take(1_000) {
-            let id = descriptor
-                .get("contentId")
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_owned)
-                .unwrap_or_else(|| {
-                    format!(
-                        "sha256:{}",
-                        hex::encode(Sha256::digest(descriptor.to_string().as_bytes()))
-                    )
-                });
-            descriptor["contentId"] = serde_json::json!(id);
-            let published_at = chrono::Utc::now();
-            let version_seed = format!(
-                "{}:{}:{}",
-                id,
-                descriptor
-                    .get("codec")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or_default(),
-                descriptor
-                    .get("sizeBytes")
-                    .and_then(serde_json::Value::as_i64)
-                    .unwrap_or_default()
-            );
-            descriptor["version"] = serde_json::json!(format!(
-                "{}-{}",
-                published_at.timestamp_millis(),
-                &hex::encode(Sha256::digest(version_seed.as_bytes()))[..8]
-            ));
-            descriptor["publishedAt"] = serde_json::json!(published_at.to_rfc3339());
-            descriptor["expiresAt"] =
-                serde_json::json!((published_at + chrono::Duration::hours(1)).to_rfc3339());
-            if let Err(error) =
-                features.upsert(format!("mediacore/descriptor/{id}"), descriptor.clone())
+        let started_at = Instant::now();
+        let mut successfully_published = 0_usize;
+        let mut failed_to_publish = 0_usize;
+        let mut skipped = 0_usize;
+        let mut results = Vec::with_capacity(descriptors.len());
+        for descriptor in descriptors {
+            let result = match mediacore_publish_descriptor(descriptor, false, state).await {
+                Ok(result) => result,
+                Err(error) => return Some(routing::service_unavailable_response(&error)),
+            };
+            if result["success"].as_bool().unwrap_or(false) {
+                successfully_published = successfully_published.saturating_add(1);
+            } else if result["errorMessage"]
+                .as_str()
+                .is_some_and(|error| error.contains("not newer"))
             {
-                return Some(routing::service_unavailable_response(&error));
+                skipped = skipped.saturating_add(1);
+            } else {
+                failed_to_publish = failed_to_publish.saturating_add(1);
             }
-            stored.push(descriptor);
+            results.push(result);
         }
-        drop(features);
         let _ = record_mediacore_metric(
             state,
             "publish",
-            serde_json::json!({"count": stored.len(), "updated": 0}),
+            serde_json::json!({"count": successfully_published, "updated": 0}),
         )
         .await;
         return Some(routing::ok_response(
-            serde_json::json!({"published": stored.len(), "descriptors": stored}).to_string(),
+            serde_json::json!({
+                "totalRequested": results.len(),
+                "successfullyPublished": successfully_published,
+                "failedToPublish": failed_to_publish,
+                "skipped": skipped,
+                "totalDuration": format_timespan_millis(started_at.elapsed().as_millis() as u64),
+                "results": results,
+            })
+            .to_string(),
         ));
     }
     if path == "/api/mediacore/publish/republish" {
+        let started_at = Instant::now();
         let request = serde_json::from_str::<serde_json::Value>(body).unwrap_or_default();
         let requested = request.get("contentIds");
         let requested_ids = requested.and_then(serde_json::Value::as_array).map(|ids| {
+            let mut seen = HashSet::new();
             ids.iter()
                 .filter_map(serde_json::Value::as_str)
                 .map(str::trim)
                 .filter(|id| !id.is_empty())
+                .filter(|id| seen.insert(id.to_ascii_lowercase()))
+                .map(str::to_owned)
                 .collect::<Vec<_>>()
         });
         if requested.is_some() && requested_ids.as_ref().is_none_or(Vec::is_empty) {
@@ -53402,32 +53294,59 @@ async fn mediacore_mutation_response(
             .read()
             .await
             .values_with_prefix("mediacore/descriptor/");
-        let total_checked = requested_ids.as_ref().map_or(descriptors.len(), Vec::len);
-        let still_valid = requested_ids.as_ref().map_or(descriptors.len(), |ids| {
-            ids.iter()
-                .filter(|id| {
-                    descriptors.iter().any(|descriptor| {
-                        descriptor
-                            .get("contentId")
-                            .and_then(serde_json::Value::as_str)
-                            == Some(**id)
-                    })
+        let publication_records = descriptors
+            .iter()
+            .filter(|descriptor| descriptor.get("publishedAt").is_some())
+            .collect::<Vec<_>>();
+        let ids = requested_ids.unwrap_or_else(|| {
+            publication_records
+                .iter()
+                .filter_map(|descriptor| {
+                    descriptor
+                        .get("contentId")
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::to_owned)
                 })
-                .count()
+                .collect()
         });
+        let now = chrono::Utc::now();
+        let expiring_threshold = now + chrono::Duration::minutes(30);
+        let mut still_valid = 0_usize;
+        let mut failed = 0_usize;
+        for content_id in &ids {
+            let Some(descriptor) = publication_records.iter().find(|descriptor| {
+                descriptor
+                    .get("contentId")
+                    .and_then(serde_json::Value::as_str)
+                    == Some(content_id.as_str())
+            }) else {
+                continue;
+            };
+            let expires_at = descriptor
+                .get("expiresAt")
+                .and_then(serde_json::Value::as_str)
+                .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+                .map(|value| value.with_timezone(&chrono::Utc))
+                .unwrap_or(now);
+            if expires_at <= expiring_threshold {
+                failed = failed.saturating_add(1);
+            } else {
+                still_valid = still_valid.saturating_add(1);
+            }
+        }
         let _ = record_mediacore_metric(
             state,
             "publish",
-            serde_json::json!({"count": still_valid, "republished": still_valid}),
+            serde_json::json!({"count": 0, "republished": 0, "failed": failed}),
         )
         .await;
         return Some(routing::ok_response(
             serde_json::json!({
-                "totalChecked": total_checked,
-                "republished": still_valid,
-                "failed": 0,
+                "totalChecked": ids.len(),
+                "republished": 0,
+                "failed": failed,
                 "stillValid": still_valid,
-                "duration": "00:00:00",
+                "duration": format_timespan_millis(started_at.elapsed().as_millis() as u64),
             })
             .to_string(),
         ));
@@ -54004,6 +53923,152 @@ async fn mediacore_retrieve_descriptor(
             "verification": mediacore_descriptor_verification(&descriptor, retrieved_at),
         }),
     })
+}
+
+fn mediacore_publish_version(
+    descriptor: &serde_json::Value,
+    published_at: chrono::DateTime<chrono::Utc>,
+) -> String {
+    let version_seed = format!(
+        "{}:{}:{}",
+        descriptor
+            .get("contentId")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default(),
+        descriptor
+            .get("codec")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default(),
+        descriptor
+            .get("sizeBytes")
+            .and_then(serde_json::Value::as_i64)
+            .unwrap_or_default()
+    );
+    format!(
+        "{}-{}",
+        published_at.timestamp_millis(),
+        &hex::encode(Sha256::digest(version_seed.as_bytes()))[..8]
+    )
+}
+
+fn mediacore_descriptor_passes_base_validation(
+    descriptor: &serde_json::Value,
+    now: chrono::DateTime<chrono::Utc>,
+) -> bool {
+    let has_hashes = descriptor
+        .get("hashes")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|hashes| !hashes.is_empty());
+    let signature_is_fresh = descriptor
+        .get("signature")
+        .filter(|value| value.is_object())
+        .and_then(|signature| signature.get("timestampUnixMs"))
+        .and_then(serde_json::Value::as_i64)
+        .is_some_and(|timestamp| now.timestamp_millis().saturating_sub(timestamp) <= 3_600_000);
+    let descriptor_size_is_bounded = serde_json::to_vec(descriptor)
+        .map(|bytes| bytes.len() <= 10 * 1024)
+        .unwrap_or(false);
+    has_hashes && signature_is_fresh && descriptor_size_is_bounded
+}
+
+async fn mediacore_publish_descriptor(
+    mut descriptor: serde_json::Value,
+    force_update: bool,
+    state: &AppState,
+) -> Result<serde_json::Value, String> {
+    let content_id = descriptor
+        .get("contentId")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+        .unwrap_or_default();
+    let published_at = chrono::Utc::now();
+    if descriptor.get("isAdvertisable") == Some(&serde_json::Value::Bool(false)) {
+        return Ok(serde_json::json!({
+            "success": false,
+            "contentId": content_id,
+            "version": "0",
+            "publishedAt": published_at.to_rfc3339(),
+            "ttl": "00:00:00",
+            "errorMessage": "Content is not advertisable",
+            "wasUpdated": false,
+            "previousVersion": null,
+        }));
+    }
+
+    let version = mediacore_publish_version(&descriptor, published_at);
+    let key = format!("mediacore/descriptor/{content_id}");
+    let existing = state.controller_features.read().await.get(&key).cloned();
+    let previous_version = existing
+        .as_ref()
+        .filter(|value| value.get("publishedAt").is_some())
+        .and_then(|value| value.get("version"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned);
+    if !force_update
+        && previous_version
+            .as_deref()
+            .is_some_and(|previous| version.as_str() <= previous)
+    {
+        return Ok(serde_json::json!({
+            "success": false,
+            "contentId": content_id,
+            "version": version,
+            "publishedAt": published_at.to_rfc3339(),
+            "ttl": "01:00:00",
+            "errorMessage": format!("Version {version} is not newer than existing {}", previous_version.as_deref().unwrap_or_default()),
+            "wasUpdated": false,
+            "previousVersion": previous_version,
+        }));
+    }
+    if descriptor
+        .get("signature")
+        .is_none_or(serde_json::Value::is_null)
+    {
+        return Ok(serde_json::json!({
+            "success": false,
+            "contentId": content_id,
+            "version": version,
+            "publishedAt": published_at.to_rfc3339(),
+            "ttl": "01:00:00",
+            "errorMessage": "Descriptor signature is required; provide a signed descriptor before publishing.",
+            "wasUpdated": false,
+            "previousVersion": previous_version,
+        }));
+    }
+    if !mediacore_descriptor_passes_base_validation(&descriptor, published_at) {
+        return Ok(serde_json::json!({
+            "success": false,
+            "contentId": content_id,
+            "version": version,
+            "publishedAt": published_at.to_rfc3339(),
+            "ttl": "01:00:00",
+            "errorMessage": "Base publisher failed",
+            "wasUpdated": false,
+            "previousVersion": previous_version,
+        }));
+    }
+
+    descriptor["contentId"] = serde_json::json!(content_id);
+    descriptor["version"] = serde_json::json!(version);
+    descriptor["publishedAt"] = serde_json::json!(published_at.to_rfc3339());
+    descriptor["expiresAt"] =
+        serde_json::json!((published_at + chrono::Duration::hours(1)).to_rfc3339());
+    state
+        .controller_features
+        .write()
+        .await
+        .upsert(key, descriptor)?;
+    Ok(serde_json::json!({
+        "success": true,
+        "contentId": content_id,
+        "version": version,
+        "publishedAt": published_at.to_rfc3339(),
+        "ttl": "01:00:00",
+        "wasUpdated": previous_version.is_some(),
+        "previousVersion": previous_version,
+    }))
 }
 
 fn dynamic_podcore_get_route(path: &str) -> bool {
@@ -97915,7 +97980,11 @@ mod tests {
             "contentId": content_id,
             "title": "before",
             "hashes": [{"algorithm": "sha256", "hex": "aaaa"}],
-            "signature": {"publicKey": "key", "signature": "signature"},
+            "signature": {
+                "publicKey": "key",
+                "signature": "signature",
+                "timestampUnixMs": super::unix_timestamp_millis(),
+            },
         });
         let published = super::route_http_request(
             "POST",
@@ -97937,12 +98006,11 @@ mod tests {
         )
         .await
         .unwrap();
-        let updated_json = serde_json::from_str::<serde_json::Value>(&updated.body).unwrap();
-        assert_eq!(updated.status, "200 OK", "{}", updated.body);
-        assert_eq!(updated_json["wasUpdated"], true);
-        assert!(updated_json["version"]
-            .as_str()
-            .is_some_and(|value| !value.is_empty()));
+        assert_eq!(updated.status, "400 Bad Request", "{}", updated.body);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&updated.body).unwrap(),
+            serde_json::json!({"error": "Failed to update descriptor"})
+        );
 
         let retrieved = super::route_http_request(
             "POST",
@@ -98083,7 +98151,7 @@ mod tests {
                         "signature": {
                             "publicKey": "key",
                             "signature": "signature",
-                            "timestampUnixMs": 1,
+                            "timestampUnixMs": super::unix_timestamp_millis(),
                         },
                     },
                 })
@@ -103342,7 +103410,18 @@ mod tests {
             "POST",
             "/api/v0/mediacore/publish/descriptor",
             None,
-            r#"{"descriptor":{"contentId":"cid-1","hashes":[{"algorithm":"sha256","hex":"0123456789abcdef"}],"signature":{"publicKey":"key","signature":"0123456789abcdef","timestampUnixMs":1}}}"#,
+            &serde_json::json!({
+                "descriptor": {
+                    "contentId": "cid-1",
+                    "hashes": [{"algorithm": "sha256", "hex": "0123456789abcdef"}],
+                    "signature": {
+                        "publicKey": "key",
+                        "signature": "0123456789abcdef",
+                        "timestampUnixMs": super::unix_timestamp_millis(),
+                    },
+                },
+            })
+            .to_string(),
             &state,
         )
         .await
