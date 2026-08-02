@@ -17284,7 +17284,7 @@ async fn route_http_request_with_headers(
             let Some(username) = path_segment_after(path, "/api/mesh/sync/") else {
                 return Ok(routing::not_found_response());
             };
-            if route.path.starts_with("/api/v0/") && body.trim().is_empty() {
+            if route.path.starts_with("/api/v0/") {
                 return Ok(HttpResponse {
                     status: "400 Bad Request",
                     content_type: "application/json",
@@ -102634,7 +102634,7 @@ mod tests {
             (
                 "POST",
                 "/api/v0/mesh/sync/route-audit-peer",
-                "",
+                "{}",
                 "400 Bad Request",
             ),
             (
