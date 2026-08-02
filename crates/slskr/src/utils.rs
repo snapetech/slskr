@@ -616,7 +616,16 @@ pub fn is_authorized(
     authorization: Option<&str>,
     cookie: Option<&str>,
 ) -> bool {
-    api_credential(config, authorization, cookie, None).is_some()
+    is_authorized_from(config, authorization, cookie, None)
+}
+
+pub fn is_authorized_from(
+    config: &AppConfig,
+    authorization: Option<&str>,
+    cookie: Option<&str>,
+    remote_addr: Option<SocketAddr>,
+) -> bool {
+    api_credential(config, authorization, cookie, remote_addr).is_some()
 }
 
 fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {

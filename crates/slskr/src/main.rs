@@ -32946,11 +32946,11 @@ async fn apply_watched_controller_configuration(
                 .map(String::as_str))
     };
     if search_filters_changed {
-        // Both frozen controllers accidentally drop IgnoreCase when a watched
-        // search-filter list is recompiled. Preserve that observable behavior.
-        *state.search_request_filters.write().await =
-            compile_controller_regexes(&reloaded.controller_search_request_filters, true)
-                .expect("validated search request filters must compile");
+        *state.search_request_filters.write().await = compile_controller_regexes(
+            &reloaded.controller_search_request_filters,
+            reloaded.controller_case_sensitive_regex,
+        )
+        .expect("validated search request filters must compile");
     }
     let server_address_changed = effective_server_address(state) != reloaded.server_address;
     if server_address_changed {
@@ -40141,8 +40141,9 @@ fn authenticated_rate_limit_user_key(
     config: &AppConfig,
     authorization: Option<&str>,
     cookie: Option<&str>,
+    remote_addr: Option<SocketAddr>,
 ) -> Option<String> {
-    if !is_authorized(config, authorization, cookie) {
+    if !utils::is_authorized_from(config, authorization, cookie, remote_addr) {
         return None;
     }
     authorization
@@ -66766,6 +66767,7 @@ where
             &state.config,
             authorization,
             sec_headers.cookie.as_deref(),
+            sec_headers.remote_addr,
         );
         let username = rate_limit_user.as_deref();
         let rate_limit_remote_addr =
@@ -70337,6 +70339,40 @@ mod tests {
             .is_some());
     }
 
+    #[tokio::test]
+    async fn watched_search_filters_preserve_reloaded_case_mode() {
+        let (state, _receiver) = test_state_with_env(
+            MapEnv::default()
+                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn")
+                .with("SLSKR_SHARE_FIXTURE", "Virtual/SECRET.flac=42")
+                .with("SLSKD_SEARCH_REQUEST_FILTER", "secret")
+                .with("SLSKD_CASE_SENSITIVE_REGEX", "true"),
+        );
+        assert!(state.config.controller_case_sensitive_regex);
+        assert!(super::build_file_search_response(&state, 1, "SECRET")
+            .await
+            .is_some());
+
+        let yaml = "flags:\n  case_sensitive_reg_ex: false\nfilters:\n  search:\n    request:\n      - secret|other\n";
+        fs::write(state.config.state_dir.join("slskd.yml"), yaml).unwrap();
+        let cli_environment = BTreeMap::from([
+            (
+                "SLSKR_STATE_DIR".to_owned(),
+                state.config.state_dir.display().to_string(),
+            ),
+            ("SLSKR_AUTH_DISABLED".to_owned(), "true".to_owned()),
+            (
+                "SLSKR_CONTROLLER_COMPATIBILITY_TARGET".to_owned(),
+                "slskdn".to_owned(),
+            ),
+        ]);
+        super::apply_watched_controller_configuration(&state, Some(yaml), &cli_environment).await;
+
+        assert!(!super::build_file_search_response(&state, 1, "SECRET")
+            .await
+            .is_some());
+    }
+
     #[test]
     fn share_filters_honor_startup_case_mode_against_original_paths() {
         let root =
@@ -71763,11 +71799,15 @@ mod tests {
         )
         .expect("cookie auth config");
         let cookie = Some("slskr.session=route-token");
-        let first = super::authenticated_rate_limit_user_key(&config, None, cookie)
+        let first = super::authenticated_rate_limit_user_key(&config, None, cookie, None)
             .expect("cookie-authenticated key");
-        let second =
-            super::authenticated_rate_limit_user_key(&config, Some("Bearer route-token"), cookie)
-                .expect("matching credentials key");
+        let second = super::authenticated_rate_limit_user_key(
+            &config,
+            Some("Bearer route-token"),
+            cookie,
+            None,
+        )
+        .expect("matching credentials key");
 
         assert_eq!(first, second);
         assert_eq!(first, super::rate_limit_user_key("route-token"));
@@ -71777,12 +71817,44 @@ mod tests {
             &config,
             Some("Bearer attacker-controlled"),
             cookie,
+            None,
         )
         .is_none());
         assert!(super::authenticated_rate_limit_user_key(
             &config,
             Some("Basic route-token"),
             cookie,
+            None,
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn authenticated_api_key_rate_limit_key_honors_cidr_from_request_peer() {
+        let config = super::AppConfig::from_layers(
+            None,
+            FileConfig::default(),
+            &MapEnv::default()
+                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn")
+                .with(
+                    "SLSKD_API_KEYS_JSON",
+                    r#"{"operator":{"key":"0123456789abcdef","role":"readonly","cidr":"127.0.0.1/32"}}"#,
+                ),
+        )
+        .expect("API key config");
+        let key = super::authenticated_rate_limit_user_key(
+            &config,
+            Some("ApiKey 0123456789abcdef"),
+            None,
+            Some("127.0.0.1:8080".parse().unwrap()),
+        )
+        .expect("CIDR-authorized API key must bypass the anonymous partition");
+        assert_eq!(key, super::rate_limit_user_key("0123456789abcdef"));
+        assert!(super::authenticated_rate_limit_user_key(
+            &config,
+            Some("ApiKey 0123456789abcdef"),
+            None,
+            Some("192.0.2.20:8080".parse().unwrap()),
         )
         .is_none());
     }
