@@ -32982,53 +32982,24 @@ async fn apply_watched_controller_configuration(
     apply_distributed_settings(state, reloaded.soulseek_distributed).await;
     let regular_listener_result =
         reconfigure_regular_listener(state, reloaded.listener_bind.clone()).await;
-    let frozen_slskdn_obfuscation_patch_bug =
-        state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn;
-    let obfuscation_changed = reloaded.obfuscation_enabled != state.config.obfuscation_enabled
-        || reloaded.obfuscation_mode != state.config.obfuscation_mode
-        || reloaded.obfuscation_listen_port != state.config.obfuscation_listen_port
-        || reloaded.obfuscation_advertise_regular_port
-            != state.config.obfuscation_advertise_regular_port
-        || reloaded.obfuscation_prefer_outbound != state.config.obfuscation_prefer_outbound;
-    let obfuscated_listener_result = if frozen_slskdn_obfuscation_patch_bug {
-        // Frozen slskdN passes a PeerObfuscationOptions patch that its vendored
-        // runtime drops.  Preserve the startup type-1 listener and metadata
-        // until restart; upstream fix: snapetech/slskdN#266.
-        Ok(false)
-    } else {
-        let obfuscated_bind = reloaded
-            .obfuscation_enabled
-            .then(|| reloaded.obfuscated_listener_bind.clone())
-            .flatten();
-        reconfigure_obfuscated_listener(state, obfuscated_bind).await
-    };
-    if frozen_slskdn_obfuscation_patch_bug && obfuscation_changed {
-        let _ = state
-            .session_commands
-            .send(SessionCommand::SetWaitPort {
-                port: effective_advertised_port(state),
-                obfuscated_port: effective_obfuscated_advertised_port(state),
-            })
-            .await;
-        if state.session.read().await.state == "connected" {
-            state.runtime.write().await.set_reconnect_pending(true);
-        }
-    }
+    let obfuscated_bind = reloaded
+        .obfuscation_enabled
+        .then(|| reloaded.obfuscated_listener_bind.clone())
+        .flatten();
+    let obfuscated_listener_result = reconfigure_obfuscated_listener(state, obfuscated_bind).await;
     match (regular_listener_result, obfuscated_listener_result) {
         (Ok(regular_changed), Ok(obfuscated_changed)) if regular_changed || obfuscated_changed => {
             *state
                 .advertised_port
                 .write()
                 .unwrap_or_else(std::sync::PoisonError::into_inner) = reloaded.advertised_port;
-            if !frozen_slskdn_obfuscation_patch_bug {
-                *state
-                    .obfuscated_advertised_port
-                    .write()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner) = reloaded
-                    .obfuscation_enabled
-                    .then_some(reloaded.obfuscated_advertised_port)
-                    .flatten();
-            }
+            *state
+                .obfuscated_advertised_port
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = reloaded
+                .obfuscation_enabled
+                .then_some(reloaded.obfuscated_advertised_port)
+                .flatten();
             let _ = state
                 .session_commands
                 .send(SessionCommand::SetWaitPort {
@@ -103035,6 +103006,35 @@ mod tests {
         .await;
 
         assert!(!state.runtime.read().await.application_reconnect_pending);
+    }
+
+    #[tokio::test]
+    async fn watched_obfuscated_listener_rebind_updates_advertised_port() {
+        let (state, _receiver) = test_state_with_env(
+            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+        );
+        let yaml = "soulseek:\n  obfuscation:\n    listen_port: 50302\n";
+        fs::write(state.config.state_dir.join("slskd.yml"), yaml).unwrap();
+        let reloaded =
+            super::load_watched_controller_configuration(state.controller_cli_environment.clone())
+                .expect("obfuscated listener config reload");
+        assert_eq!(
+            reloaded.obfuscated_listener_bind.as_deref(),
+            Some("0.0.0.0:50302")
+        );
+        assert_eq!(reloaded.obfuscated_advertised_port, Some(50_302));
+
+        super::apply_watched_controller_configuration(
+            &state,
+            Some(yaml),
+            &state.controller_cli_environment,
+        )
+        .await;
+
+        assert_eq!(
+            super::effective_obfuscated_advertised_port(&state),
+            Some(50_302)
+        );
     }
 
     #[tokio::test]
