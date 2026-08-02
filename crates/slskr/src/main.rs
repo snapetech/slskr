@@ -12997,6 +12997,79 @@ fn songid_matches_value(
         .collect()
 }
 
+/// Matches the oracle's `SongIdService.DetectSourceType` classification. The
+/// source can still fall back to a text query when optional metadata tools are
+/// unavailable, but the run must retain its actual source family.
+fn songid_source_type(source: &str) -> &'static str {
+    let lower = source.trim().to_ascii_lowercase();
+    if Path::new(source.trim()).is_file() {
+        return "local_file";
+    }
+    if (lower.starts_with("http://") || lower.starts_with("https://"))
+        && (lower.contains("youtube.com/") || lower.contains("youtu.be/"))
+    {
+        return "youtube_url";
+    }
+    if lower.starts_with("spotify:track:")
+        || ((lower.starts_with("http://") || lower.starts_with("https://"))
+            && lower.contains("open.spotify.com/track/"))
+    {
+        return "spotify_url";
+    }
+    if reqwest::Url::parse(source.trim()).is_ok() {
+        return "url";
+    }
+    "text_query"
+}
+
+fn songid_fallback_query(source: &str, source_type: &str) -> String {
+    if source_type == "local_file" {
+        return Path::new(source.trim())
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default()
+            .trim()
+            .to_owned();
+    }
+    source.trim().to_owned()
+}
+
+fn songid_path_is_within_root(path: &Path, root: &Path) -> bool {
+    let Some(path) = normalize_absolute_path(path) else {
+        return false;
+    };
+    let Some(root) = normalize_absolute_path(root) else {
+        return false;
+    };
+    if !path.starts_with(&root) {
+        return false;
+    }
+    match (path.canonicalize(), root.canonicalize()) {
+        (Ok(path), Ok(root)) => path.starts_with(root),
+        _ => true,
+    }
+}
+
+/// Local SongID analysis is restricted to downloads, incomplete files, and
+/// configured shares, matching the oracle's safe-root check. This is only
+/// applied to an existing file; text and URL sources are not filesystem paths.
+fn songid_local_file_is_allowed(config: &AppConfig, source: &str) -> bool {
+    let path = Path::new(source.trim());
+    if !path.is_file() {
+        return false;
+    }
+    std::iter::once(config.downloads_dir.as_path())
+        .chain(std::iter::once(config.incomplete_dir.as_path()))
+        .chain(
+            config
+                .share_settings
+                .directories
+                .iter()
+                .map(|directory| directory.local_path.as_path()),
+        )
+        .any(|root| songid_path_is_within_root(path, root))
+}
+
 fn songid_runs_value(
     library: &LibraryStore,
     shares: &ShareIndexSnapshot,
@@ -14105,17 +14178,17 @@ fn songid_capabilities_json(
         capability(
             "text_query",
             "Text query analysis",
-            "experimental",
-            false,
-            NOT_IMPLEMENTED.to_owned(),
+            "stable",
+            true,
+            "Text searches do not require external tools.".to_owned(),
             &[]
         ),
         capability(
             "url_parsing",
             "YouTube and Spotify URL parsing",
             "experimental",
-            false,
-            NOT_IMPLEMENTED.to_owned(),
+            true,
+            "URL classification and metadata fallback are implemented.".to_owned(),
             &[]
         ),
         capability(
@@ -14154,8 +14227,8 @@ fn songid_capabilities_json(
             "local_file_intake",
             "Local file intake",
             "experimental",
-            false,
-            NOT_IMPLEMENTED.to_owned(),
+            true,
+            "Local files are accepted when they are under configured safe directories.".to_owned(),
             &[]
         ),
         capability(
@@ -25400,13 +25473,23 @@ async fn route_http_request_with_headers(
              if source.is_empty() {
                  return Ok(routing::bad_request_response("SongID source is required."));
              }
+             let source_type = songid_source_type(&source);
+             if source_type == "local_file"
+                 && !songid_local_file_is_allowed(&state.config, &source)
+             {
+                 return Ok(routing::bad_request_response(
+                     "SongID analysis could not be queued.",
+                 ));
+             }
              let Ok(_songid_permit) = Arc::clone(&state.songid_run_slots).try_acquire_owned()
              else {
                  return Ok(routing::service_unavailable_response(
                      "SongID run concurrency limit reached",
                  ));
              };
-             let query = extract_json_string_field(body, "query").unwrap_or_default();
+             let query = extract_json_string_field(body, "query")
+                 .filter(|query| !query.trim().is_empty())
+                 .unwrap_or_else(|| songid_fallback_query(&source, source_type));
              let library = state.library.read().await;
              let shares = state.shares.read().await;
              let runs = songid_runs_value(&library, &shares);
@@ -25430,7 +25513,36 @@ async fn route_http_request_with_headers(
              let run = match mutate_runtime_compat_state(state, |runtime, _| {
                  let mut run = runtime.record_songid_run(matches, library_items, shared_files)?;
                  run["source"] = serde_json::json!(source);
+                 run["sourceType"] = serde_json::json!(source_type);
                  run["query"] = serde_json::json!(query);
+                 run["summary"] = serde_json::json!(match source_type {
+                     "local_file" => "Analyzed local file with filename fallback metadata.",
+                     "youtube_url" => {
+                         "Classified YouTube URL; optional metadata tools may enrich the run."
+                     }
+                     "spotify_url" => {
+                         "Classified Spotify URL; optional page metadata may enrich the run."
+                     }
+                     "url" => "Classified URL; optional source metadata may enrich the run.",
+                     _ => "Using free-text SongID query.",
+                 });
+                 run["evidence"] = serde_json::json!([match source_type {
+                     "local_file" => format!("Local file path detected: {source}"),
+                     "youtube_url" => {
+                         "YouTube URL detected; using source query fallback.".to_owned()
+                     }
+                     "spotify_url" => {
+                         "Spotify track URL detected; using source query fallback.".to_owned()
+                     }
+                     "url" => "URL detected; using source query fallback.".to_owned(),
+                     _ => "Treating input as a direct SongID text query.".to_owned(),
+                 }]);
+                 run["metadata"] = serde_json::json!({
+                     "title": if source_type == "local_file" { query.clone() } else { String::new() },
+                     "artist": "",
+                     "album": "",
+                     "extra": {"analysisAudioSource": source_type},
+                 });
                  if let Some(stored) = runtime.songid_run_records.last_mut() {
                      *stored = run.clone();
                  }
@@ -96288,14 +96400,11 @@ mod tests {
                 .unwrap_or_else(|| panic!("missing capability {id}"))
         };
 
-        // Features slskR has not implemented must honestly say so, not
-        // claim oracle-level depth slskR's SongID run queue doesn't have.
+        // Source classification and safe local-file intake are implemented;
+        // deep metadata/fingerprint integrations remain explicitly absent.
         for id in [
-            "text_query",
-            "url_parsing",
             "musicbrainz_lookup",
             "spotify_page_metadata",
-            "local_file_intake",
             "chromaprint_fingerprint",
             "acoustid_lookup",
         ] {
@@ -96311,6 +96420,10 @@ mod tests {
                 capability["reason"]
             );
         }
+        assert_eq!(by_id("text_query")["status"], "stable");
+        assert_eq!(by_id("text_query")["available"], true);
+        assert_eq!(by_id("url_parsing")["available"], true);
+        assert_eq!(by_id("local_file_intake")["available"], true);
 
         // Tool-gated capabilities must reflect real PATH state, not a
         // hardcoded value.
@@ -96333,6 +96446,52 @@ mod tests {
         let hash_flag = by_id("hash_from_audio_file_flag");
         assert_eq!(hash_flag["status"], "broken");
         assert_eq!(hash_flag["available"], false);
+    }
+
+    #[test]
+    fn songid_source_classification_and_local_root_guard_match_target() {
+        assert_eq!(super::songid_source_type("Artist - Track"), "text_query");
+        assert_eq!(
+            super::songid_source_type("https://www.youtube.com/watch?v=track"),
+            "youtube_url"
+        );
+        assert_eq!(
+            super::songid_source_type("https://open.spotify.com/track/abc"),
+            "spotify_url"
+        );
+        assert_eq!(
+            super::songid_source_type("https://example.test/audio"),
+            "url"
+        );
+
+        let state_dir = std::env::temp_dir().join(format!("slskr-songid-{}", uuid::Uuid::new_v4()));
+        let config = super::AppConfig::from_layers(
+            None,
+            FileConfig::default(),
+            &MapEnv::default().with("SLSKR_STATE_DIR", state_dir.to_str().unwrap()),
+        )
+        .expect("SongID test config");
+        fs::create_dir_all(&config.downloads_dir).unwrap();
+        let allowed = config.downloads_dir.join("allowed.flac");
+        fs::write(&allowed, b"fixture").unwrap();
+        assert!(super::songid_local_file_is_allowed(
+            &config,
+            allowed.to_str().unwrap()
+        ));
+
+        let outside_dir = state_dir.join("outside");
+        fs::create_dir_all(&outside_dir).unwrap();
+        let outside = outside_dir.join("outside.flac");
+        fs::write(&outside, b"fixture").unwrap();
+        assert!(!super::songid_local_file_is_allowed(
+            &config,
+            outside.to_str().unwrap()
+        ));
+        assert_eq!(
+            super::songid_fallback_query(allowed.to_str().unwrap(), "local_file"),
+            "allowed"
+        );
+        fs::remove_dir_all(state_dir).unwrap();
     }
 
     #[tokio::test]
