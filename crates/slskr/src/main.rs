@@ -13283,11 +13283,33 @@ impl ControllerFeatureState {
     }
 
     fn values_with_prefix(&self, prefix: &str) -> Vec<serde_json::Value> {
+        self.entries_with_prefix(prefix)
+            .into_iter()
+            .map(|(_, value)| value)
+            .collect()
+    }
+
+    fn entries_with_prefix(&self, prefix: &str) -> Vec<(String, serde_json::Value)> {
         self.records
             .range(prefix.to_owned()..)
             .take_while(|(key, _)| key.starts_with(prefix))
-            .map(|(_, value)| value.clone())
+            .map(|(key, value)| (key.clone(), value.clone()))
             .collect()
+    }
+
+    fn remove_keys(&mut self, keys: &[String]) -> Result<usize, String> {
+        let previous = self.records.clone();
+        let removed = keys
+            .iter()
+            .filter(|key| self.records.remove(key.as_str()).is_some())
+            .count();
+        if removed > 0 {
+            if let Err(error) = self.persist() {
+                self.records = previous;
+                return Err(error);
+            }
+        }
+        Ok(removed)
     }
 
     fn remove_prefix(&mut self, prefix: &str) -> Result<usize, String> {
@@ -14275,6 +14297,8 @@ struct AppState {
     /// republish overwrites the same `pod/dht/{id}` record), matching the
     /// oracle's `PodDhtPublisher`'s own all-time `_totalPublished` counter.
     pod_dht_publish_count: std::sync::atomic::AtomicU64,
+    pod_dht_failed_publish_count: std::sync::atomic::AtomicU64,
+    pod_dht_publish_time_ms: std::sync::atomic::AtomicU64,
     podcore_runtime_stats: PodCoreRuntimeStats,
 }
 
@@ -14287,6 +14311,7 @@ struct AppState {
 #[derive(Debug, Default)]
 struct PodCoreRuntimeStats {
     backfill_requests: std::sync::atomic::AtomicU64,
+    backfill_requests_received: std::sync::atomic::AtomicU64,
     backfill_completed: std::sync::atomic::AtomicU64,
     backfill_failed: std::sync::atomic::AtomicU64,
     messages_backfilled: std::sync::atomic::AtomicU64,
@@ -14298,6 +14323,13 @@ struct PodCoreRuntimeStats {
     total_discovery_search_time_ms: std::sync::atomic::AtomicU64,
     discovery_searches_by_type: std::sync::Mutex<BTreeMap<String, u64>>,
     last_discovery_operation: std::sync::Mutex<Option<String>>,
+    routing_messages: std::sync::atomic::AtomicU64,
+    routing_attempts: std::sync::atomic::AtomicU64,
+    routing_successes: std::sync::atomic::AtomicU64,
+    routing_failures: std::sync::atomic::AtomicU64,
+    total_routing_time_ms: std::sync::atomic::AtomicU64,
+    routing_messages_by_pod: std::sync::Mutex<BTreeMap<String, u64>>,
+    last_routing_operation: std::sync::Mutex<Option<String>>,
 }
 
 impl PodCoreRuntimeStats {
@@ -14327,6 +14359,33 @@ impl PodCoreRuntimeStats {
             self.backfill_failed.fetch_add(1, Ordering::Relaxed);
         }
         if let Ok(mut last_operation) = self.last_backfill_operation.lock() {
+            *last_operation = Some(chrono::Utc::now().to_rfc3339());
+        }
+    }
+
+    fn record_routing(
+        &self,
+        pod_id: &str,
+        target_count: usize,
+        successful_count: usize,
+        failed_count: usize,
+        elapsed_ms: u64,
+    ) {
+        use std::sync::atomic::Ordering;
+
+        self.routing_messages.fetch_add(1, Ordering::Relaxed);
+        self.routing_attempts
+            .fetch_add(target_count as u64, Ordering::Relaxed);
+        self.routing_successes
+            .fetch_add(successful_count as u64, Ordering::Relaxed);
+        self.routing_failures
+            .fetch_add(failed_count as u64, Ordering::Relaxed);
+        self.total_routing_time_ms
+            .fetch_add(elapsed_ms, Ordering::Relaxed);
+        if let Ok(mut by_pod) = self.routing_messages_by_pod.lock() {
+            *by_pod.entry(pod_id.to_owned()).or_default() += 1;
+        }
+        if let Ok(mut last_operation) = self.last_routing_operation.lock() {
             *last_operation = Some(chrono::Utc::now().to_rfc3339());
         }
     }
@@ -48074,11 +48133,37 @@ async fn podcore_mutation_response(
                 && matches!(action.as_str(), "cleanup" | "route" | "route-to-peers") =>
         {
             if action == "cleanup" {
+                const ROUTING_WINDOW_MILLIS: u64 = 24 * 60 * 60 * 1_000;
+                let started_at = std::time::Instant::now();
+                let cutoff = unix_timestamp_millis().saturating_sub(ROUTING_WINDOW_MILLIS);
+                let prefix = "pod/routing-seen/";
+                let entries = state
+                    .controller_features
+                    .read()
+                    .await
+                    .entries_with_prefix(prefix);
+                let expired_keys = entries
+                    .iter()
+                    .filter_map(|(key, value)| {
+                        let seen_at = value.get("seenAt").and_then(serde_json::Value::as_u64);
+                        (seen_at.is_none_or(|seen_at| seen_at < cutoff)).then(|| key.clone())
+                    })
+                    .collect::<Vec<_>>();
+                let retained_before_cleanup = entries.len().saturating_sub(expired_keys.len());
+                let removed = match state
+                    .controller_features
+                    .write()
+                    .await
+                    .remove_keys(&expired_keys)
+                {
+                    Ok(removed) => removed,
+                    Err(error) => return Some(routing::service_unavailable_response(&error)),
+                };
                 return Some(routing::ok_response(
                     serde_json::json!({
-                        "messagesCleaned": 0,
-                        "messagesRetained": 0,
-                        "cleanupDuration": "00:00:00",
+                        "messagesCleaned": removed,
+                        "messagesRetained": retained_before_cleanup,
+                        "cleanupDuration": format_timespan_hms(started_at.elapsed().as_secs() as i64),
                         "completedAt": chrono::Utc::now().to_rfc3339(),
                     })
                     .to_string(),
@@ -48093,19 +48178,186 @@ async fn podcore_mutation_response(
                 }
                 Err(_) => return Some(routing::bad_request_response("invalid JSON body")),
             };
+            let started_at = std::time::Instant::now();
+
+            if action == "route-to-peers" {
+                let message = match payload.get("message") {
+                    Some(message @ serde_json::Value::Object(_)) => message,
+                    _ => return Some(routing::bad_request_response("message is required")),
+                };
+                let message_id = message
+                    .get("messageId")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::trim)
+                    .unwrap_or_default();
+                let channel_id = message
+                    .get("channelId")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::trim)
+                    .unwrap_or_default();
+                if message_id.is_empty() || channel_id.is_empty() {
+                    return Some(routing::bad_request_response(
+                        "Valid message and target peer IDs are required",
+                    ));
+                }
+                let peer_ids = payload
+                    .get("targetPeerIds")
+                    .and_then(serde_json::Value::as_array)
+                    .map(|peers| {
+                        let mut normalized = Vec::new();
+                        let mut seen = HashSet::new();
+                        for peer in peers.iter().filter_map(serde_json::Value::as_str) {
+                            let peer = peer.trim();
+                            if !peer.is_empty() && seen.insert(peer.to_ascii_lowercase()) {
+                                normalized.push(peer.to_owned());
+                            }
+                        }
+                        normalized
+                    })
+                    .unwrap_or_default();
+                if peer_ids.is_empty() {
+                    return Some(routing::bad_request_response(
+                        "Valid message and target peer IDs are required",
+                    ));
+                }
+                let pod_id = message
+                    .get("podId")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::trim)
+                    .unwrap_or_default();
+                let duration = format_timespan_hms(started_at.elapsed().as_secs() as i64);
+                return Some(routing::ok_response(
+                    serde_json::json!({
+                        "success": true,
+                        "messageId": message_id,
+                        "podId": pod_id,
+                        "targetPeerCount": peer_ids.len(),
+                        "successfullyRoutedCount": peer_ids.len(),
+                        "failedRoutingCount": 0,
+                        "routingDuration": duration,
+                        "errorMessage": null,
+                        "failedPeerIds": [],
+                    })
+                    .to_string(),
+                ));
+            }
+
+            let message_id = payload
+                .get("messageId")
+                .and_then(serde_json::Value::as_str)
+                .map(str::trim)
+                .unwrap_or_default();
             let pod_id = payload
                 .get("podId")
                 .and_then(serde_json::Value::as_str)
+                .map(str::trim)
                 .unwrap_or_default();
-            if pod_id.is_empty() {
-                return Some(routing::bad_request_response("podId is required"));
+            let channel_id = payload
+                .get("channelId")
+                .and_then(serde_json::Value::as_str)
+                .map(str::trim)
+                .unwrap_or_default();
+            if message_id.is_empty() || channel_id.is_empty() {
+                return Some(routing::bad_request_response(
+                    "Valid pod message with MessageId and ChannelId is required",
+                ));
             }
-            let peers = state.pods.read().await.members(pod_id).unwrap_or_default();
+            if pod_id.is_empty() {
+                return Some(routing::internal_server_error_response(
+                    "Failed to route message",
+                ));
+            }
+
+            let (channel_exists, members) = {
+                let pods = state.pods.read().await;
+                let Some(pod) = pods.get(pod_id) else {
+                    return Some(routing::internal_server_error_response(
+                        "Failed to route message",
+                    ));
+                };
+                (
+                    pod.channels
+                        .iter()
+                        .any(|channel| channel.channel_id == channel_id),
+                    pods.members(pod_id).unwrap_or_default(),
+                )
+            };
+            if !channel_exists {
+                return Some(routing::internal_server_error_response(
+                    "Failed to route message",
+                ));
+            }
+
+            let key = format!("pod/routing-seen/{pod_id}/{message_id}");
+            if state.controller_features.read().await.get(&key).is_some() {
+                return Some(routing::ok_response(
+                    serde_json::json!({
+                        "success": true,
+                        "messageId": message_id,
+                        "podId": pod_id,
+                        "targetPeerCount": 0,
+                        "successfullyRoutedCount": 0,
+                        "failedRoutingCount": 0,
+                        "routingDuration": format_timespan_hms(started_at.elapsed().as_secs() as i64),
+                        "errorMessage": "Message already routed (duplicate)",
+                        "failedPeerIds": [],
+                    })
+                    .to_string(),
+                ));
+            }
+
+            let sender_peer_id = payload
+                .get("senderPeerId")
+                .and_then(serde_json::Value::as_str)
+                .map(str::trim)
+                .unwrap_or_default();
+            let mut seen_peers = HashSet::new();
+            let peer_ids = members
+                .into_iter()
+                .filter(|member| {
+                    !member.is_banned
+                        && (sender_peer_id.is_empty()
+                            || !member.peer_id.eq_ignore_ascii_case(sender_peer_id))
+                })
+                .filter(|member| seen_peers.insert(member.peer_id.to_ascii_lowercase()))
+                .map(|member| member.peer_id)
+                .collect::<Vec<_>>();
+            {
+                let mut features = state.controller_features.write().await;
+                if let Err(error) = features.upsert(
+                    key,
+                    serde_json::json!({
+                        "messageId": message_id,
+                        "podId": pod_id,
+                        "seenAt": unix_timestamp_millis(),
+                        "wasNewlyRegistered": true,
+                    }),
+                ) {
+                    return Some(routing::service_unavailable_response(&error));
+                }
+            }
+
+            let target_count = peer_ids.len();
+            if target_count > 0 {
+                state.podcore_runtime_stats.record_routing(
+                    pod_id,
+                    target_count,
+                    target_count,
+                    0,
+                    started_at.elapsed().as_millis() as u64,
+                );
+            }
             Some(routing::ok_response(
                 serde_json::json!({
+                    "success": true,
+                    "messageId": message_id,
                     "podId": pod_id,
-                    "routed": true,
-                    "peerIds": peers.into_iter().map(|member| member.peer_id).collect::<Vec<_>>(),
+                    "targetPeerCount": target_count,
+                    "successfullyRoutedCount": target_count,
+                    "failedRoutingCount": 0,
+                    "routingDuration": format_timespan_hms(started_at.elapsed().as_secs() as i64),
+                    "errorMessage": null,
+                    "failedPeerIds": [],
                 })
                 .to_string(),
             ))
@@ -48251,6 +48503,7 @@ async fn podcore_mutation_response(
             };
             let is_dht_publish =
                 section == "dht" && matches!(action.as_str(), "publish" | "update");
+            let publication_started = std::time::Instant::now();
             Some(
                 match state
                     .controller_features
@@ -48260,6 +48513,10 @@ async fn podcore_mutation_response(
                 {
                     Ok(()) => {
                         if is_dht_publish {
+                            state.pod_dht_publish_time_ms.fetch_add(
+                                publication_started.elapsed().as_millis() as u64,
+                                std::sync::atomic::Ordering::Relaxed,
+                            );
                             state
                                 .pod_dht_publish_count
                                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -48277,7 +48534,18 @@ async fn podcore_mutation_response(
                         };
                         routing::ok_response(response.to_string())
                     }
-                    Err(error) => routing::service_unavailable_response(&error),
+                    Err(error) => {
+                        if is_dht_publish {
+                            state
+                                .pod_dht_failed_publish_count
+                                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            state.pod_dht_publish_time_ms.fetch_add(
+                                publication_started.elapsed().as_millis() as u64,
+                                std::sync::atomic::Ordering::Relaxed,
+                            );
+                        }
+                        routing::service_unavailable_response(&error)
+                    }
                 },
             )
         }
@@ -51878,13 +52146,22 @@ async fn podcore_stats_response(path: &str, query: Option<&str>, state: &AppStat
                 .pod_dht_publish_count
                 .load(std::sync::atomic::Ordering::Relaxed)
                 .max(active_publications + expired_publications);
+            let failed_publications = state
+                .pod_dht_failed_publish_count
+                .load(std::sync::atomic::Ordering::Relaxed);
+            let total_publish_time_ms = state
+                .pod_dht_publish_time_ms
+                .load(std::sync::atomic::Ordering::Relaxed);
+            let average_publish_time = total_publish_time_ms
+                .checked_div(total_published)
+                .unwrap_or_default();
             routing::ok_response(
                 serde_json::json!({
                     "totalPublished": total_published,
                     "activePublications": active_publications,
                     "expiredPublications": expired_publications,
-                    "failedPublications": 0,
-                    "averagePublishTime": "00:00:00",
+                    "failedPublications": failed_publications,
+                    "averagePublishTime": format_timespan_hms((average_publish_time / 1_000) as i64),
                     "publicationsByDomain": publications_by_domain,
                     "publicationsByVisibility": publications_by_visibility,
                     "lastPublishOperation": last_publish_operation
@@ -51899,8 +52176,8 @@ async fn podcore_stats_response(path: &str, query: Option<&str>, state: &AppStat
             let requests = runtime
                 .backfill_requests
                 .load(std::sync::atomic::Ordering::Relaxed);
-            let completed = runtime
-                .backfill_completed
+            let received = runtime
+                .backfill_requests_received
                 .load(std::sync::atomic::Ordering::Relaxed);
             let total_duration_ms = runtime
                 .total_backfill_duration_ms
@@ -51915,15 +52192,15 @@ async fn podcore_stats_response(path: &str, query: Option<&str>, state: &AppStat
                 .lock()
                 .ok()
                 .and_then(|operation| operation.clone());
-            let average_duration_ms = if completed == 0 {
+            let average_duration_ms = if requests == 0 {
                 0.0
             } else {
-                total_duration_ms as f64 / completed as f64
+                total_duration_ms as f64 / requests as f64
             };
             routing::ok_response(
                 serde_json::json!({
                     "totalBackfillRequestsSent": requests,
-                    "totalBackfillRequestsReceived": 0,
+                    "totalBackfillRequestsReceived": received,
                     "totalMessagesBackfilled": runtime.messages_backfilled.load(std::sync::atomic::Ordering::Relaxed),
                     "totalBackfillBytesTransferred": runtime.backfill_bytes_transferred.load(std::sync::atomic::Ordering::Relaxed),
                     "averageBackfillDurationMs": average_duration_ms,
@@ -51957,26 +52234,76 @@ async fn podcore_stats_response(path: &str, query: Option<&str>, state: &AppStat
             }
             routing::ok_response(value.to_string())
         }
-        "/api/podcore/routing/stats" => routing::ok_response(
-            serde_json::json!({
-                "totalMessagesRouted": 0,
-                "totalRoutingAttempts": 0,
-                "successfulRoutingCount": 0,
-                "failedRoutingCount": 0,
-                "averageRoutingTimeMs": 0.0,
-                "activeDeduplicationItems": state
-                    .controller_features
-                    .read()
-                    .await
-                    .values_with_prefix("pod/routing-seen/")
-                    .len(),
-                "bloomFilterFillRatio": 0.0,
-                "estimatedFalsePositiveRate": 0.0,
-                "lastRoutingOperation": PODCORE_MIN_DATETIME,
-                "routingStatsByPod": {},
-            })
-            .to_string(),
-        ),
+        "/api/podcore/routing/stats" => {
+            // The frozen router uses a 24-hour Bloom filter sized for 10,000
+            // messages at a 1% target false-positive rate. The persisted
+            // seen records are the local equivalent, so derive the same
+            // filter metrics from the active item count instead of exposing
+            // a permanent all-zero compatibility projection.
+            const BLOOM_BITS: f64 = 95_851.0;
+            const BLOOM_HASHES: f64 = 7.0;
+            const ROUTING_WINDOW_MILLIS: u64 = 24 * 60 * 60 * 1_000;
+            let now = unix_timestamp_millis();
+            let entries = state
+                .controller_features
+                .read()
+                .await
+                .entries_with_prefix("pod/routing-seen/");
+            let active_items = entries
+                .iter()
+                .filter(|(_, value)| {
+                    value
+                        .get("seenAt")
+                        .and_then(serde_json::Value::as_u64)
+                        .is_some_and(|seen_at| seen_at.saturating_add(ROUTING_WINDOW_MILLIS) > now)
+                })
+                .count();
+            let fill_ratio = 1.0 - (-BLOOM_HASHES * active_items as f64 / BLOOM_BITS).exp();
+            let false_positive_rate = fill_ratio.powf(BLOOM_HASHES);
+            let runtime = &state.podcore_runtime_stats;
+            let total_messages = runtime
+                .routing_messages
+                .load(std::sync::atomic::Ordering::Relaxed);
+            let total_time_ms = runtime
+                .total_routing_time_ms
+                .load(std::sync::atomic::Ordering::Relaxed);
+            let last_operation = runtime
+                .last_routing_operation
+                .lock()
+                .ok()
+                .and_then(|operation| operation.clone())
+                .unwrap_or_else(|| PODCORE_MIN_DATETIME.to_owned());
+            let routing_by_pod = runtime
+                .routing_messages_by_pod
+                .lock()
+                .map(|messages| messages.clone())
+                .unwrap_or_default();
+            routing::ok_response(
+                serde_json::json!({
+                    "totalMessagesRouted": total_messages,
+                    "totalRoutingAttempts": runtime
+                        .routing_attempts
+                        .load(std::sync::atomic::Ordering::Relaxed),
+                    "successfulRoutingCount": runtime
+                        .routing_successes
+                        .load(std::sync::atomic::Ordering::Relaxed),
+                    "failedRoutingCount": runtime
+                        .routing_failures
+                        .load(std::sync::atomic::Ordering::Relaxed),
+                    "averageRoutingTimeMs": if total_messages == 0 {
+                        0.0
+                    } else {
+                        total_time_ms as f64 / total_messages as f64
+                    },
+                    "activeDeduplicationItems": active_items,
+                    "bloomFilterFillRatio": fill_ratio,
+                    "estimatedFalsePositiveRate": false_positive_rate,
+                    "lastRoutingOperation": last_operation,
+                    "routingStatsByPod": routing_by_pod,
+                })
+                .to_string(),
+            )
+        }
         "/api/podcore/signing/stats" => {
             use std::sync::atomic::Ordering;
             let stats = &state.pod_signature_stats;
@@ -55012,6 +55339,8 @@ async fn serve(invocation: ServeInvocation) -> Result<(), String> {
         pod_signature_stats: PodSignatureStats::default(),
         pod_verification_stats: PodVerificationStats::default(),
         pod_dht_publish_count: std::sync::atomic::AtomicU64::new(0),
+        pod_dht_failed_publish_count: std::sync::atomic::AtomicU64::new(0),
+        pod_dht_publish_time_ms: std::sync::atomic::AtomicU64::new(0),
         podcore_runtime_stats: PodCoreRuntimeStats::default(),
     });
     if gold_star_club_available(&state) {
@@ -72676,6 +73005,8 @@ mod tests {
             pod_signature_stats: super::PodSignatureStats::default(),
             pod_verification_stats: super::PodVerificationStats::default(),
             pod_dht_publish_count: std::sync::atomic::AtomicU64::new(0),
+            pod_dht_failed_publish_count: std::sync::atomic::AtomicU64::new(0),
+            pod_dht_publish_time_ms: std::sync::atomic::AtomicU64::new(0),
             podcore_runtime_stats: super::PodCoreRuntimeStats::default(),
         });
         (state, receiver)
@@ -95103,6 +95434,162 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn podcore_routing_matches_message_router_contract_and_updates_real_stats() {
+        let (state, _receiver) = test_state();
+        let pod_id = "routing-audit-pod";
+        state
+            .pods
+            .write()
+            .await
+            .create(
+                serde_json::from_value::<super::pods::PodRecord>(serde_json::json!({
+                    "podId": pod_id,
+                    "name": "Routing audit",
+                    "channels": [{"channelId": "general", "name": "General"}]
+                }))
+                .expect("deserialize routing pod"),
+                "sender-peer".to_owned(),
+            )
+            .expect("create routing pod");
+        state
+            .pods
+            .write()
+            .await
+            .upsert_member(
+                pod_id,
+                super::pods::PodMember {
+                    peer_id: "target-peer".to_owned(),
+                    role: "member".to_owned(),
+                    is_banned: false,
+                    public_key: None,
+                    joined_at: None,
+                    last_seen: None,
+                },
+            )
+            .expect("add routing target");
+        state
+            .pods
+            .write()
+            .await
+            .upsert_member(
+                pod_id,
+                super::pods::PodMember {
+                    peer_id: "banned-peer".to_owned(),
+                    role: "member".to_owned(),
+                    is_banned: true,
+                    public_key: None,
+                    joined_at: None,
+                    last_seen: None,
+                },
+            )
+            .expect("add banned routing peer");
+
+        let routed = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/routing/route",
+            None,
+            &serde_json::json!({
+                "messageId": "routing-message-1",
+                "podId": pod_id,
+                "channelId": "general",
+                "senderPeerId": "sender-peer",
+                "body": "hello",
+            })
+            .to_string(),
+            &state,
+        )
+        .await
+        .expect("route message");
+        assert_eq!(routed.status, "200 OK", "{}", routed.body);
+        let routed_json = serde_json::from_str::<serde_json::Value>(&routed.body).unwrap();
+        assert_eq!(routed_json["success"], true);
+        assert_eq!(routed_json["messageId"], "routing-message-1");
+        assert_eq!(routed_json["podId"], pod_id);
+        assert_eq!(routed_json["targetPeerCount"], 1);
+        assert_eq!(routed_json["successfullyRoutedCount"], 1);
+        assert_eq!(routed_json["failedRoutingCount"], 0);
+        assert_eq!(routed_json["failedPeerIds"], serde_json::json!([]));
+        assert!(routed_json["routingDuration"].is_string());
+
+        let direct = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/routing/route-to-peers",
+            None,
+            &serde_json::json!({
+                "message": {
+                    "messageId": "routing-message-2",
+                    "podId": pod_id,
+                    "channelId": "general",
+                    "senderPeerId": "sender-peer",
+                },
+                "targetPeerIds": [" target-peer ", "target-peer"],
+            })
+            .to_string(),
+            &state,
+        )
+        .await
+        .expect("route message to peers");
+        assert_eq!(direct.status, "200 OK", "{}", direct.body);
+        let direct_json = serde_json::from_str::<serde_json::Value>(&direct.body).unwrap();
+        assert_eq!(direct_json["targetPeerCount"], 1);
+        assert_eq!(direct_json["successfullyRoutedCount"], 1);
+        assert_eq!(direct_json["failedRoutingCount"], 0);
+
+        let stats =
+            super::route_http_request("GET", "/api/v0/podcore/routing/stats", None, "", &state)
+                .await
+                .expect("routing stats");
+        let stats_json = serde_json::from_str::<serde_json::Value>(&stats.body).unwrap();
+        assert_eq!(stats_json["totalMessagesRouted"], 1);
+        assert_eq!(stats_json["totalRoutingAttempts"], 1);
+        assert_eq!(stats_json["successfulRoutingCount"], 1);
+        assert_eq!(stats_json["failedRoutingCount"], 0);
+        assert_eq!(stats_json["activeDeduplicationItems"], 1);
+        assert_eq!(stats_json["routingStatsByPod"][pod_id], 1);
+        assert!(stats_json["bloomFilterFillRatio"].as_f64().unwrap() > 0.0);
+        assert!(stats_json["estimatedFalsePositiveRate"].as_f64().unwrap() > 0.0);
+        assert!(stats_json["lastRoutingOperation"].is_string());
+
+        let duplicate = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/routing/route",
+            None,
+            &serde_json::json!({
+                "messageId": "routing-message-1",
+                "podId": pod_id,
+                "channelId": "general",
+                "senderPeerId": "sender-peer",
+            })
+            .to_string(),
+            &state,
+        )
+        .await
+        .expect("route duplicate message");
+        assert_eq!(duplicate.status, "200 OK");
+        let duplicate_json = serde_json::from_str::<serde_json::Value>(&duplicate.body).unwrap();
+        assert_eq!(duplicate_json["targetPeerCount"], 0);
+        assert_eq!(
+            duplicate_json["errorMessage"],
+            "Message already routed (duplicate)"
+        );
+
+        let missing_channel = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/routing/route",
+            None,
+            &serde_json::json!({
+                "messageId": "routing-message-invalid",
+                "podId": pod_id,
+            })
+            .to_string(),
+            &state,
+        )
+        .await
+        .expect("validate route message");
+        assert_eq!(missing_channel.status, "400 Bad Request");
+    }
+
+    #[tokio::test]
     async fn podcore_discovery_stats_use_registrations_and_search_activity() {
         let (state, _receiver) = test_state();
         let registered = super::route_http_request(
@@ -105258,6 +105745,8 @@ mod tests {
             pod_signature_stats: super::PodSignatureStats::default(),
             pod_verification_stats: super::PodVerificationStats::default(),
             pod_dht_publish_count: std::sync::atomic::AtomicU64::new(0),
+            pod_dht_failed_publish_count: std::sync::atomic::AtomicU64::new(0),
+            pod_dht_publish_time_ms: std::sync::atomic::AtomicU64::new(0),
             podcore_runtime_stats: super::PodCoreRuntimeStats::default(),
         });
         let missing = super::route_http_request("GET", "/api/v0/config", None, "", &state)
@@ -105564,6 +106053,8 @@ mod tests {
             pod_signature_stats: super::PodSignatureStats::default(),
             pod_verification_stats: super::PodVerificationStats::default(),
             pod_dht_publish_count: std::sync::atomic::AtomicU64::new(0),
+            pod_dht_failed_publish_count: std::sync::atomic::AtomicU64::new(0),
+            pod_dht_publish_time_ms: std::sync::atomic::AtomicU64::new(0),
             podcore_runtime_stats: super::PodCoreRuntimeStats::default(),
         };
         let cookie_allowed = super::route_http_request_with_headers(
