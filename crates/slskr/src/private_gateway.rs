@@ -198,6 +198,60 @@ impl Gateway {
             .collect()
     }
 
+    pub async fn register_outbound_overlay(
+        &self,
+        username: String,
+        endpoint: SocketAddr,
+        features: Vec<String>,
+        version: i32,
+        certificate_thumbprint: Option<String>,
+    ) -> String {
+        let connection_id = uuid::Uuid::new_v4().simple().to_string();
+        let timestamp = overlay_timestamp();
+        self.overlay_connections.write().await.insert(
+            connection_id.clone(),
+            OverlayConnectionMetadata {
+                username,
+                address: endpoint.ip().to_string(),
+                port: endpoint.port(),
+                features,
+                connected_at: timestamp.clone(),
+                last_activity: timestamp,
+                certificate_thumbprint,
+                version,
+                is_outbound: true,
+            },
+        );
+        connection_id
+    }
+
+    pub async fn remove_overlay_connection(&self, connection_id: &str) {
+        self.overlay_connections.write().await.remove(connection_id);
+    }
+
+    pub async fn register_outbound_guard(
+        self: &Arc<Self>,
+        username: String,
+        endpoint: SocketAddr,
+        features: Vec<String>,
+        version: i32,
+        certificate_thumbprint: Option<String>,
+    ) -> OutboundOverlayGuard {
+        let connection_id = self
+            .register_outbound_overlay(
+                username,
+                endpoint,
+                features,
+                version,
+                certificate_thumbprint,
+            )
+            .await;
+        OutboundOverlayGuard {
+            gateway: Arc::clone(self),
+            connection_id,
+        }
+    }
+
     pub async fn run(self: Arc<Self>, state: Arc<super::AppState>) -> Result<(), String> {
         let listener = self
             .listener
@@ -1056,6 +1110,23 @@ pub struct OverlayConnectionMetadata {
     pub is_outbound: bool,
 }
 
+pub struct OutboundOverlayGuard {
+    gateway: Arc<Gateway>,
+    connection_id: String,
+}
+
+impl Drop for OutboundOverlayGuard {
+    fn drop(&mut self) {
+        let gateway = Arc::clone(&self.gateway);
+        let connection_id = self.connection_id.clone();
+        if tokio::runtime::Handle::try_current().is_ok() {
+            tokio::spawn(async move {
+                gateway.remove_overlay_connection(&connection_id).await;
+            });
+        }
+    }
+}
+
 fn overlay_timestamp() -> String {
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
 }
@@ -1585,6 +1656,35 @@ mod tests {
             .unwrap();
         assert_eq!(first.certificate_sha256(), second.certificate_sha256());
         drop((first, second));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn outbound_overlay_metadata_is_removed_when_guard_drops() {
+        let root = temporary_directory("gateway-outbound-session");
+        let gateway = Arc::new(
+            Gateway::load_or_create_with_quic("127.0.0.1:0".parse().unwrap(), &root, None)
+                .await
+                .unwrap(),
+        );
+        let guard = gateway
+            .register_outbound_guard(
+                "remote".to_owned(),
+                "192.0.2.10:2234".parse().unwrap(),
+                vec![FEATURE_MESH_SERVICE.to_owned()],
+                OVERLAY_VERSION,
+                None,
+            )
+            .await;
+        let connections = gateway.active_overlay_connections().await;
+        assert_eq!(connections.len(), 1);
+        assert_eq!(connections[0].username, "remote");
+        assert_eq!(connections[0].address, "192.0.2.10");
+        assert_eq!(connections[0].port, 2234);
+        assert!(connections[0].is_outbound);
+        drop(guard);
+        tokio::task::yield_now().await;
+        assert!(gateway.active_overlay_connections().await.is_empty());
         fs::remove_dir_all(root).unwrap();
     }
 

@@ -59,7 +59,9 @@ impl Drop for StagingFileGuard {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn fetch_content(
+    gateway: Option<&std::sync::Arc<crate::private_gateway::Gateway>>,
     peer: &TrustedMeshPeer,
     local_username: &str,
     authentication_key: &SigningKey,
@@ -70,6 +72,7 @@ pub async fn fetch_content(
 ) -> Result<(), String> {
     validate_request(local_username, content_id, size, expected_sha256)?;
     fetch_content_inner(
+        gateway,
         peer,
         local_username,
         authentication_key,
@@ -85,7 +88,9 @@ pub async fn fetch_content(
 /// same authenticated `pods/PostMessage` service used by the frozen runtime's
 /// mesh adapter.  The caller must supply a trusted certificate pin; capability
 /// records alone are not sufficient to authenticate an overlay connection.
+#[allow(clippy::too_many_arguments)]
 pub async fn post_pod_message(
+    gateway: Option<&std::sync::Arc<crate::private_gateway::Gateway>>,
     peer: &TrustedMeshPeer,
     local_username: &str,
     authentication_key: &SigningKey,
@@ -112,6 +117,21 @@ pub async fn post_pod_message(
     if !client.remote_username.eq_ignore_ascii_case(&peer.username) {
         return Err("pod message overlay identity did not match the trusted peer".to_owned());
     }
+    let _session_guard = if let Some(gateway) = gateway {
+        Some(
+            gateway
+                .register_outbound_guard(
+                    client.remote_username.clone(),
+                    peer.overlay_endpoint,
+                    client.remote_features.clone(),
+                    slskr_client::overlay::OVERLAY_VERSION,
+                    client.remote_certificate_sha256.map(hex::encode),
+                )
+                .await,
+        )
+    } else {
+        None
+    };
 
     let payload = serde_json::to_vec(&serde_json::json!({
         "PodId": pod_id,
@@ -150,13 +170,14 @@ pub async fn post_pod_message(
     {
         return Err("pod message peer reported unsuccessful delivery".to_owned());
     }
-    response
+    let result = response
         .get("MessageId")
         .or_else(|| response.get("messageId"))
         .and_then(serde_json::Value::as_str)
         .filter(|message_id| !message_id.trim().is_empty())
         .map(str::to_owned)
-        .ok_or_else(|| "pod message peer omitted the delivered message ID".to_owned())
+        .ok_or_else(|| "pod message peer omitted the delivered message ID".to_owned());
+    result
 }
 
 /// Deliver a PodCore message using the frozen slskdN UDP control envelope.
@@ -253,7 +274,9 @@ pub struct PodMessageControlRequest<'a> {
     pub sig_version: i32,
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn fetch_content_inner(
+    gateway: Option<&std::sync::Arc<crate::private_gateway::Gateway>>,
     peer: &TrustedMeshPeer,
     local_username: &str,
     authentication_key: &SigningKey,
@@ -273,6 +296,7 @@ async fn fetch_content_inner(
         .await
         .map_err(|error| format!("mesh content staging create failed: {error}"))?;
     let mut staging = StagingFileGuard::new(output, file);
+    let mut _session_guard = None;
     let result = async {
         let mut hello = MeshHello::new(
             local_username,
@@ -291,6 +315,21 @@ async fn fetch_content_inner(
         if !client.remote_username.eq_ignore_ascii_case(&peer.username) {
             return Err("mesh content overlay identity did not match the trusted peer".to_owned());
         }
+        _session_guard = if let Some(gateway) = gateway {
+            Some(
+                gateway
+                    .register_outbound_guard(
+                        client.remote_username.clone(),
+                        peer.overlay_endpoint,
+                        client.remote_features.clone(),
+                        slskr_client::overlay::OVERLAY_VERSION,
+                        client.remote_certificate_sha256.map(hex::encode),
+                    )
+                    .await,
+            )
+        } else {
+            None
+        };
 
         let mut hasher = Sha256::new();
         let mut offset = 0_u64;
@@ -476,9 +515,18 @@ mod tests {
         };
         let key = SigningKey::from_bytes(&[2_u8; 32]);
 
-        let error = fetch_content(&peer, "local", &key, "content", 1, &"a".repeat(64), &output)
-            .await
-            .unwrap_err();
+        let error = fetch_content(
+            None,
+            &peer,
+            "local",
+            &key,
+            "content",
+            1,
+            &"a".repeat(64),
+            &output,
+        )
+        .await
+        .unwrap_err();
         assert!(error.contains("staging create failed"), "{error}");
         assert_eq!(
             std::fs::read(&output).unwrap(),
@@ -518,6 +566,7 @@ mod tests {
         let output_for_fetch = output.clone();
         let fetch = tokio::spawn(async move {
             fetch_content(
+                None,
                 &peer,
                 "local",
                 &key,
@@ -561,6 +610,7 @@ mod tests {
         let key = SigningKey::from_bytes(&[2_u8; 32]);
 
         let error = fetch_content(
+            None,
             &peer,
             "local",
             &key,
@@ -617,6 +667,7 @@ mod tests {
         let output_for_fetch = output.clone();
         let fetch = tokio::spawn(async move {
             fetch_content(
+                None,
                 &peer,
                 "local",
                 &key,

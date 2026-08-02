@@ -51207,6 +51207,7 @@ async fn route_pod_message_to_peer(
         .await;
     }
     mesh_services::post_pod_message(
+        state.private_gateway.as_ref(),
         &peer,
         &local_username,
         &state.capability_signing_key,
@@ -64985,6 +64986,7 @@ async fn open_remote_mesh_preview_file(
             .await
             .ok_or_else(|| "local mesh identity is unavailable".to_owned())?;
         mesh_services::fetch_content(
+            state.private_gateway.as_ref(),
             peer,
             &local_username,
             &state.capability_signing_key,
