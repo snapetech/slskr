@@ -12983,6 +12983,89 @@ impl DestinationStore {
             .unwrap_or(&self.records[0])
             .json()
     }
+
+    fn normalize_explicit_path(&self, requested: &str) -> Option<PathBuf> {
+        let requested = Path::new(requested.trim());
+        if !requested.is_absolute() {
+            return None;
+        }
+        let mut normalized = PathBuf::new();
+        for component in requested.components() {
+            match component {
+                Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
+                Component::RootDir => normalized.push(std::path::MAIN_SEPARATOR.to_string()),
+                Component::CurDir => {}
+                Component::ParentDir => {
+                    if !normalized.pop() {
+                        return None;
+                    }
+                }
+                Component::Normal(value) => normalized.push(value),
+            }
+        }
+        if !normalized.is_absolute() {
+            return None;
+        }
+
+        self.records
+            .iter()
+            .any(|record| {
+                let root = Path::new(&record.path);
+                let Some(root) = normalize_absolute_path(root) else {
+                    return false;
+                };
+                if !normalized.starts_with(&root) {
+                    return false;
+                }
+                match (normalized.canonicalize(), root.canonicalize()) {
+                    (Ok(canonical_path), Ok(canonical_root)) => {
+                        canonical_path.starts_with(canonical_root)
+                    }
+                    _ => true,
+                }
+            })
+            .then_some(normalized)
+    }
+}
+
+fn normalize_absolute_path(path: &Path) -> Option<PathBuf> {
+    if !path.is_absolute() {
+        return None;
+    }
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
+            Component::RootDir => normalized.push(std::path::MAIN_SEPARATOR.to_string()),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !normalized.pop() {
+                    return None;
+                }
+            }
+            Component::Normal(value) => normalized.push(value),
+        }
+    }
+    normalized.is_absolute().then_some(normalized)
+}
+
+fn directory_is_writable(path: &Path) -> bool {
+    if !path.is_dir() {
+        return false;
+    }
+    let probe = path.join(format!(
+        ".slskr-write-test-{}",
+        uuid::Uuid::new_v4().simple()
+    ));
+    let writable = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&probe)
+        .is_ok();
+    if writable {
+        let _ = fs::remove_file(probe);
+    }
+    writable
 }
 
 #[derive(Clone, Debug)]
@@ -27969,6 +28052,7 @@ async fn route_http_request_with_headers(
                  .or_else(|| extract_json_string_field(body, "url"))
                  .unwrap_or_default();
              let destinations = state.destinations.read().await;
+             let normalized_path = destinations.normalize_explicit_path(&destination);
              let matched = destinations
                  .records
                  .iter()
@@ -27982,11 +28066,20 @@ async fn route_http_request_with_headers(
              let known_count = destinations.records.len();
              drop(destinations);
              if route.path.starts_with("/api/v0/") {
-                 let exists = matched.is_some() && std::path::Path::new(&destination).is_dir();
+                 let path = normalized_path
+                     .as_ref()
+                     .map(|path| path.display().to_string())
+                     .unwrap_or_else(|| destination.clone());
+                 let exists = normalized_path
+                     .as_deref()
+                     .is_some_and(Path::is_dir);
                  return Ok(routing::ok_response(serde_json::json!({
-                     "path": destination,
+                     "path": path,
                      "exists": exists,
-                     "writable": exists,
+                     "writable": exists
+                         && normalized_path
+                             .as_deref()
+                             .is_some_and(directory_is_writable),
                  }).to_string()));
              }
              Ok(routing::ok_response(serde_json::json!({
@@ -90530,6 +90623,30 @@ mod tests {
             1
         );
         assert!(destinations.records[0].is_default);
+    }
+
+    #[test]
+    fn destination_validation_allows_children_but_rejects_escape_paths() {
+        let root = std::env::temp_dir().join(format!(
+            "slskr-destination-validation-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        let child = root.join("nested");
+        std::fs::create_dir_all(&child).unwrap();
+        let destinations = super::DestinationStore::from_config(&root, &[]);
+
+        assert_eq!(
+            destinations.normalize_explicit_path(&child.display().to_string()),
+            Some(child.clone())
+        );
+        assert!(destinations
+            .normalize_explicit_path(&root.join("../outside").display().to_string())
+            .is_none());
+        assert!(destinations
+            .normalize_explicit_path("relative/nested")
+            .is_none());
+
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
