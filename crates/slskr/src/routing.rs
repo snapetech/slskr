@@ -79,7 +79,10 @@ pub fn check_route_auth(
         )?;
     }
 
-    if !csrf_origin_allowed(config, method, normalized, headers) {
+    let bearer_or_api_key = auth
+        .is_some_and(|value| value.starts_with("Bearer ") || value.starts_with("ApiKey "))
+        || headers.x_slskdn_api_key.is_some();
+    if !bearer_or_api_key && !csrf_origin_allowed(config, method, normalized, headers) {
         return Err("csrf");
     }
 

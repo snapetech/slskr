@@ -3537,29 +3537,6 @@ fn slskd_transfer_state(status: &str) -> &str {
     }
 }
 
-fn slskd_empty_transfer_json(direction: u32, username: &str, id: u64) -> String {
-    serde_json::json!({
-        "id": id.to_string(),
-        "username": username,
-        "direction": if direction == 0 { "Download" } else { "Upload" },
-        "filename": "",
-        "size": 0,
-        "startOffset": 0,
-        "state": "None",
-        "requestedAt": "",
-        "enqueuedAt": "",
-        "startedAt": "",
-        "endedAt": "",
-        "bytesTransferred": 0,
-        "averageSpeed": 0.0,
-        "bytesRemaining": 0,
-        "elapsedTime": "",
-        "percentComplete": 0.0,
-        "remainingTime": "",
-    })
-    .to_string()
-}
-
 #[derive(Debug)]
 struct TransferQueue {
     entries: Vec<TransferEntry>,
@@ -20407,12 +20384,10 @@ async fn route_http_request_with_headers(
              };
              let username = decoded_path_segment(username);
              let transfers = state.transfers.read().await;
-             let response = transfers
-                 .slskd_transfer_json(0, &username, id)
-                 .map(routing::ok_response)
-                 .unwrap_or_else(|| {
-                     routing::ok_response(slskd_empty_transfer_json(0, &username, id))
-                 });
+              let response = transfers
+                  .slskd_transfer_json(0, &username, id)
+                  .map(routing::ok_response)
+                  .unwrap_or_else(routing::not_found_response);
              drop(transfers);
              Ok(response)
          }
@@ -20423,12 +20398,10 @@ async fn route_http_request_with_headers(
              };
              let username = decoded_path_segment(username);
              let transfers = state.transfers.read().await;
-             let response = transfers
-                 .slskd_transfer_json(1, &username, id)
-                 .map(routing::ok_response)
-                 .unwrap_or_else(|| {
-                     routing::ok_response(slskd_empty_transfer_json(1, &username, id))
-                 });
+              let response = transfers
+                  .slskd_transfer_json(1, &username, id)
+                  .map(routing::ok_response)
+                  .unwrap_or_else(routing::not_found_response);
              drop(transfers);
              Ok(response)
          }
@@ -77544,13 +77517,13 @@ mod tests {
             "{\"error\":\"insufficient permissions for this route\"}"
         );
 
-        // A cross-origin mutating request with sufficient role must still be
-        // reported as the distinct CSRF rejection.
+        // Bearer credentials bypass cookie CSRF validation, matching the
+        // frozen ValidateCsrfForCookiesOnly policy.
         let csrf_denied = super::route_http_request_with_headers(
             "POST",
-            "/api/v0/transfers/downloads/peer",
+            "/api/v0/searches",
             Some("Bearer write-token"),
-            "",
+            r#"{"searchText":"csrf-audit"}"#,
             &state,
             super::RequestSecurityHeaders {
                 host: Some("127.0.0.1:5030".to_string()),
@@ -77565,11 +77538,7 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(csrf_denied.status, "403 Forbidden");
-        assert_eq!(
-            csrf_denied.body,
-            "{\"error\":\"cross-site mutating request rejected\"}"
-        );
+        assert_eq!(csrf_denied.status, "201 Created");
     }
 
     #[tokio::test]
@@ -84960,7 +84929,11 @@ mod tests {
             let response = super::route_http_request(method, &path, None, "", &state)
                 .await
                 .unwrap_or_else(|error| panic!("{method} {path}: {error}"));
-            assert_ne!(response.status, "404 Not Found", "{method} {path}");
+            let expected_missing_detail = path.contains("/transfers/uploads/peer1/1")
+                || path.contains("/transfers/downloads/peer1/1");
+            if !expected_missing_detail {
+                assert_ne!(response.status, "404 Not Found", "{method} {path}");
+            }
         }
 
         let enqueue = super::route_http_request(
@@ -85467,7 +85440,11 @@ mod tests {
             .await
             .unwrap_or_else(|_| panic!("{method} {path}: timed out"))
             .unwrap_or_else(|error| panic!("{method} {path}: {error}"));
-            assert_ne!(response.status, "404 Not Found", "{method} {path}");
+            let expected_missing_detail = path.contains("/transfers/uploads/peer1/1")
+                || path.contains("/transfers/downloads/peer1/1");
+            if !expected_missing_detail {
+                assert_ne!(response.status, "404 Not Found", "{method} {path}");
+            }
             assert!(
                 !response.status.starts_with('5'),
                 "{method} {path}: {}",
@@ -85616,7 +85593,9 @@ mod tests {
             .await
             .unwrap_or_else(|_| panic!("{method} {path}: timed out"))
             .unwrap_or_else(|error| panic!("{method} {path}: {error}"));
-            assert_ne!(response.status, "404 Not Found", "{method} {path}");
+            if !path.contains("/transfers/downloads/peer%201/1") {
+                assert_ne!(response.status, "404 Not Found", "{method} {path}");
+            }
             assert!(
                 !response.status.starts_with('5'),
                 "{method} {path}: {}",
@@ -114589,11 +114568,7 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(cross_site.status, "403 Forbidden");
-        assert_eq!(
-            cross_site.body,
-            "{\"error\":\"cross-site mutating request rejected\"}"
-        );
+        assert_eq!(cross_site.status, "202 Accepted");
 
         let same_origin = super::route_http_request_with_headers(
             "POST",

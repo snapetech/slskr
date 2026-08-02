@@ -15130,7 +15130,45 @@ async fn refresh_player_status(window: &web_sys::Window) -> Result<(), JsValue> 
             .as_ref()
             .map(|track| build_player_radio_plan(Some(track)).primary_query)
             .unwrap_or_default();
-        let stream_url = track.as_ref().map(player_stream_url).unwrap_or_default();
+        let direct_stream_url = track.as_ref().map(player_stream_url).unwrap_or_default();
+        let stream_url = if let Some(track) = track.as_ref() {
+            let content_id = track
+                .get("contentId")
+                .or_else(|| track.get("content_id"))
+                .map(json_scalar_preview)
+                .filter(|value| !value.is_empty());
+            if let Some(content_id) = content_id {
+                let ticket_path = format!(
+                    "/streams/{}/ticket",
+                    percent_encode_player_stream_component(&content_id)
+                );
+                let ticket_body = serde_json::json!({"contentId": content_id}).to_string();
+                match fetch_text_with_method(
+                    window,
+                    &endpoint_url(&ticket_path),
+                    "POST",
+                    Some(&ticket_body),
+                )
+                .await
+                {
+                    Ok(body) => serde_json::from_str::<serde_json::Value>(&body)
+                        .ok()
+                        .and_then(|value| {
+                            value
+                                .get("url")
+                                .or_else(|| value.get("streamUrl"))
+                                .and_then(serde_json::Value::as_str)
+                                .map(str::to_owned)
+                        })
+                        .unwrap_or(direct_stream_url.clone()),
+                    Err(_) => direct_stream_url.clone(),
+                }
+            } else {
+                direct_stream_url.clone()
+            }
+        } else {
+            String::new()
+        };
         if let Some(element) = document.get_element_by_id("slskr-player-now") {
             element.set_text_content(Some(&title));
         }
