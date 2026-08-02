@@ -17003,57 +17003,95 @@ async fn route_http_request_with_headers(
             }).to_string()))
         }
         ("GET", "/api/hashdb/entries") => {
-            let params = route.query.map(query_params).unwrap_or_default();
-            let limit = params
-                .iter()
-                .find(|(key, _)| key == "limit")
-                .and_then(|(_, value)| value.parse::<usize>().ok())
-                .unwrap_or(100)
-                .clamp(1, 1_000);
-            let offset = params
-                .iter()
-                .find(|(key, _)| key == "offset")
-                .and_then(|(_, value)| value.parse::<usize>().ok())
-                .unwrap_or(0);
-            let discovery = state.content_discovery.read().await;
-            let mut entries = discovery
-                .hash_entries()
-                .iter()
-                .map(|entry| serde_json::to_value(entry).unwrap_or_else(|_| serde_json::json!({})))
-                .collect::<Vec<_>>();
-            let latest_seq = discovery.latest_seq();
-            drop(discovery);
-            let shares = state.shares.read().await;
-            entries.extend(shares
-                .entries
-                .iter()
-                .filter(|entry| is_auto_retry_audio_file(&entry.filename))
-                .map(|entry| {
+            if route.path.starts_with("/api/v0/") {
+                // Frozen HashDbController.GetEntries pages by sequence ID,
+                // not by the local vector offset, and returns only HashDb
+                // rows. Share-index projections belong to the unversioned
+                // slskR compatibility helper below, not this controller.
+                let limit = match query_parameter(route.query, "limit") {
+                    Some(raw) => match raw.parse::<i64>() {
+                        Ok(value) => usize::try_from(value.clamp(1, 1_000)).unwrap_or(1),
+                        Err(_) => return Ok(routing::bad_request_response("limit is invalid")),
+                    },
+                    None => 100,
+                };
+                let offset = match query_parameter(route.query, "offset") {
+                    Some(raw) => match raw.parse::<i64>() {
+                        Ok(value) => u64::try_from(value.max(0)).unwrap_or(0),
+                        Err(_) => return Ok(routing::bad_request_response("offset is invalid")),
+                    },
+                    None => 0,
+                };
+                let discovery = state.content_discovery.read().await;
+                let (entries, _) = discovery.hash_entries_since_seq(offset, limit);
+                let latest_seq = discovery.latest_seq();
+                let count = entries.len();
+                Ok(routing::ok_response(
                     serde_json::json!({
-                        "id": format!("share-{}-{}", entry.size, entry.filename),
-                        "path": entry.filename,
-                        "filename": entry.filename,
-                        "extension": entry.extension,
-                        "size": entry.size,
-                        "hash": format!("{:016x}", stable_content_hash(&entry.filename, entry.size)),
-                        "source": "share-index",
+                        "latestSeq": latest_seq,
+                        "entries": entries,
+                        "count": count,
                     })
-                })
-                .collect::<Vec<_>>());
-            let count = entries.len();
-            let entries = entries
-                .into_iter()
-                .skip(offset)
-                .take(limit)
-                .collect::<Vec<_>>();
-            drop(shares);
-            Ok(routing::ok_response(serde_json::json!({
-                "latestSeq": latest_seq,
-                "entries": entries,
-                "count": count,
-                "offset": offset,
-                "limit": limit,
-            }).to_string()))
+                    .to_string(),
+                ))
+            } else {
+                let params = route.query.map(query_params).unwrap_or_default();
+                let limit = params
+                    .iter()
+                    .find(|(key, _)| key == "limit")
+                    .and_then(|(_, value)| value.parse::<usize>().ok())
+                    .unwrap_or(100)
+                    .clamp(1, 1_000);
+                let offset = params
+                    .iter()
+                    .find(|(key, _)| key == "offset")
+                    .and_then(|(_, value)| value.parse::<usize>().ok())
+                    .unwrap_or(0);
+                let discovery = state.content_discovery.read().await;
+                let mut entries = discovery
+                    .hash_entries()
+                    .iter()
+                    .map(|entry| {
+                        serde_json::to_value(entry).unwrap_or_else(|_| serde_json::json!({}))
+                    })
+                    .collect::<Vec<_>>();
+                let latest_seq = discovery.latest_seq();
+                drop(discovery);
+                let shares = state.shares.read().await;
+                entries.extend(shares
+                    .entries
+                    .iter()
+                    .filter(|entry| is_auto_retry_audio_file(&entry.filename))
+                    .map(|entry| {
+                        serde_json::json!({
+                            "id": format!("share-{}-{}", entry.size, entry.filename),
+                            "path": entry.filename,
+                            "filename": entry.filename,
+                            "extension": entry.extension,
+                            "size": entry.size,
+                            "hash": format!("{:016x}", stable_content_hash(&entry.filename, entry.size)),
+                            "source": "share-index",
+                        })
+                    })
+                    .collect::<Vec<_>>());
+                let count = entries.len();
+                let entries = entries
+                    .into_iter()
+                    .skip(offset)
+                    .take(limit)
+                    .collect::<Vec<_>>();
+                drop(shares);
+                Ok(routing::ok_response(
+                    serde_json::json!({
+                        "latestSeq": latest_seq,
+                        "entries": entries,
+                        "count": count,
+                        "offset": offset,
+                        "limit": limit,
+                    })
+                    .to_string(),
+                ))
+            }
         }
         ("GET", path) if path.starts_with("/api/hashdb/hash/by-size/") => {
             let Some(raw_size) = path_segment_after(path, "/api/hashdb/hash/by-size/") else {
@@ -55153,23 +55191,26 @@ async fn extended_controller_dynamic_get_response(
         );
     }
     if let Some(since) = path_segment_after(path, "/api/hashdb/sync/since/") {
-        let Ok(since) = since.parse::<u64>() else {
-            return routing::bad_request_response("sinceSeq must be an unsigned integer");
+        let since = match since.parse::<i64>() {
+            Ok(value) => u64::try_from(value.max(0)).unwrap_or(0),
+            Err(_) => return routing::bad_request_response("sinceSeq must be an integer"),
+        };
+        let limit = match query_parameter(query, "limit") {
+            Some(raw) => match raw.parse::<i64>() {
+                Ok(value) => usize::try_from(value.max(0)).unwrap_or(usize::MAX),
+                Err(_) => return routing::bad_request_response("limit is invalid"),
+            },
+            None => 1_000,
         };
         let discovery = state.content_discovery.read().await;
-        let entries = discovery
-            .hash_entries()
-            .iter()
-            .filter(|entry| entry.seq_id > since)
-            .take(1_000)
-            .collect::<Vec<_>>();
+        let (entries, _) = discovery.hash_entries_since_seq(since, limit);
+        let latest_seq = discovery.latest_seq();
+        let count = entries.len();
         return routing::ok_response(
             serde_json::json!({
-                "fromSeqId": since,
-                "toSeqId": discovery.latest_seq(),
-                "count": entries.len(),
+                "latestSeq": latest_seq,
+                "count": count,
                 "entries": entries,
-                "hasMore": false,
             })
             .to_string(),
         );
@@ -107030,6 +107071,72 @@ mod tests {
             .expect("hashdb peers after backfill");
         let peers_json = serde_json::from_str::<serde_json::Value>(&peers.body).unwrap();
         assert_eq!(peers_json["count"], 11);
+    }
+
+    #[tokio::test]
+    async fn versioned_hashdb_paging_matches_sequence_controller_contract() {
+        let (state, _receiver) = test_state();
+        let hash_a = "a".repeat(64);
+        let hash_b = "b".repeat(64);
+        state
+            .content_discovery
+            .write()
+            .await
+            .merge_hash_entries(vec![
+                super::content_discovery::HashDbEntry {
+                    flac_key: hash_a.clone(),
+                    byte_hash: hash_a,
+                    size: 100,
+                    ..Default::default()
+                },
+                super::content_discovery::HashDbEntry {
+                    flac_key: hash_b.clone(),
+                    byte_hash: hash_b,
+                    size: 200,
+                    ..Default::default()
+                },
+            ])
+            .expect("seed hashdb sequence");
+
+        let first =
+            super::route_http_request("GET", "/api/v0/hashdb/entries?limit=1", None, "", &state)
+                .await
+                .expect("first hashdb page");
+        assert_eq!(first.status, "200 OK", "{}", first.body);
+        let first_json = serde_json::from_str::<serde_json::Value>(&first.body).unwrap();
+        assert_eq!(first_json["latestSeq"], 2);
+        assert_eq!(first_json["count"], 1);
+        assert_eq!(first_json["entries"][0]["seqId"], 1);
+        assert!(first_json.get("offset").is_none());
+        assert!(first_json.get("limit").is_none());
+
+        let second = super::route_http_request(
+            "GET",
+            "/api/v0/hashdb/entries?offset=1&limit=1",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("sequence-offset hashdb page");
+        let second_json = serde_json::from_str::<serde_json::Value>(&second.body).unwrap();
+        assert_eq!(second_json["entries"][0]["seqId"], 2);
+
+        let sync = super::route_http_request(
+            "GET",
+            "/api/v0/hashdb/sync/since/1?limit=1",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("hashdb sync page");
+        let sync_json = serde_json::from_str::<serde_json::Value>(&sync.body).unwrap();
+        assert_eq!(sync_json["latestSeq"], 2);
+        assert_eq!(sync_json["count"], 1);
+        assert_eq!(sync_json["entries"][0]["seqId"], 2);
+        assert!(sync_json.get("fromSeqId").is_none());
+        assert!(sync_json.get("hasMore").is_none());
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
