@@ -5608,8 +5608,8 @@ impl SignalSystemSettings {
                     "SLSKD_SIGNALSYSTEM_BTEXTENSIONCHANNEL_REQUIREACTIVESESSION",
                     "SLSKR_SIGNAL_SYSTEM_BT_EXTENSION_CHANNEL_REQUIRE_ACTIVE_SESSION",
                 ],
-                2,
-                true,
+                1,
+                false,
             )?,
         })
     }

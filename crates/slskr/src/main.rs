@@ -32250,8 +32250,9 @@ fn slskd_options_json(
     response[ftp_key]["vpn"]["enabled"] = serde_json::json!(config.integrations.vpn.enabled);
     response[ftp_key]["vpn"]["portForwarding"] =
         serde_json::json!(config.integrations.vpn.port_forwarding);
-    response[ftp_key]["vpn"]["selfHostedRelay"] =
-        serde_json::json!(config.integrations.vpn.self_hosted_relay);
+    if let Some(vpn) = response[ftp_key]["vpn"].as_object_mut() {
+        vpn.remove("selfHostedRelay");
+    }
     response[ftp_key]["vpn"]["pollingInterval"] =
         serde_json::json!(config.integrations.vpn.polling_interval);
     response[ftp_key]["vpn"]["gluetun"]["version"] = serde_json::json!(1);
@@ -32345,11 +32346,11 @@ fn slskd_options_json(
         response["solid"]["maxFetchBytes"] = serde_json::json!(media.solid.max_fetch_bytes);
         response["solid"]["timeoutSeconds"] = serde_json::json!(media.solid.timeout.as_secs());
         response["solid"]["allowedHosts"] = serde_json::json!(media.solid.allowed_hosts);
-        response["solid"]["clientIdUrl"] = media
-            .solid
-            .client_id_url
-            .clone()
-            .map_or(serde_json::Value::Null, serde_json::Value::String);
+        if let Some(client_id_url) = media.solid.client_id_url.clone() {
+            response["solid"]["clientIdUrl"] = serde_json::Value::String(client_id_url);
+        } else if let Some(solid) = response["solid"].as_object_mut() {
+            solid.remove("clientIdUrl");
+        }
         response["solid"]["redirectPath"] = serde_json::json!(media.solid.redirect_path);
         response["songId"]["maxConcurrentRuns"] =
             serde_json::json!(media.song_id_max_concurrent_runs);
@@ -32534,11 +32535,17 @@ fn slskd_options_json(
         response["integration"]["lastFm"]["enabled"] =
             serde_json::json!(config.integrations.lastfm.enabled);
         response["integration"]["lastFm"]["apiKey"] = serde_json::json!("*****");
+        let musicbrainz_timeout_seconds = config.integrations.musicbrainz.timeout_seconds;
+        let musicbrainz_timeout_seconds = if musicbrainz_timeout_seconds.fract() == 0.0 {
+            serde_json::json!(musicbrainz_timeout_seconds as i64)
+        } else {
+            serde_json::json!(musicbrainz_timeout_seconds)
+        };
         response["integration"]["musicBrainz"] = serde_json::json!({
             "baseUrl": config.integrations.musicbrainz.base_url,
             "retryAttempts": config.integrations.musicbrainz.retry_attempts,
             "timeout": format_timespan_hms(config.integrations.musicbrainz.timeout_seconds as i64),
-            "timeoutSeconds": config.integrations.musicbrainz.timeout_seconds,
+            "timeoutSeconds": musicbrainz_timeout_seconds,
             "userAgent": config.integrations.musicbrainz.user_agent,
         });
         response["integration"]["ntfy"] = serde_json::json!({
@@ -32613,10 +32620,10 @@ fn slskd_options_json(
             serde_json::json!(config.integrations.lidarr.import_mode);
         response["integration"]["lidarr"]["importReplaceExistingFiles"] =
             serde_json::json!(config.integrations.lidarr.import_replace_existing_files);
-        response["integration"]["lidarr"]["deleteRejectedDownloads"] =
-            serde_json::json!(config.integrations.lidarr.delete_rejected_downloads);
-        response["integration"]["lidarr"]["blacklistRejectedDownloads"] =
-            serde_json::json!(config.integrations.lidarr.blacklist_rejected_downloads);
+        if let Some(lidarr) = response["integration"]["lidarr"].as_object_mut() {
+            lidarr.remove("deleteRejectedDownloads");
+            lidarr.remove("blacklistRejectedDownloads");
+        }
     } else if let Some(username) = config.username.as_deref() {
         response["soulseek"]["username"] = serde_json::json!(username);
         response["soulseek"]["password"] = serde_json::json!("*****");
@@ -33848,6 +33855,19 @@ async fn apply_watched_controller_configuration(
                     state.config.controller_compatibility_target,
                 )
             });
+            if text.is_some() && parsed.is_none() {
+                // The frozen controller clears the current options projection
+                // when the watched YAML is syntactically invalid, while
+                // retaining the already-loaded runtime/share index until the
+                // next valid reload.  Do not leave the previous watched
+                // projection visible during that interval.
+                let mut overlay = state.options_overlay.write().await;
+                overlay.watched_yaml_effective = Some(serde_json::Value::Null);
+                overlay.watched_share_directories = Some(Vec::new());
+                overlay.watched_instance_name = Some(state.config.instance_name.clone());
+                overlay.watched_controller_swagger = Some(state.config.controller_swagger);
+                overlay.watched_dht = Some(state.config.advanced_networking.dht.clone());
+            }
             record_daemon_log(
                 state,
                 logging::LogLevel::Warn,
@@ -77634,7 +77654,6 @@ mod tests {
             serde_json::json!({
                 "enabled": true,
                 "portForwarding": true,
-                "selfHostedRelay": false,
                 "pollingInterval": 3456,
                 "gluetun": {
                     "version": 1,
@@ -107734,9 +107753,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rejected_watched_reload_retains_last_valid_options_projection() {
+    async fn syntactically_invalid_watched_reload_clears_current_options_projection() {
         let (state, _receiver) = test_state_with_env(MapEnv::default());
-        let valid = "soulseek:\n  description: retained description\n";
+        let valid = "shares:\n  directories:\n    - '[Valid]/tmp/valid-share'\n";
         fs::write(state.config.state_dir.join("slskd.yml"), valid).unwrap();
         super::apply_watched_controller_configuration(
             &state,
@@ -107761,7 +107780,7 @@ mod tests {
             true,
         ))
         .unwrap();
-        assert_eq!(current["soulseek"]["description"], "retained description");
+        assert_eq!(current["shares"]["directories"], serde_json::json!([]));
         assert!(state
             .controller_options_validation_error
             .read()
