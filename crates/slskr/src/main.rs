@@ -42935,7 +42935,16 @@ async fn mediacore_extended_response(path: &str, state: &AppState) -> HttpRespon
         .collect::<Vec<_>>();
     let published_descriptors = controller_features.values_with_prefix("mediacore/descriptor/");
     let ipld_link_records = controller_features.values_with_prefix("mediacore/ipld/");
+    let mediacore_metrics = controller_features.values_with_prefix("mediacore/metrics/");
     drop(controller_features);
+    let metric_sum = |operation: &str, field: &str| -> u64 {
+        mediacore_metrics
+            .iter()
+            .filter(|metric| metric["operation"].as_str() == Some(operation))
+            .filter_map(|metric| metric["value"][field].as_u64())
+            .sum()
+    };
+    let metric_count = |operation: &str| -> u64 { metric_sum(operation, "count") };
     let mappings = discovery
         .hash_entries()
         .len()
@@ -42953,78 +42962,121 @@ async fn mediacore_extended_response(path: &str, state: &AppState) -> HttpRespon
         registered_domains.insert("music".to_owned());
     }
     let domains = registered_domains.len();
-    let descriptors = library
-        .records
-        .len()
-        .saturating_add(published_descriptors.len());
-    let shared_files = shares.entries.len();
+    let descriptors = published_descriptors.len();
+    let mut mappings_by_domain = BTreeMap::<String, usize>::new();
+    let mut mappings_by_type = BTreeMap::<String, usize>::new();
+    for content_id in registered_mappings
+        .iter()
+        .map(|(_, content_id)| content_id.as_str())
+        .chain(
+            discovery
+                .hash_entries()
+                .iter()
+                .filter(|entry| !entry.music_brainz_id.is_empty())
+                .map(|_| "content:music:recording:musicbrainz"),
+        )
+    {
+        let parts = content_id.split(':').collect::<Vec<_>>();
+        if parts.len() == 4 && parts[0].eq_ignore_ascii_case("content") {
+            *mappings_by_domain.entry(parts[1].to_owned()).or_default() += 1;
+            *mappings_by_type.entry(parts[2].to_owned()).or_default() += 1;
+        }
+    }
+    let total_retrievals = metric_sum("retrieve", "count");
+    let cache_hits = metric_sum("retrieve", "hits");
+    let cache_misses = metric_sum("retrieve", "misses");
+    let cache_size_bytes = published_descriptors
+        .iter()
+        .filter_map(|descriptor| serde_json::to_vec(descriptor).ok())
+        .map(|descriptor| descriptor.len() as u64)
+        .sum::<u64>();
+    let total_fuzzy_matches = metric_count("fuzzy");
+    let successful_fuzzy_matches = metric_sum("fuzzy", "successes");
+    let total_ipld_links = ipld_link_records
+        .iter()
+        .map(|record| {
+            record["linkCount"]
+                .as_u64()
+                .or_else(|| record["links"].as_array().map(|links| links.len() as u64))
+                .unwrap_or(0)
+        })
+        .sum::<u64>();
+    let total_ipld_graphs = ipld_link_records.len() as u64;
+    let total_perceptual_hashes = metric_count("perceptual-hash");
+    let total_imports = metric_sum("portability", "imports");
+    let successful_imports = metric_sum("portability", "successfulImports");
+    let total_exports = metric_sum("portability", "exports");
+    let total_data_transferred = metric_sum("portability", "dataTransferred");
+    let total_published = published_descriptors.len() as u64;
+    let successful_publishes = metric_sum("publish", "count");
+    let republished_descriptors = metric_sum("publish", "republished");
     let registry = serde_json::json!({
         "totalMappings": mappings,
         "totalDomains": domains,
-        "mappingsByDomain": if domains == 0 { serde_json::json!({}) } else { serde_json::json!({"Music": mappings}) },
-        "mappingsByType": if mappings == 0 { serde_json::json!({}) } else { serde_json::json!({"Recording": mappings}) },
+        "mappingsByDomain": mappings_by_domain,
+        "mappingsByType": mappings_by_type,
         "lastUpdated": chrono::Utc::now().to_rfc3339(),
         "averageMappingsPerDomain": if domains == 0 { 0.0 } else { mappings as f64 / domains as f64 },
     });
     let descriptor_stats = serde_json::json!({
-        "totalRetrievals": 0,
-        "cacheHits": 0,
-        "cacheMisses": 0,
-        "cacheHitRatio": 0,
+        "totalRetrievals": total_retrievals,
+        "cacheHits": cache_hits,
+        "cacheMisses": cache_misses,
+        "cacheHitRatio": if total_retrievals == 0 { 0.0 } else { cache_hits as f64 / total_retrievals as f64 },
         "averageRetrievalTime": "00:00:00",
         "activeCacheEntries": descriptors,
-        "cacheSizeBytes": 0,
+        "cacheSizeBytes": cache_size_bytes,
         "expiredEntriesCleaned": 0,
         "lastCacheCleanup": chrono::Utc::now().to_rfc3339(),
         "retrievalsByDomain": {},
     });
     let fuzzy = serde_json::json!({
-        "totalMatches": 0,
-        "successfulMatches": 0,
-        "successRate": 0,
+        "totalMatches": total_fuzzy_matches,
+        "successfulMatches": successful_fuzzy_matches,
+        "successRate": if total_fuzzy_matches == 0 { 0.0 } else { successful_fuzzy_matches as f64 / total_fuzzy_matches as f64 },
         "averageMatchingTime": "00:00:00",
         "accuracyByAlgorithm": {},
         "matchesByDomain": {},
-        "averageConfidenceScore": 0,
+        "averageConfidenceScore": if total_fuzzy_matches == 0 { 0.0 } else { metric_sum("fuzzy", "confidence") as f64 / total_fuzzy_matches as f64 },
     });
     let ipld = serde_json::json!({
-        "totalLinks": mappings,
-        "totalNodes": mappings,
-        "totalGraphs": domains,
+        "totalLinks": total_ipld_links,
+        "totalNodes": total_ipld_links.saturating_add(total_ipld_graphs),
+        "totalGraphs": total_ipld_graphs,
         "linksByType": {},
         "graphsByRoot": {},
         "brokenLinksDetected": 0,
         "orphanedNodes": 0,
         "averageTraversalTime": "00:00:00",
-        "graphConnectivityRatio": if mappings == 0 { 0.0 } else { 1.0 },
+        "graphConnectivityRatio": if total_ipld_graphs == 0 { 0.0 } else { 1.0 },
     });
     let perceptual = serde_json::json!({
-        "totalHashesComputed": mappings,
+        "totalHashesComputed": total_perceptual_hashes,
         "averageComputationTime": "00:00:00",
         "statsByAlgorithm": {},
         "overallAccuracy": 0,
-        "hashesByContentType": if mappings == 0 { serde_json::json!({}) } else { serde_json::json!({"audio": mappings}) },
+        "hashesByContentType": if total_perceptual_hashes == 0 { serde_json::json!({}) } else { serde_json::json!({"audio": total_perceptual_hashes}) },
         "duplicateHashesDetected": 0,
     });
     let portability = serde_json::json!({
-        "totalExports": 0,
-        "totalImports": 0,
-        "successfulImports": 0,
-        "importSuccessRate": 0,
+        "totalExports": total_exports,
+        "totalImports": total_imports,
+        "successfulImports": successful_imports,
+        "importSuccessRate": if total_imports == 0 { 0.0 } else { successful_imports as f64 / total_imports as f64 },
         "conflictsByType": {},
         "resolutionsUsed": {"Merge": 0, "Overwrite": 0, "Skip": 0, "KeepExisting": 0},
         "averageExportTime": "00:00:00",
         "averageImportTime": "00:00:00",
-        "totalDataTransferred": 0,
+        "totalDataTransferred": total_data_transferred,
     });
     let publishing = serde_json::json!({
-        "totalPublished": shared_files,
-        "activePublications": shared_files,
+        "totalPublished": total_published,
+        "activePublications": total_published,
         "expiredPublications": 0,
-        "publicationSuccessRate": if shared_files == 0 { 0.0 } else { 1.0 },
-        "publicationsByDomain": if shared_files == 0 { serde_json::json!({}) } else { serde_json::json!({"Music": shared_files}) },
+        "publicationSuccessRate": if successful_publishes == 0 { 0.0 } else { 1.0 },
+        "publicationsByDomain": if total_published == 0 { serde_json::json!({}) } else { serde_json::json!({"Music": total_published}) },
         "averagePublishTime": "00:00:00",
-        "republishedDescriptors": 0,
+        "republishedDescriptors": republished_descriptors,
         "failedPublications": 0,
         "recentErrors": {},
     });
@@ -43296,8 +43348,8 @@ async fn mediacore_extended_response(path: &str, state: &AppState) -> HttpRespon
             ]
         }),
         "/api/mediacore/publish/stats" => serde_json::json!({
-            "totalPublishedDescriptors": shared_files,
-            "activePublications": shared_files,
+            "totalPublishedDescriptors": total_published,
+            "activePublications": total_published,
             "expiringSoon": 0,
             "lastPublishOperation": chrono::Utc::now().to_rfc3339(),
             "publicationsByDomain": publishing["publicationsByDomain"],
@@ -49860,6 +49912,12 @@ async fn mediacore_mutation_response(
                     })
             }
         };
+        let _ = record_mediacore_metric(
+            state,
+            "perceptual-hash",
+            serde_json::json!({"algorithm": algorithm, "count": 1}),
+        )
+        .await;
         return Some(routing::ok_response(
             serde_json::json!({
                 "algorithm": algorithm,
@@ -49908,6 +49966,16 @@ async fn mediacore_mutation_response(
         };
         let distance = (left_hash ^ right_hash).count_ones();
         let similarity = 1.0 - f64::from(distance) / 64.0;
+        let _ = record_mediacore_metric(
+            state,
+            "fuzzy",
+            serde_json::json!({
+                "count": 1,
+                "successes": 1,
+                "confidence": similarity,
+            }),
+        )
+        .await;
         return Some(routing::ok_response(
             serde_json::json!({
                 "hashA": normalized_left,
@@ -50014,6 +50082,16 @@ async fn mediacore_mutation_response(
         });
         matches.truncate(usize::try_from(max_results).unwrap_or(usize::MAX));
         let total_candidates = candidates.len();
+        let _ = record_mediacore_metric(
+            state,
+            "fuzzy",
+            serde_json::json!({
+                "count": matches.len(),
+                "successes": matches.len(),
+                "confidence": matches.iter().filter_map(|value| value["confidence"].as_f64()).sum::<f64>(),
+            }),
+        )
+        .await;
         return Some(routing::ok_response(
             serde_json::json!({
                 "targetContentId": content_id,
@@ -50063,6 +50141,16 @@ async fn mediacore_mutation_response(
                 .values_with_prefix("mediacore/descriptor/");
             let similarity =
                 descriptor_perceptual_similarity(left.trim(), right.trim(), &descriptors);
+            let _ = record_mediacore_metric(
+                state,
+                "fuzzy",
+                serde_json::json!({
+                    "count": 1,
+                    "successes": usize::from(similarity >= threshold),
+                    "confidence": similarity,
+                }),
+            )
+            .await;
             return Some(routing::ok_response(
                 serde_json::json!({
                     "contentIdA": left.trim(),
@@ -50078,13 +50166,20 @@ async fn mediacore_mutation_response(
         let right = right.trim();
         let levenshtein = levenshtein_similarity(left, right);
         let phonetic = phonetic_similarity(left, right);
+        let combined = levenshtein * 0.7 + phonetic * 0.3;
+        let _ = record_mediacore_metric(
+            state,
+            "fuzzy",
+            serde_json::json!({"count": 1, "successes": 1, "confidence": combined}),
+        )
+        .await;
         return Some(routing::ok_response(
             serde_json::json!({
                 "textA": left,
                 "textB": right,
                 "levenshteinSimilarity": levenshtein,
                 "phoneticSimilarity": phonetic,
-                "combinedSimilarity": levenshtein * 0.7 + phonetic * 0.3,
+                "combinedSimilarity": combined,
             })
             .to_string(),
         ));
@@ -50118,12 +50213,19 @@ async fn mediacore_mutation_response(
                 "Each link requires a non-empty name and target",
             ));
         }
+        let link_count = links.len();
         let value = serde_json::json!({
             "contentId": decoded_path_segment(content_id),
             "links": links,
-            "linkCount": links.len(),
+            "linkCount": link_count,
             "updatedAt": unix_timestamp(),
         });
+        let _ = record_mediacore_metric(
+            state,
+            "ipld",
+            serde_json::json!({"count": link_count, "nodes": link_count.saturating_add(1)}),
+        )
+        .await;
         let key = format!("mediacore/ipld/{}", decoded_path_segment(content_id));
         return Some(
             match state
@@ -50177,16 +50279,72 @@ async fn mediacore_mutation_response(
             Err(_) => return Some(routing::bad_request_response("invalid JSON body")),
         };
         if let Some(content_id) = route_id {
-            let Some(_updates) = request.get("updates").filter(|value| value.is_object()) else {
+            let Some(updates) = request
+                .get("updates")
+                .and_then(serde_json::Value::as_object)
+            else {
                 return Some(routing::bad_request_response("Updates are required"));
             };
             let key = format!("mediacore/descriptor/{content_id}");
-            let features = state.controller_features.read().await;
-            let Some(_existing) = features.get(&key) else {
+            let Some(mut descriptor) = state.controller_features.read().await.get(&key).cloned()
+            else {
                 return Some(routing::bad_request_response("Failed to update descriptor"));
             };
-            drop(features);
-            return Some(routing::bad_request_response("Failed to update descriptor"));
+            let previous_version = descriptor
+                .get("version")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned);
+            let updated_at = chrono::Utc::now();
+            {
+                let Some(descriptor_object) = descriptor.as_object_mut() else {
+                    return Some(routing::bad_request_response("Failed to update descriptor"));
+                };
+                for (field, value) in updates {
+                    descriptor_object.insert(field.clone(), value.clone());
+                }
+                descriptor_object.insert("contentId".to_owned(), serde_json::json!(content_id));
+                descriptor_object.insert(
+                    "updatedAt".to_owned(),
+                    serde_json::json!(updated_at.to_rfc3339()),
+                );
+            }
+            let version = format!(
+                "{}-{}",
+                updated_at.timestamp_millis(),
+                &hex::encode(Sha256::digest(descriptor.to_string().as_bytes()))[..8]
+            );
+            if let Some(descriptor_object) = descriptor.as_object_mut() {
+                descriptor_object.insert("version".to_owned(), serde_json::json!(version));
+            }
+            let upsert_result = state
+                .controller_features
+                .write()
+                .await
+                .upsert(key, descriptor);
+            return Some(match upsert_result {
+                Ok(()) => {
+                    let _ = record_mediacore_metric(
+                        state,
+                        "publish",
+                        serde_json::json!({"count": 1, "updated": 1}),
+                    )
+                    .await;
+                    routing::ok_response(
+                        serde_json::json!({
+                            "success": true,
+                            "contentId": content_id,
+                            "version": version,
+                            "publishedAt": updated_at.to_rfc3339(),
+                            "ttl": "01:00:00",
+                            "errorMessage": null,
+                            "wasUpdated": true,
+                            "previousVersion": previous_version,
+                        })
+                        .to_string(),
+                    )
+                }
+                Err(error) => routing::service_unavailable_response(&error),
+            });
         }
         let Some(mut descriptor) = request
             .get("descriptor")
@@ -50239,14 +50397,20 @@ async fn mediacore_mutation_response(
             &hex::encode(Sha256::digest(version_seed.as_bytes()))[..8]
         );
         let key = format!("mediacore/descriptor/{content_id}");
-        return Some(
-            match state
-                .controller_features
-                .write()
-                .await
-                .upsert(key, descriptor.clone())
-            {
-                Ok(()) => routing::ok_response(
+        let upsert_result = state
+            .controller_features
+            .write()
+            .await
+            .upsert(key, descriptor.clone());
+        return Some(match upsert_result {
+            Ok(()) => {
+                let _ = record_mediacore_metric(
+                    state,
+                    "publish",
+                    serde_json::json!({"count": 1, "updated": 0}),
+                )
+                .await;
+                routing::ok_response(
                     serde_json::json!({
                         "success": true,
                         "contentId": content_id,
@@ -50258,10 +50422,10 @@ async fn mediacore_mutation_response(
                         "previousVersion": null,
                     })
                     .to_string(),
-                ),
-                Err(error) => routing::service_unavailable_response(&error),
-            },
-        );
+                )
+            }
+            Err(error) => routing::service_unavailable_response(&error),
+        });
     }
     if path == "/api/mediacore/publish/batch" {
         let descriptors = serde_json::from_str::<serde_json::Value>(body)
@@ -50309,6 +50473,13 @@ async fn mediacore_mutation_response(
             }
             stored.push(descriptor);
         }
+        drop(features);
+        let _ = record_mediacore_metric(
+            state,
+            "publish",
+            serde_json::json!({"count": stored.len(), "updated": 0}),
+        )
+        .await;
         return Some(routing::ok_response(
             serde_json::json!({"published": stored.len(), "descriptors": stored}).to_string(),
         ));
@@ -50346,10 +50517,16 @@ async fn mediacore_mutation_response(
                 })
                 .count()
         });
+        let _ = record_mediacore_metric(
+            state,
+            "publish",
+            serde_json::json!({"count": still_valid, "republished": still_valid}),
+        )
+        .await;
         return Some(routing::ok_response(
             serde_json::json!({
                 "totalChecked": total_checked,
-                "republished": 0,
+                "republished": still_valid,
                 "failed": 0,
                 "stillValid": still_valid,
                 "duration": "00:00:00",
@@ -50376,6 +50553,15 @@ async fn mediacore_mutation_response(
             .filter_map(serde_json::Value::as_str)
             .filter_map(|id| features.get(&format!("mediacore/descriptor/{id}")).cloned())
             .collect::<Vec<_>>();
+        let hits = descriptors.len();
+        let misses = ids.len().saturating_sub(hits);
+        drop(features);
+        let _ = record_mediacore_metric(
+            state,
+            "retrieve",
+            serde_json::json!({"count": ids.len(), "hits": hits, "misses": misses}),
+        )
+        .await;
         return Some(routing::ok_response(
             serde_json::json!({"descriptors": descriptors, "count": descriptors.len()}).to_string(),
         ));
@@ -50422,6 +50608,16 @@ async fn mediacore_mutation_response(
                         !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_hexdigit())
                     })
         });
+        let _ = record_mediacore_metric(
+            state,
+            "retrieve",
+            serde_json::json!({
+                "count": 1,
+                "hits": usize::from(has_hashes && signature_valid),
+                "misses": usize::from(!(has_hashes && signature_valid)),
+            }),
+        )
+        .await;
         return Some(routing::ok_response(
             serde_json::json!({
                 "isValid": has_hashes && signature_valid,
@@ -50535,9 +50731,17 @@ async fn mediacore_mutation_response(
                             })
                     })
                     .collect::<Vec<_>>();
+                let exported_count = entries.len();
+                drop(features);
                 let checksum = hex::encode(Sha256::digest(
                     serde_json::to_vec(&entries).unwrap_or_default(),
                 ));
+                let _ = record_mediacore_metric(
+                    state,
+                    "portability",
+                    serde_json::json!({"exports": 1, "dataTransferred": exported_count}),
+                )
+                .await;
                 routing::ok_response(
                     serde_json::json!({
                         "version": "1.0",
@@ -50546,7 +50750,7 @@ async fn mediacore_mutation_response(
                         "entries": entries,
                         "links": [],
                         "metadata": {
-                            "totalEntries": entries.len(),
+                            "totalEntries": exported_count,
                             "totalLinks": 0,
                             "entriesByDomain": {},
                             "checksum": checksum,
@@ -50564,16 +50768,123 @@ async fn mediacore_mutation_response(
                 let entries = package
                     .get("entries")
                     .and_then(serde_json::Value::as_array)
-                    .map_or(0, Vec::len);
+                    .cloned()
+                    .unwrap_or_default();
+                if entries.is_empty() {
+                    return Some(routing::ok_response(
+                        serde_json::json!({
+                            "success": true,
+                            "entriesProcessed": 0,
+                            "entriesImported": 0,
+                            "entriesSkipped": 0,
+                            "conflictsResolved": 0,
+                            "conflicts": [],
+                            "errors": [],
+                            "duration": "00:00:00",
+                        })
+                        .to_string(),
+                    ));
+                }
+                let strategy = payload
+                    .get("strategy")
+                    .or_else(|| package.get("strategy"))
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("Merge")
+                    .trim()
+                    .to_ascii_lowercase();
+                if !matches!(
+                    strategy.as_str(),
+                    "merge" | "overwrite" | "skip" | "keepexisting"
+                ) {
+                    return Some(routing::bad_request_response("Unsupported import strategy"));
+                }
+                let mut imported = 0_usize;
+                let mut skipped = 0_usize;
+                let mut conflicts = 0_usize;
+                let mut errors = Vec::new();
+                let mut features = state.controller_features.write().await;
+                for entry in entries.iter().take(1_000) {
+                    let descriptor = entry
+                        .get("descriptor")
+                        .filter(|value| value.is_object())
+                        .unwrap_or(entry);
+                    let Some(content_id) = descriptor
+                        .get("contentId")
+                        .or_else(|| entry.get("contentId"))
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                    else {
+                        errors.push("Each import entry requires a ContentID".to_owned());
+                        continue;
+                    };
+                    let key = format!("mediacore/descriptor/{content_id}");
+                    let existing = features.get(&key).cloned();
+                    let mut candidate = descriptor.clone();
+                    if let Some(existing) = existing {
+                        conflicts = conflicts.saturating_add(1);
+                        match strategy.as_str() {
+                            "skip" | "keepexisting" => {
+                                skipped = skipped.saturating_add(1);
+                                continue;
+                            }
+                            "merge" => {
+                                let Some(existing) = existing.as_object() else {
+                                    errors.push(format!(
+                                        "Descriptor {content_id} is not a JSON object"
+                                    ));
+                                    continue;
+                                };
+                                let Some(candidate_object) = candidate.as_object() else {
+                                    errors.push(format!(
+                                        "Descriptor {content_id} is not a JSON object"
+                                    ));
+                                    continue;
+                                };
+                                let mut merged = existing.clone();
+                                for (field, value) in candidate_object {
+                                    merged.insert(field.clone(), value.clone());
+                                }
+                                candidate = serde_json::Value::Object(merged);
+                            }
+                            "overwrite" => {}
+                            _ => unreachable!("import strategy validated above"),
+                        }
+                    }
+                    if let Some(candidate) = candidate.as_object_mut() {
+                        candidate.insert("contentId".to_owned(), serde_json::json!(content_id));
+                        candidate.insert(
+                            "importedAt".to_owned(),
+                            serde_json::json!(chrono::Utc::now().to_rfc3339()),
+                        );
+                    }
+                    if let Err(error) = features.upsert(key, candidate) {
+                        return Some(routing::service_unavailable_response(&error));
+                    }
+                    imported = imported.saturating_add(1);
+                }
+                drop(features);
+                let _ = record_mediacore_metric(
+                    state,
+                    "portability",
+                    serde_json::json!({
+                        "imports": 1,
+                        "successfulImports": usize::from(errors.is_empty()),
+                        "entriesImported": imported,
+                        "entriesSkipped": skipped,
+                        "dataTransferred": entries.len(),
+                    }),
+                )
+                .await;
                 routing::ok_response(
                     serde_json::json!({
-                        "success": true,
-                        "entriesProcessed": entries,
-                        "entriesImported": 0,
-                        "entriesSkipped": 0,
-                        "conflictsResolved": 0,
+                        "success": errors.is_empty(),
+                        "entriesProcessed": entries.len().min(1_000),
+                        "entriesImported": imported,
+                        "entriesSkipped": skipped,
+                        "conflictsResolved": conflicts.saturating_sub(skipped),
                         "conflicts": [],
-                        "errors": [],
+                        "errors": errors,
                         "duration": "00:00:00",
                     })
                     .to_string(),
@@ -50583,11 +50894,43 @@ async fn mediacore_mutation_response(
         });
     }
     if path == "/api/mediacore/stats/reset" {
-        return Some(routing::ok_response(
-            serde_json::json!({"message": "Statistics reset successfully"}).to_string(),
-        ));
+        return Some(
+            match state
+                .controller_features
+                .write()
+                .await
+                .remove_prefix("mediacore/metrics/")
+            {
+                Ok(_) => routing::ok_response(
+                    serde_json::json!({"message": "Statistics reset successfully"}).to_string(),
+                ),
+                Err(error) => routing::service_unavailable_response(&error),
+            },
+        );
     }
     None
+}
+
+/// Persist bounded MediaCore operation counters alongside the feature state.
+/// The sibling keeps these counters in its MediaCore services; using the
+/// existing atomic feature store gives slskR the same restart-visible API
+/// behavior without introducing a second persistence backend.
+async fn record_mediacore_metric(
+    state: &AppState,
+    operation: &str,
+    value: serde_json::Value,
+) -> Result<(), String> {
+    let id = uuid::Uuid::new_v4().simple().to_string();
+    let record = serde_json::json!({
+        "operation": operation,
+        "recordedAt": unix_timestamp_millis(),
+        "value": value,
+    });
+    state
+        .controller_features
+        .write()
+        .await
+        .upsert(format!("mediacore/metrics/{id}"), record)
 }
 
 fn dynamic_podcore_get_route(path: &str) -> bool {
@@ -93692,6 +94035,121 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(reset.body, r#"{"message":"Statistics reset successfully"}"#);
+    }
+
+    #[tokio::test]
+    async fn mediacore_descriptor_updates_imports_and_stats_use_real_records() {
+        let (state, _receiver) = test_state();
+        let content_id = "content:test:recording:real";
+        let descriptor = serde_json::json!({
+            "contentId": content_id,
+            "title": "before",
+            "hashes": [{"algorithm": "sha256", "hex": "aaaa"}],
+            "signature": {"publicKey": "key", "signature": "signature"},
+        });
+        let published = super::route_http_request(
+            "POST",
+            "/api/v0/mediacore/publish/descriptor",
+            None,
+            &serde_json::json!({"descriptor": descriptor}).to_string(),
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(published.status, "200 OK", "{}", published.body);
+
+        let updated = super::route_http_request(
+            "PUT",
+            &format!("/api/v0/mediacore/publish/descriptor/{content_id}"),
+            None,
+            r#"{"updates":{"title":"after","genre":"ambient"}}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        let updated_json = serde_json::from_str::<serde_json::Value>(&updated.body).unwrap();
+        assert_eq!(updated.status, "200 OK", "{}", updated.body);
+        assert_eq!(updated_json["wasUpdated"], true);
+        assert!(updated_json["version"]
+            .as_str()
+            .is_some_and(|value| !value.is_empty()));
+
+        let retrieved = super::route_http_request(
+            "POST",
+            "/api/v0/mediacore/retrieve/batch",
+            None,
+            &serde_json::json!({"contentIds":[content_id,"content:test:recording:missing"]})
+                .to_string(),
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(retrieved.status, "200 OK", "{}", retrieved.body);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&retrieved.body).unwrap()["count"],
+            1
+        );
+
+        let stats =
+            super::route_http_request("GET", "/api/v0/mediacore/retrieve/stats", None, "", &state)
+                .await
+                .unwrap();
+        let stats = serde_json::from_str::<serde_json::Value>(&stats.body).unwrap();
+        assert_eq!(stats["totalRetrievals"], 2);
+        assert_eq!(stats["cacheHits"], 1);
+        assert_eq!(stats["cacheMisses"], 1);
+
+        let imported = super::route_http_request(
+            "POST",
+            "/api/v0/mediacore/portability/import",
+            None,
+            &serde_json::json!({
+                "package": {
+                    "entries": [{
+                        "contentId": "content:test:recording:imported",
+                        "descriptor": {
+                            "contentId": "content:test:recording:imported",
+                            "title": "imported",
+                            "hashes": [{"algorithm": "sha256", "hex": "bbbb"}]
+                        }
+                    }]
+                }
+            })
+            .to_string(),
+            &state,
+        )
+        .await
+        .unwrap();
+        let imported = serde_json::from_str::<serde_json::Value>(&imported.body).unwrap();
+        assert_eq!(imported["success"], true);
+        assert_eq!(imported["entriesProcessed"], 1);
+        assert_eq!(imported["entriesImported"], 1);
+
+        let publishing = super::route_http_request(
+            "GET",
+            "/api/v0/mediacore/stats/publishing",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        let publishing = serde_json::from_str::<serde_json::Value>(&publishing.body).unwrap();
+        assert_eq!(publishing["totalPublished"], 2);
+
+        let reset =
+            super::route_http_request("POST", "/api/v0/mediacore/stats/reset", None, "", &state)
+                .await
+                .unwrap();
+        assert_eq!(reset.body, r#"{"message":"Statistics reset successfully"}"#);
+        let stats =
+            super::route_http_request("GET", "/api/v0/mediacore/retrieve/stats", None, "", &state)
+                .await
+                .unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&stats.body).unwrap()["totalRetrievals"],
+            0
+        );
     }
 
     #[tokio::test]
