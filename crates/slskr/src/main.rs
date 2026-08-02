@@ -15622,6 +15622,13 @@ async fn route_http_request_with_headers(
         ("GET", "/health/mesh") => Ok(mesh_health_response(&state.config)),
         ("HEAD", "/health/mesh") => Ok(head_response(mesh_health_response(&state.config))),
         ("GET", "/api/version") => Ok(version_response()),
+        ("GET", "/api/capabilities")
+            if state.config.controller_compatibility_target
+                == ControllerCompatibilityTarget::Slskdn
+                && matches!(route.path, "/api/slskdn/capabilities" | "/api/v0/slskdn/capabilities") =>
+        {
+            Ok(slskdn_capabilities_response(state).await)
+        }
         ("GET", "/api/capabilities") => Ok(capabilities_response()),
         ("GET", "/.well-known/webfinger") => {
             Ok(activitypub_webfinger_response(route.query, state).await)
@@ -28820,20 +28827,43 @@ async fn route_http_request_with_headers(
         }
 
         ("GET", "/api/slskdn/library/health") => {
-            let library = state.library.read().await;
-            let issues = library.health_issues();
-            let body = serde_json::json!({
-                "path": "",
-                "summary": {
-                    "totalItems": library.records.len(),
-                    "totalIssues": issues.len(),
-                    "healthy": issues.is_empty(),
+            let limit = match query_parameter(route.query, "limit") {
+                None => 100,
+                Some(value) => match value.parse::<i64>() {
+                    Ok(value) if (1..=250).contains(&value) => value as usize,
+                    _ => return Ok(routing::bad_request_response("limit must be between 1 and 250")),
                 },
-                "status": if issues.is_empty() { "healthy" } else { "issues" },
-                "items": library.records.len(),
+            };
+            let path_filter = query_parameter(route.query, "path")
+                .filter(|value| !value.trim().is_empty())
+                .map(|value| value.trim().to_owned());
+            let library = state.library.read().await;
+            let all_issues = library.health_issues();
+            let total_issues = all_issues.len();
+            let issues = all_issues
+                .into_iter()
+                .take(limit)
+                .map(|issue| {
+                    serde_json::json!({
+                        "type": "MissingMetadata",
+                        "file": "",
+                        "mb_recording_id": "",
+                        "reason": issue
+                            .get("message")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or("Library metadata is incomplete"),
+                        "severity": "Medium",
+                    })
+                })
+                .collect::<Vec<_>>();
+            let body = serde_json::json!({
+                "path": path_filter.unwrap_or_else(|| "(all)".to_owned()),
+                "summary": {
+                    "total_issues": total_issues,
+                    "issues_open": total_issues,
+                    "issues_resolved": 0,
+                },
                 "issues": issues,
-                "issueCount": issues.len(),
-                "updated_at": library.updated_at,
             }).to_string();
             drop(library);
             Ok(routing::ok_response(body))
@@ -32803,10 +32833,35 @@ fn slskd_debug_value(
                 return "System.Collections.Generic.List`1[slskd.Options+DestinationOption]"
                     .to_owned();
             }
-            "realm.governanceroots" => return "[]".to_owned(),
-            "realm.isvalid" => return "False".to_owned(),
-            "multirealm.realms" => return "[{\"Id\":\"default-realm-v1\",\"DisplayName\":null,\"Description\":null,\"GovernanceRoots\":[\"default-governance-root\"],\"BootstrapNodes\":[],\"Policies\":{\"GossipEnabled\":true,\"ReplicationEnabled\":true,\"MaxGossipHops\":3,\"GossipIntervalSeconds\":300,\"FederationAllowed\":true},\"IsValid\":true}]".to_owned(),
-            "multirealm.realmids" => return "System.Collections.Generic.HashSet`1[System.String]".to_owned(),
+            "realm.governanceroots" => {
+                return serde_json::to_string(&state.config.realm.governance_roots)
+                    .unwrap_or_default();
+            }
+            "realm.isvalid" => return "True".to_owned(),
+            "multirealm.realms" => {
+                return serde_json::json!([{
+                    "Id": state.config.realm.id.clone(),
+                    "DisplayName": serde_json::Value::Null,
+                    "Description": serde_json::Value::Null,
+                    "GovernanceRoots": state.config.realm.governance_roots.clone(),
+                    "BootstrapNodes": state.config.realm.bootstrap_nodes.clone(),
+                    "Policies": {
+                        "GossipEnabled": state.config.realm.gossip_enabled,
+                        "ReplicationEnabled": state.config.realm.replication_enabled,
+                        "MaxGossipHops": state.config.realm.max_gossip_hops,
+                        "GossipIntervalSeconds": state.config.realm.gossip_interval_seconds,
+                        "FederationAllowed": state.config.realm.federation_allowed,
+                    },
+                    "IsValid": true,
+                }])
+                .to_string();
+            }
+            "multirealm.realmids" => {
+                return format!(
+                    "System.Collections.Generic.HashSet`1[System.String]({})",
+                    state.config.realm.id
+                );
+            }
             "virtualsoulfind.capture.audioextensions"
             | "security.pathguard.blockedextensions"
             | "security.paranoidmode.blockedipranges"
@@ -36573,6 +36628,73 @@ fn slskd_application_state_json(
         "users": users.records.iter().map(|user| user.username.clone()).collect::<Vec<_>>(),
     })
     .to_string()
+}
+
+async fn slskdn_capabilities_response(state: &AppState) -> HttpResponse {
+    let media = state.media_services.read().await;
+    let mut features = vec![
+        "mbid_jobs",
+        "discography_jobs",
+        "label_crate_jobs",
+        "canonical_scoring",
+        "rescue_mode",
+        "library_health",
+        "warm_cache",
+        "job_manifests",
+        "session_traces",
+        "playback_aware",
+        "soulseek_type1_obfuscation_options",
+        "soulseek_type1_obfuscated_distributed_messages",
+        "soulseek_type1_obfuscated_file_transfers",
+    ];
+    if media.features.scene_pod_bridge {
+        features.push("scene_pod_bridge");
+    }
+    let config = &state.config;
+    let requested_listen_port =
+        (config.obfuscation_listen_port > 0).then_some(config.obfuscation_listen_port);
+    let effective_listen_port = config.obfuscated_advertised_port;
+    let mode = config.obfuscation_mode.as_str();
+    let limitations = vec![
+        "Type-1 obfuscation is a compatibility/privacy posture, not transport security or meaningful encryption.",
+        "Current runtime support covers peer-message (P), distributed-message (D), and file-transfer (F) streams.",
+        "Regular transfer paths remain advertised and available for legacy-client compatibility.",
+    ];
+    let summary = if config.obfuscation_enabled {
+        if mode == "prefer" && config.obfuscation_prefer_outbound {
+            "Prefer mode uses obfuscated peer/distributed/transfer dials when peers advertise type-1 metadata and keeps regular fallback."
+        } else {
+            "Compatibility mode keeps regular outbound peer/distributed/transfer dials first and adds obfuscated reachability."
+        }
+    } else {
+        "Soulseek type-1 peer/distributed/transfer obfuscation is disabled."
+    };
+    let body = serde_json::json!({
+        "impl": "slskdn",
+        "compat": "slskd",
+        "version": APP_VERSION,
+        "features": features,
+        "obfuscation": {
+            "enabled": config.obfuscation_enabled,
+            "mode": mode,
+            "type": 1,
+            "regularListenPort": config.listen_port,
+            "requestedListenPort": requested_listen_port,
+            "effectiveListenPort": effective_listen_port,
+            "advertiseRegularPort": config.obfuscation_advertise_regular_port,
+            "preferOutbound": mode == "prefer" && config.obfuscation_prefer_outbound,
+            "supportedConnectionTypes": ["P", "D", "F"],
+            "runtimeSupported": true,
+            "runtimeState": if config.obfuscation_enabled { "active" } else { "disabled" },
+            "summary": summary,
+            "limitations": limitations,
+        },
+        "feature": {
+            "scenePodBridge": media.features.scene_pod_bridge,
+        },
+    });
+    drop(media);
+    routing::ok_response(body.to_string())
 }
 
 fn capabilities_response() -> HttpResponse {
@@ -45187,11 +45309,18 @@ async fn feature_controller_mutation_response(
         let mut errors = Vec::new();
         if realm_id.trim().is_empty() {
             errors.push("Realm id is required.");
+        } else if !state
+            .realm_subject_indexes
+            .read()
+            .await
+            .is_same_realm(realm_id)
+        {
+            errors.push("Realm id does not match the local realm.");
         }
         if index_id.trim().is_empty() {
             errors.push("Index id is required.");
         }
-        if !is_safe_opaque_reference(&decided_by) {
+        if !realm_subject_index::is_safe_opaque_reference(&decided_by) {
             errors.push("Decided-by identifier must be opaque and safe.");
         }
         if note.chars().count() > 512 {
@@ -56344,7 +56473,11 @@ async fn serve(invocation: ServeInvocation) -> Result<(), String> {
 
     let content_discovery_store =
         content_discovery::ContentDiscoveryStore::load(&config.state_dir)?;
-    let realm_subject_index_store = realm_subject_index::Store::load(&config.state_dir)?;
+    let realm_subject_index_store = realm_subject_index::Store::load_with_identity(
+        &config.state_dir,
+        &config.realm.id,
+        config.realm.governance_roots.iter(),
+    )?;
     let controller_feature_state = ControllerFeatureState::load(&config.state_dir)?;
     let mut controller_options_state = ControllerOptionsOverlayState::load(&config)?;
     controller_options_state.command_line_environment = invocation.config_environment.clone();
@@ -78335,9 +78468,9 @@ mod tests {
     async fn realm_subject_indexes_persist_authority_and_compute_conflicts() {
         let (state, _receiver) = test_state();
         let index = |id: &str, subject: &str, title: &str, discogs: &str| {
-            serde_json::json!({
+            let mut index = serde_json::json!({
                 "id": id,
-                "realmId": "realm",
+                "realmId": super::realm_subject_index::DEFAULT_REALM_ID,
                 "subjectNamespace": "music",
                 "revision": 1,
                 "publishedAt": "2026-08-01T00:00:00Z",
@@ -78355,12 +78488,15 @@ mod tests {
                     "aliases": ["shared-alias"],
                 }],
                 "signature": {
-                    "signer": "governance-root",
+                    "signer": super::realm_subject_index::DEFAULT_GOVERNANCE_ROOT,
                     "algorithm": "realm-governance-sha256",
-                    "payloadHash": "fixture",
+                    "payloadHash": "",
                     "value": "signature",
                 },
-            })
+            });
+            index["signature"]["payloadHash"] =
+                serde_json::json!(super::realm_subject_index::compute_payload_hash(&index));
+            index
         };
         let merged = super::route_http_request(
             "POST",
@@ -78383,7 +78519,7 @@ mod tests {
 
         let indexes = super::route_http_request(
             "GET",
-            "/api/v0/realm-subject-indexes/realm",
+            "/api/v0/realm-subject-indexes/default-realm",
             None,
             "",
             &state,
@@ -78401,7 +78537,7 @@ mod tests {
 
         let conflicts = super::route_http_request(
             "GET",
-            "/api/v0/realm-subject-indexes/realm/conflicts",
+            "/api/v0/realm-subject-indexes/default-realm/conflicts",
             None,
             "",
             &state,
@@ -78453,7 +78589,7 @@ mod tests {
 
         let disabled = super::route_http_request(
             "POST",
-            "/api/v0/realm-subject-indexes/realm/index-b/authority-decision",
+            "/api/v0/realm-subject-indexes/default-realm/index-b/authority-decision",
             None,
             r#"{"enabled":false,"decidedBy":"operator","note":"conflicting authority"}"#,
             &state,
@@ -78463,7 +78599,7 @@ mod tests {
         assert_eq!(disabled.status, "200 OK", "{}", disabled.body);
         let disabled = super::route_http_request(
             "POST",
-            "/api/v0/realm-subject-indexes/realm/index-c/authority-decision",
+            "/api/v0/realm-subject-indexes/default-realm/index-c/authority-decision",
             None,
             r#"{"enabled":false,"decidedBy":"operator","note":"conflicting authority"}"#,
             &state,
@@ -78473,7 +78609,7 @@ mod tests {
         assert_eq!(disabled.status, "200 OK", "{}", disabled.body);
         let decisions = super::route_http_request(
             "GET",
-            "/api/v0/realm-subject-indexes/realm/authority-decisions",
+            "/api/v0/realm-subject-indexes/default-realm/authority-decisions",
             None,
             "",
             &state,
@@ -78491,7 +78627,7 @@ mod tests {
 
         let after_disable = super::route_http_request(
             "GET",
-            "/api/v0/realm-subject-indexes/realm/conflicts",
+            "/api/v0/realm-subject-indexes/default-realm/conflicts",
             None,
             "",
             &state,
@@ -78504,7 +78640,7 @@ mod tests {
 
         let missing_decision = super::route_http_request(
             "POST",
-            "/api/v0/realm-subject-indexes/realm/missing/authority-decision",
+            "/api/v0/realm-subject-indexes/default-realm/missing/authority-decision",
             None,
             r#"{"enabled":true,"decidedBy":"operator"}"#,
             &state,
@@ -93550,6 +93686,63 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn slskdn_native_capability_and_library_health_contracts_are_exact() {
+        let (state, _receiver) = test_state();
+
+        let capabilities =
+            super::route_http_request("GET", "/api/slskdn/capabilities", None, "", &state)
+                .await
+                .unwrap();
+        assert_eq!(capabilities.status, "200 OK", "{}", capabilities.body);
+        let capabilities = serde_json::from_str::<serde_json::Value>(&capabilities.body).unwrap();
+        assert_eq!(capabilities["impl"], "slskdn");
+        assert_eq!(capabilities["compat"], "slskd");
+        assert!(capabilities["features"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|feature| feature == "library_health"));
+        assert_eq!(capabilities["obfuscation"]["type"], 1);
+        assert_eq!(
+            capabilities["obfuscation"]["supportedConnectionTypes"],
+            serde_json::json!(["P", "D", "F"])
+        );
+
+        let health = super::route_http_request(
+            "GET",
+            "/api/slskdn/library/health?limit=1",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(health.status, "200 OK", "{}", health.body);
+        let health = serde_json::from_str::<serde_json::Value>(&health.body).unwrap();
+        assert_eq!(health["path"], "(all)");
+        assert_eq!(
+            health["summary"],
+            serde_json::json!({
+                "total_issues": 0,
+                "issues_open": 0,
+                "issues_resolved": 0,
+            })
+        );
+        assert!(health.get("issueCount").is_none());
+
+        let invalid = super::route_http_request(
+            "GET",
+            "/api/slskdn/library/health?limit=251",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(invalid.status, "400 Bad Request");
+    }
+
     #[test]
     fn dynamic_controller_route_patterns_cover_materialized_controller_paths() {
         for path in [
@@ -98456,7 +98649,7 @@ mod tests {
             "POST",
             "/api/v0/virtualsoulfind/shadow-index/sync/merge",
             None,
-            r#"{"records":[{"recordingId":"route-audit","peerIds":["peer-a"],"updatedAt":1}],"realmIndexes":[{"id":"index","realmId":"realm","subjectNamespace":"music","revision":1,"entries":[{"subjectId":"route-audit","workRef":{"domain":"music","title":"Route Audit","externalIds":{"musicbrainz:recording":"route-audit"}},"externalIds":{},"aliases":[]}],"signature":{"signer":"route-audit","value":"signature","payloadHash":"hash"}}]}"#,
+            r#"{"records":[{"recordingId":"route-audit","peerIds":["peer-a"],"updatedAt":1}],"realmIndexes":[{"id":"index","realmId":"default-realm","subjectNamespace":"music","revision":1,"entries":[{"subjectId":"route-audit","workRef":{"domain":"music","title":"Route Audit","externalIds":{"musicbrainz:recording":"route-audit"}},"externalIds":{},"aliases":[]}],"signature":{"signer":"default-governance","value":"signature","payloadHash":"a890273abd9ae483659d6b08c9bc83dd82cda93bdefc9c940412c91f2ccddcc6"}}]}"#,
             &state,
         )
         .await
@@ -98468,7 +98661,7 @@ mod tests {
         // IsSafeOpaqueReference check.
         let unsafe_decision = super::route_http_request(
             "POST",
-            "/api/v0/realm-subject-indexes/realm/index/authority-decision",
+            "/api/v0/realm-subject-indexes/default-realm/index/authority-decision",
             None,
             r#"{"enabled":true,"decidedBy":"/etc/passwd","note":"route-audit"}"#,
             &state,
@@ -98489,7 +98682,7 @@ mod tests {
         // (unversioned) regardless of input, as the old fake handlers did.
         let decision = super::route_http_request(
             "POST",
-            "/api/v0/realm-subject-indexes/realm/index/authority-decision",
+            "/api/v0/realm-subject-indexes/default-realm/index/authority-decision",
             None,
             r#"{"enabled":true,"decidedBy":"route-audit","note":"route-audit"}"#,
             &state,
@@ -101267,7 +101460,7 @@ mod tests {
                 .expect("slskdn library health");
         let slskdn_health_json =
             serde_json::from_str::<serde_json::Value>(&slskdn_health.body).unwrap();
-        assert_eq!(slskdn_health_json["issueCount"], 0);
+        assert_eq!(slskdn_health_json["summary"]["total_issues"], 0);
         let podcore_search = super::route_http_request(
             "GET",
             "/api/podcore/content/search?query=Release",

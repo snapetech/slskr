@@ -10,6 +10,8 @@ use rand::{rngs::SysRng, TryRng};
 use serde::{Deserialize, Deserializer, Serialize};
 use slskr_client::{protocol::peer::FileEntry, server::LoginCredentials};
 
+use crate::realm_subject_index::{DEFAULT_GOVERNANCE_ROOT, DEFAULT_REALM_ID};
+
 const MAX_CONFIG_FILE_BYTES: u64 = 1024 * 1024;
 const MAX_PRIVATE_MESSAGE_AUTO_RESPONSE_BYTES: usize = 4 * 1024;
 const MAX_COMPLETED_PATH_TEMPLATE_BYTES: usize = 4 * 1024;
@@ -57,6 +59,7 @@ pub struct AppConfig {
     pub core_workflow: CoreWorkflowSettings,
     pub advanced_networking: AdvancedNetworkingSettings,
     pub media_services: MediaAdvancedServiceSettings,
+    pub realm: RealmSettings,
     pub controller_web: ControllerWebSettings,
     pub controller_api_keys: BTreeMap<String, ControllerApiKeySettings>,
     pub listener_bind: Option<String>,
@@ -913,6 +916,7 @@ impl AppConfig {
             env,
             controller_compatibility_target,
         )?;
+        let realm = RealmSettings::from_layers(file_config.realm, env)?;
         let controller_headless =
             env_bool_layer(env, "SLSKD_HEADLESS", file_config.headless.unwrap_or(false))?;
         let controller_swagger = env_bool_layer(
@@ -1420,6 +1424,7 @@ impl AppConfig {
             core_workflow,
             advanced_networking,
             media_services,
+            realm,
             controller_web,
             controller_api_keys,
             listener_bind,
@@ -4325,6 +4330,9 @@ pub struct FileConfig {
     permissions: PermissionsFileConfig,
     telemetry: TelemetryFileConfig,
     retention: RetentionFileConfig,
+    realm: RealmFileConfig,
+    #[serde(rename = "multiRealm", alias = "multi_realm")]
+    multi_realm: MultiRealmFileConfig,
     filters: FiltersFileConfig,
     app: AppFileConfig,
     blacklist: ManagedBlacklistFileConfig,
@@ -4364,6 +4372,148 @@ pub struct FileConfig {
     virtual_soulfind_v2: VirtualSoulfindV2FileConfig,
     integrations: IntegrationsFileConfig,
     diagnostics: DiagnosticsFileConfig,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RealmSettings {
+    pub id: String,
+    pub governance_roots: Vec<String>,
+    pub bootstrap_nodes: Vec<String>,
+    pub gossip_enabled: bool,
+    pub replication_enabled: bool,
+    pub max_gossip_hops: u32,
+    pub gossip_interval_seconds: u64,
+    pub federation_allowed: bool,
+}
+
+impl RealmSettings {
+    fn from_layers<E: ConfigEnv>(file: RealmFileConfig, env: &E) -> Result<Self, String> {
+        let id = env
+            .var("SLSKR_REALM_ID")
+            .or_else(|| env.var("SLSKD_REALM_ID"))
+            .or(file.id)
+            .unwrap_or_else(|| DEFAULT_REALM_ID.to_owned())
+            .trim()
+            .to_owned();
+        if id.len() < 3
+            || id.len() > 64
+            || !id
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+            || id.starts_with('.')
+            || id.ends_with('.')
+            || id.contains("..")
+        {
+            return Err(
+                "realm.id must be 3-64 characters of letters, numbers, hyphens, underscores, or periods and may not contain consecutive periods".to_owned(),
+            );
+        }
+
+        let governance_roots = env
+            .var("SLSKR_REALM_GOVERNANCE_ROOTS")
+            .or_else(|| env.var("SLSKD_REALM_GOVERNANCE_ROOTS"))
+            .map(|roots| {
+                roots
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|root| !root.is_empty())
+                    .map(str::to_owned)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or(file.governance_roots);
+        if governance_roots.is_empty() || governance_roots.iter().any(|root| root.trim().is_empty())
+        {
+            return Err(
+                "realm.governanceRoots must contain at least one non-empty root".to_owned(),
+            );
+        }
+        let bootstrap_nodes = file
+            .bootstrap_nodes
+            .into_iter()
+            .map(|node| node.trim().to_owned())
+            .collect::<Vec<_>>();
+        if bootstrap_nodes.iter().any(String::is_empty) {
+            return Err("realm.bootstrapNodes cannot contain empty entries".to_owned());
+        }
+        if !(1..=10).contains(&file.policies.max_gossip_hops) {
+            return Err("realm.policies.maxGossipHops must be between 1 and 10".to_owned());
+        }
+        if !(30..=3600).contains(&file.policies.gossip_interval_seconds) {
+            return Err(
+                "realm.policies.gossipIntervalSeconds must be between 30 and 3600".to_owned(),
+            );
+        }
+        Ok(Self {
+            id,
+            governance_roots,
+            bootstrap_nodes,
+            gossip_enabled: file.policies.gossip_enabled,
+            replication_enabled: file.policies.replication_enabled,
+            max_gossip_hops: file.policies.max_gossip_hops,
+            gossip_interval_seconds: file.policies.gossip_interval_seconds,
+            federation_allowed: file.policies.federation_allowed,
+        })
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(default, deny_unknown_fields, rename_all = "camelCase")]
+struct RealmFileConfig {
+    id: Option<String>,
+    #[serde(alias = "governance_roots")]
+    governance_roots: Vec<String>,
+    #[serde(alias = "bootstrap_nodes")]
+    bootstrap_nodes: Vec<String>,
+    policies: RealmPoliciesFileConfig,
+}
+
+impl Default for RealmFileConfig {
+    fn default() -> Self {
+        Self {
+            id: Some(DEFAULT_REALM_ID.to_owned()),
+            governance_roots: vec![DEFAULT_GOVERNANCE_ROOT.to_owned()],
+            bootstrap_nodes: Vec::new(),
+            policies: RealmPoliciesFileConfig::default(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(default, deny_unknown_fields, rename_all = "camelCase")]
+struct RealmPoliciesFileConfig {
+    gossip_enabled: bool,
+    replication_enabled: bool,
+    max_gossip_hops: u32,
+    gossip_interval_seconds: u64,
+    federation_allowed: bool,
+}
+
+impl Default for RealmPoliciesFileConfig {
+    fn default() -> Self {
+        Self {
+            gossip_enabled: true,
+            replication_enabled: true,
+            max_gossip_hops: 3,
+            gossip_interval_seconds: 300,
+            federation_allowed: true,
+        }
+    }
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields, rename_all = "camelCase")]
+struct MultiRealmFileConfig {
+    realms: Vec<RealmFileConfig>,
+    bridge: MultiRealmBridgeFileConfig,
+    is_bridging_enabled: bool,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields, rename_all = "camelCase")]
+struct MultiRealmBridgeFileConfig {
+    enabled: bool,
+    allowed_flows: Vec<String>,
+    disallowed_flows: Vec<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
