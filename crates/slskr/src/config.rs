@@ -2052,9 +2052,11 @@ pub struct FeatureGateSettings {
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct SolidSettings {
     pub allow_insecure_http: bool,
+    pub allow_localhost_for_web_id: bool,
     pub max_fetch_bytes: usize,
     pub timeout: Duration,
     pub allowed_hosts: Vec<String>,
+    pub client_id_url: Option<String>,
     pub redirect_path: String,
 }
 
@@ -4629,12 +4631,16 @@ pub struct PlayerExternalVisualizerFileConfig {
 pub struct SolidFileConfig {
     #[serde(alias = "allowInsecureHttp")]
     allow_insecure_http: Option<bool>,
+    #[serde(alias = "allowLocalhostForWebId")]
+    allow_localhost_for_web_id: Option<bool>,
     #[serde(alias = "maxFetchBytes")]
     max_fetch_bytes: Option<usize>,
     #[serde(alias = "timeoutSeconds")]
     timeout_seconds: Option<u64>,
     #[serde(alias = "allowedHosts")]
     allowed_hosts: Option<Vec<String>>,
+    #[serde(alias = "clientIdUrl")]
+    client_id_url: Option<String>,
     #[serde(alias = "redirectPath")]
     redirect_path: Option<String>,
 }
@@ -5801,10 +5807,33 @@ impl MediaAdvancedServiceSettings {
             return Err("solid.allowedHosts contains an invalid hostname".to_owned());
         }
         let solid = SolidSettings {
-            allow_insecure_http: solid_file.allow_insecure_http.unwrap_or(false),
+            allow_insecure_http: env_bool_any_layer(
+                env,
+                &[
+                    "SLSKR_SOLID_ALLOW_INSECURE_HTTP",
+                    "SLSKD_SOLID_ALLOW_INSECURE_HTTP",
+                ],
+                solid_file.allow_insecure_http.unwrap_or(false),
+            )?,
+            allow_localhost_for_web_id: env_bool_any_layer(
+                env,
+                &[
+                    "SLSKR_SOLID_ALLOW_LOCALHOST_FOR_WEB_ID",
+                    "SLSKD_SOLID_ALLOW_LOCALHOST_FOR_WEB_ID",
+                    "SLSKD_SOLID_ALLOWLOCALHOSTFORWEBID",
+                ],
+                solid_file.allow_localhost_for_web_id.unwrap_or(false),
+            )?,
             max_fetch_bytes: solid_file.max_fetch_bytes.unwrap_or(1_000_000),
             timeout: Duration::from_secs(solid_file.timeout_seconds.unwrap_or(10)),
             allowed_hosts,
+            client_id_url: optional_env_any(
+                env,
+                &["SLSKR_SOLID_CLIENT_ID_URL", "SLSKD_SOLID_CLIENT_ID_URL"],
+            )
+            .or_else(|| solid_file.client_id_url.clone())
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty()),
             redirect_path: solid_file
                 .redirect_path
                 .clone()
@@ -7565,6 +7594,15 @@ const CONTROLLER_YAML_CORE_MAPPINGS: &[(&str, &str)] = &[
         "integrations.spotify.max_items_per_import",
         "SLSKD_SPOTIFY_MAX_ITEMS_PER_IMPORT",
     ),
+    (
+        "solid.allow_insecure_http",
+        "SLSKD_SOLID_ALLOW_INSECURE_HTTP",
+    ),
+    (
+        "solid.allow_localhost_for_web_id",
+        "SLSKD_SOLID_ALLOW_LOCALHOST_FOR_WEB_ID",
+    ),
+    ("solid.client_id_url", "SLSKD_SOLID_CLIENT_ID_URL"),
     ("integrations.youtube.enabled", "SLSKD_YOUTUBE"),
     ("integrations.youtube.api_key", "SLSKD_YOUTUBE_API_KEY"),
     ("integrations.lastfm.enabled", "SLSKD_LASTFM"),
@@ -12596,9 +12634,11 @@ player:
     name: Fixture Visualizer
 solid:
   allowInsecureHttp: true
+  allowLocalhostForWebId: true
   maxFetchBytes: 7654321
   timeoutSeconds: 23
   allowedHosts: [Pod.Example., identity.example]
+  clientIdUrl: https://solid.example/clientid.jsonld
   redirectPath: /fixture/callback
 song_id:
   max_concurrent_runs: 7
@@ -12661,6 +12701,7 @@ virtualSoulfind:
         assert_eq!(visualizer.name, "Fixture Visualizer");
 
         assert!(media.solid.allow_insecure_http);
+        assert!(media.solid.allow_localhost_for_web_id);
         assert_eq!(media.solid.max_fetch_bytes, 7_654_321);
         assert_eq!(media.solid.timeout.as_secs(), 23);
         assert_eq!(
@@ -12668,6 +12709,10 @@ virtualSoulfind:
             ["pod.example", "identity.example"]
         );
         assert_eq!(media.solid.redirect_path, "/fixture/callback");
+        assert_eq!(
+            media.solid.client_id_url.as_deref(),
+            Some("https://solid.example/clientid.jsonld")
+        );
         assert_eq!(media.song_id_max_concurrent_runs, 7);
 
         let bridge = &media.virtual_soulfind.bridge;

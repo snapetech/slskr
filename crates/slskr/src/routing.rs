@@ -58,6 +58,7 @@ pub fn check_route_auth(
         || (method == "GET"
             && normalized.starts_with("/api/share-grants/")
             && normalized.ends_with("/manifest"));
+    let public_solid_client_id = method == "GET" && normalized == "/solid/clientid.jsonld";
 
     if config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
         && !config.auth_required
@@ -67,7 +68,7 @@ pub fn check_route_auth(
         return Err("unauthorized");
     }
 
-    if !delegated_share_route {
+    if !delegated_share_route && !public_solid_client_id {
         authorize_controller_route_from(
             config,
             method,

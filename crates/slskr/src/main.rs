@@ -26167,7 +26167,11 @@ async fn route_http_request_with_headers(
               let media = state.media_services.read().await;
               Ok(routing::ok_response(serde_json::json!({
                   "enabled": true,
-                  "clientId": "/solid/clientid.jsonld",
+                  "clientId": media
+                      .solid
+                      .client_id_url
+                      .clone()
+                      .unwrap_or_else(|| "/solid/clientid.jsonld".to_owned()),
                   "redirectPath": media.solid.redirect_path,
               }).to_string()))
           }
@@ -28662,6 +28666,10 @@ async fn route_http_request_with_headers(
              }).to_string()))
          }
 
+        ("GET", "/solid/clientid.jsonld") => {
+            Ok(solid_client_id_document_response(state).await)
+        }
+
         ("GET", "/api/slskdn") => {
             let session = state.session.read().await;
             let shares = state.shares.read().await;
@@ -29960,6 +29968,67 @@ async fn route_http_request_with_headers(
             .unwrap_or(500);
         tracing::complete_request_span(status_code);
     })
+}
+
+async fn solid_client_id_document_response(state: &AppState) -> HttpResponse {
+    let media = state.media_services.read().await;
+    if state.config.controller_compatibility_target != ControllerCompatibilityTarget::Slskdn
+        || !media.features.solid
+    {
+        return routing::not_found_response();
+    }
+    let Some(client_id_url) = media.solid.client_id_url.clone() else {
+        return routing::not_found_response();
+    };
+    let Ok(mut client_id) = reqwest::Url::parse(&client_id_url) else {
+        return routing::internal_server_error_response("invalid Solid client ID URL");
+    };
+    if client_id.host_str().is_none() {
+        return routing::internal_server_error_response("invalid Solid client ID URL");
+    }
+    client_id.set_path(&media.solid.redirect_path);
+    client_id.set_query(None);
+    client_id.set_fragment(None);
+    let document = serde_json::json!({
+        "@context": "https://www.w3.org/ns/solid/oidc-context.jsonld",
+        "client_id": client_id_url,
+        "client_name": "slskdn",
+        "application_type": "web",
+        "redirect_uris": [client_id.to_string()],
+        "scope": "openid webid",
+    });
+    HttpResponse {
+        status: "200 OK",
+        content_type: "application/ld+json",
+        body: document.to_string(),
+    }
+}
+
+fn solid_private_or_reserved(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(ip) => {
+            let octets = ip.octets();
+            octets[0] == 0
+                || octets[0] == 10
+                || (octets[0] == 100 && (64..=127).contains(&octets[1]))
+                || (octets[0] == 127)
+                || (octets[0] == 169 && octets[1] == 254)
+                || (octets[0] == 172 && (16..=31).contains(&octets[1]))
+                || (octets[0] == 192 && octets[1] == 168)
+                || octets[0] >= 224
+        }
+        IpAddr::V6(ip) => {
+            if let Some(ip) = ip.to_ipv4() {
+                return solid_private_or_reserved(IpAddr::V4(ip));
+            }
+            let octets = ip.octets();
+            ip.is_unspecified()
+                || ip.is_loopback()
+                || ip.is_multicast()
+                || (octets[0] == 0xfe && (octets[1] & 0xc0) == 0x80)
+                || (octets[0] & 0xfe) == 0xfc
+        }
+    }
 }
 
 #[cfg(test)]
@@ -31327,9 +31396,16 @@ fn slskd_options_json(
             player.remove("workingDirectory");
         }
         response["solid"]["allowInsecureHttp"] = serde_json::json!(media.solid.allow_insecure_http);
+        response["solid"]["allowLocalhostForWebId"] =
+            serde_json::json!(media.solid.allow_localhost_for_web_id);
         response["solid"]["maxFetchBytes"] = serde_json::json!(media.solid.max_fetch_bytes);
         response["solid"]["timeoutSeconds"] = serde_json::json!(media.solid.timeout.as_secs());
         response["solid"]["allowedHosts"] = serde_json::json!(media.solid.allowed_hosts);
+        response["solid"]["clientIdUrl"] = media
+            .solid
+            .client_id_url
+            .clone()
+            .map_or(serde_json::Value::Null, serde_json::Value::String);
         response["solid"]["redirectPath"] = serde_json::json!(media.solid.redirect_path);
         response["songId"]["maxConcurrentRuns"] =
             serde_json::json!(media.song_id_max_concurrent_runs);
@@ -44636,11 +44712,13 @@ async fn feature_controller_mutation_response(
         ));
     }
     if method == "POST" && path == "/api/solid/resolve-webid" {
-        let Some(web_id) = extract_json_string_field(body, "webId")
-            .or_else(|| extract_json_string_field(body, "url"))
-        else {
+        let Some(web_id) = extract_json_string_field(body, "webId") else {
             return Some(routing::bad_request_response("webId is required"));
         };
+        let web_id = web_id.trim().to_owned();
+        if web_id.is_empty() {
+            return Some(routing::bad_request_response("webId is required"));
+        }
         let Ok(url) = reqwest::Url::parse(&web_id) else {
             return Some(routing::bad_request_response(
                 "webId must be an absolute URL",
@@ -44662,6 +44740,31 @@ async fn feature_controller_mutation_response(
             return Some(routing::bad_request_response(
                 "WebID resolution was blocked by policy.",
             ));
+        }
+        if !solid.allow_localhost_for_web_id {
+            if host == "localhost" || host.ends_with(".local") {
+                return Some(routing::bad_request_response(
+                    "WebID resolution was blocked by policy.",
+                ));
+            }
+            let port = url.port_or_known_default().unwrap_or(443);
+            let addresses = match tokio::net::lookup_host((host.as_str(), port)).await {
+                Ok(addresses) => addresses.collect::<Vec<_>>(),
+                Err(_) => {
+                    return Some(routing::bad_request_response(
+                        "WebID resolution was blocked by policy.",
+                    ))
+                }
+            };
+            if addresses.is_empty()
+                || addresses.iter().any(|address| {
+                    address.ip().is_loopback() || solid_private_or_reserved(address.ip())
+                })
+            {
+                return Some(routing::bad_request_response(
+                    "WebID resolution was blocked by policy.",
+                ));
+            }
         }
         let client = match reqwest::Client::builder()
             .timeout(solid.timeout)
@@ -100010,6 +100113,7 @@ mod tests {
         {
             let mut media_services = state.media_services.write().await;
             media_services.solid.allow_insecure_http = true;
+            media_services.solid.allow_localhost_for_web_id = true;
             media_services.solid.allowed_hosts = vec!["127.0.0.1".to_owned()];
         }
 
@@ -100058,6 +100162,70 @@ mod tests {
         assert_eq!(
             response_json["oidcIssuers"],
             serde_json::json!(["https://issuer.example/oidc"])
+        );
+    }
+
+    #[tokio::test]
+    async fn solid_client_id_document_is_anonymous_and_uses_configured_origin() {
+        let (state, _receiver) = test_state();
+        {
+            let mut media_services = state.media_services.write().await;
+            media_services.solid.client_id_url =
+                Some("https://solid.example/clientid.jsonld".to_owned());
+            media_services.solid.redirect_path = "/oidc/callback".to_owned();
+        }
+
+        let response = super::route_http_request("GET", "/solid/clientid.jsonld", None, "", &state)
+            .await
+            .expect("client ID document");
+        assert_eq!(response.status, "200 OK");
+        assert_eq!(response.content_type, "application/ld+json");
+        let document = serde_json::from_str::<serde_json::Value>(&response.body).unwrap();
+        assert_eq!(
+            document["@context"],
+            "https://www.w3.org/ns/solid/oidc-context.jsonld"
+        );
+        assert_eq!(
+            document["client_id"],
+            "https://solid.example/clientid.jsonld"
+        );
+        assert_eq!(document["client_name"], "slskdn");
+        assert_eq!(document["application_type"], "web");
+        assert_eq!(document["scope"], "openid webid");
+        assert_eq!(
+            document["redirect_uris"],
+            serde_json::json!(["https://solid.example/oidc/callback"])
+        );
+
+        state.media_services.write().await.solid.client_id_url = None;
+        let missing = super::route_http_request("GET", "/solid/clientid.jsonld", None, "", &state)
+            .await
+            .expect("missing client ID document");
+        assert_eq!(missing.status, "404 Not Found");
+    }
+
+    #[tokio::test]
+    async fn solid_webid_policy_blocks_localhost_without_explicit_test_opt_in() {
+        let (state, _receiver) = test_state();
+        {
+            let mut media_services = state.media_services.write().await;
+            media_services.solid.allow_insecure_http = true;
+            media_services.solid.allow_localhost_for_web_id = false;
+            media_services.solid.allowed_hosts = vec!["127.0.0.1".to_owned()];
+        }
+        let response = super::route_http_request(
+            "POST",
+            "/api/solid/resolve-webid",
+            None,
+            r#"{"webId":"http://127.0.0.1:1/profile/card#me"}"#,
+            &state,
+        )
+        .await
+        .expect("localhost policy response");
+        assert_eq!(response.status, "400 Bad Request");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&response.body).unwrap(),
+            serde_json::json!({"error": "WebID resolution was blocked by policy."})
         );
     }
 
