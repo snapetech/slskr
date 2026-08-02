@@ -549,6 +549,21 @@ impl Gateway {
         }
     }
 
+    /// Dispatch an HTTP-gateway service call through the same real service
+    /// handlers used by authenticated overlay peers.  This keeps the local
+    /// gateway from inventing a compatibility record when it is configured as
+    /// a provider for the HTTP gateway.
+    pub async fn call_http_service(
+        &self,
+        call: MeshServiceCall,
+        remote_username: &str,
+        connection_id: &str,
+        state: &super::AppState,
+    ) -> MeshServiceReply {
+        self.handle_call(call, remote_username, connection_id, state)
+            .await
+    }
+
     async fn handle_shadow_index_call(
         &self,
         method: &str,

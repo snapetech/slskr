@@ -16034,6 +16034,15 @@ async fn route_http_request_with_headers(
         route.normalized_path.to_string()
     };
 
+    // slskdN's mesh-gateway middleware short-circuits every /mesh request
+    // while the feature is disabled, before auth or controller fallback can
+    // change the wire response.  Keep the same disabled contract here.
+    if (normalized_path == "/mesh" || normalized_path.starts_with("/mesh/"))
+        && !state.config.mesh_gateway.enabled
+    {
+        return Ok(mesh_gateway_disabled_response());
+    }
+
     let controller_metrics_request =
         method == "GET" && route.path == controller_metrics_path(&state.config);
     if controller_metrics_request {
@@ -16263,6 +16272,37 @@ async fn route_http_request_with_headers(
             return Ok(routing::forbidden_response(
                 "authenticated Pod membership is required",
             ));
+        }
+    }
+
+    // Keep the descriptor-unpublish path out of the large compatibility
+    // mutation future.  The latter owns hundreds of unrelated branches and
+    // can exceed the default Tokio worker stack before this small handler is
+    // polled on a live HTTP request.
+    if method == "DELETE" && normalized_path.starts_with("/api/mediacore/publish/descriptor/") {
+        if let Some(response) = Box::pin(mediacore_mutation_response(
+            method,
+            &normalized_path,
+            body,
+            state,
+        ))
+        .await
+        {
+            return Ok(response);
+        }
+    }
+
+    if method == "DELETE" && normalized_path.starts_with("/api/podcore/") {
+        if let Some(response) = Box::pin(podcore_mutation_response(
+            method,
+            &normalized_path,
+            route.query,
+            body,
+            state,
+        ))
+        .await
+        {
+            return Ok(response);
         }
     }
 
@@ -45272,7 +45312,9 @@ async fn extended_controller_mutation_response(
         );
     }
     if matches!(method, "POST" | "PUT" | "DELETE") && path.starts_with("/api/mediacore/") {
-        if let Some(response) = mediacore_mutation_response(method, path, body, state).await {
+        if let Some(response) =
+            Box::pin(mediacore_mutation_response(method, path, body, state)).await
+        {
             return response;
         }
     }
@@ -47100,21 +47142,46 @@ async fn activitypub_webfinger_response(query: Option<&str>, state: &AppState) -
     }))
 }
 
-async fn mesh_http_services_response(state: &AppState) -> HttpResponse {
-    if state.private_gateway.is_none() {
-        return HttpResponse {
-            status: "404 Not Found",
-            content_type: "application/json",
-            body: r#"{"error":"mesh_gateway_disabled"}"#.to_owned(),
-        };
+fn mesh_gateway_disabled_response() -> HttpResponse {
+    HttpResponse {
+        status: "404 Not Found",
+        content_type: "application/json",
+        body: r#"{"error":"mesh_gateway_disabled"}"#.to_owned(),
     }
-    let services = ["private-gateway", "pods", "shadow-index", "MeshContent"]
-        .into_iter()
+}
+
+fn mesh_gateway_error_response(
+    status: &'static str,
+    error: &str,
+    message: Option<&str>,
+) -> HttpResponse {
+    let mut response = serde_json::Map::new();
+    response.insert("error".to_owned(), serde_json::json!(error));
+    if let Some(message) = message {
+        response.insert("message".to_owned(), serde_json::json!(message));
+    }
+    HttpResponse {
+        status,
+        content_type: "application/json",
+        body: serde_json::Value::Object(response).to_string(),
+    }
+}
+
+async fn mesh_http_services_response(state: &AppState) -> HttpResponse {
+    if !state.config.mesh_gateway.enabled {
+        return mesh_gateway_disabled_response();
+    }
+    let provider_count = usize::from(state.private_gateway.is_some());
+    let services = state
+        .config
+        .mesh_gateway
+        .allowed_services
+        .iter()
         .map(|service_name| {
             serde_json::json!({
                 "serviceName": service_name,
-                "providerCount": 1,
-                "available": true,
+                "providerCount": provider_count,
+                "available": provider_count > 0,
             })
         })
         .collect::<Vec<_>>();
@@ -47122,11 +47189,130 @@ async fn mesh_http_services_response(state: &AppState) -> HttpResponse {
         serde_json::json!({
             "gateway": {
                 "enabled": true,
-                "bindAddress": state.config.overlay_bind.map(|address| address.to_string()),
-                "requestTimeoutSeconds": 30,
-                "maxRequestBodyBytes": slskr_client::overlay::MAX_OVERLAY_MESSAGE_BYTES,
+                "bindAddress": state.config.mesh_gateway.bind_address,
+                "requestTimeoutSeconds": state.config.mesh_gateway.request_timeout_seconds,
+                "maxRequestBodyBytes": state.config.mesh_gateway.max_request_body_bytes,
             },
             "services": services,
+        })
+        .to_string(),
+    )
+}
+
+async fn mesh_http_service_response(path: &str, body: &str, state: &AppState) -> HttpResponse {
+    let Some(segments) = decoded_segments_after(path, "/mesh/http/") else {
+        return routing::not_found_response();
+    };
+    let [service, operation] = segments.as_slice() else {
+        return routing::not_found_response();
+    };
+    let service = service.trim();
+    let operation = operation.trim();
+    if service.is_empty() || operation.is_empty() {
+        return mesh_gateway_error_response(
+            "400 Bad Request",
+            "invalid_request",
+            Some("Service name and method are required"),
+        );
+    }
+    if !state
+        .config
+        .mesh_gateway
+        .allowed_services
+        .iter()
+        .any(|allowed| allowed == service)
+    {
+        return mesh_gateway_error_response(
+            "403 Forbidden",
+            "service_not_allowed",
+            Some("Requested service is not allowed"),
+        );
+    }
+    if body.len() > state.config.mesh_gateway.max_request_body_bytes {
+        return mesh_gateway_error_response(
+            "413 Payload Too Large",
+            "payload_too_large",
+            Some("Request body exceeds the configured size limit"),
+        );
+    }
+    let Some(gateway) = state.private_gateway.as_ref() else {
+        return mesh_gateway_error_response(
+            "503 Service Unavailable",
+            "service_unavailable",
+            Some("No providers found for the requested service"),
+        );
+    };
+    let call = match slskr_client::overlay::MeshServiceCall::new(
+        uuid::Uuid::new_v4().to_string(),
+        service,
+        operation,
+        body.as_bytes().to_vec(),
+    ) {
+        Ok(call) => call,
+        Err(_) => {
+            return mesh_gateway_error_response(
+                "400 Bad Request",
+                "invalid_request",
+                Some("Service name, method, or payload is invalid"),
+            )
+        }
+    };
+    let username = state
+        .config
+        .username
+        .as_deref()
+        .filter(|username| !username.trim().is_empty())
+        .unwrap_or("slskr");
+    let reply = match time::timeout(
+        Duration::from_secs(state.config.mesh_gateway.request_timeout_seconds),
+        gateway.call_http_service(call, username, "http-gateway", state),
+    )
+    .await
+    {
+        Ok(reply) => reply,
+        Err(_) => {
+            return mesh_gateway_error_response(
+                "504 Gateway Timeout",
+                "gateway_timeout",
+                Some("Service call timed out"),
+            )
+        }
+    };
+    if reply.status_code != 0 {
+        let status = match reply.status_code {
+            2 | 3 => "404 Not Found",
+            4 => "400 Bad Request",
+            8 => "403 Forbidden",
+            9 => "413 Payload Too Large",
+            10 => "500 Internal Server Error",
+            _ => "502 Bad Gateway",
+        };
+        let mut response = serde_json::Map::new();
+        response.insert("error".to_owned(), serde_json::json!("service_error"));
+        response.insert(
+            "statusCode".to_owned(),
+            serde_json::json!(reply.status_code),
+        );
+        response.insert(
+            "message".to_owned(),
+            serde_json::json!("Service returned an error"),
+        );
+        return HttpResponse {
+            status,
+            content_type: "application/json",
+            body: serde_json::Value::Object(response).to_string(),
+        };
+    }
+    if reply.payload.is_empty() {
+        return routing::ok_response(r#"{"success":true}"#.to_owned());
+    }
+    if let Ok(payload) = serde_json::from_slice::<serde_json::Value>(&reply.payload) {
+        return routing::ok_response(payload.to_string());
+    }
+    routing::ok_response(
+        serde_json::json!({
+            "payload": STANDARD.encode(reply.payload),
+            "encoding": "base64",
         })
         .to_string(),
     )
@@ -47580,29 +47766,7 @@ async fn feature_controller_mutation_response(
         ));
     }
     if method == "POST" && path.starts_with("/mesh/http/") {
-        let segments = decoded_segments_after(path, "/mesh/http/")?;
-        let [service, operation] = segments.as_slice() else {
-            return Some(routing::not_found_response());
-        };
-        let payload = serde_json::from_str::<serde_json::Value>(body)
-            .unwrap_or_else(|_| serde_json::json!({"raw": body}));
-        let id = uuid::Uuid::new_v4().to_string();
-        let record = serde_json::json!({
-            "id": id,
-            "serviceName": service,
-            "method": operation,
-            "payload": payload,
-            "receivedAt": unix_timestamp(),
-        });
-        return Some(
-            match state.controller_features.write().await.upsert(
-                format!("mesh/http/{service}/{operation}/{id}"),
-                record.clone(),
-            ) {
-                Ok(()) => routing::ok_response(record.to_string()),
-                Err(error) => routing::service_unavailable_response(&error),
-            },
-        );
+        return Some(mesh_http_service_response(path, body, state).await);
     }
     if method == "PUT" && path.starts_with("/api/conversations/") {
         let segments = decoded_segments_after(path, "/api/conversations/")?;
@@ -97962,6 +98126,29 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn mediacore_versioned_descriptor_delete_does_not_overflow_worker_stack() {
+        let (state, _receiver) = test_state();
+        let response = super::route_http_request(
+            "DELETE",
+            "/api/v0/mediacore/publish/descriptor/content-id",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("delete descriptor");
+        assert_eq!(response.status, "200 OK", "{}", response.body);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&response.body).unwrap(),
+            serde_json::json!({
+                "contentId": "content-id",
+                "success": true,
+                "wasPublished": false,
+            })
+        );
+    }
+
+    #[tokio::test]
     async fn mediacore_descriptor_updates_imports_and_stats_use_real_records() {
         let (state, _receiver) = test_state();
         let content_id = "content:test:recording:real";
@@ -102947,6 +103134,95 @@ mod tests {
             .expect("mesh services response");
         assert_eq!(mesh.status, "404 Not Found");
         assert_eq!(mesh.body, r#"{"error":"mesh_gateway_disabled"}"#);
+    }
+
+    #[tokio::test]
+    async fn mesh_gateway_disabled_post_short_circuits_compatibility_fallback() {
+        let (state, _receiver) = test_state();
+        let response = super::route_http_request(
+            "POST",
+            "/mesh/http/route-audit-id/route-audit-id",
+            None,
+            "{}",
+            &state,
+        )
+        .await
+        .expect("mesh gateway response");
+        assert_eq!(response.status, "404 Not Found");
+        assert_eq!(response.body, r#"{"error":"mesh_gateway_disabled"}"#);
+    }
+
+    #[tokio::test]
+    async fn mesh_gateway_enabled_enforces_allowlist_and_provider_discovery() {
+        let (state, _receiver) = test_state_with_env(
+            MapEnv::default()
+                .with("SLSKD_MESH_GATEWAY_ENABLED", "true")
+                .with("SLSKD_MESH_GATEWAY_ALLOWED_SERVICES", "pods"),
+        );
+
+        let rejected =
+            super::route_http_request("POST", "/mesh/http/route-audit-id/List", None, "{}", &state)
+                .await
+                .expect("allowlist response");
+        assert_eq!(rejected.status, "403 Forbidden");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&rejected.body).unwrap(),
+            serde_json::json!({
+                "error": "service_not_allowed",
+                "message": "Requested service is not allowed",
+            })
+        );
+
+        let unavailable =
+            super::route_http_request("POST", "/mesh/http/pods/List", None, "{}", &state)
+                .await
+                .expect("provider response");
+        assert_eq!(unavailable.status, "503 Service Unavailable");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&unavailable.body).unwrap(),
+            serde_json::json!({
+                "error": "service_unavailable",
+                "message": "No providers found for the requested service",
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn mesh_gateway_enabled_dispatches_to_real_local_service_handlers() {
+        let root = std::env::temp_dir().join(format!(
+            "slskr-mesh-http-gateway-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&root).expect("mesh gateway state directory");
+        let (mut state, _receiver) = test_state_with_env(
+            MapEnv::default()
+                .with("SLSKD_MESH_GATEWAY_ENABLED", "true")
+                .with("SLSKD_MESH_GATEWAY_ALLOWED_SERVICES", "pods"),
+        );
+        let gateway = Arc::new(
+            super::private_gateway::Gateway::load_or_create_with_quic(
+                "127.0.0.1:0".parse().unwrap(),
+                &root,
+                None,
+            )
+            .await
+            .expect("mesh gateway"),
+        );
+        Arc::get_mut(&mut state)
+            .expect("unshared test state")
+            .private_gateway = Some(gateway);
+
+        let response =
+            super::route_http_request("POST", "/mesh/http/pods/List", None, "{}", &state)
+                .await
+                .expect("local service response");
+        assert_eq!(response.status, "200 OK", "{}", response.body);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&response.body).unwrap(),
+            serde_json::json!([])
+        );
+        std::fs::remove_dir_all(root).expect("remove mesh gateway state directory");
     }
 
     #[tokio::test]

@@ -58,6 +58,7 @@ pub struct AppConfig {
     pub search_retention: SearchRetentionSettings,
     pub core_workflow: CoreWorkflowSettings,
     pub advanced_networking: AdvancedNetworkingSettings,
+    pub mesh_gateway: MeshGatewaySettings,
     pub media_services: MediaAdvancedServiceSettings,
     pub social_federation: SocialFederationSettings,
     pub federation_publishing: FederationPublishingSettings,
@@ -913,6 +914,7 @@ impl AppConfig {
             controller_compatibility_target,
             &state_dir,
         )?;
+        let mesh_gateway = MeshGatewaySettings::from_layers(&file_config.mesh_gateway, env)?;
         let media_services = MediaAdvancedServiceSettings::from_layers(
             &file_config,
             env,
@@ -1429,6 +1431,7 @@ impl AppConfig {
             search_retention,
             core_workflow,
             advanced_networking,
+            mesh_gateway,
             media_services,
             social_federation,
             federation_publishing,
@@ -1892,6 +1895,166 @@ pub struct MeshRuntimeSettings {
     pub quic_port: u16,
     pub enforce_remote_payload_limits: bool,
     pub max_remote_payload_size: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MeshGatewaySettings {
+    pub enabled: bool,
+    pub bind_address: String,
+    pub port: u16,
+    pub api_key: Option<String>,
+    pub csrf_token: Option<String>,
+    pub allowed_services: Vec<String>,
+    pub max_request_body_bytes: usize,
+    pub request_timeout_seconds: u64,
+    pub log_bodies: bool,
+    pub require_risk_acknowledgment: bool,
+    pub i_understand_the_risk: bool,
+    pub allowed_origins: Vec<String>,
+    pub enable_rate_limiting: bool,
+    pub max_requests_per_minute: u32,
+}
+
+impl MeshGatewaySettings {
+    fn from_layers<E: ConfigEnv>(file: &MeshGatewayFileConfig, env: &E) -> Result<Self, String> {
+        let enabled = env_bool_any_layer(
+            env,
+            &["SLSKR_MESH_GATEWAY_ENABLED", "SLSKD_MESH_GATEWAY_ENABLED"],
+            file.enabled.unwrap_or(false),
+        )?;
+        let bind_address = optional_env_any(
+            env,
+            &[
+                "SLSKR_MESH_GATEWAY_BIND_ADDRESS",
+                "SLSKD_MESH_GATEWAY_BIND_ADDRESS",
+            ],
+        )
+        .or_else(|| file.bind_address.clone())
+        .unwrap_or_else(|| "127.0.0.1".to_owned());
+        if bind_address.trim().is_empty() {
+            return Err("MeshGateway.BindAddress cannot be empty".to_owned());
+        }
+        let port = env_parse_any_layer(
+            env,
+            &["SLSKR_MESH_GATEWAY_PORT", "SLSKD_MESH_GATEWAY_PORT"],
+            file.port,
+            0_u16,
+        )?;
+        let allowed_services = normalized_controller_values(string_array_any_layer(
+            env,
+            &[
+                "SLSKR_MESH_GATEWAY_ALLOWED_SERVICES",
+                "SLSKD_MESH_GATEWAY_ALLOWED_SERVICES",
+            ],
+            file.allowed_services.clone().unwrap_or_default(),
+        ));
+        let max_request_body_bytes = env_parse_any_layer(
+            env,
+            &[
+                "SLSKR_MESH_GATEWAY_MAX_REQUEST_BODY_BYTES",
+                "SLSKD_MESH_GATEWAY_MAX_REQUEST_BODY_BYTES",
+            ],
+            file.max_request_body_bytes,
+            1_048_576_usize,
+        )?;
+        if !(1..=16 * 1024 * 1024).contains(&max_request_body_bytes) {
+            return Err(
+                "MeshGateway.MaxRequestBodyBytes must be between 1 and 16777216".to_owned(),
+            );
+        }
+        let request_timeout_seconds = env_parse_any_layer(
+            env,
+            &[
+                "SLSKR_MESH_GATEWAY_REQUEST_TIMEOUT_SECONDS",
+                "SLSKD_MESH_GATEWAY_REQUEST_TIMEOUT_SECONDS",
+            ],
+            file.request_timeout_seconds,
+            30_u64,
+        )?;
+        if !(1..=3_600).contains(&request_timeout_seconds) {
+            return Err("MeshGateway.RequestTimeoutSeconds must be between 1 and 3600".to_owned());
+        }
+        if enabled && allowed_services.is_empty() {
+            return Err(
+                "MeshGateway.AllowedServices cannot be empty when the gateway is enabled"
+                    .to_owned(),
+            );
+        }
+        let max_requests_per_minute = env_parse_any_layer(
+            env,
+            &[
+                "SLSKR_MESH_GATEWAY_MAX_REQUESTS_PER_MINUTE",
+                "SLSKD_MESH_GATEWAY_MAX_REQUESTS_PER_MINUTE",
+            ],
+            file.max_requests_per_minute,
+            60_u32,
+        )?;
+        if max_requests_per_minute == 0 {
+            return Err("MeshGateway.MaxRequestsPerMinute must be greater than zero".to_owned());
+        }
+        Ok(Self {
+            enabled,
+            bind_address,
+            port,
+            api_key: optional_env_any(
+                env,
+                &["SLSKR_MESH_GATEWAY_API_KEY", "SLSKD_MESH_GATEWAY_API_KEY"],
+            )
+            .or_else(|| file.api_key.clone()),
+            csrf_token: optional_env_any(
+                env,
+                &[
+                    "SLSKR_MESH_GATEWAY_CSRF_TOKEN",
+                    "SLSKD_MESH_GATEWAY_CSRF_TOKEN",
+                ],
+            )
+            .or_else(|| file.csrf_token.clone()),
+            allowed_services,
+            max_request_body_bytes,
+            request_timeout_seconds,
+            log_bodies: env_bool_any_layer(
+                env,
+                &[
+                    "SLSKR_MESH_GATEWAY_LOG_BODIES",
+                    "SLSKD_MESH_GATEWAY_LOG_BODIES",
+                ],
+                file.log_bodies.unwrap_or(false),
+            )?,
+            require_risk_acknowledgment: env_bool_any_layer(
+                env,
+                &[
+                    "SLSKR_MESH_GATEWAY_REQUIRE_RISK_ACKNOWLEDGMENT",
+                    "SLSKD_MESH_GATEWAY_REQUIRE_RISK_ACKNOWLEDGMENT",
+                ],
+                file.require_risk_acknowledgment.unwrap_or(true),
+            )?,
+            i_understand_the_risk: env_bool_any_layer(
+                env,
+                &[
+                    "SLSKR_MESH_GATEWAY_I_UNDERSTAND_THE_RISK",
+                    "SLSKD_MESH_GATEWAY_I_UNDERSTAND_THE_RISK",
+                ],
+                file.i_understand_the_risk.unwrap_or(false),
+            )?,
+            allowed_origins: normalized_controller_values(string_array_any_layer(
+                env,
+                &[
+                    "SLSKR_MESH_GATEWAY_ALLOWED_ORIGINS",
+                    "SLSKD_MESH_GATEWAY_ALLOWED_ORIGINS",
+                ],
+                file.allowed_origins.clone().unwrap_or_default(),
+            )),
+            enable_rate_limiting: env_bool_any_layer(
+                env,
+                &[
+                    "SLSKR_MESH_GATEWAY_ENABLE_RATE_LIMITING",
+                    "SLSKD_MESH_GATEWAY_ENABLE_RATE_LIMITING",
+                ],
+                file.enable_rate_limiting.unwrap_or(true),
+            )?,
+            max_requests_per_minute,
+        })
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -4737,6 +4900,8 @@ pub struct FileConfig {
     #[serde(rename = "Mesh")]
     mesh_sync: MeshSyncRootFileConfig,
     mesh: MeshFileConfig,
+    #[serde(rename = "meshGateway", alias = "MeshGateway", alias = "mesh_gateway")]
+    mesh_gateway: MeshGatewayFileConfig,
     #[serde(
         rename = "SignalSystem",
         alias = "signalSystem",
@@ -5424,6 +5589,42 @@ pub struct MeshFileConfig {
     overlay: MeshPortsFileConfig,
     security: MeshSecurityFileConfig,
     sync_security: MeshSyncSecurityFileConfig,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields, rename_all = "camelCase")]
+struct MeshGatewayFileConfig {
+    #[serde(alias = "Enabled")]
+    enabled: Option<bool>,
+    #[serde(alias = "BindAddress", alias = "bind_address")]
+    bind_address: Option<String>,
+    #[serde(alias = "Port")]
+    port: Option<u16>,
+    #[serde(alias = "ApiKey", alias = "api_key")]
+    api_key: Option<String>,
+    #[serde(alias = "CsrfToken", alias = "csrf_token")]
+    csrf_token: Option<String>,
+    #[serde(alias = "AllowedServices", alias = "allowed_services")]
+    allowed_services: Option<Vec<String>>,
+    #[serde(alias = "MaxRequestBodyBytes", alias = "max_request_body_bytes")]
+    max_request_body_bytes: Option<usize>,
+    #[serde(alias = "RequestTimeoutSeconds", alias = "request_timeout_seconds")]
+    request_timeout_seconds: Option<u64>,
+    #[serde(alias = "LogBodies", alias = "log_bodies")]
+    log_bodies: Option<bool>,
+    #[serde(
+        alias = "RequireRiskAcknowledgment",
+        alias = "require_risk_acknowledgment"
+    )]
+    require_risk_acknowledgment: Option<bool>,
+    #[serde(alias = "IUnderstandTheRisk", alias = "i_understand_the_risk")]
+    i_understand_the_risk: Option<bool>,
+    #[serde(alias = "AllowedOrigins", alias = "allowed_origins")]
+    allowed_origins: Option<Vec<String>>,
+    #[serde(alias = "EnableRateLimiting", alias = "enable_rate_limiting")]
+    enable_rate_limiting: Option<bool>,
+    #[serde(alias = "MaxRequestsPerMinute", alias = "max_requests_per_minute")]
+    max_requests_per_minute: Option<u32>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -10479,6 +10680,52 @@ mod tests {
         fn var(&self, name: &str) -> Option<String> {
             self.values.get(name).cloned()
         }
+    }
+
+    #[test]
+    fn mesh_gateway_settings_match_frozen_defaults_and_validation() {
+        let disabled =
+            super::AppConfig::from_layers(None, super::FileConfig::default(), &MapEnv::default())
+                .unwrap();
+        assert!(!disabled.mesh_gateway.enabled);
+        assert!(disabled.mesh_gateway.allowed_services.is_empty());
+        assert_eq!(disabled.mesh_gateway.max_request_body_bytes, 1_048_576);
+        assert_eq!(disabled.mesh_gateway.request_timeout_seconds, 30);
+
+        let enabled = super::AppConfig::from_layers(
+            None,
+            super::FileConfig::default(),
+            &MapEnv::default()
+                .with("SLSKD_MESH_GATEWAY_ENABLED", "true")
+                .with("SLSKD_MESH_GATEWAY_ALLOWED_SERVICES", "pods; shadow-index")
+                .with("SLSKD_MESH_GATEWAY_MAX_REQUEST_BODY_BYTES", "4096")
+                .with("SLSKD_MESH_GATEWAY_REQUEST_TIMEOUT_SECONDS", "7"),
+        )
+        .unwrap();
+        assert!(enabled.mesh_gateway.enabled);
+        assert_eq!(
+            enabled.mesh_gateway.allowed_services,
+            vec!["pods", "shadow-index"]
+        );
+        assert_eq!(enabled.mesh_gateway.max_request_body_bytes, 4096);
+        assert_eq!(enabled.mesh_gateway.request_timeout_seconds, 7);
+
+        let file = serde_yaml::from_str::<super::FileConfig>(
+            "MeshGateway:\n  Enabled: true\n  AllowedServices: [pods]\n  MaxRequestBodyBytes: 8192\n",
+        )
+        .unwrap();
+        let from_file = super::AppConfig::from_layers(None, file, &MapEnv::default()).unwrap();
+        assert!(from_file.mesh_gateway.enabled);
+        assert_eq!(from_file.mesh_gateway.allowed_services, vec!["pods"]);
+        assert_eq!(from_file.mesh_gateway.max_request_body_bytes, 8192);
+
+        let error = super::AppConfig::from_layers(
+            None,
+            super::FileConfig::default(),
+            &MapEnv::default().with("SLSKD_MESH_GATEWAY_ENABLED", "true"),
+        )
+        .expect_err("enabled gateway without services must fail validation");
+        assert!(error.contains("AllowedServices"), "{error}");
     }
 
     #[test]
