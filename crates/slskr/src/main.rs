@@ -5301,6 +5301,7 @@ struct MeshState {
     sync_merge_successful: u64,
     sync_merge_failed: u64,
     sync_entries_received: u64,
+    sync_entries_sent: u64,
     sync_entries_merged: u64,
     updated_at: u64,
 }
@@ -5344,6 +5345,7 @@ impl MeshState {
             sync_merge_successful: 0,
             sync_merge_failed: 0,
             sync_entries_received: 0,
+            sync_entries_sent: 0,
             sync_entries_merged: 0,
             updated_at: unix_timestamp(),
         }
@@ -17181,6 +17183,7 @@ async fn route_http_request_with_headers(
             let successful_syncs = mesh.sync_merge_successful;
             let failed_syncs = mesh.sync_merge_failed;
             let total_entries_received = mesh.sync_entries_received;
+            let total_entries_sent = mesh.sync_entries_sent;
             let total_entries_merged = mesh.sync_entries_merged;
             drop(mesh);
             drop(users);
@@ -17190,10 +17193,7 @@ async fn route_http_request_with_headers(
                 "successfulSyncs": successful_syncs,
                 "failedSyncs": failed_syncs,
                 "totalEntriesReceived": total_entries_received,
-                // No real send-side mesh sync endpoint exists in slskR
-                // yet (the oracle's real sync is bidirectional); honest
-                // 0 rather than a fabricated count.
-                "totalEntriesSent": 0,
+                "totalEntriesSent": total_entries_sent,
                 "totalEntriesMerged": total_entries_merged,
                 "rejectedMessages": rejected_messages,
                 // slskR's merge is all-or-nothing per batch (no partial
@@ -56181,14 +56181,34 @@ async fn extended_controller_get_response(
         }
         "/api/mesh/delta" => {
             let discovery = state.content_discovery.read().await;
+            let since_seq = query_parameter(query, "sinceSeq")
+                .or_else(|| query_parameter(query, "since_seq_id"))
+                .or_else(|| query_parameter(query, "fromSeqId"))
+                .and_then(|value| value.parse::<u64>().ok())
+                .unwrap_or(0);
+            let max_entries = query_parameter(query, "maxEntries")
+                .or_else(|| query_parameter(query, "max_entries"))
+                .or_else(|| query_parameter(query, "limit"))
+                .and_then(|value| value.parse::<usize>().ok())
+                .unwrap_or(1_000)
+                .min(10_000);
+            let (entries, has_more) = discovery.hash_entries_since_seq(since_seq, max_entries);
+            let latest_seq_id = discovery.latest_seq();
+            drop(discovery);
+            let sent = entries.len() as u64;
+            if sent > 0 {
+                let mut mesh = state.mesh.write().await;
+                mesh.sync_entries_sent = mesh.sync_entries_sent.saturating_add(sent);
+            }
             routing::ok_response(serde_json::json!({
                 "type": "hashdb_delta",
-                "fromSeqId": query_parameter(query, "fromSeqId").and_then(|value| value.parse::<u64>().ok()).unwrap_or(0),
-                "toSeqId": discovery.latest_seq(),
-                "latest_seq_id": discovery.latest_seq(),
-                "entries": discovery.hash_entries(),
-                "hasMore": false,
-                "has_more": false,
+                "fromSeqId": since_seq,
+                "toSeqId": latest_seq_id,
+                "sinceSeq": since_seq,
+                "latest_seq_id": latest_seq_id,
+                "entries": entries,
+                "hasMore": has_more,
+                "has_more": has_more,
                 "proto_version": 1,
                 "public_key": STANDARD.encode(state.capability_signing_key.verifying_key().as_bytes()),
                 "signature": "",
@@ -99548,6 +99568,7 @@ mod tests {
             .expect("baseline mesh stats");
         let baseline_json = serde_json::from_str::<serde_json::Value>(&baseline.body).unwrap();
         assert_eq!(baseline_json["totalSyncs"], 0, "{baseline_json}");
+        assert_eq!(baseline_json["totalEntriesSent"], 0, "{baseline_json}");
         assert_eq!(baseline_json["currentSeqId"], 0, "{baseline_json}");
 
         let valid_entry = serde_json::json!({
@@ -99569,6 +99590,25 @@ mod tests {
         assert_eq!(merged_json["merged"], 1, "{merged_json}");
         let real_seq_id = merged_json["latestSeqId"].as_u64().unwrap();
         assert!(real_seq_id > 0, "{merged_json}");
+
+        let delta = super::route_http_request(
+            "GET",
+            "/api/v0/mesh/delta?sinceSeq=0&maxEntries=1",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("generate a real mesh delta");
+        assert_eq!(delta.status, "200 OK", "{}", delta.body);
+        let delta_json = serde_json::from_str::<serde_json::Value>(&delta.body).unwrap();
+        assert_eq!(
+            delta_json["entries"].as_array().unwrap().len(),
+            1,
+            "{delta_json}"
+        );
+        assert_eq!(delta_json["hasMore"], false, "{delta_json}");
+        assert_eq!(delta_json["latest_seq_id"], real_seq_id, "{delta_json}");
 
         // An invalid entry (zero size) must count as a real failure, not
         // silently succeed or vanish from the stats.
@@ -99592,6 +99632,7 @@ mod tests {
         assert_eq!(stats_json["successfulSyncs"], 1, "{stats_json}");
         assert_eq!(stats_json["failedSyncs"], 1, "{stats_json}");
         assert_eq!(stats_json["totalEntriesReceived"], 2, "{stats_json}");
+        assert_eq!(stats_json["totalEntriesSent"], 1, "{stats_json}");
         assert_eq!(stats_json["totalEntriesMerged"], 1, "{stats_json}");
         assert_eq!(stats_json["currentSeqId"], real_seq_id, "{stats_json}");
     }

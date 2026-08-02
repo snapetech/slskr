@@ -335,6 +335,28 @@ impl ContentDiscoveryStore {
         &self.hash_entries
     }
 
+    /// Returns the ordered hash delta after `since_seq`, together with the
+    /// target-style continuation flag.  The slskdN mesh controller asks the
+    /// HashDb for at most `max_entries + 1` rows ordered by sequence ID so it
+    /// can report whether another page remains; returning a full snapshot
+    /// here would make mesh peers resend the entire database on every sync.
+    pub fn hash_entries_since_seq(
+        &self,
+        since_seq: u64,
+        max_entries: usize,
+    ) -> (Vec<HashDbEntry>, bool) {
+        let mut entries = self
+            .hash_entries
+            .iter()
+            .filter(|entry| entry.seq_id > since_seq)
+            .cloned()
+            .collect::<Vec<_>>();
+        entries.sort_by_key(|entry| entry.seq_id);
+        let has_more = entries.len() > max_entries;
+        entries.truncate(max_entries);
+        (entries, has_more)
+    }
+
     pub fn shadow_records(&self) -> &[ShadowIndexRecord] {
         &self.shadow_records
     }
