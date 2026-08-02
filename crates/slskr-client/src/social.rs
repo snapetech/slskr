@@ -432,6 +432,7 @@ mod tests {
                 username: "  alice  ".to_owned(),
                 message: "hello".to_owned(),
                 is_new: true,
+                was_replayed: false,
             })),
             Some(ServerMessage::MessageAcked { id: 1 })
         );

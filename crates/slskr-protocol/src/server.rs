@@ -526,6 +526,7 @@ pub struct PrivateMessage {
     pub username: String,
     pub message: String,
     pub is_new: bool,
+    pub was_replayed: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -875,6 +876,7 @@ impl ServerMessage {
                     username: reader.read_string()?,
                     message: reader.read_string()?,
                     is_new: reader.read_bool()?,
+                    was_replayed: reader.read_bool()?,
                 })
             }
             (ServerCode::MessageAcked, Direction::ClientToServer) => Self::MessageAcked {
@@ -1177,6 +1179,7 @@ impl ServerMessage {
                 writer.write_string(&value.username)?;
                 writer.write_string(&value.message)?;
                 writer.write_bool(value.is_new);
+                writer.write_bool(value.was_replayed);
                 ServerCode::MessageUser
             }
             Self::MessageAcked { id } => {

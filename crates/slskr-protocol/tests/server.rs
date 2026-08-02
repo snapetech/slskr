@@ -498,6 +498,7 @@ fn private_message_and_error_messages_round_trip() {
                 username: "peer".to_owned(),
                 message: "hello".to_owned(),
                 is_new: true,
+                was_replayed: false,
             }),
             Direction::ServerToClient,
         ),

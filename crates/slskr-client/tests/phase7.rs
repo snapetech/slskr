@@ -389,6 +389,7 @@ fn private_message_inbox_returns_ack_messages() {
             username: "alice".to_owned(),
             message: "hi".to_owned(),
             is_new: true,
+            was_replayed: false,
         }))
         .unwrap();
 
@@ -408,6 +409,7 @@ fn private_message_inbox_acknowledges_replays_without_storing_duplicates() {
         username: "alice".to_owned(),
         message: "original".to_owned(),
         is_new: true,
+        was_replayed: false,
     };
     let mut replay = original.clone();
     replay.message = "replayed payload".to_owned();
@@ -444,6 +446,7 @@ fn social_message_histories_evict_oldest_entries_at_limits() {
             username: "alice".to_owned(),
             message: format!("private-{index}"),
             is_new: true,
+            was_replayed: false,
         }));
         assert_eq!(ack, Some(ServerMessage::MessageAcked { id: index as u32 }));
     }
@@ -473,6 +476,7 @@ fn social_histories_reject_oversized_peer_controlled_fields() {
             username: "alice".to_owned(),
             message: oversized,
             is_new: true,
+            was_replayed: false,
         })),
         Some(ServerMessage::MessageAcked { id: 99 })
     );
@@ -519,6 +523,7 @@ fn social_state_rejects_control_characters_in_persistent_identities() {
             username: "alice\nforged".to_owned(),
             message: "hello".to_owned(),
             is_new: true,
+            was_replayed: false,
         })),
         Some(ServerMessage::MessageAcked { id: 100 })
     );

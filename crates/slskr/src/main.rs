@@ -6675,6 +6675,9 @@ struct MessageRecord {
     created_at: u64,
     created_at_ms: u64,
     updated_at: u64,
+    source_id: Option<u32>,
+    source_timestamp: Option<u32>,
+    was_replayed: bool,
 }
 
 impl MessageRecord {
@@ -6700,7 +6703,8 @@ impl MessageRecord {
             "direction": if self.direction == "inbound" { "In" } else { "Out" },
             "message": self.body,
             "isAcknowledged": self.acknowledged,
-            "wasReplayed": false,
+            "wasReplayed": self.was_replayed,
+            "sourceId": self.source_id,
         })
     }
 }
@@ -6747,6 +6751,11 @@ impl MessageStore {
                         .unwrap_or_default()
                         .saturating_mul(1_000),
                     updated_at: u64::try_from(record.created_at).unwrap_or_default(),
+                    source_id: record.source_id.and_then(|value| u32::try_from(value).ok()),
+                    source_timestamp: record
+                        .source_timestamp
+                        .and_then(|value| u32::try_from(value).ok()),
+                    was_replayed: record.was_replayed,
                 })
             })
             .collect();
@@ -6799,6 +6808,9 @@ impl MessageStore {
             created_at: now,
             created_at_ms: now_ms,
             updated_at: now,
+            source_id: None,
+            source_timestamp: None,
+            was_replayed: false,
         };
         self.records.push(record.clone());
         if self.records.len() > self.max_records {
@@ -67509,7 +67521,30 @@ async fn project_server_message(
                 redact_username(&message.username)
             );
             let mut messages = state.messages.write().await;
-            let record = messages.add(message.username.clone(), "inbound", message.message.clone());
+            let record = if let Some(existing) = messages.records.iter_mut().find(|record| {
+                record.direction == "inbound"
+                    && record.username.eq_ignore_ascii_case(&message.username)
+                    && record.source_id == Some(message.id)
+                    && record.source_timestamp == Some(message.timestamp)
+            }) {
+                existing.was_replayed = message.was_replayed;
+                existing.acknowledged = false;
+                existing.clone()
+            } else {
+                let mut record =
+                    messages.add(message.username.clone(), "inbound", message.message.clone());
+                record.source_id = Some(message.id);
+                record.source_timestamp = Some(message.timestamp);
+                record.was_replayed = message.was_replayed;
+                if let Some(stored) = messages
+                    .records
+                    .iter_mut()
+                    .find(|stored| stored.id == record.id)
+                {
+                    *stored = record.clone();
+                }
+                record
+            };
             let message_id = record.id;
             drop(messages);
             if let Err(error) = persist_message_record_checked(state, &record).await {
@@ -71162,6 +71197,9 @@ fn persisted_message_record(record: &MessageRecord) -> crate::persistence::Messa
         direction: record.direction.to_owned(),
         read: record.acknowledged,
         created_at: i64::try_from(record.created_at).unwrap_or(i64::MAX),
+        source_id: record.source_id.map(i64::from),
+        source_timestamp: record.source_timestamp.map(i64::from),
+        was_replayed: record.was_replayed,
     }
 }
 
@@ -88457,6 +88495,9 @@ mod tests {
             direction: "inbound".to_owned(),
             read: false,
             created_at: 1,
+            source_id: None,
+            source_timestamp: None,
+            was_replayed: false,
         };
         db.insert_message(&old_message).await.expect("old message");
         let (state, _receiver) = test_state_with_env_parts(
@@ -109947,6 +109988,9 @@ mod tests {
                 direction: "incoming".to_owned(),
                 read: false,
                 created_at: 1,
+                source_id: None,
+                source_timestamp: None,
+                was_replayed: false,
             },
             super::persistence::MessageRecord {
                 id: "2".to_owned(),
@@ -109955,6 +109999,9 @@ mod tests {
                 direction: "incoming".to_owned(),
                 read: false,
                 created_at: 1,
+                source_id: None,
+                source_timestamp: None,
+                was_replayed: false,
             },
         ]);
         assert!(rehydrated.records[0].username.len() <= super::MAX_MESSAGE_USERNAME_BYTES);
@@ -110395,6 +110442,9 @@ mod tests {
             direction: "outbound".to_owned(),
             read: false,
             created_at: 1,
+            source_id: None,
+            source_timestamp: None,
+            was_replayed: false,
         };
         db.insert_message(&original).await.unwrap();
         let new_record = super::persistence::MessageRecord {
@@ -110764,6 +110814,45 @@ mod tests {
             .unwrap();
         assert!(!opinions.body.contains("drum and bass"));
         assert!(opinions.body.contains("new-track"));
+    }
+
+    #[tokio::test]
+    async fn inbound_private_message_replays_update_one_record_and_retain_replay_flag() {
+        use slskr_client::protocol::server::{PrivateMessage, ServerMessage};
+        let (state, _receiver) = test_state();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let client = tokio::net::TcpStream::connect(address);
+        let server = listener.accept();
+        let (client, server) = tokio::join!(client, server);
+        let (server, _) = server.unwrap();
+        let mut session = slskr_client::server::ServerSession::new(
+            slskr_client::stream::ServerConnection::new(server),
+        );
+        let _client = slskr_client::stream::ServerConnection::new(client.unwrap());
+        let message = |replayed| {
+            ServerMessage::MessageUserResponse(PrivateMessage {
+                id: 77,
+                timestamp: 88,
+                username: "peer".to_owned(),
+                message: "hello".to_owned(),
+                is_new: true,
+                was_replayed: replayed,
+            })
+        };
+        super::project_server_message(&state, &mut session, &message(false)).await;
+        super::project_server_message(&state, &mut session, &message(true)).await;
+        let messages = state.messages.read().await;
+        assert_eq!(messages.records.len(), 1);
+        assert!(messages.records[0].was_replayed);
+        drop(messages);
+        let response =
+            super::route_http_request("GET", "/api/v0/conversations/peer", None, "", &state)
+                .await
+                .unwrap();
+        let json = serde_json::from_str::<serde_json::Value>(&response.body).unwrap();
+        assert_eq!(json["messages"].as_array().unwrap().len(), 1);
+        assert_eq!(json["messages"][0]["wasReplayed"], true);
     }
 
     #[tokio::test]
@@ -112986,6 +113075,7 @@ mod tests {
                 username: "FixturePeer".to_owned(),
                 message: "Please prove you are human".to_owned(),
                 is_new: true,
+                was_replayed: false,
             }),
         )
         .await;

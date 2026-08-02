@@ -137,6 +137,12 @@ pub struct MessageRecord {
     pub direction: String,
     pub read: bool,
     pub created_at: i64,
+    #[serde(default)]
+    pub source_id: Option<i64>,
+    #[serde(default)]
+    pub source_timestamp: Option<i64>,
+    #[serde(default)]
+    pub was_replayed: bool,
 }
 
 /// User statistics record
@@ -547,6 +553,9 @@ impl<'r> FromRow<'r, SqliteRow> for MessageRecord {
             direction: row.try_get("direction")?,
             read: row.try_get("read")?,
             created_at: row.try_get("created_at")?,
+            source_id: row.try_get("source_id").unwrap_or(None),
+            source_timestamp: row.try_get("source_timestamp").unwrap_or(None),
+            was_replayed: row.try_get("was_replayed").unwrap_or(false),
         })
     }
 }
@@ -1086,12 +1095,24 @@ impl DatabaseManager {
                 content TEXT NOT NULL,
                 direction TEXT NOT NULL,
                 read INTEGER DEFAULT 0,
-                created_at INTEGER NOT NULL
+                created_at INTEGER NOT NULL,
+                source_id INTEGER,
+                source_timestamp INTEGER,
+                was_replayed INTEGER DEFAULT 0
             )
             "#,
         )
         .execute(&self.pool)
         .await?;
+        let _ = query("ALTER TABLE messages ADD COLUMN source_id INTEGER")
+            .execute(&self.pool)
+            .await;
+        let _ = query("ALTER TABLE messages ADD COLUMN source_timestamp INTEGER")
+            .execute(&self.pool)
+            .await;
+        let _ = query("ALTER TABLE messages ADD COLUMN was_replayed INTEGER DEFAULT 0")
+            .execute(&self.pool)
+            .await;
 
         // Create user stats table
         query(
@@ -2506,8 +2527,8 @@ impl DatabaseManager {
     ) -> Result<(), Box<dyn std::error::Error>> {
         query(
             r#"
-            INSERT INTO messages (id, username, content, direction, read, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO messages (id, username, content, direction, read, created_at, source_id, source_timestamp, was_replayed)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&record.id)
@@ -2516,6 +2537,9 @@ impl DatabaseManager {
         .bind(&record.direction)
         .bind(record.read as i32)
         .bind(record.created_at)
+        .bind(record.source_id)
+        .bind(record.source_timestamp)
+        .bind(record.was_replayed as i32)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -2531,8 +2555,8 @@ impl DatabaseManager {
             for record in records {
                 query(
                     r#"
-                    INSERT INTO messages (id, username, content, direction, read, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                    INSERT INTO messages (id, username, content, direction, read, created_at, source_id, source_timestamp, was_replayed)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     "#,
                 )
                 .bind(&record.id)
@@ -2541,6 +2565,9 @@ impl DatabaseManager {
                 .bind(&record.direction)
                 .bind(record.read as i32)
                 .bind(record.created_at)
+                .bind(record.source_id)
+                .bind(record.source_timestamp)
+                .bind(record.was_replayed as i32)
                 .execute(&mut *transaction)
                 .await?;
             }
@@ -4864,6 +4891,9 @@ mod tests {
             direction: "incoming".to_string(),
             read: false,
             created_at: now,
+            source_id: None,
+            source_timestamp: None,
+            was_replayed: false,
         };
 
         db.insert_message(&record).await.unwrap();
@@ -4882,6 +4912,9 @@ mod tests {
             direction: "outgoing".to_string(),
             read: false,
             created_at: now + 1,
+            source_id: None,
+            source_timestamp: None,
+            was_replayed: false,
         };
         db.insert_message(&newer).await.unwrap();
 

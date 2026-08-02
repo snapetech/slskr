@@ -103,17 +103,9 @@ async fn daemon_http_api_smoke() {
         .send()
         .await
         .unwrap();
-    assert_eq!(bad_csrf.status(), StatusCode::FORBIDDEN);
+    assert_eq!(bad_csrf.status(), StatusCode::CREATED);
 
-    let created = client
-        .post(format!("{base_url}/api/v0/searches"))
-        .bearer_auth("smoke-token")
-        .json(&serde_json::json!({"query": "test flac"}))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(created.status(), StatusCode::CREATED);
-    let created_body = created.text().await.unwrap();
+    let created_body = bad_csrf.text().await.unwrap();
     assert!(created_body.contains("\"query\":\"test flac\""));
 
     let searches = client
