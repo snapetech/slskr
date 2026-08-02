@@ -16326,6 +16326,9 @@ async fn route_http_request_with_headers(
     } else {
         route.normalized_path.to_string()
     };
+    if route.path == "/api/server/status" {
+        normalized_path = "/api/server/status".to_owned();
+    }
 
     // slskdN's mesh-gateway middleware short-circuits every /mesh request
     // while the feature is disabled, before auth or controller fallback can
@@ -16795,6 +16798,22 @@ async fn route_http_request_with_headers(
                 content_type: "application/json; charset=utf-8",
                 body,
             })
+        }
+        ("GET", "/api/server/status") => {
+            let session = state.session.read().await;
+            let connected = session.state == "connected";
+            Ok(routing::ok_response(
+                serde_json::json!({
+                    "connected": connected,
+                    "state": if connected { "logged_in" } else { "disconnected" },
+                    "username": if connected {
+                        session.username.clone().unwrap_or_default()
+                    } else {
+                        String::new()
+                    },
+                })
+                .to_string(),
+            ))
         }
         ("PUT", "/api/server") | ("POST", "/api/server") => {
             let username = extract_json_string_field(body, "username")
@@ -18964,11 +18983,7 @@ async fn route_http_request_with_headers(
                     content_type: "",
                     body: String::new(),
                 }),
-                Ok(false) => Ok(HttpResponse {
-                    status: "204 No Content",
-                    content_type: "",
-                    body: String::new(),
-                }),
+                Ok(false) => Ok(routing::not_found_response()),
                 Err(error) => Ok(file_storage_error_response(&error)),
             }
         }
@@ -21173,20 +21188,20 @@ async fn route_http_request_with_headers(
             let Some(username) = user_route_username(path, "/endpoint") else {
                 return Ok(routing::not_found_response());
             };
-            let json = if let Some(address) = test_user_endpoint_peer_address(state, &username) {
-                format!(
-                    "{{\"username\":\"{}\",\"addressFamily\":\"IPv4\",\"address\":\"{}\",\"port\":{}}}",
-                    json_escape(&username),
-                    address.ip,
-                    address.port
-                )
+            let address = if let Some(address) = test_user_endpoint_peer_address(state, &username) {
+                address
             } else {
-                format!(
-                    "{{\"username\":\"{}\",\"addressFamily\":\"IPv4\",\"address\":\"0.0.0.0\",\"port\":0}}",
-                    json_escape(&username)
-                )
+                match request_peer_endpoint(state, &username).await {
+                    Ok(address) => address,
+                    Err(_) => return Ok(routing::not_found_response()),
+                }
             };
-            Ok(routing::ok_response(json))
+            Ok(routing::ok_response(serde_json::json!({
+                "username": username,
+                "addressFamily": "IPv4",
+                "address": address.ip.to_string(),
+                "port": address.port,
+            }).to_string()))
         }
 
         ("GET", "/api/soulseek/users/similar") => {
@@ -25002,7 +25017,12 @@ async fn route_http_request_with_headers(
             let scan = library.create_health_scan(library_path);
             drop(library);
             Ok(scan
-                .map(|record| routing::accepted_response(record.json()))
+                .map(|record| {
+                    routing::ok_response(serde_json::json!({
+                        "scanId": record.id,
+                        "message": "Scan started successfully",
+                    }).to_string())
+                })
                 .unwrap_or_else(|| {
                     routing::service_unavailable_response("library health scan id space exhausted")
                 }))
@@ -56707,15 +56727,13 @@ async fn extended_controller_get_response(
         "/api/hashdb/key" => {
             let filename = query_parameter(query, "filename").unwrap_or_default();
             let size = query_parameter(query, "size").and_then(|size| size.parse::<u64>().ok());
-            if filename.trim().is_empty() || size.is_none() {
-                return routing::bad_request_response("filename and size are required");
+            if filename.trim().is_empty() || size.is_none_or(|size| size == 0) {
+                return routing::bad_request_response("filename and positive size are required");
             }
             let size = size.unwrap_or_default();
             routing::ok_response(
                 serde_json::json!({
-                    "filename": filename,
-                    "size": size,
-                    "key": content_discovery::generate_flac_key(&filename, size),
+                    "flacKey": content_discovery::generate_flac_key(&filename, size),
                 })
                 .to_string(),
             )
@@ -84005,8 +84023,7 @@ mod tests {
         )
         .await
         .expect("delete missing downloaded file");
-        assert_eq!(missing.status, "204 No Content");
-        assert!(missing.body.is_empty());
+        assert_eq!(missing.status, "404 Not Found");
 
         let traversal = super::route_http_request(
             "DELETE",
@@ -84028,8 +84045,38 @@ mod tests {
         )
         .await
         .expect("delete slskd encoded directory");
-        assert_eq!(newline_encoded_missing.status, "204 No Content");
-        assert!(newline_encoded_missing.body.is_empty());
+        assert_eq!(newline_encoded_missing.status, "404 Not Found");
+    }
+
+    #[tokio::test]
+    async fn hashdb_key_matches_frozen_dto_and_positive_size_validation() {
+        let (state, _receiver) = test_state();
+        let response = super::route_http_request(
+            "GET",
+            "/api/v0/hashdb/key?filename=Track.flac&size=123",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(response.status, "200 OK");
+        let json = serde_json::from_str::<serde_json::Value>(&response.body).unwrap();
+        assert!(json["flacKey"].is_string(), "{json}");
+        assert!(json.get("key").is_none());
+        assert!(json.get("filename").is_none());
+        assert!(json.get("size").is_none());
+
+        let zero = super::route_http_request(
+            "GET",
+            "/api/v0/hashdb/key?filename=Track.flac&size=0",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(zero.status, "400 Bad Request");
     }
 
     #[test]
@@ -84561,7 +84608,10 @@ mod tests {
 
     #[tokio::test]
     async fn slskd_automation_compat_routes_use_expected_shapes() {
-        let (state, mut receiver) = test_state();
+        let (state, mut receiver) = test_state_with_env(MapEnv::default().with(
+            "SLSKR_TEST_USER_ENDPOINT_OVERRIDES",
+            "peer 1=127.0.0.1:2234;peer1=127.0.0.1:2234",
+        ));
 
         let app = super::route_http_request("GET", "/api/v0/application", None, "", &state)
             .await
@@ -98453,6 +98503,14 @@ mod tests {
                 );
             }
         }
+        let status = super::route_http_request("GET", "/api/server/status", None, "", &state)
+            .await
+            .unwrap();
+        let status_json = serde_json::from_str::<serde_json::Value>(&status.body).unwrap();
+        assert_eq!(status_json["connected"], false);
+        assert_eq!(status_json["state"], "disconnected");
+        assert_eq!(status_json["username"], "");
+        assert!(status_json.get("credentialStore").is_none());
     }
 
     #[tokio::test]
@@ -106849,8 +106907,9 @@ mod tests {
         .await
         .expect("library scan");
         let scan_json = serde_json::from_str::<serde_json::Value>(&scan.body).unwrap();
-        assert_eq!(scan_json["libraryPath"], "/music");
-        assert_eq!(scan_json["issues_found"], 1);
+        assert_eq!(scan.status, "200 OK");
+        assert!(scan_json["scanId"].as_str().is_some());
+        assert_eq!(scan_json["message"], "Scan started successfully");
         let second_scan = super::route_http_request(
             "POST",
             "/api/v0/library/health/scans",
@@ -106862,7 +106921,8 @@ mod tests {
         .expect("second library scan");
         let second_scan_json =
             serde_json::from_str::<serde_json::Value>(&second_scan.body).unwrap();
-        assert_ne!(scan_json["id"], second_scan_json["id"]);
+        assert_eq!(second_scan.status, "200 OK");
+        assert_ne!(scan_json["scanId"], second_scan_json["scanId"]);
         let missing_scan = super::route_http_request(
             "GET",
             "/api/library/health/scans/scan-does-not-exist",
@@ -106877,7 +106937,7 @@ mod tests {
             "GET",
             &format!(
                 "/api/library/health/scans/{}",
-                scan_json["id"].as_str().unwrap()
+                scan_json["scanId"].as_str().unwrap()
             ),
             None,
             "",
@@ -106892,7 +106952,7 @@ mod tests {
             "GET",
             &format!(
                 "/api/library/health/scans/{}/untrusted",
-                scan_json["id"].as_str().unwrap()
+                scan_json["scanId"].as_str().unwrap()
             ),
             None,
             "",
@@ -106937,7 +106997,7 @@ mod tests {
             "GET",
             &format!(
                 "/api/library/health/scans/{}",
-                scan_json["id"].as_str().unwrap()
+                scan_json["scanId"].as_str().unwrap()
             ),
             None,
             "",
