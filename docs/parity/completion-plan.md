@@ -75,6 +75,13 @@ The 18,269 `needs-proof` cases are not presumed absent. They are certification
 dimensions to be linked in bulk from the subsystem contract matrices now that
 the known configuration-layer implementation gaps are closed.
 
+The 2026-08-01 transport pass added the frozen slskdN QUIC control wire to the
+Rust client and daemon: `slskdn-overlay` ALPN, bounded bidirectional streams,
+MessagePack envelopes, public-key-value pin validation, and Pod routing for
+explicit non-shared-port pins. Shared DHT/UDP demultiplexing, public QUIC
+proxying, QUIC data transport, and live QUIC interoperability are still open
+certification work.
+
 The raw proof-case closure ratio is a certification-ledger metric only. It is
 not used as an implementation queue or as a product-completion estimate. Work
 is selected and closed by vertical subsystem so one implementation and one

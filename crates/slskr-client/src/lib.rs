@@ -15,6 +15,7 @@ pub mod overlay;
 pub mod overlay_control;
 pub mod peer_cache;
 pub mod peer_connect;
+pub mod quic_control;
 pub mod search;
 pub mod server;
 pub mod share_payload;

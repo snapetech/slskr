@@ -18,6 +18,7 @@ use slskr_client::overlay::{
     OVERLAY_MAGIC, OVERLAY_VERSION,
 };
 use slskr_client::overlay_control::{ControlEnvelope, CONTROL_MAX_DATAGRAM_BYTES};
+use slskr_client::quic_control::{QuicControlConnection, QuicControlError, QuicControlServer};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{lookup_host, tcp::OwnedWriteHalf, TcpListener, TcpStream, UdpSocket},
@@ -99,6 +100,7 @@ pub struct Gateway {
     certificate_sha256: [u8; 32],
     listener: Mutex<Option<TcpListener>>,
     udp_listener: Mutex<Option<UdpSocket>>,
+    quic_listener: Mutex<Option<QuicControlServer>>,
     connections: Arc<Semaphore>,
     tunnels: RwLock<BTreeMap<String, Arc<Tunnel>>>,
     replay_nonces: Mutex<BTreeMap<(String, String), u64>>,
@@ -115,14 +117,27 @@ impl fmt::Debug for Gateway {
 }
 
 impl Gateway {
-    pub async fn load_or_create(bind: SocketAddr, state_dir: &Path) -> Result<Self, String> {
+    pub async fn load_or_create_with_quic(
+        bind: SocketAddr,
+        state_dir: &Path,
+        quic_bind: Option<SocketAddr>,
+    ) -> Result<Self, String> {
         let (certificate, private_key) = load_or_create_certificate(state_dir)?;
         let certificate_sha256 = Sha256::digest(certificate.as_ref()).into();
         let config =
             ServerConfig::builder_with_protocol_versions(&[&tokio_rustls::rustls::version::TLS13])
                 .with_no_client_auth()
-                .with_single_cert(vec![certificate], private_key.into())
+                .with_single_cert(vec![certificate.clone()], private_key.clone_key().into())
                 .map_err(|error| format!("overlay TLS configuration failed: {error}"))?;
+        let quic_listener = quic_bind.and_then(|bind| {
+            match QuicControlServer::bind(bind, certificate, private_key) {
+                Ok(listener) => Some(listener),
+                Err(error) => {
+                    tracing::warn!(%error, ?bind, "overlay QUIC control listener unavailable");
+                    None
+                }
+            }
+        });
         let listener = TcpListener::bind(bind)
             .await
             .map_err(|error| format!("overlay listener bind failed: {error}"))?;
@@ -146,6 +161,7 @@ impl Gateway {
             certificate_sha256,
             listener: Mutex::new(Some(listener)),
             udp_listener: Mutex::new(udp_listener),
+            quic_listener: Mutex::new(quic_listener),
             connections: Arc::new(Semaphore::new(MAX_GATEWAY_CONNECTIONS)),
             tunnels: RwLock::new(BTreeMap::new()),
             replay_nonces: Mutex::new(BTreeMap::new()),
@@ -202,6 +218,13 @@ impl Gateway {
                 gateway.run_udp_control(udp_listener, udp_state).await;
             });
         }
+        if let Some(quic_listener) = self.quic_listener.lock().await.take() {
+            let gateway = Arc::clone(&self);
+            let quic_state = Arc::clone(&state);
+            tokio::spawn(async move {
+                gateway.run_quic_control(quic_listener, quic_state).await;
+            });
+        }
         loop {
             let (tcp, _) = listener
                 .accept()
@@ -247,6 +270,78 @@ impl Gateway {
             if envelope.message_type != "pod_message" {
                 // Target ControlDispatcher intentionally ignores unknown
                 // control types after decode; retain that one-way behavior.
+                continue;
+            }
+            let Ok(message) = serde_json::from_slice::<PodControlMessage>(&envelope.payload) else {
+                continue;
+            };
+            if message.sender_peer_id.trim().is_empty()
+                || message.message_id.trim().is_empty()
+                || message.timestamp_unix_ms <= 0
+            {
+                continue;
+            }
+            let _ = self
+                .handle_pods_call(
+                    "PostMessage",
+                    &envelope.payload,
+                    message.sender_peer_id.trim(),
+                    &state,
+                )
+                .await;
+        }
+    }
+
+    async fn run_quic_control(
+        self: Arc<Self>,
+        server: QuicControlServer,
+        state: Arc<super::AppState>,
+    ) {
+        loop {
+            let Some(connection) = server.accept().await else {
+                return;
+            };
+            let Ok(connection) = connection else {
+                continue;
+            };
+            let gateway = Arc::clone(&self);
+            let connection_state = Arc::clone(&state);
+            tokio::spawn(async move {
+                gateway
+                    .handle_quic_connection(connection, connection_state)
+                    .await;
+            });
+        }
+    }
+
+    async fn handle_quic_connection(
+        &self,
+        connection: QuicControlConnection,
+        state: Arc<super::AppState>,
+    ) {
+        let remote = connection.remote_address();
+        loop {
+            let envelope = match connection.accept_envelope().await {
+                Ok(envelope) => envelope,
+                Err(QuicControlError::Connection(error)) => {
+                    tracing::debug!(%error, ?remote, "overlay QUIC control connection closed");
+                    return;
+                }
+                Err(error) => {
+                    tracing::debug!(%error, ?remote, "overlay QUIC control stream rejected");
+                    continue;
+                }
+            };
+            let now = match i64::try_from(super::unix_timestamp_millis()) {
+                Ok(now) => now,
+                Err(_) => continue,
+            };
+            if !envelope.timestamp_is_current(now) || envelope.verify().is_err() {
+                continue;
+            }
+            if envelope.message_type != "pod_message" {
+                // This preserves the frozen dispatcher behavior for control
+                // types that have no local service implementation.
                 continue;
             }
             let Ok(message) = serde_json::from_slice::<PodControlMessage>(&envelope.payload) else {
@@ -1418,10 +1513,10 @@ mod tests {
     #[tokio::test]
     async fn gateway_certificate_identity_is_durable() {
         let root = temporary_directory("gateway-identity");
-        let first = Gateway::load_or_create("127.0.0.1:0".parse().unwrap(), &root)
+        let first = Gateway::load_or_create_with_quic("127.0.0.1:0".parse().unwrap(), &root, None)
             .await
             .unwrap();
-        let second = Gateway::load_or_create("127.0.0.1:0".parse().unwrap(), &root)
+        let second = Gateway::load_or_create_with_quic("127.0.0.1:0".parse().unwrap(), &root, None)
             .await
             .unwrap();
         assert_eq!(first.certificate_sha256(), second.certificate_sha256());

@@ -82,7 +82,7 @@ use std::{
     ffi::OsString,
     fs,
     io::{Read, Seek, SeekFrom},
-    net::{IpAddr, SocketAddr, SocketAddrV4, ToSocketAddrs},
+    net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4, ToSocketAddrs},
     path::{Component, Path, PathBuf},
     process::Stdio,
     sync::{
@@ -49276,6 +49276,18 @@ fn trusted_mesh_peer_for(state: &AppState, identity: &str) -> Option<TrustedMesh
         .cloned()
 }
 
+fn configured_quic_certificate_pin(state: &AppState, peer: &TrustedMeshPeer) -> Option<[u8; 32]> {
+    state
+        .config
+        .advanced_networking
+        .overlay
+        .trusted_certificate_pins
+        .get(&peer.overlay_endpoint.to_string())?
+        .iter()
+        .filter_map(|pin| STANDARD.decode(pin.trim()).ok())
+        .find_map(|pin| pin.try_into().ok())
+}
+
 async fn route_pod_message_to_peer(
     state: &AppState,
     message: &serde_json::Value,
@@ -49339,6 +49351,24 @@ async fn route_pod_message_to_peer(
             signature,
             sig_version,
         };
+        if state.config.advanced_networking.overlay.enable_quic
+            && !state
+                .config
+                .advanced_networking
+                .overlay
+                .share_quic_with_dht_port
+        {
+            if let Some(certificate_pin) = configured_quic_certificate_pin(state, &peer) {
+                return mesh_services::post_pod_message_quic(
+                    &peer,
+                    &local_username,
+                    &state.capability_signing_key,
+                    &request,
+                    certificate_pin,
+                )
+                .await;
+            }
+        }
         return mesh_services::post_pod_message_control(
             &peer,
             &local_username,
@@ -58154,8 +58184,27 @@ async fn serve(invocation: ServeInvocation) -> Result<(), String> {
         && config.advanced_networking.mesh.enable_overlay
     {
         if let Some(bind) = config.overlay_bind {
+            let quic_bind = config.advanced_networking.overlay.enable_quic.then(|| {
+                let overlay = &config.advanced_networking.overlay;
+                let address = if overlay.share_quic_with_dht_port {
+                    IpAddr::V4(Ipv4Addr::LOCALHOST)
+                } else {
+                    bind.ip()
+                };
+                let port = if overlay.share_quic_with_dht_port {
+                    overlay.quic_backend_listen_port
+                } else {
+                    overlay.quic_listen_port
+                };
+                SocketAddr::new(address, port)
+            });
             Some(Arc::new(
-                private_gateway::Gateway::load_or_create(bind, &config.state_dir).await?,
+                private_gateway::Gateway::load_or_create_with_quic(
+                    bind,
+                    &config.state_dir,
+                    quic_bind,
+                )
+                .await?,
             ))
         } else {
             None
@@ -78836,9 +78885,13 @@ mod tests {
             MapEnv::default().with("SLSKR_TEST_USER_ENDPOINT_OVERRIDES", "member=127.0.0.1:1"),
         );
         let gateway = Arc::new(
-            super::private_gateway::Gateway::load_or_create("127.0.0.1:0".parse().unwrap(), &root)
-                .await
-                .expect("gateway"),
+            super::private_gateway::Gateway::load_or_create_with_quic(
+                "127.0.0.1:0".parse().unwrap(),
+                &root,
+                None,
+            )
+            .await
+            .expect("gateway"),
         );
         let endpoint = gateway.bind();
         let certificate_pin = gateway.certificate_sha256();
@@ -94402,9 +94455,13 @@ mod tests {
         )
         .await;
         let gateway = Arc::new(
-            super::private_gateway::Gateway::load_or_create("127.0.0.1:0".parse().unwrap(), &root)
-                .await
-                .expect("trusted mesh gateway"),
+            super::private_gateway::Gateway::load_or_create_with_quic(
+                "127.0.0.1:0".parse().unwrap(),
+                &root,
+                None,
+            )
+            .await
+            .expect("trusted mesh gateway"),
         );
         let endpoint = gateway.bind();
         let certificate_pin = gateway.certificate_sha256();

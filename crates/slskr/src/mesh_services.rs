@@ -10,6 +10,7 @@ use slskr_client::overlay::{
     connect_tls_overlay, MeshHello, MeshServiceCall, FEATURE_MESH_SERVICE,
 };
 use slskr_client::overlay_control::{send_udp_control, ControlEnvelope};
+use slskr_client::quic_control::send_quic_control;
 use tokio::io::AsyncWriteExt;
 use tokio::time::timeout;
 
@@ -170,6 +171,35 @@ pub async fn post_pod_message_control(
     authentication_key: &SigningKey,
     request: &PodMessageControlRequest<'_>,
 ) -> Result<String, String> {
+    let (message_id, envelope) =
+        pod_message_control_envelope(local_username, authentication_key, request)?;
+    send_udp_control(peer.overlay_endpoint, &envelope)
+        .await
+        .map_err(|error| format!("pod message control send failed: {error}"))?;
+    Ok(message_id)
+}
+
+/// Deliver a PodCore message over the frozen slskdN QUIC control transport.
+pub async fn post_pod_message_quic(
+    peer: &TrustedMeshPeer,
+    local_username: &str,
+    authentication_key: &SigningKey,
+    request: &PodMessageControlRequest<'_>,
+    expected_public_key_sha256: [u8; 32],
+) -> Result<String, String> {
+    let (message_id, envelope) =
+        pod_message_control_envelope(local_username, authentication_key, request)?;
+    send_quic_control(peer.overlay_endpoint, &envelope, expected_public_key_sha256)
+        .await
+        .map_err(|error| format!("pod message QUIC control send failed: {error}"))?;
+    Ok(message_id)
+}
+
+fn pod_message_control_envelope(
+    local_username: &str,
+    authentication_key: &SigningKey,
+    request: &PodMessageControlRequest<'_>,
+) -> Result<(String, ControlEnvelope), String> {
     validate_pod_message(
         local_username,
         request.pod_id,
@@ -210,10 +240,7 @@ pub async fn post_pod_message_control(
         authentication_key,
     )
     .map_err(|error| format!("pod message control envelope failed: {error}"))?;
-    send_udp_control(peer.overlay_endpoint, &envelope)
-        .await
-        .map_err(|error| format!("pod message control send failed: {error}"))?;
-    Ok(message_id)
+    Ok((message_id, envelope))
 }
 
 pub struct PodMessageControlRequest<'a> {

@@ -2230,6 +2230,7 @@ dependencies = [
  "ed25519-dalek",
  "flate2",
  "md5",
+ "quinn",
  "rand 0.10.2",
  "rcgen",
  "serde",
@@ -2240,6 +2241,7 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tracing",
+ "x509-parser",
 ]
 
 [[package]]

@@ -138,6 +138,19 @@ missing, and 18,269 needing behavioral proof, with zero missing denominators.
 The proof cases intentionally have different granularity; the manifest reports
 their raw closure ratio without treating it as weighted feature value.
 
+## 2026-08-01 transport follow-up
+
+The slskdN `ControlEnvelope` transport now has an executable Rust QUIC client
+and bounded server path: exact `slskdn-overlay` ALPN, one bidirectional stream
+per envelope, MessagePack size bounds, Ed25519/timestamp validation, and the
+target's base64 SHA-256 public-key-value certificate pin are covered by
+hermetic tests. Daemon startup reuses the durable overlay certificate and
+routes explicitly pinned, non-shared-port Pod control peers through QUIC.
+Shared DHT/UDP demultiplexing and public-port QUIC proxying, QUIC data-plane
+transfers, and live cross-runtime QUIC receiver proof remain open; the default
+shared-port path therefore retains its UDP fallback until those pieces are
+implemented.
+
 The executable configuration ledger currently reports **436 complete, 0
 partial, and 0 missing** leaves out of the 436-path frozen union.
 All 15 Lidarr leaves and all 7 Spotify leaves are now complete. Lidarr has real
