@@ -21733,6 +21733,22 @@ async fn route_http_request_with_headers(
                 return Ok(routing::not_found_response());
             };
             let mut rooms = state.rooms.write().await;
+            if state.session.read().await.state == "connected"
+                && rooms.records.iter().any(|record| {
+                    record.name == bounded_room_name(room_name)
+                        && record.joined
+                        && record.last_error.is_none()
+                })
+            {
+                let existing = rooms
+                    .records
+                    .iter()
+                    .find(|record| record.name == bounded_room_name(room_name))
+                    .cloned()
+                    .expect("joined room exists");
+                drop(rooms);
+                return Ok(routing::ok_response(existing.slskd_room_json().to_string()));
+            }
             let previous = rooms.clone();
             let Some(record) = rooms.join(room_name.to_string()) else {
                 return Ok(routing::service_unavailable_response(
@@ -85009,6 +85025,12 @@ mod tests {
                 .expect("join room");
         assert_eq!(joined.status, "201 Created");
         let _ = receiver.try_recv();
+        let repeated =
+            super::route_http_request("POST", "/api/v0/rooms/music/join", None, "", &state)
+                .await
+                .unwrap();
+        assert_eq!(repeated.status, "200 OK");
+        assert!(receiver.try_recv().is_err());
 
         let room_message = super::route_http_request(
             "POST",
