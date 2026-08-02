@@ -45952,6 +45952,7 @@ async fn extended_controller_mutation_response(
     if let Some(response) = Box::pin(misc_controller_mutation_response(
         method,
         path,
+        query,
         body,
         state,
         is_versioned_v0,
@@ -46745,6 +46746,7 @@ async fn bridge_handle_room_list(
 async fn misc_controller_mutation_response(
     method: &str,
     path: &str,
+    query: Option<&str>,
     body: &str,
     state: &AppState,
     is_versioned_v0: bool,
@@ -47110,12 +47112,44 @@ async fn misc_controller_mutation_response(
         );
     }
     if method == "POST" && path == "/api/mesh/message" {
-        if is_versioned_v0 && body.trim().is_empty() {
-            return Some(HttpResponse {
-                status: "415 Unsupported Media Type",
-                content_type: "application/json",
-                body: String::new(),
-            });
+        if is_versioned_v0 {
+            if body.trim().is_empty() {
+                return Some(HttpResponse {
+                    status: "415 Unsupported Media Type",
+                    content_type: "application/json",
+                    body: String::new(),
+                });
+            }
+            let from_user = query_parameter(query, "fromUser")
+                .map(|value| value.trim().to_owned())
+                .filter(|value| !value.is_empty());
+            if from_user.is_none() {
+                return Some(routing::bad_request_response(
+                    "fromUser query parameter required",
+                ));
+            }
+            let payload = match serde_json::from_str::<serde_json::Value>(body) {
+                Ok(serde_json::Value::Object(payload)) => payload,
+                Ok(_) | Err(_) => {
+                    return Some(routing::bad_request_response("invalid mesh message"))
+                }
+            };
+            let Some(message_type) = payload.get("type").and_then(serde_json::Value::as_i64) else {
+                return Some(routing::bad_request_response(
+                    "Message must have 'type' property",
+                ));
+            };
+            if !matches!(message_type, 1 | 2 | 3 | 4 | 7) {
+                return Some(routing::bad_request_response(
+                    "Unknown or invalid message type",
+                ));
+            }
+            // HandleMessageAsync rejects an unsigned envelope before it can
+            // dispatch a protocol message. Preserve that real null response
+            // instead of queueing the JSON as a Soulseek text message.
+            return Some(routing::ok_response(
+                serde_json::json!({"handled": true, "response": null}).to_string(),
+            ));
         }
         let username = extract_json_string_field(body, "username")
             .or_else(|| extract_json_string_field(body, "peerId"));
@@ -99814,6 +99848,61 @@ mod tests {
         assert_eq!(json["timestamp_ms"], 0, "{json}");
         assert!(json.get("peerId").is_none(), "{json}");
         assert!(json.get("capabilities").is_none(), "{json}");
+    }
+
+    #[tokio::test]
+    async fn versioned_mesh_message_matches_typed_controller_validation() {
+        let (state, _receiver) = test_state();
+
+        let missing_peer = super::route_http_request(
+            "POST",
+            "/api/v0/mesh/message",
+            None,
+            r#"{"type":1}"#,
+            &state,
+        )
+        .await
+        .expect("missing fromUser response");
+        assert_eq!(missing_peer.status, "400 Bad Request");
+        assert!(missing_peer.body.contains("fromUser"));
+
+        let missing_type = super::route_http_request(
+            "POST",
+            "/api/v0/mesh/message?fromUser=mesh-peer",
+            None,
+            "{}",
+            &state,
+        )
+        .await
+        .expect("missing type response");
+        assert_eq!(missing_type.status, "400 Bad Request");
+        assert!(missing_type.body.contains("type"));
+
+        let unsupported = super::route_http_request(
+            "POST",
+            "/api/v0/mesh/message?fromUser=mesh-peer",
+            None,
+            r#"{"type":6}"#,
+            &state,
+        )
+        .await
+        .expect("unsupported type response");
+        assert_eq!(unsupported.status, "400 Bad Request");
+
+        let unsigned = super::route_http_request(
+            "POST",
+            "/api/v0/mesh/message?fromUser=mesh-peer",
+            None,
+            r#"{"type":1}"#,
+            &state,
+        )
+        .await
+        .expect("unsigned envelope response");
+        assert_eq!(unsigned.status, "200 OK", "{}", unsigned.body);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&unsigned.body).unwrap(),
+            serde_json::json!({"handled": true, "response": null})
+        );
     }
 
     #[tokio::test]
