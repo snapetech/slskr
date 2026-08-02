@@ -13963,6 +13963,75 @@ struct AppState {
     /// republish overwrites the same `pod/dht/{id}` record), matching the
     /// oracle's `PodDhtPublisher`'s own all-time `_totalPublished` counter.
     pod_dht_publish_count: std::sync::atomic::AtomicU64,
+    podcore_runtime_stats: PodCoreRuntimeStats,
+}
+
+/// Runtime counters for PodCore operations that are implemented locally.
+///
+/// The oracle keeps these counters in its backfill/discovery services.  Keep
+/// them separate from the persisted controller-feature records: those records
+/// describe current publications and cursors, while these values describe
+/// work performed by this process since startup.
+#[derive(Debug, Default)]
+struct PodCoreRuntimeStats {
+    backfill_requests: std::sync::atomic::AtomicU64,
+    backfill_completed: std::sync::atomic::AtomicU64,
+    backfill_failed: std::sync::atomic::AtomicU64,
+    messages_backfilled: std::sync::atomic::AtomicU64,
+    backfill_bytes_transferred: std::sync::atomic::AtomicU64,
+    total_backfill_duration_ms: std::sync::atomic::AtomicU64,
+    backfill_requests_by_pod: std::sync::Mutex<BTreeMap<String, u64>>,
+    last_backfill_operation: std::sync::Mutex<Option<String>>,
+    discovery_searches: std::sync::atomic::AtomicU64,
+    total_discovery_search_time_ms: std::sync::atomic::AtomicU64,
+    discovery_searches_by_type: std::sync::Mutex<BTreeMap<String, u64>>,
+    last_discovery_operation: std::sync::Mutex<Option<String>>,
+}
+
+impl PodCoreRuntimeStats {
+    fn record_backfill(
+        &self,
+        pod_id: &str,
+        messages: usize,
+        bytes: usize,
+        elapsed_ms: u64,
+        success: bool,
+    ) {
+        use std::sync::atomic::Ordering;
+
+        self.backfill_requests.fetch_add(1, Ordering::Relaxed);
+        if success {
+            self.backfill_completed.fetch_add(1, Ordering::Relaxed);
+            self.messages_backfilled
+                .fetch_add(messages as u64, Ordering::Relaxed);
+            self.backfill_bytes_transferred
+                .fetch_add(bytes as u64, Ordering::Relaxed);
+            self.total_backfill_duration_ms
+                .fetch_add(elapsed_ms, Ordering::Relaxed);
+            if let Ok(mut by_pod) = self.backfill_requests_by_pod.lock() {
+                *by_pod.entry(pod_id.to_owned()).or_default() += 1;
+            }
+        } else {
+            self.backfill_failed.fetch_add(1, Ordering::Relaxed);
+        }
+        if let Ok(mut last_operation) = self.last_backfill_operation.lock() {
+            *last_operation = Some(chrono::Utc::now().to_rfc3339());
+        }
+    }
+
+    fn record_discovery_search(&self, search_type: &str, elapsed_ms: u64) {
+        use std::sync::atomic::Ordering;
+
+        self.discovery_searches.fetch_add(1, Ordering::Relaxed);
+        self.total_discovery_search_time_ms
+            .fetch_add(elapsed_ms, Ordering::Relaxed);
+        if let Ok(mut by_type) = self.discovery_searches_by_type.lock() {
+            *by_type.entry(search_type.to_owned()).or_default() += 1;
+        }
+        if let Ok(mut last_operation) = self.last_discovery_operation.lock() {
+            *last_operation = Some(chrono::Utc::now().to_rfc3339());
+        }
+    }
 }
 
 /// Matches the oracle's `MessageSigner`'s real `Interlocked` counters --
@@ -46559,6 +46628,54 @@ async fn collection_item_controller_response(
     }
 }
 
+async fn podcore_local_backfill_response(
+    state: &AppState,
+    pod_id: &str,
+    last_seen: &BTreeMap<String, u64>,
+) -> Option<serde_json::Value> {
+    let started_at = std::time::Instant::now();
+    let pod = state.pods.read().await.get(pod_id)?;
+    let messages = state.pod_channels.read().await;
+    let mut synchronized = 0_usize;
+    let mut bytes_transferred = 0_usize;
+    let mut channels_requested = 0_usize;
+
+    for channel in &pod.channels {
+        let Some(last_seen_timestamp) = last_seen.get(&channel.channel_id) else {
+            continue;
+        };
+        channels_requested += 1;
+        for message in messages.list(pod_id, &channel.channel_id, None) {
+            if message.timestamp_unix_ms > *last_seen_timestamp {
+                synchronized = synchronized.saturating_add(1);
+                bytes_transferred = bytes_transferred.saturating_add(message.body.len());
+            }
+        }
+    }
+    drop(messages);
+
+    let elapsed_ms = started_at.elapsed().as_millis() as u64;
+    state.podcore_runtime_stats.record_backfill(
+        pod_id,
+        synchronized,
+        bytes_transferred,
+        elapsed_ms,
+        true,
+    );
+    Some(serde_json::json!({
+        "success": true,
+        "podId": pod_id,
+        "channelsRequested": channels_requested,
+        "messagesReceived": synchronized,
+        "synchronized": synchronized,
+        "bytesTransferred": bytes_transferred,
+        "duration": format_timespan_hms(started_at.elapsed().as_secs() as i64),
+        "durationMs": elapsed_ms,
+        "completedAt": chrono::Utc::now().to_rfc3339(),
+        "errorMessage": null,
+    }))
+}
+
 async fn podcore_mutation_response(
     method: &str,
     path: &str,
@@ -47054,23 +47171,52 @@ async fn podcore_mutation_response(
                     "Each last seen timestamp requires a non-empty channel ID and positive timestamp",
                 ));
             }
-            let pods = state.pods.read().await;
-            let Some(pod) = pods.get(pod_id) else {
+            let last_seen = last_seen
+                .into_iter()
+                .map(|(channel_id, timestamp)| (channel_id, timestamp.as_u64().unwrap_or_default()))
+                .collect::<BTreeMap<_, _>>();
+            let Some(result) = podcore_local_backfill_response(state, pod_id, &last_seen).await
+            else {
                 return Some(routing::not_found_response());
             };
-            drop(pods);
-            let messages = state.pod_channels.read().await;
-            let count = pod
-                .channels
-                .iter()
-                .map(|channel| messages.list(pod_id, &channel.channel_id, None).len())
-                .sum::<usize>();
-            Some(routing::ok_response(
-                serde_json::json!({"podId": pod_id, "synchronized": count, "completedAt": unix_timestamp()}).to_string(),
-            ))
+            Some(routing::ok_response(result.to_string()))
         }
         ("POST", [section, sync_all]) if section == "backfill" && sync_all == "sync-all" => {
-            Some(routing::ok_response("[]".to_owned()))
+            let pods = state.pods.read().await.list_visible(None);
+            let features = state.controller_features.read().await;
+            let work = pods
+                .iter()
+                .map(|pod| {
+                    let last_seen = pod
+                        .channels
+                        .iter()
+                        .map(|channel| {
+                            let timestamp = features
+                                .get(&format!(
+                                    "pod/backfill/{}/{}",
+                                    pod.pod_id, channel.channel_id
+                                ))
+                                .and_then(|value| value.get("lastSeen"))
+                                .and_then(serde_json::Value::as_u64)
+                                .unwrap_or(0);
+                            (channel.channel_id.clone(), timestamp)
+                        })
+                        .collect::<BTreeMap<_, _>>();
+                    (pod.pod_id.clone(), last_seen)
+                })
+                .collect::<Vec<_>>();
+            drop(features);
+            let mut results = Vec::with_capacity(work.len());
+            for (pod_id, last_seen) in work {
+                if let Some(result) =
+                    podcore_local_backfill_response(state, &pod_id, &last_seen).await
+                {
+                    results.push(result);
+                }
+            }
+            Some(routing::ok_response(
+                serde_json::Value::Array(results).to_string(),
+            ))
         }
         ("POST", [section, action]) if section == "content" && action == "validate" => {
             let content_id = match serde_json::from_str::<String>(body) {
@@ -47290,6 +47436,48 @@ async fn podcore_mutation_response(
             });
             let key = format!("pod/{section}/{id}");
             let now = chrono::Utc::now();
+            let request_pod = payload
+                .get("pod")
+                .filter(|pod| pod.is_object())
+                .cloned()
+                .or_else(|| {
+                    payload
+                        .get("podId")
+                        .and_then(serde_json::Value::as_str)
+                        .filter(|value| !value.trim().is_empty())
+                        .map(|_| payload.clone())
+                });
+            let stored_pod = if request_pod.is_some() {
+                request_pod.clone()
+            } else {
+                state
+                    .pods
+                    .read()
+                    .await
+                    .get(&id)
+                    .map(|pod| serde_json::json!(pod))
+            };
+            let published_pod = (section == "dht"
+                && matches!(action.as_str(), "publish" | "update"))
+            .then(|| stored_pod.clone())
+            .flatten();
+            let (publication_signature, publication_public_key) =
+                published_pod.as_ref().map_or((None, None), |pod| {
+                    let canonical = serde_json::to_vec(pod).unwrap_or_default();
+                    let signature = state.capability_signing_key.sign(&canonical);
+                    (
+                        Some(STANDARD.encode(signature.to_bytes())),
+                        Some(
+                            STANDARD
+                                .encode(state.capability_signing_key.verifying_key().as_bytes()),
+                        ),
+                    )
+                });
+            let discovery_tags = stored_pod
+                .as_ref()
+                .and_then(|pod| pod.get("tags"))
+                .cloned()
+                .unwrap_or_else(|| serde_json::json!([]));
             let value = if section == "dht" && matches!(action.as_str(), "publish" | "update") {
                 serde_json::json!({
                     "success": true,
@@ -47297,6 +47485,9 @@ async fn podcore_mutation_response(
                     "dhtKey": format!("pod:{id}:meta"),
                     "publishedAt": now.to_rfc3339(),
                     "expiresAt": (now + chrono::Duration::hours(24)).to_rfc3339(),
+                    "publishedPod": published_pod,
+                    "signature": publication_signature,
+                    "publicKey": publication_public_key,
                     "errorMessage": null,
                 })
             } else if section == "discovery" && matches!(action.as_str(), "register" | "update") {
@@ -47317,6 +47508,7 @@ async fn podcore_mutation_response(
                     "discoveryKeys": keys,
                     "registeredAt": now.to_rfc3339(),
                     "expiresAt": (now + chrono::Duration::hours(24)).to_rfc3339(),
+                    "tags": discovery_tags,
                     "errorMessage": null,
                 })
             } else if section == "discovery" && action == "refresh" {
@@ -47350,7 +47542,18 @@ async fn podcore_mutation_response(
                                 .pod_dht_publish_count
                                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         }
-                        routing::ok_response(value.to_string())
+                        let response = if is_dht_publish {
+                            let mut response = value.clone();
+                            if let Some(response) = response.as_object_mut() {
+                                response.remove("publishedPod");
+                                response.remove("signature");
+                                response.remove("publicKey");
+                            }
+                            response
+                        } else {
+                            value.clone()
+                        };
+                        routing::ok_response(response.to_string())
                     }
                     Err(error) => routing::service_unavailable_response(&error),
                 },
@@ -48861,6 +49064,34 @@ fn dynamic_podcore_get_route(path: &str) -> bool {
     )
 }
 
+fn verify_pod_dht_publication(
+    published_pod: &serde_json::Value,
+    signature: &str,
+    public_key: &str,
+) -> bool {
+    let Ok(signature_bytes) = STANDARD.decode(signature.as_bytes()) else {
+        return false;
+    };
+    let Ok(signature_bytes) = <[u8; 64]>::try_from(signature_bytes.as_slice()) else {
+        return false;
+    };
+    let Ok(public_key_bytes) = STANDARD.decode(public_key.as_bytes()) else {
+        return false;
+    };
+    let Ok(public_key_bytes) = <[u8; 32]>::try_from(public_key_bytes.as_slice()) else {
+        return false;
+    };
+    let Ok(public_key) = VerifyingKey::from_bytes(&public_key_bytes) else {
+        return false;
+    };
+    let Ok(canonical) = serde_json::to_vec(published_pod) else {
+        return false;
+    };
+    public_key
+        .verify(&canonical, &Signature::from_bytes(&signature_bytes))
+        .is_ok()
+}
+
 async fn extended_controller_dynamic_get_response(
     path: &str,
     query: Option<&str>,
@@ -49756,30 +49987,73 @@ async fn podcore_dynamic_get_response(
             routing::ok_response(serde_json::Value::Object(latest_by_channel).to_string())
         }
         [section, metadata, pod_id] if section == "dht" && metadata == "metadata" => {
-            let pods = state.pods.read().await;
             let publication = state
                 .controller_features
                 .read()
                 .await
                 .get(&format!("pod/dht/{pod_id}"))
                 .cloned();
-            pods.get(pod_id)
-                .map_or_else(routing::not_found_response, |pod| {
-                    routing::ok_response(
-                        serde_json::json!({
-                            "podId": pod_id,
-                            "metadata": pod,
-                            "published": publication.is_some(),
-                            "publication": publication,
-                        })
-                        .to_string(),
-                    )
+            let Some(publication) = publication else {
+                return HttpResponse {
+                    status: "404 Not Found",
+                    content_type: "application/json",
+                    body: serde_json::json!({"found": false, "error": "Pod not found"}).to_string(),
+                };
+            };
+            let Some(published_pod) = publication.get("publishedPod").filter(|pod| !pod.is_null())
+            else {
+                return HttpResponse {
+                    status: "404 Not Found",
+                    content_type: "application/json",
+                    body: serde_json::json!({"found": false, "error": "Pod not found"}).to_string(),
+                };
+            };
+            let signature = publication
+                .get("signature")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default();
+            let public_key = publication
+                .get("publicKey")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default();
+            if !verify_pod_dht_publication(published_pod, signature, public_key) {
+                return HttpResponse {
+                    status: "404 Not Found",
+                    content_type: "application/json",
+                    body: serde_json::json!({"found": false, "error": "Pod not found"}).to_string(),
+                };
+            }
+            let retrieved_at = chrono::Utc::now();
+            let expires_at = publication
+                .get("expiresAt")
+                .and_then(serde_json::Value::as_str)
+                .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+                .map(|value| value.with_timezone(&chrono::Utc));
+            if expires_at.is_some_and(|expires_at| expires_at <= retrieved_at) {
+                return HttpResponse {
+                    status: "404 Not Found",
+                    content_type: "application/json",
+                    body: serde_json::json!({"found": false, "error": "Pod not found"}).to_string(),
+                };
+            }
+            routing::ok_response(
+                serde_json::json!({
+                    "found": true,
+                    "podId": pod_id,
+                    "publishedPod": published_pod,
+                    "retrievedAt": retrieved_at.to_rfc3339(),
+                    "expiresAt": expires_at.map(|value| value.to_rfc3339()),
+                    "isValidSignature": true,
+                    "errorMessage": null,
                 })
+                .to_string(),
+            )
         }
         [section, filter, value]
             if section == "discovery"
                 && matches!(filter.as_str(), "content" | "name" | "tag" | "tags") =>
         {
+            let started_at = std::time::Instant::now();
             let tags = value
                 .split(',')
                 .map(str::trim)
@@ -49808,6 +50082,9 @@ async fn podcore_dynamic_get_response(
                 })
                 .collect::<Vec<_>>();
             let total_found = matches.len();
+            state
+                .podcore_runtime_stats
+                .record_discovery_search(filter, started_at.elapsed().as_millis() as u64);
             routing::ok_response(
                 serde_json::json!({
                     "pods": matches,
@@ -50617,6 +50894,7 @@ async fn podcore_stats_response(path: &str, query: Option<&str>, state: &AppStat
     }
     match path {
         "/api/podcore/discovery/all" => {
+            let started_at = std::time::Instant::now();
             let limit = 50;
             let rows = visible.into_iter().take(limit).map(|pod| serde_json::json!({
                 "podId": pod.pod_id,
@@ -50627,6 +50905,9 @@ async fn podcore_stats_response(path: &str, query: Option<&str>, state: &AppStat
                 "channelCount": pod.channels.len(),
                 "publishedAt": unix_timestamp_millis(),
             })).collect::<Vec<_>>();
+            state
+                .podcore_runtime_stats
+                .record_discovery_search("All", started_at.elapsed().as_millis() as u64);
             routing::ok_response(serde_json::json!({
                 "pods": rows,
                 "searchType": "All",
@@ -50635,15 +50916,77 @@ async fn podcore_stats_response(path: &str, query: Option<&str>, state: &AppStat
                 "searchedAt": chrono::Utc::now().to_rfc3339(),
             }).to_string())
         }
-        "/api/podcore/discovery/stats" => routing::ok_response(serde_json::json!({
-            "totalRegisteredPods": pod_count,
-            "activeDiscoveryEntries": pod_count,
-            "expiredEntries": 0,
-            "registrationsByTag": visible.iter().flat_map(|pod| pod.tags.iter()).fold(BTreeMap::<String, usize>::new(), |mut counts, tag| { *counts.entry(tag.clone()).or_default() += 1; counts }),
-            "searchesByType": {},
-            "lastDiscoveryOperation": chrono::Utc::now().to_rfc3339(),
-            "averageDiscoveryTime": "00:00:00",
-        }).to_string()),
+        "/api/podcore/discovery/stats" => {
+            let now = chrono::Utc::now();
+            let discovery_records = state
+                .controller_features
+                .read()
+                .await
+                .values_with_prefix("pod/discovery/");
+            let mut active_entries = 0_u64;
+            let mut expired_entries = 0_u64;
+            let mut registrations_by_tag = BTreeMap::<String, u64>::new();
+            let mut last_recorded_operation: Option<chrono::DateTime<chrono::Utc>> = None;
+            for record in &discovery_records {
+                let expires_at = record
+                    .get("expiresAt")
+                    .and_then(serde_json::Value::as_str)
+                    .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+                    .map(|value| value.with_timezone(&chrono::Utc));
+                if expires_at.is_none_or(|expires_at| expires_at > now) {
+                    active_entries += 1;
+                } else {
+                    expired_entries += 1;
+                }
+                if let Some(registered_at) = record
+                    .get("registeredAt")
+                    .and_then(serde_json::Value::as_str)
+                    .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+                {
+                    let registered_at = registered_at.with_timezone(&chrono::Utc);
+                    if last_recorded_operation.is_none_or(|current| registered_at > current) {
+                        last_recorded_operation = Some(registered_at);
+                    }
+                }
+                if let Some(tags) = record.get("tags").and_then(serde_json::Value::as_array) {
+                    for tag in tags.iter().filter_map(serde_json::Value::as_str) {
+                        *registrations_by_tag.entry(tag.to_owned()).or_default() += 1;
+                    }
+                }
+            }
+            let runtime = &state.podcore_runtime_stats;
+            let searches = runtime
+                .discovery_searches_by_type
+                .lock()
+                .map(|searches| searches.clone())
+                .unwrap_or_default();
+            let search_count = runtime
+                .discovery_searches
+                .load(std::sync::atomic::Ordering::Relaxed);
+            let search_duration_ms = runtime
+                .total_discovery_search_time_ms
+                .load(std::sync::atomic::Ordering::Relaxed);
+            let last_operation = runtime
+                .last_discovery_operation
+                .lock()
+                .ok()
+                .and_then(|operation| operation.clone())
+                .or_else(|| last_recorded_operation.map(|operation| operation.to_rfc3339()));
+            routing::ok_response(
+                serde_json::json!({
+                    "totalRegisteredPods": discovery_records.len(),
+                    "activeDiscoveryEntries": active_entries,
+                    "expiredEntries": expired_entries,
+                    "registrationsByTag": registrations_by_tag,
+                    "searchesByType": searches,
+                    "lastDiscoveryOperation": last_operation,
+                    "averageDiscoveryTime": format_timespan_hms(
+                        (search_duration_ms / search_count.max(1) / 1_000) as i64,
+                    ),
+                })
+                .to_string(),
+            )
+        }
         "/api/podcore/content/metadata" => {
             // Matches the oracle's PodContentController.GetContentMetadata
             // + ContentLinkService.CreateBasicMetadata: requires a real
@@ -50784,16 +51127,55 @@ async fn podcore_stats_response(path: &str, query: Option<&str>, state: &AppStat
                 .to_string(),
             )
         }
-        "/api/podcore/backfill/stats" => routing::ok_response(serde_json::json!({
-            "totalBackfillRequestsSent": 0,
-            "totalBackfillRequestsReceived": 0,
-            "totalMessagesBackfilled": 0,
-            "totalBackfillBytesTransferred": 0,
-            "averageBackfillDurationMs": 0.0,
-            "backfillRequestsByPod": {},
-            "lastBackfillOperation": serde_json::Value::Null,
-            "totalRequests": 0, "completedRequests": 0, "failedRequests": 0,
-        }).to_string()),
+        "/api/podcore/backfill/stats" => {
+            let runtime = &state.podcore_runtime_stats;
+            let requests = runtime
+                .backfill_requests
+                .load(std::sync::atomic::Ordering::Relaxed);
+            let completed = runtime
+                .backfill_completed
+                .load(std::sync::atomic::Ordering::Relaxed);
+            let failed = runtime
+                .backfill_failed
+                .load(std::sync::atomic::Ordering::Relaxed);
+            let total_duration_ms = runtime
+                .total_backfill_duration_ms
+                .load(std::sync::atomic::Ordering::Relaxed);
+            let requests_by_pod = runtime
+                .backfill_requests_by_pod
+                .lock()
+                .map(|requests| requests.clone())
+                .unwrap_or_default();
+            let last_operation = runtime
+                .last_backfill_operation
+                .lock()
+                .ok()
+                .and_then(|operation| operation.clone());
+            let average_duration_ms = if completed == 0 {
+                0.0
+            } else {
+                total_duration_ms as f64 / completed as f64
+            };
+            routing::ok_response(
+                serde_json::json!({
+                    // These two fields describe peer-to-peer traffic in the
+                    // oracle. slskR's current sync implementation is local
+                    // and has no overlay backfill transport, so leave them
+                    // at their honest wire-traffic value of zero.
+                    "totalBackfillRequestsSent": 0,
+                    "totalBackfillRequestsReceived": 0,
+                    "totalMessagesBackfilled": runtime.messages_backfilled.load(std::sync::atomic::Ordering::Relaxed),
+                    "totalBackfillBytesTransferred": runtime.backfill_bytes_transferred.load(std::sync::atomic::Ordering::Relaxed),
+                    "averageBackfillDurationMs": average_duration_ms,
+                    "backfillRequestsByPod": requests_by_pod,
+                    "lastBackfillOperation": last_operation,
+                    "totalRequests": requests,
+                    "completedRequests": completed,
+                    "failedRequests": failed,
+                })
+                .to_string(),
+            )
+        }
         "/api/podcore/messages/stats" => routing::ok_response(serde_json::json!({
             "totalMessages": total_messages,
             "totalSizeBytes": total_message_bytes,
@@ -50807,7 +51189,12 @@ async fn podcore_stats_response(path: &str, query: Option<&str>, state: &AppStat
             "successfulRoutingCount": 0,
             "failedRoutingCount": 0,
             "averageRoutingTimeMs": 0.0,
-            "activeDeduplicationItems": state.pod_join_replays.read().await.len(),
+            "activeDeduplicationItems": state
+                .controller_features
+                .read()
+                .await
+                .values_with_prefix("pod/routing-seen/")
+                .len(),
             "bloomFilterFillRatio": 0.0,
             "estimatedFalsePositiveRate": 0.0,
             "lastRoutingOperation": serde_json::Value::Null,
@@ -53846,6 +54233,7 @@ async fn serve(invocation: ServeInvocation) -> Result<(), String> {
         pod_signature_stats: PodSignatureStats::default(),
         pod_verification_stats: PodVerificationStats::default(),
         pod_dht_publish_count: std::sync::atomic::AtomicU64::new(0),
+        podcore_runtime_stats: PodCoreRuntimeStats::default(),
     });
     start_controller_version_check(Arc::clone(&state)).await;
     match credential_store::load(&state.config) {
@@ -71208,6 +71596,7 @@ mod tests {
             pod_signature_stats: super::PodSignatureStats::default(),
             pod_verification_stats: super::PodVerificationStats::default(),
             pod_dht_publish_count: std::sync::atomic::AtomicU64::new(0),
+            podcore_runtime_stats: super::PodCoreRuntimeStats::default(),
         });
         (state, receiver)
     }
@@ -93282,6 +93671,196 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn podcore_dht_metadata_reads_and_verifies_the_published_record() {
+        let (state, _receiver) = test_state();
+        let pod_id = "metadata-audit-pod";
+        let published = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/dht/publish",
+            None,
+            &serde_json::json!({
+                "pod": {
+                    "podId": pod_id,
+                    "name": "Published metadata",
+                    "visibility": "public"
+                }
+            })
+            .to_string(),
+            &state,
+        )
+        .await
+        .expect("publish pod metadata");
+        assert_eq!(published.status, "200 OK", "{}", published.body);
+        let published_json = serde_json::from_str::<serde_json::Value>(&published.body).unwrap();
+        assert_eq!(published_json["podId"], pod_id);
+        assert!(published_json.get("publishedPod").is_none());
+
+        let metadata = super::route_http_request(
+            "GET",
+            &format!("/api/v0/podcore/dht/metadata/{pod_id}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("get published metadata");
+        assert_eq!(metadata.status, "200 OK", "{}", metadata.body);
+        let metadata_json = serde_json::from_str::<serde_json::Value>(&metadata.body).unwrap();
+        assert_eq!(metadata_json["found"], true);
+        assert_eq!(metadata_json["podId"], pod_id);
+        assert_eq!(metadata_json["publishedPod"]["name"], "Published metadata");
+        assert_eq!(metadata_json["isValidSignature"], true);
+
+        let unpublished = super::route_http_request(
+            "DELETE",
+            &format!("/api/v0/podcore/dht/unpublish/{pod_id}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("unpublish metadata");
+        assert_eq!(unpublished.status, "200 OK");
+        let missing = super::route_http_request(
+            "GET",
+            &format!("/api/v0/podcore/dht/metadata/{pod_id}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("missing published metadata");
+        assert_eq!(missing.status, "404 Not Found");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&missing.body).unwrap(),
+            serde_json::json!({"found": false, "error": "Pod not found"})
+        );
+    }
+
+    #[tokio::test]
+    async fn podcore_backfill_sync_and_sync_all_report_real_local_work() {
+        let (state, _receiver) = test_state();
+        let pod_id = "backfill-audit-pod";
+        state
+            .pods
+            .write()
+            .await
+            .create(
+                serde_json::from_value::<super::pods::PodRecord>(serde_json::json!({
+                    "podId": pod_id,
+                    "name": "Backfill audit",
+                    "isPublic": true,
+                    "channels": [{"channelId": "general", "name": "General"}]
+                }))
+                .expect("deserialize backfill pod"),
+                "owner-peer".to_owned(),
+            )
+            .expect("create backfill pod");
+        {
+            let mut channels = state.pod_channels.write().await;
+            channels
+                .append(
+                    pod_id.to_owned(),
+                    "general".to_owned(),
+                    "peer-1".to_owned(),
+                    "old".to_owned(),
+                    String::new(),
+                    1_000,
+                )
+                .expect("append old message");
+            channels
+                .append(
+                    pod_id.to_owned(),
+                    "general".to_owned(),
+                    "peer-1".to_owned(),
+                    "new".to_owned(),
+                    String::new(),
+                    1_001,
+                )
+                .expect("append new message");
+        }
+
+        let sync = super::route_http_request(
+            "POST",
+            &format!("/api/v0/podcore/backfill/{pod_id}/sync"),
+            None,
+            r#"{"general":1000}"#,
+            &state,
+        )
+        .await
+        .expect("sync backfill");
+        assert_eq!(sync.status, "200 OK", "{}", sync.body);
+        let sync_json = serde_json::from_str::<serde_json::Value>(&sync.body).unwrap();
+        assert_eq!(sync_json["messagesReceived"], 1);
+        assert_eq!(sync_json["bytesTransferred"], 3);
+
+        let sync_all = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/backfill/sync-all",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("sync all backfill");
+        assert_eq!(sync_all.status, "200 OK");
+        let sync_all_json = serde_json::from_str::<serde_json::Value>(&sync_all.body).unwrap();
+        assert_eq!(sync_all_json.as_array().unwrap().len(), 1);
+        assert_eq!(sync_all_json[0]["messagesReceived"], 2);
+
+        let stats =
+            super::route_http_request("GET", "/api/v0/podcore/backfill/stats", None, "", &state)
+                .await
+                .expect("backfill stats");
+        let stats_json = serde_json::from_str::<serde_json::Value>(&stats.body).unwrap();
+        assert_eq!(stats_json["totalRequests"], 2);
+        assert_eq!(stats_json["completedRequests"], 2);
+        assert_eq!(stats_json["totalMessagesBackfilled"], 3);
+        assert_eq!(stats_json["totalBackfillBytesTransferred"], 9);
+        assert_eq!(stats_json["backfillRequestsByPod"][pod_id], 2);
+        assert!(stats_json["lastBackfillOperation"].is_string());
+    }
+
+    #[tokio::test]
+    async fn podcore_discovery_stats_use_registrations_and_search_activity() {
+        let (state, _receiver) = test_state();
+        let registered = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/discovery/register",
+            None,
+            r#"{"podId":"discovery-audit-pod","name":"Audit Pod","tags":["music","live"]}"#,
+            &state,
+        )
+        .await
+        .expect("register discovery pod");
+        assert_eq!(registered.status, "200 OK", "{}", registered.body);
+
+        let search = super::route_http_request(
+            "GET",
+            "/api/v0/podcore/discovery/name/audit",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("search discovery pods");
+        assert_eq!(search.status, "200 OK", "{}", search.body);
+
+        let stats =
+            super::route_http_request("GET", "/api/v0/podcore/discovery/stats", None, "", &state)
+                .await
+                .expect("discovery stats");
+        let stats_json = serde_json::from_str::<serde_json::Value>(&stats.body).unwrap();
+        assert_eq!(stats_json["totalRegisteredPods"], 1);
+        assert_eq!(stats_json["activeDiscoveryEntries"], 1);
+        assert_eq!(stats_json["expiredEntries"], 0);
+        assert_eq!(stats_json["registrationsByTag"]["music"], 1);
+        assert_eq!(stats_json["registrationsByTag"]["live"], 1);
+        assert_eq!(stats_json["searchesByType"]["name"], 1);
+        assert!(stats_json["lastDiscoveryOperation"].is_string());
+    }
+
+    #[tokio::test]
     async fn library_bloom_preview_reflects_real_hashdb_contents_not_an_empty_filter() {
         let (state, _receiver) = test_state();
 
@@ -103089,6 +103668,7 @@ mod tests {
             pod_signature_stats: super::PodSignatureStats::default(),
             pod_verification_stats: super::PodVerificationStats::default(),
             pod_dht_publish_count: std::sync::atomic::AtomicU64::new(0),
+            podcore_runtime_stats: super::PodCoreRuntimeStats::default(),
         });
         let missing = super::route_http_request("GET", "/api/v0/config", None, "", &state)
             .await
@@ -103393,6 +103973,7 @@ mod tests {
             pod_signature_stats: super::PodSignatureStats::default(),
             pod_verification_stats: super::PodVerificationStats::default(),
             pod_dht_publish_count: std::sync::atomic::AtomicU64::new(0),
+            podcore_runtime_stats: super::PodCoreRuntimeStats::default(),
         };
         let cookie_allowed = super::route_http_request_with_headers(
             "GET",
