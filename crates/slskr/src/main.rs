@@ -10524,6 +10524,13 @@ struct RuntimeCompatState {
     relay_agent_enabled: bool,
     bridge_running: bool,
     bridge_config_updates: u64,
+    bridge_started_at: Option<u64>,
+    bridge_active_clients: BTreeMap<String, serde_json::Value>,
+    bridge_total_connections: u64,
+    bridge_total_searches: u64,
+    bridge_total_downloads: u64,
+    bridge_total_room_joins: u64,
+    bridge_total_bytes_proxied: u64,
     options_updates: u64,
     options_yaml_uploads: u64,
     options_yaml_validations: u64,
@@ -10836,6 +10843,13 @@ impl RuntimeCompatState {
             relay_agent_enabled: false,
             bridge_running: false,
             bridge_config_updates: 0,
+            bridge_started_at: None,
+            bridge_active_clients: BTreeMap::new(),
+            bridge_total_connections: 0,
+            bridge_total_searches: 0,
+            bridge_total_downloads: 0,
+            bridge_total_room_joins: 0,
+            bridge_total_bytes_proxied: 0,
             options_updates: 0,
             options_yaml_uploads: 0,
             options_yaml_validations: 0,
@@ -10861,6 +10875,13 @@ impl RuntimeCompatState {
             relay_agent_enabled: record.relay_agent_enabled,
             bridge_running: record.bridge_running,
             bridge_config_updates: u64::try_from(record.bridge_config_updates).unwrap_or_default(),
+            bridge_started_at: None,
+            bridge_active_clients: BTreeMap::new(),
+            bridge_total_connections: 0,
+            bridge_total_searches: 0,
+            bridge_total_downloads: 0,
+            bridge_total_room_joins: 0,
+            bridge_total_bytes_proxied: 0,
             options_updates: u64::try_from(record.options_updates).unwrap_or_default(),
             options_yaml_uploads: u64::try_from(record.options_yaml_uploads).unwrap_or_default(),
             options_yaml_validations: u64::try_from(record.options_yaml_validations)
@@ -10952,6 +10973,10 @@ impl RuntimeCompatState {
 
     fn set_bridge_running(&mut self, running: bool, configured: bool) -> serde_json::Value {
         self.bridge_running = running && configured;
+        if !self.bridge_running {
+            self.bridge_started_at = None;
+            self.bridge_active_clients.clear();
+        }
         self.updated_at = unix_timestamp();
         serde_json::json!({
             "status": if configured {
@@ -24068,18 +24093,17 @@ async fn route_http_request_with_headers(
             } else {
                 "disabled"
             };
-            drop(runtime);
-            // Matches the oracle's real BridgeDashboard.
-            // GetConnectedClientsAsync contract (a real ConnectedClient[]
-            // tracked from genuine legacy-client connections to an
-            // embedded Soulfind-protocol bridge server) -- slskR has no
-            // such embedded server, so there are no real bridge clients
-            // to report. An honest empty list, not mesh-capability
-            // records or watched-user presence pretending to be bridge
-            // connections.
+            // Matches the oracle's real BridgeDashboard client snapshot;
+            // only sessions accepted by the embedded Soulfind-protocol
+            // listener are included.
+            let clients = runtime
+                .bridge_active_clients
+                .values()
+                .cloned()
+                .collect::<Vec<_>>();
              let json = serde_json::json!({
-                 "clients": [],
-                 "count": 0,
+                 "clients": clients,
+                 "count": runtime.bridge_active_clients.len(),
                  "status": status,
                  "ready": bridge.enabled,
              });
@@ -24126,18 +24150,24 @@ async fn route_http_request_with_headers(
              let transfer_count = transfers.entries.len();
              drop(transfers);
              // Matches the oracle's real BridgeDashboardData contract:
-             // no embedded Soulfind bridge server exists in slskR, so
-             // there are no real legacy-client connections or
-             // bridge-proxied bytes to report -- honest zeros for the
-             // oracle's own fields, not slskR's local transfer activity
-             // standing in for unrelated bridge metrics (kept below as
-             // separate, honestly-labeled extra fields).
+             // Local HTTP transfer activity remains separate from the
+             // protocol bridge counters below.
              let json = serde_json::json!({
                  "health": if runtime.bridge_running { "Healthy" } else { "Disabled" },
-                 "connectedClients": 0,
-                 "stats": {"totalBytesProxied": 0, "totalConnections": 0},
+                 "connectedClients": runtime.bridge_active_clients.len(),
+                 "stats": {
+                     "totalBytesProxied": runtime.bridge_total_bytes_proxied,
+                     "totalConnections": runtime.bridge_total_connections,
+                     "currentConnections": runtime.bridge_active_clients.len(),
+                     "totalSearches": runtime.bridge_total_searches,
+                     "totalDownloads": runtime.bridge_total_downloads,
+                     "totalRoomJoins": runtime.bridge_total_room_joins,
+                     "uptime": runtime.bridge_started_at.map(|started| format_timespan_hms(
+                         i64::try_from(unix_timestamp().saturating_sub(started)).unwrap_or(i64::MAX)
+                     )).unwrap_or_else(|| "00:00:00".to_owned()),
+                 },
                  "meshBenefits": {"enabled": bridge.enabled},
-                 "active_clients": 0,
+                 "active_clients": runtime.bridge_active_clients.len(),
                  "transfers": transfer_count,
                  "active_transfers": active_transfers,
                  "total_bytes": bytes,
@@ -24175,21 +24205,18 @@ async fn route_http_request_with_headers(
                  .count();
              let total_requests = transfers.entries.len();
              drop(transfers);
-             // Matches the oracle's real BridgeStatistics contract: no
-             // embedded Soulfind bridge server exists in slskR, so there
-             // are no real legacy-client connections/searches/
-             // room-joins/downloads/proxied bytes to report -- honest
-             // zeros, not slskR's own transfer queue standing in for
-             // unrelated bridge metrics (kept below as separate,
-             // honestly-labeled extra fields).
+             // Local HTTP transfer activity remains separate from the
+             // protocol bridge counters below.
              let json = serde_json::json!({
-                 "totalConnections": 0,
-                 "currentConnections": 0,
-                 "totalSearches": 0,
-                 "totalDownloads": 0,
-                 "totalRoomJoins": 0,
-                 "totalBytesProxied": 0,
-                 "uptime": "00:00:00",
+                 "totalConnections": runtime.bridge_total_connections,
+                 "currentConnections": runtime.bridge_active_clients.len(),
+                 "totalSearches": runtime.bridge_total_searches,
+                 "totalDownloads": runtime.bridge_total_downloads,
+                 "totalRoomJoins": runtime.bridge_total_room_joins,
+                 "totalBytesProxied": runtime.bridge_total_bytes_proxied,
+                 "uptime": runtime.bridge_started_at.map(|started| format_timespan_hms(
+                     i64::try_from(unix_timestamp().saturating_sub(started)).unwrap_or(i64::MAX)
+                 )).unwrap_or_else(|| "00:00:00".to_owned()),
                  "total_requests": total_requests,
                  "total_bytes": total_bytes,
                  "active_sessions": active_sessions,
@@ -24213,13 +24240,20 @@ async fn route_http_request_with_headers(
              let transfers = state.transfers.read().await;
              let transfer_count = transfers.entries.len();
              drop(transfers);
+             let uptime_seconds = runtime
+                 .bridge_started_at
+                 .map(|started| unix_timestamp().saturating_sub(started))
+                 .unwrap_or(0);
              let json = format!(
-                 "{{\"status\":\"{}\",\"version\":\"1.0.0\",\"uptime_seconds\":0,\"enabled\":{},\"configured\":{},\"running\":{},\"configUpdates\":{},\"host\":null,\"port\":null,\"endpoint_configured\":{},\"transfers\":{},\"next_action\":\"{}\"}}",
+                 "{{\"status\":\"{}\",\"version\":\"1.0.0\",\"uptime_seconds\":{},\"enabled\":{},\"configured\":{},\"running\":{},\"configUpdates\":{},\"host\":\"{}\",\"port\":{},\"endpoint_configured\":{},\"transfers\":{},\"next_action\":\"{}\"}}",
                  if runtime.bridge_running { "running" } else if bridge.enabled { "configured" } else { "disabled" },
+                 uptime_seconds,
                  bridge.enabled,
                  bridge.enabled && bridge.endpoint_configured(),
                  runtime.bridge_running,
                  runtime.bridge_config_updates,
+                 bridge.bind_address,
+                 bridge.port,
                  bridge.endpoint_configured(),
                  transfer_count,
                  if runtime.bridge_running {
@@ -44798,6 +44832,554 @@ fn listening_party_normalize(
     }))
 }
 
+const BRIDGE_LOGIN: i32 = 1;
+const BRIDGE_LOGIN_RESPONSE: i32 = 2;
+const BRIDGE_SEARCH_REQUEST: i32 = 3;
+const BRIDGE_SEARCH_RESPONSE: i32 = 4;
+const BRIDGE_DOWNLOAD_REQUEST: i32 = 5;
+const BRIDGE_DOWNLOAD_RESPONSE: i32 = 6;
+const BRIDGE_ROOM_LIST_REQUEST: i32 = 7;
+const BRIDGE_ROOM_LIST_RESPONSE: i32 = 8;
+const BRIDGE_MAX_FRAME_BYTES: usize = 1024 * 1024;
+const BRIDGE_MAX_STRING_BYTES: usize = 1024 * 1024;
+
+/// The frozen slskdN bridge uses a deliberately small Soulseek-compatible
+/// frame: a little-endian length containing the four-byte message type and
+/// payload, followed by the little-endian type and payload.  Keep this parser
+/// bounded and independent of the HTTP bridge routes so legacy clients use
+/// the same real protocol boundary as the target service.
+async fn bridge_read_frame(stream: &mut TcpStream) -> Result<Option<(i32, Vec<u8>)>, &'static str> {
+    let mut length_bytes = [0_u8; 4];
+    if stream.read_exact(&mut length_bytes).await.is_err() {
+        return Ok(None);
+    }
+    let length = u32::from_le_bytes(length_bytes) as usize;
+    if !(4..=BRIDGE_MAX_FRAME_BYTES).contains(&length) {
+        return Err("invalid bridge message length");
+    }
+    let mut type_bytes = [0_u8; 4];
+    stream
+        .read_exact(&mut type_bytes)
+        .await
+        .map_err(|_| "incomplete bridge message type")?;
+    let mut payload = vec![0_u8; length - 4];
+    if !payload.is_empty() {
+        stream
+            .read_exact(&mut payload)
+            .await
+            .map_err(|_| "incomplete bridge message payload")?;
+    }
+    Ok(Some((i32::from_le_bytes(type_bytes), payload)))
+}
+
+async fn bridge_write_frame(
+    stream: &mut TcpStream,
+    message_type: i32,
+    payload: &[u8],
+) -> Result<(), &'static str> {
+    let length = 4_usize
+        .checked_add(payload.len())
+        .filter(|length| *length <= BRIDGE_MAX_FRAME_BYTES)
+        .ok_or("bridge response is too large")?;
+    let length = u32::try_from(length).map_err(|_| "bridge response length overflow")?;
+    stream
+        .write_all(&length.to_le_bytes())
+        .await
+        .map_err(|_| "could not write bridge response length")?;
+    stream
+        .write_all(&message_type.to_le_bytes())
+        .await
+        .map_err(|_| "could not write bridge response type")?;
+    if !payload.is_empty() {
+        stream
+            .write_all(payload)
+            .await
+            .map_err(|_| "could not write bridge response payload")?;
+    }
+    stream
+        .flush()
+        .await
+        .map_err(|_| "could not flush bridge response")
+}
+
+fn bridge_read_i32(payload: &[u8], cursor: &mut usize) -> Option<i32> {
+    let end = cursor.checked_add(4)?;
+    let bytes = payload.get(*cursor..end)?;
+    *cursor = end;
+    Some(i32::from_le_bytes(bytes.try_into().ok()?))
+}
+
+fn bridge_read_string(payload: &[u8], cursor: &mut usize) -> Option<String> {
+    let length = bridge_read_i32(payload, cursor)?;
+    if !(0..=i32::try_from(BRIDGE_MAX_STRING_BYTES).ok()?).contains(&length) {
+        return None;
+    }
+    let length = usize::try_from(length).ok()?;
+    let end = cursor.checked_add(length)?;
+    let value = std::str::from_utf8(payload.get(*cursor..end)?)
+        .ok()?
+        .to_owned();
+    *cursor = end;
+    Some(value)
+}
+
+fn bridge_write_i32(payload: &mut Vec<u8>, value: i32) {
+    payload.extend_from_slice(&value.to_le_bytes());
+}
+
+fn bridge_write_string(payload: &mut Vec<u8>, value: &str) {
+    let value = value.as_bytes();
+    let value = &value[..value.len().min(BRIDGE_MAX_STRING_BYTES)];
+    bridge_write_i32(payload, i32::try_from(value.len()).unwrap_or(i32::MAX));
+    payload.extend_from_slice(value);
+}
+
+fn bridge_login_response(success: bool, message: &str) -> Vec<u8> {
+    let mut payload = Vec::new();
+    payload.push(u8::from(success));
+    bridge_write_string(&mut payload, message);
+    payload
+}
+
+fn bridge_download_wire_response(success: bool, message_or_id: &str, token: i32) -> Vec<u8> {
+    let mut payload = Vec::new();
+    payload.push(u8::from(success));
+    bridge_write_string(&mut payload, message_or_id);
+    bridge_write_i32(&mut payload, token);
+    payload
+}
+
+fn bridge_password_matches(provided: &str, configured: &str) -> bool {
+    let provided = provided.as_bytes();
+    let configured = configured.as_bytes();
+    let length = provided.len().max(configured.len());
+    let mut provided_padded = vec![0_u8; length];
+    let mut configured_padded = vec![0_u8; length];
+    provided_padded[..provided.len()].copy_from_slice(provided);
+    configured_padded[..configured.len()].copy_from_slice(configured);
+    provided.len() == configured.len()
+        && subtle_constant_time_equal(&provided_padded, &configured_padded)
+}
+
+fn subtle_constant_time_equal(left: &[u8], right: &[u8]) -> bool {
+    if left.len() != right.len() {
+        return false;
+    }
+    left.iter()
+        .zip(right)
+        .fold(0_u8, |difference, (left, right)| {
+            difference | (left ^ right)
+        })
+        == 0
+}
+
+struct BridgeClientSession {
+    username: String,
+    requests_in_window: u32,
+    request_window_started: Instant,
+    transfer_count: u32,
+    active_transfer_id: Option<String>,
+}
+
+impl BridgeClientSession {
+    fn new() -> Self {
+        Self {
+            username: String::new(),
+            requests_in_window: 0,
+            request_window_started: Instant::now(),
+            transfer_count: 0,
+            active_transfer_id: None,
+        }
+    }
+
+    fn consume_request_quota(&mut self, limit: u32) -> bool {
+        if self.request_window_started.elapsed() >= Duration::from_secs(60) {
+            self.request_window_started = Instant::now();
+            self.requests_in_window = 0;
+        }
+        if self.requests_in_window >= limit.max(1) {
+            return false;
+        }
+        self.requests_in_window = self.requests_in_window.saturating_add(1);
+        true
+    }
+}
+
+fn spawn_bridge_server(state: Arc<AppState>) {
+    if !state.config.media_services.virtual_soulfind.bridge.enabled {
+        return;
+    }
+    tokio::spawn(async move {
+        run_bridge_server(state).await;
+    });
+}
+
+async fn run_bridge_server(state: Arc<AppState>) {
+    let bridge = state.config.media_services.virtual_soulfind.bridge.clone();
+    if !bridge.bind_address.is_loopback()
+        && (!bridge.require_auth || bridge.password.trim().is_empty())
+    {
+        record_daemon_log(
+            &state,
+            logging::LogLevel::Error,
+            "bridge",
+            "refusing non-loopback Soulfind bridge without password authentication".to_owned(),
+        )
+        .await;
+        return;
+    }
+
+    let address = SocketAddr::new(bridge.bind_address, bridge.port);
+    let listener = match TcpListener::bind(address).await {
+        Ok(listener) => listener,
+        Err(error) => {
+            record_daemon_log(
+                &state,
+                logging::LogLevel::Error,
+                "bridge",
+                format!("could not bind Soulfind bridge at {address}: {error}"),
+            )
+            .await;
+            return;
+        }
+    };
+    {
+        let mut runtime = state.runtime.write().await;
+        runtime.bridge_running = true;
+        runtime.bridge_started_at = Some(unix_timestamp());
+        runtime.updated_at = unix_timestamp();
+    }
+    record_daemon_log(
+        &state,
+        logging::LogLevel::Info,
+        "bridge",
+        format!("Soulfind bridge listening on {address}"),
+    )
+    .await;
+
+    loop {
+        if !state.runtime.read().await.bridge_running {
+            break;
+        }
+        let accepted = tokio::select! {
+            accepted = listener.accept() => accepted,
+            _ = time::sleep(Duration::from_millis(250)) => continue,
+        };
+        let Ok((mut stream, remote)) = accepted else {
+            continue;
+        };
+        let client_id = uuid::Uuid::new_v4().simple().to_string();
+        let mut runtime = state.runtime.write().await;
+        if runtime.bridge_active_clients.len() >= bridge.max_clients {
+            drop(runtime);
+            let _ = stream.shutdown().await;
+            continue;
+        }
+        let now = unix_timestamp();
+        runtime.bridge_total_connections = runtime.bridge_total_connections.saturating_add(1);
+        runtime.bridge_active_clients.insert(
+            client_id.clone(),
+            serde_json::json!({
+                "clientId": client_id,
+                "clientType": "Unknown",
+                "ipAddress": remote.ip().to_string(),
+                "connectedAt": now,
+                "requestCount": 0,
+                "lastActivity": now,
+            }),
+        );
+        drop(runtime);
+        let client_state = Arc::clone(&state);
+        tokio::spawn(async move {
+            bridge_handle_client(client_id, stream, client_state).await;
+        });
+    }
+
+    let mut runtime = state.runtime.write().await;
+    runtime.bridge_running = false;
+    runtime.bridge_started_at = None;
+    runtime.bridge_active_clients.clear();
+    runtime.updated_at = unix_timestamp();
+}
+
+async fn bridge_handle_client(client_id: String, mut stream: TcpStream, state: Arc<AppState>) {
+    let bridge = state.config.media_services.virtual_soulfind.bridge.clone();
+    let mut session = BridgeClientSession::new();
+
+    let login = match bridge_read_frame(&mut stream).await {
+        Ok(Some((message_type, payload))) if message_type == BRIDGE_LOGIN => {
+            let mut cursor = 0;
+            bridge_read_string(&payload, &mut cursor).zip(bridge_read_string(&payload, &mut cursor))
+        }
+        _ => None,
+    };
+    let Some((username, password)) = login else {
+        let _ = bridge_write_frame(
+            &mut stream,
+            BRIDGE_LOGIN_RESPONSE,
+            &bridge_login_response(false, "Login message required"),
+        )
+        .await;
+        bridge_remove_client(&state, &client_id).await;
+        return;
+    };
+    if bridge.require_auth && !bridge_password_matches(&password, &bridge.password) {
+        let _ = bridge_write_frame(
+            &mut stream,
+            BRIDGE_LOGIN_RESPONSE,
+            &bridge_login_response(false, "Invalid username or password"),
+        )
+        .await;
+        bridge_remove_client(&state, &client_id).await;
+        return;
+    }
+    session.username = username;
+    {
+        let mut runtime = state.runtime.write().await;
+        if let Some(client) = runtime.bridge_active_clients.get_mut(&client_id) {
+            let client_type = if session.username.trim().is_empty() {
+                "Soulseek Legacy".to_owned()
+            } else {
+                format!("Soulseek Legacy ({})", session.username)
+            };
+            client["clientType"] = serde_json::json!(client_type);
+            client["lastActivity"] = serde_json::json!(unix_timestamp());
+        }
+    }
+    if bridge_write_frame(
+        &mut stream,
+        BRIDGE_LOGIN_RESPONSE,
+        &bridge_login_response(true, "Login successful"),
+    )
+    .await
+    .is_err()
+    {
+        bridge_remove_client(&state, &client_id).await;
+        return;
+    }
+
+    loop {
+        let Ok(Some((message_type, payload))) = bridge_read_frame(&mut stream).await else {
+            break;
+        };
+        if !session.consume_request_quota(bridge.max_requests_per_minute) {
+            let _ = bridge_write_frame(
+                &mut stream,
+                BRIDGE_LOGIN_RESPONSE,
+                &bridge_login_response(false, "Request quota exceeded"),
+            )
+            .await;
+            break;
+        }
+        bridge_record_request(&state, &client_id, message_type).await;
+        let result = match message_type {
+            BRIDGE_SEARCH_REQUEST => bridge_handle_search(&mut stream, payload, &state).await,
+            BRIDGE_DOWNLOAD_REQUEST => {
+                bridge_handle_download(&mut stream, payload, &state, &mut session).await
+            }
+            BRIDGE_ROOM_LIST_REQUEST => bridge_handle_room_list(&mut stream, &state).await,
+            _ => {
+                bridge_write_frame(
+                    &mut stream,
+                    BRIDGE_LOGIN_RESPONSE,
+                    &bridge_login_response(false, "Unknown message type"),
+                )
+                .await
+            }
+        };
+        if result.is_err() {
+            break;
+        }
+    }
+    bridge_remove_client(&state, &client_id).await;
+}
+
+async fn bridge_record_request(state: &AppState, client_id: &str, message_type: i32) {
+    let mut runtime = state.runtime.write().await;
+    if let Some(client) = runtime.bridge_active_clients.get_mut(client_id) {
+        let request_count = client["requestCount"]
+            .as_u64()
+            .unwrap_or(0)
+            .saturating_add(1);
+        client["requestCount"] = serde_json::json!(request_count);
+        client["lastActivity"] = serde_json::json!(unix_timestamp());
+    }
+    match message_type {
+        BRIDGE_SEARCH_REQUEST => {
+            runtime.bridge_total_searches = runtime.bridge_total_searches.saturating_add(1)
+        }
+        BRIDGE_DOWNLOAD_REQUEST => {
+            runtime.bridge_total_downloads = runtime.bridge_total_downloads.saturating_add(1)
+        }
+        BRIDGE_ROOM_LIST_REQUEST => {
+            runtime.bridge_total_room_joins = runtime.bridge_total_room_joins.saturating_add(1)
+        }
+        _ => {}
+    }
+}
+
+async fn bridge_remove_client(state: &AppState, client_id: &str) {
+    state
+        .runtime
+        .write()
+        .await
+        .bridge_active_clients
+        .remove(client_id);
+}
+
+async fn bridge_handle_search(
+    stream: &mut TcpStream,
+    payload: Vec<u8>,
+    state: &AppState,
+) -> Result<(), &'static str> {
+    let mut cursor = 0;
+    let Some(query) = bridge_read_string(&payload, &mut cursor) else {
+        return Err("invalid bridge search request");
+    };
+    let Some(token) = bridge_read_i32(&payload, &mut cursor) else {
+        return Err("invalid bridge search token");
+    };
+    let query = query.to_ascii_lowercase();
+    let username = state
+        .config
+        .username
+        .clone()
+        .unwrap_or_else(|| "slskR".to_owned());
+    let entries = state.shares.read().await.entries.clone();
+    let mut files = Vec::new();
+    for entry in entries {
+        if !entry.filename.to_ascii_lowercase().contains(&query) {
+            continue;
+        }
+        files.push((entry.filename, entry.size, entry.extension));
+        if files.len() >= 1_000 {
+            break;
+        }
+    }
+    let mut response = Vec::new();
+    bridge_write_i32(&mut response, token);
+    bridge_write_i32(
+        &mut response,
+        i32::try_from(files.len()).unwrap_or(i32::MAX),
+    );
+    for (filename, size, extension) in files {
+        bridge_write_string(&mut response, &username);
+        bridge_write_string(&mut response, &filename);
+        response.extend_from_slice(&i64::try_from(size).unwrap_or(i64::MAX).to_le_bytes());
+        bridge_write_i32(&mut response, 0);
+        bridge_write_string(&mut response, &extension);
+    }
+    bridge_write_frame(stream, BRIDGE_SEARCH_RESPONSE, &response).await
+}
+
+async fn bridge_handle_download(
+    stream: &mut TcpStream,
+    payload: Vec<u8>,
+    state: &AppState,
+    session: &mut BridgeClientSession,
+) -> Result<(), &'static str> {
+    let mut cursor = 0;
+    let Some(username) = bridge_read_string(&payload, &mut cursor) else {
+        return Err("invalid bridge download username");
+    };
+    let Some(filename) = bridge_read_string(&payload, &mut cursor) else {
+        return Err("invalid bridge download filename");
+    };
+    let Some(token) = bridge_read_i32(&payload, &mut cursor) else {
+        return Err("invalid bridge download token");
+    };
+    let max_transfers = state
+        .config
+        .media_services
+        .virtual_soulfind
+        .bridge
+        .max_transfers_per_session
+        .max(1);
+    if session.active_transfer_id.is_some() {
+        bridge_write_frame(
+            stream,
+            BRIDGE_DOWNLOAD_RESPONSE,
+            &bridge_download_wire_response(false, "A download is already active", token),
+        )
+        .await?;
+        return Ok(());
+    }
+    if session.transfer_count >= max_transfers {
+        bridge_write_frame(
+            stream,
+            BRIDGE_DOWNLOAD_RESPONSE,
+            &bridge_download_wire_response(false, "Transfer quota exceeded", token),
+        )
+        .await?;
+        return Ok(());
+    }
+    let request = serde_json::json!({
+        "username": username,
+        "filename": filename,
+    })
+    .to_string();
+    match extended_controller_download_response(&request, state).await {
+        Ok(requests) => {
+            let transfer_id = requests
+                .first()
+                .map(|entry| {
+                    entry
+                        .request_id
+                        .clone()
+                        .unwrap_or_else(|| entry.id.to_string())
+                })
+                .unwrap_or_default();
+            session.transfer_count = session.transfer_count.saturating_add(1);
+            session.active_transfer_id = Some(transfer_id.clone());
+            bridge_write_frame(
+                stream,
+                BRIDGE_DOWNLOAD_RESPONSE,
+                &bridge_download_wire_response(true, &transfer_id, token),
+            )
+            .await
+        }
+        Err(response) => {
+            bridge_write_frame(
+                stream,
+                BRIDGE_DOWNLOAD_RESPONSE,
+                &bridge_download_wire_response(false, &response.body, token),
+            )
+            .await
+        }
+    }
+}
+
+async fn bridge_handle_room_list(
+    stream: &mut TcpStream,
+    state: &AppState,
+) -> Result<(), &'static str> {
+    let rooms = state
+        .rooms
+        .read()
+        .await
+        .records
+        .iter()
+        .filter(|room| room.joined)
+        .map(|room| {
+            (
+                room.name.clone(),
+                room.user_count
+                    .unwrap_or_else(|| u32::try_from(room.members.len()).unwrap_or(u32::MAX)),
+            )
+        })
+        .collect::<Vec<_>>();
+    let mut response = Vec::new();
+    bridge_write_i32(
+        &mut response,
+        i32::try_from(rooms.len()).unwrap_or(i32::MAX),
+    );
+    for (name, user_count) in rooms {
+        bridge_write_string(&mut response, &name);
+        bridge_write_i32(&mut response, i32::try_from(user_count).unwrap_or(i32::MAX));
+    }
+    bridge_write_frame(stream, BRIDGE_ROOM_LIST_RESPONSE, &response).await
+}
+
 async fn misc_controller_mutation_response(
     method: &str,
     path: &str,
@@ -57147,6 +57729,7 @@ async fn serve(invocation: ServeInvocation) -> Result<(), String> {
         regular_listener_receiver,
         obfuscated_listener_receiver,
     );
+    spawn_bridge_server(Arc::clone(&state));
     spawn_rate_limit_cleanup(Arc::clone(&state));
     spawn_retention_scheduler(Arc::clone(&state));
     record_daemon_log(
@@ -93903,14 +94486,96 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn soulfind_bridge_wire_frames_match_target_parser_contract() {
+        use tokio::io::AsyncWriteExt as _;
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bridge test listener");
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let (message_type, payload) = super::bridge_read_frame(&mut stream)
+                .await
+                .expect("read bridge frame")
+                .expect("bridge client frame");
+            assert_eq!(message_type, super::BRIDGE_LOGIN);
+            let mut cursor = 0;
+            assert_eq!(
+                super::bridge_read_string(&payload, &mut cursor).as_deref(),
+                Some("legacy-client")
+            );
+            assert_eq!(
+                super::bridge_read_string(&payload, &mut cursor).as_deref(),
+                Some("secret")
+            );
+            super::bridge_write_frame(
+                &mut stream,
+                super::BRIDGE_LOGIN_RESPONSE,
+                &super::bridge_login_response(true, "Login successful"),
+            )
+            .await
+            .expect("write bridge response");
+        });
+
+        let mut client = tokio::net::TcpStream::connect(address)
+            .await
+            .expect("bridge test client");
+        let mut login = Vec::new();
+        super::bridge_write_string(&mut login, "legacy-client");
+        super::bridge_write_string(&mut login, "secret");
+        let frame_length = u32::try_from(4 + login.len()).unwrap();
+        client.write_all(&frame_length.to_le_bytes()).await.unwrap();
+        client
+            .write_all(&super::BRIDGE_LOGIN.to_le_bytes())
+            .await
+            .unwrap();
+        client.write_all(&login).await.unwrap();
+
+        let (message_type, payload) = super::bridge_read_frame(&mut client)
+            .await
+            .expect("read login response")
+            .expect("login response frame");
+        assert_eq!(message_type, super::BRIDGE_LOGIN_RESPONSE);
+        assert_eq!(payload.first(), Some(&1));
+        let mut cursor = 1;
+        assert_eq!(
+            super::bridge_read_string(&payload, &mut cursor).as_deref(),
+            Some("Login successful")
+        );
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn bridge_rejects_oversized_wire_frames() {
+        use tokio::io::AsyncWriteExt as _;
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bridge test listener");
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            assert_eq!(
+                super::bridge_read_frame(&mut stream).await,
+                Err("invalid bridge message length")
+            );
+        });
+        let mut client = tokio::net::TcpStream::connect(address)
+            .await
+            .expect("bridge test client");
+        let oversized = u32::try_from(super::BRIDGE_MAX_FRAME_BYTES + 1).unwrap();
+        client.write_all(&oversized.to_le_bytes()).await.unwrap();
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
     async fn bridge_admin_clients_never_leaks_unrelated_peer_activity() {
         let (state, _receiver) = test_state();
         // Real, unrelated peer activity: an online watched user and a
-        // real peer capability record. Neither is a real legacy client
-        // connected to an embedded Soulfind bridge server (slskR has no
-        // such server), so neither must appear in the bridge client
-        // list -- matching the oracle's real (and, here, honestly
-        // empty) BridgeDashboard.GetConnectedClientsAsync contract.
+        // real peer capability record. Neither is a legacy client
+        // connected to the embedded Soulfind bridge listener, so neither
+        // must appear in the bridge client list.
         {
             let mut users = state.users.write().await;
             users.watch("online-peer".to_owned());
