@@ -5435,6 +5435,29 @@ impl MeshState {
             .collect()
     }
 
+    fn capability_service_peers_json(&self) -> Vec<serde_json::Value> {
+        let mut records = self.capability_records.iter().collect::<Vec<_>>();
+        records.sort_by(|left, right| right.issued_at_unix.cmp(&left.issued_at_unix));
+        records
+            .into_iter()
+            .map(capability_service_peer_json)
+            .collect()
+    }
+
+    fn capability_service_mesh_peers_json(&self) -> Vec<serde_json::Value> {
+        self.capability_service_peers_json()
+            .into_iter()
+            .filter(|record| record["canMeshSync"] == true)
+            .map(|record| {
+                serde_json::json!({
+                    "username": record["username"],
+                    "lastSeen": record["lastSeen"],
+                    "meshSeqId": record["meshSeqId"],
+                })
+            })
+            .collect()
+    }
+
     fn discover_json(&self, users: &UserStore) -> String {
         let user_json = self
             .candidate_usernames(users)
@@ -14965,6 +14988,11 @@ struct AppState {
 /// work performed by this process since startup.
 #[derive(Debug, Default)]
 struct PodCoreRuntimeStats {
+    dht_active_publications: std::sync::atomic::AtomicI64,
+    dht_expired_publications: std::sync::atomic::AtomicU64,
+    dht_publications_by_domain: std::sync::Mutex<BTreeMap<String, u64>>,
+    dht_publications_by_visibility: std::sync::Mutex<BTreeMap<String, u64>>,
+    dht_last_publish_operation: std::sync::Mutex<Option<String>>,
     backfill_requests: std::sync::atomic::AtomicU64,
     backfill_requests_received: std::sync::atomic::AtomicU64,
     backfill_completed: std::sync::atomic::AtomicU64,
@@ -14988,6 +15016,45 @@ struct PodCoreRuntimeStats {
 }
 
 impl PodCoreRuntimeStats {
+    fn record_dht_unpublish(&self) {
+        use std::sync::atomic::Ordering;
+
+        self.dht_active_publications.fetch_sub(1, Ordering::Relaxed);
+        self.dht_expired_publications
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn record_dht_publish(&self, pod: Option<&serde_json::Value>) {
+        use std::sync::atomic::Ordering;
+
+        self.dht_active_publications.fetch_add(1, Ordering::Relaxed);
+        if let Some(pod) = pod {
+            if let Some(domain) = pod
+                .get("focusContentId")
+                .and_then(serde_json::Value::as_str)
+                .and_then(|content_id| content_id.split(':').nth(1))
+            {
+                if let Ok(mut by_domain) = self.dht_publications_by_domain.lock() {
+                    *by_domain.entry(domain.to_owned()).or_default() += 1;
+                }
+            }
+            let visibility =
+                pod_visibility_name(pod.get("visibility").unwrap_or(&serde_json::Value::from(1)));
+            if let Ok(mut by_visibility) = self.dht_publications_by_visibility.lock() {
+                *by_visibility.entry(visibility).or_default() += 1;
+            }
+        }
+        if let Ok(mut last_operation) = self.dht_last_publish_operation.lock() {
+            *last_operation = Some(chrono::Utc::now().to_rfc3339());
+        }
+    }
+
+    fn record_dht_refresh(&self) {
+        if let Ok(mut last_operation) = self.dht_last_publish_operation.lock() {
+            *last_operation = Some(chrono::Utc::now().to_rfc3339());
+        }
+    }
+
     fn record_backfill(
         &self,
         pod_id: &str,
@@ -16240,6 +16307,13 @@ async fn route_http_request_with_headers(
         {
             Ok(slskdn_capabilities_response(state).await)
         }
+        ("GET", "/api/capabilities")
+            if state.config.controller_compatibility_target
+                == ControllerCompatibilityTarget::Slskdn
+                && route.path == "/api/v0/capabilities" =>
+        {
+            Ok(slskdn_capability_controller_response(state).await)
+        }
         ("GET", "/api/capabilities") => Ok(capabilities_response()),
         ("GET", "/.well-known/webfinger") => {
             Ok(activitypub_webfinger_response(route.query, state).await)
@@ -16642,13 +16716,10 @@ async fn route_http_request_with_headers(
             }).to_string()))
         }
         ("GET", "/api/capabilities/peers") => {
-            // Matches the oracle's real GetPeers: known slskdn peer
-            // *capability* records, not the generic connected-Soulseek-
-            // user list -- the sibling single-peer route
-            // (/api/capabilities/peers/{username}) already correctly
-            // uses this same real capability store.
+            // Matches the oracle's CapabilitiesController contract: known
+            // slskdn capability peers, not the generic connected-user list.
             let mesh = state.mesh.read().await;
-            let peers = mesh.capability_records_json();
+            let peers = mesh.capability_service_peers_json();
             let count = peers.len();
             drop(mesh);
             Ok(routing::ok_response(serde_json::json!({
@@ -16657,14 +16728,8 @@ async fn route_http_request_with_headers(
             }).to_string()))
         }
         ("GET", "/api/capabilities/mesh-peers") => {
-            // Matches the oracle's real GetMeshPeers: only the
-            // mesh-sync-capable subset of known peer capability records.
             let mesh = state.mesh.read().await;
-            let peers = mesh
-                .capability_records_json()
-                .into_iter()
-                .filter(|record| record["meshCapable"] == true)
-                .collect::<Vec<_>>();
+            let peers = mesh.capability_service_mesh_peers_json();
             let count = peers.len();
             drop(mesh);
             Ok(routing::ok_response(serde_json::json!({
@@ -17481,13 +17546,26 @@ async fn route_http_request_with_headers(
                             state.config.sanitized_json(),
                         )
                     }
-                    ("GET", "/api/capabilities") | ("GET", "/api/v0/capabilities") => {
+                    ("GET", "/api/capabilities") => batch::create_success_result(
+                        operation.id,
+                        200,
+                        capabilities_response().body,
+                    ),
+                    ("GET", "/api/v0/capabilities")
+                        if state.config.controller_compatibility_target
+                            == ControllerCompatibilityTarget::Slskdn =>
+                    {
                         batch::create_success_result(
                             operation.id,
                             200,
-                            capabilities_response().body,
+                            slskdn_capability_controller_response(state).await.body,
                         )
-                    }
+                    },
+                    ("GET", "/api/v0/capabilities") => batch::create_success_result(
+                        operation.id,
+                        200,
+                        capabilities_response().body,
+                    ),
                     ("GET", "/api/stats") | ("GET", "/api/v0/stats") => {
                         let session = state.session.read().await;
                         let shares = state.shares.read().await;
@@ -37526,6 +37604,48 @@ async fn slskdn_capabilities_response(state: &AppState) -> HttpResponse {
     routing::ok_response(body.to_string())
 }
 
+async fn slskdn_capability_controller_response(state: &AppState) -> HttpResponse {
+    #[derive(Serialize)]
+    struct CapabilityFile {
+        client: &'static str,
+        version: &'static str,
+        features: [&'static str; 6],
+        protocol_version: i32,
+        capabilities: i32,
+        mesh_seq_id: u64,
+    }
+
+    #[derive(Serialize)]
+    struct CapabilityResponse {
+        version: &'static str,
+        tag: &'static str,
+        json: String,
+    }
+
+    let mesh_seq_id = state.content_discovery.read().await.latest_seq();
+    let capability_json = CapabilityFile {
+        client: "slskdn",
+        version: "1.0.0",
+        features: [
+            "dht",
+            "hash_exchange",
+            "mesh_sync",
+            "flac_hash_db",
+            "swarm_download",
+            "partial_download",
+        ],
+        protocol_version: 1,
+        capabilities: 63,
+        mesh_seq_id,
+    };
+    let response = CapabilityResponse {
+        version: "slskdn/1.0.0+dht+mesh+swarm",
+        tag: "slskdn_caps:v1;dht=1;mesh=1;swarm=1;hashx=1;flacdb=1",
+        json: serde_json::to_string_pretty(&capability_json).unwrap_or_else(|_| "{}".to_owned()),
+    };
+    routing::ok_response(serde_json::to_string(&response).unwrap_or_else(|_| "{}".to_owned()))
+}
+
 fn capabilities_response() -> HttpResponse {
     let capability_json = serde_json::json!({
         "client": "slskr",
@@ -37539,7 +37659,7 @@ fn capabilities_response() -> HttpResponse {
         status: "200 OK",
         content_type: "application/json",
         body: serde_json::json!({
-            "version": format!("slskr/{APP_VERSION}+dht+mesh+swarm"),
+        "version": format!("slskr/{APP_VERSION}+dht+mesh+swarm"),
             "impl": "slskr",
             "compat": "slskdn-v1",
             "features": capability_json["features"].clone(),
@@ -37749,6 +37869,23 @@ fn capability_flag_value(name: &str) -> i32 {
     }
 }
 
+fn capability_flags_from_features(features: &[String]) -> i32 {
+    features.iter().fold(0, |flags, feature| {
+        let flag = match feature.to_ascii_lowercase().as_str() {
+            "dht" | "dht_hash_db" => CAPABILITY_SUPPORTS_DHT,
+            "hashx" | "hash_exchange" => CAPABILITY_SUPPORTS_HASH_EXCHANGE,
+            "partial" | "partial_download" => CAPABILITY_SUPPORTS_PARTIAL_DOWNLOAD,
+            "mesh" | "mesh_sync" | slskr_client::capabilities::FEATURE_MESH_V1 => {
+                CAPABILITY_SUPPORTS_MESH_SYNC
+            }
+            "flacdb" | "flac_hash_db" => CAPABILITY_SUPPORTS_FLAC_HASH_DB,
+            "swarm" | "swarm_download" => CAPABILITY_SUPPORTS_SWARM,
+            _ => 0,
+        };
+        flags | flag
+    })
+}
+
 fn capability_flags_from_tag(flags: &str) -> i32 {
     flags
         .split(';')
@@ -37758,7 +37895,7 @@ fn capability_flags_from_tag(flags: &str) -> i32 {
             let value = fields.next()?;
             (fields.next().is_none() && value == "1").then(|| capability_flag_value(name))
         })
-        .sum()
+        .fold(0, |flags, flag| flags | flag)
 }
 
 fn capability_flags_from_version(tokens: &str) -> i32 {
@@ -37766,11 +37903,11 @@ fn capability_flags_from_version(tokens: &str) -> i32 {
         .split('+')
         .filter(|token| !token.is_empty())
         .map(capability_flag_value)
-        .sum()
+        .fold(0, |flags, flag| flags | flag)
 }
 
 fn capability_flags_string(flags: i32) -> String {
-    [
+    let names = [
         (CAPABILITY_SUPPORTS_DHT, "SupportsDHT"),
         (CAPABILITY_SUPPORTS_HASH_EXCHANGE, "SupportsHashExchange"),
         (
@@ -37780,11 +37917,32 @@ fn capability_flags_string(flags: i32) -> String {
         (CAPABILITY_SUPPORTS_MESH_SYNC, "SupportsMeshSync"),
         (CAPABILITY_SUPPORTS_FLAC_HASH_DB, "SupportsFlacHashDb"),
         (CAPABILITY_SUPPORTS_SWARM, "SupportsSwarm"),
-    ]
-    .into_iter()
-    .filter_map(|(flag, name)| (flags & flag != 0).then_some(name))
-    .collect::<Vec<_>>()
-    .join(", ")
+    ];
+    if flags == 0 {
+        return "None".to_owned();
+    }
+    names
+        .into_iter()
+        .filter_map(|(flag, name)| (flags & flag != 0).then_some(name))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn capability_service_peer_json(
+    descriptor: &slskr_client::capabilities::PeerCapabilityDescriptor,
+) -> serde_json::Value {
+    let flags = capability_flags_from_features(&descriptor.features);
+    serde_json::json!({
+        "username": descriptor.username,
+        "flags": capability_flags_string(flags),
+        "flagsValue": flags,
+        "clientVersion": "",
+        "protocolVersion": 1,
+        "canSwarm": flags & CAPABILITY_SUPPORTS_SWARM != 0,
+        "canMeshSync": flags & CAPABILITY_SUPPORTS_MESH_SYNC != 0,
+        "lastSeen": unix_seconds_rfc3339(descriptor.issued_at_unix),
+        "meshSeqId": 0,
+    })
 }
 
 fn parse_capability_tag(description: &str) -> Option<ParsedCapabilityDescription> {
@@ -50324,7 +50482,6 @@ async fn podcore_mutation_response(
                     "podId": pod_id,
                     "membersUpdated": members_updated,
                     "duration": format_timespan_hms(started_at.elapsed().as_secs() as i64),
-                    "errorMessage": null,
                 })
                 .to_string(),
             ))
@@ -50342,7 +50499,6 @@ async fn podcore_mutation_response(
                     "opinionsRefreshed": opinions.len(),
                     "newOpinions": 0,
                     "duration": "00:00:00",
-                    "errorMessage": null,
                 })
                 .to_string(),
             ))
@@ -50639,7 +50795,6 @@ async fn podcore_mutation_response(
                 "dhtKey": format!("pod:{pod_id}:member:{peer_id}"),
                 "publishedAt": now.to_rfc3339(),
                 "expiresAt": (now + chrono::Duration::hours(24)).to_rfc3339(),
-                "errorMessage": null,
             });
             Some(
                 match state.controller_features.write().await.upsert(
@@ -51040,7 +51195,6 @@ async fn podcore_mutation_response(
                         "successfullyRoutedCount": successfully_routed,
                         "failedRoutingCount": failed_peer_ids.len(),
                         "routingDuration": duration,
-                        "errorMessage": null,
                         "failedPeerIds": failed_peer_ids,
                     })
                     .to_string(),
@@ -51174,7 +51328,6 @@ async fn podcore_mutation_response(
                     "successfullyRoutedCount": successfully_routed,
                     "failedRoutingCount": 0,
                     "routingDuration": format_timespan_hms(started_at.elapsed().as_secs() as i64),
-                    "errorMessage": null,
                     "failedPeerIds": [],
                 })
                 .to_string(),
@@ -51210,7 +51363,10 @@ async fn podcore_mutation_response(
         ("POST", [section, message]) if section == "verification" && message == "message" => {
             Some(pod_verification_message_response(body, state).await)
         }
-        ("POST", [section, refresh, pod_id]) if section == "dht" && refresh == "refresh" => {
+        ("POST", [section, refresh, tail @ ..])
+            if section == "dht" && refresh == "refresh" && !tail.is_empty() =>
+        {
+            let pod_id = tail.join("/");
             let publication_key = format!("pod/dht/{pod_id}");
             let Some(publication) = state
                 .controller_features
@@ -51219,15 +51375,8 @@ async fn podcore_mutation_response(
                 .get(&publication_key)
                 .cloned()
             else {
-                return Some(routing::ok_response(
-                    serde_json::json!({
-                        "success": false,
-                        "podId": pod_id,
-                        "wasRepublished": false,
-                        "nextRefresh": PODCORE_MIN_DATETIME,
-                        "errorMessage": "Pod not found in local tracking",
-                    })
-                    .to_string(),
+                return Some(routing::internal_server_error_response(
+                    "Failed to refresh pod",
                 ));
             };
             let now = chrono::Utc::now();
@@ -51237,15 +51386,8 @@ async fn podcore_mutation_response(
                 .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
                 .map(|value| value.with_timezone(&chrono::Utc))
             else {
-                return Some(routing::ok_response(
-                    serde_json::json!({
-                        "success": false,
-                        "podId": pod_id,
-                        "wasRepublished": false,
-                        "nextRefresh": PODCORE_MIN_DATETIME,
-                        "errorMessage": "Pod publication tracking is invalid",
-                    })
-                    .to_string(),
+                return Some(routing::internal_server_error_response(
+                    "Failed to refresh pod",
                 ));
             };
             let next_refresh = expires_at - chrono::Duration::hours(6);
@@ -51261,16 +51403,9 @@ async fn podcore_mutation_response(
                 ));
             }
 
-            let Some(pod) = state.pods.read().await.get(pod_id) else {
-                return Some(routing::ok_response(
-                    serde_json::json!({
-                        "success": false,
-                        "podId": pod_id,
-                        "wasRepublished": false,
-                        "nextRefresh": PODCORE_MIN_DATETIME,
-                        "errorMessage": "Pod not found in pod service",
-                    })
-                    .to_string(),
+            let Some(pod) = state.pods.read().await.get(&pod_id) else {
+                return Some(routing::internal_server_error_response(
+                    "Failed to refresh pod",
                 ));
             };
             let published_pod = serde_json::json!(pod);
@@ -51288,14 +51423,17 @@ async fn podcore_mutation_response(
                 "signature": STANDARD.encode(signature.to_bytes()),
                 "publicKey": STANDARD.encode(state.capability_signing_key.verifying_key().as_bytes()),
             });
-            if let Err(error) = state
+            if let Err(_error) = state
                 .controller_features
                 .write()
                 .await
                 .upsert(publication_key, refreshed)
             {
-                return Some(routing::service_unavailable_response(&error));
+                return Some(routing::internal_server_error_response(
+                    "Failed to refresh pod",
+                ));
             }
+            state.podcore_runtime_stats.record_dht_refresh();
             Some(routing::ok_response(
                 serde_json::json!({
                     "success": true,
@@ -51305,6 +51443,9 @@ async fn podcore_mutation_response(
                 })
                 .to_string(),
             ))
+        }
+        ("POST", [section, action]) if section == "discovery" && action == "refresh" => {
+            Some(podcore_discovery_refresh_response(state).await)
         }
         ("POST", [section, action, tail @ ..])
             if matches!(section.as_str(), "dht" | "discovery") =>
@@ -51319,8 +51460,23 @@ async fn podcore_mutation_response(
                     .unwrap_or("all")
                     .to_owned()
             });
+            let id = id.trim().to_owned();
             if pods::is_gold_star_club(&id) && !gold_star_club_available(state) {
                 return Some(routing::not_found_response());
+            }
+            let canonical_dht_write = section == "dht"
+                && matches!(action.as_str(), "publish" | "update")
+                && tail.is_empty();
+            if canonical_dht_write {
+                if payload.get("pod").filter(|pod| pod.is_object()).is_none() {
+                    return Some(routing::bad_request_response("Pod data is required"));
+                }
+                if id.is_empty() || id == "all" {
+                    return Some(routing::bad_request_response("Pod ID is required"));
+                }
+                if state.pods.read().await.get(&id).is_none() {
+                    return Some(routing::not_found_response());
+                }
             }
             let key = format!("pod/{section}/{id}");
             let now = chrono::Utc::now();
@@ -51335,7 +51491,14 @@ async fn podcore_mutation_response(
                         .filter(|value| !value.trim().is_empty())
                         .map(|_| payload.clone())
                 });
-            let stored_pod = if request_pod.is_some() {
+            let stored_pod = if canonical_dht_write {
+                state
+                    .pods
+                    .read()
+                    .await
+                    .get(&id)
+                    .map(|pod| serde_json::json!(pod))
+            } else if request_pod.is_some() {
                 request_pod.clone()
             } else {
                 state
@@ -51361,11 +51524,6 @@ async fn podcore_mutation_response(
                         ),
                     )
                 });
-            let discovery_tags = stored_pod
-                .as_ref()
-                .and_then(|pod| pod.get("tags"))
-                .cloned()
-                .unwrap_or_else(|| serde_json::json!([]));
             let value = if section == "dht" && matches!(action.as_str(), "publish" | "update") {
                 serde_json::json!({
                     "success": true,
@@ -51376,37 +51534,79 @@ async fn podcore_mutation_response(
                     "publishedPod": published_pod,
                     "signature": publication_signature,
                     "publicKey": publication_public_key,
-                    "errorMessage": null,
                 })
             } else if section == "discovery" && matches!(action.as_str(), "register" | "update") {
+                let Some(pod_id) = payload
+                    .get("podId")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                else {
+                    return Some(routing::bad_request_response(
+                        "Valid pod with PodId is required",
+                    ));
+                };
+                let Some(visibility) = payload.get("visibility") else {
+                    return Some(routing::internal_server_error_response(
+                        "Failed to register pod",
+                    ));
+                };
+                if !pod_visibility_is_listed(visibility) {
+                    return Some(routing::internal_server_error_response(
+                        "Failed to register pod",
+                    ));
+                }
                 let name = payload
                     .get("name")
                     .and_then(serde_json::Value::as_str)
+                    .map(str::trim)
                     .unwrap_or_default();
                 let mut keys = vec!["pod:discover:all".to_owned()];
                 if !name.trim().is_empty() {
                     keys.push(format!(
                         "pod:discover:name:{}",
-                        name.trim().to_ascii_lowercase()
+                        pod_discovery_name_slug(name)
                     ));
                 }
-                serde_json::json!({
+                let tags = payload
+                    .get("tags")
+                    .and_then(serde_json::Value::as_array)
+                    .map(|tags| {
+                        tags.iter()
+                            .filter_map(serde_json::Value::as_str)
+                            .map(str::trim)
+                            .filter(|tag| !tag.is_empty())
+                            .map(ToOwned::to_owned)
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                for tag in &tags {
+                    let key = format!("pod:discover:tag:{}", tag.to_ascii_lowercase());
+                    if !keys.contains(&key) {
+                        keys.push(key);
+                    }
+                }
+                if let Some(content_id) = payload
+                    .get("focusContentId")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                {
+                    keys.push(format!(
+                        "pod:discover:content:{}",
+                        content_id.to_ascii_lowercase()
+                    ));
+                }
+                let mut registration = serde_json::json!({
                     "success": true,
-                    "podId": id,
+                    "podId": pod_id,
                     "discoveryKeys": keys,
                     "registeredAt": now.to_rfc3339(),
                     "expiresAt": (now + chrono::Duration::hours(24)).to_rfc3339(),
-                    "tags": discovery_tags,
-                    "errorMessage": null,
-                })
-            } else if section == "discovery" && action == "refresh" {
-                serde_json::json!({
-                    "success": true,
-                    "podId": "all",
-                    "wasRepublished": false,
-                    "nextRefresh": (now + chrono::Duration::hours(1)).to_rfc3339(),
-                    "errorMessage": null,
-                })
+                });
+                registration["tags"] = serde_json::json!(tags);
+                registration["pod"] = payload.clone();
+                registration
             } else {
                 serde_json::json!({
                     "podId": id,
@@ -51417,7 +51617,14 @@ async fn podcore_mutation_response(
             };
             let is_dht_publish =
                 section == "dht" && matches!(action.as_str(), "publish" | "update");
+            let is_dht_update = section == "dht" && action == "update";
             let publication_started = std::time::Instant::now();
+            if is_dht_update {
+                // slskdN implements UpdateAsync as UnpublishAsync followed by
+                // PublishAsync, so the lifecycle counters retain the expired
+                // publication even though the DHT key is overwritten.
+                state.podcore_runtime_stats.record_dht_unpublish();
+            }
             Some(
                 match state
                     .controller_features
@@ -51434,6 +51641,9 @@ async fn podcore_mutation_response(
                             state
                                 .pod_dht_publish_count
                                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            state
+                                .podcore_runtime_stats
+                                .record_dht_publish(published_pod.as_ref());
                         }
                         let response = if is_dht_publish {
                             let mut response = value.clone();
@@ -51441,6 +51651,16 @@ async fn podcore_mutation_response(
                                 response.remove("publishedPod");
                                 response.remove("signature");
                                 response.remove("publicKey");
+                                response.remove("errorMessage");
+                            }
+                            response
+                        } else if section == "discovery"
+                            && matches!(action.as_str(), "register" | "update")
+                        {
+                            let mut response = value.clone();
+                            if let Some(response) = response.as_object_mut() {
+                                response.remove("tags");
+                                response.remove("pod");
                             }
                             response
                         } else {
@@ -51469,30 +51689,216 @@ async fn podcore_mutation_response(
         {
             let key = format!("pod/{section}/{pod_id}");
             Some(match state.controller_features.write().await.remove(&key) {
-                Ok(removed) if section == "dht" => routing::ok_response(
-                    serde_json::json!({
-                        "success": true,
-                        "podId": pod_id,
-                        "dhtKey": format!("pod:{pod_id}:meta"),
-                        "errorMessage": null,
-                        "wasPublished": removed.is_some(),
-                    })
-                    .to_string(),
-                ),
-                Ok(removed) => routing::ok_response(
-                    serde_json::json!({
-                        "success": true,
-                        "podId": pod_id,
-                        "removedKeys": if removed.is_some() { vec!["pod:discover:all"] } else { Vec::<&str>::new() },
-                        "errorMessage": null,
-                    })
-                    .to_string(),
-                ),
+                Ok(_removed) if section == "dht" => {
+                    state.podcore_runtime_stats.record_dht_unpublish();
+                    routing::ok_response(
+                        serde_json::json!({
+                            "success": true,
+                            "podId": pod_id,
+                            "dhtKey": format!("pod:{pod_id}:meta"),
+                        })
+                        .to_string(),
+                    )
+                }
+                Ok(Some(removed)) => {
+                    let removed_keys = removed
+                        .get("discoveryKeys")
+                        .cloned()
+                        .unwrap_or_else(|| serde_json::json!([]));
+                    routing::ok_response(
+                        serde_json::json!({
+                            "success": true,
+                            "podId": pod_id,
+                            "removedKeys": removed_keys,
+                        })
+                        .to_string(),
+                    )
+                }
+                Ok(None) => routing::internal_server_error_response("Failed to unregister pod"),
                 Err(error) => routing::service_unavailable_response(&error),
             })
         }
         _ => None,
     }
+}
+
+fn pod_visibility_is_listed(value: &serde_json::Value) -> bool {
+    value
+        .as_str()
+        .is_some_and(|value| value.eq_ignore_ascii_case("listed"))
+        || value.as_i64() == Some(0)
+}
+
+fn pod_visibility_name(value: &serde_json::Value) -> String {
+    if let Some(value) = value.as_str() {
+        return match value.trim().to_ascii_lowercase().as_str() {
+            "listed" | "public" => "Listed".to_owned(),
+            "unlisted" => "Unlisted".to_owned(),
+            "private" => "Private".to_owned(),
+            _ => value.trim().to_owned(),
+        };
+    }
+    match value.as_i64() {
+        Some(0) => "Listed".to_owned(),
+        Some(1) => "Unlisted".to_owned(),
+        Some(2) => "Private".to_owned(),
+        _ => "Unknown".to_owned(),
+    }
+}
+
+fn pod_discovery_name_slug(name: &str) -> String {
+    name.trim().replace(' ', "-").to_ascii_lowercase()
+}
+
+fn pod_discovery_metadata_value(pod: &serde_json::Value) -> serde_json::Value {
+    let default_visibility = serde_json::json!(1);
+    let tags = pod
+        .get("tags")
+        .filter(|tags| tags.is_array())
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!([]));
+    let channel_count = pod
+        .get("channels")
+        .and_then(serde_json::Value::as_array)
+        .map_or(0, Vec::len);
+    serde_json::json!({
+        "podId": pod.get("podId").and_then(serde_json::Value::as_str).unwrap_or_default(),
+        "name": pod.get("name").and_then(serde_json::Value::as_str).unwrap_or_default(),
+        "visibility": pod_visibility_name(pod.get("visibility").unwrap_or(&default_visibility)),
+        "focusContentId": pod.get("focusContentId").cloned().unwrap_or(serde_json::Value::Null),
+        "tags": tags,
+        "channelCount": channel_count,
+        "publishedAt": unix_timestamp_millis(),
+    })
+}
+
+fn pod_discovery_record_is_active(
+    record: &serde_json::Value,
+    now: chrono::DateTime<chrono::Utc>,
+) -> bool {
+    record
+        .get("expiresAt")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+        .map(|value| value.with_timezone(&chrono::Utc) > now)
+        .unwrap_or(false)
+}
+
+fn pod_discovery_record_has_keys(record: &serde_json::Value, required_keys: &[String]) -> bool {
+    let keys = record
+        .get("discoveryKeys")
+        .and_then(serde_json::Value::as_array);
+    required_keys.iter().all(|required| {
+        keys.is_some_and(|keys| {
+            keys.iter()
+                .filter_map(serde_json::Value::as_str)
+                .any(|key| key == required)
+        })
+    })
+}
+
+fn pod_discovery_rows(
+    records: &[serde_json::Value],
+    pods: &pods::PodStore,
+    required_keys: &[String],
+) -> Vec<serde_json::Value> {
+    let mut seen = HashSet::new();
+    records
+        .iter()
+        .filter(|record| pod_discovery_record_has_keys(record, required_keys))
+        .filter_map(|record| {
+            record
+                .get("pod")
+                .filter(|pod| pod.is_object())
+                .cloned()
+                .or_else(|| {
+                    record
+                        .get("podId")
+                        .and_then(serde_json::Value::as_str)
+                        .and_then(|pod_id| pods.get(pod_id).map(|pod| serde_json::json!(pod)))
+                })
+        })
+        .map(|pod| pod_discovery_metadata_value(&pod))
+        .filter(|metadata| {
+            metadata
+                .get("podId")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|pod_id| seen.insert(pod_id.to_owned()))
+        })
+        .collect()
+}
+
+async fn podcore_discovery_refresh_response(state: &AppState) -> HttpResponse {
+    let now = chrono::Utc::now();
+    let refresh_before = now + chrono::Duration::hours(6);
+    let entries = state
+        .controller_features
+        .read()
+        .await
+        .entries_with_prefix("pod/discovery/");
+    let mut refreshed = 0_u64;
+    let mut errors = 0_u64;
+
+    for (key, mut record) in entries {
+        let Some(expires_at) = record
+            .get("expiresAt")
+            .and_then(serde_json::Value::as_str)
+            .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+            .map(|value| value.with_timezone(&chrono::Utc))
+        else {
+            errors += 1;
+            continue;
+        };
+        if expires_at >= refresh_before {
+            continue;
+        }
+
+        let Some(pod_id) = record
+            .get("podId")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned)
+        else {
+            errors += 1;
+            continue;
+        };
+
+        let pod_exists = state.pods.read().await.get(&pod_id).is_some();
+        let result = if pod_exists {
+            record["registeredAt"] = serde_json::json!(now.to_rfc3339());
+            record["expiresAt"] =
+                serde_json::json!((now + chrono::Duration::hours(24)).to_rfc3339());
+            state.controller_features.write().await.upsert(key, record)
+        } else {
+            state
+                .controller_features
+                .write()
+                .await
+                .remove(&key)
+                .map(|_| ())
+        };
+        match result {
+            Ok(()) => {
+                if pod_exists {
+                    refreshed += 1;
+                }
+            }
+            Err(_) => errors += 1,
+        }
+    }
+
+    let mut response = serde_json::json!({
+        "success": errors == 0,
+        "podId": "all",
+        "wasRepublished": refreshed > 0,
+        "nextRefresh": (chrono::Utc::now() + chrono::Duration::hours(1)).to_rfc3339(),
+    });
+    if errors > 0 {
+        response["errorMessage"] =
+            serde_json::json!(format!("{errors} errors occurred during refresh"));
+    }
+    routing::ok_response(response.to_string())
 }
 
 /// Matches the oracle's canonical payload exactly:
@@ -53256,7 +53662,8 @@ fn dynamic_podcore_get_route(path: &str) -> bool {
             | ["routing", "seen", _, _]
             | ["verification", "membership", _, _]
             | ["verification", "role", _, _, _]
-    )
+    ) || (segments.len() >= 3 && segments[0] == "discovery" && segments[1] == "content")
+        || (segments.len() >= 3 && segments[0] == "dht" && segments[1] == "metadata")
 }
 
 fn verify_pod_dht_publication(
@@ -53415,11 +53822,14 @@ async fn extended_controller_dynamic_get_response(
     if let Some(username) = path_segment_after(path, "/api/capabilities/peers/") {
         let username = decoded_path_segment(username);
         let mesh = state.mesh.read().await;
-        let record = mesh.capability_records_json().into_iter().find(|record| {
-            record["username"]
-                .as_str()
-                .is_some_and(|value| value.eq_ignore_ascii_case(&username))
-        });
+        let record = mesh
+            .capability_service_peers_json()
+            .into_iter()
+            .find(|record| {
+                record["username"]
+                    .as_str()
+                    .is_some_and(|value| value.eq_ignore_ascii_case(&username))
+            });
         return record.map_or_else(routing::not_found_response, |record| {
             routing::ok_response(record.to_string())
         });
@@ -54193,7 +54603,10 @@ async fn podcore_dynamic_get_response(
             }
             routing::ok_response(serde_json::Value::Object(latest_by_channel).to_string())
         }
-        [section, metadata, pod_id] if section == "dht" && metadata == "metadata" => {
+        [section, metadata, tail @ ..]
+            if section == "dht" && metadata == "metadata" && !tail.is_empty() =>
+        {
+            let pod_id = tail.join("/");
             let publication = state
                 .controller_features
                 .read()
@@ -54251,43 +54664,29 @@ async fn podcore_dynamic_get_response(
                     "retrievedAt": retrieved_at.to_rfc3339(),
                     "expiresAt": expires_at.map(|value| value.to_rfc3339()),
                     "isValidSignature": true,
-                    "errorMessage": null,
                 })
                 .to_string(),
             )
         }
-        [section, filter, value]
-            if section == "discovery"
-                && matches!(filter.as_str(), "content" | "name" | "tag" | "tags") =>
+        [section, filter, tail @ ..]
+            if section == "discovery" && filter == "content" && !tail.is_empty() =>
         {
+            let value = tail.join("/");
             let started_at = std::time::Instant::now();
-            let tags = value
-                .split(',')
-                .map(str::trim)
-                .filter(|tag| !tag.is_empty())
+            let required_keys = vec![format!(
+                "pod:discover:content:{}",
+                value.to_ascii_lowercase()
+            )];
+            let records = state
+                .controller_features
+                .read()
+                .await
+                .values_with_prefix("pod/discovery/")
+                .into_iter()
+                .filter(|record| pod_discovery_record_is_active(record, chrono::Utc::now()))
                 .collect::<Vec<_>>();
             let pods = state.pods.read().await;
-            let matches = pods
-                .list_visible(None)
-                .into_iter()
-                .filter(|pod| match filter.as_str() {
-                    "content" => pod
-                        .focus_content_id
-                        .as_deref()
-                        .is_some_and(|content| content.eq_ignore_ascii_case(value)),
-                    "name" => pod
-                        .name
-                        .to_ascii_lowercase()
-                        .contains(&value.to_ascii_lowercase()),
-                    "tag" => pod.tags.iter().any(|tag| tag.eq_ignore_ascii_case(value)),
-                    "tags" => tags.iter().all(|expected| {
-                        pod.tags
-                            .iter()
-                            .any(|tag| tag.eq_ignore_ascii_case(expected))
-                    }),
-                    _ => false,
-                })
-                .collect::<Vec<_>>();
+            let matches = pod_discovery_rows(&records, &pods, &required_keys);
             let total_found = matches.len();
             state
                 .podcore_runtime_stats
@@ -54297,7 +54696,66 @@ async fn podcore_dynamic_get_response(
                     "pods": matches,
                     "searchTerm": value,
                     "searchType": filter,
-                    "searchedAt": unix_timestamp(),
+                    "searchedAt": chrono::Utc::now().to_rfc3339(),
+                    "totalFound": total_found,
+                })
+                .to_string(),
+            )
+        }
+        [section, filter, value]
+            if section == "discovery" && matches!(filter.as_str(), "name" | "tag" | "tags") =>
+        {
+            if value.trim().is_empty() {
+                return routing::bad_request_response("Search value is required");
+            }
+            if filter != "tags" && value.len() > 128 {
+                return routing::bad_request_response("Search value must be within length limits");
+            }
+            let started_at = std::time::Instant::now();
+            let tags = value
+                .split(',')
+                .map(str::trim)
+                .filter(|tag| !tag.is_empty())
+                .collect::<Vec<_>>();
+            if filter == "tags"
+                && (value.len() > 128 * 16
+                    || tags.is_empty()
+                    || tags.len() > 16
+                    || tags.iter().any(|tag| tag.len() > 128))
+            {
+                return routing::bad_request_response(
+                    "Tags are required and tag count/length limits must be respected",
+                );
+            }
+            let required_keys = match filter.as_str() {
+                "name" => vec![format!("pod:discover:name:{}", value.to_ascii_lowercase())],
+                "tag" => vec![format!("pod:discover:tag:{}", value.to_ascii_lowercase())],
+                "tags" => tags
+                    .iter()
+                    .map(|tag| format!("pod:discover:tag:{}", tag.to_ascii_lowercase()))
+                    .collect(),
+                _ => Vec::new(),
+            };
+            let records = state
+                .controller_features
+                .read()
+                .await
+                .values_with_prefix("pod/discovery/")
+                .into_iter()
+                .filter(|record| pod_discovery_record_is_active(record, chrono::Utc::now()))
+                .collect::<Vec<_>>();
+            let pods = state.pods.read().await;
+            let matches = pod_discovery_rows(&records, &pods, &required_keys);
+            let total_found = matches.len();
+            state
+                .podcore_runtime_stats
+                .record_discovery_search(filter, started_at.elapsed().as_millis() as u64);
+            routing::ok_response(
+                serde_json::json!({
+                    "pods": matches,
+                    "searchTerm": if filter == "tags" { tags.join(",") } else { value.clone() },
+                    "searchType": filter,
+                    "searchedAt": chrono::Utc::now().to_rfc3339(),
                     "totalFound": total_found,
                 })
                 .to_string(),
@@ -54320,13 +54778,14 @@ async fn podcore_dynamic_get_response(
         [section, pod_id, peer_id, verify] if section == "membership" && verify == "verify" => {
             let pods = state.pods.read().await;
             let found = pods.is_member(pod_id, peer_id);
-            routing::ok_response(
-                serde_json::json!({
-                    "isValidMember": found,
-                    "isBanned": false,
-                    "errorMessage": if found { serde_json::Value::Null } else { serde_json::json!("Member not found") },
-                }).to_string(),
-            )
+            let mut response = serde_json::json!({
+                "isValidMember": found,
+                "isBanned": false,
+            });
+            if !found {
+                response["errorMessage"] = serde_json::json!("Member not found");
+            }
+            routing::ok_response(response.to_string())
         }
         [section, pod_id, channel_id, count] if section == "messages" && count == "count" => {
             let messages = state
@@ -54392,13 +54851,14 @@ async fn podcore_dynamic_get_response(
             if section == "verification" && membership == "membership" =>
         {
             let valid = state.pods.read().await.is_member(pod_id, peer_id);
-            routing::ok_response(
-                serde_json::json!({
-                    "isValidMember": valid,
-                    "isBanned": false,
-                    "errorMessage": if valid { serde_json::Value::Null } else { serde_json::json!("Member not found") },
-                }).to_string(),
-            )
+            let mut response = serde_json::json!({
+                "isValidMember": valid,
+                "isBanned": false,
+            });
+            if !valid {
+                response["errorMessage"] = serde_json::json!("Member not found");
+            }
+            routing::ok_response(response.to_string())
         }
         [section, role, pod_id, peer_id, required_role]
             if section == "verification" && role == "role" =>
@@ -55141,28 +55601,29 @@ const PODCORE_MIN_DATETIME: &str = "0001-01-01T00:00:00+00:00";
 
 async fn podcore_stats_response(path: &str, query: Option<&str>, state: &AppState) -> HttpResponse {
     let pods = state.pods.read().await;
-    let visible = pods.list_visible(None);
     let membership_stats = pods.membership_stats();
     let pod_messages = state.pod_channels.read().await;
     let message_stats = pod_messages.stats();
     match path {
         "/api/podcore/discovery/all" => {
             let started_at = std::time::Instant::now();
-            let limit = 50;
-            let rows = visible
+            let limit = query_parameter(query, "limit")
+                .and_then(|value| value.parse::<usize>().ok())
+                .unwrap_or(50);
+            if limit == 0 || limit > 100 {
+                return routing::bad_request_response("Limit must be between 1 and 100");
+            }
+            let records = state
+                .controller_features
+                .read()
+                .await
+                .values_with_prefix("pod/discovery/")
+                .into_iter()
+                .filter(|record| pod_discovery_record_is_active(record, chrono::Utc::now()))
+                .collect::<Vec<_>>();
+            let rows = pod_discovery_rows(&records, &pods, &["pod:discover:all".to_owned()])
                 .into_iter()
                 .take(limit)
-                .map(|pod| {
-                    serde_json::json!({
-                        "podId": pod.pod_id,
-                        "name": pod.name,
-                        "visibility": pod.visibility,
-                        "focusContentId": pod.focus_content_id,
-                        "tags": pod.tags,
-                        "channelCount": pod.channels.len(),
-                        "publishedAt": unix_timestamp_millis(),
-                    })
-                })
                 .collect::<Vec<_>>();
             state
                 .podcore_runtime_stats
@@ -55170,8 +55631,8 @@ async fn podcore_stats_response(path: &str, query: Option<&str>, state: &AppStat
             routing::ok_response(
                 serde_json::json!({
                     "pods": rows,
-                    "searchType": "All",
-                    "searchTerm": "",
+                    "searchType": "all",
+                    "searchTerm": limit.to_string(),
                     "totalFound": rows.len(),
                     "searchedAt": chrono::Utc::now().to_rfc3339(),
                 })
@@ -55190,15 +55651,19 @@ async fn podcore_stats_response(path: &str, query: Option<&str>, state: &AppStat
             let mut registrations_by_tag = BTreeMap::<String, u64>::new();
             let mut last_recorded_operation: Option<chrono::DateTime<chrono::Utc>> = None;
             for record in &discovery_records {
+                let discovery_key_count = record
+                    .get("discoveryKeys")
+                    .and_then(serde_json::Value::as_array)
+                    .map_or(1, Vec::len) as u64;
                 let expires_at = record
                     .get("expiresAt")
                     .and_then(serde_json::Value::as_str)
                     .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
                     .map(|value| value.with_timezone(&chrono::Utc));
                 if expires_at.is_none_or(|expires_at| expires_at > now) {
-                    active_entries += 1;
+                    active_entries += discovery_key_count;
                 } else {
-                    expired_entries += 1;
+                    expired_entries += discovery_key_count;
                 }
                 if let Some(registered_at) = record
                     .get("registeredAt")
@@ -55304,72 +55769,32 @@ async fn podcore_stats_response(path: &str, query: Option<&str>, state: &AppStat
             .to_string(),
         ),
         "/api/podcore/dht/stats" => {
-            fn increment_count(map: &mut serde_json::Map<String, serde_json::Value>, key: String) {
-                let counter = map.entry(key).or_insert_with(|| serde_json::json!(0));
-                *counter = serde_json::json!(counter.as_u64().unwrap_or(0) + 1);
-            }
-
-            let now = chrono::Utc::now();
-            let dht_records = state
-                .controller_features
-                .read()
-                .await
-                .values_with_prefix("pod/dht/");
-            let mut active_publications = 0_u64;
-            let mut expired_publications = 0_u64;
-            let mut publications_by_domain = serde_json::Map::new();
-            let mut publications_by_visibility = serde_json::Map::new();
-            let mut last_publish_operation: Option<chrono::DateTime<chrono::Utc>> = None;
-            for record in &dht_records {
-                let expires_at = record
-                    .get("expiresAt")
-                    .and_then(serde_json::Value::as_str)
-                    .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
-                    .map(|value| value.with_timezone(&chrono::Utc));
-                let is_active = expires_at.is_none_or(|expires_at| expires_at > now);
-                if is_active {
-                    active_publications += 1;
-                } else {
-                    expired_publications += 1;
-                }
-                let published_at = record
-                    .get("publishedAt")
-                    .and_then(serde_json::Value::as_str)
-                    .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
-                    .map(|value| value.with_timezone(&chrono::Utc));
-                if let Some(published_at) = published_at {
-                    if last_publish_operation.is_none_or(|current| published_at > current) {
-                        last_publish_operation = Some(published_at);
-                    }
-                }
-                if !is_active {
-                    continue;
-                }
-                let Some(pod) = record
-                    .get("podId")
-                    .and_then(serde_json::Value::as_str)
-                    .and_then(|pod_id| pods.get(pod_id))
-                else {
-                    continue;
-                };
-                if let Some(domain) = pod
-                    .focus_content_id
-                    .as_deref()
-                    .and_then(|content_id| content_id.split(':').nth(1))
-                {
-                    increment_count(&mut publications_by_domain, domain.to_owned());
-                }
-                let visibility = pod.visibility.as_str().unwrap_or("unknown").to_owned();
-                increment_count(&mut publications_by_visibility, visibility);
-            }
-            // Total-ever-published is a real monotonic counter, distinct
-            // from currently-tracked publications (a republish overwrites
-            // the same record rather than adding a new one) -- it can
-            // never be lower than what's still tracked right now.
+            let runtime = &state.podcore_runtime_stats;
+            let active_publications = runtime
+                .dht_active_publications
+                .load(std::sync::atomic::Ordering::Relaxed);
+            let expired_publications = runtime
+                .dht_expired_publications
+                .load(std::sync::atomic::Ordering::Relaxed);
+            let publications_by_domain = runtime
+                .dht_publications_by_domain
+                .lock()
+                .map(|values| values.clone())
+                .unwrap_or_default();
+            let publications_by_visibility = runtime
+                .dht_publications_by_visibility
+                .lock()
+                .map(|values| values.clone())
+                .unwrap_or_default();
+            let last_publish_operation = runtime
+                .dht_last_publish_operation
+                .lock()
+                .ok()
+                .and_then(|value| value.clone())
+                .unwrap_or_else(|| PODCORE_MIN_DATETIME.to_owned());
             let total_published = state
                 .pod_dht_publish_count
-                .load(std::sync::atomic::Ordering::Relaxed)
-                .max(active_publications + expired_publications);
+                .load(std::sync::atomic::Ordering::Relaxed);
             let failed_publications = state
                 .pod_dht_failed_publish_count
                 .load(std::sync::atomic::Ordering::Relaxed);
@@ -55388,9 +55813,7 @@ async fn podcore_stats_response(path: &str, query: Option<&str>, state: &AppStat
                     "averagePublishTime": format_timespan_millis(average_publish_time),
                     "publicationsByDomain": publications_by_domain,
                     "publicationsByVisibility": publications_by_visibility,
-                    "lastPublishOperation": last_publish_operation
-                        .map(|value| value.to_rfc3339())
-                        .unwrap_or_else(|| PODCORE_MIN_DATETIME.to_owned()),
+                    "lastPublishOperation": last_publish_operation,
                 })
                 .to_string(),
             )
@@ -64794,6 +65217,133 @@ fn search_dispatch_message(
     }
 }
 
+async fn handle_incoming_soulseek_pod_message(
+    state: &Arc<AppState>,
+    username: &str,
+    message: &str,
+) -> bool {
+    const POD_MESSAGE_PREFIX: &str = "PODMSG:";
+    const MAX_MESSAGE_BYTES: usize = 16 * 1024;
+    const MAX_JSON_BYTES: usize = 12 * 1024;
+    if !message.starts_with(POD_MESSAGE_PREFIX) {
+        return false;
+    }
+    if message.len() > MAX_MESSAGE_BYTES {
+        return true;
+    }
+    let json_payload = &message[POD_MESSAGE_PREFIX.len()..];
+    if json_payload.is_empty() || json_payload.len() > MAX_JSON_BYTES {
+        return true;
+    }
+    let Ok(payload) = serde_json::from_str::<serde_json::Value>(json_payload) else {
+        return true;
+    };
+    let string_field = |camel: &str, pascal: &str| {
+        payload
+            .get(camel)
+            .or_else(|| payload.get(pascal))
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .unwrap_or_default()
+    };
+    let pod_id = string_field("podId", "PodId");
+    let channel_id = string_field("channelId", "ChannelId");
+    let sender_peer_id = string_field("senderPeerId", "SenderPeerId");
+    let message_id = string_field("messageId", "MessageId");
+    let body = string_field("body", "Body");
+    let signature = string_field("signature", "Signature");
+    let timestamp_unix_ms = payload
+        .get("timestampUnixMs")
+        .or_else(|| payload.get("TimestampUnixMs"))
+        .and_then(serde_json::Value::as_i64)
+        .unwrap_or_default();
+    let sig_version = payload
+        .get("sigVersion")
+        .or_else(|| payload.get("SigVersion"))
+        .and_then(serde_json::Value::as_i64)
+        .unwrap_or(1);
+    if pod_id.is_empty()
+        || channel_id.is_empty()
+        || sender_peer_id.is_empty()
+        || message_id.is_empty()
+        || body.is_empty()
+        || timestamp_unix_ms <= 0
+        || sender_peer_id != format!("bridge:{username}")
+        || body.len() > 10_000
+    {
+        return true;
+    }
+    let normalized = serde_json::json!({
+        "messageId": message_id,
+        "podId": pod_id,
+        "channelId": channel_id,
+        "senderPeerId": sender_peer_id,
+        "body": body,
+        "timestampUnixMs": timestamp_unix_ms,
+        "sigVersion": sig_version,
+    });
+    let (canonical, canonical_pod_id) = pod_message_canonical_payload(&normalized);
+    let signature_mode = state
+        .advanced_networking
+        .read()
+        .await
+        .pod_security_signature_mode;
+    if !pod_verify_signature(
+        &normalized,
+        &canonical,
+        &canonical_pod_id,
+        signature,
+        signature_mode,
+        state,
+    )
+    .await
+    {
+        return true;
+    }
+    let binding = {
+        let pods = state.pods.read().await;
+        if pods.get(pod_id).is_none()
+            || !pods.channel_exists(pod_id, channel_id)
+            || !pods.is_member(pod_id, sender_peer_id)
+        {
+            return true;
+        }
+        pods.soulseek_binding(pod_id, channel_id)
+    };
+    let stored = state.pod_channels.write().await.append_with_id(
+        message_id.to_owned(),
+        pod_id.to_owned(),
+        channel_id.to_owned(),
+        sender_peer_id.to_owned(),
+        body.to_owned(),
+        signature.to_owned(),
+        u64::try_from(timestamp_unix_ms).unwrap_or_default(),
+        u8::try_from(sig_version).unwrap_or(1),
+    );
+    let Ok(stored) = stored else {
+        return true;
+    };
+    if let Some(binding) =
+        binding.filter(|binding| binding.kind == "room" && binding.mode == "mirror")
+    {
+        let _ = try_send_session_command(
+            state,
+            SessionCommand::SayRoom {
+                room: binding.identifier,
+                body: format!("[Pod:{}] {}", stored.sender_peer_id, stored.body),
+            },
+        );
+    }
+    record_event(
+        state,
+        "pod.message.received",
+        pod_id.to_owned(),
+        Some(format!("channel={channel_id}")),
+    )
+    .await;
+    true
+}
+
 async fn project_server_message(
     state: &Arc<AppState>,
     session: &mut ServerSession<TcpStream>,
@@ -64855,6 +65405,11 @@ async fn project_server_message(
             .await;
         }
         ServerMessage::MessageUserResponse(message) => {
+            if handle_incoming_soulseek_pod_message(state, &message.username, &message.message)
+                .await
+            {
+                return;
+            }
             eprintln!(
                 "received private message id={} from {}",
                 message.id,
@@ -76387,7 +76942,10 @@ mod tests {
         let cases = [
             ("/api/v0/health", "\"status\":\"ok\""),
             ("/api/v0/version", "\"name\":\"slskr\""),
-            ("/api/v0/capabilities", "\"api_version\":\"v0\""),
+            (
+                "/api/v0/capabilities",
+                "\"version\":\"slskdn/1.0.0+dht+mesh+swarm\"",
+            ),
             ("/api/v0/config", "\"credentials_configured\":true"),
             ("/api/v0/stats", "\"session\":"),
             ("/api/v0/telemetry", "\"health\":"),
@@ -78537,6 +79095,33 @@ mod tests {
         .await
         .expect("non-capability response");
         assert_eq!(false_positive.body, r#"{"isSlskdn":false}"#);
+
+        let duplicate_flags = super::route_http_request(
+            "POST",
+            "/api/capabilities/parse",
+            None,
+            r#"{"description":"slskdn_caps:v1;dht=1;dht=1"}"#,
+            &state,
+        )
+        .await
+        .expect("duplicate capability parse response");
+        let duplicate_json =
+            serde_json::from_str::<serde_json::Value>(&duplicate_flags.body).unwrap();
+        assert_eq!(duplicate_json["flags"], "SupportsDHT");
+        assert_eq!(duplicate_json["flagsValue"], 1);
+
+        let no_flags = super::route_http_request(
+            "POST",
+            "/api/capabilities/parse",
+            None,
+            r#"{"versionString":"slskdn/2.4.1"}"#,
+            &state,
+        )
+        .await
+        .expect("empty capability parse response");
+        let no_flags_json = serde_json::from_str::<serde_json::Value>(&no_flags.body).unwrap();
+        assert_eq!(no_flags_json["flags"], "None");
+        assert_eq!(no_flags_json["flagsValue"], 0);
     }
 
     #[tokio::test]
@@ -79936,6 +80521,91 @@ mod tests {
             .await
             .expect("private pod history");
         assert_eq!(forbidden.status, "403 Forbidden");
+    }
+
+    #[tokio::test]
+    async fn inbound_soulseek_pod_messages_are_validated_and_stored() {
+        let (state, _receiver) = test_state();
+        let pod_id = "pod:00000000000000000000000000000001";
+        state
+            .pods
+            .write()
+            .await
+            .create(
+                serde_json::from_value::<super::pods::PodRecord>(serde_json::json!({
+                    "podId": pod_id,
+                    "name": "Inbound Pod",
+                    "isPublic": true,
+                    "channels": [{
+                        "channelId": "general",
+                        "kind": 0,
+                        "name": "General"
+                    }]
+                }))
+                .expect("deserialize inbound pod fixture"),
+                "owner-peer".to_owned(),
+            )
+            .expect("create inbound pod");
+        state
+            .pods
+            .write()
+            .await
+            .upsert_member(
+                pod_id,
+                super::pods::PodMember {
+                    peer_id: "bridge:alice".to_owned(),
+                    role: "member".to_owned(),
+                    is_banned: false,
+                    public_key: None,
+                    joined_at: None,
+                    last_seen: None,
+                },
+            )
+            .expect("add inbound pod member");
+        state
+            .advanced_networking
+            .write()
+            .await
+            .pod_security_signature_mode = super::PodSignatureMode::Off;
+
+        let timestamp = super::unix_timestamp_millis();
+        let payload = serde_json::json!({
+            "MessageId": "inbound-message-1",
+            "PodId": pod_id,
+            "ChannelId": "general",
+            "SenderPeerId": "bridge:alice",
+            "Body": "hello from the bridge",
+            "TimestampUnixMs": timestamp,
+            "SigVersion": 1,
+            "Signature": ""
+        });
+        assert!(
+            super::handle_incoming_soulseek_pod_message(
+                &state,
+                "alice",
+                &format!("PODMSG:{payload}"),
+            )
+            .await
+        );
+        assert!(
+            super::handle_incoming_soulseek_pod_message(
+                &state,
+                "alice",
+                &format!("PODMSG:{payload}"),
+            )
+            .await
+        );
+        assert!(!super::handle_incoming_soulseek_pod_message(&state, "alice", "ordinary PM").await);
+
+        let messages = state
+            .pod_channels
+            .read()
+            .await
+            .list(pod_id, "general", None);
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].message_id, "inbound-message-1");
+        assert_eq!(messages[0].sender_peer_id, "bridge:alice");
+        assert_eq!(messages[0].body, "hello from the bridge");
     }
 
     #[tokio::test]
@@ -93343,6 +94013,13 @@ mod tests {
         assert!(usernames.contains(&"mesh-capable-peer"));
         assert!(usernames.contains(&"plain-peer"));
         assert!(!usernames.contains(&"unrelated-soulseek-user"));
+        assert_eq!(peers_json["peers"][0]["protocolVersion"], 1);
+        assert_eq!(peers_json["peers"][0]["flagsValue"], 8);
+        assert_eq!(peers_json["peers"][0]["flags"], "SupportsMeshSync");
+        assert_eq!(peers_json["peers"][0]["canMeshSync"], true);
+        assert!(peers_json["peers"][0]["lastSeen"].is_string());
+        assert_eq!(peers_json["peers"][0]["meshSeqId"], 0);
+        assert!(peers_json["peers"][0].get("peerId").is_none());
 
         let mesh_peers =
             super::route_http_request("GET", "/api/v0/capabilities/mesh-peers", None, "", &state)
@@ -93352,6 +94029,21 @@ mod tests {
         let mesh_peers_json = serde_json::from_str::<serde_json::Value>(&mesh_peers.body).unwrap();
         assert_eq!(mesh_peers_json["count"], 1);
         assert_eq!(mesh_peers_json["peers"][0]["username"], "mesh-capable-peer");
+        assert!(mesh_peers_json["peers"][0].get("flags").is_none());
+
+        let peer = super::route_http_request(
+            "GET",
+            "/api/capabilities/peers/mesh-capable-peer",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("get one capability peer");
+        let peer_json = serde_json::from_str::<serde_json::Value>(&peer.body).unwrap();
+        assert_eq!(peer.status, "200 OK");
+        assert_eq!(peer_json["username"], "mesh-capable-peer");
+        assert_eq!(peer_json["flagsValue"], 8);
     }
 
     #[tokio::test]
@@ -99488,9 +100180,9 @@ mod tests {
         let stats_json = serde_json::from_str::<serde_json::Value>(&stats.body).unwrap();
         assert_eq!(stats_json["activePublications"], 2, "{stats_json}");
         assert_eq!(stats_json["totalPublished"], 3, "{stats_json}");
-        assert_eq!(stats_json["expiredPublications"], 0, "{stats_json}");
+        assert_eq!(stats_json["expiredPublications"], 1, "{stats_json}");
         assert_eq!(
-            stats_json["publicationsByDomain"]["audio"], 1,
+            stats_json["publicationsByDomain"]["audio"], 2,
             "{stats_json}"
         );
         assert_eq!(
@@ -99498,11 +100190,11 @@ mod tests {
             "{stats_json}"
         );
         assert_eq!(
-            stats_json["publicationsByVisibility"]["public"], 1,
+            stats_json["publicationsByVisibility"]["Listed"], 2,
             "{stats_json}"
         );
         assert_eq!(
-            stats_json["publicationsByVisibility"]["private"], 1,
+            stats_json["publicationsByVisibility"]["Private"], 1,
             "{stats_json}"
         );
         assert!(
@@ -99535,10 +100227,12 @@ mod tests {
             after_unpublish_json["totalPublished"], 3,
             "{after_unpublish_json}"
         );
+        assert_eq!(
+            after_unpublish_json["expiredPublications"], 2,
+            "{after_unpublish_json}"
+        );
         assert!(
-            after_unpublish_json["publicationsByDomain"]
-                .get("video")
-                .is_none(),
+            after_unpublish_json["publicationsByDomain"]["video"] == 1,
             "{after_unpublish_json}"
         );
     }
@@ -99547,6 +100241,21 @@ mod tests {
     async fn podcore_dht_metadata_reads_and_verifies_the_published_record() {
         let (state, _receiver) = test_state();
         let pod_id = "metadata-audit-pod";
+        state
+            .pods
+            .write()
+            .await
+            .create(
+                serde_json::from_value::<super::pods::PodRecord>(serde_json::json!({
+                    "podId": pod_id,
+                    "name": "Published metadata",
+                    "visibility": "Listed",
+                    "isPublic": true,
+                }))
+                .expect("deserialize metadata pod fixture"),
+                "owner-peer".to_owned(),
+            )
+            .expect("create metadata pod");
         let published = super::route_http_request(
             "POST",
             "/api/v0/podcore/dht/publish",
@@ -99874,7 +100583,7 @@ mod tests {
             "POST",
             "/api/v0/podcore/discovery/register",
             None,
-            r#"{"podId":"discovery-audit-pod","name":"Audit Pod","tags":["music","live"]}"#,
+            r#"{"podId":"discovery-audit-pod","name":"Audit Pod","visibility":"Listed","tags":["music","live"]}"#,
             &state,
         )
         .await
@@ -99883,7 +100592,7 @@ mod tests {
 
         let search = super::route_http_request(
             "GET",
-            "/api/v0/podcore/discovery/name/audit",
+            "/api/v0/podcore/discovery/name/audit-pod",
             None,
             "",
             &state,
@@ -99898,7 +100607,7 @@ mod tests {
                 .expect("discovery stats");
         let stats_json = serde_json::from_str::<serde_json::Value>(&stats.body).unwrap();
         assert_eq!(stats_json["totalRegisteredPods"], 1);
-        assert_eq!(stats_json["activeDiscoveryEntries"], 1);
+        assert_eq!(stats_json["activeDiscoveryEntries"], 4);
         assert_eq!(stats_json["expiredEntries"], 0);
         assert_eq!(stats_json["registrationsByTag"]["music"], 1);
         assert_eq!(stats_json["registrationsByTag"]["live"], 1);
@@ -101515,6 +102224,21 @@ mod tests {
     async fn podcore_maintenance_mutations_match_slskdn_result_contracts() {
         let (state, _receiver) = test_state();
         let pod_id = "pod:00000000000000000000000000000001";
+        state
+            .pods
+            .write()
+            .await
+            .create(
+                serde_json::from_value::<super::pods::PodRecord>(serde_json::json!({
+                    "podId": pod_id,
+                    "name": "Route Audit",
+                    "visibility": "Listed",
+                    "isPublic": true,
+                }))
+                .expect("deserialize maintenance pod fixture"),
+                "owner-peer".to_owned(),
+            )
+            .expect("create maintenance pod");
 
         for action in ["publish", "update"] {
             let response = super::route_http_request(
@@ -101538,7 +102262,7 @@ mod tests {
                 "POST",
                 &format!("/api/v0/podcore/discovery/{action}"),
                 None,
-                &serde_json::json!({"podId": pod_id, "name": "Route Audit"}).to_string(),
+                &serde_json::json!({"podId": pod_id, "name": "Route Audit", "visibility": "Listed"}).to_string(),
                 &state,
             )
             .await

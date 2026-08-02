@@ -128,38 +128,102 @@ impl PodChannelStore {
         signature: String,
         timestamp_unix_ms: u64,
     ) -> Result<PodChannelMessage, String> {
+        self.append_inner(
+            pod_id,
+            channel_id,
+            sender_peer_id,
+            body,
+            signature,
+            timestamp_unix_ms,
+            uuid::Uuid::new_v4().simple().to_string(),
+            1,
+            true,
+        )
+    }
+
+    /// Append a message received from a peer while retaining its wire identity.
+    /// The frozen slskdN PodMessaging service rejects a repeated MessageId before
+    /// storage; local generated messages continue to use `append` above.
+    pub fn append_with_id(
+        &mut self,
+        message_id: String,
+        pod_id: String,
+        channel_id: String,
+        sender_peer_id: String,
+        body: String,
+        signature: String,
+        timestamp_unix_ms: u64,
+        sig_version: u8,
+    ) -> Result<PodChannelMessage, String> {
+        self.append_inner(
+            pod_id,
+            channel_id,
+            sender_peer_id,
+            body,
+            signature,
+            timestamp_unix_ms,
+            message_id,
+            sig_version,
+            false,
+        )
+    }
+
+    fn append_inner(
+        &mut self,
+        pod_id: String,
+        channel_id: String,
+        sender_peer_id: String,
+        body: String,
+        signature: String,
+        timestamp_unix_ms: u64,
+        message_id: String,
+        sig_version: u8,
+        normalize_timestamp: bool,
+    ) -> Result<PodChannelMessage, String> {
         validate_field("PodId", &pod_id, MAX_POD_ID_BYTES)?;
         validate_field("ChannelId", &channel_id, MAX_CHANNEL_ID_BYTES)?;
         validate_field("SenderPeerId", &sender_peer_id, MAX_PEER_ID_BYTES)?;
         validate_field("Message body", &body, MAX_BODY_BYTES)?;
+        validate_field("MessageId", &message_id, MAX_MESSAGE_ID_BYTES)?;
         if signature.len() > MAX_SIGNATURE_BYTES {
             return Err(format!(
                 "Signature must be at most {MAX_SIGNATURE_BYTES} bytes"
             ));
         }
-
-        let timestamp_unix_ms = match self
+        if self
             .messages
             .iter()
-            .filter(|message| message.pod_id == pod_id && message.channel_id == channel_id)
-            .map(|message| message.timestamp_unix_ms)
-            .max()
+            .any(|message| message.message_id == message_id)
         {
-            Some(latest) if timestamp_unix_ms <= latest => latest
-                .checked_add(1)
-                .ok_or_else(|| "Pod channel message cursor space is exhausted".to_owned())?,
-            _ => timestamp_unix_ms,
+            return Err("Pod channel message already exists".to_owned());
+        }
+
+        let timestamp_unix_ms = if normalize_timestamp {
+            match self
+                .messages
+                .iter()
+                .filter(|message| message.pod_id == pod_id && message.channel_id == channel_id)
+                .map(|message| message.timestamp_unix_ms)
+                .max()
+            {
+                Some(latest) if timestamp_unix_ms <= latest => latest
+                    .checked_add(1)
+                    .ok_or_else(|| "Pod channel message cursor space is exhausted".to_owned())?,
+                _ => timestamp_unix_ms,
+            }
+        } else {
+            timestamp_unix_ms
         };
 
         let message = PodChannelMessage {
-            message_id: uuid::Uuid::new_v4().simple().to_string(),
+            message_id,
             pod_id: pod_id.clone(),
             channel_id: channel_id.clone(),
             sender_peer_id,
             body,
             timestamp_unix_ms,
             signature,
-            sig_version: 1,
+            sig_version,
         };
         let mut messages = self.messages.clone();
         messages.push(message.clone());
