@@ -5459,6 +5459,48 @@ impl MeshState {
         Ok(())
     }
 
+    fn restore_capability(&mut self, descriptor: PeerCapabilityDescriptor) -> bool {
+        if descriptor.verify(SystemTime::now()).is_err()
+            || self.capability_records.len() >= MAX_PEER_CAPABILITY_RECORDS
+            || self.capability_records.iter().any(|record| {
+                record.peer_id.eq_ignore_ascii_case(&descriptor.peer_id)
+                    || record.username.eq_ignore_ascii_case(&descriptor.username)
+            })
+        {
+            return false;
+        }
+        self.capability_records.push(descriptor);
+        true
+    }
+
+    fn restore_persisted_capabilities(&mut self, records: &[serde_json::Value]) {
+        for record in records.iter().take(MAX_PEER_CAPABILITY_RECORDS) {
+            if let Some(descriptor) = persisted_capability_descriptor(record) {
+                let _ = self.restore_capability(descriptor);
+            }
+        }
+    }
+
+    fn persisted_capability_projection(&self) -> Vec<serde_json::Value> {
+        self.capability_records
+            .iter()
+            .map(|descriptor| {
+                serde_json::json!({
+                    "peerId": descriptor.peer_id,
+                    "username": descriptor.username,
+                    "features": descriptor.features,
+                    "endpoints": descriptor.endpoints,
+                    "overlayPort": descriptor.overlay_port,
+                    "maxPayloadLength": descriptor.max_payload_length,
+                    "issuedAtUnix": descriptor.issued_at_unix,
+                    "expiresAtUnix": descriptor.expires_at_unix,
+                    "publicKey": STANDARD.encode(descriptor.public_key),
+                    "signature": descriptor.signature.map(|value| STANDARD.encode(value)),
+                })
+            })
+            .collect()
+    }
+
     fn candidate_usernames(&self, users: &UserStore) -> Vec<String> {
         self.rendezvous.candidate_usernames(
             users.records.iter().map(|user| user.username.as_str()),
@@ -14138,6 +14180,78 @@ impl ControllerFeatureState {
                     "lastUpdated": now,
                 }),
             );
+        }
+        if let Err(error) = self.persist() {
+            self.records = previous;
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    fn import_soulseek_interests(
+        &mut self,
+        username: &str,
+        liked: &[String],
+        hated: &[String],
+    ) -> Result<(), String> {
+        let issuer = format!("soulseek:{username}");
+        let previous = self.records.clone();
+        self.records.retain(|key, value| {
+            !(key.starts_with("opinion/")
+                && value.get("issuer").and_then(serde_json::Value::as_str) == Some(issuer.as_str())
+                && value.get("source").and_then(serde_json::Value::as_str)
+                    == Some("soulseek-interest"))
+        });
+        let now = unix_timestamp().saturating_mul(1000);
+        for (kind, values) in [("Like", liked), ("Hate", hated)] {
+            for interest in values.iter().take(MAX_INTERESTS_PER_KIND) {
+                let interest = interest.trim();
+                if interest.is_empty()
+                    || interest.len() > MAX_INTEREST_NAME_BYTES
+                    || interest.chars().any(char::is_control)
+                {
+                    continue;
+                }
+                let (subject_type, subject_id) = interest
+                    .split_once(':')
+                    .map(|(prefix, value)| {
+                        let subject_type = match prefix.to_ascii_lowercase().as_str() {
+                            "artist" => "Artist",
+                            "album" => "Album",
+                            "track" => "Track",
+                            "user" => "User",
+                            "file" => "File",
+                            _ => "Track",
+                        };
+                        (subject_type, value.trim())
+                    })
+                    .unwrap_or(("Track", interest));
+                if subject_id.is_empty() {
+                    continue;
+                }
+                let id = uuid::Uuid::new_v4().to_string();
+                if self.records.len() >= MAX_CONTROLLER_FEATURE_RECORDS {
+                    self.records = previous;
+                    return Err("opinion record capacity is full".to_owned());
+                }
+                self.records.insert(
+                    format!("opinion/{id}"),
+                    serde_json::json!({
+                        "id": id,
+                        "issuer": issuer,
+                        "subjectType": subject_type,
+                        "subjectId": subject_id,
+                        "kind": kind,
+                        "strength": 0.25,
+                        "confidence": 0.25,
+                        "scope": "soulseek-public",
+                        "source": "soulseek-interest",
+                        "reason": "Soulseek user interest",
+                        "createdUnixMs": now,
+                        "updatedUnixMs": now,
+                    }),
+                );
+            }
         }
         if let Err(error) = self.persist() {
             self.records = previous;
@@ -38422,6 +38536,48 @@ fn capability_service_peer_json(
     })
 }
 
+fn persisted_capability_descriptor(value: &serde_json::Value) -> Option<PeerCapabilityDescriptor> {
+    let decode = |name: &str| STANDARD.decode(value.get(name)?.as_str()?.as_bytes()).ok();
+    let public_key = <[u8; 32]>::try_from(decode("publicKey")?.as_slice()).ok()?;
+    let signature = value
+        .get("signature")
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.is_empty())
+        .and_then(|_| <[u8; 64]>::try_from(decode("signature")?.as_slice()).ok());
+    let features = value
+        .get("features")?
+        .as_array()?
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .map(str::to_owned)
+        .collect();
+    let endpoints = value
+        .get("endpoints")?
+        .as_array()?
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .map(str::to_owned)
+        .collect();
+    Some(PeerCapabilityDescriptor {
+        peer_id: value.get("peerId")?.as_str()?.to_owned(),
+        username: value.get("username")?.as_str()?.to_owned(),
+        features,
+        endpoints,
+        overlay_port: value
+            .get("overlayPort")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|port| u16::try_from(port).ok()),
+        max_payload_length: value
+            .get("maxPayloadLength")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|length| u32::try_from(length).ok())?,
+        issued_at_unix: value.get("issuedAtUnix")?.as_u64()?,
+        expires_at_unix: value.get("expiresAtUnix")?.as_u64()?,
+        public_key,
+        signature,
+    })
+}
+
 fn parse_capability_tag(description: &str) -> Option<ParsedCapabilityDescription> {
     let matcher = fancy_regex::Regex::new(r"(?i)slskdn_caps:v(\d+);?(.*)").ok()?;
     let captures = matcher.captures(description).ok()??;
@@ -60632,6 +60788,14 @@ async fn serve(invocation: ServeInvocation) -> Result<(), String> {
     )?;
     let controller_cli_environment = invocation.config_environment.clone();
     let revoked_jwts = RevokedJwtStore::load(&config.state_dir);
+    let mut mesh_state = MeshState::from_settings(&config.advanced_networking.mesh);
+    if let Some(records) = controller_feature_state
+        .get("hashdb/peers")
+        .and_then(|value| value.get("peers"))
+        .and_then(serde_json::Value::as_array)
+    {
+        mesh_state.restore_persisted_capabilities(records);
+    }
     let state = Arc::new(AppState {
         controller_version: std::sync::RwLock::new(ControllerVersionState::initial()),
         controller_cli_environment,
@@ -60688,7 +60852,7 @@ async fn serve(invocation: ServeInvocation) -> Result<(), String> {
         ),
         searches: RwLock::new(search_store),
         users: RwLock::new(user_store),
-        mesh: RwLock::new(MeshState::from_settings(&config.advanced_networking.mesh)),
+        mesh: RwLock::new(mesh_state),
         capability_signing_key,
         content_discovery: RwLock::new(content_discovery_store),
         realm_subject_indexes: RwLock::new(realm_subject_index_store),
@@ -66100,15 +66264,25 @@ where
         let message_type = envelope.message_type;
         let nonce = envelope.nonce;
         let username = envelope.descriptor.username.clone();
-        if let Err(error) = state
-            .mesh
-            .write()
-            .await
-            .update_capability(envelope.descriptor)
-        {
-            record_peer_security_violation(state, peer_username).await;
-            return Err(error);
-        }
+        let projection = {
+            let mut mesh = state.mesh.write().await;
+            if let Err(error) = mesh.update_capability(envelope.descriptor) {
+                Err(error)
+            } else {
+                Ok(mesh.persisted_capability_projection())
+            }
+        };
+        let projection = match projection {
+            Ok(projection) => projection,
+            Err(error) => {
+                record_peer_security_violation(state, peer_username).await;
+                return Err(error);
+            }
+        };
+        let _ = state.controller_features.write().await.upsert(
+            "hashdb/peers".to_owned(),
+            serde_json::json!({"peers": projection}),
+        );
         if message_type == PeerCapabilityMessageType::Hello {
             let acknowledgement = PeerCapabilityEnvelope::new(
                 PeerCapabilityMessageType::Acknowledge,
@@ -67246,6 +67420,11 @@ async fn project_server_message(
     match message {
         ServerMessage::UserInterests(interests) => {
             let key = interests.username.to_ascii_lowercase();
+            let _ = state
+                .controller_features
+                .write()
+                .await
+                .import_soulseek_interests(&interests.username, &interests.liked, &interests.hated);
             if let Some(waiters) = state.pending_user_interests.write().await.remove(&key) {
                 for waiter in waiters {
                     let _ = waiter.send(Ok(interests.clone()));
@@ -96041,6 +96220,40 @@ mod tests {
             ));
             mesh.capability_records
                 .push(test_capability_descriptor("plain-peer", vec![]));
+            let signing_key = ed25519_dalek::SigningKey::from_bytes(&[42; 32]);
+            let persisted_descriptor =
+                slskr_client::capabilities::PeerCapabilityDescriptor::unsigned(
+                    "persisted-peer",
+                    vec![slskr_client::capabilities::FEATURE_MESH_V1.to_owned()],
+                    Vec::new(),
+                    std::time::Duration::from_secs(300),
+                    &signing_key,
+                    std::time::SystemTime::now(),
+                )
+                .unwrap()
+                .sign(&signing_key)
+                .unwrap();
+            let projection = vec![serde_json::json!({
+                "peerId": persisted_descriptor.peer_id,
+                "username": persisted_descriptor.username,
+                "features": persisted_descriptor.features,
+                "endpoints": persisted_descriptor.endpoints,
+                "overlayPort": persisted_descriptor.overlay_port,
+                "maxPayloadLength": persisted_descriptor.max_payload_length,
+                "issuedAtUnix": persisted_descriptor.issued_at_unix,
+                "expiresAtUnix": persisted_descriptor.expires_at_unix,
+                "publicKey": base64::engine::general_purpose::STANDARD.encode(persisted_descriptor.public_key),
+                "signature": persisted_descriptor.signature.map(|value| base64::engine::general_purpose::STANDARD.encode(value)),
+            })];
+            state
+                .controller_features
+                .write()
+                .await
+                .upsert(
+                    "hashdb/peers".to_owned(),
+                    serde_json::json!({"peers": projection}),
+                )
+                .unwrap();
         }
         // A watched Soulseek user with no capability record at all must
         // not appear in either capability listing.
@@ -96127,6 +96340,21 @@ mod tests {
             .expect("list hashdb peers after a backfill");
         let hash_peers_json = serde_json::from_str::<serde_json::Value>(&hash_peers.body).unwrap();
         assert_eq!(hash_peers_json["peers"][0]["backfillsToday"], 1);
+
+        let persisted = state
+            .controller_features
+            .read()
+            .await
+            .get("hashdb/peers")
+            .cloned()
+            .unwrap();
+        let mut restored = super::MeshState::new();
+        restored.restore_persisted_capabilities(persisted["peers"].as_array().unwrap());
+        assert_eq!(restored.capability_records.len(), 1);
+        assert!(restored
+            .capability_records
+            .iter()
+            .any(|record| record.username == "persisted-peer"));
     }
 
     #[tokio::test]
@@ -110468,6 +110696,28 @@ mod tests {
         assert_eq!(json["username"], "remote-peer");
         assert_eq!(json["liked"], serde_json::json!(["drum and bass"]));
         assert_eq!(json["hated"], serde_json::json!(["bad rips"]));
+        let opinions = super::route_http_request("GET", "/api/v0/opinions", None, "", &state)
+            .await
+            .unwrap();
+        let opinions_json = serde_json::from_str::<serde_json::Value>(&opinions.body).unwrap();
+        assert_eq!(opinions_json.as_array().unwrap().len(), 2);
+        assert!(opinions.body.contains("soulseek-interest"));
+        let replacement = slskr_client::protocol::server::UserInterests {
+            username: "remote-peer".to_owned(),
+            liked: vec!["new-track".to_owned()],
+            hated: Vec::new(),
+        };
+        super::project_server_message(
+            &state,
+            &mut session,
+            &ServerMessage::UserInterests(replacement),
+        )
+        .await;
+        let opinions = super::route_http_request("GET", "/api/v0/opinions", None, "", &state)
+            .await
+            .unwrap();
+        assert!(!opinions.body.contains("drum and bass"));
+        assert!(opinions.body.contains("new-track"));
     }
 
     #[tokio::test]
