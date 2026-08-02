@@ -122,12 +122,16 @@ const DirectoryRow = ({
   </Table.Row>
 );
 
-const Explorer = ({ remoteFileManagement, root }) => {
+const Explorer = ({ active = true, remoteFileManagement, root }) => {
   const [directory, setDirectory] = useState({ directories: [], files: [] });
   const [subdirectory, setSubdirectory] = useState([]);
   const [loading, setLoading] = useState(false);
 
   const fetch = async () => {
+    if (!active) {
+      return;
+    }
+
     setLoading(true);
     const directoryResult = await list({
       root,
@@ -138,8 +142,12 @@ const Explorer = ({ remoteFileManagement, root }) => {
   };
 
   useEffect(() => {
+    if (!active) {
+      return;
+    }
+
     fetch();
-  }, [subdirectory]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [active, root, subdirectory]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     setSubdirectory([]);
@@ -154,6 +162,18 @@ const Explorer = ({ remoteFileManagement, root }) => {
     copy.pop();
     setSubdirectory(copy);
   };
+
+  if (!active) {
+    return (
+      <Header
+        className="explorer-working-directory"
+        size="small"
+      >
+        <Icon name="folder" />
+        {'/' + root + '/'}
+      </Header>
+    );
+  }
 
   if (loading) {
     return <LoaderSegment />;

@@ -235,7 +235,7 @@ const Chat = ({ state }) => {
         )}
       </Menu.Item>
     ),
-    render: () => (
+    pane: (
       <Tab.Pane
         attached={false}
         key={tab.key}
@@ -354,7 +354,7 @@ const Chat = ({ state }) => {
                 <Icon name="plus" />
               </Menu.Item>
             ),
-            render: () => null,
+            pane: null,
           },
         ]}
         renderActiveOnly={false}
