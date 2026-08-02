@@ -42,6 +42,7 @@ const AdversarialSettings = () => {
       if (data) {
         setSettings(data);
         setError(null);
+        return data;
       } else {
         setError('Adversarial features are not configured on this server');
       }
@@ -50,6 +51,8 @@ const AdversarialSettings = () => {
     } finally {
       setLoading(false);
     }
+
+    return null;
   }, []);
 
   const fetchStatus = useCallback(async () => {
@@ -99,10 +102,23 @@ const AdversarialSettings = () => {
   }, []);
 
   useEffect(() => {
-    fetchSettings();
-    fetchStatus();
-    fetchTransportStatus();
-    fetchTorStatus();
+    const initialize = async () => {
+      const configuredSettings = await fetchSettings();
+      fetchStatus();
+
+      const enabled = configuredSettings?.Enabled ?? configuredSettings?.enabled;
+      if (!enabled) return;
+
+      fetchTransportStatus();
+      const anonymity = configuredSettings.Anonymity || configuredSettings.anonymity;
+      const anonymityEnabled = anonymity?.Enabled ?? anonymity?.enabled;
+      const anonymityMode = anonymity?.Mode ?? anonymity?.mode;
+      if (anonymityEnabled && anonymityMode === 'Tor') {
+        fetchTorStatus();
+      }
+    };
+
+    initialize();
   }, [fetchSettings, fetchStatus, fetchTorStatus, fetchTransportStatus]);
 
   const handleSave = async () => {
