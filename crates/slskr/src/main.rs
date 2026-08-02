@@ -11499,19 +11499,71 @@ fn security_reputation_profile_value(
 /// single peer, sourced from slskR's real, violation-driven score and
 /// violation counters (`SecurityState.reputation`/`violations`) rather
 /// than a disconnected, admin-only settings blob that never reflected
-/// real behavior. slskR does not yet track the oracle's finer-grained
-/// per-event counters (successful/failed/aborted transfers, malformed
-/// messages, content mismatches, slot availability) yet; those counters stay
-/// at their real zero values until the corresponding behavior is wired.
+/// real behavior. Transfer counters are reconciled from the retained real
+/// transfer history on each read, so the profile does not report a fabricated
+/// zero after an actual transfer has completed or failed.
 async fn security_reputation_profile_json(state: &AppState, username: &str) -> serde_json::Value {
     let key = username.to_ascii_lowercase();
+    let transfer_metrics = {
+        let transfers = state.transfers.read().await;
+        let mut successful = 0_u64;
+        let mut failed = 0_u64;
+        let mut aborted = 0_u64;
+        let mut bytes = 0_u64;
+        let mut content_mismatches = 0_u64;
+        let mut first_seen: Option<u64> = None;
+        let mut last_seen: Option<u64> = None;
+        for entry in transfers.entries.iter().filter(|entry| {
+            entry
+                .peer_username
+                .as_deref()
+                .is_some_and(|peer| peer.eq_ignore_ascii_case(username))
+        }) {
+            first_seen =
+                Some(first_seen.map_or(entry.requested_at, |seen| seen.min(entry.requested_at)));
+            last_seen = Some(last_seen.map_or(entry.updated_at, |seen| seen.max(entry.updated_at)));
+            bytes = bytes.saturating_add(entry.bytes_transferred);
+            match entry.status.as_str() {
+                "succeeded" | "completed" => successful = successful.saturating_add(1),
+                "failed" | "rejected" => failed = failed.saturating_add(1),
+                "cancelled" | "aborted" => aborted = aborted.saturating_add(1),
+                _ => {}
+            }
+            if entry.reason.as_deref().is_some_and(|reason| {
+                let reason = reason.to_ascii_lowercase();
+                reason.contains("mismatch") || reason.contains("hash mismatch")
+            }) {
+                content_mismatches = content_mismatches.saturating_add(1);
+            }
+        }
+        (
+            successful,
+            failed,
+            aborted,
+            bytes,
+            content_mismatches,
+            first_seen,
+            last_seen,
+        )
+    };
     let mut security = state.security.write().await;
     let legacy_protocol_violations = security.violations.get(&key).copied().unwrap_or(0);
     let had_profile = security.reputation_profiles.contains_key(&key);
     security.ensure_reputation_profile(&key, username);
-    if !had_profile {
-        if let Some(profile) = security.reputation_profiles.get_mut(&key) {
+    if let Some(profile) = security.reputation_profiles.get_mut(&key) {
+        if !had_profile {
             profile.protocol_violations = u64::from(legacy_protocol_violations);
+        }
+        profile.successful_transfers = transfer_metrics.0;
+        profile.failed_transfers = transfer_metrics.1;
+        profile.aborted_transfers = transfer_metrics.2;
+        profile.total_bytes_transferred = transfer_metrics.3;
+        profile.content_mismatches = transfer_metrics.4;
+        if let Some(first_seen) = transfer_metrics.5 {
+            profile.first_seen = profile.first_seen.min(first_seen);
+        }
+        if let Some(last_seen) = transfer_metrics.6 {
+            profile.last_seen = profile.last_seen.max(last_seen);
         }
     }
     let score = security
@@ -89823,6 +89875,41 @@ mod tests {
         // instead of reputation at all).
         let (state, _receiver) = test_state();
 
+        // The profile counters must reconcile the real retained transfer
+        // history rather than remain at an unconditional zero.
+        {
+            let mut transfers = state.transfers.write().await;
+            let successful = transfers.create(
+                0,
+                Some("cleanpeer".to_owned()),
+                "Music/clean.flac".to_owned(),
+                None,
+                Some(100),
+            );
+            transfers.update_status(successful.id, "succeeded", Some(100), None);
+            let failed = transfers.create(
+                0,
+                Some("cleanpeer".to_owned()),
+                "Music/failed.flac".to_owned(),
+                None,
+                Some(20),
+            );
+            transfers.update_status(
+                failed.id,
+                "failed",
+                Some(20),
+                Some("content hash mismatch".to_owned()),
+            );
+            let aborted = transfers.create(
+                0,
+                Some("cleanpeer".to_owned()),
+                "Music/aborted.flac".to_owned(),
+                None,
+                Some(3),
+            );
+            transfers.update_status(aborted.id, "cancelled", Some(3), None);
+        }
+
         // A peer with no recorded violations reports the real,
         // never-decremented default score.
         let clean = super::route_http_request(
@@ -89837,6 +89924,12 @@ mod tests {
         let clean_json = serde_json::from_str::<serde_json::Value>(&clean.body).unwrap();
         assert_eq!(clean_json["score"], 50);
         assert_eq!(clean_json["protocolViolations"], 0);
+        assert_eq!(clean_json["successfulTransfers"], 1);
+        assert_eq!(clean_json["failedTransfers"], 1);
+        assert_eq!(clean_json["abortedTransfers"], 1);
+        assert_eq!(clean_json["totalBytesTransferred"], 123);
+        assert_eq!(clean_json["contentMismatches"], 1);
+        assert_eq!(clean_json["successRate"], 1.0 / 3.0);
         assert_eq!(clean_json["trustLevel"], "Neutral");
 
         // Seed a real violation-driven score drop via the same
