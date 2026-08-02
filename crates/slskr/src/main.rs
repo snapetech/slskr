@@ -51,6 +51,7 @@ mod rate_limit;
 )]
 mod routing;
 mod scripts;
+mod solid;
 #[allow(
     dead_code,
     reason = "storage codecs are retained for cache and compatibility formats"
@@ -43927,8 +43928,14 @@ async fn feature_controller_mutation_response(
                 "WebID resolution was blocked by policy.",
             ));
         }
+        let content_type = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned);
         let mut stream = response.bytes_stream();
         let mut fetched = 0_usize;
+        let mut profile = Vec::new();
         while let Some(chunk) = stream.next().await {
             let Ok(chunk) = chunk else {
                 return Some(routing::internal_server_error_response(
@@ -43941,11 +43948,21 @@ async fn feature_controller_mutation_response(
                     "WebID resolution was blocked by policy.",
                 ));
             }
+            profile.extend_from_slice(&chunk);
         }
+        let oidc_issuers =
+            match solid::extract_oidc_issuers(&profile, content_type.as_deref(), url.as_str()) {
+                Ok(issuers) => issuers,
+                Err(_) => {
+                    return Some(routing::internal_server_error_response(
+                        "Failed to resolve WebID",
+                    ));
+                }
+            };
         return Some(routing::ok_response(
             serde_json::json!({
                 "webId": web_id,
-                "oidcIssuers": [],
+                "oidcIssuers": oidc_issuers,
             })
             .to_string(),
         ));
@@ -98236,6 +98253,65 @@ mod tests {
         assert_eq!(backfill_json["backfilled"], 1);
         assert_eq!(backfill_json["persisted"], true);
         assert_eq!(backfill_json["status"], "local");
+    }
+
+    #[tokio::test]
+    async fn solid_webid_route_extracts_oidc_issuers_from_profile() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let (state, _receiver) = test_state();
+        {
+            let mut media_services = state.media_services.write().await;
+            media_services.solid.allow_insecure_http = true;
+            media_services.solid.allowed_hosts = vec!["127.0.0.1".to_owned()];
+        }
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind profile fixture");
+        let port = listener
+            .local_addr()
+            .expect("profile fixture address")
+            .port();
+        let web_id = format!("http://127.0.0.1:{port}/profile/card#me");
+        let profile = format!(
+            "@prefix solid: <http://www.w3.org/ns/solid/terms#>.\n<{web_id}> solid:oidcIssuer <https://issuer.example/oidc>.\n"
+        );
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.expect("profile request");
+            let mut request = [0_u8; 4096];
+            let _ = stream
+                .read(&mut request)
+                .await
+                .expect("read profile request");
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/turtle\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                profile.len(), profile
+            );
+            stream
+                .write_all(response.as_bytes())
+                .await
+                .expect("write profile response");
+        });
+
+        let response = super::route_http_request(
+            "POST",
+            "/api/solid/resolve-webid",
+            None,
+            &serde_json::json!({"webId": web_id}).to_string(),
+            &state,
+        )
+        .await
+        .expect("resolve WebID");
+        server.await.expect("profile fixture task");
+
+        assert_eq!(response.status, "200 OK");
+        let response_json = serde_json::from_str::<serde_json::Value>(&response.body).unwrap();
+        assert_eq!(response_json["webId"], web_id);
+        assert_eq!(
+            response_json["oidcIssuers"],
+            serde_json::json!(["https://issuer.example/oidc"])
+        );
     }
 
     #[test]
