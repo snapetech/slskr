@@ -84,6 +84,7 @@ use std::{
     io::{Read, Seek, SeekFrom},
     net::{IpAddr, SocketAddr, SocketAddrV4, ToSocketAddrs},
     path::{Component, Path, PathBuf},
+    process::Stdio,
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
@@ -328,9 +329,9 @@ const WEBSOCKET_AUTH_PROTOCOL_PREFIX: &str = "slskr.api-token.";
 
 use crate::config::{
     json_bool_option, json_escape, json_option, json_u32_option, json_u64_option,
-    json_usize_option, parse_compat_ip_address, AppConfig, ConfigEnv,
-    ControllerCompatibilityTarget, MusicBrainzIntegrationSettings, PodSignatureMode, ProcessEnv,
-    ShareDirectory, TrustedMeshPeer,
+    json_usize_option, parse_compat_ip_address, AcoustIdIntegrationSettings, AppConfig,
+    ChromaprintIntegrationSettings, ConfigEnv, ControllerCompatibilityTarget, IntegrationSettings,
+    MusicBrainzIntegrationSettings, PodSignatureMode, ProcessEnv, ShareDirectory, TrustedMeshPeer,
 };
 use crate::utils::*;
 
@@ -347,6 +348,7 @@ const MAX_SEARCH_TTL_SECONDS: u64 = 24 * 60 * 60;
 const MAX_WEB_STATIC_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_INTEGRATION_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 const MAX_SOURCE_PROVIDER_RESPONSE_BYTES: usize = 512 * 1024;
+const MAX_SONGID_TOOL_OUTPUT_BYTES: usize = 64 * 1024;
 const MAX_ROOM_MESSAGES_PER_ROOM: usize = 1_000;
 const MAX_TOTAL_ROOM_MESSAGES: usize = 10_000;
 const MAX_ROOM_RECORDS: usize = 1_024;
@@ -3704,6 +3706,7 @@ impl TransferQueue {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn create_with_batch_for_wishlist(
         &mut self,
         direction: u32,
@@ -13129,10 +13132,228 @@ async fn songid_fetch_spotify_page_metadata(source: &str) -> Result<serde_json::
     Ok(songid_spotify_metadata_from_html(source, &html))
 }
 
+async fn songid_run_tool(
+    command: &mut tokio::process::Command,
+    label: &str,
+) -> Result<std::process::Output, String> {
+    let output = tokio::time::timeout(Duration::from_secs(30), command.output())
+        .await
+        .map_err(|_| format!("{label} timed out"))?
+        .map_err(|error| format!("{label} failed to start: {error}"))?;
+    if output.stdout.len() > MAX_SONGID_TOOL_OUTPUT_BYTES
+        || output.stderr.len() > MAX_SONGID_TOOL_OUTPUT_BYTES
+    {
+        return Err(format!(
+            "{label} output exceeds {MAX_SONGID_TOOL_OUTPUT_BYTES} bytes"
+        ));
+    }
+    Ok(output)
+}
+
+fn songid_parse_fpcalc_output(output: &str) -> Option<String> {
+    output.lines().map(str::trim).find_map(|line| {
+        if let Some(fingerprint) = line.strip_prefix("FINGERPRINT=") {
+            return (!fingerprint.trim().is_empty()).then(|| fingerprint.trim().to_owned());
+        }
+        if line.is_empty() || line.starts_with("DURATION=") {
+            return None;
+        }
+        Some(line.to_owned())
+    })
+}
+
+async fn songid_extract_chromaprint(
+    source: &str,
+    settings: &ChromaprintIntegrationSettings,
+) -> Result<String, String> {
+    if !settings.enabled {
+        return Err("Chromaprint is disabled".to_owned());
+    }
+    let source_path = Path::new(source);
+    if !source_path.is_file() {
+        return Err("local SongID source is not a file".to_owned());
+    }
+
+    // The target feeds ffmpeg's bounded, normalized PCM output into the
+    // native Chromaprint service. This host exposes the same library through
+    // fpcalc, so normalize through the configured ffmpeg first and invoke
+    // fpcalc on that bounded WAV. This also keeps the configured decoder path
+    // meaningful instead of silently using an unrelated decoder.
+    let normalized_path = std::env::temp_dir().join(format!(
+        "slskr-songid-{}.wav",
+        uuid::Uuid::new_v4().simple()
+    ));
+    let result = async {
+        let mut ffmpeg = tokio::process::Command::new(&settings.ffmpeg_path);
+        ffmpeg
+            .arg("-hide_banner")
+            .arg("-nostdin")
+            .arg("-loglevel")
+            .arg("error")
+            .arg("-y")
+            .arg("-t")
+            .arg(settings.duration_seconds.to_string())
+            .arg("-i")
+            .arg(source_path)
+            .arg("-f")
+            .arg("wav")
+            .arg("-acodec")
+            .arg("pcm_s16le")
+            .arg("-ar")
+            .arg(settings.sample_rate.to_string())
+            .arg("-ac")
+            .arg(settings.channels.to_string())
+            .arg(&normalized_path)
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
+        let ffmpeg_output = songid_run_tool(&mut ffmpeg, "ffmpeg SongID normalization").await?;
+        if !ffmpeg_output.status.success() {
+            let stderr = String::from_utf8_lossy(&ffmpeg_output.stderr);
+            return Err(format!(
+                "ffmpeg exited with {}: {}",
+                ffmpeg_output.status,
+                stderr.trim().chars().take(512).collect::<String>()
+            ));
+        }
+
+        let metadata = fs::metadata(&normalized_path)
+            .map_err(|error| format!("normalized SongID audio is unavailable: {error}"))?;
+        let max_pcm_bytes = u64::from(settings.sample_rate)
+            .checked_mul(u64::from(settings.channels))
+            .and_then(|value| value.checked_mul(u64::from(settings.duration_seconds)))
+            .and_then(|value| value.checked_mul(2))
+            .ok_or_else(|| "Chromaprint PCM size overflow".to_owned())?;
+        if metadata.len() == 0 || metadata.len() > max_pcm_bytes.saturating_add(4096) {
+            return Err("normalized SongID audio exceeded its bounded duration".to_owned());
+        }
+
+        let mut fpcalc = tokio::process::Command::new("fpcalc");
+        fpcalc
+            .arg("-plain")
+            .arg("-algorithm")
+            .arg(settings.algorithm.to_string())
+            .arg("-length")
+            .arg(settings.duration_seconds.to_string())
+            .arg("-rate")
+            .arg(settings.sample_rate.to_string())
+            .arg("-channels")
+            .arg(settings.channels.to_string())
+            .arg(&normalized_path)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
+        let fpcalc_output = songid_run_tool(&mut fpcalc, "fpcalc").await?;
+        if !fpcalc_output.status.success() {
+            let stderr = String::from_utf8_lossy(&fpcalc_output.stderr);
+            return Err(format!(
+                "fpcalc exited with {}: {}",
+                fpcalc_output.status,
+                stderr.trim().chars().take(512).collect::<String>()
+            ));
+        }
+        let stdout = String::from_utf8_lossy(&fpcalc_output.stdout);
+        songid_parse_fpcalc_output(&stdout)
+            .ok_or_else(|| "fpcalc returned no Chromaprint fingerprint".to_owned())
+    }
+    .await;
+    let _ = fs::remove_file(&normalized_path);
+    result
+}
+
+async fn songid_acoustid_lookup(
+    fingerprint: &str,
+    settings: &AcoustIdIntegrationSettings,
+    sample_rate: u32,
+    duration_seconds: u32,
+) -> Result<Option<serde_json::Value>, String> {
+    if !settings.enabled {
+        return Ok(None);
+    }
+    let client_id = settings
+        .client_id
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| "AcoustID is enabled without a client id".to_owned())?;
+    let endpoint = format!("{}/lookup", settings.base_url.trim_end_matches('/'));
+    let url = reqwest::Url::parse(&endpoint)
+        .map_err(|error| format!("AcoustID URL is invalid: {error}"))?;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|error| format!("failed to build AcoustID client: {error}"))?;
+    let duration = duration_seconds.to_string();
+    let sample_rate = sample_rate.to_string();
+    let response = client
+        .post(url)
+        .form(&[
+            ("client", client_id),
+            ("format", "json"),
+            ("fingerprint", fingerprint),
+            ("duration", duration.as_str()),
+            ("sample_rate", sample_rate.as_str()),
+            ("meta", "recordings"),
+        ])
+        .send()
+        .await
+        .map_err(|error| format!("AcoustID lookup failed: {error}"))?;
+    if !response.status().is_success() {
+        return Err(format!("AcoustID returned HTTP {}", response.status()));
+    }
+    let root = read_bounded_source_provider_json(response, "AcoustID lookup").await?;
+    Ok(root
+        .get("results")
+        .and_then(serde_json::Value::as_array)
+        .and_then(|results| results.first())
+        .cloned())
+}
+
+fn songid_acoustid_finding(result: &serde_json::Value) -> serde_json::Value {
+    let recording = result
+        .get("recordings")
+        .and_then(serde_json::Value::as_array)
+        .and_then(|recordings| recordings.first());
+    let recording_id = recording
+        .and_then(|recording| recording.get("id"))
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    let title = recording
+        .and_then(|recording| recording.get("title"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let artist = recording
+        .and_then(|recording| recording.get("artists"))
+        .and_then(serde_json::Value::as_array)
+        .and_then(|artists| artists.first())
+        .and_then(|artist| artist.get("name"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let score = result
+        .get("score")
+        .and_then(serde_json::Value::as_f64)
+        .unwrap_or(0.0);
+    serde_json::json!({
+        "recordingId": recording_id,
+        "externalId": result.get("id").cloned().unwrap_or(serde_json::Value::Null),
+        "title": title,
+        "artist": artist,
+        "score": score,
+        "summary": format!("AcoustID score {score:.2}"),
+    })
+}
+
 async fn songid_source_analysis(
     source: &str,
     source_type: &str,
-) -> (String, serde_json::Value, Vec<String>) {
+    integrations: &IntegrationSettings,
+) -> (
+    String,
+    serde_json::Value,
+    Vec<String>,
+    Option<serde_json::Value>,
+    Option<serde_json::Value>,
+) {
     if source_type == "spotify_url" {
         if let Some(metadata) = tokio::time::timeout(
             Duration::from_secs(10),
@@ -13163,12 +13384,12 @@ async fn songid_source_analysis(
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
-            return (query, run_metadata, evidence);
+            return (query, run_metadata, evidence, None, None);
         }
     }
 
     let query = songid_fallback_query(source, source_type);
-    let evidence = match source_type {
+    let mut evidence = match source_type {
         "local_file" => vec![format!("Local file path detected: {source}")],
         "youtube_url" => vec!["YouTube URL detected; using source query fallback.".to_owned()],
         "spotify_url" => {
@@ -13183,7 +13404,54 @@ async fn songid_source_analysis(
         "album": "",
         "extra": {"analysisAudioSource": source_type},
     });
-    (query, metadata, evidence)
+    let mut full_source_fingerprint = None;
+    let mut acoustid_finding = None;
+    if source_type == "local_file" && integrations.chromaprint.enabled {
+        match songid_extract_chromaprint(source, &integrations.chromaprint).await {
+            Ok(fingerprint) => {
+                evidence.push(format!(
+                    "Chromaprint fingerprint extracted ({} characters).",
+                    fingerprint.len()
+                ));
+                if integrations.acoustid.enabled {
+                    match songid_acoustid_lookup(
+                        &fingerprint,
+                        &integrations.acoustid,
+                        integrations.chromaprint.sample_rate,
+                        integrations.chromaprint.duration_seconds,
+                    )
+                    .await
+                    {
+                        Ok(Some(result)) => {
+                            let finding = songid_acoustid_finding(&result);
+                            evidence.push("AcoustID returned a recording match.".to_owned());
+                            acoustid_finding = Some(finding);
+                        }
+                        Ok(None) => {
+                            evidence.push("AcoustID returned no recording match.".to_owned());
+                        }
+                        Err(error) => {
+                            evidence.push(format!("AcoustID lookup failed: {error}"));
+                        }
+                    }
+                }
+                full_source_fingerprint = Some(serde_json::json!({
+                    "path": "",
+                    "durationSeconds": integrations.chromaprint.duration_seconds,
+                    "fingerprintLength": fingerprint.len(),
+                    "fingerprint": fingerprint,
+                }));
+            }
+            Err(error) => evidence.push(format!("Chromaprint extraction failed: {error}")),
+        }
+    }
+    (
+        query,
+        metadata,
+        evidence,
+        full_source_fingerprint,
+        acoustid_finding,
+    )
 }
 
 fn songid_path_is_within_root(path: &Path, root: &Path) -> bool {
@@ -13871,6 +14139,19 @@ fn command_exists_on_path(command: &str) -> bool {
         .any(|directory| directory.join(command).is_file())
 }
 
+fn configured_command_exists(command: &str) -> bool {
+    let command = command.trim();
+    if command.is_empty() {
+        return false;
+    }
+    let path = Path::new(command);
+    if path.is_absolute() || path.components().count() > 1 {
+        path.is_file()
+    } else {
+        command_exists_on_path(command)
+    }
+}
+
 fn file_exists_at_known_location_or_on_path(candidates: &[&str], path_file_name: &str) -> bool {
     candidates
         .iter()
@@ -14216,16 +14497,10 @@ fn songid_evidence_package_json(run: &serde_json::Value) -> serde_json::Value {
 
 /// Matches the oracle's `SongIdCapabilityReporter`: real external-tool
 /// presence checks on `PATH` (and, for panako/audfprint, known install
-/// locations), not a hardcoded list. MusicBrainz availability reflects the
-/// configured live client; Chromaprint fingerprinting, AcoustID lookup, and
-/// the deeper per-source-type analysis the oracle's SongID run pipeline
-/// performs remain separately unavailable.
-fn songid_capabilities_json(
-    musicbrainz: Option<&MusicBrainzIntegrationSettings>,
-) -> serde_json::Value {
+/// locations), not a hardcoded list. Integration-backed capabilities also
+/// reflect the configured live clients and required local tools.
+fn songid_capabilities_json(integrations: Option<&IntegrationSettings>) -> serde_json::Value {
     const DOCKER_HINT: &str = "For Docker, run install-optional-media-tools with the matching profile or install the tool in a derived image and keep it on PATH.";
-    const NOT_IMPLEMENTED: &str = "Not yet implemented in slskR.";
-
     fn capability(
         id: &str,
         label: &str,
@@ -14318,12 +14593,34 @@ fn songid_capabilities_json(
         tool_reason(&[("whisper", whisper), ("ffmpeg", ffmpeg)]);
     let (ocr_available, ocr_reason) = tool_reason(&[("tesseract", tesseract), ("ffmpeg", ffmpeg)]);
     let (c2pa_available, c2pa_reason) = tool_reason(&[("c2patool", c2patool)]);
+    let musicbrainz = integrations.map(|settings| &settings.musicbrainz);
     let musicbrainz_configured =
         musicbrainz.is_some_and(|settings| reqwest::Url::parse(&settings.base_url).is_ok());
     let musicbrainz_reason = if musicbrainz_configured {
         "MusicBrainz client is configured.".to_owned()
     } else {
         "MusicBrainz base URL is not valid.".to_owned()
+    };
+    let chromaprint_enabled = integrations.is_some_and(|settings| settings.chromaprint.enabled);
+    let chromaprint_ffmpeg = integrations
+        .is_some_and(|settings| configured_command_exists(&settings.chromaprint.ffmpeg_path));
+    let fpcalc = command_exists_on_path("fpcalc");
+    let chromaprint_available = chromaprint_enabled && chromaprint_ffmpeg && fpcalc;
+    let chromaprint_reason = if !chromaprint_enabled {
+        "Chromaprint is disabled; set integration.chromaprint.enabled to enable it.".to_owned()
+    } else if !chromaprint_ffmpeg {
+        "Configured Chromaprint ffmpeg executable was not found.".to_owned()
+    } else if !fpcalc {
+        format!("fpcalc/libchromaprint was not found on PATH. {DOCKER_HINT}")
+    } else {
+        "Chromaprint is enabled and ffmpeg/libchromaprint are available.".to_owned()
+    };
+    let acoustid_configured = integrations
+        .is_some_and(|settings| settings.acoustid.enabled && settings.acoustid.client_id.is_some());
+    let acoustid_reason = if acoustid_configured {
+        "AcoustID is enabled with a client id.".to_owned()
+    } else {
+        "Requires integration.acoustid.enabled and a client id.".to_owned()
     };
 
     serde_json::json!([
@@ -14387,24 +14684,24 @@ fn songid_capabilities_json(
             "chromaprint_fingerprint",
             "Chromaprint fingerprinting",
             "experimental",
-            false,
-            NOT_IMPLEMENTED.to_owned(),
+            chromaprint_available,
+            chromaprint_reason,
             &[
                 "integration.chromaprint.enabled",
                 "ffmpeg",
-                "libchromaprint"
-            ]
+                "libchromaprint",
+            ],
         ),
         capability(
             "acoustid_lookup",
             "AcoustID lookup",
             "experimental",
-            false,
-            NOT_IMPLEMENTED.to_owned(),
+            acoustid_configured,
+            acoustid_reason,
             &[
                 "integration.acoustid.enabled",
-                "integration.acoustid.client_id"
-            ]
+                "integration.acoustid.client_id",
+            ],
         ),
         capability(
             "songrec",
@@ -25639,8 +25936,9 @@ async fn route_http_request_with_headers(
                      "SongID run concurrency limit reached",
                  ));
              };
-             let (fallback_query, metadata, evidence) =
-                 songid_source_analysis(&source, source_type).await;
+             let integrations = state.integration_settings.read().await.clone();
+             let (fallback_query, metadata, evidence, full_source_fingerprint, acoustid_finding) =
+                 songid_source_analysis(&source, source_type, &integrations).await;
              let query = extract_json_string_field(body, "query")
                  .filter(|query| !query.trim().is_empty())
                  .unwrap_or(fallback_query);
@@ -25674,6 +25972,12 @@ async fn route_http_request_with_headers(
                  run["sourceType"] = serde_json::json!(source_type);
                  run["query"] = serde_json::json!(query);
                  run["summary"] = serde_json::json!(match source_type {
+                     "local_file" if full_source_fingerprint.is_some() && acoustid_finding.is_some() => {
+                         "Analyzed local file with Chromaprint and AcoustID metadata."
+                     }
+                     "local_file" if full_source_fingerprint.is_some() => {
+                         "Analyzed local file with Chromaprint and filename metadata."
+                     }
                      "local_file" => "Analyzed local file with filename fallback metadata.",
                      "youtube_url" => {
                          "Classified YouTube URL; optional metadata tools may enrich the run."
@@ -25689,6 +25993,19 @@ async fn route_http_request_with_headers(
                      evidence.iter().cloned().map(serde_json::Value::String).collect(),
                  );
                  run["metadata"] = metadata.clone();
+                 if let Some(fingerprint) = full_source_fingerprint.clone() {
+                     run["fullSourceFingerprint"] = fingerprint;
+                 }
+                 if let Some(finding) = acoustid_finding.clone() {
+                     run["clips"] = serde_json::json!([{
+                         "clipId": "full-source",
+                         "acoustId": finding,
+                     }]);
+                     run["scorecard"] = serde_json::json!({
+                         "acoustIdHitCount": 1,
+                         "rawAcoustIdHitCount": 1,
+                     });
+                 }
                  if let Some(stored) = runtime.songid_run_records.last_mut() {
                      *stored = run.clone();
                  }
@@ -29581,10 +29898,9 @@ async fn route_http_request_with_headers(
                 .unwrap_or(20)
                 .clamp(1, 100) as usize;
             let settings = state.integration_settings.read().await.musicbrainz.clone();
-            let mut hits = match musicbrainz_search_recordings(&settings, &query, limit).await {
-                Ok(hits) => hits,
-                Err(_) => Vec::new(),
-            };
+            let mut hits = musicbrainz_search_recordings(&settings, &query, limit)
+                .await
+                .unwrap_or_default();
             if hits.is_empty() {
                 // A disconnected or empty MusicBrainz backend must not erase
                 // local content search results. The compatibility controller
@@ -54385,8 +54701,8 @@ async fn extended_controller_get_response(
             )
         }
         "/api/songid/capabilities" => {
-            let musicbrainz = state.integration_settings.read().await.musicbrainz.clone();
-            routing::ok_response(songid_capabilities_json(Some(&musicbrainz)).to_string())
+            let integrations = state.integration_settings.read().await.clone();
+            routing::ok_response(songid_capabilities_json(Some(&integrations)).to_string())
         }
         "/api/telemetry/prometheus" => {
             let transfers = state.transfers.read().await;
@@ -96546,25 +96862,24 @@ mod tests {
                 .unwrap_or_else(|| panic!("missing capability {id}"))
         };
 
-        // Source classification and safe local-file intake are implemented;
-        // deep metadata/fingerprint integrations remain explicitly absent.
-        for id in [
-            "musicbrainz_lookup",
-            "chromaprint_fingerprint",
-            "acoustid_lookup",
-        ] {
+        // An absent integration configuration is reported as unavailable;
+        // this is a configuration state, not a fabricated implementation
+        // status.
+        for id in ["chromaprint_fingerprint", "acoustid_lookup"] {
             let capability = by_id(id);
             assert_eq!(capability["available"], false, "{id}");
             assert!(
-                capability["reason"]
-                    .as_str()
-                    .unwrap()
-                    .contains("Not yet implemented")
-                    || capability["reason"].as_str().unwrap().contains("base URL"),
+                capability["reason"].as_str().unwrap().contains("disabled")
+                    || capability["reason"].as_str().unwrap().contains("Requires"),
                 "{id}: {}",
                 capability["reason"]
             );
         }
+        assert_eq!(by_id("musicbrainz_lookup")["available"], false);
+        assert!(by_id("musicbrainz_lookup")["reason"]
+            .as_str()
+            .unwrap()
+            .contains("base URL"));
         assert_eq!(by_id("text_query")["status"], "stable");
         assert_eq!(by_id("text_query")["available"], true);
         assert_eq!(by_id("url_parsing")["available"], true);
@@ -96654,6 +96969,95 @@ mod tests {
             "allowed"
         );
         fs::remove_dir_all(state_dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn songid_chromaprint_path_uses_configured_ffmpeg_and_fpcalc() {
+        if !super::configured_command_exists("ffmpeg") || !super::command_exists_on_path("fpcalc") {
+            return;
+        }
+        let source = std::env::temp_dir().join(format!(
+            "slskr-songid-chromaprint-{}.wav",
+            uuid::Uuid::new_v4().simple()
+        ));
+        let generated = std::process::Command::new("ffmpeg")
+            .args([
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=440:duration=10",
+                "-ar",
+                "44100",
+                "-ac",
+                "2",
+            ])
+            .arg(&source)
+            .status()
+            .expect("ffmpeg test fixture");
+        assert!(generated.success());
+        let settings = super::ChromaprintIntegrationSettings {
+            enabled: true,
+            algorithm: 1,
+            ffmpeg_path: "ffmpeg".to_owned(),
+            sample_rate: 44_100,
+            channels: 2,
+            duration_seconds: 10,
+        };
+        let fingerprint = super::songid_extract_chromaprint(source.to_str().unwrap(), &settings)
+            .await
+            .expect("Chromaprint fingerprint");
+        assert!(fingerprint.len() > 20);
+        let _ = fs::remove_file(source);
+    }
+
+    #[tokio::test]
+    async fn songid_acoustid_lookup_matches_target_form_contract() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind AcoustID fixture");
+        let address = listener.local_addr().expect("AcoustID fixture address");
+        let server = tokio::spawn(async move {
+            serve_json_fixture(
+                &listener,
+                serde_json::json!({
+                    "status": "ok",
+                    "results": [{
+                        "id": "acoustid-audit",
+                        "score": 0.97,
+                        "recordings": [{
+                            "id": "recording-audit",
+                            "title": "Audit Track",
+                            "artists": [{"name": "Audit Artist"}]
+                        }]
+                    }]
+                }),
+            )
+            .await
+        });
+        let settings = super::AcoustIdIntegrationSettings {
+            enabled: true,
+            client_id: Some("fixture-client".to_owned()),
+            base_url: format!("http://{address}/v2"),
+        };
+        let result = super::songid_acoustid_lookup("fixture-fingerprint", &settings, 44_100, 120)
+            .await
+            .expect("AcoustID fixture lookup")
+            .expect("AcoustID result");
+        assert_eq!(result["id"], "acoustid-audit");
+        let request = server.await.expect("AcoustID fixture task");
+        assert!(request.starts_with("POST /v2/lookup HTTP/1.1"), "{request}");
+        assert!(request.contains("client=fixture-client"), "{request}");
+        assert!(
+            request.contains("fingerprint=fixture-fingerprint"),
+            "{request}"
+        );
+        assert!(request.contains("duration=120"), "{request}");
+        assert!(request.contains("sample_rate=44100"), "{request}");
+        assert!(request.contains("meta=recordings"), "{request}");
     }
 
     #[tokio::test]

@@ -3027,6 +3027,8 @@ impl TrustedProxyCidr {
 pub struct IntegrationSettings {
     pub spotify: Box<SpotifyIntegrationSettings>,
     pub lidarr: Box<LidarrIntegrationSettings>,
+    pub chromaprint: ChromaprintIntegrationSettings,
+    pub acoustid: AcoustIdIntegrationSettings,
     pub musicbrainz: MusicBrainzIntegrationSettings,
     pub youtube: SourceFeedApiKeySettings,
     pub lastfm: SourceFeedApiKeySettings,
@@ -3055,6 +3057,11 @@ impl IntegrationSettings {
                 file_config.lidarr,
                 env,
             )?),
+            chromaprint: ChromaprintIntegrationSettings::from_layers(
+                file_config.chromaprint,
+                env,
+            )?,
+            acoustid: AcoustIdIntegrationSettings::from_layers(file_config.acoustid, env)?,
             musicbrainz: MusicBrainzIntegrationSettings::from_layers(file_config.musicbrainz, env)?,
             youtube: SourceFeedApiKeySettings::from_layers(
                 file_config.youtube,
@@ -3087,9 +3094,11 @@ impl IntegrationSettings {
 
     pub fn sanitized_json(&self) -> String {
         format!(
-            "{{\"spotify\":{},\"lidarr\":{},\"musicbrainz\":{},\"youtube\":{},\"lastfm\":{},\"ntfy\":{},\"pushover\":{},\"pushbullet\":{},\"ftp\":{},\"vpn\":{},\"script_count\":{},\"webhook_count\":{},\"bridge\":{},\"external_visualizer\":{}}}",
+            "{{\"spotify\":{},\"lidarr\":{},\"chromaprint\":{},\"acoustid\":{},\"musicbrainz\":{},\"youtube\":{},\"lastfm\":{},\"ntfy\":{},\"pushover\":{},\"pushbullet\":{},\"ftp\":{},\"vpn\":{},\"script_count\":{},\"webhook_count\":{},\"bridge\":{},\"external_visualizer\":{}}}",
             self.spotify.sanitized_json(),
             self.lidarr.sanitized_json(),
+            self.chromaprint.sanitized_json(),
+            self.acoustid.sanitized_json(),
             self.musicbrainz.sanitized_json(),
             self.youtube.sanitized_json(),
             self.lastfm.sanitized_json(),
@@ -3103,6 +3112,176 @@ impl IntegrationSettings {
             self.bridge.sanitized_json(),
             self.external_visualizer.sanitized_json()
         )
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ChromaprintIntegrationSettings {
+    pub enabled: bool,
+    pub algorithm: u32,
+    pub ffmpeg_path: String,
+    pub sample_rate: u32,
+    pub channels: u32,
+    pub duration_seconds: u32,
+}
+
+impl ChromaprintIntegrationSettings {
+    fn from_layers<E: ConfigEnv>(
+        file_config: ChromaprintFileConfig,
+        env: &E,
+    ) -> Result<Self, String> {
+        let settings = Self {
+            enabled: env_bool_any_layer(
+                env,
+                &["SLSKD_CHROMAPRINT_ENABLED", "SLSKR_CHROMAPRINT_ENABLED"],
+                file_config.enabled.unwrap_or(false),
+            )?,
+            algorithm: env_parse_any_layer(
+                env,
+                &["SLSKD_CHROMAPRINT_ALGORITHM", "SLSKR_CHROMAPRINT_ALGORITHM"],
+                file_config.algorithm,
+                1,
+            )?,
+            ffmpeg_path: optional_env_any(
+                env,
+                &[
+                    "SLSKD_CHROMAPRINT_FFMPEG_PATH",
+                    "SLSKR_CHROMAPRINT_FFMPEG_PATH",
+                ],
+            )
+            .or(file_config.ffmpeg_path)
+            .unwrap_or_else(|| "ffmpeg".to_owned())
+            .trim()
+            .to_owned(),
+            sample_rate: env_parse_any_layer(
+                env,
+                &[
+                    "SLSKD_CHROMAPRINT_SAMPLE_RATE",
+                    "SLSKR_CHROMAPRINT_SAMPLE_RATE",
+                ],
+                file_config.sample_rate,
+                44_100,
+            )?,
+            channels: env_parse_any_layer(
+                env,
+                &["SLSKD_CHROMAPRINT_CHANNELS", "SLSKR_CHROMAPRINT_CHANNELS"],
+                file_config.channels,
+                2,
+            )?,
+            duration_seconds: env_parse_any_layer(
+                env,
+                &[
+                    "SLSKD_CHROMAPRINT_DURATION_SECONDS",
+                    "SLSKR_CHROMAPRINT_DURATION_SECONDS",
+                ],
+                file_config.duration_seconds,
+                120,
+            )?,
+        };
+        if settings.ffmpeg_path.is_empty() {
+            return Err("Chromaprint ffmpeg path must not be empty.".to_owned());
+        }
+        if settings.enabled && settings.algorithm == 0 {
+            return Err("Chromaprint algorithm must be positive.".to_owned());
+        }
+        if settings.enabled && settings.sample_rate == 0 {
+            return Err("Chromaprint sample rate must be positive.".to_owned());
+        }
+        if settings.enabled && settings.channels == 0 {
+            return Err("Chromaprint channels must be positive.".to_owned());
+        }
+        if settings.enabled && settings.duration_seconds == 0 {
+            return Err("Chromaprint duration must be positive seconds.".to_owned());
+        }
+        Ok(settings)
+    }
+
+    pub fn sanitized_json(&self) -> String {
+        format!(
+            "{{\"enabled\":{},\"algorithm\":{},\"ffmpeg_path_configured\":{},\"sample_rate\":{},\"channels\":{},\"duration_seconds\":{}}}",
+            self.enabled,
+            self.algorithm,
+            !self.ffmpeg_path.is_empty(),
+            self.sample_rate,
+            self.channels,
+            self.duration_seconds,
+        )
+    }
+}
+
+impl Default for ChromaprintIntegrationSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            algorithm: 1,
+            ffmpeg_path: "ffmpeg".to_owned(),
+            sample_rate: 44_100,
+            channels: 2,
+            duration_seconds: 120,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct AcoustIdIntegrationSettings {
+    pub enabled: bool,
+    pub client_id: Option<String>,
+    pub base_url: String,
+}
+
+impl AcoustIdIntegrationSettings {
+    fn from_layers<E: ConfigEnv>(file_config: AcoustIdFileConfig, env: &E) -> Result<Self, String> {
+        let settings = Self {
+            enabled: env_bool_any_layer(
+                env,
+                &["SLSKD_ACOUSTID_ENABLED", "SLSKR_ACOUSTID_ENABLED"],
+                file_config.enabled.unwrap_or(false),
+            )?,
+            client_id: optional_env_any(
+                env,
+                &["SLSKD_ACOUSTID_CLIENT_ID", "SLSKR_ACOUSTID_CLIENT_ID"],
+            )
+            .or(file_config.client_id)
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty()),
+            base_url: optional_env_any(
+                env,
+                &["SLSKD_ACOUSTID_BASE_URL", "SLSKR_ACOUSTID_BASE_URL"],
+            )
+            .or(file_config.base_url)
+            .unwrap_or_else(|| "https://api.acoustid.org/v2".to_owned())
+            .trim()
+            .trim_end_matches('/')
+            .to_owned(),
+        };
+        if settings.enabled && settings.client_id.is_none() {
+            return Err("AcoustID client id must be supplied when enabled.".to_owned());
+        }
+        let parsed = reqwest::Url::parse(&settings.base_url)
+            .map_err(|_| "AcoustID base URL must be an absolute URL.".to_owned())?;
+        if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
+            return Err("AcoustID base URL must be an absolute URL.".to_owned());
+        }
+        Ok(settings)
+    }
+
+    pub fn sanitized_json(&self) -> String {
+        format!(
+            "{{\"enabled\":{},\"client_id_configured\":{},\"base_url_configured\":{}}}",
+            self.enabled,
+            self.client_id.is_some(),
+            !self.base_url.is_empty(),
+        )
+    }
+}
+
+impl Default for AcoustIdIntegrationSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            client_id: None,
+            base_url: "https://api.acoustid.org/v2".to_owned(),
+        }
     }
 }
 
@@ -4579,6 +4758,7 @@ pub struct FileConfig {
     persistence: PersistenceFileConfig,
     podcore: PodCoreFileConfig,
     virtual_soulfind_v2: VirtualSoulfindV2FileConfig,
+    #[serde(alias = "integration", alias = "Integration")]
     integrations: IntegrationsFileConfig,
     diagnostics: DiagnosticsFileConfig,
 }
@@ -7342,6 +7522,9 @@ pub struct PersistenceFileConfig {
 pub struct IntegrationsFileConfig {
     spotify: SpotifyFileConfig,
     lidarr: LidarrFileConfig,
+    chromaprint: ChromaprintFileConfig,
+    #[serde(rename = "acoustId", alias = "acoustid", alias = "AcoustID")]
+    acoustid: AcoustIdFileConfig,
     #[serde(rename = "musicBrainz", alias = "musicbrainz")]
     musicbrainz: MusicBrainzFileConfig,
     youtube: SourceFeedApiKeyFileConfig,
@@ -7355,6 +7538,30 @@ pub struct IntegrationsFileConfig {
     webhooks: BTreeMap<String, FrozenWebhookSettings>,
     bridge: BridgeFileConfig,
     external_visualizer: ExternalVisualizerFileConfig,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ChromaprintFileConfig {
+    enabled: Option<bool>,
+    algorithm: Option<u32>,
+    #[serde(alias = "ffmpegPath")]
+    ffmpeg_path: Option<String>,
+    #[serde(alias = "sampleRate")]
+    sample_rate: Option<u32>,
+    channels: Option<u32>,
+    #[serde(alias = "durationSeconds")]
+    duration_seconds: Option<u32>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct AcoustIdFileConfig {
+    enabled: Option<bool>,
+    #[serde(rename = "clientId", alias = "client_id")]
+    client_id: Option<String>,
+    #[serde(alias = "baseUrl")]
+    base_url: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -7619,6 +7826,7 @@ fn config_contains_sensitive_values(config: &FileConfig) -> bool {
         || config.auth.read_only_token.is_some()
         || config.auth.nowplaying_token.is_some()
         || config.integrations.spotify.client_secret.is_some()
+        || config.integrations.acoustid.client_id.is_some()
         || config.integrations.lidarr.api_key.is_some()
         || config.integrations.youtube.api_key.is_some()
         || config.integrations.lastfm.api_key.is_some()
@@ -8124,6 +8332,36 @@ const CONTROLLER_YAML_CORE_MAPPINGS: &[(&str, &str)] = &[
         "integrations.lidarr.blacklist_rejected_downloads",
         "SLSKD_LIDARR_BLACKLIST_REJECTED_DOWNLOADS",
     ),
+    (
+        "integrations.chromaprint.enabled",
+        "SLSKD_CHROMAPRINT_ENABLED",
+    ),
+    (
+        "integrations.chromaprint.algorithm",
+        "SLSKD_CHROMAPRINT_ALGORITHM",
+    ),
+    (
+        "integrations.chromaprint.ffmpeg_path",
+        "SLSKD_CHROMAPRINT_FFMPEG_PATH",
+    ),
+    (
+        "integrations.chromaprint.sample_rate",
+        "SLSKD_CHROMAPRINT_SAMPLE_RATE",
+    ),
+    (
+        "integrations.chromaprint.channels",
+        "SLSKD_CHROMAPRINT_CHANNELS",
+    ),
+    (
+        "integrations.chromaprint.duration_seconds",
+        "SLSKD_CHROMAPRINT_DURATION_SECONDS",
+    ),
+    ("integrations.acoustid.enabled", "SLSKD_ACOUSTID_ENABLED"),
+    (
+        "integrations.acoustid.client_id",
+        "SLSKD_ACOUSTID_CLIENT_ID",
+    ),
+    ("integrations.acoustid.base_url", "SLSKD_ACOUSTID_BASE_URL"),
     (
         "integrations.musicbrainz.base_url",
         "SLSKD_MUSICBRAINZ_BASE_URL",
@@ -11487,6 +11725,68 @@ mod tests {
         .expect_err("non-positive MusicBrainz timeout");
         assert!(error.contains("TimeoutSeconds"), "{error}");
 
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn chromaprint_and_acoustid_settings_match_frozen_integration_options() {
+        let root = std::env::temp_dir().join(format!(
+            "slskr-audio-integrations-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let file = serde_yaml::from_str::<super::FileConfig>(
+            "integration:\n  chromaprint:\n    enabled: true\n    algorithm: 1\n    ffmpegPath: /usr/bin/ffmpeg\n    sampleRate: 22050\n    channels: 1\n    durationSeconds: 45\n  acoustid:\n    enabled: true\n    clientId: fixture-client\n    baseUrl: http://127.0.0.1:39001/v2\n",
+        )
+        .expect("target integration alias parses");
+        let config = super::AppConfig::from_layers(
+            None,
+            file,
+            &MapEnv::default()
+                .with("SLSKR_STATE_DIR", root.to_str().unwrap())
+                .with("SLSKR_AUTH_DISABLED", "true"),
+        )
+        .expect("audio integration settings");
+        assert!(config.integrations.chromaprint.enabled);
+        assert_eq!(config.integrations.chromaprint.algorithm, 1);
+        assert_eq!(
+            config.integrations.chromaprint.ffmpeg_path,
+            "/usr/bin/ffmpeg"
+        );
+        assert_eq!(config.integrations.chromaprint.sample_rate, 22_050);
+        assert_eq!(config.integrations.chromaprint.channels, 1);
+        assert_eq!(config.integrations.chromaprint.duration_seconds, 45);
+        assert!(config.integrations.acoustid.enabled);
+        assert_eq!(
+            config.integrations.acoustid.client_id.as_deref(),
+            Some("fixture-client")
+        );
+        assert_eq!(
+            config.integrations.acoustid.base_url,
+            "http://127.0.0.1:39001/v2"
+        );
+        let sanitized = config.integrations.sanitized_json();
+        assert!(sanitized.contains("\"chromaprint\""));
+        assert!(sanitized.contains("\"acoustid\""));
+        assert!(sanitized.contains("\"client_id_configured\":true"));
+        assert!(!sanitized.contains("fixture-client"));
+
+        let error = super::AppConfig::from_layers(
+            None,
+            serde_yaml::from_str::<super::FileConfig>(
+                "integration:\n  acoustid:\n    enabled: true\n",
+            )
+            .unwrap(),
+            &MapEnv::default()
+                .with("SLSKR_STATE_DIR", root.to_str().unwrap())
+                .with("SLSKR_AUTH_DISABLED", "true"),
+        )
+        .expect_err("enabled AcoustID requires a client id");
+        assert!(error.contains("client id"), "{error}");
         let _ = std::fs::remove_dir_all(root);
     }
 
