@@ -1,4 +1,15 @@
-import { getBrowseErrorMessage } from './BrowseSession';
+import BrowseSession, { getBrowseErrorMessage } from './BrowseSession';
+import { render, screen } from '@testing-library/react';
+
+describe('BrowseSession controls', () => {
+  it('exposes an accessible browse action', () => {
+    render(<BrowseSession />);
+
+    expect(
+      screen.getByRole('button', { name: 'Browse user files' }),
+    ).toBeInTheDocument();
+  });
+});
 
 describe('BrowseSession errors', () => {
   it('uses bounded text returned by the daemon', () => {

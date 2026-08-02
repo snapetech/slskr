@@ -22,13 +22,14 @@ import Security from './Security';
 import Shares from './Shares';
 import SourceProviders from './SourceProviders';
 import SwarmAnalytics from './SwarmAnalytics';
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { Navigate, useNavigate, useParams } from 'react-router-dom';
 import { Icon, Menu, Segment, Tab } from 'semantic-ui-react';
 
 const System = ({ options = {}, state = {}, theme }) => {
   const navigate = useNavigate();
   const { tab } = useParams();
+  const systemRef = useRef(null);
 
   const panes = [
     {
@@ -370,6 +371,13 @@ const System = ({ options = {}, state = {}, theme }) => {
 
   const activeIndex = panes.findIndex((pane) => pane.route === tab);
 
+  useEffect(() => {
+    const activeItem = systemRef.current?.querySelector(
+      '.ui.tabular.menu .active.item',
+    );
+    activeItem?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+  }, [activeIndex]);
+
   const onTabChange = (_event, { activeIndex: newActiveIndex }) => {
     navigate(`/system/${panes[newActiveIndex].route}`);
   };
@@ -379,7 +387,7 @@ const System = ({ options = {}, state = {}, theme }) => {
   }
 
   return (
-    <div className="system">
+    <div className="system" ref={systemRef}>
       <Segment raised>
         <Tab
           activeIndex={activeIndex > -1 ? activeIndex : 0}
