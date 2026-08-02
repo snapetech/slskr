@@ -15013,6 +15013,10 @@ struct PodCoreRuntimeStats {
     total_routing_time_ms: std::sync::atomic::AtomicU64,
     routing_messages_by_pod: std::sync::Mutex<BTreeMap<String, u64>>,
     last_routing_operation: std::sync::Mutex<Option<String>>,
+    /// Last locally observed opinion count per pod. The frozen PodCore
+    /// opinion service reports the number of opinions newly observed during
+    /// a refresh rather than returning a constant zero.
+    opinion_refresh_counts: std::sync::Mutex<BTreeMap<String, usize>>,
 }
 
 impl PodCoreRuntimeStats {
@@ -15124,6 +15128,14 @@ impl PodCoreRuntimeStats {
         if let Ok(mut last_operation) = self.last_discovery_operation.lock() {
             *last_operation = Some(chrono::Utc::now().to_rfc3339());
         }
+    }
+
+    fn record_opinion_refresh(&self, pod_id: &str, opinion_count: usize) -> usize {
+        let Ok(mut counts) = self.opinion_refresh_counts.lock() else {
+            return 0;
+        };
+        let previous_count = counts.insert(pod_id.to_owned(), opinion_count).unwrap_or(0);
+        opinion_count.saturating_sub(previous_count)
     }
 }
 
@@ -50881,18 +50893,26 @@ async fn podcore_mutation_response(
             ))
         }
         ("POST", [pod_id, section, refresh]) if section == "opinions" && refresh == "refresh" => {
+            let pod_id = pod_id.trim();
+            if pod_id.is_empty() {
+                return Some(routing::bad_request_response("Pod ID is required"));
+            }
+            let started_at = std::time::Instant::now();
             let opinions = state
                 .controller_features
                 .read()
                 .await
                 .values_with_prefix(&format!("pod/opinion/{pod_id}/"));
+            let new_opinions = state
+                .podcore_runtime_stats
+                .record_opinion_refresh(pod_id, opinions.len());
             Some(routing::ok_response(
                 serde_json::json!({
                     "success": true,
                     "podId": pod_id,
                     "opinionsRefreshed": opinions.len(),
-                    "newOpinions": 0,
-                    "duration": "00:00:00",
+                    "newOpinions": new_opinions,
+                    "duration": format_timespan_hms(started_at.elapsed().as_secs() as i64),
                 })
                 .to_string(),
             ))
@@ -100369,6 +100389,78 @@ mod tests {
         let update = serde_json::from_str::<serde_json::Value>(&update.body).unwrap();
         assert_eq!(update["success"], true);
         assert_eq!(update["membersUpdated"], 2, "real member count, not 0");
+    }
+
+    #[tokio::test]
+    async fn pod_opinion_refresh_reports_real_counts_and_new_delta() {
+        let (state, _receiver) = test_state();
+        let pod_id = "pod-refresh";
+        {
+            let mut features = state.controller_features.write().await;
+            features
+                .upsert(
+                    format!("pod/opinion/{pod_id}/content-a/opinion-1"),
+                    serde_json::json!({"contentId":"content-a","score":8}),
+                )
+                .expect("store first opinion");
+            features
+                .upsert(
+                    format!("pod/opinion/{pod_id}/content-b/opinion-2"),
+                    serde_json::json!({"contentId":"content-b","score":6}),
+                )
+                .expect("store second opinion");
+        }
+
+        let first = super::route_http_request(
+            "POST",
+            &format!("/api/v0/podcore/{pod_id}/opinions/refresh"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("first opinion refresh");
+        assert_eq!(first.status, "200 OK", "{}", first.body);
+        let first_json = serde_json::from_str::<serde_json::Value>(&first.body).unwrap();
+        assert_eq!(first_json["success"], true);
+        assert_eq!(first_json["podId"], pod_id);
+        assert_eq!(first_json["opinionsRefreshed"], 2);
+        assert_eq!(first_json["newOpinions"], 2);
+
+        let second = super::route_http_request(
+            "POST",
+            &format!("/api/v0/podcore/{pod_id}/opinions/refresh"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("second opinion refresh");
+        let second_json = serde_json::from_str::<serde_json::Value>(&second.body).unwrap();
+        assert_eq!(second_json["opinionsRefreshed"], 2);
+        assert_eq!(second_json["newOpinions"], 0);
+
+        state
+            .controller_features
+            .write()
+            .await
+            .upsert(
+                format!("pod/opinion/{pod_id}/content-c/opinion-3"),
+                serde_json::json!({"contentId":"content-c","score":9}),
+            )
+            .expect("store third opinion");
+        let third = super::route_http_request(
+            "POST",
+            &format!("/api/v0/podcore/{pod_id}/opinions/refresh"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("third opinion refresh");
+        let third_json = serde_json::from_str::<serde_json::Value>(&third.body).unwrap();
+        assert_eq!(third_json["opinionsRefreshed"], 3);
+        assert_eq!(third_json["newOpinions"], 1);
     }
 
     #[tokio::test]
