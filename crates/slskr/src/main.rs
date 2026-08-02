@@ -16403,6 +16403,7 @@ enum SessionCommand {
     },
     RequestUserStats(String),
     RequestUserInterests(String),
+    SendServerMessage(ServerMessage),
     TransferPeer {
         id: u64,
         username: String,
@@ -20869,46 +20870,42 @@ async fn route_http_request_with_headers(
              let Some((username, id)) = slskd_transfer_file_path(path, "downloads") else {
                  return Ok(routing::not_found_response());
              };
-             let username = decoded_path_segment(username);
-             let mut transfers = state.transfers.write().await;
-             let matches_transfer = transfers.entries.iter().any(|entry| {
-                 entry.id == id && entry.direction == 0 && entry.peer_username.as_deref() == Some(username.as_str())
-             });
-             let updated = matches_transfer
-                 .then(|| transfers.update_status(id, "cancelled", None, None))
-                 .flatten();
+              let username = decoded_path_segment(username);
+              let remove_file = query_parameter(route.query, "remove").is_some_and(|value| value == "true")
+                  || query_parameter(route.query, "deleteFile").is_some_and(|value| value == "true");
+              let mut transfers = state.transfers.write().await;
+              let target = transfers.entries.iter().find(|entry| {
+                  entry.id == id && entry.direction == 0 && entry.peer_username.as_deref() == Some(username.as_str())
+              }).cloned();
+              let Some(target) = target else { return Ok(routing::not_found_response()); };
+              let updated = transfers.update_status(id, "cancelled", None, None);
              drop(transfers);
              if let Some(entry) = updated.as_ref() {
                  persist_transfer_record(state, entry).await?;
              }
-             Ok(if updated.is_some() {
-                 routing::ok_response("true".to_owned())
-             } else {
-                 routing::ok_response("false".to_owned())
-             })
+              if remove_file { if let Some(path) = target.local_path.as_deref() { let _ = fs::remove_file(path); } }
+              Ok(routing::no_content_response())
          }
 
          ("DELETE", path) if slskd_transfer_file_path(path, "uploads").is_some() => {
              let Some((username, id)) = slskd_transfer_file_path(path, "uploads") else {
                  return Ok(routing::not_found_response());
              };
-             let username = decoded_path_segment(username);
-             let mut transfers = state.transfers.write().await;
-             let matches_transfer = transfers.entries.iter().any(|entry| {
-                 entry.id == id && entry.direction == 1 && entry.peer_username.as_deref() == Some(username.as_str())
-             });
-             let updated = matches_transfer
-                 .then(|| transfers.update_status(id, "cancelled", None, None))
-                 .flatten();
+              let username = decoded_path_segment(username);
+              let remove_file = query_parameter(route.query, "remove").is_some_and(|value| value == "true")
+                  || query_parameter(route.query, "deleteFile").is_some_and(|value| value == "true");
+              let mut transfers = state.transfers.write().await;
+              let target = transfers.entries.iter().find(|entry| {
+                  entry.id == id && entry.direction == 1 && entry.peer_username.as_deref() == Some(username.as_str())
+              }).cloned();
+              let Some(target) = target else { return Ok(routing::not_found_response()); };
+              let updated = transfers.update_status(id, "cancelled", None, None);
              drop(transfers);
              if let Some(entry) = updated.as_ref() {
                  persist_transfer_record(state, entry).await?;
              }
-             Ok(if updated.is_some() {
-                 routing::ok_response("true".to_owned())
-             } else {
-                 routing::ok_response("false".to_owned())
-             })
+              if remove_file { if let Some(path) = target.local_path.as_deref() { let _ = fs::remove_file(path); } }
+              Ok(routing::no_content_response())
          }
 
          // GET individual transfer
@@ -22526,6 +22523,20 @@ async fn route_http_request_with_headers(
                 return Ok(routing::bad_request_response("room is required"));
             };
             let mut rooms = state.rooms.write().await;
+            if route.path.starts_with("/api/v0/") && rooms.records.iter().any(|record| {
+                record.name == bounded_room_name(&room_name)
+                    && record.joined
+                    && record.last_error.is_none()
+            }) {
+                let existing = rooms
+                    .records
+                    .iter()
+                    .find(|record| record.name == bounded_room_name(&room_name))
+                    .cloned()
+                    .expect("joined room exists");
+                drop(rooms);
+                return Ok(routing::ok_response(existing.slskd_room_json().to_string()));
+            }
             let previous = rooms.clone();
             let Some(record) = rooms.join(room_name.to_string()) else {
                 return Ok(routing::service_unavailable_response(
@@ -24229,9 +24240,17 @@ async fn route_http_request_with_headers(
             Ok(routing::ok_response(json))
         }
         ("POST", "/api/soulseek/interests") => {
-            let name = extract_json_string_field(body, "name").unwrap_or_default();
+            let versioned = route.path.starts_with("/api/v0/");
+            if versioned && state.session.read().await.state != "connected" {
+                return Ok(routing::service_unavailable_response(
+                    "Soulseek session is disconnected",
+                ));
+            }
+            let name = extract_json_string_field(body, "item")
+                .or_else(|| extract_json_string_field(body, "name"))
+                .unwrap_or_default();
             if name.is_empty() {
-                return Ok(routing::conflict_response("name is required"));
+                return Ok(routing::bad_request_response("item is required"));
             }
             let mut interests = state.interests.write().await;
             let previous = interests.clone();
@@ -24250,12 +24269,28 @@ async fn route_http_request_with_headers(
                     drop(interests);
                     return Ok(routing::service_unavailable_response(&error));
                 }
-                Ok(routing::created_response(json))
+                if versioned {
+                    if let Err(error) = send_active_interest_command(
+                        state,
+                        ServerMessage::AddThingILike { item: record.name.clone() },
+                    )
+                    .await
+                    {
+                        return Ok(routing::service_unavailable_response(&error));
+                    }
+                    Ok(routing::no_content_response())
+                } else {
+                    Ok(routing::created_response(json))
+                }
             } else {
                 Ok(routing::ok_response(json))
             }
         }
         ("DELETE", path) if path.starts_with("/api/soulseek/interests/") => {
+            let versioned = route.path.starts_with("/api/v0/");
+            if versioned && state.session.read().await.state != "connected" {
+                return Ok(routing::service_unavailable_response("Soulseek session is disconnected"));
+            }
             let Some(id) = path_segment_after(path, "/api/soulseek/interests/") else {
                 return Ok(routing::not_found_response());
             };
@@ -24273,7 +24308,17 @@ async fn route_http_request_with_headers(
                     drop(interests);
                     return Ok(routing::service_unavailable_response(&error));
                 }
-                Ok(routing::ok_response("{}".to_string()))
+                if versioned {
+                    if let Err(error) = send_active_interest_command(
+                        state,
+                        ServerMessage::RemoveThingILike { item: id.to_owned() },
+                    ).await {
+                        return Ok(routing::service_unavailable_response(&error));
+                    }
+                    Ok(routing::no_content_response())
+                } else {
+                    Ok(routing::ok_response("{}".to_string()))
+                }
             } else {
                 Ok(routing::not_found_response())
             }
@@ -24287,9 +24332,17 @@ async fn route_http_request_with_headers(
             Ok(routing::ok_response(json))
         }
         ("POST", "/api/soulseek/hated-interests") => {
-            let name = extract_json_string_field(body, "name").unwrap_or_default();
+            let versioned = route.path.starts_with("/api/v0/");
+            if versioned && state.session.read().await.state != "connected" {
+                return Ok(routing::service_unavailable_response(
+                    "Soulseek session is disconnected",
+                ));
+            }
+            let name = extract_json_string_field(body, "item")
+                .or_else(|| extract_json_string_field(body, "name"))
+                .unwrap_or_default();
             if name.is_empty() {
-                return Ok(routing::conflict_response("name is required"));
+                return Ok(routing::bad_request_response("item is required"));
             }
             let mut interests = state.interests.write().await;
             let previous = interests.clone();
@@ -24308,12 +24361,28 @@ async fn route_http_request_with_headers(
                     drop(interests);
                     return Ok(routing::service_unavailable_response(&error));
                 }
-                Ok(routing::created_response(json))
+                if versioned {
+                    if let Err(error) = send_active_interest_command(
+                        state,
+                        ServerMessage::AddThingIHate { item: record.name.clone() },
+                    )
+                    .await
+                    {
+                        return Ok(routing::service_unavailable_response(&error));
+                    }
+                    Ok(routing::no_content_response())
+                } else {
+                    Ok(routing::created_response(json))
+                }
             } else {
                 Ok(routing::ok_response(json))
             }
         }
         ("DELETE", path) if path.starts_with("/api/soulseek/hated-interests/") => {
+            let versioned = route.path.starts_with("/api/v0/");
+            if versioned && state.session.read().await.state != "connected" {
+                return Ok(routing::service_unavailable_response("Soulseek session is disconnected"));
+            }
             let Some(id) = path_segment_after(path, "/api/soulseek/hated-interests/") else {
                 return Ok(routing::not_found_response());
             };
@@ -24331,7 +24400,17 @@ async fn route_http_request_with_headers(
                     drop(interests);
                     return Ok(routing::service_unavailable_response(&error));
                 }
-                Ok(routing::ok_response("{}".to_string()))
+                if versioned {
+                    if let Err(error) = send_active_interest_command(
+                        state,
+                        ServerMessage::RemoveThingIHate { item: id.to_owned() },
+                    ).await {
+                        return Ok(routing::service_unavailable_response(&error));
+                    }
+                    Ok(routing::no_content_response())
+                } else {
+                    Ok(routing::ok_response("{}".to_string()))
+                }
             } else {
                 Ok(routing::not_found_response())
             }
@@ -63069,6 +63148,9 @@ async fn handle_session_command(
                 }
             }
         }
+        SessionCommand::SendServerMessage(message) => {
+            send_active_server_message(state, session, message, "send server interest").await;
+        }
         SessionCommand::TransferPeer { id, username } => {
             send_active_server_message(
                 state,
@@ -70997,6 +71079,16 @@ async fn send_session_command(state: &AppState, command: SessionCommand) -> Resu
         .send(command)
         .await
         .map_err(|_| "session manager is not running".to_owned())
+}
+
+async fn send_active_interest_command(
+    state: &AppState,
+    message: ServerMessage,
+) -> Result<(), String> {
+    if state.session.read().await.state != "connected" {
+        return Err("Soulseek session is disconnected".to_owned());
+    }
+    send_session_command(state, SessionCommand::SendServerMessage(message)).await
 }
 
 fn try_send_session_command(state: &AppState, command: SessionCommand) -> Result<(), String> {
@@ -85024,6 +85116,11 @@ mod tests {
                 .await
                 .expect("join room");
         assert_eq!(joined.status, "201 Created");
+        let joined_again =
+            super::route_http_request("POST", "/api/v0/rooms/joined", None, r#""music""#, &state)
+                .await
+                .unwrap();
+        assert_eq!(joined_again.status, "200 OK");
         let _ = receiver.try_recv();
         let repeated =
             super::route_http_request("POST", "/api/v0/rooms/music/join", None, "", &state)
@@ -85348,7 +85445,7 @@ mod tests {
         )
         .await
         .expect("cancel telemetry transfer");
-        assert_eq!(cancelled.body, "true");
+        assert_eq!(cancelled.status, "204 No Content");
         let exceptions = super::route_http_request(
             "GET",
             "/api/v0/telemetry/reports/transfers/exceptions?direction=Download&username=telemetry%20peer&sortOrder=ASC",
@@ -85524,6 +85621,8 @@ mod tests {
                 && (versioned == "/api/v0/searches/1"
                     || versioned.starts_with("/api/v0/conversations/")
                     || versioned == "/api/v0/shares")
+                || (method == "DELETE"
+                    && versioned.starts_with("/api/v0/transfers/uploads/peer1/1"))
                 || (method == "GET" && versioned.starts_with("/api/v0/transfers/uploads/peer1"))
                 || (method == "GET" && versioned.starts_with("/api/v0/shares/root"))
             {
@@ -85598,7 +85697,9 @@ mod tests {
             .await
             .unwrap_or_else(|_| panic!("{method} {path}: timed out"))
             .unwrap_or_else(|error| panic!("{method} {path}: {error}"));
-            assert_ne!(response.status, "404 Not Found", "{method} {path}");
+            if !path.contains("/transfers/downloads/peer1/1") {
+                assert_ne!(response.status, "404 Not Found", "{method} {path}");
+            }
             assert!(
                 !response.status.starts_with('5'),
                 "{method} {path}: {}",
@@ -85754,7 +85855,9 @@ mod tests {
             .await
             .unwrap_or_else(|_| panic!("{method} {path}: timed out"))
             .unwrap_or_else(|error| panic!("{method} {path}: {error}"));
-            assert_ne!(response.status, "404 Not Found", "{method} {path}");
+            if !path.contains("/transfers/downloads/peer%201/1") {
+                assert_ne!(response.status, "404 Not Found", "{method} {path}");
+            }
             assert!(
                 !response.status.starts_with('5'),
                 "{method} {path}: {}",
@@ -86065,6 +86168,38 @@ mod tests {
         .expect("throttled batch");
         assert_eq!(throttled.status, "429 Too Many Requests");
         drop(held);
+    }
+
+    #[tokio::test]
+    async fn transfer_cancellation_returns_frozen_statuses() {
+        let (state, _receiver) = test_state();
+        let missing = super::route_http_request(
+            "DELETE",
+            "/api/v0/transfers/downloads/peer/999",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(missing.status, "404 Not Found");
+        let entry = state.transfers.write().await.create(
+            0,
+            Some("peer".to_owned()),
+            "cancel.flac".to_owned(),
+            None,
+            Some(1),
+        );
+        let cancelled = super::route_http_request(
+            "DELETE",
+            &format!("/api/v0/transfers/downloads/peer/{}", entry.id),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(cancelled.status, "204 No Content");
     }
 
     #[tokio::test]
@@ -98535,6 +98670,26 @@ mod tests {
         assert_eq!(
             bridge_dashboard_json["stats"]["totalBytesProxied"], 0,
             "{bridge_dashboard_json}"
+        );
+    }
+
+    #[tokio::test]
+    async fn versioned_interest_mutations_use_item_payload_and_wire_commands() {
+        use slskr_client::protocol::server::ServerMessage;
+        let (state, mut receiver) = test_state();
+        state.session.write().await.state = "connected";
+        let liked = super::route_http_request(
+            "POST",
+            "/api/v0/soulseek/interests",
+            None,
+            r#"{"item":"ambient"}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(liked.status, "204 No Content");
+        assert!(
+            matches!(receiver.recv().await.unwrap(), super::SessionCommand::SendServerMessage(ServerMessage::AddThingILike { item }) if item == "ambient")
         );
     }
 
