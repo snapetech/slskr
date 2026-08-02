@@ -13034,6 +13034,158 @@ fn songid_fallback_query(source: &str, source_type: &str) -> String {
     source.trim().to_owned()
 }
 
+fn songid_spotify_metadata_from_html(source: &str, html: &str) -> serde_json::Value {
+    let title = [metadata_value(html, "og:title"), metadata_title(html)]
+        .into_iter()
+        .find(|value| !value.trim().is_empty())
+        .unwrap_or_default()
+        .trim()
+        .to_owned();
+    let description = metadata_value(html, "og:description");
+    let description_parts = description
+        .split('·')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>();
+    let artist = description_parts.first().copied().unwrap_or_default();
+    let album = description_parts.get(1).copied().unwrap_or_default();
+    let query = match (artist, title.as_str()) {
+        (artist, title) if !artist.is_empty() && !title.is_empty() => {
+            format!("{artist} - {title}")
+        }
+        (_, title) if !title.is_empty() => title.to_owned(),
+        (artist, _) => artist.to_owned(),
+    };
+    let source_id = source
+        .split_once("/track/")
+        .map(|(_, id)| id.split(['?', '#']).next().unwrap_or_default().trim())
+        .filter(|id| !id.is_empty())
+        .unwrap_or_default();
+    serde_json::json!({
+        "query": query,
+        "metadata": {
+            "title": title,
+            "artist": artist,
+            "album": album,
+            "spotifyTrackId": source_id,
+            "previewUrl": metadata_value(html, "og:audio"),
+            "extra": {"analysisAudioSource": "spotify_page"},
+        },
+        "evidence": [format!("Spotify page metadata extracted query: {query}")],
+    })
+}
+
+async fn songid_fetch_spotify_page_metadata(source: &str) -> Result<serde_json::Value, String> {
+    let url =
+        reqwest::Url::parse(source).map_err(|error| format!("Spotify URL is invalid: {error}"))?;
+    if !matches!(url.scheme(), "http" | "https")
+        || !url
+            .host_str()
+            .is_some_and(|host| host.eq_ignore_ascii_case("open.spotify.com"))
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.fragment().is_some()
+    {
+        return Err("Spotify URL is not a public open.spotify.com page".to_owned());
+    }
+    let host = url
+        .host_str()
+        .ok_or_else(|| "Spotify URL has no host".to_owned())?;
+    let port = url
+        .port_or_known_default()
+        .ok_or_else(|| "Spotify URL port is unknown".to_owned())?;
+    let addresses = (host, port)
+        .to_socket_addrs()
+        .map_err(|error| format!("Spotify URL resolution failed: {error}"))?
+        .collect::<Vec<_>>();
+    if addresses.is_empty()
+        || addresses
+            .iter()
+            .any(|address| is_blocked_integration_ip(address.ip()))
+    {
+        return Err("Spotify URL resolves to a private address".to_owned());
+    }
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .redirect(reqwest::redirect::Policy::none())
+        .resolve_to_addrs(host, &addresses)
+        .build()
+        .map_err(|error| format!("failed to build Spotify metadata client: {error}"))?;
+    let response = client
+        .get(url)
+        .header("User-Agent", "slskR-songid/1.0")
+        .header(reqwest::header::ACCEPT, "text/html")
+        .send()
+        .await
+        .map_err(|error| format!("Spotify metadata request failed: {error}"))?;
+    if !response.status().is_success() {
+        return Err(format!(
+            "Spotify metadata returned HTTP {}",
+            response.status()
+        ));
+    }
+    let body = read_bounded_source_provider_bytes(response, "Spotify metadata").await?;
+    let html = String::from_utf8_lossy(&body);
+    Ok(songid_spotify_metadata_from_html(source, &html))
+}
+
+async fn songid_source_analysis(
+    source: &str,
+    source_type: &str,
+) -> (String, serde_json::Value, Vec<String>) {
+    if source_type == "spotify_url" {
+        if let Some(metadata) = tokio::time::timeout(
+            Duration::from_secs(10),
+            songid_fetch_spotify_page_metadata(source),
+        )
+        .await
+        .ok()
+        .and_then(Result::ok)
+        {
+            let query = metadata
+                .get("query")
+                .and_then(serde_json::Value::as_str)
+                .filter(|query| !query.trim().is_empty())
+                .unwrap_or(source)
+                .to_owned();
+            let run_metadata = metadata
+                .get("metadata")
+                .cloned()
+                .unwrap_or_else(|| serde_json::json!({}));
+            let evidence = metadata
+                .get("evidence")
+                .and_then(serde_json::Value::as_array)
+                .map(|values| {
+                    values
+                        .iter()
+                        .filter_map(serde_json::Value::as_str)
+                        .map(str::to_owned)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            return (query, run_metadata, evidence);
+        }
+    }
+
+    let query = songid_fallback_query(source, source_type);
+    let evidence = match source_type {
+        "local_file" => vec![format!("Local file path detected: {source}")],
+        "youtube_url" => vec!["YouTube URL detected; using source query fallback.".to_owned()],
+        "spotify_url" => {
+            vec!["Spotify metadata fetch failed; using source query fallback.".to_owned()]
+        }
+        "url" => vec!["URL detected; using source query fallback.".to_owned()],
+        _ => vec!["Treating input as a direct SongID text query.".to_owned()],
+    };
+    let metadata = serde_json::json!({
+        "title": if source_type == "local_file" { query.clone() } else { String::new() },
+        "artist": "",
+        "album": "",
+        "extra": {"analysisAudioSource": source_type},
+    });
+    (query, metadata, evidence)
+}
+
 fn songid_path_is_within_root(path: &Path, root: &Path) -> bool {
     let Some(path) = normalize_absolute_path(path) else {
         return false;
@@ -14203,8 +14355,8 @@ fn songid_capabilities_json(
             "spotify_page_metadata",
             "Spotify page metadata",
             "experimental",
-            false,
-            NOT_IMPLEMENTED.to_owned(),
+            true,
+            "Spotify page metadata fetch is implemented for public pages.".to_owned(),
             &[]
         ),
         capability(
@@ -25487,9 +25639,15 @@ async fn route_http_request_with_headers(
                      "SongID run concurrency limit reached",
                  ));
              };
+             let (fallback_query, metadata, evidence) =
+                 songid_source_analysis(&source, source_type).await;
              let query = extract_json_string_field(body, "query")
                  .filter(|query| !query.trim().is_empty())
-                 .unwrap_or_else(|| songid_fallback_query(&source, source_type));
+                 .unwrap_or(fallback_query);
+             let spotify_metadata_loaded = metadata
+                 .pointer("/extra/analysisAudioSource")
+                 .and_then(serde_json::Value::as_str)
+                 == Some("spotify_page");
              let library = state.library.read().await;
              let shares = state.shares.read().await;
              let runs = songid_runs_value(&library, &shares);
@@ -25520,29 +25678,17 @@ async fn route_http_request_with_headers(
                      "youtube_url" => {
                          "Classified YouTube URL; optional metadata tools may enrich the run."
                      }
-                     "spotify_url" => {
-                         "Classified Spotify URL; optional page metadata may enrich the run."
+                     "spotify_url" if spotify_metadata_loaded => {
+                         "Analyzed Spotify page metadata for SongID query generation."
                      }
+                     "spotify_url" => "Spotify metadata fetch failed; using source query fallback.",
                      "url" => "Classified URL; optional source metadata may enrich the run.",
                      _ => "Using free-text SongID query.",
                  });
-                 run["evidence"] = serde_json::json!([match source_type {
-                     "local_file" => format!("Local file path detected: {source}"),
-                     "youtube_url" => {
-                         "YouTube URL detected; using source query fallback.".to_owned()
-                     }
-                     "spotify_url" => {
-                         "Spotify track URL detected; using source query fallback.".to_owned()
-                     }
-                     "url" => "URL detected; using source query fallback.".to_owned(),
-                     _ => "Treating input as a direct SongID text query.".to_owned(),
-                 }]);
-                 run["metadata"] = serde_json::json!({
-                     "title": if source_type == "local_file" { query.clone() } else { String::new() },
-                     "artist": "",
-                     "album": "",
-                     "extra": {"analysisAudioSource": source_type},
-                 });
+                 run["evidence"] = serde_json::Value::Array(
+                     evidence.iter().cloned().map(serde_json::Value::String).collect(),
+                 );
+                 run["metadata"] = metadata.clone();
                  if let Some(stored) = runtime.songid_run_records.last_mut() {
                      *stored = run.clone();
                  }
@@ -96404,7 +96550,6 @@ mod tests {
         // deep metadata/fingerprint integrations remain explicitly absent.
         for id in [
             "musicbrainz_lookup",
-            "spotify_page_metadata",
             "chromaprint_fingerprint",
             "acoustid_lookup",
         ] {
@@ -96424,6 +96569,7 @@ mod tests {
         assert_eq!(by_id("text_query")["available"], true);
         assert_eq!(by_id("url_parsing")["available"], true);
         assert_eq!(by_id("local_file_intake")["available"], true);
+        assert_eq!(by_id("spotify_page_metadata")["available"], true);
 
         // Tool-gated capabilities must reflect real PATH state, not a
         // hardcoded value.
@@ -96462,6 +96608,22 @@ mod tests {
         assert_eq!(
             super::songid_source_type("https://example.test/audio"),
             "url"
+        );
+        let spotify_metadata = super::songid_spotify_metadata_from_html(
+            "https://open.spotify.com/track/abc123?si=fixture",
+            r#"<html><head>
+                <meta property="og:title" content="Track &amp; More">
+                <meta property="og:description" content="Artist · Album">
+                <meta property="og:audio" content="https://cdn.example/preview.mp3">
+            </head></html>"#,
+        );
+        assert_eq!(spotify_metadata["query"], "Artist - Track & More");
+        assert_eq!(spotify_metadata["metadata"]["artist"], "Artist");
+        assert_eq!(spotify_metadata["metadata"]["album"], "Album");
+        assert_eq!(spotify_metadata["metadata"]["spotifyTrackId"], "abc123");
+        assert_eq!(
+            spotify_metadata["metadata"]["previewUrl"],
+            "https://cdn.example/preview.mp3"
         );
 
         let state_dir = std::env::temp_dir().join(format!("slskr-songid-{}", uuid::Uuid::new_v4()));
