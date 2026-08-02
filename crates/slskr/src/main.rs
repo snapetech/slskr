@@ -32796,6 +32796,7 @@ async fn apply_watched_controller_configuration(
         || reloaded.controller_web_enforce_security != state.config.controller_web_enforce_security
         || reloaded.controller_web_allow_remote_no_auth
             != state.config.controller_web_allow_remote_no_auth
+        || reloaded.controller_web_cors != state.config.controller_web_cors
         || reloaded.controller_web_max_request_body_size
             != state.config.controller_web_max_request_body_size
         || reloaded.controller_web_rate_limiting != state.config.controller_web_rate_limiting
@@ -102925,6 +102926,23 @@ mod tests {
         .unwrap();
         assert_eq!(current["feature"]["swagger"], false);
         assert_eq!(startup["feature"]["swagger"], true);
+        assert!(state.runtime.read().await.application_restart_requested);
+    }
+
+    #[tokio::test]
+    async fn watched_cors_changes_mark_restart_required() {
+        let (state, _receiver) = test_state_with_env(MapEnv::default());
+        let yaml =
+            "web:\n  cors:\n    enabled: true\n    allowed_origins: [https://allowed.example]\n";
+        fs::write(state.config.state_dir.join("slskd.yml"), yaml).unwrap();
+
+        super::apply_watched_controller_configuration(
+            &state,
+            Some(yaml),
+            &state.controller_cli_environment,
+        )
+        .await;
+
         assert!(state.runtime.read().await.application_restart_requested);
     }
 
