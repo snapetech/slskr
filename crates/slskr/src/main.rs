@@ -56327,22 +56327,26 @@ async fn extended_controller_get_response(
             }).to_string())
         }
         "/api/mesh/hello" => {
-            let mesh = state.mesh.read().await;
+            let discovery = state.content_discovery.read().await;
+            let latest_seq_id = discovery.latest_seq();
+            let hash_count = discovery.hash_entries().len();
+            drop(discovery);
+            let client_id = state
+                .config
+                .username
+                .clone()
+                .unwrap_or_else(|| "slskdn".to_owned());
             routing::ok_response(
                 serde_json::json!({
-                    "type": "hello",
-                    "client_id": mesh_dht::peer_id(&state.capability_signing_key),
-                    "client_version": APP_VERSION,
-                    "latest_seq_id": state.content_discovery.read().await.latest_seq(),
-                    "hash_count": state.content_discovery.read().await.hash_entries().len(),
+                    "type": 1,
                     "proto_version": 1,
-                    "public_key": STANDARD.encode(state.capability_signing_key.verifying_key().as_bytes()),
+                    "public_key": "",
                     "signature": "",
-                    "timestamp_ms": unix_timestamp_millis(),
-                    "peerId": mesh_dht::peer_id(&state.capability_signing_key),
-                    "interestTag": MESH_RENDEZVOUS_INTEREST_TAG,
-                    "protocolVersion": 1,
-                    "capabilities": mesh.capability_records.len(),
+                    "timestamp_ms": 0,
+                    "client_id": client_id,
+                    "client_version": APP_VERSION,
+                    "latest_seq_id": latest_seq_id,
+                    "hash_count": hash_count,
                 })
                 .to_string(),
             )
@@ -99755,6 +99759,29 @@ mod tests {
         assert_eq!(stats_json["skippedEntries"], 1, "{stats_json}");
         assert_eq!(stats_json["totalEntriesMerged"], 1, "{stats_json}");
         assert_eq!(stats_json["currentSeqId"], real_seq_id, "{stats_json}");
+    }
+
+    #[tokio::test]
+    async fn mesh_hello_matches_frozen_message_dto() {
+        let (state, _receiver) =
+            test_state_with_env(MapEnv::default().with("SLSKD_SLSK_USERNAME", "mesh-user"));
+
+        let hello = super::route_http_request("GET", "/api/v0/mesh/hello", None, "", &state)
+            .await
+            .expect("mesh hello");
+        assert_eq!(hello.status, "200 OK", "{}", hello.body);
+        let json = serde_json::from_str::<serde_json::Value>(&hello.body).unwrap();
+        assert_eq!(json["type"], 1, "{json}");
+        assert_eq!(json["proto_version"], 1, "{json}");
+        assert_eq!(json["client_id"], "tester", "{json}");
+        assert_eq!(json["client_version"], super::APP_VERSION, "{json}");
+        assert_eq!(json["latest_seq_id"], 0, "{json}");
+        assert_eq!(json["hash_count"], 0, "{json}");
+        assert_eq!(json["public_key"], "", "{json}");
+        assert_eq!(json["signature"], "", "{json}");
+        assert_eq!(json["timestamp_ms"], 0, "{json}");
+        assert!(json.get("peerId").is_none(), "{json}");
+        assert!(json.get("capabilities").is_none(), "{json}");
     }
 
     #[tokio::test]
