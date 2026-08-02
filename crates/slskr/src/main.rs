@@ -13771,6 +13771,24 @@ fn format_timespan_hms(total_seconds: i64) -> String {
     }
 }
 
+/// Formats a whole-millisecond duration using the .NET `TimeSpan` JSON
+/// representation. Preserve the fractional component when a target stats
+/// service reports a sub-second average; the older h:m:s helper intentionally
+/// remains unchanged for endpoints whose contract only exposes seconds.
+fn format_timespan_millis(total_millis: u64) -> String {
+    let total_seconds = total_millis / 1_000;
+    let milliseconds = total_millis % 1_000;
+    let base = format_timespan_hms(i64::try_from(total_seconds).unwrap_or(i64::MAX));
+    if milliseconds == 0 {
+        base
+    } else {
+        // TimeSpan's constant format uses seven fractional decimal places;
+        // millisecond counters contribute the first three and four trailing
+        // zeroes.
+        format!("{base}.{milliseconds:03}0000")
+    }
+}
+
 /// Matches the oracle's real `SongIdService.BuildEvidencePackage`/
 /// `SongIdRunEvidencePackage` contract: a real reshape of the same
 /// stored run fields the other SongID endpoints already read/write
@@ -15446,6 +15464,12 @@ async fn route_http_request_with_headers(
         }
     }
 
+    if (normalized_path.starts_with("/actors/") || normalized_path == "/.well-known/webfinger")
+        && !social_federation_is_active(&state.config)
+    {
+        return Ok(controller_swagger_not_found_response());
+    }
+
     if normalized_path.starts_with("/api/mesh")
         || normalized_path.starts_with("/api/dht")
         || normalized_path.starts_with("/api/overlay")
@@ -16074,12 +16098,9 @@ async fn route_http_request_with_headers(
         ("GET", "/api/hashdb/stats") => {
             let discovery = state.content_discovery.read().await;
             let persisted_entries = discovery.hash_entries().len();
-            let persisted_bytes = discovery
-                .hash_entries()
-                .iter()
-                .map(|entry| entry.size)
-                .sum::<u64>();
             let latest_seq = discovery.latest_seq();
+            let database_size_bytes = discovery.database_size_bytes();
+            let distinct_peers = discovery.distinct_peer_count();
             let shares = state.shares.read().await;
             let audio_entries = shares
                 .entries
@@ -16087,32 +16108,17 @@ async fn route_http_request_with_headers(
                 .filter(|entry| is_auto_retry_audio_file(&entry.filename))
                 .collect::<Vec<_>>();
             let projected_share_entries = audio_entries.len();
-            let total_entries = persisted_entries + projected_share_entries;
-            let total_bytes = persisted_bytes.saturating_add(
-                audio_entries.iter().map(|entry| entry.size).sum::<u64>(),
-            );
-            let total_flac_entries = audio_entries
-                .iter()
-                .filter(|entry| entry.filename.to_ascii_lowercase().ends_with(".flac"))
-                .count();
             drop(shares);
             drop(discovery);
-            let users = state.users.read().await;
-            let total_peers = users.records.len();
-            drop(users);
             let slskdn_peers = state.mesh.read().await.capability_records.len();
             Ok(routing::ok_response(serde_json::json!({
-                "currentSeqId": latest_seq,
-                "totalHashEntries": total_entries,
-                "totalEntries": total_entries,
-                "totalBytes": total_bytes,
-                "databaseSizeBytes": total_bytes,
-                "totalPeers": total_peers,
+                "totalPeers": distinct_peers,
                 "slskdnPeers": slskdn_peers,
-                "totalFlacEntries": total_flac_entries,
+                "totalFlacEntries": projected_share_entries,
                 "hashedFlacEntries": persisted_entries,
-                "persistedEntries": persisted_entries,
-                "projectedShareEntries": projected_share_entries,
+                "totalHashEntries": persisted_entries,
+                "currentSeqId": latest_seq,
+                "databaseSizeBytes": database_size_bytes,
             }).to_string()))
         }
         ("GET", "/api/hashdb/entries") => {
@@ -16449,6 +16455,20 @@ async fn route_http_request_with_headers(
                 "currentSeqId": current_seq_id,
                 "knownMeshPeers": known_mesh_peers,
                 "warnings": [],
+            }).to_string()))
+        }
+        ("GET", "/api/mesh/peers") if route.path.starts_with("/api/v0/") => {
+            let mesh = state.mesh.read().await;
+            let peers = mesh
+                .capability_records_json()
+                .into_iter()
+                .filter(|record| record["meshCapable"] == true)
+                .collect::<Vec<_>>();
+            drop(mesh);
+            Ok(routing::ok_response(serde_json::json!({
+                "count": peers.len(),
+                "peers": peers,
+                "overlay": [],
             }).to_string()))
         }
         ("GET", "/api/mesh/peers") => {
@@ -26307,6 +26327,12 @@ async fn route_http_request_with_headers(
               }).to_string()))
           }
 
+          ("GET", "/api/federation/diagnostics")
+              if route.path == "/api/v0/federation/diagnostics" =>
+          {
+              Ok(federation_diagnostics_response(&state.config))
+          }
+
           ("GET", "/api/federation/diagnostics") => {
               let users = state.users.read().await;
               let mesh = state.mesh.read().await;
@@ -26554,6 +26580,21 @@ async fn route_http_request_with_headers(
               Ok(routing::ok_response(body))
           }
 
+          ("GET", "/api/mesh/transport") if route.path.starts_with("/api/v0/") => {
+              let dht_sessions = match state.dht.as_ref() {
+                  Some(dht) => dht.peers().await.len(),
+                  None => 0,
+              };
+              let overlay_sessions = match state.private_gateway.as_ref() {
+                  Some(gateway) => gateway.active_connection_count().await,
+                  None => 0,
+              };
+              Ok(routing::ok_response(serde_json::json!({
+                  "dht": dht_sessions,
+                  "overlay": overlay_sessions,
+                  "natType": "Unknown",
+              }).to_string()))
+          }
           ("GET", "/api/mesh/transport") => {
               let gateway = state.private_gateway.as_ref();
               let enabled = gateway.is_some();
@@ -30138,6 +30179,41 @@ async fn route_http_request_with_headers(
     })
 }
 
+fn solid_problem_response(status: u16, title: &str, detail: &str) -> HttpResponse {
+    let status_text = match status {
+        400 => "400 Bad Request",
+        500 => "500 Internal Server Error",
+        _ => "500 Internal Server Error",
+    };
+    HttpResponse {
+        status: status_text,
+        content_type: "application/problem+json",
+        body: serde_json::json!({
+            "type": "about:blank",
+            "title": title,
+            "status": status,
+            "detail": detail,
+        })
+        .to_string(),
+    }
+}
+
+fn solid_resolution_error(
+    is_versioned: bool,
+    status: u16,
+    title: &str,
+    detail: &str,
+    legacy_detail: &str,
+) -> HttpResponse {
+    if is_versioned {
+        solid_problem_response(status, title, detail)
+    } else if status == 400 {
+        routing::bad_request_response(legacy_detail)
+    } else {
+        routing::internal_server_error_response(legacy_detail)
+    }
+}
+
 async fn solid_client_id_document_response(state: &AppState) -> HttpResponse {
     let media = state.media_services.read().await;
     if state.config.controller_compatibility_target != ControllerCompatibilityTarget::Slskdn
@@ -30597,6 +30673,98 @@ fn mesh_health_response(config: &AppConfig) -> HttpResponse {
             "service": "slskr-mesh",
         })
         .to_string(),
+    }
+}
+
+fn federation_diagnostics_response(config: &AppConfig) -> HttpResponse {
+    let federation = &config.social_federation;
+    let publishing = &config.federation_publishing;
+    let mode = federation.mode.as_str();
+    let is_hermit = mode.eq_ignore_ascii_case("Hermit");
+    let is_friends_only = mode.eq_ignore_ascii_case("FriendsOnly");
+    let is_public = mode.eq_ignore_ascii_case("Public");
+    let exposure = if !federation.enabled || is_hermit {
+        "Hermit"
+    } else if is_friends_only {
+        "FriendsOnly"
+    } else if is_public {
+        "Public"
+    } else {
+        "Custom"
+    };
+    let mut warnings = Vec::new();
+    if federation.enabled && federation.base_url.is_none() {
+        warnings.push("Federation is enabled but federation.baseUrl is not configured.");
+    }
+    if federation.enabled && is_public && !federation.verify_signatures {
+        warnings
+            .push("Public federation is enabled while HTTP signature verification is disabled.");
+    }
+    if publishing.enabled && !federation.enabled {
+        warnings.push("Federation publishing is enabled while social federation is disabled.");
+    }
+    if publishing.enabled
+        && !publishing.require_moderation_approval
+        && publishing.default_visibility.eq_ignore_ascii_case("public")
+    {
+        warnings.push("Federation publishing defaults to public without moderation approval.");
+    }
+    if config.advanced_networking.pod_join_signature_mode == PodSignatureMode::Off {
+        warnings.push("Pod join signatures are not enforced.");
+    }
+    if config.advanced_networking.pod_security_signature_mode == PodSignatureMode::Off {
+        warnings.push("Pod message signatures are not enforced.");
+    }
+    HttpResponse {
+        status: "200 OK",
+        content_type: "application/json",
+        body: serde_json::json!({
+            "federation": {
+                "enabled": federation.enabled,
+                "mode": federation.mode,
+                "domainConfigured": federation.domain.is_some(),
+                "baseUrlConfigured": federation.base_url.is_some(),
+                "approvedPeerCount": federation.approved_peers.len(),
+                "verifySignatures": federation.verify_signatures,
+                "httpTimeoutSeconds": federation.http_timeout_seconds,
+                "pageSize": federation.page_size,
+                "exposure": exposure,
+            },
+            "publishing": {
+                "enabled": publishing.enabled,
+                "publishableDomains": publishing.publishable_domains,
+                "defaultVisibility": publishing.default_visibility,
+                "approvedCircleCount": publishing.approved_circles.len(),
+                "requireModerationApproval": publishing.require_moderation_approval,
+                "includeExternalLinks": publishing.include_external_links,
+                "maxMetadataSizeKb": publishing.max_metadata_size_kb,
+            },
+            "pods": {
+                "joinSignatureMode": pod_signature_mode_target_name(
+                    config.advanced_networking.pod_join_signature_mode,
+                ),
+                "messageSignatureMode": pod_signature_mode_target_name(
+                    config.advanced_networking.pod_security_signature_mode,
+                ),
+            },
+            "mesh": {
+                "selfPeerIdConfigured": true,
+                "soulseekRendezvousEnabled": config
+                    .advanced_networking
+                    .mesh
+                    .enable_soulseek_rendezvous,
+            },
+            "warnings": warnings,
+        })
+        .to_string(),
+    }
+}
+
+fn pod_signature_mode_target_name(mode: PodSignatureMode) -> &'static str {
+    match mode {
+        PodSignatureMode::Off => "Off",
+        PodSignatureMode::Warn => "Warn",
+        PodSignatureMode::Enforce => "Enforce",
     }
 }
 
@@ -45044,6 +45212,11 @@ fn activitypub_response(value: serde_json::Value) -> HttpResponse {
     }
 }
 
+fn social_federation_is_active(config: &AppConfig) -> bool {
+    config.social_federation.enabled
+        && !config.social_federation.mode.eq_ignore_ascii_case("Hermit")
+}
+
 async fn activitypub_actor_exists(actor: &str, state: &AppState) -> bool {
     let prefix = format!("activitypub/{actor}/");
     !state
@@ -45434,15 +45607,40 @@ async fn feature_controller_mutation_response(
         ));
     }
     if method == "POST" && path == "/api/solid/resolve-webid" {
-        let Some(web_id) = extract_json_string_field(body, "webId") else {
-            return Some(routing::bad_request_response("webId is required"));
+        let web_id = serde_json::from_str::<serde_json::Value>(body)
+            .ok()
+            .and_then(|value| {
+                value
+                    .get("webId")
+                    .or_else(|| value.get("WebId"))
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned)
+            });
+        let Some(web_id) = web_id else {
+            return Some(solid_resolution_error(
+                is_versioned_v0,
+                400,
+                "Invalid WebID",
+                "WebId must be an absolute URI.",
+                "webId is required",
+            ));
         };
         let web_id = web_id.trim().to_owned();
         if web_id.is_empty() {
-            return Some(routing::bad_request_response("webId is required"));
+            return Some(solid_resolution_error(
+                is_versioned_v0,
+                400,
+                "Invalid WebID",
+                "WebId must be an absolute URI.",
+                "webId is required",
+            ));
         }
         let Ok(url) = reqwest::Url::parse(&web_id) else {
-            return Some(routing::bad_request_response(
+            return Some(solid_resolution_error(
+                is_versioned_v0,
+                400,
+                "Invalid WebID",
+                "WebId must be an absolute URI.",
                 "webId must be an absolute URL",
             ));
         };
@@ -45451,7 +45649,11 @@ async fn feature_controller_mutation_response(
             .host_str()
             .map(|host| host.trim_end_matches('.').to_ascii_lowercase())
         else {
-            return Some(routing::bad_request_response(
+            return Some(solid_resolution_error(
+                is_versioned_v0,
+                400,
+                "Invalid WebID",
+                "WebId must be an absolute URI.",
                 "webId must include a hostname",
             ));
         };
@@ -45459,13 +45661,21 @@ async fn feature_controller_mutation_response(
             || (url.scheme() == "http" && !solid.allow_insecure_http)
             || !solid.allowed_hosts.iter().any(|allowed| allowed == &host)
         {
-            return Some(routing::bad_request_response(
+            return Some(solid_resolution_error(
+                is_versioned_v0,
+                400,
+                "Solid fetch blocked",
+                "WebID resolution was blocked by policy.",
                 "WebID resolution was blocked by policy.",
             ));
         }
         if !solid.allow_localhost_for_web_id {
             if host == "localhost" || host.ends_with(".local") {
-                return Some(routing::bad_request_response(
+                return Some(solid_resolution_error(
+                    is_versioned_v0,
+                    400,
+                    "Solid fetch blocked",
+                    "WebID resolution was blocked by policy.",
                     "WebID resolution was blocked by policy.",
                 ));
             }
@@ -45473,7 +45683,11 @@ async fn feature_controller_mutation_response(
             let addresses = match tokio::net::lookup_host((host.as_str(), port)).await {
                 Ok(addresses) => addresses.collect::<Vec<_>>(),
                 Err(_) => {
-                    return Some(routing::bad_request_response(
+                    return Some(solid_resolution_error(
+                        is_versioned_v0,
+                        400,
+                        "Solid fetch blocked",
+                        "WebID resolution was blocked by policy.",
                         "WebID resolution was blocked by policy.",
                     ))
                 }
@@ -45483,7 +45697,11 @@ async fn feature_controller_mutation_response(
                     address.ip().is_loopback() || solid_private_or_reserved(address.ip())
                 })
             {
-                return Some(routing::bad_request_response(
+                return Some(solid_resolution_error(
+                    is_versioned_v0,
+                    400,
+                    "Solid fetch blocked",
+                    "WebID resolution was blocked by policy.",
                     "WebID resolution was blocked by policy.",
                 ));
             }
@@ -45495,7 +45713,11 @@ async fn feature_controller_mutation_response(
         {
             Ok(client) => client,
             Err(_) => {
-                return Some(routing::internal_server_error_response(
+                return Some(solid_resolution_error(
+                    is_versioned_v0,
+                    500,
+                    "Failed to resolve WebID",
+                    "WebID resolution failed.",
                     "Failed to resolve WebID",
                 ))
             }
@@ -45503,7 +45725,11 @@ async fn feature_controller_mutation_response(
         let response = match client.get(url.clone()).send().await {
             Ok(response) if response.status().is_success() => response,
             _ => {
-                return Some(routing::internal_server_error_response(
+                return Some(solid_resolution_error(
+                    is_versioned_v0,
+                    500,
+                    "Failed to resolve WebID",
+                    "WebID resolution failed.",
                     "Failed to resolve WebID",
                 ))
             }
@@ -45512,7 +45738,11 @@ async fn feature_controller_mutation_response(
             .content_length()
             .is_some_and(|length| length > solid.max_fetch_bytes as u64)
         {
-            return Some(routing::bad_request_response(
+            return Some(solid_resolution_error(
+                is_versioned_v0,
+                400,
+                "Solid fetch blocked",
+                "WebID resolution was blocked by policy.",
                 "WebID resolution was blocked by policy.",
             ));
         }
@@ -45526,13 +45756,21 @@ async fn feature_controller_mutation_response(
         let mut profile = Vec::new();
         while let Some(chunk) = stream.next().await {
             let Ok(chunk) = chunk else {
-                return Some(routing::internal_server_error_response(
+                return Some(solid_resolution_error(
+                    is_versioned_v0,
+                    500,
+                    "Failed to resolve WebID",
+                    "WebID resolution failed.",
                     "Failed to resolve WebID",
                 ));
             };
             fetched = fetched.saturating_add(chunk.len());
             if fetched > solid.max_fetch_bytes {
-                return Some(routing::bad_request_response(
+                return Some(solid_resolution_error(
+                    is_versioned_v0,
+                    400,
+                    "Solid fetch blocked",
+                    "WebID resolution was blocked by policy.",
                     "WebID resolution was blocked by policy.",
                 ));
             }
@@ -45542,7 +45780,11 @@ async fn feature_controller_mutation_response(
             match solid::extract_oidc_issuers(&profile, content_type.as_deref(), url.as_str()) {
                 Ok(issuers) => issuers,
                 Err(_) => {
-                    return Some(routing::internal_server_error_response(
+                    return Some(solid_resolution_error(
+                        is_versioned_v0,
+                        500,
+                        "Failed to resolve WebID",
+                        "WebID resolution failed.",
                         "Failed to resolve WebID",
                     ));
                 }
@@ -53344,8 +53586,8 @@ async fn podcore_stats_response(path: &str, query: Option<&str>, state: &AppStat
                     "registrationsByTag": registrations_by_tag,
                     "searchesByType": searches,
                     "lastDiscoveryOperation": last_operation,
-                    "averageDiscoveryTime": format_timespan_hms(
-                        (search_duration_ms / search_count.max(1) / 1_000) as i64,
+                    "averageDiscoveryTime": format_timespan_millis(
+                        search_duration_ms / search_count.max(1),
                     ),
                 })
                 .to_string(),
@@ -53486,7 +53728,7 @@ async fn podcore_stats_response(path: &str, query: Option<&str>, state: &AppStat
                     "activePublications": active_publications,
                     "expiredPublications": expired_publications,
                     "failedPublications": failed_publications,
-                    "averagePublishTime": format_timespan_hms((average_publish_time / 1_000) as i64),
+                    "averagePublishTime": format_timespan_millis(average_publish_time),
                     "publicationsByDomain": publications_by_domain,
                     "publicationsByVisibility": publications_by_visibility,
                     "lastPublishOperation": last_publish_operation
@@ -71587,6 +71829,17 @@ mod tests {
     use crate::utils::{
         normalize_api_path, parse_route, percent_decode, query_params, split_request_target,
     };
+
+    #[test]
+    fn podcore_timespan_stats_preserve_target_millisecond_precision() {
+        assert_eq!(super::format_timespan_millis(0), "00:00:00");
+        assert_eq!(super::format_timespan_millis(1), "00:00:00.0010000");
+        assert_eq!(super::format_timespan_millis(1_234), "00:00:01.2340000");
+        assert_eq!(
+            super::format_timespan_millis(86_400_001),
+            "1.00:00:00.0010000"
+        );
+    }
 
     #[test]
     fn secure_oauth_state_fails_closed_when_randomness_is_unavailable() {
@@ -93741,6 +93994,41 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(invalid.status, "400 Bad Request");
+
+        let transport =
+            super::route_http_request("GET", "/api/v0/mesh/transport", None, "", &state)
+                .await
+                .unwrap();
+        let transport = serde_json::from_str::<serde_json::Value>(&transport.body).unwrap();
+        assert!(transport["dht"].is_number());
+        assert!(transport["overlay"].is_number());
+        assert_eq!(transport["natType"], "Unknown");
+
+        let peers = super::route_http_request("GET", "/api/v0/mesh/peers", None, "", &state)
+            .await
+            .unwrap();
+        let peers = serde_json::from_str::<serde_json::Value>(&peers.body).unwrap();
+        assert!(peers["count"].is_number());
+        assert!(peers["peers"].is_array());
+        assert!(peers["overlay"].is_array());
+
+        let hashdb = super::route_http_request("GET", "/api/v0/hashdb/stats", None, "", &state)
+            .await
+            .unwrap();
+        let hashdb = serde_json::from_str::<serde_json::Value>(&hashdb.body).unwrap();
+        for key in [
+            "totalPeers",
+            "slskdnPeers",
+            "totalFlacEntries",
+            "hashedFlacEntries",
+            "totalHashEntries",
+            "currentSeqId",
+            "databaseSizeBytes",
+        ] {
+            assert!(hashdb.get(key).is_some(), "missing {key}: {hashdb}");
+        }
+        assert!(hashdb.get("totalEntries").is_none());
+        assert!(hashdb.get("projectedShareEntries").is_none());
     }
 
     #[test]
@@ -99454,7 +99742,12 @@ mod tests {
 
     #[tokio::test]
     async fn activitypub_and_mesh_http_controller_gets_never_fall_back_to_html() {
-        let (state, _receiver) = test_state();
+        let (state, _receiver) = test_state_with_env(
+            MapEnv::default()
+                .with("FEDERATION_ENABLED", "true")
+                .with("FEDERATION_MODE", "Public")
+                .with("FEDERATION_DOMAIN", "127.0.0.1"),
+        );
 
         let webfinger =
             super::route_http_request("GET", "/.well-known/webfinger", None, "", &state)
@@ -101873,13 +102166,26 @@ mod tests {
             .any(|pod| pod["name"] == "mesh-peer"));
 
         let federation =
-            super::route_http_request("GET", "/api/federation/diagnostics", None, "", &state)
+            super::route_http_request("GET", "/api/v0/federation/diagnostics", None, "", &state)
                 .await
                 .expect("federation diagnostics");
         let federation_json = serde_json::from_str::<serde_json::Value>(&federation.body).unwrap();
-        assert_eq!(federation_json["status"], "ready");
-        assert_eq!(federation_json["counts"]["watchedUsers"], 1);
-        assert_eq!(federation_json["items"][0]["source"], "watched-user");
+        assert_eq!(federation_json["federation"]["enabled"], false);
+        assert_eq!(federation_json["federation"]["mode"], "Hermit");
+        assert_eq!(federation_json["federation"]["exposure"], "Hermit");
+        assert_eq!(
+            federation_json["publishing"]["publishableDomains"],
+            serde_json::json!(["music"])
+        );
+        assert_eq!(federation_json["pods"]["joinSignatureMode"], "Off");
+        assert_eq!(federation_json["mesh"]["selfPeerIdConfigured"], true);
+        assert_eq!(
+            federation_json["warnings"],
+            serde_json::json!([
+                "Pod join signatures are not enforced.",
+                "Pod message signatures are not enforced."
+            ])
+        );
 
         let security =
             super::route_http_request("GET", "/api/security/dashboard", None, "", &state)
@@ -102154,6 +102460,44 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<serde_json::Value>(&response.body).unwrap(),
             serde_json::json!({"error": "WebID resolution was blocked by policy."})
+        );
+    }
+
+    #[tokio::test]
+    async fn versioned_solid_resolution_uses_slskdn_problem_details() {
+        let (state, _receiver) = test_state();
+        let invalid =
+            super::route_http_request("POST", "/api/v0/solid/resolve-webid", None, "{}", &state)
+                .await
+                .expect("invalid WebID response");
+        assert_eq!(invalid.status, "400 Bad Request");
+        assert_eq!(invalid.content_type, "application/problem+json");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&invalid.body).unwrap(),
+            serde_json::json!({
+                "type": "about:blank",
+                "title": "Invalid WebID",
+                "status": 400,
+                "detail": "WebId must be an absolute URI."
+            })
+        );
+
+        let blocked = super::route_http_request(
+            "POST",
+            "/api/v0/solid/resolve-webid",
+            None,
+            r#"{"webId":"https://example.com/profile#me"}"#,
+            &state,
+        )
+        .await
+        .expect("blocked WebID response");
+        assert_eq!(blocked.status, "400 Bad Request");
+        let blocked_json = serde_json::from_str::<serde_json::Value>(&blocked.body).unwrap();
+        assert_eq!(blocked_json["title"], "Solid fetch blocked");
+        assert_eq!(blocked_json["status"], 400);
+        assert_eq!(
+            blocked_json["detail"],
+            "WebID resolution was blocked by policy."
         );
     }
 

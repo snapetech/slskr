@@ -59,6 +59,8 @@ pub struct AppConfig {
     pub core_workflow: CoreWorkflowSettings,
     pub advanced_networking: AdvancedNetworkingSettings,
     pub media_services: MediaAdvancedServiceSettings,
+    pub social_federation: SocialFederationSettings,
+    pub federation_publishing: FederationPublishingSettings,
     pub realm: RealmSettings,
     pub controller_web: ControllerWebSettings,
     pub controller_api_keys: BTreeMap<String, ControllerApiKeySettings>,
@@ -916,6 +918,10 @@ impl AppConfig {
             env,
             controller_compatibility_target,
         )?;
+        let social_federation =
+            SocialFederationSettings::from_layers(file_config.social_federation, env)?;
+        let federation_publishing =
+            FederationPublishingSettings::from_layers(file_config.federation_publishing, env)?;
         let realm = RealmSettings::from_layers(file_config.realm, env)?;
         let controller_headless =
             env_bool_layer(env, "SLSKD_HEADLESS", file_config.headless.unwrap_or(false))?;
@@ -1424,6 +1430,8 @@ impl AppConfig {
             core_workflow,
             advanced_networking,
             media_services,
+            social_federation,
+            federation_publishing,
             realm,
             controller_web,
             controller_api_keys,
@@ -2052,6 +2060,181 @@ pub struct FeatureGateSettings {
     pub social_federation: bool,
     pub virtual_soulfind: bool,
     pub multi_source_downloads: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct SocialFederationSettings {
+    pub enabled: bool,
+    pub mode: String,
+    pub domain: Option<String>,
+    pub base_url: Option<String>,
+    pub approved_peers: Vec<String>,
+    pub page_size: u32,
+    pub verify_signatures: bool,
+    pub http_timeout_seconds: u32,
+}
+
+impl SocialFederationSettings {
+    fn from_layers<E: ConfigEnv>(
+        file: SocialFederationFileConfig,
+        env: &E,
+    ) -> Result<Self, String> {
+        let page_size = env_parse_any_layer(
+            env,
+            &["FEDERATION_PAGE_SIZE", "SLSKR_FEDERATION_PAGE_SIZE"],
+            file.page_size,
+            20_u32,
+        )?;
+        if !(10..=100).contains(&page_size) {
+            return Err("federation.page_size must be between 10 and 100".to_owned());
+        }
+        let http_timeout_seconds = env_parse_any_layer(
+            env,
+            &[
+                "FEDERATION_HTTP_TIMEOUT_SECONDS",
+                "SLSKR_FEDERATION_HTTP_TIMEOUT_SECONDS",
+            ],
+            file.http_timeout_seconds,
+            30_u32,
+        )?;
+        if !(5..=120).contains(&http_timeout_seconds) {
+            return Err("federation.http_timeout_seconds must be between 5 and 120".to_owned());
+        }
+        let mode = env
+            .var("FEDERATION_MODE")
+            .or_else(|| env.var("SLSKR_FEDERATION_MODE"))
+            .or(file.mode)
+            .unwrap_or_else(|| "Hermit".to_owned());
+        let mode = mode.trim().to_owned();
+        let domain = env
+            .var("FEDERATION_DOMAIN")
+            .or_else(|| env.var("SLSKR_FEDERATION_DOMAIN"))
+            .or(file.domain)
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty());
+        let base_url = env
+            .var("FEDERATION_BASE_URL")
+            .or_else(|| env.var("SLSKR_FEDERATION_BASE_URL"))
+            .or(file.base_url)
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty());
+        Ok(Self {
+            enabled: env_bool_any_layer(
+                env,
+                &["FEDERATION_ENABLED", "SLSKR_FEDERATION_ENABLED"],
+                file.enabled.unwrap_or(false),
+            )?,
+            mode,
+            domain,
+            base_url,
+            approved_peers: string_array_any_layer(
+                env,
+                &[
+                    "FEDERATION_APPROVED_PEERS",
+                    "SLSKR_FEDERATION_APPROVED_PEERS",
+                ],
+                file.approved_peers,
+            ),
+            page_size,
+            verify_signatures: env_bool_any_layer(
+                env,
+                &[
+                    "FEDERATION_VERIFY_SIGNATURES",
+                    "SLSKR_FEDERATION_VERIFY_SIGNATURES",
+                ],
+                file.verify_signatures.unwrap_or(true),
+            )?,
+            http_timeout_seconds,
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct FederationPublishingSettings {
+    pub enabled: bool,
+    pub publishable_domains: Vec<String>,
+    pub default_visibility: String,
+    pub approved_circles: Vec<String>,
+    pub require_moderation_approval: bool,
+    pub include_external_links: bool,
+    pub max_metadata_size_kb: u32,
+}
+
+impl FederationPublishingSettings {
+    fn from_layers<E: ConfigEnv>(
+        file: FederationPublishingFileConfig,
+        env: &E,
+    ) -> Result<Self, String> {
+        let max_metadata_size_kb = env_parse_any_layer(
+            env,
+            &[
+                "FEDERATION_PUBLISHING_MAX_METADATA_SIZE_KB",
+                "SLSKR_FEDERATION_PUBLISHING_MAX_METADATA_SIZE_KB",
+            ],
+            file.max_metadata_size_kb,
+            10_u32,
+        )?;
+        if !(1..=100).contains(&max_metadata_size_kb) {
+            return Err(
+                "federation_publishing.max_metadata_size_kb must be between 1 and 100".to_owned(),
+            );
+        }
+        let default_visibility = env
+            .var("FEDERATION_PUBLISHING_DEFAULT_VISIBILITY")
+            .or_else(|| env.var("SLSKR_FEDERATION_PUBLISHING_DEFAULT_VISIBILITY"))
+            .or(file.default_visibility)
+            .unwrap_or_else(|| "public".to_owned())
+            .trim()
+            .to_owned();
+        Ok(Self {
+            enabled: env_bool_any_layer(
+                env,
+                &[
+                    "FEDERATION_PUBLISHING_ENABLED",
+                    "SLSKR_FEDERATION_PUBLISHING_ENABLED",
+                ],
+                file.enabled.unwrap_or(false),
+            )?,
+            publishable_domains: string_array_any_layer(
+                env,
+                &[
+                    "FEDERATION_PUBLISHING_PUBLISHABLE_DOMAINS",
+                    "SLSKR_FEDERATION_PUBLISHING_PUBLISHABLE_DOMAINS",
+                ],
+                if file.publishable_domains.is_empty() {
+                    vec!["music".to_owned()]
+                } else {
+                    file.publishable_domains
+                },
+            ),
+            default_visibility,
+            approved_circles: string_array_any_layer(
+                env,
+                &[
+                    "FEDERATION_PUBLISHING_APPROVED_CIRCLES",
+                    "SLSKR_FEDERATION_PUBLISHING_APPROVED_CIRCLES",
+                ],
+                file.approved_circles,
+            ),
+            require_moderation_approval: env_bool_any_layer(
+                env,
+                &[
+                    "FEDERATION_PUBLISHING_REQUIRE_MODERATION",
+                    "SLSKR_FEDERATION_PUBLISHING_REQUIRE_MODERATION",
+                ],
+                file.require_moderation_approval.unwrap_or(true),
+            )?,
+            include_external_links: env_bool_any_layer(
+                env,
+                &[
+                    "FEDERATION_PUBLISHING_INCLUDE_EXTERNAL_LINKS",
+                    "SLSKR_FEDERATION_PUBLISHING_INCLUDE_EXTERNAL_LINKS",
+                ],
+                file.include_external_links.unwrap_or(true),
+            )?,
+            max_metadata_size_kb,
+        })
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -4333,6 +4516,18 @@ pub struct FileConfig {
     realm: RealmFileConfig,
     #[serde(rename = "multiRealm", alias = "multi_realm")]
     multi_realm: MultiRealmFileConfig,
+    #[serde(
+        alias = "socialFederation",
+        alias = "SocialFederation",
+        alias = "social_federation"
+    )]
+    social_federation: SocialFederationFileConfig,
+    #[serde(
+        alias = "federationPublishing",
+        alias = "FederationPublishing",
+        alias = "federation_publishing"
+    )]
+    federation_publishing: FederationPublishingFileConfig,
     filters: FiltersFileConfig,
     app: AppFileConfig,
     blacklist: ManagedBlacklistFileConfig,
@@ -4372,6 +4567,49 @@ pub struct FileConfig {
     virtual_soulfind_v2: VirtualSoulfindV2FileConfig,
     integrations: IntegrationsFileConfig,
     diagnostics: DiagnosticsFileConfig,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields, rename_all = "camelCase")]
+struct SocialFederationFileConfig {
+    #[serde(alias = "Enabled")]
+    enabled: Option<bool>,
+    #[serde(alias = "Mode")]
+    mode: Option<String>,
+    #[serde(alias = "Domain")]
+    domain: Option<String>,
+    #[serde(alias = "BaseUrl", alias = "base_url")]
+    base_url: Option<String>,
+    #[serde(alias = "ApprovedPeers", alias = "approved_peers")]
+    approved_peers: Vec<String>,
+    #[serde(alias = "PageSize", alias = "page_size")]
+    page_size: Option<u32>,
+    #[serde(alias = "VerifySignatures", alias = "verify_signatures")]
+    verify_signatures: Option<bool>,
+    #[serde(alias = "HttpTimeoutSeconds", alias = "http_timeout_seconds")]
+    http_timeout_seconds: Option<u32>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields, rename_all = "camelCase")]
+struct FederationPublishingFileConfig {
+    #[serde(alias = "Enabled")]
+    enabled: Option<bool>,
+    #[serde(alias = "PublishableDomains", alias = "publishable_domains")]
+    publishable_domains: Vec<String>,
+    #[serde(alias = "DefaultVisibility", alias = "default_visibility")]
+    default_visibility: Option<String>,
+    #[serde(alias = "ApprovedCircles", alias = "approved_circles")]
+    approved_circles: Vec<String>,
+    #[serde(
+        alias = "RequireModerationApproval",
+        alias = "require_moderation_approval"
+    )]
+    require_moderation_approval: Option<bool>,
+    #[serde(alias = "IncludeExternalLinks", alias = "include_external_links")]
+    include_external_links: Option<bool>,
+    #[serde(alias = "MaxMetadataSizeKb", alias = "max_metadata_size_kb")]
+    max_metadata_size_kb: Option<u32>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -7416,6 +7654,51 @@ const CONTROLLER_YAML_CORE_MAPPINGS: &[(&str, &str)] = &[
     ("blacklist.enabled", "SLSKD_BLACKLIST"),
     ("blacklist.file", "SLSKD_BLACKLIST_FILE"),
     ("feature.swagger", "SLSKD_SWAGGER"),
+    ("socialFederation.enabled", "FEDERATION_ENABLED"),
+    ("socialFederation.mode", "FEDERATION_MODE"),
+    ("socialFederation.domain", "FEDERATION_DOMAIN"),
+    ("socialFederation.baseUrl", "FEDERATION_BASE_URL"),
+    (
+        "socialFederation.approvedPeers",
+        "FEDERATION_APPROVED_PEERS",
+    ),
+    ("socialFederation.pageSize", "FEDERATION_PAGE_SIZE"),
+    (
+        "socialFederation.verifySignatures",
+        "FEDERATION_VERIFY_SIGNATURES",
+    ),
+    (
+        "socialFederation.httpTimeoutSeconds",
+        "FEDERATION_HTTP_TIMEOUT_SECONDS",
+    ),
+    (
+        "federationPublishing.enabled",
+        "FEDERATION_PUBLISHING_ENABLED",
+    ),
+    (
+        "federationPublishing.publishableDomains",
+        "FEDERATION_PUBLISHING_PUBLISHABLE_DOMAINS",
+    ),
+    (
+        "federationPublishing.defaultVisibility",
+        "FEDERATION_PUBLISHING_DEFAULT_VISIBILITY",
+    ),
+    (
+        "federationPublishing.approvedCircles",
+        "FEDERATION_PUBLISHING_APPROVED_CIRCLES",
+    ),
+    (
+        "federationPublishing.requireModerationApproval",
+        "FEDERATION_PUBLISHING_REQUIRE_MODERATION",
+    ),
+    (
+        "federationPublishing.includeExternalLinks",
+        "FEDERATION_PUBLISHING_INCLUDE_EXTERNAL_LINKS",
+    ),
+    (
+        "federationPublishing.maxMetadataSizeKb",
+        "FEDERATION_PUBLISHING_MAX_METADATA_SIZE_KB",
+    ),
     ("SignalSystem.Enabled", "SLSKD_SIGNALSYSTEM_ENABLED"),
     (
         "SignalSystem.DeduplicationCacheSize",
@@ -8174,11 +8457,9 @@ fn controller_yaml_environment(
                 continue;
             }
         }
-        let Some(value) = (if yaml_path.starts_with("SignalSystem.") {
-            controller_yaml_value_case_insensitive(&root, yaml_path)
-        } else {
-            controller_yaml_value(&root, yaml_path)
-        }) else {
+        let Some(value) = controller_yaml_value(&root, yaml_path)
+            .or_else(|| controller_yaml_value_case_insensitive(&root, yaml_path))
+        else {
             continue;
         };
         let value = match value {
@@ -8203,6 +8484,9 @@ fn controller_yaml_environment(
                         | "SLSKD_WEB_CORS_ALLOWED_ORIGINS"
                         | "SLSKD_WEB_CORS_ALLOWED_HEADERS"
                         | "SLSKD_WEB_CORS_ALLOWED_METHODS"
+                        | "FEDERATION_APPROVED_PEERS"
+                        | "FEDERATION_PUBLISHING_PUBLISHABLE_DOMAINS"
+                        | "FEDERATION_PUBLISHING_APPROVED_CIRCLES"
                         | "SLSKD_ROOMS"
                         | "SLSKD_SLSK_LIKED_INTERESTS"
                         | "SLSKD_SLSK_HATED_INTERESTS"
@@ -8361,6 +8645,23 @@ fn controller_string_array_layer<E: ConfigEnv>(
             value.split(';').map(str::to_owned).collect()
         }
     })
+}
+
+fn string_array_any_layer<E: ConfigEnv>(
+    env: &E,
+    names: &[&str],
+    file_value: Vec<String>,
+) -> Vec<String> {
+    names
+        .iter()
+        .find_map(|name| env.var(name))
+        .map_or(file_value, |value| {
+            if value.is_empty() {
+                Vec::new()
+            } else {
+                value.split(';').map(str::to_owned).collect()
+            }
+        })
 }
 
 fn normalized_controller_values(values: Vec<String>) -> Vec<String> {
@@ -12225,6 +12526,83 @@ mod tests {
         assert!(env_enabled
             .sanitized_json()
             .contains("\"virtual_soulfind_v2_enabled\":true"));
+    }
+
+    #[test]
+    fn federation_settings_match_target_defaults_file_layers_and_bounds() {
+        let defaults =
+            super::AppConfig::from_layers(None, super::FileConfig::default(), &MapEnv::default())
+                .expect("default federation settings");
+        assert!(!defaults.social_federation.enabled);
+        assert_eq!(defaults.social_federation.mode, "Hermit");
+        assert_eq!(defaults.social_federation.page_size, 20);
+        assert!(defaults.social_federation.verify_signatures);
+        assert_eq!(defaults.social_federation.http_timeout_seconds, 30);
+        assert!(!defaults.federation_publishing.enabled);
+        assert_eq!(
+            defaults.federation_publishing.publishable_domains,
+            ["music"]
+        );
+        assert_eq!(defaults.federation_publishing.default_visibility, "public");
+        assert!(defaults.federation_publishing.require_moderation_approval);
+        assert!(defaults.federation_publishing.include_external_links);
+        assert_eq!(defaults.federation_publishing.max_metadata_size_kb, 10);
+
+        let file = super::FileConfig {
+            social_federation: super::SocialFederationFileConfig {
+                enabled: Some(true),
+                mode: Some("FriendsOnly".to_owned()),
+                domain: Some("social.example".to_owned()),
+                base_url: Some("https://social.example".to_owned()),
+                approved_peers: vec!["peer-a".to_owned()],
+                page_size: Some(40),
+                verify_signatures: Some(false),
+                http_timeout_seconds: Some(45),
+            },
+            federation_publishing: super::FederationPublishingFileConfig {
+                enabled: Some(true),
+                publishable_domains: vec!["music".to_owned(), "books".to_owned()],
+                default_visibility: Some("circle".to_owned()),
+                approved_circles: vec!["friends".to_owned()],
+                require_moderation_approval: Some(false),
+                include_external_links: Some(false),
+                max_metadata_size_kb: Some(25),
+            },
+            ..super::FileConfig::default()
+        };
+        let configured = super::AppConfig::from_layers(
+            None,
+            file,
+            &MapEnv::default()
+                .with("FEDERATION_MODE", "Public")
+                .with("FEDERATION_PAGE_SIZE", "50")
+                .with("FEDERATION_PUBLISHING_PUBLISHABLE_DOMAINS", "music;video")
+                .with("SLSKR_FEDERATION_PUBLISHING_MAX_METADATA_SIZE_KB", "30"),
+        )
+        .expect("layered federation settings");
+        assert!(configured.social_federation.enabled);
+        assert_eq!(configured.social_federation.mode, "Public");
+        assert_eq!(configured.social_federation.page_size, 50);
+        assert_eq!(configured.social_federation.approved_peers, ["peer-a"]);
+        assert_eq!(
+            configured.federation_publishing.publishable_domains,
+            ["music", "video"]
+        );
+        assert_eq!(configured.federation_publishing.max_metadata_size_kb, 30);
+
+        for (name, value) in [
+            ("FEDERATION_PAGE_SIZE", "9"),
+            ("FEDERATION_HTTP_TIMEOUT_SECONDS", "121"),
+            ("FEDERATION_PUBLISHING_MAX_METADATA_SIZE_KB", "0"),
+        ] {
+            let error = super::AppConfig::from_layers(
+                None,
+                super::FileConfig::default(),
+                &MapEnv::default().with(name, value),
+            )
+            .expect_err("out-of-range federation setting must fail startup");
+            assert!(error.contains("federation"), "{name}={value}: {error}");
+        }
     }
 
     #[test]
