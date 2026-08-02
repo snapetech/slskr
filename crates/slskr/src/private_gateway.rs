@@ -103,6 +103,7 @@ pub struct Gateway {
     quic_listener: Mutex<Option<QuicControlServer>>,
     connections: Arc<Semaphore>,
     tunnels: RwLock<BTreeMap<String, Arc<Tunnel>>>,
+    overlay_connections: RwLock<BTreeMap<String, OverlayConnectionMetadata>>,
     replay_nonces: Mutex<BTreeMap<(String, String), u64>>,
 }
 
@@ -164,6 +165,7 @@ impl Gateway {
             quic_listener: Mutex::new(quic_listener),
             connections: Arc::new(Semaphore::new(MAX_GATEWAY_CONNECTIONS)),
             tunnels: RwLock::new(BTreeMap::new()),
+            overlay_connections: RwLock::new(BTreeMap::new()),
             replay_nonces: Mutex::new(BTreeMap::new()),
         })
     }
@@ -186,22 +188,14 @@ impl Gateway {
         self.tunnels.read().await.len()
     }
 
-    /// Real, deduplicated usernames of peers with a currently-open
-    /// tunnel -- the only real per-connection identity slskR's gateway
-    /// currently tracks. Unlike the oracle's real `MeshPeerInfoResponse`,
-    /// there is no per-session `connectedAt`/`lastActivity`/
-    /// `certificateThumbprint` tracking yet (only `Tunnel::owner` is
-    /// recorded), so this reports real identities without that extra
-    /// metadata rather than fabricating it.
-    pub async fn connected_peer_usernames(&self) -> Vec<String> {
-        let tunnels = self.tunnels.read().await;
-        let mut usernames = tunnels
+    /// Return metadata for currently-open, authenticated TLS overlay sessions.
+    pub async fn active_overlay_connections(&self) -> Vec<OverlayConnectionMetadata> {
+        self.overlay_connections
+            .read()
+            .await
             .values()
-            .map(|tunnel| tunnel.owner.clone())
-            .collect::<Vec<_>>();
-        usernames.sort();
-        usernames.dedup();
-        usernames
+            .cloned()
+            .collect()
     }
 
     pub async fn run(self: Arc<Self>, state: Arc<super::AppState>) -> Result<(), String> {
@@ -376,6 +370,12 @@ impl Gateway {
             .await
             .map_err(|_| "overlay TLS accept timed out".to_owned())?
             .map_err(|error| format!("overlay TLS accept failed: {error}"))?;
+        let certificate_thumbprint = tls
+            .get_ref()
+            .1
+            .peer_certificates()
+            .and_then(|certificates| certificates.first())
+            .map(|certificate| hex::encode(Sha256::digest(certificate.as_ref())));
         let mut framer = OverlayFramer::new(tls);
         let hello: MeshHello = timeout(Duration::from_secs(5), framer.read())
             .await
@@ -397,21 +397,36 @@ impl Gateway {
         let local_username = super::pod_request_peer_id(state)
             .await
             .ok_or_else(|| "local gateway identity is unavailable".to_owned())?;
-        framer
-            .write(&MeshHelloAck {
-                magic: OVERLAY_MAGIC.to_owned(),
-                message_type: "mesh_hello_ack".to_owned(),
-                version: OVERLAY_VERSION,
-                username: local_username,
-                features: vec![FEATURE_MESH_SERVICE.to_owned()],
-                soulseek_ports: None,
-                overlay_port: Some(self.bind.port()),
-                nonce_echo: hello.nonce,
-            })
-            .await
-            .map_err(|error| format!("overlay acknowledgement failed: {error}"))?;
+        let acknowledgement = MeshHelloAck {
+            magic: OVERLAY_MAGIC.to_owned(),
+            message_type: "mesh_hello_ack".to_owned(),
+            version: OVERLAY_VERSION,
+            username: local_username,
+            features: vec![FEATURE_MESH_SERVICE.to_owned()],
+            soulseek_ports: None,
+            overlay_port: Some(self.bind.port()),
+            nonce_echo: hello.nonce,
+        };
+        self.overlay_connections.write().await.insert(
+            connection_id.clone(),
+            OverlayConnectionMetadata {
+                username: hello.username.clone(),
+                address: remote_address.ip().to_string(),
+                port: remote_address.port(),
+                features: hello.features.clone(),
+                connected_at: overlay_timestamp(),
+                last_activity: overlay_timestamp(),
+                certificate_thumbprint,
+                version: hello.version,
+                is_outbound: false,
+            },
+        );
 
         let result = async {
+            framer
+                .write(&acknowledgement)
+                .await
+                .map_err(|error| format!("overlay acknowledgement failed: {error}"))?;
             let mut liveness = OverlayLiveness::new();
             loop {
                 if liveness.is_idle() {
@@ -420,6 +435,7 @@ impl Gateway {
                 let raw = match timeout(liveness.read_wait(), framer.read_raw()).await {
                     Ok(result) => {
                         liveness.record_inbound();
+                        self.touch_overlay_connection(&connection_id).await;
                         result.map_err(|error| format!("overlay read failed: {error}"))?
                     }
                     Err(_) if liveness.last_ping.elapsed() >= OVERLAY_KEEPALIVE_INTERVAL => {
@@ -488,6 +504,10 @@ impl Gateway {
         }
         .await;
         self.remove_connection_tunnels(&connection_id).await;
+        self.overlay_connections
+            .write()
+            .await
+            .remove(&connection_id);
         result
     }
 
@@ -996,6 +1016,17 @@ impl Gateway {
             .await
             .retain(|_, tunnel| tunnel.connection_id != connection_id);
     }
+
+    async fn touch_overlay_connection(&self, connection_id: &str) {
+        if let Some(connection) = self
+            .overlay_connections
+            .write()
+            .await
+            .get_mut(connection_id)
+        {
+            connection.last_activity = overlay_timestamp();
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -1009,6 +1040,24 @@ struct Tunnel {
     pod_id: String,
     writer: Mutex<OwnedWriteHalf>,
     incoming: Mutex<mpsc::Receiver<Vec<u8>>>,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OverlayConnectionMetadata {
+    pub username: String,
+    pub address: String,
+    pub port: u16,
+    pub features: Vec<String>,
+    pub connected_at: String,
+    pub last_activity: String,
+    pub certificate_thumbprint: Option<String>,
+    pub version: i32,
+    pub is_outbound: bool,
+}
+
+fn overlay_timestamp() -> String {
+    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
 }
 
 fn service_reply(

@@ -144,6 +144,10 @@ impl PodChannelStore {
     /// Append a message received from a peer while retaining its wire identity.
     /// The frozen slskdN PodMessaging service rejects a repeated MessageId before
     /// storage; local generated messages continue to use `append` above.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the peer wire DTO maps directly to this append operation"
+    )]
     pub fn append_with_id(
         &mut self,
         message_id: String,
@@ -168,6 +172,10 @@ impl PodChannelStore {
         )
     }
 
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the append variants share the validated storage operation"
+    )]
     fn append_inner(
         &mut self,
         pod_id: String,

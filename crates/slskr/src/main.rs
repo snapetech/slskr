@@ -5527,7 +5527,7 @@ impl MeshState {
 
     fn capability_service_peers_json(&self) -> Vec<serde_json::Value> {
         let mut records = self.capability_records.iter().collect::<Vec<_>>();
-        records.sort_by(|left, right| right.issued_at_unix.cmp(&left.issued_at_unix));
+        records.sort_by_key(|record| std::cmp::Reverse(record.issued_at_unix));
         records
             .into_iter()
             .map(capability_service_peer_json)
@@ -44468,7 +44468,7 @@ async fn mediacore_extended_response(
         .filter_map(|record| {
             record
                 .get("descriptor")
-                .or_else(|| Some(*record))
+                .or(Some(*record))
                 .and_then(|descriptor| serde_json::to_vec(descriptor).ok())
         })
         .map(|descriptor| descriptor.len() as u64)
@@ -51978,7 +51978,7 @@ async fn podcore_mutation_response(
             let work = pods
                 .iter()
                 .filter(|pod| pods_store.is_member(&pod.pod_id, &local_peer_id))
-                .map(|pod| {
+                .filter_map(|pod| {
                     let last_seen = pod
                         .channels
                         .iter()
@@ -51996,7 +51996,6 @@ async fn podcore_mutation_response(
                         .collect::<BTreeMap<_, _>>();
                     (!last_seen.is_empty()).then(|| (pod.pod_id.clone(), last_seen))
                 })
-                .flatten()
                 .collect::<Vec<_>>();
             drop(features);
             drop(pods_store);
@@ -56817,26 +56816,13 @@ async fn extended_controller_get_response(
             routing::ok_response(serde_json::json!({"entries": entries}).to_string())
         }
         "/api/overlay/connections" => {
-            // Matches the oracle's real MeshPeerInfoResponse concept (the
-            // live overlay/mesh session list) -- previously reported
-            // state.peer_endpoints, a last-known-IP cache from Soulseek
-            // server lookups, unrelated to whether an overlay session is
-            // actually open. Built from the gateway's real open-tunnel
-            // registry instead, the only real per-connection identity
-            // slskR currently tracks; the oracle's additional per-session
-            // fields (address/port/connectedAt/lastActivity/
-            // certificateThumbprint/version/isOutbound) aren't tracked at
-            // the tunnel level yet, so they're omitted rather than
-            // fabricated.
-            let usernames = match state.private_gateway.as_ref() {
-                Some(gateway) => gateway.connected_peer_usernames().await,
+            let connections = match state.private_gateway.as_ref() {
+                Some(gateway) => gateway.active_overlay_connections().await,
                 None => Vec::new(),
             };
-            let rows = usernames
-                .into_iter()
-                .map(|username| serde_json::json!({"username": username}))
-                .collect::<Vec<_>>();
-            routing::ok_response(serde_json::Value::Array(rows).to_string())
+            routing::ok_response(
+                serde_json::to_string(&connections).unwrap_or_else(|_| "[]".to_owned()),
+            )
         }
         "/api/overlay/stats" => {
             let peers = state.peer_endpoints.read().await;
@@ -81614,20 +81600,34 @@ mod tests {
             "{overlay_stats_json}"
         );
 
-        // Matches the oracle's real overlay/mesh session list -- must
-        // report the real tunnel owner's identity, not slskR's old
-        // unrelated peer-endpoints IP cache.
+        // Matches the oracle's real overlay/mesh session list -- report the
+        // authenticated TLS session, not tunnel ownership state.
         let overlay_connections =
             super::route_http_request("GET", "/api/v0/overlay/connections", None, "", &state)
                 .await
                 .expect("overlay connections with an open tunnel");
         let overlay_connections_json =
             serde_json::from_str::<serde_json::Value>(&overlay_connections.body).unwrap();
+        assert_eq!(overlay_connections_json.as_array().unwrap().len(), 1);
+        let connection = &overlay_connections_json[0];
+        assert_eq!(connection["username"], "member");
+        assert_eq!(connection["address"], "127.0.0.1");
+        assert!(connection["port"].as_u64().is_some_and(|port| port > 0));
         assert_eq!(
-            overlay_connections_json,
-            serde_json::json!([{"username": "member"}]),
-            "{overlay_connections_json}"
+            connection["features"],
+            serde_json::json!([FEATURE_MESH_SERVICE])
         );
+        assert!(connection["connectedAt"]
+            .as_str()
+            .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+            .is_some());
+        assert!(connection["lastActivity"]
+            .as_str()
+            .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+            .is_some());
+        assert!(connection["certificateThumbprint"].is_null());
+        assert_eq!(connection["version"], 1);
+        assert_eq!(connection["isOutbound"], false);
 
         let reply = client
             .call(
@@ -81707,7 +81707,43 @@ mod tests {
             super::route_http_request("GET", "/api/v0/overlay/connections", None, "", &state)
                 .await
                 .expect("overlay connections after closing the tunnel");
-        assert_eq!(overlay_connections_after_close.body, "[]");
+        let overlay_connections_after_close_json =
+            serde_json::from_str::<serde_json::Value>(&overlay_connections_after_close.body)
+                .unwrap();
+        assert_eq!(
+            overlay_connections_after_close_json[0]["username"], "member",
+            "closing a tunnel must not remove its still-open overlay session"
+        );
+
+        let mut client_stream = client.into_inner();
+        tokio::io::AsyncWriteExt::shutdown(&mut client_stream)
+            .await
+            .expect("close overlay client connection");
+        let overlay_connections_after_client_close =
+            tokio::time::timeout(std::time::Duration::from_secs(2), async {
+                loop {
+                    let response = super::route_http_request(
+                        "GET",
+                        "/api/v0/overlay/connections",
+                        None,
+                        "",
+                        &state,
+                    )
+                    .await
+                    .expect("overlay connections after client close");
+                    let value = serde_json::from_str::<serde_json::Value>(&response.body).unwrap();
+                    if value.as_array().is_some_and(Vec::is_empty) {
+                        break value;
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .expect("overlay connection cleanup timeout");
+        assert_eq!(
+            overlay_connections_after_client_close,
+            serde_json::json!([])
+        );
 
         let mut second_hello = MeshHello::new(
             "member",
