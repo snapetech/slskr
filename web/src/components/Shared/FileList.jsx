@@ -4,7 +4,7 @@ import {
   formatSeconds,
   getFileName,
 } from '../../lib/util';
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Checkbox, Header, Icon, List, Table } from 'semantic-ui-react';
 
 const FileList = ({
@@ -17,6 +17,32 @@ const FileList = ({
   onSelectionChange,
 }) => {
   const [folded, setFolded] = useState(false);
+  const [lastSelectedIndex, setLastSelectedIndex] = useState(null);
+  const sortedFiles = useMemo(
+    () =>
+      [...files].sort((left, right) =>
+        left.filename > right.filename ? 1 : -1,
+      ),
+    [files],
+  );
+  const handleSelectionChange = (event, file, index, checked) => {
+    const shiftKey = event.shiftKey || event.nativeEvent?.shiftKey;
+    if (
+      shiftKey &&
+      lastSelectedIndex !== null &&
+      lastSelectedIndex !== index
+    ) {
+      const start = Math.min(lastSelectedIndex, index);
+      const end = Math.max(lastSelectedIndex, index);
+      sortedFiles
+        .slice(start, end + 1)
+        .forEach((rangeFile) => onSelectionChange(rangeFile, checked));
+    } else {
+      onSelectionChange(file, checked);
+    }
+
+    setLastSelectedIndex(index);
+  };
 
   return (
     <div
@@ -78,9 +104,7 @@ const FileList = ({
                 </Table.Row>
               </Table.Header>
               <Table.Body>
-                {files
-                  .sort((a, b) => (a.filename > b.filename ? 1 : -1))
-                  .map((f) => (
+                {sortedFiles.map((f, index) => (
                     <Table.Row key={f.filename}>
                       <Table.Cell className="filelist-selector">
                         <Checkbox
@@ -88,7 +112,7 @@ const FileList = ({
                           disabled={disabled}
                           fitted
                           onChange={(event, data) =>
-                            onSelectionChange(f, data.checked)
+                            handleSelectionChange(event, f, index, data.checked)
                           }
                         />
                       </Table.Cell>
