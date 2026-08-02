@@ -2,6 +2,7 @@ import * as federationDiagnostics from '../../../lib/federationDiagnostics';
 import * as lidarr from '../../../lib/lidarr';
 import * as optionsApi from '../../../lib/options';
 import * as YAML from 'yaml';
+import MetadataProcessingPanel from './MetadataProcessingPanel';
 import {
   buildMediaServerExecutionContract,
   buildMediaServerPathDiagnostic,
@@ -916,6 +917,20 @@ const buildMetadataSettingsForm = (options = {}) => {
         'ImportReplaceExistingFiles',
       ),
     ),
+    lidarrDeleteRejectedDownloads: Boolean(
+      getOption(
+        lidarrOptions,
+        'deleteRejectedDownloads',
+        'DeleteRejectedDownloads',
+      ),
+    ),
+    lidarrBlacklistRejectedDownloads: Boolean(
+      getOption(
+        lidarrOptions,
+        'blacklistRejectedDownloads',
+        'BlacklistRejectedDownloads',
+      ),
+    ),
     lidarrMaxItemsPerSync: String(
       getOption(lidarrOptions, 'maxItemsPerSync', 'MaxItemsPerSync') ?? 100,
     ),
@@ -1000,6 +1015,8 @@ const MetadataSettingsPanel = ({ options }) => {
       importPathFrom: form.lidarrImportPathFrom.trim(),
       importPathTo: form.lidarrImportPathTo.trim(),
       importReplaceExistingFiles: form.lidarrImportReplaceExistingFiles,
+      deleteRejectedDownloads: form.lidarrDeleteRejectedDownloads,
+      blacklistRejectedDownloads: form.lidarrBlacklistRejectedDownloads,
       maxItemsPerSync: toNumber(form.lidarrMaxItemsPerSync, 100),
       syncIntervalSeconds: toNumber(form.lidarrSyncIntervalSeconds, 3600),
       syncWantedToWishlist: form.lidarrSyncWantedToWishlist,
@@ -1146,6 +1163,14 @@ const MetadataSettingsPanel = ({ options }) => {
       set(
         ['integrations', 'lidarr', 'import_replace_existing_files'],
         patch.lidarr.importReplaceExistingFiles,
+      );
+      set(
+        ['integrations', 'lidarr', 'delete_rejected_downloads'],
+        patch.lidarr.deleteRejectedDownloads,
+      );
+      set(
+        ['integrations', 'lidarr', 'blacklist_rejected_downloads'],
+        patch.lidarr.blacklistRejectedDownloads,
       );
 
       await optionsApi.updateYaml({ yaml: document.toString() });
@@ -1554,6 +1579,34 @@ const MetadataSettingsPanel = ({ options }) => {
                     label="Replace existing files"
                     onChange={(_, { checked }) =>
                       update('lidarrImportReplaceExistingFiles', checked)
+                    }
+                  />
+                }
+              />
+              <Popup
+                content="Delete completed files that Lidarr rejects during automatic import. Only direct files in the completed directory are eligible."
+                trigger={
+                  <Checkbox
+                    aria-label="Enable Lidarr delete rejected downloads setting"
+                    checked={form.lidarrDeleteRejectedDownloads}
+                    disabled={!remoteConfiguration || saving}
+                    label="Delete rejected downloads"
+                    onChange={(_, { checked }) =>
+                      update('lidarrDeleteRejectedDownloads', checked)
+                    }
+                  />
+                }
+              />
+              <Popup
+                content="Exclude the rejected Wishlist peer and remote directory from future automatic downloads."
+                trigger={
+                  <Checkbox
+                    aria-label="Enable Lidarr blacklist rejected downloads setting"
+                    checked={form.lidarrBlacklistRejectedDownloads}
+                    disabled={!remoteConfiguration || saving}
+                    label="Blacklist rejected downloads"
+                    onChange={(_, { checked }) =>
+                      update('lidarrBlacklistRejectedDownloads', checked)
                     }
                   />
                 }
@@ -3541,6 +3594,7 @@ const Integrations = ({ options = {}, state = {} }) => (
       state={state}
     />
     <LidarrPanel options={options} />
+    <MetadataProcessingPanel />
     <MetadataSettingsPanel options={options} />
     <NotificationIntegrationsPanel options={options} />
     <SourceFeedIntegrationsPanel options={options} />

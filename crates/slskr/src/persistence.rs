@@ -73,6 +73,7 @@ pub struct TransferRecord {
     pub started_at: i64,
     pub completed_at: Option<i64>,
     pub request_id: Option<String>,
+    pub wishlist_item_id: Option<String>,
     pub request_name: Option<String>,
     pub destination_directory: Option<String>,
     pub local_path: Option<String>,
@@ -474,6 +475,7 @@ impl<'r> FromRow<'r, SqliteRow> for TransferRecord {
             started_at: row.try_get("started_at")?,
             completed_at: row.try_get("completed_at")?,
             request_id: row.try_get("request_id")?,
+            wishlist_item_id: row.try_get("wishlist_item_id")?,
             request_name: row.try_get("request_name")?,
             destination_directory: row.try_get("destination_directory")?,
             local_path: row.try_get("local_path")?,
@@ -1001,6 +1003,7 @@ impl DatabaseManager {
                 started_at INTEGER NOT NULL,
                 completed_at INTEGER
                 , request_id TEXT
+                , wishlist_item_id TEXT
                 , request_name TEXT
                 , destination_directory TEXT
                 , local_path TEXT
@@ -1749,6 +1752,7 @@ impl DatabaseManager {
     async fn ensure_transfer_columns(&self) -> Result<(), Box<dyn std::error::Error>> {
         for statement in [
             "ALTER TABLE transfers ADD COLUMN request_id TEXT",
+            "ALTER TABLE transfers ADD COLUMN wishlist_item_id TEXT",
             "ALTER TABLE transfers ADD COLUMN request_name TEXT",
             "ALTER TABLE transfers ADD COLUMN destination_directory TEXT",
             "ALTER TABLE transfers ADD COLUMN local_path TEXT",
@@ -2067,8 +2071,8 @@ impl DatabaseManager {
     ) -> Result<(), Box<dyn std::error::Error>> {
         query(
             r#"
-            INSERT OR REPLACE INTO transfers (id, direction, filename, peer_username, filesize, progress, status, started_at, completed_at, request_id, request_name, destination_directory, local_path, batch_id, reason, bit_rate, sample_rate, bit_depth, length_seconds, artist, album, title, track_number, year)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT OR REPLACE INTO transfers (id, direction, filename, peer_username, filesize, progress, status, started_at, completed_at, request_id, wishlist_item_id, request_name, destination_directory, local_path, batch_id, reason, bit_rate, sample_rate, bit_depth, length_seconds, artist, album, title, track_number, year)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#
         )
         .bind(&record.id)
@@ -2079,9 +2083,10 @@ impl DatabaseManager {
         .bind(record.progress)
         .bind(&record.status)
         .bind(record.started_at)
-        .bind(record.completed_at)
-        .bind(&record.request_id)
-        .bind(&record.request_name)
+            .bind(record.completed_at)
+            .bind(&record.request_id)
+            .bind(&record.wishlist_item_id)
+            .bind(&record.request_name)
         .bind(&record.destination_directory)
         .bind(&record.local_path)
         .bind(&record.batch_id)
@@ -2106,7 +2111,7 @@ impl DatabaseManager {
         id: &str,
     ) -> Result<Option<TransferRecord>, Box<dyn std::error::Error>> {
         let record = query_as::<_, TransferRecord>(
-            "SELECT id, direction, filename, peer_username, filesize, progress, status, started_at, completed_at, request_id, request_name, destination_directory, local_path, batch_id, reason, bit_rate, sample_rate, bit_depth, length_seconds, artist, album, title, track_number, year FROM transfers WHERE id = ?"
+            "SELECT id, direction, filename, peer_username, filesize, progress, status, started_at, completed_at, request_id, wishlist_item_id, request_name, destination_directory, local_path, batch_id, reason, bit_rate, sample_rate, bit_depth, length_seconds, artist, album, title, track_number, year FROM transfers WHERE id = ?"
         )
         .bind(id)
         .fetch_optional(&self.pool)
@@ -2123,7 +2128,7 @@ impl DatabaseManager {
     ) -> Result<Vec<TransferRecord>, Box<dyn std::error::Error>> {
         let records = if let Some(status) = status {
             query_as::<_, TransferRecord>(
-                "SELECT id, direction, filename, peer_username, filesize, progress, status, started_at, completed_at, request_id, request_name, destination_directory, local_path, batch_id, reason, bit_rate, sample_rate, bit_depth, length_seconds, artist, album, title, track_number, year FROM transfers WHERE status = ? ORDER BY started_at DESC LIMIT ? OFFSET ?"
+                "SELECT id, direction, filename, peer_username, filesize, progress, status, started_at, completed_at, request_id, wishlist_item_id, request_name, destination_directory, local_path, batch_id, reason, bit_rate, sample_rate, bit_depth, length_seconds, artist, album, title, track_number, year FROM transfers WHERE status = ? ORDER BY started_at DESC LIMIT ? OFFSET ?"
             )
             .bind(status)
             .bind(limit)
@@ -2132,7 +2137,7 @@ impl DatabaseManager {
             .await?
         } else {
             query_as::<_, TransferRecord>(
-                "SELECT id, direction, filename, peer_username, filesize, progress, status, started_at, completed_at, request_id, request_name, destination_directory, local_path, batch_id, reason, bit_rate, sample_rate, bit_depth, length_seconds, artist, album, title, track_number, year FROM transfers ORDER BY started_at DESC LIMIT ? OFFSET ?"
+                "SELECT id, direction, filename, peer_username, filesize, progress, status, started_at, completed_at, request_id, wishlist_item_id, request_name, destination_directory, local_path, batch_id, reason, bit_rate, sample_rate, bit_depth, length_seconds, artist, album, title, track_number, year FROM transfers ORDER BY started_at DESC LIMIT ? OFFSET ?"
             )
             .bind(limit)
             .bind(offset)
@@ -2234,8 +2239,8 @@ impl DatabaseManager {
         for (transfer, event) in records {
             let transfer_insert = query(
                 r#"
-                INSERT OR REPLACE INTO transfers (id, direction, filename, peer_username, filesize, progress, status, started_at, completed_at, request_id, request_name, destination_directory, local_path, batch_id, reason, bit_rate, sample_rate, bit_depth, length_seconds, artist, album, title, track_number, year)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT OR REPLACE INTO transfers (id, direction, filename, peer_username, filesize, progress, status, started_at, completed_at, request_id, wishlist_item_id, request_name, destination_directory, local_path, batch_id, reason, bit_rate, sample_rate, bit_depth, length_seconds, artist, album, title, track_number, year)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 "#,
             )
             .bind(&transfer.id)
@@ -2248,6 +2253,7 @@ impl DatabaseManager {
             .bind(transfer.started_at)
             .bind(transfer.completed_at)
             .bind(&transfer.request_id)
+            .bind(&transfer.wishlist_item_id)
             .bind(&transfer.request_name)
             .bind(&transfer.destination_directory)
             .bind(&transfer.local_path)
@@ -4656,6 +4662,7 @@ mod tests {
             started_at: now,
             completed_at: None,
             request_id: Some("request_1".to_owned()),
+            wishlist_item_id: Some("wish-1".to_owned()),
             request_name: Some("Test".to_owned()),
             destination_directory: Some("Artist/Album".to_owned()),
             local_path: Some("downloads/Artist/Album/test.mp3".to_owned()),
@@ -4678,6 +4685,7 @@ mod tests {
         assert_eq!(retrieved.progress, 500000);
         assert_eq!(retrieved.bit_rate, Some(320));
         assert_eq!(retrieved.request_id.as_deref(), Some("request_1"));
+        assert_eq!(retrieved.wishlist_item_id.as_deref(), Some("wish-1"));
 
         db.update_transfer_progress("transfer_1", 750000)
             .await
@@ -4739,6 +4747,7 @@ mod tests {
             started_at: 1,
             completed_at: None,
             request_id: None,
+            wishlist_item_id: None,
             request_name: None,
             destination_directory: None,
             local_path: None,

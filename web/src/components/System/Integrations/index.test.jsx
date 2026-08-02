@@ -2,6 +2,7 @@ import '@testing-library/jest-dom';
 import * as federationDiagnostics from '../../../lib/federationDiagnostics';
 import * as lidarr from '../../../lib/lidarr';
 import * as optionsApi from '../../../lib/options';
+import * as slskr from '../../../lib/slskr';
 import Integrations from './index';
 import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -24,9 +25,17 @@ vi.mock('../../../lib/options', () => ({
   updateYaml: vi.fn(),
 }));
 
+vi.mock('../../../lib/slskr', () => ({
+  getMetadataProcessingStatus: vi.fn(),
+}));
+
 describe('Integrations', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    slskr.getMetadataProcessingStatus.mockResolvedValue({
+      active: [],
+      history: [],
+    });
     Object.assign(navigator, {
       clipboard: {
         writeText: vi.fn().mockResolvedValue(undefined),
@@ -99,6 +108,29 @@ describe('Integrations', () => {
     expect(screen.getByText('http://lidarr.local:8686')).toBeInTheDocument();
     expect(screen.getByText('API Key Configured')).toBeInTheDocument();
     expect(screen.queryByText('secret-key')).not.toBeInTheDocument();
+  });
+
+  it('polls and renders metadata processing activity', async () => {
+    slskr.getMetadataProcessingStatus.mockResolvedValue({
+      active: [
+        {
+          id: 'metadata-1',
+          filename: 'Artist - Track.flac',
+          stage: 'hashing',
+          status: 'running',
+          startedAt: '2026-08-01T00:00:00Z',
+          detail: null,
+        },
+      ],
+      history: [],
+    });
+
+    render(<Integrations />);
+
+    expect(await screen.findByText('Metadata processing activity')).toBeInTheDocument();
+    expect(await screen.findByText('Artist - Track.flac')).toBeInTheDocument();
+    expect(screen.getByText('hashing')).toBeInTheDocument();
+    expect(slskr.getMetadataProcessingStatus).toHaveBeenCalledWith(50);
   });
 
   it('shows read-only federation and pod diagnostics', async () => {
@@ -332,6 +364,12 @@ describe('Integrations', () => {
       target: { value: 'http://lidarr.local:8686' },
     });
     fireEvent.click(screen.getByLabelText('Enable Lidarr wanted sync setting'));
+    fireEvent.click(
+      screen.getByLabelText('Enable Lidarr delete rejected downloads setting'),
+    );
+    fireEvent.click(
+      screen.getByLabelText('Enable Lidarr blacklist rejected downloads setting'),
+    );
     fireEvent.change(screen.getByLabelText('Lidarr import path from setting'), {
       target: { value: '/downloads' },
     });
@@ -353,6 +391,8 @@ describe('Integrations', () => {
     expect(yaml).toContain('lidarr');
     expect(yaml).toContain('url: http://lidarr.local:8686');
     expect(yaml).toContain('sync_wanted_to_wishlist: true');
+    expect(yaml).toContain('delete_rejected_downloads: true');
+    expect(yaml).toContain('blacklist_rejected_downloads: true');
     expect(yaml).not.toContain('*****');
     expect(
       screen.getByText('Metadata and Servarr integration settings saved to YAML.'),

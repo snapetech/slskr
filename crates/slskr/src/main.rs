@@ -756,6 +756,10 @@ fn controller_cli_environment_name(flag: &str) -> Option<(&'static str, bool)> {
         "--lidarr-import-path-to" => ("SLSKD_LIDARR_IMPORT_PATH_TO", true),
         "--lidarr-import-mode" => ("SLSKD_LIDARR_IMPORT_MODE", true),
         "--lidarr-import-replace-existing" => ("SLSKD_LIDARR_IMPORT_REPLACE_EXISTING", false),
+        "--lidarr-delete-rejected-downloads" => ("SLSKD_LIDARR_DELETE_REJECTED_DOWNLOADS", false),
+        "--lidarr-blacklist-rejected-downloads" => {
+            ("SLSKD_LIDARR_BLACKLIST_REJECTED_DOWNLOADS", false)
+        }
         _ => return None,
     })
 }
@@ -2893,6 +2897,8 @@ struct TransferEntry {
     #[serde(default)]
     request_id: Option<String>,
     #[serde(default)]
+    wishlist_item_id: Option<String>,
+    #[serde(default)]
     request_name: Option<String>,
     #[serde(default)]
     destination_directory: Option<String>,
@@ -3223,6 +3229,7 @@ fn persisted_transfer_record(entry: &TransferEntry) -> persistence::TransferReco
         started_at: entry.started_at.unwrap_or(entry.requested_at) as i64,
         completed_at,
         request_id: entry.request_id.clone(),
+        wishlist_item_id: entry.wishlist_item_id.clone(),
         request_name: entry.request_name.clone(),
         destination_directory: entry.destination_directory.clone(),
         local_path: entry.local_path.clone(),
@@ -3372,6 +3379,7 @@ struct TransferQueue {
 #[derive(Clone, Debug, Default)]
 struct TransferRequestDetails {
     request_id: Option<String>,
+    wishlist_item_id: Option<String>,
     request_name: Option<String>,
     destination_directory: Option<String>,
     bit_rate: Option<u32>,
@@ -3478,6 +3486,7 @@ impl TransferQueue {
             local_path: None,
             batch_id: None,
             request_id: None,
+            wishlist_item_id: None,
             request_name: None,
             destination_directory: None,
             bit_rate: None,
@@ -3523,6 +3532,7 @@ impl TransferQueue {
             local_path: Some(local_path),
             batch_id: None,
             request_id: None,
+            wishlist_item_id: None,
             request_name: None,
             destination_directory: None,
             bit_rate: None,
@@ -3587,6 +3597,37 @@ impl TransferQueue {
         )
     }
 
+    fn create_with_batch_for_wishlist(
+        &mut self,
+        direction: u32,
+        peer_username: Option<String>,
+        filename: String,
+        local_path: Option<String>,
+        size: Option<u64>,
+        batch_id: Option<String>,
+        wishlist_item_id: String,
+    ) -> TransferEntry {
+        let details = if direction == 0 {
+            TransferRequestDetails {
+                request_id: Some(uuid::Uuid::new_v4().to_string()),
+                wishlist_item_id: Some(wishlist_item_id),
+                request_name: Some(virtual_basename(&filename).to_owned()),
+                ..TransferRequestDetails::default()
+            }
+        } else {
+            TransferRequestDetails::default()
+        };
+        self.create_with_details(
+            direction,
+            peer_username,
+            filename,
+            local_path,
+            size,
+            batch_id,
+            details,
+        )
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn create_with_details(
         &mut self,
@@ -3611,6 +3652,7 @@ impl TransferQueue {
             local_path,
             batch_id,
             request_id: details.request_id,
+            wishlist_item_id: details.wishlist_item_id,
             request_name: details.request_name,
             destination_directory: details.destination_directory,
             bit_rate: details.bit_rate,
@@ -4549,6 +4591,9 @@ fn bounded_transfer_entry(mut entry: TransferEntry) -> TransferEntry {
     entry.request_id = entry
         .request_id
         .map(|request_id| truncate_utf8_bytes(request_id, MAX_TRANSFER_REQUEST_ID_BYTES));
+    entry.wishlist_item_id = entry
+        .wishlist_item_id
+        .map(|item_id| truncate_utf8_bytes(item_id, MAX_TRANSFER_REQUEST_ID_BYTES));
     if entry.direction == 0 && entry.request_id.is_none() {
         entry.request_id = Some(uuid::Uuid::new_v4().to_string());
     }
@@ -11029,10 +11074,44 @@ struct SecurityBanRecord {
 }
 
 #[derive(Clone, Debug)]
+struct SecurityReputationProfile {
+    username: String,
+    first_seen: u64,
+    last_seen: u64,
+    successful_transfers: u64,
+    failed_transfers: u64,
+    aborted_transfers: u64,
+    total_bytes_transferred: u64,
+    malformed_messages: u64,
+    protocol_violations: u64,
+    content_mismatches: u64,
+    slots_available_count: u64,
+}
+
+impl SecurityReputationProfile {
+    fn new(username: &str, now: u64) -> Self {
+        Self {
+            username: username.to_owned(),
+            first_seen: now,
+            last_seen: now,
+            successful_transfers: 0,
+            failed_transfers: 0,
+            aborted_transfers: 0,
+            total_bytes_transferred: 0,
+            malformed_messages: 0,
+            protocol_violations: 0,
+            content_mismatches: 0,
+            slots_available_count: 0,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
 struct SecurityState {
     bans: Vec<SecurityBanRecord>,
     violations: BTreeMap<String, u32>,
     reputation: BTreeMap<String, i32>,
+    reputation_profiles: BTreeMap<String, SecurityReputationProfile>,
     updated_at: u64,
 }
 
@@ -11042,6 +11121,7 @@ impl SecurityState {
             bans: Vec::new(),
             violations: BTreeMap::new(),
             reputation: BTreeMap::new(),
+            reputation_profiles: BTreeMap::new(),
             updated_at: unix_timestamp(),
         }
     }
@@ -11079,8 +11159,16 @@ impl SecurityState {
             bans,
             violations: BTreeMap::new(),
             reputation: BTreeMap::new(),
+            reputation_profiles: BTreeMap::new(),
             updated_at,
         }
+    }
+
+    fn ensure_reputation_profile(&mut self, key: &str, username: &str) {
+        let now = unix_timestamp();
+        self.reputation_profiles
+            .entry(key.to_owned())
+            .or_insert_with(|| SecurityReputationProfile::new(username, now));
     }
 
     /// Convenience default over `ban_with_options`, exercised directly by
@@ -11163,6 +11251,11 @@ impl SecurityState {
             return false;
         }
         let key = username.to_ascii_lowercase();
+        self.ensure_reputation_profile(&key, &username);
+        if let Some(profile) = self.reputation_profiles.get_mut(&key) {
+            profile.last_seen = unix_timestamp();
+            profile.protocol_violations = profile.protocol_violations.saturating_add(1);
+        }
         let violation_count = self
             .violations
             .get(&key)
@@ -11170,8 +11263,10 @@ impl SecurityState {
             .unwrap_or(0)
             .saturating_add(1);
         self.violations.insert(key.clone(), violation_count);
-        let score = self.reputation.entry(key.clone()).or_insert(100);
-        *score = score.saturating_sub(10).max(0);
+        let score = self.reputation.entry(key.clone()).or_insert(50);
+        *score = score
+            .saturating_sub(SECURITY_REPUTATION_PROTOCOL_VIOLATION_PENALTY)
+            .max(0);
         self.updated_at = unix_timestamp();
         if settings.violation_tracker.enabled
             && self.violations.get(&key).copied().unwrap_or(0)
@@ -11250,7 +11345,8 @@ impl SecurityState {
 /// `UntrustedThreshold`/`MaxScore`.
 const SECURITY_REPUTATION_TRUSTED_THRESHOLD: i32 = 70;
 const SECURITY_REPUTATION_UNTRUSTED_THRESHOLD: i32 = 20;
-const SECURITY_REPUTATION_DEFAULT_SCORE: i32 = 100;
+const SECURITY_REPUTATION_DEFAULT_SCORE: i32 = 50;
+const SECURITY_REPUTATION_PROTOCOL_VIOLATION_PENALTY: i32 = 15;
 
 fn security_reputation_trust_level(score: i32) -> &'static str {
     if score >= SECURITY_REPUTATION_TRUSTED_THRESHOLD {
@@ -11262,42 +11358,68 @@ fn security_reputation_trust_level(score: i32) -> &'static str {
     }
 }
 
+fn security_reputation_profile_value(
+    profile: &SecurityReputationProfile,
+    score: i32,
+) -> serde_json::Value {
+    let total_transfers = profile
+        .successful_transfers
+        .saturating_add(profile.failed_transfers)
+        .saturating_add(profile.aborted_transfers);
+    let success_rate = if total_transfers > 0 {
+        profile.successful_transfers as f64 / total_transfers as f64
+    } else {
+        0.5
+    };
+    serde_json::json!({
+        "username": profile.username,
+        "score": score,
+        "firstSeen": unix_seconds_rfc3339(profile.first_seen),
+        "lastSeen": unix_seconds_rfc3339(profile.last_seen),
+        "successfulTransfers": profile.successful_transfers,
+        "failedTransfers": profile.failed_transfers,
+        "abortedTransfers": profile.aborted_transfers,
+        "totalBytesTransferred": profile.total_bytes_transferred,
+        "malformedMessages": profile.malformed_messages,
+        "protocolViolations": profile.protocol_violations,
+        "contentMismatches": profile.content_mismatches,
+        "slotsAvailableCount": profile.slots_available_count,
+        "successRate": success_rate,
+        "trustLevel": security_reputation_trust_level(score),
+    })
+}
+
 /// Matches the oracle's real `PeerReputation`/`PeerProfile` shape for a
 /// single peer, sourced from slskR's real, violation-driven score and
 /// violation counters (`SecurityState.reputation`/`violations`) rather
 /// than a disconnected, admin-only settings blob that never reflected
 /// real behavior. slskR does not yet track the oracle's finer-grained
 /// per-event counters (successful/failed/aborted transfers, malformed
-/// messages, content mismatches, slot availability) or per-peer first/
-/// last-seen timestamps, so those fields are honestly left at their
-/// zero/neutral defaults rather than fabricated.
+/// messages, content mismatches, slot availability) yet; those counters stay
+/// at their real zero values until the corresponding behavior is wired.
 async fn security_reputation_profile_json(state: &AppState, username: &str) -> serde_json::Value {
     let key = username.to_ascii_lowercase();
-    let security = state.security.read().await;
+    let mut security = state.security.write().await;
+    let legacy_protocol_violations = security.violations.get(&key).copied().unwrap_or(0);
+    let had_profile = security.reputation_profiles.contains_key(&key);
+    security.ensure_reputation_profile(&key, username);
+    if !had_profile {
+        if let Some(profile) = security.reputation_profiles.get_mut(&key) {
+            profile.protocol_violations = u64::from(legacy_protocol_violations);
+        }
+    }
     let score = security
         .reputation
         .get(&key)
         .copied()
         .unwrap_or(SECURITY_REPUTATION_DEFAULT_SCORE);
-    let protocol_violations = security.violations.get(&key).copied().unwrap_or(0);
+    let profile = security
+        .reputation_profiles
+        .get(&key)
+        .expect("reputation profile is created above")
+        .clone();
     drop(security);
-    let now = chrono::Utc::now().to_rfc3339();
-    serde_json::json!({
-        "username": username,
-        "score": score,
-        "firstSeen": now,
-        "lastSeen": now,
-        "successfulTransfers": 0,
-        "failedTransfers": 0,
-        "abortedTransfers": 0,
-        "totalBytesTransferred": 0,
-        "malformedMessages": 0,
-        "protocolViolations": protocol_violations,
-        "contentMismatches": 0,
-        "slotsAvailableCount": 0,
-        "successRate": 0.5,
-        "trustLevel": security_reputation_trust_level(score),
-    })
+    security_reputation_profile_value(&profile, score)
 }
 
 fn normalize_security_ban_value(kind: &str, value: &str) -> Option<String> {
@@ -15196,6 +15318,27 @@ async fn route_http_request_with_headers(
             let security = state.security.read().await;
             Ok(routing::ok_response(security.slskdn_bans_json()))
         }
+        ("GET", "/api/security/transports/status")
+            if route.path.starts_with("/api/v0/")
+                && state.config.controller_compatibility_target
+                    == ControllerCompatibilityTarget::Slskdn =>
+        {
+            // Matches slskdn's versioned TransportSelectorStatus contract.
+            // The native slskR endpoint below intentionally retains its
+            // historical selectedTransport/healthy shape.
+            Ok(routing::ok_response(
+                serde_json::json!({
+                    "selectedMode": "Direct",
+                    "totalTransports": 1,
+                    "availableTransports": 0,
+                    "availableTransportTypes": [],
+                    "lastConnectivityTest": chrono::Utc::now().to_rfc3339(),
+                    "primaryTransportAvailable": false,
+                    "fallbackAvailable": false,
+                })
+                .to_string(),
+            ))
+        }
         ("GET", "/api/application") => {
             let session = state.session.read().await;
             let share_lifecycle = state.share_lifecycle.read().await;
@@ -15971,6 +16114,25 @@ async fn route_http_request_with_headers(
             drop(mesh);
             drop(users);
             Ok(routing::ok_response(body))
+        }
+        ("GET", "/api/dht/peers") if route.path.starts_with("/api/v0/") => {
+            let peers = match state.dht.as_ref() {
+                Some(dht) => dht
+                    .peers()
+                    .await
+                    .into_iter()
+                    .map(|endpoint| {
+                        serde_json::json!({
+                            "address": endpoint.ip().to_string(),
+                            "port": endpoint.port(),
+                        })
+                    })
+                    .collect::<Vec<_>>(),
+                None => Vec::new(),
+            };
+            Ok(routing::ok_response(
+                serde_json::Value::Array(peers).to_string(),
+            ))
         }
         ("GET", "/api/dht/peers") => {
             let users = state.users.read().await;
@@ -18820,6 +18982,7 @@ async fn route_http_request_with_headers(
                 original.batch_id.clone(),
                 TransferRequestDetails {
                     request_id: original.request_id.clone(),
+                    wishlist_item_id: original.wishlist_item_id.clone(),
                     request_name: original.request_name.clone(),
                     destination_directory: original.destination_directory.clone(),
                     bit_rate: original.bit_rate,
@@ -18945,6 +19108,7 @@ async fn route_http_request_with_headers(
                     original.batch_id.clone(),
                     TransferRequestDetails {
                         request_id: original.request_id.clone(),
+                        wishlist_item_id: original.wishlist_item_id.clone(),
                         request_name: original.request_name.clone(),
                         destination_directory: original.destination_directory.clone(),
                         bit_rate: original.bit_rate,
@@ -25115,6 +25279,9 @@ async fn route_http_request_with_headers(
 
           ("GET", path) if pod_channel_messages_path(path).is_some() => {
               let (pod_id, channel_id) = pod_channel_messages_path(path).unwrap_or_default();
+              if pods::is_gold_star_club(&pod_id) && !gold_star_club_available(state) {
+                  return Ok(routing::not_found_response());
+              }
               let since = match query_millis_parameter(route.query, "since") {
                   Ok(value) => value,
                   Err(error) => return Ok(routing::bad_request_response(&error)),
@@ -25560,6 +25727,9 @@ async fn route_http_request_with_headers(
               let segments = pod_resource_segments(path).unwrap_or_default();
               let pod_id = &segments[0];
               let action = &segments[1];
+              if pods::is_gold_star_club(pod_id) && !gold_star_club_available(state) {
+                  return Ok(routing::not_found_response());
+              }
               let peer_id = if action == "ban" {
                   extract_json_string_field(body, "peerId")
                       .unwrap_or_default()
@@ -25588,12 +25758,23 @@ async fn route_http_request_with_headers(
                   ));
               }
               let result = match action.as_str() {
-                  "join" => pods.join(pod_id, peer_id),
+                  "join" => pods.join(pod_id, peer_id.clone()),
                   "leave" => pods.leave(pod_id, &peer_id),
                   _ => pods.ban(pod_id, &peer_id),
               };
               match result {
                   Ok(Some(true)) => {
+                      if action == "leave" && pods::is_gold_star_club(pod_id) {
+                          if let Err(error) = pods::record_gold_star_club_revocation(
+                              &state.config.state_dir,
+                              &peer_id,
+                          ) {
+                              eprintln!("Gold Star Club revocation persistence failed: {error}");
+                              return Ok(routing::service_unavailable_response(
+                                  "pod revocation storage is unavailable",
+                              ));
+                          }
+                      }
                       let response_key = match action.as_str() {
                           "join" => "joined",
                           "leave" => "left",
@@ -25818,32 +25999,59 @@ async fn route_http_request_with_headers(
               // Matches the oracle's real PeerReputation.GetStats(): real
               // per-peer scores and violation counts, not watch/online
               // status (which has nothing to do with reputation).
-              let total_peers = security.reputation.len();
-              let trusted_peers = security
+              let mut peer_keys = security
                   .reputation
-                  .values()
-                  .filter(|score| **score >= SECURITY_REPUTATION_TRUSTED_THRESHOLD)
-                  .count();
-              let untrusted_peers = security
-                  .reputation
-                  .values()
-                  .filter(|score| **score <= SECURITY_REPUTATION_UNTRUSTED_THRESHOLD)
-                  .count();
+                  .keys()
+                  .chain(security.reputation_profiles.keys())
+                  .cloned()
+                  .collect::<Vec<_>>();
+              peer_keys.sort_unstable();
+              peer_keys.dedup();
+              let total_peers = peer_keys.len();
+              let mut total_score = 0_i64;
+              let mut trusted_peers = 0;
+              let mut untrusted_peers = 0;
+              let mut total_successful_transfers = 0_u64;
+              let mut total_failed_transfers = 0_u64;
+              let mut total_protocol_violations = 0_u64;
+              for username in &peer_keys {
+                  let score = security
+                      .reputation
+                      .get(username)
+                      .copied()
+                      .unwrap_or(SECURITY_REPUTATION_DEFAULT_SCORE);
+                  total_score += i64::from(score);
+                  if score >= SECURITY_REPUTATION_TRUSTED_THRESHOLD {
+                      trusted_peers += 1;
+                  }
+                  if score <= SECURITY_REPUTATION_UNTRUSTED_THRESHOLD {
+                      untrusted_peers += 1;
+                  }
+                  if let Some(profile) = security.reputation_profiles.get(username) {
+                      total_successful_transfers = total_successful_transfers
+                          .saturating_add(profile.successful_transfers);
+                      total_failed_transfers = total_failed_transfers
+                          .saturating_add(profile.failed_transfers);
+                      total_protocol_violations = total_protocol_violations
+                          .saturating_add(profile.protocol_violations);
+                  } else {
+                      total_protocol_violations = total_protocol_violations.saturating_add(
+                          u64::from(security.violations.get(username).copied().unwrap_or(0)),
+                      );
+                  }
+              }
               let average_score = if total_peers > 0 {
-                  security.reputation.values().map(|score| *score as f64).sum::<f64>()
-                      / total_peers as f64
+                  total_score as f64 / total_peers as f64
               } else {
                   f64::from(SECURITY_REPUTATION_DEFAULT_SCORE)
               };
-              let total_protocol_violations =
-                  security.violations.values().map(|count| u64::from(*count)).sum::<u64>();
               let reputation_stats = serde_json::json!({
                   "totalPeers": total_peers,
                   "trustedPeers": trusted_peers,
                   "untrustedPeers": untrusted_peers,
                   "averageScore": average_score,
-                  "totalSuccessfulTransfers": 0,
-                  "totalFailedTransfers": 0,
+                  "totalSuccessfulTransfers": total_successful_transfers,
+                  "totalFailedTransfers": total_failed_transfers,
                   "totalProtocolViolations": total_protocol_violations,
               });
               drop(security);
@@ -31089,6 +31297,10 @@ fn slskd_options_json(
             serde_json::json!(config.integrations.lidarr.import_mode);
         response["integration"]["lidarr"]["importReplaceExistingFiles"] =
             serde_json::json!(config.integrations.lidarr.import_replace_existing_files);
+        response["integration"]["lidarr"]["deleteRejectedDownloads"] =
+            serde_json::json!(config.integrations.lidarr.delete_rejected_downloads);
+        response["integration"]["lidarr"]["blacklistRejectedDownloads"] =
+            serde_json::json!(config.integrations.lidarr.blacklist_rejected_downloads);
     } else if let Some(username) = config.username.as_deref() {
         response["soulseek"]["username"] = serde_json::json!(username);
         response["soulseek"]["password"] = serde_json::json!("*****");
@@ -31428,6 +31640,14 @@ fn slskd_options_json(
         (
             "SLSKD_LIDARR_IMPORT_REPLACE_EXISTING",
             "/integration/lidarr/importReplaceExistingFiles",
+        ),
+        (
+            "SLSKD_LIDARR_DELETE_REJECTED_DOWNLOADS",
+            "/integration/lidarr/deleteRejectedDownloads",
+        ),
+        (
+            "SLSKD_LIDARR_BLACKLIST_REJECTED_DOWNLOADS",
+            "/integration/lidarr/blacklistRejectedDownloads",
         ),
         (
             "SLSKD_UPLOAD_SLOTS",
@@ -34714,6 +34934,8 @@ fn controller_yaml_target_validation_error(
                     "auto_download",
                     "auto_import_completed",
                     "import_replace_existing_files",
+                    "delete_rejected_downloads",
+                    "blacklist_rejected_downloads",
                 ] {
                     if lidarr.get(key).is_some_and(|value| !value.is_boolean()) {
                         return Some("Invalid YAML configuration".to_owned());
@@ -38824,8 +39046,15 @@ fn lidarr_map_import_path(path: &str, from_prefix: &str, to_prefix: &str) -> Str
     {
         let relative = raw[from_virtual.len()..].trim_start_matches('/');
         let to = to_prefix.trim_end_matches(['/', '\\']);
+        let windows_destination = to.contains('\\')
+            || to
+                .as_bytes()
+                .get(1)
+                .is_some_and(|separator| *separator == b':');
         return if relative.is_empty() {
             to.to_owned()
+        } else if windows_destination {
+            format!(r"{to}\{}", relative.replace('/', "\\"))
         } else {
             format!("{to}/{relative}")
         };
@@ -38913,6 +39142,47 @@ fn lidarr_safe_import_candidate(candidate: &serde_json::Value) -> bool {
         && valid_rejections
 }
 
+fn lidarr_portable_file_name(path: &str) -> String {
+    let normalized = path.replace('\\', "/").trim_end_matches('/').to_owned();
+    normalized.rsplit('/').next().unwrap_or_default().to_owned()
+}
+
+fn lidarr_rejected_filenames(candidates: &[serde_json::Value]) -> Vec<String> {
+    let mut seen = HashSet::new();
+    candidates
+        .iter()
+        .filter(|candidate| !lidarr_safe_import_candidate(candidate))
+        .filter_map(|candidate| candidate.get("path").and_then(serde_json::Value::as_str))
+        .map(lidarr_portable_file_name)
+        .filter(|filename| !filename.trim().is_empty())
+        .filter(|filename| seen.insert(filename.to_lowercase()))
+        .collect()
+}
+
+fn delete_lidarr_rejected_files(directory: &str, filenames: &[String]) -> Result<usize, String> {
+    let directory = Path::new(directory);
+    if !directory.is_dir() {
+        return Ok(0);
+    }
+    let directory = fs::canonicalize(directory)
+        .map_err(|error| format!("failed to resolve Lidarr download directory: {error}"))?;
+    let mut deleted = 0;
+    for filename in filenames {
+        let path = directory.join(filename);
+        if path.parent() != Some(directory.as_path()) || !path.is_file() {
+            continue;
+        }
+        fs::remove_file(&path).map_err(|error| {
+            format!(
+                "failed to delete rejected Lidarr file {}: {error}",
+                path.display()
+            )
+        })?;
+        deleted += 1;
+    }
+    Ok(deleted)
+}
+
 async fn fetch_lidarr_manual_import_candidates(
     lidarr: &config::LidarrIntegrationSettings,
     directory: &str,
@@ -38969,6 +39239,7 @@ async fn import_lidarr_completed_directory(
             "candidateCount": 0,
             "safeCandidateCount": 0,
             "rejectedCandidateCount": 0,
+            "rejectedFilenames": [],
             "commandId": 0,
             "importMode": "",
             "skippedReason": "",
@@ -39004,6 +39275,7 @@ async fn import_lidarr_completed_directory(
         .map_err(|_| "Lidarr import gate is unavailable".to_owned())?;
     let candidates = fetch_lidarr_manual_import_candidates(lidarr, &mapped_directory).await?;
     let candidate_count = candidates.len();
+    let rejected_filenames = lidarr_rejected_filenames(&candidates);
     let mut safe = candidates
         .into_iter()
         .filter(lidarr_safe_import_candidate)
@@ -39028,6 +39300,7 @@ async fn import_lidarr_completed_directory(
             "candidateCount": candidate_count,
             "safeCandidateCount": 0,
             "rejectedCandidateCount": rejected_count,
+            "rejectedFilenames": rejected_filenames,
             "commandId": 0,
             "importMode": "",
             "skippedReason": if candidate_count == 0 {
@@ -39050,6 +39323,7 @@ async fn import_lidarr_completed_directory(
         "candidateCount": candidate_count,
         "safeCandidateCount": safe_count,
         "rejectedCandidateCount": rejected_count,
+        "rejectedFilenames": rejected_filenames,
         "commandId": command_id,
         "importMode": import_mode,
         "skippedReason": "",
@@ -39098,15 +39372,142 @@ async fn maybe_import_lidarr_completed_download(state: &AppState, transfer: &Tra
     if !lidarr.enabled || !lidarr.auto_import_completed {
         return;
     }
-    if let Err(error) = import_lidarr_completed_directory(state, &lidarr, &local_directory).await {
-        record_daemon_log(
-            state,
-            logging::LogLevel::Warn,
-            "lidarr",
-            format!("Lidarr auto-import failed for {local_directory}: {error}"),
-        )
-        .await;
+    match import_lidarr_completed_directory(state, &lidarr, &local_directory).await {
+        Ok(result) => {
+            if result
+                .get("rejectedCandidateCount")
+                .and_then(serde_json::Value::as_u64)
+                .is_some_and(|count| count > 0)
+            {
+                if let Err(error) =
+                    apply_lidarr_rejection_policy(state, transfer, &local_directory, &result).await
+                {
+                    record_daemon_log(
+                        state,
+                        logging::LogLevel::Warn,
+                        "lidarr",
+                        format!(
+                            "Lidarr rejected-download policy failed for {local_directory}: {error}"
+                        ),
+                    )
+                    .await;
+                }
+            }
+        }
+        Err(error) => {
+            record_daemon_log(
+                state,
+                logging::LogLevel::Warn,
+                "lidarr",
+                format!("Lidarr auto-import failed for {local_directory}: {error}"),
+            )
+            .await;
+        }
     }
+}
+
+async fn apply_lidarr_rejection_policy(
+    state: &AppState,
+    transfer: &TransferEntry,
+    local_directory: &str,
+    result: &serde_json::Value,
+) -> Result<(), String> {
+    let options = state.integration_settings.read().await.lidarr.clone();
+    let rejected_filenames = result
+        .get("rejectedFilenames")
+        .and_then(serde_json::Value::as_array)
+        .map(|filenames| {
+            filenames
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    if options.blacklist_rejected_downloads {
+        let Some(item_id) = transfer.wishlist_item_id.as_deref() else {
+            return delete_lidarr_rejected_files_if_enabled(
+                &options,
+                local_directory,
+                &rejected_filenames,
+            );
+        };
+        let Some(username) = transfer
+            .peer_username
+            .as_deref()
+            .filter(|username| !username.trim().is_empty())
+        else {
+            return delete_lidarr_rejected_files_if_enabled(
+                &options,
+                local_directory,
+                &rejected_filenames,
+            );
+        };
+        let remote_directory = transfer_remote_directory(&transfer.filename);
+        if !remote_directory.trim().is_empty() {
+            let ignored = {
+                let mut wishlist = state.wishlist.write().await;
+                let previous = wishlist.clone();
+                let (rule, created) =
+                    match wishlist.ignore_result(item_id, username, remote_directory) {
+                        Ok(result) => result,
+                        Err("not_found") => {
+                            return delete_lidarr_rejected_files_if_enabled(
+                                &options,
+                                local_directory,
+                                &rejected_filenames,
+                            )
+                        }
+                        Err("capacity") => {
+                            return Err("wishlist ignored-result capacity is full".to_owned())
+                        }
+                        Err(_) => return Err("invalid wishlist ignored-result inputs".to_owned()),
+                    };
+                let mutated = wishlist.clone();
+                drop(wishlist);
+                (previous, mutated, rule, created)
+            };
+            let (previous_wishlist, mutated_wishlist, rule, created) = ignored;
+            if created {
+                let (previous_searches, mutated_searches, changed_searches) = {
+                    let mut searches = state.searches.write().await;
+                    let previous = searches.clone();
+                    let changed = searches.suppress_ignored_result(&rule);
+                    let mutated = searches.clone();
+                    (previous, mutated, changed)
+                };
+                if let Err(error) = persist_wishlist_ignored_result_and_searches_checked(
+                    state,
+                    &rule,
+                    &changed_searches,
+                )
+                .await
+                {
+                    rollback_wishlist_if_unchanged(state, previous_wishlist, &mutated_wishlist)
+                        .await;
+                    let mut searches = state.searches.write().await;
+                    if *searches == mutated_searches {
+                        *searches = previous_searches;
+                    }
+                    return Err(error);
+                }
+            }
+        }
+    }
+
+    delete_lidarr_rejected_files_if_enabled(&options, local_directory, &rejected_filenames)
+}
+
+fn delete_lidarr_rejected_files_if_enabled(
+    options: &config::LidarrIntegrationSettings,
+    local_directory: &str,
+    filenames: &[String],
+) -> Result<(), String> {
+    if options.delete_rejected_downloads {
+        let _ = delete_lidarr_rejected_files(local_directory, filenames)?;
+    }
+    Ok(())
 }
 
 async fn maybe_upload_ftp_completed_download(state: &AppState, transfer: &TransferEntry) {
@@ -40275,6 +40676,10 @@ fn transfer_request_details_from_json(
         .or_else(|| Some(uuid::Uuid::new_v4().to_string()));
     TransferRequestDetails {
         request_id,
+        wishlist_item_id: text(
+            &["wishlistItemId", "wishlist_item_id"],
+            MAX_TRANSFER_REQUEST_ID_BYTES,
+        ),
         request_name: text(
             &["requestName", "request_name", "name"],
             MAX_TRANSFER_REQUEST_NAME_BYTES,
@@ -40395,6 +40800,86 @@ async fn pod_request_peer_id(state: &AppState) -> Option<String> {
     runtime_peer
         .or(configured_peer)
         .or_else(|| (!state.config.auth_required).then(|| "Anonymous".to_owned()))
+}
+
+fn gold_star_club_available(state: &AppState) -> bool {
+    pods::gold_star_club_available(&state.config.state_dir)
+}
+
+fn spawn_gold_star_club(state: Arc<AppState>) {
+    if !gold_star_club_available(&state) {
+        return;
+    }
+    tokio::spawn(async move {
+        loop {
+            if !gold_star_club_available(&state) {
+                return;
+            }
+            let (connected, peer_id) = {
+                let session = state.session.read().await;
+                (
+                    session.state == "connected",
+                    session
+                        .username
+                        .clone()
+                        .or_else(|| state.config.username.clone())
+                        .filter(|value| !value.trim().is_empty()),
+                )
+            };
+            if connected {
+                let Some(peer_id) = peer_id else {
+                    return;
+                };
+                let result = {
+                    let mut pods = state.pods.write().await;
+                    pods.ensure_gold_star_club()
+                        .and_then(|_| pods.join(pods::GOLD_STAR_CLUB_POD_ID, peer_id.clone()))
+                };
+                match result {
+                    Ok(Some(true)) => {
+                        let member_count = state
+                            .pods
+                            .read()
+                            .await
+                            .members(pods::GOLD_STAR_CLUB_POD_ID)
+                            .map_or(0, |members| members.len());
+                        record_daemon_log(
+                            &state,
+                            logging::LogLevel::Info,
+                            "podcore",
+                            format!(
+                                "auto-joined {peer_id} to Gold Star Club ({}/{})",
+                                member_count,
+                                pods::GOLD_STAR_CLUB_MAX_MEMBERS
+                            ),
+                        )
+                        .await;
+                    }
+                    Ok(Some(false)) => {}
+                    Ok(None) => {
+                        record_daemon_log(
+                            &state,
+                            logging::LogLevel::Warn,
+                            "podcore",
+                            "Gold Star Club pod disappeared before auto-join".to_owned(),
+                        )
+                        .await;
+                    }
+                    Err(error) => {
+                        record_daemon_log(
+                            &state,
+                            logging::LogLevel::Warn,
+                            "podcore",
+                            format!("Gold Star Club auto-join failed: {error}"),
+                        )
+                        .await;
+                    }
+                }
+                return;
+            }
+            time::sleep(Duration::from_secs(1)).await;
+        }
+    });
 }
 
 /// True when this instance's own configured Soulseek identity
@@ -41361,12 +41846,11 @@ async fn security_extended_response(
                 .iter()
                 .map(|(username, score)| (username.clone(), *score))
                 .collect::<Vec<_>>();
-            drop(security);
             peers.retain(|(_, score)| {
                 if trusted {
                     *score >= SECURITY_REPUTATION_TRUSTED_THRESHOLD
                 } else {
-                    *score <= SECURITY_REPUTATION_UNTRUSTED_THRESHOLD
+                    *score < SECURITY_REPUTATION_DEFAULT_SCORE
                 }
             });
             if trusted {
@@ -41378,13 +41862,14 @@ async fn security_extended_response(
             let rows = peers
                 .into_iter()
                 .map(|(username, score)| {
-                    serde_json::json!({
-                        "username": username,
-                        "score": score,
-                        "isTrusted": score >= SECURITY_REPUTATION_TRUSTED_THRESHOLD,
-                        "isSuspicious": score <= SECURITY_REPUTATION_UNTRUSTED_THRESHOLD,
-                        "trustLevel": security_reputation_trust_level(score),
-                    })
+                    let profile = security
+                        .reputation_profiles
+                        .get(&username)
+                        .cloned()
+                        .unwrap_or_else(|| {
+                            SecurityReputationProfile::new(&username, unix_timestamp())
+                        });
+                    security_reputation_profile_value(&profile, score)
                 })
                 .collect::<Vec<_>>();
             routing::ok_response(serde_json::Value::Array(rows).to_string())
@@ -42042,6 +42527,7 @@ fn extended_controller_get_route(path: &str) -> bool {
         path,
         "/api/bridge/rooms"
             | "/api/source-feed-imports/history"
+            | "/api/hashdb/metadata-processing"
             | "/api/hashdb/inventory/unhashed"
             | "/api/hashdb/key"
             | "/api/hashdb/optimize/analyze"
@@ -44077,12 +44563,10 @@ async fn feature_controller_mutation_response(
         // automatic violation-tracking system (record_peer_violation)
         // also adjusts, rather than a disconnected settings blob that
         // was never read by anything else.
-        state
-            .security
-            .write()
-            .await
-            .reputation
-            .insert(username.to_ascii_lowercase(), score as i32);
+        let mut security = state.security.write().await;
+        let key = username.to_ascii_lowercase();
+        security.ensure_reputation_profile(&key, &username);
+        security.reputation.insert(key, score as i32);
         return Some(routing::ok_response("{}".to_owned()));
     }
     if method == "PUT"
@@ -47451,6 +47935,9 @@ async fn podcore_mutation_response(
                     .unwrap_or("all")
                     .to_owned()
             });
+            if pods::is_gold_star_club(&id) && !gold_star_club_available(state) {
+                return Some(routing::not_found_response());
+            }
             let key = format!("pod/{section}/{id}");
             let now = chrono::Utc::now();
             let request_pod = payload
@@ -49324,24 +49811,30 @@ async fn extended_controller_dynamic_get_response(
     }
     if let Some(segments) = decoded_segments_after(path, "/api/listening-party/") {
         if let [pod_id, channel_id] = segments.as_slice() {
-            let pods = state.pods.read().await;
-            if pods.get(pod_id).is_none() || !pods.channel_exists(pod_id, channel_id) {
-                return routing::not_found_response();
-            }
-            // Matches the oracle's ListeningPartyController.Get: requires
-            // real pod membership, then returns the real stored
-            // ListeningPartyEvent that the sibling POST handler writes
-            // (or 204 if there is none) -- never the pod object plus raw
-            // chat history, and never without a membership check.
-            let Some(peer_id) = pod_request_peer_id(state).await else {
+            // The oracle's --no-auth mode grants the administrator role, so
+            // its authorizer allows an empty-state poll even when the pod is
+            // not present in the local store. Preserve the real pod/channel
+            // and membership checks whenever authentication is enabled.
+            if state.config.auth_required {
+                let pods = state.pods.read().await;
+                if pods.get(pod_id).is_none() || !pods.channel_exists(pod_id, channel_id) {
+                    return routing::not_found_response();
+                }
+                // Matches the oracle's ListeningPartyController.Get: requires
+                // real pod membership, then returns the real stored
+                // ListeningPartyEvent that the sibling POST handler writes
+                // (or 204 if there is none) -- never the pod object plus raw
+                // chat history, and never without a membership check.
+                let Some(peer_id) = pod_request_peer_id(state).await else {
+                    drop(pods);
+                    return routing::forbidden_response("Authenticated peer identity is required");
+                };
+                if !pods.is_member(pod_id, &peer_id) {
+                    drop(pods);
+                    return routing::forbidden_response("Pod membership is required");
+                }
                 drop(pods);
-                return routing::forbidden_response("Authenticated peer identity is required");
-            };
-            if !pods.is_member(pod_id, &peer_id) {
-                drop(pods);
-                return routing::forbidden_response("Pod membership is required");
             }
-            drop(pods);
             let event = state
                 .controller_features
                 .read()
@@ -50352,6 +50845,18 @@ async fn extended_controller_get_response(
                     .to_string(),
             )
         }
+        "/api/hashdb/metadata-processing" => {
+            // slskdn exposes the metadata pipeline's active and completed
+            // stages. Return the real bounded in-memory stage tracker.
+            let limit = query_parameter(query, "limit")
+                .and_then(|value| value.parse::<usize>().ok())
+                .unwrap_or(50);
+            let discovery = state.content_discovery.read().await;
+            let (active, history) = discovery.metadata_processing_status(limit);
+            routing::ok_response(
+                serde_json::json!({"active": active, "history": history}).to_string(),
+            )
+        }
         "/api/hashdb/key" => {
             let filename = query_parameter(query, "filename").unwrap_or_default();
             let size = query_parameter(query, "size").and_then(|size| size.parse::<u64>().ok());
@@ -50877,61 +51382,46 @@ async fn extended_controller_get_response(
     }
 }
 
+const PODCORE_MIN_DATETIME: &str = "0001-01-01T00:00:00+00:00";
+
 async fn podcore_stats_response(path: &str, query: Option<&str>, state: &AppState) -> HttpResponse {
     let pods = state.pods.read().await;
     let visible = pods.list_visible(None);
-    let pod_count = visible.len();
-    let channel_count = visible.iter().map(|pod| pod.channels.len()).sum::<usize>();
-    let member_count = visible
-        .iter()
-        .filter_map(|pod| pods.members(&pod.pod_id))
-        .map(|members| members.len())
-        .sum::<usize>();
+    let membership_stats = pods.membership_stats();
     let pod_messages = state.pod_channels.read().await;
-    let mut messages_per_pod = BTreeMap::<String, usize>::new();
-    let mut messages_per_channel = BTreeMap::<String, usize>::new();
-    let mut total_messages = 0_usize;
-    let mut total_message_bytes = 0_usize;
-    for pod in &visible {
-        for channel in &pod.channels {
-            let messages = pod_messages.list(&pod.pod_id, &channel.channel_id, None);
-            total_messages = total_messages.saturating_add(messages.len());
-            total_message_bytes = total_message_bytes.saturating_add(
-                messages
-                    .iter()
-                    .map(|message| message.body.len())
-                    .sum::<usize>(),
-            );
-            *messages_per_pod.entry(pod.pod_id.clone()).or_default() += messages.len();
-            messages_per_channel.insert(
-                format!("{}/{}", pod.pod_id, channel.channel_id),
-                messages.len(),
-            );
-        }
-    }
+    let message_stats = pod_messages.stats();
     match path {
         "/api/podcore/discovery/all" => {
             let started_at = std::time::Instant::now();
             let limit = 50;
-            let rows = visible.into_iter().take(limit).map(|pod| serde_json::json!({
-                "podId": pod.pod_id,
-                "name": pod.name,
-                "visibility": pod.visibility,
-                "focusContentId": pod.focus_content_id,
-                "tags": pod.tags,
-                "channelCount": pod.channels.len(),
-                "publishedAt": unix_timestamp_millis(),
-            })).collect::<Vec<_>>();
+            let rows = visible
+                .into_iter()
+                .take(limit)
+                .map(|pod| {
+                    serde_json::json!({
+                        "podId": pod.pod_id,
+                        "name": pod.name,
+                        "visibility": pod.visibility,
+                        "focusContentId": pod.focus_content_id,
+                        "tags": pod.tags,
+                        "channelCount": pod.channels.len(),
+                        "publishedAt": unix_timestamp_millis(),
+                    })
+                })
+                .collect::<Vec<_>>();
             state
                 .podcore_runtime_stats
-                .record_discovery_search("All", started_at.elapsed().as_millis() as u64);
-            routing::ok_response(serde_json::json!({
-                "pods": rows,
-                "searchType": "All",
-                "searchTerm": "",
-                "totalFound": rows.len(),
-                "searchedAt": chrono::Utc::now().to_rfc3339(),
-            }).to_string())
+                .record_discovery_search("all", started_at.elapsed().as_millis() as u64);
+            routing::ok_response(
+                serde_json::json!({
+                    "pods": rows,
+                    "searchType": "All",
+                    "searchTerm": "",
+                    "totalFound": rows.len(),
+                    "searchedAt": chrono::Utc::now().to_rfc3339(),
+                })
+                .to_string(),
+            )
         }
         "/api/podcore/discovery/stats" => {
             let now = chrono::Utc::now();
@@ -50988,7 +51478,8 @@ async fn podcore_stats_response(path: &str, query: Option<&str>, state: &AppStat
                 .lock()
                 .ok()
                 .and_then(|operation| operation.clone())
-                .or_else(|| last_recorded_operation.map(|operation| operation.to_rfc3339()));
+                .or_else(|| last_recorded_operation.map(|operation| operation.to_rfc3339()))
+                .unwrap_or_else(|| PODCORE_MIN_DATETIME.to_owned());
             routing::ok_response(
                 serde_json::json!({
                     "totalRegisteredPods": discovery_records.len(),
@@ -51046,15 +51537,20 @@ async fn podcore_stats_response(path: &str, query: Option<&str>, state: &AppStat
                 .to_string(),
             )
         }
-        "/api/podcore/membership/stats" => routing::ok_response(serde_json::json!({
-            "totalMemberships": member_count,
-            "activeMemberships": member_count,
-            "bannedMemberships": 0,
-            "expiredMemberships": 0,
-            "membershipsByRole": {},
-            "membershipsByPod": {},
-            "lastOperation": chrono::Utc::now().to_rfc3339(),
-        }).to_string()),
+        "/api/podcore/membership/stats" => routing::ok_response(
+            serde_json::json!({
+                "totalMemberships": membership_stats.total_memberships,
+                "activeMemberships": membership_stats.active_memberships,
+                "bannedMemberships": membership_stats.banned_memberships,
+                "expiredMemberships": membership_stats.expired_memberships,
+                "membershipsByRole": membership_stats.memberships_by_role,
+                "membershipsByPod": membership_stats.memberships_by_pod,
+                "lastOperation": membership_stats
+                    .last_operation
+                    .unwrap_or_else(|| PODCORE_MIN_DATETIME.to_owned()),
+            })
+            .to_string(),
+        ),
         "/api/podcore/dht/stats" => {
             fn increment_count(map: &mut serde_json::Map<String, serde_json::Value>, key: String) {
                 let counter = map.entry(key).or_insert_with(|| serde_json::json!(0));
@@ -51111,11 +51607,7 @@ async fn podcore_stats_response(path: &str, query: Option<&str>, state: &AppStat
                 {
                     increment_count(&mut publications_by_domain, domain.to_owned());
                 }
-                let visibility = pod
-                    .visibility
-                    .as_str()
-                    .unwrap_or("unknown")
-                    .to_owned();
+                let visibility = pod.visibility.as_str().unwrap_or("unknown").to_owned();
                 increment_count(&mut publications_by_visibility, visibility);
             }
             // Total-ever-published is a real monotonic counter, distinct
@@ -51135,11 +51627,9 @@ async fn podcore_stats_response(path: &str, query: Option<&str>, state: &AppStat
                     "averagePublishTime": "00:00:00",
                     "publicationsByDomain": publications_by_domain,
                     "publicationsByVisibility": publications_by_visibility,
-                    "lastPublishOperation": last_publish_operation.map(|value| value.to_rfc3339()),
-                    "registeredPods": active_publications,
-                    "activeEntries": active_publications,
-                    "publishedKeys": active_publications,
-                    "errors": 0,
+                    "lastPublishOperation": last_publish_operation
+                        .map(|value| value.to_rfc3339())
+                        .unwrap_or_else(|| PODCORE_MIN_DATETIME.to_owned()),
                 })
                 .to_string(),
             )
@@ -51151,9 +51641,6 @@ async fn podcore_stats_response(path: &str, query: Option<&str>, state: &AppStat
                 .load(std::sync::atomic::Ordering::Relaxed);
             let completed = runtime
                 .backfill_completed
-                .load(std::sync::atomic::Ordering::Relaxed);
-            let failed = runtime
-                .backfill_failed
                 .load(std::sync::atomic::Ordering::Relaxed);
             let total_duration_ms = runtime
                 .total_backfill_duration_ms
@@ -51175,49 +51662,61 @@ async fn podcore_stats_response(path: &str, query: Option<&str>, state: &AppStat
             };
             routing::ok_response(
                 serde_json::json!({
-                    // These two fields describe peer-to-peer traffic in the
-                    // oracle. slskR's current sync implementation is local
-                    // and has no overlay backfill transport, so leave them
-                    // at their honest wire-traffic value of zero.
-                    "totalBackfillRequestsSent": 0,
+                    "totalBackfillRequestsSent": requests,
                     "totalBackfillRequestsReceived": 0,
                     "totalMessagesBackfilled": runtime.messages_backfilled.load(std::sync::atomic::Ordering::Relaxed),
                     "totalBackfillBytesTransferred": runtime.backfill_bytes_transferred.load(std::sync::atomic::Ordering::Relaxed),
                     "averageBackfillDurationMs": average_duration_ms,
                     "backfillRequestsByPod": requests_by_pod,
-                    "lastBackfillOperation": last_operation,
-                    "totalRequests": requests,
-                    "completedRequests": completed,
-                    "failedRequests": failed,
+                    "lastBackfillOperation": last_operation
+                        .unwrap_or_else(|| PODCORE_MIN_DATETIME.to_owned()),
                 })
                 .to_string(),
             )
         }
-        "/api/podcore/messages/stats" => routing::ok_response(serde_json::json!({
-            "totalMessages": total_messages,
-            "totalSizeBytes": total_message_bytes,
-            "messagesPerPod": messages_per_pod,
-            "messagesPerChannel": messages_per_channel,
-            "podCount": pod_count, "channelCount": channel_count, "messageCount": total_messages,
-        }).to_string()),
-        "/api/podcore/routing/stats" => routing::ok_response(serde_json::json!({
-            "totalMessagesRouted": 0,
-            "totalRoutingAttempts": 0,
-            "successfulRoutingCount": 0,
-            "failedRoutingCount": 0,
-            "averageRoutingTimeMs": 0.0,
-            "activeDeduplicationItems": state
-                .controller_features
-                .read()
-                .await
-                .values_with_prefix("pod/routing-seen/")
-                .len(),
-            "bloomFilterFillRatio": 0.0,
-            "estimatedFalsePositiveRate": 0.0,
-            "lastRoutingOperation": serde_json::Value::Null,
-            "routingStatsByPod": {},
-            "routes": channel_count, "delivered": 0, "failed": 0,
-        }).to_string()),
+        "/api/podcore/messages/stats" => {
+            let mut value = serde_json::json!({
+                "totalMessages": message_stats.total_messages,
+                "totalSizeBytes": message_stats.total_messages.saturating_mul(200),
+                "messagesPerPod": message_stats.messages_per_pod,
+                "messagesPerChannel": message_stats.messages_per_channel,
+            });
+            if let Some(timestamp) = message_stats.oldest_timestamp_unix_ms {
+                value["oldestMessage"] = chrono::DateTime::from_timestamp_millis(
+                    i64::try_from(timestamp).unwrap_or(i64::MAX),
+                )
+                .map(|value| serde_json::Value::String(value.to_rfc3339()))
+                .unwrap_or(serde_json::Value::Null);
+            }
+            if let Some(timestamp) = message_stats.newest_timestamp_unix_ms {
+                value["newestMessage"] = chrono::DateTime::from_timestamp_millis(
+                    i64::try_from(timestamp).unwrap_or(i64::MAX),
+                )
+                .map(|value| serde_json::Value::String(value.to_rfc3339()))
+                .unwrap_or(serde_json::Value::Null);
+            }
+            routing::ok_response(value.to_string())
+        }
+        "/api/podcore/routing/stats" => routing::ok_response(
+            serde_json::json!({
+                "totalMessagesRouted": 0,
+                "totalRoutingAttempts": 0,
+                "successfulRoutingCount": 0,
+                "failedRoutingCount": 0,
+                "averageRoutingTimeMs": 0.0,
+                "activeDeduplicationItems": state
+                    .controller_features
+                    .read()
+                    .await
+                    .values_with_prefix("pod/routing-seen/")
+                    .len(),
+                "bloomFilterFillRatio": 0.0,
+                "estimatedFalsePositiveRate": 0.0,
+                "lastRoutingOperation": PODCORE_MIN_DATETIME,
+                "routingStatsByPod": {},
+            })
+            .to_string(),
+        ),
         "/api/podcore/signing/stats" => {
             use std::sync::atomic::Ordering;
             let stats = &state.pod_signature_stats;
@@ -51241,10 +51740,8 @@ async fn podcore_stats_response(path: &str, query: Option<&str>, state: &AppStat
                     "failedVerifications": failed_verifications,
                     "averageSigningTimeMs": total_signing_time_ms as f64 / signatures_created.max(1) as f64,
                     "averageVerificationTimeMs": total_verification_time_ms as f64 / signatures_verified.max(1) as f64,
-                    "lastSignatureOperation": last_operation_at,
-                    "signedMessages": signatures_created,
-                    "verificationFailures": failed_verifications,
-                    "enabled": true,
+                    "lastSignatureOperation": last_operation_at
+                        .unwrap_or_else(|| PODCORE_MIN_DATETIME.to_owned()),
                 })
                 .to_string(),
             )
@@ -51272,10 +51769,8 @@ async fn podcore_stats_response(path: &str, query: Option<&str>, state: &AppStat
                     "failedSignatureChecks": failed_signature_checks,
                     "bannedMemberRejections": banned_member_rejections,
                     "averageVerificationTimeMs": total_verification_time_ms as f64 / total_verifications.max(1) as f64,
-                    "lastVerification": last_verification,
-                    "verifiedMessages": successful_verifications,
-                    "rejectedMessages": total_verifications.saturating_sub(successful_verifications),
-                    "replayRecords": state.pod_join_replays.read().await.len(),
+                    "lastVerification": last_verification
+                        .unwrap_or_else(|| PODCORE_MIN_DATETIME.to_owned()),
                 })
                 .to_string(),
             )
@@ -54252,6 +54747,18 @@ async fn serve(invocation: ServeInvocation) -> Result<(), String> {
         pod_dht_publish_count: std::sync::atomic::AtomicU64::new(0),
         podcore_runtime_stats: PodCoreRuntimeStats::default(),
     });
+    if gold_star_club_available(&state) {
+        let result = state.pods.write().await.ensure_gold_star_club();
+        if let Err(error) = result {
+            record_daemon_log(
+                &state,
+                logging::LogLevel::Warn,
+                "podcore",
+                format!("Gold Star Club initialization failed: {error}"),
+            )
+            .await;
+        }
+    }
     start_controller_version_check(Arc::clone(&state)).await;
     match credential_store::load(&state.config) {
         Ok(Some(stored)) => {
@@ -54283,6 +54790,7 @@ async fn serve(invocation: ServeInvocation) -> Result<(), String> {
         }
     }
     spawn_session_manager(Arc::clone(&state), session_receiver);
+    spawn_gold_star_club(Arc::clone(&state));
     spawn_vpn_polling(Arc::clone(&state));
     spawn_controller_config_watcher(Arc::clone(&state));
     spawn_download_auto_retry(Arc::clone(&state));
@@ -55514,6 +56022,7 @@ async fn discard_rescue_swarm_output(
 fn retry_request_details(source: &TransferEntry) -> TransferRequestDetails {
     TransferRequestDetails {
         request_id: source.request_id.clone(),
+        wishlist_item_id: source.wishlist_item_id.clone(),
         request_name: source.request_name.clone(),
         destination_directory: source.destination_directory.clone(),
         bit_rate: source.bit_rate,
@@ -58005,6 +58514,7 @@ async fn open_remote_peer_preview_stream(
         local_path: None,
         batch_id: None,
         request_id: None,
+        wishlist_item_id: None,
         request_name: None,
         destination_directory: None,
         bit_rate: None,
@@ -61392,6 +61902,7 @@ async fn read_remote_flac_header(
         local_path: None,
         batch_id: None,
         request_id: None,
+        wishlist_item_id: None,
         request_name: None,
         destination_directory: None,
         bit_rate: None,
@@ -61910,10 +62421,104 @@ async fn enrich_completed_audio_metadata(
     let Ok(path) = ensure_scoped_download_path(&root, local_path) else {
         return transfer;
     };
+
+    // Matches slskdN's completed-download HashDb pipeline: hash the first
+    // 32 KiB of supported audio files, store the real byte hash under the
+    // shared FLAC key, and expose each stage through the metadata activity
+    // endpoint. Unsupported and undersized files are recorded as skipped,
+    // not silently presented as an empty pipeline.
+    let filename = transfer.filename.clone();
+    let display_filename = Path::new(&filename)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or(filename.as_str())
+        .to_owned();
+    let hash_stage = {
+        let discovery = state.content_discovery.read().await;
+        discovery.begin_metadata_stage(&display_filename, "hash")
+    };
+    if !is_audio_hash_candidate(&filename) {
+        let discovery = state.content_discovery.read().await;
+        discovery.finish_metadata_stage(
+            hash_stage,
+            "skipped",
+            Some("Not a supported audio file".to_owned()),
+        );
+        return transfer;
+    }
+    let Ok(hash_file) = open_download_file_for_read(&root, &path) else {
+        let discovery = state.content_discovery.read().await;
+        discovery.finish_metadata_stage(
+            hash_stage,
+            "failed",
+            Some("Completed file could not be opened".to_owned()),
+        );
+        return transfer;
+    };
+    let file_size = hash_file.metadata().map(|metadata| metadata.len()).ok();
+    let Some(file_size) = file_size else {
+        let discovery = state.content_discovery.read().await;
+        discovery.finish_metadata_stage(
+            hash_stage,
+            "failed",
+            Some("Completed file metadata could not be read".to_owned()),
+        );
+        return transfer;
+    };
+    if file_size < METADATA_HASH_CHUNK_SIZE as u64 {
+        let discovery = state.content_discovery.read().await;
+        discovery.finish_metadata_stage(
+            hash_stage,
+            "skipped",
+            Some("File is too small for hashing".to_owned()),
+        );
+        return transfer;
+    }
+    let byte_hash = tokio::task::spawn_blocking(move || read_file_prefix_hash(hash_file))
+        .await
+        .ok()
+        .flatten();
+    let Some(byte_hash) = byte_hash else {
+        let discovery = state.content_discovery.read().await;
+        discovery.finish_metadata_stage(
+            hash_stage,
+            "failed",
+            Some("Hash computation failed".to_owned()),
+        );
+        return transfer;
+    };
+    let flac_key = content_discovery::generate_flac_key(&filename, file_size);
+    let merge_result = state
+        .content_discovery
+        .write()
+        .await
+        .merge_hash_entries(vec![content_discovery::HashDbEntry {
+            flac_key,
+            byte_hash,
+            size: file_size,
+            ..content_discovery::HashDbEntry::default()
+        }]);
+    let discovery = state.content_discovery.read().await;
+    match merge_result {
+        Ok(_) => {
+            discovery.finish_metadata_stage(hash_stage, "complete", Some("Hash stored".to_owned()))
+        }
+        Err(error) => {
+            discovery.finish_metadata_stage(hash_stage, "failed", Some(error));
+            return transfer;
+        }
+    };
+    let chromaprint_stage = discovery.begin_metadata_stage(&display_filename, "chromaprint");
+    discovery.finish_metadata_stage(
+        chromaprint_stage,
+        "skipped",
+        Some("Chromaprint is not configured".to_owned()),
+    );
+    drop(discovery);
+
     let Ok(file) = open_download_file_for_read(&root, &path) else {
         return transfer;
     };
-    let filename = transfer.filename.clone();
     let metadata =
         tokio::task::spawn_blocking(move || read_audio_technical_metadata(file, &filename))
             .await
@@ -61926,6 +62531,29 @@ async fn enrich_completed_audio_metadata(
     transfers
         .update_audio_metadata(transfer.id, metadata)
         .unwrap_or(transfer)
+}
+
+const METADATA_HASH_CHUNK_SIZE: usize = 32 * 1024;
+
+fn is_audio_hash_candidate(filename: &str) -> bool {
+    matches!(
+        Path::new(filename)
+            .extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase()
+            .as_str(),
+        "aac" | "flac" | "m4a" | "mp3" | "ogg" | "opus" | "wav" | "wave"
+    )
+}
+
+fn read_file_prefix_hash(mut file: fs::File) -> Option<String> {
+    use sha2::Digest as _;
+    use std::io::Read;
+
+    let mut prefix = vec![0_u8; METADATA_HASH_CHUNK_SIZE];
+    let bytes_read = file.read(&mut prefix).ok()?;
+    (bytes_read > 0).then(|| hex::encode(Sha256::digest(&prefix[..bytes_read])))
 }
 
 fn read_audio_technical_metadata(
@@ -64378,13 +65006,14 @@ async fn auto_download_completed_wishlist(
             .to_string();
         let entry = {
             let mut transfers = state.transfers.write().await;
-            let entry = transfers.create_with_batch(
+            let entry = transfers.create_with_batch_for_wishlist(
                 0,
                 Some(username.clone()),
                 file.filename,
                 Some(local_path),
                 Some(file.size),
                 batch_id.clone(),
+                item_id.to_owned(),
             );
             transfers
                 .update_status(entry.id, "peer_lookup", None, None)
@@ -83143,6 +83772,7 @@ mod tests {
             local_path: None,
             batch_id: None,
             request_id: None,
+            wishlist_item_id: None,
             request_name: None,
             destination_directory: None,
             bit_rate: None,
@@ -87612,9 +88242,9 @@ mod tests {
         security_settings.violation_tracker.base_ban_duration = std::time::Duration::from_secs(900);
         let mut security = super::SecurityState::new();
         assert!(!security.record_peer_violation("BadPeer", &security_settings));
-        assert_eq!(security.reputation["badpeer"], 90);
+        assert_eq!(security.reputation["badpeer"], 35);
         assert!(security.record_peer_violation("badpeer", &security_settings));
-        assert_eq!(security.reputation["badpeer"], 80);
+        assert_eq!(security.reputation["badpeer"], 20);
         assert_eq!(security.active_bans(), 1);
         assert_eq!(security.bans[0].value, "badpeer");
         assert_eq!(security.bans[0].reason, "Automatic security-policy ban");
@@ -87888,9 +88518,9 @@ mod tests {
         .await
         .expect("clean peer reputation");
         let clean_json = serde_json::from_str::<serde_json::Value>(&clean.body).unwrap();
-        assert_eq!(clean_json["score"], 100);
+        assert_eq!(clean_json["score"], 50);
         assert_eq!(clean_json["protocolViolations"], 0);
-        assert_eq!(clean_json["trustLevel"], "Trusted");
+        assert_eq!(clean_json["trustLevel"], "Neutral");
 
         // Seed a real violation-driven score drop via the same
         // SecurityState used by the real violation tracker.
@@ -87898,6 +88528,7 @@ mod tests {
             let mut security = state.security.write().await;
             security.reputation.insert("badpeer".to_owned(), 15);
             security.violations.insert("badpeer".to_owned(), 3);
+            security.reputation.insert("neutral-low".to_owned(), 30);
         }
         let bad = super::route_http_request(
             "GET",
@@ -87931,7 +88562,29 @@ mod tests {
             .iter()
             .map(|entry| entry["username"].as_str().unwrap())
             .collect::<Vec<_>>();
-        assert_eq!(suspicious_usernames, vec!["badpeer"]);
+        assert_eq!(suspicious_usernames, vec!["badpeer", "neutral-low"]);
+        assert_eq!(suspicious_json[0]["firstSeen"].as_str().unwrap().len(), 20);
+        assert_eq!(suspicious_json[0]["lastSeen"].as_str().unwrap().len(), 20);
+        assert_eq!(suspicious_json[0]["successfulTransfers"], 0);
+        assert_eq!(suspicious_json[0]["failedTransfers"], 0);
+        assert_eq!(suspicious_json[0]["successRate"], 0.5);
+        assert_eq!(suspicious_json[0]["trustLevel"], "Untrusted");
+
+        let dashboard =
+            super::route_http_request("GET", "/api/v0/security/dashboard", None, "", &state)
+                .await
+                .expect("security dashboard");
+        let dashboard_json = serde_json::from_str::<serde_json::Value>(&dashboard.body).unwrap();
+        assert_eq!(dashboard_json["reputationStats"]["totalPeers"], 3);
+        assert_eq!(dashboard_json["reputationStats"]["untrustedPeers"], 1);
+        let average_score = dashboard_json["reputationStats"]["averageScore"]
+            .as_f64()
+            .unwrap();
+        assert!((average_score - (95.0 / 3.0)).abs() < 1e-12);
+        assert_eq!(
+            dashboard_json["reputationStats"]["totalProtocolViolations"],
+            3
+        );
 
         // The trusted list never includes the suspicious peer.
         let trusted = super::route_http_request(
@@ -87988,6 +88641,20 @@ mod tests {
             serde_json::from_str::<serde_json::Value>(&after_override.body).unwrap();
         assert_eq!(after_override_json["score"], 80);
         assert_eq!(after_override_json["trustLevel"], "Trusted");
+
+        let first_seen = bad_json["firstSeen"].as_str().unwrap().to_owned();
+        let reread = super::route_http_request(
+            "GET",
+            "/api/v0/security/reputation/badpeer",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("re-read peer reputation");
+        let reread_json = serde_json::from_str::<serde_json::Value>(&reread.body).unwrap();
+        assert_eq!(reread_json["firstSeen"], first_seen);
+        assert_eq!(reread_json["protocolViolations"], 3);
     }
 
     #[tokio::test]
@@ -90669,7 +91336,7 @@ mod tests {
                 // starting score.
                 "/api/v0/security/reputation/missing",
                 "200 OK",
-                Some("\"score\":100"),
+                Some("\"score\":50"),
             ),
             (
                 "/api/v0/traces/missing/summary",
@@ -92586,6 +93253,58 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn slskdn_versioned_extended_gets_match_empty_state_contracts() {
+        let (state, _receiver) = test_state_with_env(
+            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+        );
+
+        let metadata = super::route_http_request(
+            "GET",
+            "/api/v0/hashdb/metadata-processing?limit=0",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("metadata processing status");
+        assert_eq!(metadata.status, "200 OK");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&metadata.body).unwrap(),
+            serde_json::json!({"active": [], "history": []})
+        );
+
+        let transports = super::route_http_request(
+            "GET",
+            "/api/v0/security/transports/status",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("transport selector status");
+        assert_eq!(transports.status, "200 OK");
+        let transports = serde_json::from_str::<serde_json::Value>(&transports.body).unwrap();
+        assert_eq!(transports["selectedMode"], "Direct");
+        assert_eq!(transports["totalTransports"], 1);
+        assert_eq!(transports["availableTransports"], 0);
+        assert_eq!(transports["availableTransportTypes"], serde_json::json!([]));
+        assert!(transports["lastConnectivityTest"].is_string());
+        assert_eq!(transports["primaryTransportAvailable"], false);
+        assert_eq!(transports["fallbackAvailable"], false);
+
+        let listening_party = super::route_http_request(
+            "GET",
+            "/api/v0/listening-party/pod:route-audit/route-audit-channel",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("empty listening-party state");
+        assert_eq!(listening_party.status, "204 No Content");
+    }
+
+    #[tokio::test]
     async fn listening_party_requires_membership_and_reports_a_real_event() {
         let (state, _receiver) = test_state();
         let pod_id = "pod:listening-party-audit";
@@ -93561,6 +94280,90 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn podcore_membership_and_message_stats_match_storage_contracts() {
+        let (state, _receiver) = test_state();
+        let pod_id = "pod:stats-audit";
+        state
+            .pods
+            .write()
+            .await
+            .create(
+                serde_json::from_value::<super::pods::PodRecord>(serde_json::json!({
+                    "podId": pod_id,
+                    "name": "Stats audit",
+                    "isPublic": true,
+                    "channels": [{"channelId": "general", "name": "General"}]
+                }))
+                .expect("deserialize stats pod"),
+                "owner-peer".to_owned(),
+            )
+            .expect("create stats pod");
+        state
+            .pods
+            .write()
+            .await
+            .upsert_member(
+                pod_id,
+                super::pods::PodMember {
+                    peer_id: "moderator-peer".to_owned(),
+                    role: "mod".to_owned(),
+                    is_banned: false,
+                    public_key: None,
+                    joined_at: Some("2026-01-01T00:00:00+00:00".to_owned()),
+                    last_seen: Some("2026-01-02T00:00:00+00:00".to_owned()),
+                },
+            )
+            .expect("add stats member");
+        {
+            let mut channels = state.pod_channels.write().await;
+            channels
+                .append(
+                    pod_id.to_owned(),
+                    "general".to_owned(),
+                    "owner-peer".to_owned(),
+                    "one".to_owned(),
+                    String::new(),
+                    1_000,
+                )
+                .expect("append first stats message");
+            channels
+                .append(
+                    pod_id.to_owned(),
+                    "general".to_owned(),
+                    "moderator-peer".to_owned(),
+                    "two".to_owned(),
+                    String::new(),
+                    2_000,
+                )
+                .expect("append second stats message");
+        }
+
+        let membership =
+            super::route_http_request("GET", "/api/v0/podcore/membership/stats", None, "", &state)
+                .await
+                .expect("membership stats");
+        let membership_json = serde_json::from_str::<serde_json::Value>(&membership.body).unwrap();
+        assert_eq!(membership_json["totalMemberships"], 2);
+        assert_eq!(membership_json["activeMemberships"], 2);
+        assert_eq!(membership_json["membershipsByRole"]["owner"], 1);
+        assert_eq!(membership_json["membershipsByRole"]["mod"], 1);
+        assert_eq!(membership_json["membershipsByPod"][pod_id], 2);
+        assert!(membership_json["lastOperation"].is_string());
+
+        let messages =
+            super::route_http_request("GET", "/api/v0/podcore/messages/stats", None, "", &state)
+                .await
+                .expect("message stats");
+        let messages_json = serde_json::from_str::<serde_json::Value>(&messages.body).unwrap();
+        assert_eq!(messages_json["totalMessages"], 2);
+        assert_eq!(messages_json["totalSizeBytes"], 400);
+        assert_eq!(messages_json["messagesPerPod"][pod_id], 2);
+        assert_eq!(messages_json["messagesPerChannel"]["general"], 2);
+        assert_eq!(messages_json["oldestMessage"], "1970-01-01T00:00:01+00:00");
+        assert_eq!(messages_json["newestMessage"], "1970-01-01T00:00:02+00:00");
+    }
+
+    #[tokio::test]
     async fn podcore_dht_stats_reflect_real_publications_not_a_pod_count_proxy() {
         let (state, _receiver) = test_state();
         state
@@ -93830,8 +94633,8 @@ mod tests {
                 .await
                 .expect("backfill stats");
         let stats_json = serde_json::from_str::<serde_json::Value>(&stats.body).unwrap();
-        assert_eq!(stats_json["totalRequests"], 2);
-        assert_eq!(stats_json["completedRequests"], 2);
+        assert_eq!(stats_json["totalBackfillRequestsSent"], 2);
+        assert_eq!(stats_json["totalBackfillRequestsReceived"], 0);
         assert_eq!(stats_json["totalMessagesBackfilled"], 3);
         assert_eq!(stats_json["totalBackfillBytesTransferred"], 9);
         assert_eq!(stats_json["backfillRequestsByPod"][pod_id], 2);
@@ -96371,7 +97174,7 @@ mod tests {
         assert_eq!(baseline_json["totalSignaturesVerified"], 0);
         assert_eq!(
             baseline_json["lastSignatureOperation"],
-            serde_json::Value::Null
+            super::PODCORE_MIN_DATETIME
         );
 
         let pod_id = "pod:00000000000000000000000000000ba09";
@@ -96473,8 +97276,6 @@ mod tests {
         assert_eq!(stats_json["totalSignaturesVerified"], 2, "{stats_json}");
         assert_eq!(stats_json["successfulVerifications"], 1, "{stats_json}");
         assert_eq!(stats_json["failedVerifications"], 1, "{stats_json}");
-        assert_eq!(stats_json["signedMessages"], 1, "{stats_json}");
-        assert_eq!(stats_json["verificationFailures"], 1, "{stats_json}");
         assert!(
             stats_json["lastSignatureOperation"].is_string(),
             "{stats_json}"
@@ -96651,8 +97452,6 @@ mod tests {
         assert_eq!(stats_json["totalVerifications"], 2, "{stats_json}");
         assert_eq!(stats_json["successfulVerifications"], 1, "{stats_json}");
         assert_eq!(stats_json["failedMembershipChecks"], 1, "{stats_json}");
-        assert_eq!(stats_json["verifiedMessages"], 1, "{stats_json}");
-        assert_eq!(stats_json["rejectedMessages"], 1, "{stats_json}");
         assert!(stats_json["lastVerification"].is_string(), "{stats_json}");
     }
 
@@ -99800,10 +100599,11 @@ mod tests {
 
         let transfers = state.transfers.read().await;
         assert_eq!(transfers.entries.len(), 2);
-        assert!(transfers
-            .entries
-            .iter()
-            .all(|entry| entry.status == "peer_lookup" && entry.batch_id.is_some()));
+        assert!(transfers.entries.iter().all(|entry| {
+            entry.status == "peer_lookup"
+                && entry.batch_id.is_some()
+                && entry.wishlist_item_id.as_deref() == Some(item_id.as_str())
+        }));
         drop(transfers);
         let item = state.wishlist.read().await.get_item(&item_id).unwrap();
         assert_eq!(item.total_download_count, 2);
@@ -103262,7 +104062,9 @@ mod tests {
         let env = MapEnv::default()
             .with("SLSKR_LIDARR_ENABLED", "true")
             .with("SLSKR_LIDARR_URL", "http://lidarr.internal:8686/private")
-            .with("SLSKR_LIDARR_API_KEY", "lidarr-secret");
+            .with("SLSKR_LIDARR_API_KEY", "lidarr-secret")
+            .with("SLSKR_LIDARR_DELETE_REJECTED_DOWNLOADS", "true")
+            .with("SLSKR_LIDARR_BLACKLIST_REJECTED_DOWNLOADS", "true");
         let config = super::AppConfig::from_layers(None, FileConfig::default(), &env)
             .expect("Lidarr config");
         let json = config.integrations.lidarr.sanitized_json();
@@ -103272,12 +104074,161 @@ mod tests {
         assert!(!json.contains("lidarr.internal"));
         assert!(!json.contains("/private"));
         assert!(!json.contains("lidarr-secret"));
+        assert!(json.contains("\"delete_rejected_downloads\":true"));
+        assert!(json.contains("\"blacklist_rejected_downloads\":true"));
         assert_eq!(
             super::public_lidarr_error(Some(
                 "request to http://lidarr.internal:8686/private failed"
             )),
             Some("Lidarr connection failed")
         );
+    }
+
+    #[test]
+    fn lidarr_rejected_candidates_emit_distinct_portable_filenames() {
+        let candidates = vec![
+            serde_json::json!({
+                "id": 1,
+                "path": "/lidarr/Album/accepted.flac",
+                "artist": {"id": 2},
+                "album": {"id": 3},
+                "albumReleaseId": 4,
+                "tracks": [{"id": 5}],
+                "quality": {"quality": {"id": 6}},
+                "additionalFile": false,
+                "rejections": []
+            }),
+            serde_json::json!({
+                "path": r"C:\lidarr\Album\Rejected.FLAC",
+                "rejections": [{"reason": "quality mismatch"}]
+            }),
+            serde_json::json!({
+                "path": "/lidarr/Album/rejected.flac",
+                "rejections": [{"reason": "quality mismatch"}]
+            }),
+        ];
+
+        assert_eq!(
+            super::lidarr_rejected_filenames(&candidates),
+            vec!["Rejected.FLAC".to_owned()]
+        );
+    }
+
+    #[test]
+    fn lidarr_import_mapping_preserves_native_windows_destination_separators() {
+        assert_eq!(
+            super::lidarr_map_import_path(
+                "/music/downloaded/2 Chainz - T.R.U. REALigion (Anniversary Edition)",
+                "/music/downloaded",
+                r"D:\downloaded",
+            ),
+            r"D:\downloaded\2 Chainz - T.R.U. REALigion (Anniversary Edition)"
+        );
+        assert_eq!(
+            super::lidarr_map_import_path("/downloads/Album", "/downloads", "/library",),
+            "/library/Album"
+        );
+    }
+
+    #[test]
+    fn lidarr_rejected_file_deletion_stays_in_the_completed_directory() {
+        let root = std::env::temp_dir().join(format!(
+            "slskr-lidarr-rejected-files-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let inside = root.join("rejected.flac");
+        let outside = root.parent().unwrap().join(format!(
+            "slskr-lidarr-outside-{}-{}.flac",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::write(&inside, b"rejected").unwrap();
+        std::fs::write(&outside, b"protected").unwrap();
+
+        let deleted = super::delete_lidarr_rejected_files(
+            root.to_str().unwrap(),
+            &[
+                "rejected.flac".to_owned(),
+                "../".to_owned() + outside.file_name().unwrap().to_str().unwrap(),
+            ],
+        )
+        .unwrap();
+        assert_eq!(deleted, 1);
+        assert!(!inside.exists());
+        assert!(outside.exists());
+
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_file(&outside);
+    }
+
+    #[tokio::test]
+    async fn lidarr_rejection_policy_blacklists_wishlist_origin_and_deletes_files() {
+        let (state, _receiver) = test_state_with_env(
+            MapEnv::default()
+                .with("SLSKR_LIDARR_DELETE_REJECTED_DOWNLOADS", "true")
+                .with("SLSKR_LIDARR_BLACKLIST_REJECTED_DOWNLOADS", "true"),
+        );
+        let item = state
+            .wishlist
+            .write()
+            .await
+            .add_item("Artist".to_owned(), "Album".to_owned(), "Audio".to_owned())
+            .unwrap();
+        let root = std::env::temp_dir().join(format!(
+            "slskr-lidarr-policy-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let file = root.join("track.flac");
+        std::fs::write(&file, b"rejected").unwrap();
+        let transfer = {
+            let mut transfers = state.transfers.write().await;
+            transfers.create_with_details(
+                0,
+                Some("peer".to_owned()),
+                "Remote/Album/track.flac".to_owned(),
+                Some(file.display().to_string()),
+                Some(8),
+                None,
+                super::TransferRequestDetails {
+                    wishlist_item_id: Some(item.id.clone()),
+                    ..Default::default()
+                },
+            )
+        };
+        let result = serde_json::json!({
+            "rejectedCandidateCount": 1,
+            "rejectedFilenames": ["track.flac"]
+        });
+
+        super::apply_lidarr_rejection_policy(&state, &transfer, root.to_str().unwrap(), &result)
+            .await
+            .unwrap();
+
+        assert!(!file.exists());
+        let ignored = state
+            .wishlist
+            .read()
+            .await
+            .list_ignored_results(&item.id)
+            .unwrap();
+        assert_eq!(ignored.len(), 1);
+        assert_eq!(ignored[0].username, "peer");
+        assert_eq!(ignored[0].directory, "Remote/Album");
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[tokio::test]
@@ -105868,6 +106819,7 @@ mod tests {
             local_path: None,
             batch_id: None,
             request_id: None,
+            wishlist_item_id: None,
             request_name: None,
             destination_directory: None,
             bit_rate: None,
@@ -105979,6 +106931,7 @@ mod tests {
             local_path: None,
             batch_id: None,
             request_id: None,
+            wishlist_item_id: None,
             request_name: None,
             destination_directory: None,
             bit_rate: None,

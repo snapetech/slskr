@@ -247,6 +247,8 @@
       "importPathFrom": "",
       "importPathTo": "",
       "importReplaceExistingFiles": false,
+      "deleteRejectedDownloads": false,
+      "blacklistRejectedDownloads": false,
       "maxItemsPerSync": 100,
       "syncIntervalSeconds": 3600,
       "syncWantedToWishlist": false,

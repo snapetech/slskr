@@ -24,6 +24,12 @@ const MAX_POLICY_BYTES: usize = 256 * 1024;
 const MAX_REGISTERED_SERVICES: usize = 20;
 const MAX_ALLOWED_DESTINATIONS: usize = 50;
 
+pub const GOLD_STAR_CLUB_POD_ID: &str = "pod:901d57a2c1bb4e5d90d57a2c1bb4e5d0";
+pub const GOLD_STAR_CLUB_GENERAL_CHANNEL_ID: &str = "gold-star-club-general";
+pub const GOLD_STAR_CLUB_MAX_MEMBERS: usize = 250;
+pub const GOLD_STAR_CLUB_AUTOJOIN_ENV: &str = "SLSKDN_POD_GOLD_STAR_CLUB_AUTOJOIN";
+const GOLD_STAR_CLUB_REVOCATION_FILE: &str = "gold-star-club.revoked";
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PodChannel {
@@ -106,6 +112,84 @@ pub struct PodRecord {
     pub private_service_policy: Option<Value>,
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct PodMembershipStats {
+    pub total_memberships: usize,
+    pub active_memberships: usize,
+    pub banned_memberships: usize,
+    pub expired_memberships: usize,
+    pub memberships_by_role: BTreeMap<String, usize>,
+    pub memberships_by_pod: BTreeMap<String, usize>,
+    pub last_operation: Option<String>,
+}
+
+pub fn is_gold_star_club(pod_id: &str) -> bool {
+    pod_id == GOLD_STAR_CLUB_POD_ID
+}
+
+pub fn gold_star_club_opted_in_value(value: Option<&str>) -> bool {
+    value.is_some_and(|value| value.trim().eq_ignore_ascii_case("true"))
+}
+
+pub fn gold_star_club_opted_in() -> bool {
+    gold_star_club_opted_in_value(std::env::var(GOLD_STAR_CLUB_AUTOJOIN_ENV).ok().as_deref())
+}
+
+pub fn gold_star_club_revocation_path(state_dir: &Path) -> PathBuf {
+    state_dir.join(GOLD_STAR_CLUB_REVOCATION_FILE)
+}
+
+pub fn gold_star_club_is_revoked(state_dir: &Path) -> bool {
+    gold_star_club_revocation_path(state_dir).is_file()
+}
+
+pub fn gold_star_club_available(state_dir: &Path) -> bool {
+    gold_star_club_opted_in() && !gold_star_club_is_revoked(state_dir)
+}
+
+pub fn record_gold_star_club_revocation(state_dir: &Path, peer_id: &str) -> Result<(), String> {
+    let peer_id = peer_id.trim();
+    if peer_id.is_empty() {
+        return Err("Gold Star Club revocation requires a peer ID".to_owned());
+    }
+    let path = gold_star_club_revocation_path(state_dir);
+    let body = format!("revoked_by={peer_id}\nrevoked_at={}\n", current_timestamp());
+    super::write_file_atomic(&path, body.as_bytes())
+        .map_err(|error| format!("Gold Star Club revocation persistence failed: {error}"))
+}
+
+pub fn gold_star_club_pod() -> PodRecord {
+    PodRecord {
+        pod_id: GOLD_STAR_CLUB_POD_ID.to_owned(),
+        name: "Gold Star Club ⭐".to_owned(),
+        description: None,
+        visibility: Value::from(1),
+        is_public: true,
+        max_members: GOLD_STAR_CLUB_MAX_MEMBERS,
+        allow_guests: false,
+        require_approval: false,
+        updated_at: current_timestamp(),
+        focus_content_id: None,
+        tags: vec![
+            "gold-star".to_owned(),
+            "first-250".to_owned(),
+            "realm-governance".to_owned(),
+            "testing".to_owned(),
+        ],
+        channels: vec![PodChannel {
+            channel_id: GOLD_STAR_CLUB_GENERAL_CHANNEL_ID.to_owned(),
+            kind: Value::from(0),
+            name: "General".to_owned(),
+            binding_info: None,
+            description: None,
+        }],
+        members: None,
+        external_bindings: Vec::new(),
+        capabilities: Vec::new(),
+        private_service_policy: None,
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct StoredPod {
     pod: PodRecord,
@@ -142,6 +226,7 @@ impl PodStore {
     pub fn list_visible(&self, peer_id: Option<&str>) -> Vec<PodRecord> {
         self.pods
             .values()
+            .filter(|stored| self.reserved_pod_available(&stored.pod.pod_id))
             .filter(|stored| {
                 stored.pod.is_public
                     || peer_id.is_some_and(|peer_id| {
@@ -155,12 +240,18 @@ impl PodStore {
     }
 
     pub fn get(&self, pod_id: &str) -> Option<PodRecord> {
+        if !self.reserved_pod_available(pod_id) {
+            return None;
+        }
         self.pods
             .get(pod_id)
             .map(|stored| public_pod(stored, false))
     }
 
     pub fn members(&self, pod_id: &str) -> Option<Vec<PodMember>> {
+        if !self.reserved_pod_available(pod_id) {
+            return None;
+        }
         self.pods.get(pod_id).map(|stored| {
             stored
                 .members
@@ -169,6 +260,61 @@ impl PodStore {
                 .cloned()
                 .collect()
         })
+    }
+
+    pub fn membership_stats(&self) -> PodMembershipStats {
+        let mut stats = PodMembershipStats::default();
+        for (pod_id, stored) in &self.pods {
+            for member in &stored.members {
+                stats.total_memberships = stats.total_memberships.saturating_add(1);
+                stats.active_memberships = stats.active_memberships.saturating_add(1);
+                if member.is_banned {
+                    stats.banned_memberships = stats.banned_memberships.saturating_add(1);
+                }
+                *stats
+                    .memberships_by_role
+                    .entry(member.role.clone())
+                    .or_default() += 1;
+                *stats.memberships_by_pod.entry(pod_id.clone()).or_default() += 1;
+                for timestamp in [member.joined_at.as_deref(), member.last_seen.as_deref()]
+                    .into_iter()
+                    .flatten()
+                {
+                    if stats
+                        .last_operation
+                        .as_deref()
+                        .is_none_or(|current| timestamp > current)
+                    {
+                        stats.last_operation = Some(timestamp.to_owned());
+                    }
+                }
+            }
+        }
+        stats
+    }
+
+    pub fn ensure_gold_star_club(&mut self) -> Result<PodRecord, String> {
+        if !gold_star_club_available(self.state_path.parent().unwrap_or_else(|| Path::new("."))) {
+            return Err(format!(
+                "Gold Star Club requires {GOLD_STAR_CLUB_AUTOJOIN_ENV}=true and no local revocation"
+            ));
+        }
+        if let Some(existing) = self.pods.get(GOLD_STAR_CLUB_POD_ID) {
+            return Ok(public_pod(existing, false));
+        }
+        if self.pods.len() >= MAX_PODS {
+            return Err("Pod capacity is full".to_owned());
+        }
+        let mut pod = gold_star_club_pod();
+        normalize_pod(&mut pod)?;
+        let stored = StoredPod {
+            pod: pod.clone(),
+            members: Vec::new(),
+        };
+        self.commit_change(|pods| {
+            pods.insert(GOLD_STAR_CLUB_POD_ID.to_owned(), stored);
+        })?;
+        Ok(pod)
     }
 
     pub fn channel_exists(&self, pod_id: &str, channel_id: &str) -> bool {
@@ -455,6 +601,11 @@ impl PodStore {
     pub fn create(&mut self, mut pod: PodRecord, creator: String) -> Result<PodRecord, String> {
         normalize_pod(&mut pod)?;
         validate_peer_id(&creator)?;
+        if is_gold_star_club(&pod.pod_id)
+            && !gold_star_club_available(self.state_path.parent().unwrap_or_else(|| Path::new(".")))
+        {
+            return Err("Gold Star Club is disabled or locally revoked".to_owned());
+        }
         if self.pods.contains_key(&pod.pod_id) {
             return Err("Pod already exists".to_owned());
         }
@@ -528,6 +679,11 @@ impl PodStore {
 
     pub fn join(&mut self, pod_id: &str, peer_id: String) -> Result<Option<bool>, String> {
         validate_peer_id(&peer_id)?;
+        if is_gold_star_club(pod_id)
+            && !gold_star_club_available(self.state_path.parent().unwrap_or_else(|| Path::new(".")))
+        {
+            return Err("Gold Star Club is disabled or locally revoked".to_owned());
+        }
         let Some(stored) = self.pods.get(pod_id) else {
             return Ok(None);
         };
@@ -585,7 +741,7 @@ impl PodStore {
         {
             return Ok(Some(false));
         }
-        if removal_would_orphan_pod(stored, peer_id) {
+        if !is_gold_star_club(pod_id) && removal_would_orphan_pod(stored, peer_id) {
             return Err("Cannot remove the last Pod moderator".to_owned());
         }
         self.commit_change(|pods| {
@@ -739,6 +895,11 @@ impl PodStore {
         write_state(&self.state_path, &pods)?;
         self.pods = pods;
         Ok(())
+    }
+
+    fn reserved_pod_available(&self, pod_id: &str) -> bool {
+        !is_gold_star_club(pod_id)
+            || gold_star_club_available(self.state_path.parent().unwrap_or_else(|| Path::new(".")))
     }
 }
 
@@ -1198,7 +1359,9 @@ fn load_state(path: &Path) -> Result<BTreeMap<String, StoredPod>, String> {
                 && peers.insert(member.peer_id.to_ascii_lowercase())
         });
         stored.members.truncate(MAX_MEMBERS);
-        if validate_pod_members(&stored.pod, &stored.members).is_err() {
+        if !is_gold_star_club(&stored.pod.pod_id)
+            && validate_pod_members(&stored.pod, &stored.members).is_err()
+        {
             continue;
         }
         pods.insert(stored.pod.pod_id.clone(), stored);
@@ -1241,7 +1404,48 @@ fn default_member_role() -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{PodRecord, PodStore};
+    use super::{
+        gold_star_club_opted_in_value, gold_star_club_pod, record_gold_star_club_revocation,
+        PodRecord, PodStore, GOLD_STAR_CLUB_GENERAL_CHANNEL_ID, GOLD_STAR_CLUB_MAX_MEMBERS,
+        GOLD_STAR_CLUB_POD_ID,
+    };
+
+    #[test]
+    fn gold_star_club_uses_exact_positive_opt_in_and_reserved_shape() {
+        assert!(gold_star_club_opted_in_value(Some(" true ")));
+        assert!(gold_star_club_opted_in_value(Some("TRUE")));
+        assert!(!gold_star_club_opted_in_value(Some("1")));
+        assert!(!gold_star_club_opted_in_value(Some("yes")));
+        assert!(!gold_star_club_opted_in_value(None));
+
+        let pod = gold_star_club_pod();
+        assert_eq!(pod.pod_id, GOLD_STAR_CLUB_POD_ID);
+        assert_eq!(pod.max_members, GOLD_STAR_CLUB_MAX_MEMBERS);
+        assert!(pod.is_public);
+        assert_eq!(
+            pod.channels[0].channel_id,
+            GOLD_STAR_CLUB_GENERAL_CHANNEL_ID
+        );
+        assert_eq!(
+            pod.tags,
+            ["gold-star", "first-250", "realm-governance", "testing"]
+        );
+    }
+
+    #[test]
+    fn gold_star_club_revocation_is_durable() {
+        let state_dir = std::env::temp_dir().join(format!(
+            "slskr-gold-star-revocation-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&state_dir).unwrap();
+        record_gold_star_club_revocation(&state_dir, "local-user").unwrap();
+        assert!(super::gold_star_club_is_revoked(&state_dir));
+        let body =
+            std::fs::read_to_string(super::gold_star_club_revocation_path(&state_dir)).unwrap();
+        assert!(body.contains("revoked_by=local-user\n"));
+        std::fs::remove_dir_all(state_dir).unwrap();
+    }
 
     fn fixture() -> PodRecord {
         serde_json::from_value(serde_json::json!({

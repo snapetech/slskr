@@ -31,6 +31,15 @@ pub struct PodChannelMessage {
     pub sig_version: u8,
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct PodChannelStats {
+    pub total_messages: usize,
+    pub oldest_timestamp_unix_ms: Option<u64>,
+    pub newest_timestamp_unix_ms: Option<u64>,
+    pub messages_per_pod: BTreeMap<String, usize>,
+    pub messages_per_channel: BTreeMap<String, usize>,
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 struct PodChannelStateFile {
     version: u32,
@@ -76,6 +85,38 @@ impl PodChannelStore {
             })
             .cloned()
             .collect()
+    }
+
+    pub fn stats(&self) -> PodChannelStats {
+        let mut stats = PodChannelStats {
+            total_messages: self.messages.len(),
+            ..PodChannelStats::default()
+        };
+        for message in &self.messages {
+            stats.oldest_timestamp_unix_ms = Some(
+                stats
+                    .oldest_timestamp_unix_ms
+                    .map_or(message.timestamp_unix_ms, |value| {
+                        value.min(message.timestamp_unix_ms)
+                    }),
+            );
+            stats.newest_timestamp_unix_ms = Some(
+                stats
+                    .newest_timestamp_unix_ms
+                    .map_or(message.timestamp_unix_ms, |value| {
+                        value.max(message.timestamp_unix_ms)
+                    }),
+            );
+            *stats
+                .messages_per_pod
+                .entry(message.pod_id.clone())
+                .or_default() += 1;
+            *stats
+                .messages_per_channel
+                .entry(message.channel_id.clone())
+                .or_default() += 1;
+        }
+        stats
     }
 
     pub fn append(

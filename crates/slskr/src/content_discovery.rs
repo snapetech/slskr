@@ -1,5 +1,5 @@
 use std::{
-    collections::HashSet,
+    collections::{BTreeMap, HashSet, VecDeque},
     fs,
     io::Read,
     path::{Path, PathBuf},
@@ -7,8 +7,10 @@ use std::{
     time::Instant,
 };
 
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use uuid::Uuid;
 
 const STATE_VERSION: u32 = 1;
 const MAX_STATE_BYTES: u64 = 16 * 1024 * 1024;
@@ -76,6 +78,18 @@ pub struct HashDbEntry {
     pub use_count: u32,
 }
 
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MetadataProcessingEvent {
+    pub id: Uuid,
+    pub filename: String,
+    pub stage: String,
+    pub status: String,
+    pub detail: Option<String>,
+    pub started_at: String,
+    pub finished_at: Option<String>,
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct ShadowIndexRecord {
@@ -101,6 +115,8 @@ pub struct ContentDiscoveryStore {
     latest_seq: u64,
     query_metrics: Mutex<Vec<QueryMetric>>,
     total_queries: std::sync::atomic::AtomicU64,
+    metadata_processing_active: Mutex<BTreeMap<Uuid, MetadataProcessingEvent>>,
+    metadata_processing_history: Mutex<VecDeque<MetadataProcessingEvent>>,
 }
 
 impl ContentDiscoveryStore {
@@ -112,6 +128,8 @@ impl ContentDiscoveryStore {
             latest_seq: 0,
             query_metrics: Mutex::new(Vec::new()),
             total_queries: std::sync::atomic::AtomicU64::new(0),
+            metadata_processing_active: Mutex::new(BTreeMap::new()),
+            metadata_processing_history: Mutex::new(VecDeque::new()),
         }
     }
 
@@ -240,7 +258,73 @@ impl ContentDiscoveryStore {
             latest_seq,
             query_metrics: Mutex::new(Vec::new()),
             total_queries: std::sync::atomic::AtomicU64::new(0),
+            metadata_processing_active: Mutex::new(BTreeMap::new()),
+            metadata_processing_history: Mutex::new(VecDeque::new()),
         })
+    }
+
+    pub fn begin_metadata_stage(&self, filename: &str, stage: &str) -> Uuid {
+        let event = MetadataProcessingEvent {
+            id: Uuid::new_v4(),
+            filename: filename.trim().to_owned(),
+            stage: stage.trim().to_owned(),
+            status: "running".to_owned(),
+            detail: None,
+            started_at: Utc::now().to_rfc3339(),
+            finished_at: None,
+        };
+        let id = event.id;
+        if let Ok(mut active) = self.metadata_processing_active.lock() {
+            active.insert(id, event);
+        }
+        id
+    }
+
+    pub fn finish_metadata_stage(&self, id: Uuid, status: &str, detail: Option<String>) -> bool {
+        let event = self
+            .metadata_processing_active
+            .lock()
+            .ok()
+            .and_then(|mut active| active.remove(&id));
+        let Some(mut event) = event else {
+            return false;
+        };
+        event.status = status.trim().to_owned();
+        event.detail = detail;
+        event.finished_at = Some(Utc::now().to_rfc3339());
+        if let Ok(mut history) = self.metadata_processing_history.lock() {
+            history.push_back(event);
+            while history.len() > 200 {
+                history.pop_front();
+            }
+        }
+        true
+    }
+
+    pub fn metadata_processing_status(
+        &self,
+        limit: usize,
+    ) -> (Vec<MetadataProcessingEvent>, Vec<MetadataProcessingEvent>) {
+        let limit = limit.clamp(1, 200);
+        let mut active = self
+            .metadata_processing_active
+            .lock()
+            .map(|active| active.values().cloned().collect::<Vec<_>>())
+            .unwrap_or_default();
+        active.sort_by(|left, right| left.started_at.cmp(&right.started_at));
+        let history = self
+            .metadata_processing_history
+            .lock()
+            .map(|history| {
+                history
+                    .iter()
+                    .rev()
+                    .take(limit)
+                    .cloned()
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        (active, history)
     }
 
     pub fn latest_seq(&self) -> u64 {
@@ -1048,6 +1132,30 @@ mod tests {
         assert_ne!(stored.first_seen_at, u64::MAX);
         assert_ne!(stored.last_updated_at, u64::MAX);
         assert_eq!(stored.use_count, 1);
+    }
+
+    #[test]
+    fn metadata_processing_tracks_active_and_bounded_history() {
+        let store = ContentDiscoveryStore::in_memory();
+        let active_id = store.begin_metadata_stage("Track.flac", "hash");
+        let (active, history) = store.metadata_processing_status(0);
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0].id, active_id);
+        assert_eq!(active[0].filename, "Track.flac");
+        assert_eq!(active[0].stage, "hash");
+        assert_eq!(active[0].status, "running");
+        assert!(active[0].finished_at.is_none());
+        assert!(history.is_empty());
+
+        assert!(store.finish_metadata_stage(active_id, "complete", Some("Hash stored".to_owned())));
+        assert!(!store.finish_metadata_stage(active_id, "failed", None));
+
+        let (active, history) = store.metadata_processing_status(0);
+        assert!(active.is_empty());
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].status, "complete");
+        assert_eq!(history[0].detail.as_deref(), Some("Hash stored"));
+        assert!(history[0].finished_at.is_some());
     }
 
     #[test]

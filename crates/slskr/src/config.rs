@@ -3634,6 +3634,8 @@ pub struct LidarrIntegrationSettings {
     pub import_path_to: String,
     pub import_mode: String,
     pub import_replace_existing_files: bool,
+    pub delete_rejected_downloads: bool,
+    pub blacklist_rejected_downloads: bool,
 }
 
 impl LidarrIntegrationSettings {
@@ -3748,6 +3750,22 @@ impl LidarrIntegrationSettings {
                 ],
                 file_config.import_replace_existing_files.unwrap_or(false),
             )?,
+            delete_rejected_downloads: env_bool_any_layer(
+                env,
+                &[
+                    "SLSKR_LIDARR_DELETE_REJECTED_DOWNLOADS",
+                    "SLSKD_LIDARR_DELETE_REJECTED_DOWNLOADS",
+                ],
+                file_config.delete_rejected_downloads.unwrap_or(false),
+            )?,
+            blacklist_rejected_downloads: env_bool_any_layer(
+                env,
+                &[
+                    "SLSKR_LIDARR_BLACKLIST_REJECTED_DOWNLOADS",
+                    "SLSKD_LIDARR_BLACKLIST_REJECTED_DOWNLOADS",
+                ],
+                file_config.blacklist_rejected_downloads.unwrap_or(false),
+            )?,
         };
         if !(1..=120).contains(&settings.timeout_seconds) {
             return Err("Lidarr timeout must be between 1 and 120 seconds".to_owned());
@@ -3813,7 +3831,7 @@ impl LidarrIntegrationSettings {
 
     pub fn sanitized_json(&self) -> String {
         format!(
-            "{{\"enabled\":{},\"url\":null,\"url_configured\":{},\"api_key_configured\":{},\"timeout_seconds\":{},\"sync_wanted_to_wishlist\":{},\"sync_interval_seconds\":{},\"max_items_per_sync\":{},\"auto_download\":{},\"wishlist_filter\":\"{}\",\"wishlist_max_results\":{},\"auto_import_completed\":{},\"import_path_from\":\"{}\",\"import_path_to\":\"{}\",\"import_mode\":\"{}\",\"import_replace_existing_files\":{}}}",
+            "{{\"enabled\":{},\"url\":null,\"url_configured\":{},\"api_key_configured\":{},\"timeout_seconds\":{},\"sync_wanted_to_wishlist\":{},\"sync_interval_seconds\":{},\"max_items_per_sync\":{},\"auto_download\":{},\"wishlist_filter\":\"{}\",\"wishlist_max_results\":{},\"auto_import_completed\":{},\"import_path_from\":\"{}\",\"import_path_to\":\"{}\",\"import_mode\":\"{}\",\"import_replace_existing_files\":{},\"delete_rejected_downloads\":{},\"blacklist_rejected_downloads\":{}}}",
             self.enabled,
             self.url.is_some(),
             self.api_key.is_some(),
@@ -3829,6 +3847,8 @@ impl LidarrIntegrationSettings {
             json_escape(&self.import_path_to),
             json_escape(&self.import_mode),
             self.import_replace_existing_files,
+            self.delete_rejected_downloads,
+            self.blacklist_rejected_downloads,
         )
     }
 }
@@ -6676,6 +6696,8 @@ pub struct LidarrFileConfig {
     import_path_to: Option<String>,
     import_mode: Option<String>,
     import_replace_existing_files: Option<bool>,
+    delete_rejected_downloads: Option<bool>,
+    blacklist_rejected_downloads: Option<bool>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -7231,6 +7253,14 @@ const CONTROLLER_YAML_CORE_MAPPINGS: &[(&str, &str)] = &[
     (
         "integrations.lidarr.import_replace_existing_files",
         "SLSKD_LIDARR_IMPORT_REPLACE_EXISTING",
+    ),
+    (
+        "integrations.lidarr.delete_rejected_downloads",
+        "SLSKD_LIDARR_DELETE_REJECTED_DOWNLOADS",
+    ),
+    (
+        "integrations.lidarr.blacklist_rejected_downloads",
+        "SLSKD_LIDARR_BLACKLIST_REJECTED_DOWNLOADS",
     ),
     ("integrations.spotify.client_id", "SLSKD_SPOTIFY_CLIENT_ID"),
     (
