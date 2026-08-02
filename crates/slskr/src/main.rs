@@ -139,7 +139,7 @@ use socket2::{Domain, Protocol, SockRef, Socket, Type};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
-    sync::{broadcast, mpsc, oneshot, RwLock, Semaphore},
+    sync::{broadcast, mpsc, oneshot, OwnedSemaphorePermit, RwLock, Semaphore},
     time::{self, Duration, Instant},
 };
 
@@ -316,6 +316,9 @@ const SHARE_SCAN_WORKER_ERROR: &str = "share scan worker failed";
 const MAX_WEBSOCKET_CONNECTIONS: usize = 32;
 const MAX_EXTERNAL_VISUALIZER_PROCESSES: usize = 4;
 const MAX_PREVIEW_STREAMS: usize = 4;
+const LISTED_PARTY_MAX_CONCURRENT_STREAMS: usize = 50;
+const LISTED_PARTY_MAX_CONCURRENT_STREAMS_PER_IP: usize = 3;
+const MAX_LISTED_PARTY_STREAM_LIMITERS: usize = 8_192;
 const MAX_PREVIEW_STREAM_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 const MAX_PEER_ENDPOINT_RECORDS: usize = 1_024;
 const MAX_ACTIVE_MESH_DISCOVERY_PROBES: usize = 8;
@@ -14110,6 +14113,24 @@ impl PreviewStreamTicketStore {
         self.records.get(token).cloned()
     }
 
+    fn find_active_token(
+        &mut self,
+        family: &str,
+        source: &str,
+        content_id: &str,
+    ) -> Option<String> {
+        let now = unix_timestamp();
+        self.prune(now);
+        self.records
+            .iter()
+            .find(|(_, record)| {
+                record.family == family
+                    && record.source == source
+                    && record.content_id == content_id
+            })
+            .map(|(token, _)| token.clone())
+    }
+
     fn configure_remote_mesh(
         &mut self,
         token: &str,
@@ -14146,6 +14167,69 @@ impl PreviewStreamTicketStore {
 
     fn prune(&mut self, now: u64) {
         self.records.retain(|_, record| record.expires_at > now);
+    }
+}
+
+#[derive(Debug, Default)]
+struct ListeningPartyStreamLimits {
+    parties: BTreeMap<String, Arc<Semaphore>>,
+    per_ip: BTreeMap<String, Arc<Semaphore>>,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+enum ListeningPartyStreamLimitRejection {
+    Party,
+    Ip,
+    Capacity,
+}
+
+impl ListeningPartyStreamLimits {
+    fn try_acquire(
+        &mut self,
+        party_id: &str,
+        remote_ip: &str,
+    ) -> Result<(OwnedSemaphorePermit, OwnedSemaphorePermit), ListeningPartyStreamLimitRejection>
+    {
+        self.parties.retain(|_, semaphore| {
+            semaphore.available_permits() < LISTED_PARTY_MAX_CONCURRENT_STREAMS
+        });
+        self.per_ip.retain(|_, semaphore| {
+            semaphore.available_permits() < LISTED_PARTY_MAX_CONCURRENT_STREAMS_PER_IP
+        });
+
+        let party = if let Some(party) = self.parties.get(party_id) {
+            Arc::clone(party)
+        } else {
+            if self.parties.len() >= MAX_LISTED_PARTY_STREAM_LIMITERS {
+                return Err(ListeningPartyStreamLimitRejection::Capacity);
+            }
+            let party = Arc::new(Semaphore::new(LISTED_PARTY_MAX_CONCURRENT_STREAMS));
+            self.parties.insert(party_id.to_owned(), Arc::clone(&party));
+            party
+        };
+        let party_permit = party
+            .try_acquire_owned()
+            .map_err(|_| ListeningPartyStreamLimitRejection::Party)?;
+
+        let ip_key = format!("{party_id}:{remote_ip}");
+        let ip = if let Some(ip) = self.per_ip.get(&ip_key) {
+            Arc::clone(ip)
+        } else {
+            if self.per_ip.len() >= MAX_LISTED_PARTY_STREAM_LIMITERS {
+                return Err(ListeningPartyStreamLimitRejection::Capacity);
+            }
+            let ip = Arc::new(Semaphore::new(LISTED_PARTY_MAX_CONCURRENT_STREAMS_PER_IP));
+            self.per_ip.insert(ip_key, Arc::clone(&ip));
+            ip
+        };
+        let ip_permit = match ip.try_acquire_owned() {
+            Ok(permit) => permit,
+            Err(_) => {
+                drop(party_permit);
+                return Err(ListeningPartyStreamLimitRejection::Ip);
+            }
+        };
+        Ok((party_permit, ip_permit))
     }
 }
 
@@ -15053,6 +15137,7 @@ struct AppState {
     controller_features: RwLock<ControllerFeatureState>,
     peer_endpoints: RwLock<BTreeMap<String, (PeerAddress, u64)>>,
     preview_streams: Arc<Semaphore>,
+    listening_party_stream_limits: RwLock<ListeningPartyStreamLimits>,
     revoked_jwts: RwLock<RevokedJwtStore>,
     login_attempts: RwLock<LoginAttemptStore>,
     pod_signature_stats: PodSignatureStats,
@@ -16186,7 +16271,8 @@ async fn route_http_request_with_headers(
             || (!feature.streaming
                 && (normalized_path.starts_with("/api/streams")
                     || normalized_path.starts_with("/api/peer-streams")
-                    || normalized_path.starts_with("/api/mesh-streams")))
+                    || normalized_path.starts_with("/api/mesh-streams")
+                    || normalized_path.starts_with("/api/listening-party/radio")))
             || (!feature.streaming_relay_fallback
                 && normalized_path.starts_with("/api/relay/streams"))
             || (!feature.identity_friends
@@ -29115,43 +29201,75 @@ async fn route_http_request_with_headers(
                 .read()
                 .await
                 .values_with_prefix("listening-party/");
-            let announcements = events
-                .into_iter()
-                .filter(|event| {
-                    event
-                        .get("listed")
-                        .and_then(serde_json::Value::as_bool)
-                        .unwrap_or(false)
-                })
-                .filter_map(|event| {
-                    let last_seen = event
-                        .get("serverTimeUnixMs")
-                        .and_then(serde_json::Value::as_u64)
-                        .unwrap_or(0);
-                    let expires_at = last_seen.saturating_add(ANNOUNCEMENT_TTL_MS);
-                    if expires_at <= now_ms {
-                        return None;
-                    }
-                    Some(serde_json::json!({
-                        "kind": "slskdn.listeningParty.announce.v1",
-                        "partyId": event.get("partyId").cloned().unwrap_or_default(),
-                        "podId": event.get("podId").cloned().unwrap_or_default(),
-                        "channelId": event.get("channelId").cloned().unwrap_or_default(),
-                        "hostPeerId": event.get("hostPeerId").cloned().unwrap_or_default(),
-                        "title": event.get("title").cloned().unwrap_or_default(),
-                        "artist": event.get("artist").cloned().unwrap_or_default(),
-                        "album": event.get("album").cloned().unwrap_or(serde_json::Value::Null),
-                        "contentId": event.get("contentId").cloned().unwrap_or_default(),
-                        "description": event.get("description").cloned().unwrap_or_default(),
-                        "tags": event.get("tags").cloned().unwrap_or_else(|| serde_json::json!([])),
-                        "allowMeshStreaming": event.get("allowMeshStreaming").cloned().unwrap_or(serde_json::json!(false)),
-                        "streamPath": "",
-                        "startedAtUnixMs": last_seen,
-                        "expiresAtUnixMs": expires_at,
-                        "lastSeenUnixMs": last_seen,
-                    }))
-                })
-                .collect::<Vec<_>>();
+            let mut announcements = Vec::new();
+            for event in events {
+                if !event
+                    .get("listed")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false)
+                {
+                    continue;
+                }
+                let started_at = event
+                    .get("serverTimeUnixMs")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(0);
+                let last_seen = now_ms;
+                let expires_at = last_seen.saturating_add(ANNOUNCEMENT_TTL_MS);
+                if expires_at <= now_ms {
+                    continue;
+                }
+                let party_id = event
+                    .get("partyId")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default();
+                let content_id = event
+                    .get("contentId")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default();
+                let allow_mesh_streaming = event
+                    .get("allowMeshStreaming")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false);
+                let stream_path = if allow_mesh_streaming {
+                    issue_listening_party_stream_ticket(state, party_id, content_id)
+                        .await
+                        .map(|ticket| {
+                            format!(
+                                "/api/v0/listening-party/radio/{}/{}?ticket={}",
+                                url_encode(party_id),
+                                url_encode(content_id),
+                                url_encode(&ticket)
+                            )
+                        })
+                        .unwrap_or_default()
+                } else {
+                    String::new()
+                };
+                announcements.push(serde_json::json!({
+                    "kind": "slskdn.listeningParty.announce.v1",
+                    "partyId": event.get("partyId").cloned().unwrap_or_default(),
+                    "podId": event.get("podId").cloned().unwrap_or_default(),
+                    "channelId": event.get("channelId").cloned().unwrap_or_default(),
+                    "hostPeerId": event.get("hostPeerId").cloned().unwrap_or_default(),
+                    "title": event.get("title").cloned().unwrap_or_default(),
+                    "artist": event.get("artist").cloned().unwrap_or_default(),
+                    "album": event.get("album").cloned().unwrap_or(serde_json::Value::Null),
+                    "contentId": event.get("contentId").cloned().unwrap_or_default(),
+                    "description": event.get("description").cloned().unwrap_or_default(),
+                    "tags": event.get("tags").cloned().unwrap_or_else(|| serde_json::json!([])),
+                    "allowMeshStreaming": allow_mesh_streaming,
+                    "streamPath": stream_path,
+                    "startedAtUnixMs": started_at,
+                    "expiresAtUnixMs": expires_at,
+                    "lastSeenUnixMs": last_seen,
+                }));
+            }
+            announcements.sort_by(|left, right| {
+                right["lastSeenUnixMs"]
+                    .as_u64()
+                    .cmp(&left["lastSeenUnixMs"].as_u64())
+            });
             Ok(routing::ok_response(
                 serde_json::Value::Array(announcements).to_string(),
             ))
@@ -43159,10 +43277,7 @@ async fn versioned_get_failure_contract(
         }
     }
 
-    if let Some(segments) = path
-        .strip_prefix("/api/v0/listening-party/radio/")
-        .map(|value| value.split('/').collect::<Vec<_>>())
-    {
+    if let Some(segments) = decoded_segments_after(path, "/api/v0/listening-party/radio/") {
         if let [party_id, content_id] = segments.as_slice() {
             // Matches the oracle's real StreamListedParty gate: the party
             // referenced by partyId must actually be listed, must allow
@@ -43179,14 +43294,14 @@ async fn versioned_get_failure_contract(
                 .values_with_prefix("listening-party/")
                 .into_iter()
                 .any(|event| {
-                    event.get("partyId").and_then(serde_json::Value::as_str) == Some(*party_id)
+                    event.get("partyId").and_then(serde_json::Value::as_str) == Some(party_id)
                         && event.get("listed").and_then(serde_json::Value::as_bool) == Some(true)
                         && event
                             .get("allowMeshStreaming")
                             .and_then(serde_json::Value::as_bool)
                             == Some(true)
                         && event.get("contentId").and_then(serde_json::Value::as_str)
-                            == Some(*content_id)
+                            == Some(content_id)
                 });
             if !listed {
                 return Some(routing::not_found_response());
@@ -47040,7 +47155,15 @@ async fn misc_controller_mutation_response(
         // stored state entirely rather than persisting a "stopped"
         // snapshot -- there is no active listen-along after a stop.
         let result = if event["action"] == "stop" {
-            features.remove(&key).map(|_| ())
+            let result = features.remove(&key).map(|_| ());
+            if let Some(party_id) = event.get("partyId").and_then(serde_json::Value::as_str) {
+                state
+                    .stream_tickets
+                    .write()
+                    .await
+                    .revoke_source(&format!("listening-party:{party_id}"));
+            }
+            result
         } else {
             features.upsert(key, event.clone())
         };
@@ -55053,22 +55176,45 @@ async fn extended_controller_dynamic_get_response(
     }
     if let Some(segments) = decoded_segments_after(path, "/api/listening-party/radio/") {
         if let [party_id, content_id] = segments.as_slice() {
-            // Matches the oracle's real StreamListedParty gate: a real,
-            // valid stream ticket is required before revealing anything
-            // about this content, not an unauthenticated availability
-            // probe anyone could query for any partyId/contentId. Full
-            // byte streaming (the oracle's real File(...) response) is a
-            // separate, deeper gap -- slskR has no real range-request
-            // file-serving capability anywhere yet -- so this closes the
-            // info-leak half of the finding without claiming to have
-            // built real audio streaming.
+            // Matches the oracle's real StreamListedParty gate: streaming
+            // must be enabled, the party must be listed and currently
+            // playing this exact content, and the ticket must be owned by
+            // this exact party. The HTTP server upgrades this successful
+            // controller result to the real range-capable file response.
+            if !state.media_services.read().await.features.streaming {
+                return routing::not_found_response();
+            }
+            let listed = state
+                .controller_features
+                .read()
+                .await
+                .values_with_prefix("listening-party/")
+                .into_iter()
+                .any(|event| {
+                    event.get("partyId").and_then(serde_json::Value::as_str) == Some(party_id)
+                        && event.get("listed").and_then(serde_json::Value::as_bool) == Some(true)
+                        && event
+                            .get("allowMeshStreaming")
+                            .and_then(serde_json::Value::as_bool)
+                            == Some(true)
+                        && event.get("contentId").and_then(serde_json::Value::as_str)
+                            == Some(content_id)
+                });
+            if !listed {
+                return routing::not_found_response();
+            }
             let ticket_token = query_parameter(query, "ticket").unwrap_or_default();
             let ticket = if ticket_token.trim().is_empty() {
                 None
             } else {
                 state.stream_tickets.write().await.get(&ticket_token)
             };
-            if !ticket.is_some_and(|ticket| ticket.content_id.eq_ignore_ascii_case(content_id)) {
+            let owner_key = format!("listening-party:{party_id}");
+            if !ticket.is_some_and(|ticket| {
+                ticket.family == "listening-party"
+                    && ticket.source == owner_key
+                    && ticket.content_id == *content_id
+            }) {
                 return routing::unauthorized_response();
             }
             let discovery = state.content_discovery.read().await;
@@ -60254,6 +60400,7 @@ async fn serve(invocation: ServeInvocation) -> Result<(), String> {
         controller_features: RwLock::new(controller_feature_state),
         peer_endpoints: RwLock::new(BTreeMap::new()),
         preview_streams: Arc::new(Semaphore::new(MAX_PREVIEW_STREAMS)),
+        listening_party_stream_limits: RwLock::new(ListeningPartyStreamLimits::default()),
         revoked_jwts: RwLock::new(revoked_jwts),
         login_attempts: RwLock::new(LoginAttemptStore::default()),
         pod_signature_stats: PodSignatureStats::default(),
@@ -63695,6 +63842,67 @@ async fn find_shared_local_file(state: &AppState, filename: &str) -> Option<Shar
     })
 }
 
+/// Issue the frozen listening-party stream ticket for a local content id.
+///
+/// slskdN binds these tickets to `listening-party:{partyId}` and the radio
+/// controller checks that owner before opening the resolved local file.  The
+/// ticket is cached for its lifetime so repeated directory reads do not fill
+/// the bounded preview-ticket store with duplicate announcements.
+async fn issue_listening_party_stream_ticket(
+    state: &AppState,
+    party_id: &str,
+    content_id: &str,
+) -> Option<String> {
+    let content_id = content_id.trim();
+    let party_id = party_id.trim();
+    if content_id.is_empty() || party_id.is_empty() {
+        return None;
+    }
+
+    let (filename, size) = {
+        let shares = state.shares.read().await;
+        let transfers = state.transfers.read().await;
+        let share = shares.entries.iter().find(|entry| {
+            entry.filename == content_id
+                || stable_content_hash(&entry.filename, entry.size).to_string() == content_id
+        });
+        let transfer = transfers.entries.iter().find(|entry| {
+            entry.direction == 0
+                && matches!(entry.status.as_str(), "succeeded" | "completed")
+                && (entry.filename == content_id
+                    || entry.id.to_string()
+                        == content_id.strip_prefix("transfer-").unwrap_or_default())
+        });
+        let filename = share
+            .map(|entry| entry.filename.clone())
+            .or_else(|| transfer.map(|entry| entry.filename.clone()))
+            .unwrap_or_else(|| content_id.to_owned());
+        let size = share
+            .map(|entry| entry.size)
+            .or_else(|| transfer.and_then(|entry| entry.size))
+            .unwrap_or(0);
+        (filename, size)
+    };
+
+    let source = format!("listening-party:{party_id}");
+    let mut tickets = state.stream_tickets.write().await;
+    if let Some(token) = tickets.find_active_token("listening-party", &source, content_id) {
+        return Some(token);
+    }
+    let content_type = preview_stream_content_type(&filename).to_owned();
+    let (token, _) = tickets.issue(
+        "listening-party",
+        &source,
+        content_id.to_owned(),
+        filename,
+        None,
+        size,
+        content_type,
+        900,
+    )?;
+    Some(token)
+}
+
 fn shared_local_file_metadata(
     settings: &crate::config::ShareSettings,
     local_path: &Path,
@@ -63941,6 +64149,34 @@ fn preview_stream_ticket_path(path: &str) -> Option<(&'static str, String)> {
                 .map(|token| ("mesh", token))
         })?;
     (!token.is_empty() && !token.contains('/')).then(|| (family, decoded_path_segment(token)))
+}
+
+fn listening_party_stream_path(path: &str) -> Option<(String, String)> {
+    let route = routing::parse_route("GET", path);
+    let normalized = if let Some(versioned) = route
+        .normalized_path
+        .strip_prefix("/api/v0/")
+        .or_else(|| route.normalized_path.strip_prefix("/api/v1/"))
+        .or_else(|| route.normalized_path.strip_prefix("/api/v2/"))
+    {
+        format!("/api/{versioned}")
+    } else {
+        route.normalized_path.to_owned()
+    };
+    let segments = decoded_segments_after(&normalized, "/api/listening-party/radio/")?;
+    let [party_id, content_id] = segments.as_slice() else {
+        return None;
+    };
+    Some((party_id.clone(), content_id.clone()))
+}
+
+fn http_stream_ticket_path(path: &str, query: Option<&str>) -> Option<(&'static str, String)> {
+    preview_stream_ticket_path(path).or_else(|| {
+        listening_party_stream_path(path)?;
+        query_parameter(query, "ticket")
+            .filter(|token| !token.trim().is_empty() && !token.contains('/'))
+            .map(|token| ("listening-party", token))
+    })
 }
 
 async fn open_local_preview_stream_file(
@@ -72477,12 +72713,28 @@ where
         };
 
         let application_dump = application_dump_request(method, path, &state.config);
-        let preview_ticket = preview_stream_ticket_path(path);
+        let listening_party_path = listening_party_stream_path(path);
+        if listening_party_path.is_some()
+            && req
+                .headers
+                .range
+                .as_deref()
+                .is_some_and(|range| range.contains(','))
+            && response.status == "200 OK"
+        {
+            // Frozen StreamListedParty rejects multipart ranges with 400
+            // before the FileStreamResult is created.
+            response = routing::bad_request_response("Multiple byte ranges are not supported.");
+        }
+        let preview_ticket = http_stream_ticket_path(path, req.query.as_deref());
         let preview_stream = preview_ticket.is_some();
         let mut remote_preview = None;
         let mut remote_preview_head = None;
         let mut preview_permit = None;
+        let mut _listening_party_permits: Option<(OwnedSemaphorePermit, OwnedSemaphorePermit)> =
+            None;
         if preview_stream
+            && listening_party_path.is_none()
             && allowed
             && matches!(method, "GET" | "HEAD")
             && response.status == "200 OK"
@@ -72495,6 +72747,43 @@ where
                         content_type: "application/json",
                         body: r#"{"error":"preview stream limit reached"}"#.to_owned(),
                     };
+                }
+            }
+        }
+        if let Some((party_id, _)) = listening_party_path.as_ref().filter(|_| {
+            preview_stream
+                && allowed
+                && matches!(method, "GET" | "HEAD")
+                && response.status == "200 OK"
+        }) {
+            let remote_ip = remote_addr
+                .map(|address| address.ip().to_string())
+                .unwrap_or_else(|| "unknown".to_owned());
+            match state
+                .listening_party_stream_limits
+                .write()
+                .await
+                .try_acquire(party_id, &remote_ip)
+            {
+                Ok(permits) => _listening_party_permits = Some(permits),
+                Err(ListeningPartyStreamLimitRejection::Party) => {
+                    response = routing::HttpResponse {
+                        status: "429 Too Many Requests",
+                        content_type: "text/plain; charset=utf-8",
+                        body: "Too many concurrent radio streams.".to_owned(),
+                    };
+                }
+                Err(ListeningPartyStreamLimitRejection::Ip) => {
+                    response = routing::HttpResponse {
+                        status: "429 Too Many Requests",
+                        content_type: "text/plain; charset=utf-8",
+                        body: "Too many concurrent radio streams from this address.".to_owned(),
+                    };
+                }
+                Err(ListeningPartyStreamLimitRejection::Capacity) => {
+                    response = routing::service_unavailable_response(
+                        "listening-party stream limiter capacity is full",
+                    );
                 }
             }
         }
@@ -72530,7 +72819,10 @@ where
                 match open_local_preview_stream_file(&state, family, ticket).await {
                     Ok(Some(stream)) => Some(stream),
                     Ok(None) => {
-                        if method == "HEAD" {
+                        if *family == "listening-party" {
+                            response = routing::not_found_response();
+                            None
+                        } else if method == "HEAD" {
                             let ticket_record = {
                                 let mut tickets = state.stream_tickets.write().await;
                                 tickets.get(ticket)
@@ -72617,13 +72909,15 @@ where
                 "{}{}X-Request-ID: {}\r\n",
                 cors_str, disposition, request_id
             );
+            let accept_ranges =
+                !application_dump && (!preview_stream || listening_party_path.is_some());
             let written = http_server::write_file_response(
                 &mut writer,
                 stream.file,
                 stream.length,
                 &stream.content_type,
                 req.headers.range.as_deref(),
-                !preview_stream && !application_dump,
+                accept_ranges,
                 application_dump || method == "GET",
                 keep_alive,
                 &stream_extra,
@@ -78095,6 +78389,7 @@ mod tests {
             controller_features: RwLock::new(super::ControllerFeatureState::in_memory()),
             peer_endpoints: RwLock::new(BTreeMap::new()),
             preview_streams: Arc::new(tokio::sync::Semaphore::new(super::MAX_PREVIEW_STREAMS)),
+            listening_party_stream_limits: RwLock::new(super::ListeningPartyStreamLimits::default()),
             revoked_jwts: RwLock::new(super::RevokedJwtStore::default()),
             login_attempts: RwLock::new(super::LoginAttemptStore::default()),
             pod_signature_stats: super::PodSignatureStats::default(),
@@ -100543,6 +100838,10 @@ mod tests {
         assert_eq!(entries[0]["contentId"], "content:audio:track:listed");
         assert_eq!(entries[0]["allowMeshStreaming"], true);
         assert_eq!(entries[0]["kind"], "slskdn.listeningParty.announce.v1");
+        assert!(entries[0]["streamPath"]
+            .as_str()
+            .is_some_and(|path| path.starts_with("/api/v0/listening-party/radio/")
+                && path.contains("?ticket=")));
         assert!(
             entries[0]["expiresAtUnixMs"].as_u64().unwrap()
                 > entries[0]["startedAtUnixMs"].as_u64().unwrap()
@@ -100665,9 +100964,10 @@ mod tests {
         .expect("mismatched ticket request");
         assert_eq!(mismatched.status, "401 Unauthorized", "{}", mismatched.body);
 
-        // A real ticket issued for exactly this contentId is authorized,
-        // and the response reflects the real content-discovery shadow
-        // record (not a fake/empty stub).
+        // The frozen directory service issues a ticket owned by this exact
+        // party. That ticket authorizes the exact contentId, and the
+        // response reflects the real content-discovery shadow record (not a
+        // fake/empty stub).
         state
             .content_discovery
             .write()
@@ -100678,23 +100978,10 @@ mod tests {
                 updated_at: 0,
             }])
             .expect("seed shadow record");
-        let valid_ticket_response = super::route_http_request(
-            "POST",
-            "/api/v0/mesh-streams/tickets",
-            None,
-            &format!(
-                r#"{{"contentId":"{content_id}","filename":"Radio.flac","peerId":"mesh-peer"}}"#
-            ),
-            &state,
-        )
-        .await
-        .expect("create valid ticket");
-        assert_eq!(valid_ticket_response.status, "200 OK");
-        let valid_ticket = serde_json::from_str::<serde_json::Value>(&valid_ticket_response.body)
-            .unwrap()["ticket"]
-            .as_str()
-            .unwrap()
-            .to_owned();
+        let valid_ticket =
+            super::issue_listening_party_stream_ticket(&state, &party_id, content_id)
+                .await
+                .expect("create valid listening-party ticket");
         let authorized = super::route_http_request(
             "GET",
             &format!("/api/v0/listening-party/radio/{party_id}/{content_id}?ticket={valid_ticket}"),
@@ -100712,6 +100999,147 @@ mod tests {
         assert_eq!(
             authorized_json["peerIds"],
             serde_json::json!(["peer-a", "peer-b"])
+        );
+    }
+
+    #[tokio::test]
+    async fn listening_party_directory_ticket_streams_local_audio_ranges() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let root = std::env::temp_dir().join(format!(
+            "slskr-listening-party-stream-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&root).expect("create listening-party share root");
+        std::fs::write(root.join("party.flac"), b"party-audio-bytes")
+            .expect("write listening-party fixture");
+        let (state, _receiver) = test_state_with_env(
+            MapEnv::default()
+                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn")
+                .with("SLSKR_SHARE_FIXTURE", "")
+                .with("SLSKR_SHARE_DIRS", &root.display().to_string()),
+        );
+        let (content_id, filename) = {
+            let shares = state.shares.read().await;
+            let entry = shares.entries.first().expect("share fixture entry");
+            (
+                super::stable_content_hash(&entry.filename, entry.size).to_string(),
+                entry.filename.clone(),
+            )
+        };
+        let party_id = "party:stream-audit";
+        state
+            .controller_features
+            .write()
+            .await
+            .upsert(
+                "listening-party/pod:stream-audit/general".to_owned(),
+                serde_json::json!({
+                    "partyId": party_id,
+                    "podId": "pod:stream-audit",
+                    "channelId": "general",
+                    "hostPeerId": "tester",
+                    "action": "play",
+                    "contentId": content_id,
+                    "title": "Party Track",
+                    "artist": "Party Artist",
+                    "serverTimeUnixMs": super::unix_timestamp_millis(),
+                    "listed": true,
+                    "allowMeshStreaming": true,
+                }),
+            )
+            .expect("persist listening-party fixture");
+
+        let directory =
+            super::route_http_request("GET", "/api/v0/listening-party", None, "", &state)
+                .await
+                .expect("list listening-party directory");
+        assert_eq!(directory.status, "200 OK", "{}", directory.body);
+        let stream_path = serde_json::from_str::<serde_json::Value>(&directory.body).unwrap()[0]
+            ["streamPath"]
+            .as_str()
+            .expect("directory stream path")
+            .to_owned();
+        assert!(stream_path.contains(&super::url_encode(&content_id)));
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind listening-party stream server");
+        let address = listener
+            .local_addr()
+            .expect("listening-party stream address");
+        let server_state = Arc::clone(&state);
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.expect("accept radio request");
+            super::handle_http_connection(stream, server_state)
+                .await
+                .expect("serve radio response");
+        });
+        let mut client = tokio::net::TcpStream::connect(address)
+            .await
+            .expect("connect radio client");
+        client
+            .write_all(
+                format!(
+                    "GET {stream_path} HTTP/1.1\r\nHost: localhost\r\nRange: bytes=2-6\r\nConnection: close\r\n\r\n"
+                )
+                .as_bytes(),
+            )
+            .await
+            .expect("write radio request");
+        let mut raw = Vec::new();
+        client
+            .read_to_end(&mut raw)
+            .await
+            .expect("read radio response");
+        server.await.expect("radio server task");
+        std::fs::remove_dir_all(root).expect("remove listening-party fixture");
+
+        let split = raw
+            .windows(4)
+            .position(|bytes| bytes == b"\r\n\r\n")
+            .expect("radio response header boundary");
+        let headers = String::from_utf8(raw[..split].to_vec()).expect("radio response headers");
+        assert!(
+            headers.starts_with("HTTP/1.1 206 Partial Content\r\n"),
+            "{headers}"
+        );
+        assert!(headers.contains("Content-Type: audio/flac\r\n"));
+        assert!(headers.contains("Content-Range: bytes 2-6/17\r\n"));
+        assert_eq!(&raw[split + 4..], b"rty-a");
+        assert!(!filename.is_empty());
+    }
+
+    #[test]
+    fn listening_party_stream_limits_match_frozen_caps() {
+        let mut limits = super::ListeningPartyStreamLimits::default();
+        let mut party_permits = Vec::new();
+        for index in 0..super::LISTED_PARTY_MAX_CONCURRENT_STREAMS {
+            party_permits.push(
+                limits
+                    .try_acquire("party:limit-audit", &format!("ip-{index}"))
+                    .expect("party stream slot"),
+            );
+        }
+        assert_eq!(
+            limits
+                .try_acquire("party:limit-audit", "ip-over-cap")
+                .unwrap_err(),
+            super::ListeningPartyStreamLimitRejection::Party
+        );
+
+        let mut ip_permits = Vec::new();
+        for _ in 0..super::LISTED_PARTY_MAX_CONCURRENT_STREAMS_PER_IP {
+            ip_permits.push(
+                limits
+                    .try_acquire("party:ip-audit", "same-ip")
+                    .expect("per-IP stream slot"),
+            );
+        }
+        assert_eq!(
+            limits.try_acquire("party:ip-audit", "same-ip").unwrap_err(),
+            super::ListeningPartyStreamLimitRejection::Ip
         );
     }
 
@@ -113041,6 +113469,7 @@ mod tests {
             controller_features: RwLock::new(super::ControllerFeatureState::in_memory()),
             peer_endpoints: RwLock::new(BTreeMap::new()),
             preview_streams: Arc::new(tokio::sync::Semaphore::new(super::MAX_PREVIEW_STREAMS)),
+            listening_party_stream_limits: RwLock::new(super::ListeningPartyStreamLimits::default()),
             revoked_jwts: RwLock::new(super::RevokedJwtStore::default()),
             login_attempts: RwLock::new(super::LoginAttemptStore::default()),
             pod_signature_stats: super::PodSignatureStats::default(),
@@ -113357,6 +113786,7 @@ mod tests {
             controller_features: RwLock::new(super::ControllerFeatureState::in_memory()),
             peer_endpoints: RwLock::new(BTreeMap::new()),
             preview_streams: Arc::new(tokio::sync::Semaphore::new(super::MAX_PREVIEW_STREAMS)),
+            listening_party_stream_limits: RwLock::new(super::ListeningPartyStreamLimits::default()),
             revoked_jwts: RwLock::new(super::RevokedJwtStore::default()),
             login_attempts: RwLock::new(super::LoginAttemptStore::default()),
             pod_signature_stats: super::PodSignatureStats::default(),
