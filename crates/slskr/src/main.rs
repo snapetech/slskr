@@ -12201,6 +12201,8 @@ struct LibraryHealthScanRecord {
     library_path: String,
     items: usize,
     issues: Vec<serde_json::Value>,
+    status: String,
+    started_at: u64,
     updated_at: u64,
 }
 
@@ -12313,12 +12315,13 @@ impl LibraryHealthScanRecord {
     fn json(&self) -> String {
         serde_json::json!({
             "id": self.id,
-            "status": "completed",
+            "status": self.status,
             "libraryPath": self.library_path,
             "items": self.items,
             "issues_found": self.issues.len(),
             "issues": self.issues,
             "updated_at": self.updated_at,
+            "startedAt": self.started_at,
         })
         .to_string()
     }
@@ -12596,6 +12599,8 @@ impl LibraryStore {
             library_path,
             items: self.records.len(),
             issues: self.health_issues(),
+            status: "completed".to_owned(),
+            started_at: self.updated_at,
             updated_at: self.updated_at,
         };
         if self.health_scans.len() == MAX_LIBRARY_HEALTH_SCANS {
@@ -12603,6 +12608,48 @@ impl LibraryStore {
         }
         self.health_scans.push(record.clone());
         Some(record)
+    }
+
+    fn start_health_scan(
+        &mut self,
+        library_path: String,
+    ) -> Result<LibraryHealthScanRecord, String> {
+        self.refresh_health_scans();
+        if let Some(active) = self
+            .health_scans
+            .iter()
+            .find(|scan| scan.status == "running")
+        {
+            return Err(active.id.clone());
+        }
+        let id = format!("scan-{}", self.allocate_health_scan_id());
+        let now = unix_timestamp();
+        let record = LibraryHealthScanRecord {
+            id,
+            library_path,
+            items: self.records.len(),
+            issues: Vec::new(),
+            status: "running".to_owned(),
+            started_at: now,
+            updated_at: now,
+        };
+        if self.health_scans.len() == MAX_LIBRARY_HEALTH_SCANS {
+            self.health_scans.remove(0);
+        }
+        self.health_scans.push(record.clone());
+        Ok(record)
+    }
+
+    fn refresh_health_scans(&mut self) {
+        let now = unix_timestamp();
+        let issues = self.health_issues();
+        for scan in &mut self.health_scans {
+            if scan.status == "running" && now.saturating_sub(scan.started_at) >= 1 {
+                scan.status = "completed".to_owned();
+                scan.issues = issues.clone();
+                scan.updated_at = now;
+            }
+        }
     }
 
     fn health_scan(&self, id: &str) -> Option<LibraryHealthScanRecord> {
@@ -25116,7 +25163,8 @@ async fn route_http_request_with_headers(
             let Some(scan_id) = path_segment_after(path, "/api/library/health/scans/") else {
                 return Ok(routing::not_found_response());
             };
-            let library = state.library.read().await;
+            let mut library = state.library.write().await;
+            library.refresh_health_scans();
             let scan = library.health_scan(scan_id);
             drop(library);
             Ok(scan
@@ -25128,18 +25176,22 @@ async fn route_http_request_with_headers(
                 .or_else(|| extract_json_string_field(body, "path"))
                 .unwrap_or_default();
             let mut library = state.library.write().await;
-            let scan = library.create_health_scan(library_path);
+            let scan = match library.start_health_scan(library_path) {
+                Ok(scan) => scan,
+                Err(active_id) => {
+                    return Ok(routing::conflict_response(&format!(
+                        "scan already running: {active_id}"
+                    )));
+                }
+            };
             drop(library);
-            Ok(scan
-                .map(|record| {
-                    routing::ok_response(serde_json::json!({
-                        "scanId": record.id,
-                        "message": "Scan started successfully",
-                    }).to_string())
+            Ok(routing::ok_response(
+                serde_json::json!({
+                    "scanId": scan.id,
+                    "message": "Scan started successfully",
                 })
-                .unwrap_or_else(|| {
-                    routing::service_unavailable_response("library health scan id space exhausted")
-                }))
+                .to_string(),
+            ))
         }
         ("POST", "/api/library/health/issues/fix") => {
             let mut library = state.library.write().await;
@@ -107138,6 +107190,7 @@ mod tests {
         assert_eq!(scan.status, "200 OK");
         assert!(scan_json["scanId"].as_str().is_some());
         assert_eq!(scan_json["message"], "Scan started successfully");
+        let active_id = scan_json["scanId"].as_str().unwrap();
         let second_scan = super::route_http_request(
             "POST",
             "/api/v0/library/health/scans",
@@ -107147,10 +107200,22 @@ mod tests {
         )
         .await
         .expect("second library scan");
-        let second_scan_json =
-            serde_json::from_str::<serde_json::Value>(&second_scan.body).unwrap();
-        assert_eq!(second_scan.status, "200 OK");
-        assert_ne!(scan_json["scanId"], second_scan_json["scanId"]);
+        assert_eq!(second_scan.status, "409 Conflict");
+        assert!(second_scan.body.contains(active_id));
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        let completed = super::route_http_request(
+            "GET",
+            &format!("/api/library/health/scans/{active_id}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&completed.body).unwrap()["status"],
+            "completed"
+        );
         let missing_scan = super::route_http_request(
             "GET",
             "/api/library/health/scans/scan-does-not-exist",
