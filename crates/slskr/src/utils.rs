@@ -774,7 +774,7 @@ pub fn normalize_api_path(path: &str) -> &str {
         "/api/server/status" => "/api/server",
         "/api/slskdn/capabilities" | "/api/v0/slskdn/capabilities" => "/api/capabilities",
         "/api/v0/fairness/summary" => "/api/fairness",
-        "/api/v0/hashdb/backfill/candidates" => "/api/backfill/candidates",
+        "/api/v0/hashdb/backfill/candidates" => "/api/hashdb/backfill/candidates",
         "/api/v0/transfers/downloads/auto-replace/status" => "/api/autoreplace",
         "/api/v0/portforwarding/available-ports" => "/api/port-forwarding/available-ports",
         "/api/v0/portforwarding/stream-stats" => "/api/port-forwarding/stream-stats",

@@ -1795,6 +1795,72 @@ impl SearchRecord {
     }
 }
 
+const HASHDB_BACKFILL_PROGRESS_KEY: &str = "hashdb/backfill/progress";
+const HASHDB_FLAC_INVENTORY_PREFIX: &str = "hashdb/flac-inventory/";
+const HASHDB_BACKFILL_MIN_FILE_SIZE: u64 = 32_768;
+
+fn hashdb_backfill_flac_candidates(records: &[SearchRecord]) -> Vec<(String, String, u64)> {
+    records
+        .iter()
+        .flat_map(|record| {
+            record.results.iter().filter_map(|result| {
+                let peer_id = result.peer_username.as_deref()?.trim();
+                let path = result.filename.trim();
+                (path.to_ascii_lowercase().ends_with(".flac")
+                    && result.size >= HASHDB_BACKFILL_MIN_FILE_SIZE
+                    && !peer_id.is_empty()
+                    && !path.is_empty())
+                .then(|| (peer_id.to_owned(), path.to_owned(), result.size))
+            })
+        })
+        .collect()
+}
+
+fn hashdb_flac_inventory_key(peer_id: &str, path: &str, size: u64) -> String {
+    let file_id = hex::encode(Sha256::digest(
+        format!("{peer_id}|{path}|{size}").as_bytes(),
+    ));
+    format!("{HASHDB_FLAC_INVENTORY_PREFIX}{file_id}")
+}
+
+fn hashdb_flac_inventory_record(peer_id: &str, path: &str, size: u64) -> serde_json::Value {
+    let file_id = hex::encode(Sha256::digest(
+        format!("{peer_id}|{path}|{size}").as_bytes(),
+    ));
+    serde_json::json!({
+        "fileId": file_id,
+        "peerId": peer_id,
+        "path": path,
+        "size": size,
+        "discoveredAt": unix_timestamp(),
+        "hashStatus": "none",
+        "hashStatusStr": "none",
+        "hashSource": "backfill_sniff",
+        "hashSourceStr": "backfill_sniff",
+    })
+}
+
+fn hashdb_inventory_records(
+    features: &ControllerFeatureState,
+    limit: usize,
+    candidates_only: bool,
+) -> Vec<serde_json::Value> {
+    features
+        .values_with_prefix(HASHDB_FLAC_INVENTORY_PREFIX)
+        .into_iter()
+        .filter(|record| {
+            !candidates_only
+                || record
+                    .get("hashStatusStr")
+                    .and_then(serde_json::Value::as_str)
+                    .is_none_or(|status| {
+                        status.eq_ignore_ascii_case("none") || status.eq_ignore_ascii_case("failed")
+                    })
+        })
+        .take(limit)
+        .collect()
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct SearchStore {
     records: Vec<SearchRecord>,
@@ -16799,21 +16865,28 @@ async fn route_http_request_with_headers(
             let latest_seq = discovery.latest_seq();
             let database_size_bytes = discovery.database_size_bytes();
             let distinct_peers = discovery.distinct_peer_count();
-            let shares = state.shares.read().await;
-            let audio_entries = shares
-                .entries
-                .iter()
-                .filter(|entry| is_auto_retry_audio_file(&entry.filename))
-                .collect::<Vec<_>>();
-            let projected_share_entries = audio_entries.len();
-            drop(shares);
             drop(discovery);
+            let inventory = hashdb_inventory_records(
+                &*state.controller_features.read().await,
+                usize::MAX,
+                false,
+            );
+            let total_flac_entries = inventory.len();
+            let hashed_flac_entries = inventory
+                .iter()
+                .filter(|entry| {
+                    entry
+                        .get("hashStatusStr")
+                        .and_then(serde_json::Value::as_str)
+                        .is_some_and(|status| status.eq_ignore_ascii_case("known"))
+                })
+                .count();
             let slskdn_peers = state.mesh.read().await.capability_records.len();
             Ok(routing::ok_response(serde_json::json!({
                 "totalPeers": distinct_peers,
                 "slskdnPeers": slskdn_peers,
-                "totalFlacEntries": projected_share_entries,
-                "hashedFlacEntries": persisted_entries,
+                "totalFlacEntries": total_flac_entries,
+                "hashedFlacEntries": hashed_flac_entries,
                 "totalHashEntries": persisted_entries,
                 "currentSeqId": latest_seq,
                 "databaseSizeBytes": database_size_bytes,
@@ -17074,42 +17147,7 @@ async fn route_http_request_with_headers(
             ).to_string()))
         }
         ("POST", "/api/hashdb/backfill/from-history") => {
-            let searches = state.searches.read().await;
-            let search_candidates = searches.records.len();
-            let search_results = searches
-                .records
-                .iter()
-                .map(|record| record.results.len())
-                .sum::<usize>();
-            drop(searches);
-            let shares = state.shares.read().await;
-            let share_candidates = shares.entries.len();
-            drop(shares);
-            let candidates = search_candidates + search_results + share_candidates;
-            if route.path.starts_with("/api/v0/") {
-                return Ok(routing::ok_response(
-                    serde_json::json!({
-                        "searchesProcessed": search_candidates,
-                        "flacsDiscovered": 0,
-                        "totalSearches": search_candidates,
-                        "remainingSearches": 0,
-                        "complete": true,
-                        "message": format!(
-                            "Backfill complete! Processed {search_candidates} searches, discovered 0 FLACs."
-                        ),
-                    })
-                    .to_string(),
-                ));
-            }
-            Ok(routing::accepted_response(serde_json::json!({
-                "success": true,
-                "queued": candidates,
-                "candidates": candidates,
-                "searches": search_candidates,
-                "searchResults": search_results,
-                "sharedFiles": share_candidates,
-                "status": if candidates == 0 { "idle" } else { "queued" },
-            }).to_string()))
+            Ok(hashdb_backfill_from_history_response(route.query, state).await)
         }
         ("POST", path) if path.starts_with("/api/hashdb/backfill/from-history") => {
             Ok(routing::not_found_response())
@@ -41870,6 +41908,7 @@ fn unversioned_mutation_requires_api_version(method: &str, path: &str) -> bool {
             | ("POST", "/api/library/health/issues/fix")
             | ("POST", "/api/slskdn/library/remediate")
             | ("POST", "/api/source-feed-imports/preview")
+            | ("POST", "/api/hashdb/backfill/from-history")
             | ("POST", "/api/integrations/spotify/authorize")
             | ("DELETE", "/api/integrations/spotify")
             | ("POST", "/api/slskdn/warm-cache/hints")
@@ -44766,6 +44805,7 @@ fn extended_controller_get_route(path: &str) -> bool {
     matches!(
         path,
         "/api/bridge/rooms"
+            | "/api/hashdb/backfill/candidates"
             | "/api/source-feed-imports/history"
             | "/api/hashdb/metadata-processing"
             | "/api/hashdb/inventory/unhashed"
@@ -44889,6 +44929,7 @@ fn extended_controller_mutation_route(method: &str, path: &str) -> bool {
                         | "/api/dht/announce"
                         | "/api/dht/discover"
                         | "/api/events"
+                        | "/api/hashdb/backfill/from-history"
                         | "/api/hashdb/optimize/indexes"
                         | "/api/hashdb/optimize/profile"
                         | "/api/hashdb/optimize/vacuum"
@@ -45066,6 +45107,111 @@ fn slskdn_adversarial_mutation_response<'a>(
             Err(error) => routing::service_unavailable_response(&error),
         }
     })
+}
+
+async fn hashdb_backfill_from_history_response(
+    query: Option<&str>,
+    state: &AppState,
+) -> HttpResponse {
+    let batch_size = match query_parameter(query, "batchSize") {
+        None => 50,
+        Some(value) => match value.parse::<usize>() {
+            Ok(value) => value.clamp(10, 500),
+            Err(_) => return routing::bad_request_response("batchSize must be an integer"),
+        },
+    };
+    let reset = query_parameter(query, "reset")
+        .and_then(|value| parse_bool_value(&value))
+        .unwrap_or(false);
+
+    let last_processed_at = if reset {
+        None
+    } else {
+        state
+            .controller_features
+            .read()
+            .await
+            .get(HASHDB_BACKFILL_PROGRESS_KEY)
+            .and_then(|value| value.get("lastProcessedAt"))
+            .and_then(serde_json::Value::as_u64)
+    };
+    let mut records = state.searches.read().await.records.clone();
+    let total_searches = records.len();
+    let remaining_searches = last_processed_at.map_or(total_searches, |last_processed_at| {
+        records
+            .iter()
+            .filter(|record| record.created_at < last_processed_at)
+            .count()
+    });
+
+    if remaining_searches == 0 && !reset {
+        return routing::ok_response(
+            serde_json::json!({
+                "searchesProcessed": 0,
+                "flacsDiscovered": 0,
+                "totalSearches": total_searches,
+                "remainingSearches": 0,
+                "complete": true,
+                "message": "Backfill complete - all searches have been processed. Use reset=true to start over.",
+            })
+            .to_string(),
+        );
+    }
+
+    records.retain(|record| {
+        last_processed_at.is_none_or(|last_processed_at| record.created_at < last_processed_at)
+    });
+    records.sort_by_key(|record| std::cmp::Reverse(record.created_at));
+    records.truncate(batch_size);
+    let searches_processed = records.len();
+    let candidates = hashdb_backfill_flac_candidates(&records);
+    let flacs_discovered = candidates.len();
+    let oldest_processed = records.last().map(|record| record.created_at);
+
+    let store_result = async {
+        let mut features = state.controller_features.write().await;
+        if reset {
+            features.remove(HASHDB_BACKFILL_PROGRESS_KEY)?;
+        }
+        for (peer_id, path, size) in candidates {
+            let key = hashdb_flac_inventory_key(&peer_id, &path, size);
+            features.upsert(key, hashdb_flac_inventory_record(&peer_id, &path, size))?;
+        }
+        if let Some(oldest_processed) = oldest_processed {
+            features.upsert(
+                HASHDB_BACKFILL_PROGRESS_KEY.to_owned(),
+                serde_json::json!({"lastProcessedAt": oldest_processed}),
+            )?;
+        }
+        Ok::<(), String>(())
+    }
+    .await;
+    if let Err(error) = store_result {
+        return routing::service_unavailable_response(&error);
+    }
+
+    let new_remaining = remaining_searches.saturating_sub(searches_processed);
+    let complete = new_remaining == 0;
+    let message = if complete {
+        format!(
+            "Backfill complete! Processed {searches_processed} searches, discovered {flacs_discovered} FLACs."
+        )
+    } else {
+        format!(
+            "Processed {searches_processed} searches, discovered {flacs_discovered} FLACs. {new_remaining} searches remaining - click again to continue."
+        )
+    };
+    routing::ok_response(
+        serde_json::json!({
+            "searchesProcessed": searches_processed,
+            "flacsDiscovered": flacs_discovered,
+            "totalSearches": total_searches,
+            "remainingSearches": new_remaining,
+            "complete": complete,
+            "message": message,
+        })
+        .to_string(),
+    )
 }
 
 async fn extended_controller_mutation_response(
@@ -55852,6 +55998,17 @@ async fn extended_controller_get_response(
                 body: serde_json::Value::Array(rows).to_string(),
             }
         }
+        "/api/hashdb/backfill/candidates" => {
+            let limit = query_parameter(query, "limit")
+                .and_then(|value| value.parse::<usize>().ok())
+                .unwrap_or(10)
+                .clamp(1, 1_000);
+            let entries =
+                hashdb_inventory_records(&*state.controller_features.read().await, limit, true);
+            routing::ok_response(
+                serde_json::json!({"count": entries.len(), "entries": entries}).to_string(),
+            )
+        }
         "/api/hashdb/inventory/unhashed" => {
             let discovery = state.content_discovery.read().await;
             let hashed_sizes = discovery
@@ -55859,20 +56016,26 @@ async fn extended_controller_get_response(
                 .iter()
                 .map(|entry| entry.size)
                 .collect::<HashSet<_>>();
+            drop(discovery);
+            let mut rows =
+                hashdb_inventory_records(&*state.controller_features.read().await, 1_000, true);
             let shares = state.shares.read().await;
-            let rows = shares
-                .entries
-                .iter()
-                .filter(|entry| !hashed_sizes.contains(&entry.size))
-                .take(1_000)
-                .map(|entry| {
-                    serde_json::json!({
-                        "filename": entry.filename,
-                        "size": entry.size,
-                        "extension": entry.extension,
+            rows.extend(
+                shares
+                    .entries
+                    .iter()
+                    .filter(|entry| !hashed_sizes.contains(&entry.size))
+                    .take(1_000)
+                    .map(|entry| {
+                        serde_json::json!({
+                            "filename": entry.filename,
+                            "size": entry.size,
+                            "extension": entry.extension,
+                        })
                     })
-                })
-                .collect::<Vec<_>>();
+                    .collect::<Vec<_>>(),
+            );
+            rows.truncate(1_000);
             let count = rows.len();
             routing::ok_response(
                 serde_json::json!({"entries": rows.clone(), "items": rows, "count": count})
@@ -105776,7 +105939,7 @@ mod tests {
         assert_eq!(invalid_file.status, "400 Bad Request");
         let hash_backfill = super::route_http_request(
             "POST",
-            "/api/hashdb/backfill/from-history",
+            "/api/v0/hashdb/backfill/from-history",
             None,
             "{}",
             &state,
@@ -105785,8 +105948,19 @@ mod tests {
         .expect("hashdb backfill");
         let hash_backfill_json =
             serde_json::from_str::<serde_json::Value>(&hash_backfill.body).unwrap();
-        assert_eq!(hash_backfill_json["status"], "queued");
-        assert!(hash_backfill_json["queued"].as_u64().unwrap() >= 4);
+        assert_eq!(hash_backfill.status, "200 OK");
+        assert!(hash_backfill_json.get("searchesProcessed").is_some());
+        assert!(hash_backfill_json.get("flacsDiscovered").is_some());
+        let unversioned_hash_backfill = super::route_http_request(
+            "POST",
+            "/api/hashdb/backfill/from-history",
+            None,
+            "{}",
+            &state,
+        )
+        .await
+        .expect("reject unversioned hashdb backfill");
+        assert_eq!(unversioned_hash_backfill.status, "400 Bad Request");
         let aliased_hash_backfill = super::route_http_request(
             "POST",
             "/api/hashdb/backfill/from-history-untrusted",
@@ -105947,6 +106121,125 @@ mod tests {
         .expect("stream status");
         let stream_json = serde_json::from_str::<serde_json::Value>(&stream.body).unwrap();
         assert_eq!(stream_json["status"], "available");
+    }
+
+    #[tokio::test]
+    async fn hashdb_history_backfill_batches_persists_inventory_and_progress() {
+        let (state, _receiver) = test_state();
+        {
+            let mut searches = state.searches.write().await;
+            for index in 1..=11_u64 {
+                searches.records.push(super::SearchRecord {
+                    id: format!("history-{index}"),
+                    token: u32::try_from(index).unwrap(),
+                    query: format!("history {index}"),
+                    target: "global",
+                    target_name: None,
+                    status: "completed",
+                    results: vec![super::SearchResultEntry {
+                        peer_username: Some(format!("peer-{index}")),
+                        filename: format!("Library/Track-{index}.flac"),
+                        size: 32_768 + index,
+                        extension: "flac".to_owned(),
+                        locked: false,
+                        slot_free: Some(true),
+                        average_speed: Some(1_000),
+                        queue_length: Some(0),
+                    }],
+                    raw_response_count: 1,
+                    filtered_out_count: 0,
+                    ignored_result_count: 0,
+                    hidden_locked_count: 0,
+                    expires_at: 0,
+                    created_at: index,
+                    updated_at: index,
+                });
+            }
+        }
+
+        let first = super::route_http_request(
+            "POST",
+            "/api/v0/hashdb/backfill/from-history?batchSize=10",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("first history backfill batch");
+        assert_eq!(first.status, "200 OK");
+        let first_json = serde_json::from_str::<serde_json::Value>(&first.body).unwrap();
+        assert_eq!(first_json["searchesProcessed"], 10);
+        assert_eq!(first_json["flacsDiscovered"], 10);
+        assert_eq!(first_json["totalSearches"], 11);
+        assert_eq!(first_json["remainingSearches"], 1);
+        assert_eq!(first_json["complete"], false);
+
+        let candidates = super::route_http_request(
+            "GET",
+            "/api/v0/hashdb/backfill/candidates?limit=20",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("hashdb backfill candidates");
+        let candidates_json = serde_json::from_str::<serde_json::Value>(&candidates.body).unwrap();
+        assert_eq!(candidates_json["count"], 10, "{candidates_json}");
+        assert_eq!(
+            candidates_json["entries"].as_array().unwrap().len(),
+            10,
+            "{candidates_json}"
+        );
+
+        let second = super::route_http_request(
+            "POST",
+            "/api/v0/hashdb/backfill/from-history?batchSize=10",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("second history backfill batch");
+        let second_json = serde_json::from_str::<serde_json::Value>(&second.body).unwrap();
+        assert_eq!(second_json["searchesProcessed"], 1);
+        assert_eq!(second_json["flacsDiscovered"], 1);
+        assert_eq!(second_json["remainingSearches"], 0);
+        assert_eq!(second_json["complete"], true);
+
+        let complete = super::route_http_request(
+            "POST",
+            "/api/v0/hashdb/backfill/from-history",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("completed history backfill");
+        let complete_json = serde_json::from_str::<serde_json::Value>(&complete.body).unwrap();
+        assert_eq!(complete_json["searchesProcessed"], 0);
+        assert_eq!(complete_json["flacsDiscovered"], 0);
+        assert_eq!(complete_json["complete"], true);
+
+        let reset = super::route_http_request(
+            "POST",
+            "/api/v0/hashdb/backfill/from-history?reset=true",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("reset history backfill");
+        let reset_json = serde_json::from_str::<serde_json::Value>(&reset.body).unwrap();
+        assert_eq!(reset_json["searchesProcessed"], 11);
+        assert_eq!(reset_json["flacsDiscovered"], 11);
+        assert_eq!(reset_json["complete"], true);
+
+        let stats = super::route_http_request("GET", "/api/v0/hashdb/stats", None, "", &state)
+            .await
+            .expect("hashdb stats after backfill");
+        let stats_json = serde_json::from_str::<serde_json::Value>(&stats.body).unwrap();
+        assert_eq!(stats_json["totalFlacEntries"], 11);
+        assert_eq!(stats_json["hashedFlacEntries"], 0);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
