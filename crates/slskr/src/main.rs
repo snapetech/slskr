@@ -201,6 +201,33 @@ fn print_controller_logo(target: ControllerCompatibilityTarget) {
         }
     }
 }
+
+#[cfg(test)]
+mod disaster_mode_regression_tests {
+    #[test]
+    fn force_enters_full_fallback_even_when_soulseek_is_connected() {
+        assert_eq!(
+            super::virtual_soulfind_disaster_mode_level(true, false, true, false, false),
+            3
+        );
+    }
+
+    #[test]
+    fn automatic_disaster_levels_preserve_existing_threshold_order() {
+        assert_eq!(
+            super::virtual_soulfind_disaster_mode_level(false, true, false, true, true),
+            2
+        );
+        assert_eq!(
+            super::virtual_soulfind_disaster_mode_level(false, true, false, false, true),
+            1
+        );
+        assert_eq!(
+            super::virtual_soulfind_disaster_mode_level(false, true, true, true, true),
+            0
+        );
+    }
+}
 const MAX_WEBHOOK_DELIVERY_TASKS: usize = 32;
 #[cfg(test)]
 const MAX_INCOMING_CONNECTION_TASKS: usize = 128;
@@ -51439,17 +51466,13 @@ async fn extended_controller_get_response(
                 .clone();
             let unavailable_long_enough = unix_timestamp().saturating_sub(session_updated_at)
                 >= disaster.unavailable_threshold.as_secs();
-            let level = if disaster.auto && session_state != "connected" && unavailable_long_enough
-            {
-                2
-            } else if disaster.auto
-                && session_state != "connected"
-                && disaster.enable_graceful_degradation
-            {
-                1
-            } else {
-                0
-            };
+            let level = virtual_soulfind_disaster_mode_level(
+                disaster.force,
+                disaster.auto,
+                session_state == "connected",
+                unavailable_long_enough,
+                disaster.enable_graceful_degradation,
+            );
             let (level_name, description) = match level {
                 1 => (
                     "SoulseekDegraded",
@@ -51486,6 +51509,24 @@ async fn extended_controller_get_response(
             )
         }
         _ => routing::not_found_response(),
+    }
+}
+
+fn virtual_soulfind_disaster_mode_level(
+    force: bool,
+    auto: bool,
+    soulseek_connected: bool,
+    unavailable_long_enough: bool,
+    graceful_degradation: bool,
+) -> u8 {
+    if force {
+        3
+    } else if auto && !soulseek_connected && unavailable_long_enough {
+        2
+    } else if auto && !soulseek_connected && graceful_degradation {
+        1
+    } else {
+        0
     }
 }
 
