@@ -41,10 +41,7 @@ pub(crate) fn extract_oidc_issuers(
             continue;
         }
         if let Term::NamedNode(issuer) = quad.object {
-            let issuer = issuer.into_string();
-            if !issuers.iter().any(|known| known == &issuer) {
-                issuers.push(issuer);
-            }
+            issuers.push(issuer.into_string());
         }
     }
     Ok(issuers)
@@ -77,7 +74,7 @@ mod tests {
     }
 
     #[test]
-    fn json_ld_profile_extracts_array_issuers() {
+    fn json_ld_profile_preserves_duplicate_array_issuers() {
         let profile = br#"{
           "@context": {"solid": "http://www.w3.org/ns/solid/terms#"},
           "@id": "https://profile.example/profile/card#me",
@@ -89,7 +86,10 @@ mod tests {
 
         let issuers = extract_oidc_issuers(profile, Some("application/ld+json"), WEB_ID)
             .expect("valid JSON-LD profile");
-        assert_eq!(issuers, ["https://issuer.example/oidc"]);
+        assert_eq!(
+            issuers,
+            ["https://issuer.example/oidc", "https://issuer.example/oidc"]
+        );
     }
 
     #[test]

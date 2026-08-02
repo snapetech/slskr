@@ -50208,12 +50208,24 @@ async fn podcore_local_backfill_response(
         let Some(last_seen_timestamp) = last_seen.get(&channel.channel_id) else {
             continue;
         };
-        channels_requested += 1;
+        let mut channel_synchronized = false;
         for message in messages.list(pod_id, &channel.channel_id, None) {
             if message.timestamp_unix_ms > *last_seen_timestamp {
                 synchronized = synchronized.saturating_add(1);
-                bytes_transferred = bytes_transferred.saturating_add(message.body.len());
+                channel_synchronized = true;
+                // Match slskdN's PodMessageBackfill.EstimateMessageSize:
+                // message ID (50) + sender ID (50) + body + signature + metadata (100).
+                bytes_transferred = bytes_transferred.saturating_add(
+                    50usize
+                        .saturating_add(50)
+                        .saturating_add(message.body.len())
+                        .saturating_add(message.signature.len())
+                        .saturating_add(100),
+                );
             }
+        }
+        if channel_synchronized {
+            channels_requested += 1;
         }
     }
     drop(messages);
@@ -50230,13 +50242,8 @@ async fn podcore_local_backfill_response(
         "success": true,
         "podId": pod_id,
         "channelsRequested": channels_requested,
-        "messagesReceived": synchronized,
-        "synchronized": synchronized,
-        "bytesTransferred": bytes_transferred,
+        "totalMessagesReceived": synchronized,
         "duration": format_timespan_hms(started_at.elapsed().as_secs() as i64),
-        "durationMs": elapsed_ms,
-        "completedAt": chrono::Utc::now().to_rfc3339(),
-        "errorMessage": null,
     }))
 }
 
@@ -50707,13 +50714,12 @@ async fn podcore_mutation_response(
             });
             let key = format!("pod/backfill/{pod_id}/{channel_id}");
             Some(
-                match state
-                    .controller_features
-                    .write()
-                    .await
-                    .upsert(key, value.clone())
-                {
-                    Ok(()) => routing::ok_response(value.to_string()),
+                match state.controller_features.write().await.upsert(key, value) {
+                    Ok(()) => routing::HttpResponse {
+                        status: "200 OK",
+                        content_type: "",
+                        body: String::new(),
+                    },
                     Err(error) => routing::service_unavailable_response(&error),
                 },
             )
@@ -50746,30 +50752,35 @@ async fn podcore_mutation_response(
             Some(routing::ok_response(result.to_string()))
         }
         ("POST", [section, sync_all]) if section == "backfill" && sync_all == "sync-all" => {
-            let pods = state.pods.read().await.list_visible(None);
+            let local_peer_id = pod_request_peer_id(state).await.unwrap_or_default();
+            let pods_store = state.pods.read().await;
+            let pods = pods_store.list_visible(Some(&local_peer_id));
             let features = state.controller_features.read().await;
             let work = pods
                 .iter()
+                .filter(|pod| pods_store.is_member(&pod.pod_id, &local_peer_id))
                 .map(|pod| {
                     let last_seen = pod
                         .channels
                         .iter()
-                        .map(|channel| {
-                            let timestamp = features
+                        .filter_map(|channel| {
+                            features
                                 .get(&format!(
                                     "pod/backfill/{}/{}",
                                     pod.pod_id, channel.channel_id
                                 ))
                                 .and_then(|value| value.get("lastSeen"))
                                 .and_then(serde_json::Value::as_u64)
-                                .unwrap_or(0);
-                            (channel.channel_id.clone(), timestamp)
+                                .filter(|timestamp| *timestamp > 0)
+                                .map(|timestamp| (channel.channel_id.clone(), timestamp))
                         })
                         .collect::<BTreeMap<_, _>>();
-                    (pod.pod_id.clone(), last_seen)
+                    (!last_seen.is_empty()).then(|| (pod.pod_id.clone(), last_seen))
                 })
+                .flatten()
                 .collect::<Vec<_>>();
             drop(features);
+            drop(pods_store);
             let mut results = Vec::with_capacity(work.len());
             for (pod_id, last_seen) in work {
                 if let Some(result) =
@@ -51198,6 +51209,102 @@ async fn podcore_mutation_response(
         }
         ("POST", [section, message]) if section == "verification" && message == "message" => {
             Some(pod_verification_message_response(body, state).await)
+        }
+        ("POST", [section, refresh, pod_id]) if section == "dht" && refresh == "refresh" => {
+            let publication_key = format!("pod/dht/{pod_id}");
+            let Some(publication) = state
+                .controller_features
+                .read()
+                .await
+                .get(&publication_key)
+                .cloned()
+            else {
+                return Some(routing::ok_response(
+                    serde_json::json!({
+                        "success": false,
+                        "podId": pod_id,
+                        "wasRepublished": false,
+                        "nextRefresh": PODCORE_MIN_DATETIME,
+                        "errorMessage": "Pod not found in local tracking",
+                    })
+                    .to_string(),
+                ));
+            };
+            let now = chrono::Utc::now();
+            let Some(expires_at) = publication
+                .get("expiresAt")
+                .and_then(serde_json::Value::as_str)
+                .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+                .map(|value| value.with_timezone(&chrono::Utc))
+            else {
+                return Some(routing::ok_response(
+                    serde_json::json!({
+                        "success": false,
+                        "podId": pod_id,
+                        "wasRepublished": false,
+                        "nextRefresh": PODCORE_MIN_DATETIME,
+                        "errorMessage": "Pod publication tracking is invalid",
+                    })
+                    .to_string(),
+                ));
+            };
+            let next_refresh = expires_at - chrono::Duration::hours(6);
+            if expires_at - now >= chrono::Duration::hours(6) {
+                return Some(routing::ok_response(
+                    serde_json::json!({
+                        "success": true,
+                        "podId": pod_id,
+                        "wasRepublished": false,
+                        "nextRefresh": next_refresh.to_rfc3339(),
+                    })
+                    .to_string(),
+                ));
+            }
+
+            let Some(pod) = state.pods.read().await.get(pod_id) else {
+                return Some(routing::ok_response(
+                    serde_json::json!({
+                        "success": false,
+                        "podId": pod_id,
+                        "wasRepublished": false,
+                        "nextRefresh": PODCORE_MIN_DATETIME,
+                        "errorMessage": "Pod not found in pod service",
+                    })
+                    .to_string(),
+                ));
+            };
+            let published_pod = serde_json::json!(pod);
+            let canonical = serde_json::to_vec(&published_pod).unwrap_or_default();
+            let signature = state.capability_signing_key.sign(&canonical);
+            let published_at = chrono::Utc::now();
+            let refreshed_expires_at = published_at + chrono::Duration::hours(24);
+            let refreshed = serde_json::json!({
+                "success": true,
+                "podId": pod_id,
+                "dhtKey": format!("pod:{pod_id}:meta"),
+                "publishedAt": published_at.to_rfc3339(),
+                "expiresAt": refreshed_expires_at.to_rfc3339(),
+                "publishedPod": published_pod,
+                "signature": STANDARD.encode(signature.to_bytes()),
+                "publicKey": STANDARD.encode(state.capability_signing_key.verifying_key().as_bytes()),
+            });
+            if let Err(error) = state
+                .controller_features
+                .write()
+                .await
+                .upsert(publication_key, refreshed)
+            {
+                return Some(routing::service_unavailable_response(&error));
+            }
+            Some(routing::ok_response(
+                serde_json::json!({
+                    "success": true,
+                    "podId": pod_id,
+                    "wasRepublished": true,
+                    "nextRefresh": (refreshed_expires_at - chrono::Duration::hours(6)).to_rfc3339(),
+                })
+                .to_string(),
+            ))
         }
         ("POST", [section, action, tail @ ..])
             if matches!(section.as_str(), "dht" | "discovery") =>
@@ -99358,6 +99465,23 @@ mod tests {
         .expect("republish pod one");
         assert_eq!(republished.status, "200 OK");
 
+        let refresh = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/dht/refresh/dht-audit-pod-1",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("refresh pod one");
+        assert_eq!(refresh.status, "200 OK", "{}", refresh.body);
+        let refresh_json = serde_json::from_str::<serde_json::Value>(&refresh.body).unwrap();
+        assert_eq!(refresh_json["success"], true, "{refresh_json}");
+        assert_eq!(refresh_json["podId"], "dht-audit-pod-1");
+        assert_eq!(refresh_json["wasRepublished"], false);
+        assert!(refresh_json["nextRefresh"].is_string());
+        assert!(refresh_json.get("errorMessage").is_none());
+
         let stats = super::route_http_request("GET", "/api/v0/podcore/dht/stats", None, "", &state)
             .await
             .expect("dht stats");
@@ -99502,7 +99626,7 @@ mod tests {
                     "channels": [{"channelId": "general", "name": "General"}]
                 }))
                 .expect("deserialize backfill pod"),
-                "owner-peer".to_owned(),
+                "tester".to_owned(),
             )
             .expect("create backfill pod");
         {
@@ -99540,8 +99664,21 @@ mod tests {
         .expect("sync backfill");
         assert_eq!(sync.status, "200 OK", "{}", sync.body);
         let sync_json = serde_json::from_str::<serde_json::Value>(&sync.body).unwrap();
-        assert_eq!(sync_json["messagesReceived"], 1);
-        assert_eq!(sync_json["bytesTransferred"], 3);
+        assert_eq!(sync_json["totalMessagesReceived"], 1);
+        assert!(sync_json.get("messagesReceived").is_none());
+        assert!(sync_json.get("bytesTransferred").is_none());
+
+        let last_seen = super::route_http_request(
+            "PUT",
+            &format!("/api/v0/podcore/backfill/{pod_id}/general/last-seen"),
+            None,
+            "1",
+            &state,
+        )
+        .await
+        .expect("persist last-seen timestamp");
+        assert_eq!(last_seen.status, "200 OK");
+        assert!(last_seen.body.is_empty());
 
         let sync_all = super::route_http_request(
             "POST",
@@ -99555,7 +99692,7 @@ mod tests {
         assert_eq!(sync_all.status, "200 OK");
         let sync_all_json = serde_json::from_str::<serde_json::Value>(&sync_all.body).unwrap();
         assert_eq!(sync_all_json.as_array().unwrap().len(), 1);
-        assert_eq!(sync_all_json[0]["messagesReceived"], 2);
+        assert_eq!(sync_all_json[0]["totalMessagesReceived"], 2);
 
         let stats =
             super::route_http_request("GET", "/api/v0/podcore/backfill/stats", None, "", &state)
@@ -99565,7 +99702,7 @@ mod tests {
         assert_eq!(stats_json["totalBackfillRequestsSent"], 2);
         assert_eq!(stats_json["totalBackfillRequestsReceived"], 0);
         assert_eq!(stats_json["totalMessagesBackfilled"], 3);
-        assert_eq!(stats_json["totalBackfillBytesTransferred"], 9);
+        assert_eq!(stats_json["totalBackfillBytesTransferred"], 609);
         assert_eq!(stats_json["backfillRequestsByPod"][pod_id], 2);
         assert!(stats_json["lastBackfillOperation"].is_string());
     }
@@ -100862,6 +100999,7 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(last_seen.status, "200 OK", "{}", last_seen.body);
+        assert!(last_seen.body.is_empty());
 
         let verified = super::route_http_request(
             "POST",
