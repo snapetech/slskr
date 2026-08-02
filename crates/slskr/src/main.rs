@@ -735,6 +735,7 @@ fn controller_cli_environment_name(flag: &str) -> Option<(&'static str, bool)> {
         "--ftp-retry-attempts" => ("SLSKD_FTP_RETRY_ATTEMPTS", true),
         "--vpn" => ("SLSKD_VPN", false),
         "--vpn-port-forwarding" => ("SLSKD_VPN_PORT_FORWARDING", false),
+        "--vpn-self-hosted-relay" => ("SLSKD_VPN_SELF_HOSTED_RELAY", false),
         "--vpn-polling-interval" => ("SLSKD_VPN_POLLING_INTERVAL", true),
         "--vpn-gluetun-url" => ("SLSKD_VPN_GLUETUN_URL", true),
         "--vpn-gluetun-timeout" => ("SLSKD_VPN_GLUETUN_TIMEOUT", true),
@@ -30973,6 +30974,8 @@ fn slskd_options_json(
     response[ftp_key]["vpn"]["enabled"] = serde_json::json!(config.integrations.vpn.enabled);
     response[ftp_key]["vpn"]["portForwarding"] =
         serde_json::json!(config.integrations.vpn.port_forwarding);
+    response[ftp_key]["vpn"]["selfHostedRelay"] =
+        serde_json::json!(config.integrations.vpn.self_hosted_relay);
     response[ftp_key]["vpn"]["pollingInterval"] =
         serde_json::json!(config.integrations.vpn.polling_interval);
     response[ftp_key]["vpn"]["gluetun"]["version"] = serde_json::json!(1);
@@ -31531,6 +31534,10 @@ fn slskd_options_json(
             "/integration/vpn/portForwarding",
         ),
         (
+            "SLSKD_VPN_SELF_HOSTED_RELAY",
+            "/integration/vpn/selfHostedRelay",
+        ),
+        (
             "SLSKD_VPN_POLLING_INTERVAL",
             "/integration/vpn/pollingInterval",
         ),
@@ -31555,6 +31562,10 @@ fn slskd_options_json(
         (
             "SLSKD_VPN_PORT_FORWARDING",
             "/integrations/vpn/portForwarding",
+        ),
+        (
+            "SLSKD_VPN_SELF_HOSTED_RELAY",
+            "/integrations/vpn/selfHostedRelay",
         ),
         (
             "SLSKD_VPN_POLLING_INTERVAL",
@@ -36016,6 +36027,9 @@ fn slskd_application_state_json(
         "location": runtime.vpn.location,
         "forwardedPort": runtime.vpn.forwarded_port,
     });
+    if let Some(relay_status) = runtime.vpn.relay.as_ref() {
+        vpn["relay"] = relay_status.json();
+    }
     if config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn {
         vpn["portForwards"] = serde_json::Value::Array(
             runtime
@@ -73928,6 +73942,7 @@ mod tests {
         let vpn = &config.integrations.vpn;
         assert!(vpn.enabled);
         assert!(vpn.port_forwarding);
+        assert!(!vpn.self_hosted_relay);
         assert_eq!(vpn.polling_interval, 3456);
         assert_eq!(vpn.gluetun.url, "http://127.0.0.1:8000");
         assert_eq!(vpn.gluetun.timeout, 2345);
@@ -73948,6 +73963,7 @@ mod tests {
             serde_json::json!({
                 "enabled": true,
                 "portForwarding": true,
+                "selfHostedRelay": false,
                 "pollingInterval": 3456,
                 "gluetun": {
                     "version": 1,
@@ -74033,6 +74049,7 @@ mod tests {
                 public_ip_address: Some("203.0.113.5".parse().unwrap()),
                 namespace: "slskdn".to_owned(),
             }],
+            relay: None,
         };
         let response = super::route_http_request("GET", "/api/v0/application", None, "", &state)
             .await

@@ -3288,6 +3288,7 @@ impl Default for FtpIntegrationSettings {
 pub struct VpnIntegrationSettings {
     pub enabled: bool,
     pub port_forwarding: bool,
+    pub self_hosted_relay: bool,
     pub polling_interval: u64,
     pub gluetun: GluetunIntegrationSettings,
 }
@@ -3329,6 +3330,11 @@ impl VpnIntegrationSettings {
                 "SLSKD_VPN_PORT_FORWARDING",
                 file.port_forwarding.unwrap_or(false),
             )?,
+            self_hosted_relay: env_bool_layer(
+                env,
+                "SLSKD_VPN_SELF_HOSTED_RELAY",
+                file.self_hosted_relay.unwrap_or(false),
+            )?,
             polling_interval,
             gluetun: GluetunIntegrationSettings {
                 url: env
@@ -3363,15 +3369,19 @@ impl VpnIntegrationSettings {
                     "The gluetun URL must be absolute, e.g. 'http://127.0.0.1:8000'".to_owned(),
                 );
             }
+            if settings.self_hosted_relay && !settings.port_forwarding {
+                return Err("Self-hosted relay mode requires VPN port forwarding".to_owned());
+            }
         }
         Ok(settings)
     }
 
     fn sanitized_json(&self) -> String {
         format!(
-            "{{\"enabled\":{},\"port_forwarding\":{},\"polling_interval\":{},\"gluetun\":{{\"url\":{},\"timeout\":{},\"auth\":{},\"username\":{},\"password_configured\":{},\"api_key_configured\":{}}}}}",
+            "{{\"enabled\":{},\"port_forwarding\":{},\"self_hosted_relay\":{},\"polling_interval\":{},\"gluetun\":{{\"url\":{},\"timeout\":{},\"auth\":{},\"username\":{},\"password_configured\":{},\"api_key_configured\":{}}}}}",
             self.enabled,
             self.port_forwarding,
+            self.self_hosted_relay,
             self.polling_interval,
             json_escape(&self.gluetun.url),
             self.gluetun.timeout,
@@ -3388,6 +3398,7 @@ impl Default for VpnIntegrationSettings {
         Self {
             enabled: false,
             port_forwarding: false,
+            self_hosted_relay: false,
             polling_interval: 2_500,
             gluetun: GluetunIntegrationSettings {
                 url: String::new(),
@@ -6643,6 +6654,7 @@ pub struct FtpFileConfig {
 pub struct VpnFileConfig {
     enabled: Option<bool>,
     port_forwarding: Option<bool>,
+    self_hosted_relay: Option<bool>,
     polling_interval: Option<u64>,
     gluetun: GluetunFileConfig,
 }
@@ -7370,6 +7382,10 @@ const CONTROLLER_YAML_CORE_MAPPINGS: &[(&str, &str)] = &[
     (
         "integrations.vpn.port_forwarding",
         "SLSKD_VPN_PORT_FORWARDING",
+    ),
+    (
+        "integrations.vpn.self_hosted_relay",
+        "SLSKD_VPN_SELF_HOSTED_RELAY",
     ),
     (
         "integrations.vpn.polling_interval",

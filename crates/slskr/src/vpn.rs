@@ -14,6 +14,7 @@ pub(crate) struct Status {
     pub location: String,
     pub forwarded_port: Option<u16>,
     pub port_forwards: Vec<PortForward>,
+    pub relay: Option<RelayStatus>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -37,6 +38,39 @@ impl PortForward {
             "publicPort": self.public_port,
             "publicIPAddress": self.public_ip_address.map(|value| value.to_string()),
             "namespace": self.namespace,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct RelayStatus {
+    pub mode: String,
+    pub transport: String,
+    pub connected: bool,
+    pub latency_ms: Option<serde_json::Value>,
+    pub rx_bytes: i64,
+    pub tx_bytes: i64,
+    pub active_connections: i32,
+    pub connection_limit: i32,
+    pub bandwidth_limit_mbit: i32,
+    pub latest_handshake_at: Option<String>,
+    pub path: String,
+}
+
+impl RelayStatus {
+    pub(crate) fn json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "mode": self.mode,
+            "transport": self.transport,
+            "connected": self.connected,
+            "latencyMs": self.latency_ms,
+            "rxBytes": self.rx_bytes,
+            "txBytes": self.tx_bytes,
+            "activeConnections": self.active_connections,
+            "connectionLimit": self.connection_limit,
+            "bandwidthLimitMbit": self.bandwidth_limit_mbit,
+            "latestHandshakeAt": self.latest_handshake_at,
+            "path": self.path,
         })
     }
 }
@@ -80,6 +114,32 @@ struct PortForwardResponseN {
     namespace: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct RelayResponse {
+    #[serde(default, alias = "Mode")]
+    mode: String,
+    #[serde(default, alias = "Transport")]
+    transport: String,
+    #[serde(default, alias = "Connected")]
+    connected: bool,
+    #[serde(default, alias = "latencyMs", alias = "LatencyMs")]
+    latency_ms: Option<serde_json::Value>,
+    #[serde(default, alias = "rxBytes", alias = "RxBytes")]
+    rx_bytes: i64,
+    #[serde(default, alias = "txBytes", alias = "TxBytes")]
+    tx_bytes: i64,
+    #[serde(default, alias = "activeConnections", alias = "ActiveConnections")]
+    active_connections: i32,
+    #[serde(default, alias = "connectionLimit", alias = "ConnectionLimit")]
+    connection_limit: i32,
+    #[serde(default, alias = "bandwidthLimitMbit", alias = "BandwidthLimitMbit")]
+    bandwidth_limit_mbit: i32,
+    #[serde(default, alias = "latestHandshakeAt", alias = "LatestHandshakeAt")]
+    latest_handshake_at: Option<String>,
+    #[serde(default, alias = "Path")]
+    path: String,
+}
+
 fn endpoint(root: &str, path: &str) -> String {
     format!("{}{}", root.trim_end_matches('/'), path)
 }
@@ -121,6 +181,28 @@ async fn get_json<T: serde::de::DeserializeOwned>(
         .map_err(|error| format!("Unexpected Gluetun response: {error}"))
 }
 
+async fn get_optional_json<T: serde::de::DeserializeOwned>(
+    client: &reqwest::Client,
+    options: &VpnIntegrationSettings,
+    path: &str,
+) -> Result<Option<T>, String> {
+    let response = request(client, endpoint(&options.gluetun.url, path), options)
+        .send()
+        .await
+        .map_err(|error| format!("Gluetun request failed: {error}"))?;
+    if response.status() == StatusCode::NOT_FOUND {
+        return Ok(None);
+    }
+    let response = response
+        .error_for_status()
+        .map_err(|error| format!("Gluetun request failed: {error}"))?;
+    response
+        .json::<T>()
+        .await
+        .map(Some)
+        .map_err(|error| format!("Unexpected Gluetun response: {error}"))
+}
+
 pub(crate) async fn poll_once(
     options: &VpnIntegrationSettings,
     target: ControllerCompatibilityTarget,
@@ -132,9 +214,31 @@ pub(crate) async fn poll_once(
         .build()
         .map_err(|error| format!("failed to initialize Gluetun client: {error}"))?;
 
+    let relay = if options.self_hosted_relay {
+        get_optional_json::<RelayResponse>(&client, options, "/v1/slskdn/relay")
+            .await?
+            .map(|relay| RelayStatus {
+                mode: relay.mode,
+                transport: relay.transport,
+                connected: relay.connected,
+                latency_ms: relay.latency_ms,
+                rx_bytes: relay.rx_bytes,
+                tx_bytes: relay.tx_bytes,
+                active_connections: relay.active_connections,
+                connection_limit: relay.connection_limit,
+                bandwidth_limit_mbit: relay.bandwidth_limit_mbit,
+                latest_handshake_at: relay.latest_handshake_at,
+                path: relay.path,
+            })
+    } else {
+        None
+    };
     let public_ip = get_json::<PublicIpResponse>(&client, options, "/v1/publicip/ip").await?;
     if public_ip.public_ip.is_empty() {
-        return Ok(Status::default());
+        return Ok(Status {
+            relay,
+            ..Status::default()
+        });
     }
     let parsed_public_ip = public_ip.public_ip.parse::<IpAddr>().map_err(|_| {
         format!(
@@ -200,6 +304,7 @@ pub(crate) async fn poll_once(
         location: format!("{}, {}", public_ip.city, public_ip.country),
         forwarded_port,
         port_forwards,
+        relay,
     })
 }
 
@@ -215,6 +320,7 @@ mod tests {
         VpnIntegrationSettings {
             enabled: true,
             port_forwarding: true,
+            self_hosted_relay: false,
             polling_interval: 500,
             gluetun: crate::config::GluetunIntegrationSettings {
                 url,
@@ -225,6 +331,51 @@ mod tests {
                 api_key: "api-secret".to_owned(),
             },
         }
+    }
+
+    #[tokio::test]
+    async fn self_hosted_relay_status_is_optional_and_projects_all_fields() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let mut requests = Vec::new();
+            for body in [
+                r#"{"mode":"self-hosted-relay","transport":"tailscale","connected":true,"latencyMs":12.5,"rxBytes":123456,"txBytes":654321,"activeConnections":3,"connectionLimit":128,"bandwidthLimitMbit":100,"latestHandshakeAt":"2026-08-01T12:34:56Z","path":"direct"}"#,
+                r#"{"public_ip":"203.0.113.8","city":"Regina","country":"Canada"}"#,
+            ] {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut buffer = [0_u8; 4096];
+                let read = stream.read(&mut buffer).await.unwrap();
+                requests.push(String::from_utf8_lossy(&buffer[..read]).into_owned());
+                let response = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+                stream.write_all(response.as_bytes()).await.unwrap();
+            }
+            requests
+        });
+        let mut options = options(format!("http://{address}"));
+        options.port_forwarding = false;
+        options.self_hosted_relay = true;
+        let status = poll_once(&options, ControllerCompatibilityTarget::Slskdn)
+            .await
+            .unwrap();
+        let relay = status.relay.unwrap();
+        assert_eq!(relay.mode, "self-hosted-relay");
+        assert_eq!(relay.transport, "tailscale");
+        assert!(relay.connected);
+        assert_eq!(relay.latency_ms, Some(serde_json::json!(12.5)));
+        assert_eq!(relay.rx_bytes, 123_456);
+        assert_eq!(relay.tx_bytes, 654_321);
+        assert_eq!(relay.active_connections, 3);
+        assert_eq!(relay.connection_limit, 128);
+        assert_eq!(relay.bandwidth_limit_mbit, 100);
+        assert_eq!(
+            relay.latest_handshake_at.as_deref(),
+            Some("2026-08-01T12:34:56Z")
+        );
+        assert_eq!(relay.path, "direct");
+        let requests = server.await.unwrap();
+        assert!(requests[0].starts_with("GET /v1/slskdn/relay "));
+        assert!(requests[1].starts_with("GET /v1/publicip/ip "));
     }
 
     #[tokio::test]

@@ -102,6 +102,19 @@ const boolLabel = (value, trueText = 'Enabled', falseText = 'Disabled') => (
 const valueOrDash = (value) =>
   value === undefined || value === null || value === '' ? '-' : value;
 
+const formatBytes = (value) => {
+  if (!Number.isFinite(value)) return '-';
+  if (value < 1024) return `${value} B`;
+  const units = ['KiB', 'MiB', 'GiB', 'TiB'];
+  let size = value / 1024;
+  let unit = units[0];
+  for (let index = 1; index < units.length && size >= 1024; index += 1) {
+    size /= 1024;
+    unit = units[index];
+  }
+  return `${size.toFixed(1)} ${unit}`;
+};
+
 const isConfigured = (value) =>
   value !== undefined && value !== null && value !== '';
 
@@ -2477,6 +2490,7 @@ const VpnPanel = ({ options, state }) => {
   const vpnState = getVpnState(state);
   const gluetun = getOption(vpnOptions, 'gluetun', 'Gluetun') || {};
   const forwards = portForwards(vpnState);
+  const relay = getOption(vpnState, 'relay', 'Relay');
 
   return (
     <Card fluid>
@@ -2515,7 +2529,9 @@ const VpnPanel = ({ options, state }) => {
             <Table.Row>
               <Table.Cell>Provider</Table.Cell>
               <Table.Cell>
-                {getOption(gluetun, 'url', 'Url') ? 'Gluetun' : '-'}
+                {getOption(vpnOptions, 'selfHostedRelay', 'SelfHostedRelay')
+                  ? 'Self-hosted relay'
+                  : (getOption(gluetun, 'url', 'Url') ? 'Gluetun' : '-')}
               </Table.Cell>
             </Table.Row>
             <Table.Row>
@@ -2579,6 +2595,71 @@ const VpnPanel = ({ options, state }) => {
               ))}
             </Table.Body>
           </Table>
+        )}
+        {relay && (
+          <Segment>
+            <Header as="h4">
+              <Icon name="exchange" />
+              <Header.Content>Self-hosted relay</Header.Content>
+            </Header>
+            <div className="integration-status-row">
+              {boolLabel(
+                getOption(relay, 'connected', 'Connected'),
+                'Tunnel Connected',
+                'Tunnel Disconnected',
+              )}
+            </div>
+            <Table basic="very" compact definition>
+              <Table.Body>
+                <Table.Row>
+                  <Table.Cell>Transport</Table.Cell>
+                  <Table.Cell>{valueOrDash(getOption(relay, 'transport', 'Transport'))}</Table.Cell>
+                </Table.Row>
+                <Table.Row>
+                  <Table.Cell>Latency</Table.Cell>
+                  <Table.Cell>
+                    {valueOrDash(getOption(relay, 'latencyMs', 'LatencyMs'))} ms
+                  </Table.Cell>
+                </Table.Row>
+                <Table.Row>
+                  <Table.Cell>Traffic</Table.Cell>
+                  <Table.Cell>
+                    {formatBytes(getOption(relay, 'rxBytes', 'RxBytes'))} received /{' '}
+                    {formatBytes(getOption(relay, 'txBytes', 'TxBytes'))} sent
+                  </Table.Cell>
+                </Table.Row>
+                <Table.Row>
+                  <Table.Cell>Connections</Table.Cell>
+                  <Table.Cell>
+                    {valueOrDash(getOption(relay, 'activeConnections', 'ActiveConnections'))} /{' '}
+                    {valueOrDash(getOption(relay, 'connectionLimit', 'ConnectionLimit'))}
+                  </Table.Cell>
+                </Table.Row>
+                <Table.Row>
+                  <Table.Cell>Bandwidth Limit</Table.Cell>
+                  <Table.Cell>
+                    {valueOrDash(getOption(relay, 'bandwidthLimitMbit', 'BandwidthLimitMbit'))} Mbit/s
+                  </Table.Cell>
+                </Table.Row>
+                <Table.Row>
+                  <Table.Cell>
+                    {getOption(relay, 'transport', 'Transport') === 'tailscale'
+                      ? 'Latest Peer Activity'
+                      : 'Latest Handshake'}
+                  </Table.Cell>
+                  <Table.Cell>
+                    {valueOrDash(getOption(relay, 'latestHandshakeAt', 'LatestHandshakeAt'))}
+                  </Table.Cell>
+                </Table.Row>
+                {getOption(relay, 'path', 'Path') && (
+                  <Table.Row>
+                    <Table.Cell>Peer Path</Table.Cell>
+                    <Table.Cell>{getOption(relay, 'path', 'Path')}</Table.Cell>
+                  </Table.Row>
+                )}
+              </Table.Body>
+            </Table>
+          </Segment>
         )}
       </Card.Content>
     </Card>

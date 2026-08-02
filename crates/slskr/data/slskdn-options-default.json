@@ -310,7 +310,8 @@
         "version": 1
       },
       "pollingInterval": 2500,
-      "portForwarding": false
+      "portForwarding": false,
+      "selfHostedRelay": false
     },
     "webhooks": {},
     "youTube": {
