@@ -51,6 +51,8 @@ pub struct HttpHeaders {
     pub transfer_encoding: Option<String>,
     pub authorization: Option<String>,
     pub x_api_key: Option<String>,
+    pub x_slskdn_api_key: Option<String>,
+    pub x_slskdn_csrf: Option<String>,
     pub x_share_token: Option<String>,
     pub range: Option<String>,
     pub forwarded: Option<String>,
@@ -99,6 +101,8 @@ impl HttpHeaders {
                     "transfer-encoding" => headers.transfer_encoding = Some(value.to_lowercase()),
                     "authorization" => headers.authorization = Some(value.to_string()),
                     "x-api-key" => headers.x_api_key = Some(value.to_string()),
+                    "x-slskdn-apikey" => headers.x_slskdn_api_key = Some(value.to_string()),
+                    "x-slskdn-csrf" => headers.x_slskdn_csrf = Some(value.to_string()),
                     "x-share-token" => headers.x_share_token = Some(value.to_string()),
                     "range" => headers.range = Some(value.to_string()),
                     "forwarded" => headers.forwarded = Some(value.to_string()),
@@ -321,6 +325,14 @@ async fn read_http_request_inner<R: AsyncBufRead + Unpin>(
             "x-api-key" => {
                 reject_duplicate_singleton(&mut singleton_headers, &name)?;
                 headers.x_api_key = Some(value.to_string());
+            }
+            "x-slskdn-apikey" => {
+                reject_duplicate_singleton(&mut singleton_headers, &name)?;
+                headers.x_slskdn_api_key = Some(value.to_string());
+            }
+            "x-slskdn-csrf" => {
+                reject_duplicate_singleton(&mut singleton_headers, &name)?;
+                headers.x_slskdn_csrf = Some(value.to_string());
             }
             "x-share-token" => {
                 reject_duplicate_singleton(&mut singleton_headers, &name)?;
@@ -952,6 +964,8 @@ mod tests {
             "Content-Length: 256",
             "Authorization: Bearer token123",
             "X-API-Key: key123",
+            "X-Slskdn-ApiKey: gateway-key",
+            "X-Slskdn-Csrf: csrf-token",
             "X-Share-Token: share-secret",
             "Range: bytes=10-19",
             "Forwarded: for=198.51.100.24;proto=https",
@@ -965,6 +979,8 @@ mod tests {
         assert_eq!(headers.content_length, Some(256));
         assert_eq!(headers.authorization, Some("Bearer token123".to_string()));
         assert_eq!(headers.x_api_key, Some("key123".to_string()));
+        assert_eq!(headers.x_slskdn_api_key, Some("gateway-key".to_string()));
+        assert_eq!(headers.x_slskdn_csrf, Some("csrf-token".to_string()));
         assert_eq!(headers.x_share_token, Some("share-secret".to_string()));
         assert_eq!(headers.range, Some("bytes=10-19".to_string()));
         assert_eq!(

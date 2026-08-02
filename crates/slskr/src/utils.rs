@@ -85,6 +85,8 @@ pub struct RequestSecurityHeaders {
     pub referer: Option<String>,
     pub cookie: Option<String>,
     pub x_share_token: Option<String>,
+    pub x_slskdn_api_key: Option<String>,
+    pub x_slskdn_csrf: Option<String>,
     pub remote_addr: Option<SocketAddr>,
 }
 
@@ -96,6 +98,8 @@ impl RequestSecurityHeaders {
             referer: h.referer.clone(),
             cookie: h.cookie.clone(),
             x_share_token: h.x_share_token.clone(),
+            x_slskdn_api_key: h.x_slskdn_api_key.clone(),
+            x_slskdn_csrf: h.x_slskdn_csrf.clone(),
             remote_addr: None,
         }
     }

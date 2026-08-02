@@ -1974,10 +1974,55 @@ impl MeshGatewaySettings {
         if !(1..=3_600).contains(&request_timeout_seconds) {
             return Err("MeshGateway.RequestTimeoutSeconds must be between 1 and 3600".to_owned());
         }
+        let api_key = optional_env_any(
+            env,
+            &["SLSKR_MESH_GATEWAY_API_KEY", "SLSKD_MESH_GATEWAY_API_KEY"],
+        )
+        .or_else(|| file.api_key.clone());
+        let csrf_token = optional_env_any(
+            env,
+            &[
+                "SLSKR_MESH_GATEWAY_CSRF_TOKEN",
+                "SLSKD_MESH_GATEWAY_CSRF_TOKEN",
+            ],
+        )
+        .or_else(|| file.csrf_token.clone());
         if enabled && allowed_services.is_empty() {
             return Err(
                 "MeshGateway.AllowedServices cannot be empty when the gateway is enabled"
                     .to_owned(),
+            );
+        }
+        let is_localhost = matches!(bind_address.trim(), "127.0.0.1" | "localhost" | "::1");
+        if enabled
+            && !is_localhost
+            && api_key
+                .as_deref()
+                .is_none_or(|value| value.trim().is_empty())
+        {
+            return Err(
+                "MeshGateway.ApiKey is required when binding to a non-localhost address".to_owned(),
+            );
+        }
+        let require_risk_acknowledgment = env_bool_any_layer(
+            env,
+            &[
+                "SLSKR_MESH_GATEWAY_REQUIRE_RISK_ACKNOWLEDGMENT",
+                "SLSKD_MESH_GATEWAY_REQUIRE_RISK_ACKNOWLEDGMENT",
+            ],
+            file.require_risk_acknowledgment.unwrap_or(true),
+        )?;
+        let i_understand_the_risk = env_bool_any_layer(
+            env,
+            &[
+                "SLSKR_MESH_GATEWAY_I_UNDERSTAND_THE_RISK",
+                "SLSKD_MESH_GATEWAY_I_UNDERSTAND_THE_RISK",
+            ],
+            file.i_understand_the_risk.unwrap_or(false),
+        )?;
+        if enabled && !is_localhost && require_risk_acknowledgment && !i_understand_the_risk {
+            return Err(
+                "MeshGateway.IUnderstandTheRisk must be true for non-localhost binding".to_owned(),
             );
         }
         let max_requests_per_minute = env_parse_any_layer(
@@ -1996,19 +2041,8 @@ impl MeshGatewaySettings {
             enabled,
             bind_address,
             port,
-            api_key: optional_env_any(
-                env,
-                &["SLSKR_MESH_GATEWAY_API_KEY", "SLSKD_MESH_GATEWAY_API_KEY"],
-            )
-            .or_else(|| file.api_key.clone()),
-            csrf_token: optional_env_any(
-                env,
-                &[
-                    "SLSKR_MESH_GATEWAY_CSRF_TOKEN",
-                    "SLSKD_MESH_GATEWAY_CSRF_TOKEN",
-                ],
-            )
-            .or_else(|| file.csrf_token.clone()),
+            api_key,
+            csrf_token,
             allowed_services,
             max_request_body_bytes,
             request_timeout_seconds,
@@ -2020,22 +2054,8 @@ impl MeshGatewaySettings {
                 ],
                 file.log_bodies.unwrap_or(false),
             )?,
-            require_risk_acknowledgment: env_bool_any_layer(
-                env,
-                &[
-                    "SLSKR_MESH_GATEWAY_REQUIRE_RISK_ACKNOWLEDGMENT",
-                    "SLSKD_MESH_GATEWAY_REQUIRE_RISK_ACKNOWLEDGMENT",
-                ],
-                file.require_risk_acknowledgment.unwrap_or(true),
-            )?,
-            i_understand_the_risk: env_bool_any_layer(
-                env,
-                &[
-                    "SLSKR_MESH_GATEWAY_I_UNDERSTAND_THE_RISK",
-                    "SLSKD_MESH_GATEWAY_I_UNDERSTAND_THE_RISK",
-                ],
-                file.i_understand_the_risk.unwrap_or(false),
-            )?,
+            require_risk_acknowledgment,
+            i_understand_the_risk,
             allowed_origins: normalized_controller_values(string_array_any_layer(
                 env,
                 &[
@@ -10726,6 +10746,43 @@ mod tests {
         )
         .expect_err("enabled gateway without services must fail validation");
         assert!(error.contains("AllowedServices"), "{error}");
+
+        let error = super::AppConfig::from_layers(
+            None,
+            super::FileConfig::default(),
+            &MapEnv::default()
+                .with("SLSKD_MESH_GATEWAY_ENABLED", "true")
+                .with("SLSKD_MESH_GATEWAY_ALLOWED_SERVICES", "pods")
+                .with("SLSKD_MESH_GATEWAY_BIND_ADDRESS", "0.0.0.0"),
+        )
+        .expect_err("remote gateway without an API key must fail validation");
+        assert!(error.contains("ApiKey"), "{error}");
+
+        let error = super::AppConfig::from_layers(
+            None,
+            super::FileConfig::default(),
+            &MapEnv::default()
+                .with("SLSKD_MESH_GATEWAY_ENABLED", "true")
+                .with("SLSKD_MESH_GATEWAY_ALLOWED_SERVICES", "pods")
+                .with("SLSKD_MESH_GATEWAY_BIND_ADDRESS", "0.0.0.0")
+                .with("SLSKD_MESH_GATEWAY_API_KEY", "gateway-key"),
+        )
+        .expect_err("remote gateway without risk acknowledgment must fail validation");
+        assert!(error.contains("IUnderstandTheRisk"), "{error}");
+
+        let remote = super::AppConfig::from_layers(
+            None,
+            super::FileConfig::default(),
+            &MapEnv::default()
+                .with("SLSKD_MESH_GATEWAY_ENABLED", "true")
+                .with("SLSKD_MESH_GATEWAY_ALLOWED_SERVICES", "pods")
+                .with("SLSKD_MESH_GATEWAY_BIND_ADDRESS", "0.0.0.0")
+                .with("SLSKD_MESH_GATEWAY_API_KEY", "gateway-key")
+                .with("SLSKD_MESH_GATEWAY_I_UNDERSTAND_THE_RISK", "true"),
+        )
+        .expect("remote gateway with required security settings");
+        assert_eq!(remote.mesh_gateway.api_key.as_deref(), Some("gateway-key"));
+        assert!(remote.mesh_gateway.i_understand_the_risk);
     }
 
     #[test]

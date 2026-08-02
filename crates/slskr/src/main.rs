@@ -16042,6 +16042,11 @@ async fn route_http_request_with_headers(
     {
         return Ok(mesh_gateway_disabled_response());
     }
+    if normalized_path == "/mesh" || normalized_path.starts_with("/mesh/") {
+        if let Some(response) = mesh_gateway_auth_failure(state, &headers) {
+            return Ok(response);
+        }
+    }
 
     let controller_metrics_request =
         method == "GET" && route.path == controller_metrics_path(&state.config);
@@ -47167,6 +47172,87 @@ fn mesh_gateway_error_response(
     }
 }
 
+fn mesh_gateway_auth_failure(
+    state: &AppState,
+    headers: &RequestSecurityHeaders,
+) -> Option<HttpResponse> {
+    let settings = &state.config.mesh_gateway;
+    let is_local_request = headers.remote_addr.is_some_and(|remote| {
+        remote.ip().is_loopback() || remote.ip() == state.config.http_bind.ip()
+    });
+
+    if !is_local_request {
+        let Some(configured_api_key) = settings
+            .api_key
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+        else {
+            return Some(mesh_gateway_error_response(
+                "401 Unauthorized",
+                "unauthorized",
+                Some("X-Slskdn-ApiKey must be configured for non-localhost gateway access"),
+            ));
+        };
+        if !headers.x_slskdn_api_key.as_deref().is_some_and(|provided| {
+            constant_time_bytes_equal(provided.as_bytes(), configured_api_key.as_bytes())
+        }) {
+            return Some(mesh_gateway_error_response(
+                "401 Unauthorized",
+                "unauthorized",
+                Some("Valid X-Slskdn-ApiKey header is required"),
+            ));
+        }
+    }
+
+    if is_local_request {
+        if let Some(configured_csrf) = settings
+            .csrf_token
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+        {
+            if !headers.x_slskdn_csrf.as_deref().is_some_and(|provided| {
+                constant_time_bytes_equal(provided.as_bytes(), configured_csrf.as_bytes())
+            }) {
+                return Some(mesh_gateway_error_response(
+                    "403 Forbidden",
+                    "csrf_required",
+                    Some("Valid X-Slskdn-Csrf header is required for localhost access"),
+                ));
+            }
+        }
+    }
+
+    if let Some(origin) = headers.origin.as_deref() {
+        if !settings.allowed_origins.is_empty() {
+            if !settings
+                .allowed_origins
+                .iter()
+                .any(|allowed| allowed == origin)
+            {
+                return Some(mesh_gateway_error_response(
+                    "403 Forbidden",
+                    "origin_not_allowed",
+                    Some("Origin not in allowed list"),
+                ));
+            }
+        } else if is_local_request && !mesh_gateway_localhost_origin(origin) {
+            return Some(mesh_gateway_error_response(
+                "403 Forbidden",
+                "origin_not_allowed",
+                Some("Cross-origin requests to localhost are not allowed by default"),
+            ));
+        }
+    }
+
+    None
+}
+
+fn mesh_gateway_localhost_origin(origin: &str) -> bool {
+    utils::origin_host(origin)
+        .and_then(utils::parse_authority)
+        .is_some_and(|(host, _)| matches!(host.as_str(), "localhost" | "127.0.0.1" | "::1"))
+}
+
 async fn mesh_http_services_response(state: &AppState) -> HttpResponse {
     if !state.config.mesh_gateway.enabled {
         return mesh_gateway_disabled_response();
@@ -75968,6 +76054,8 @@ mod tests {
                 referer: None,
                 cookie: None,
                 x_share_token: None,
+                x_slskdn_api_key: None,
+                x_slskdn_csrf: None,
                 remote_addr: None,
             },
         )
@@ -103188,6 +103276,104 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn mesh_gateway_enabled_enforces_target_auth_and_origin_contract() {
+        let (state, _receiver) = test_state_with_env(
+            MapEnv::default()
+                .with("SLSKR_AUTH_DISABLED", "false")
+                .with("SLSKR_API_TOKEN", "route-token")
+                .with("SLSKD_MESH_GATEWAY_ENABLED", "true")
+                .with("SLSKD_MESH_GATEWAY_ALLOWED_SERVICES", "pods")
+                .with("SLSKD_MESH_GATEWAY_API_KEY", "gateway-key")
+                .with("SLSKD_MESH_GATEWAY_CSRF_TOKEN", "csrf-token"),
+        );
+        assert_eq!(
+            state.config.mesh_gateway.api_key.as_deref(),
+            Some("gateway-key")
+        );
+
+        let remote = super::RequestSecurityHeaders {
+            remote_addr: Some("192.0.2.30:1234".parse().unwrap()),
+            ..super::RequestSecurityHeaders::default()
+        };
+        let unauthorized = Box::pin(super::route_http_request_with_headers(
+            "POST",
+            "/mesh/http/pods/List",
+            None,
+            "{}",
+            &state,
+            remote.clone(),
+        ))
+        .await
+        .expect("remote auth response");
+        assert_eq!(unauthorized.status, "401 Unauthorized");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&unauthorized.body).unwrap(),
+            serde_json::json!({
+                "error": "unauthorized",
+                "message": "Valid X-Slskdn-ApiKey header is required",
+            })
+        );
+
+        let mut authorized = remote;
+        authorized.x_slskdn_api_key = Some("gateway-key".to_owned());
+        assert!(super::mesh_gateway_auth_failure(&state, &authorized).is_none());
+        let unavailable = Box::pin(super::route_http_request_with_headers(
+            "POST",
+            "/mesh/http/pods/List",
+            Some("Bearer route-token"),
+            "{}",
+            &state,
+            authorized,
+        ))
+        .await
+        .expect("authorized remote response");
+        assert_eq!(unavailable.status, "503 Service Unavailable");
+
+        let local = super::RequestSecurityHeaders {
+            remote_addr: Some("127.0.0.1:1234".parse().unwrap()),
+            origin: Some("https://evil.example".to_owned()),
+            x_slskdn_csrf: Some("csrf-token".to_owned()),
+            ..super::RequestSecurityHeaders::default()
+        };
+        let origin_denied = Box::pin(super::route_http_request_with_headers(
+            "POST",
+            "/mesh/http/pods/List",
+            Some("Bearer route-token"),
+            "{}",
+            &state,
+            local,
+        ))
+        .await
+        .expect("origin response");
+        assert_eq!(origin_denied.status, "403 Forbidden");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&origin_denied.body).unwrap(),
+            serde_json::json!({
+                "error": "origin_not_allowed",
+                "message": "Cross-origin requests to localhost are not allowed by default",
+            })
+        );
+
+        let valid_local = super::RequestSecurityHeaders {
+            remote_addr: Some("127.0.0.1:1234".parse().unwrap()),
+            origin: Some("https://localhost:3000".to_owned()),
+            x_slskdn_csrf: Some("csrf-token".to_owned()),
+            ..super::RequestSecurityHeaders::default()
+        };
+        let local_unavailable = Box::pin(super::route_http_request_with_headers(
+            "POST",
+            "/mesh/http/pods/List",
+            Some("Bearer route-token"),
+            "{}",
+            &state,
+            valid_local,
+        ))
+        .await
+        .expect("valid local response");
+        assert_eq!(local_unavailable.status, "503 Service Unavailable");
+    }
+
+    #[tokio::test]
     async fn mesh_gateway_enabled_dispatches_to_real_local_service_handlers() {
         let root = std::env::temp_dir().join(format!(
             "slskr-mesh-http-gateway-{}-{}",
@@ -108477,6 +108663,8 @@ mod tests {
             referer: None,
             cookie: None,
             x_share_token: None,
+            x_slskdn_api_key: None,
+            x_slskdn_csrf: None,
             remote_addr: None,
         };
         assert!(!super::request_origin_matches_host(
@@ -108490,6 +108678,8 @@ mod tests {
             referer: None,
             cookie: None,
             x_share_token: None,
+            x_slskdn_api_key: None,
+            x_slskdn_csrf: None,
             remote_addr: None,
         };
         assert!(super::request_origin_matches_host(
@@ -108503,6 +108693,8 @@ mod tests {
             referer: None,
             cookie: None,
             x_share_token: None,
+            x_slskdn_api_key: None,
+            x_slskdn_csrf: None,
             remote_addr: None,
         };
         assert!(super::request_origin_matches_host(&headers, "[::1]:5030"));
@@ -108521,6 +108713,8 @@ mod tests {
                 referer: None,
                 cookie: None,
                 x_share_token: None,
+                x_slskdn_api_key: None,
+                x_slskdn_csrf: None,
                 remote_addr: None,
             };
             assert!(!super::request_origin_matches_host(
@@ -108543,6 +108737,8 @@ mod tests {
                 referer: None,
                 cookie: None,
                 x_share_token: None,
+                x_slskdn_api_key: None,
+                x_slskdn_csrf: None,
                 remote_addr: None,
             };
             assert!(super::request_origin_matches_host(&headers, "localhost"));
@@ -108665,6 +108861,8 @@ mod tests {
             referer: None,
             cookie: None,
             x_share_token: None,
+            x_slskdn_api_key: None,
+            x_slskdn_csrf: None,
             remote_addr: None,
         };
         let auth = super::websocket_protocol_authorization(Some("slskr.api-token.route%2Dtoken"));
@@ -111778,6 +111976,8 @@ mod tests {
                 referer: None,
                 cookie: None,
                 x_share_token: None,
+                x_slskdn_api_key: None,
+                x_slskdn_csrf: None,
                 remote_addr: None,
             },
         )
@@ -111801,6 +112001,8 @@ mod tests {
                 referer: None,
                 cookie: None,
                 x_share_token: None,
+                x_slskdn_api_key: None,
+                x_slskdn_csrf: None,
                 remote_addr: None,
             },
         )
@@ -111820,6 +112022,8 @@ mod tests {
                 referer: None,
                 cookie: Some("other=value; slskr.session=route-token".to_string()),
                 x_share_token: None,
+                x_slskdn_api_key: None,
+                x_slskdn_csrf: None,
                 remote_addr: None,
             },
         )
@@ -112055,6 +112259,8 @@ mod tests {
                 referer: None,
                 cookie: Some("other=value; slskr.session=route-token".to_string()),
                 x_share_token: None,
+                x_slskdn_api_key: None,
+                x_slskdn_csrf: None,
                 remote_addr: None,
             },
         )
