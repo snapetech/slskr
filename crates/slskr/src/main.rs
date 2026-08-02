@@ -16278,17 +16278,6 @@ async fn route_http_request_with_headers(
     }
 
     let extended_mutation = extended_controller_mutation_route(method, normalized_path.as_str());
-    if extended_mutation {
-        return Ok(Box::pin(extended_controller_mutation_response(
-            method,
-            normalized_path.as_str(),
-            route.query,
-            body,
-            state,
-            route.path.starts_with("/api/v0/"),
-        ))
-        .await);
-    }
     match (method, normalized_path.as_str()) {
         ("GET", "/") => Ok(index_html_response()),
         ("HEAD", "/") => Ok(head_response(index_html_response())),
