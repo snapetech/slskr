@@ -44813,6 +44813,9 @@ async fn misc_controller_mutation_response(
         let [actor, direction] = segments.as_slice() else {
             return Some(routing::not_found_response());
         };
+        if !activitypub_actor_exists(actor, state).await {
+            return Some(routing::not_found_response());
+        }
         let activity = match serde_json::from_str::<serde_json::Value>(body) {
             Ok(activity @ serde_json::Value::Object(_)) => activity,
             Ok(_) => return Some(routing::bad_request_response("activity must be an object")),
@@ -44830,6 +44833,7 @@ async fn misc_controller_mutation_response(
             .and_then(serde_json::Value::as_str)
             .map(str::to_owned)
             .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        let response_activity = activity.clone();
         let record = serde_json::json!({
             "id": id,
             "actorName": actor,
@@ -44841,6 +44845,9 @@ async fn misc_controller_mutation_response(
         let key = format!("activitypub/{actor}/{direction}/{id}");
         return Some(
             match state.controller_features.write().await.upsert(key, record) {
+                Ok(()) if direction == "outbox" => {
+                    routing::ok_response(response_activity.to_string())
+                }
                 Ok(()) => routing::accepted_response(String::new()),
                 Err(error) => routing::service_unavailable_response(&error),
             },
@@ -45212,12 +45219,84 @@ fn activitypub_response(value: serde_json::Value) -> HttpResponse {
     }
 }
 
+fn webfinger_response(value: serde_json::Value) -> HttpResponse {
+    HttpResponse {
+        status: "200 OK",
+        content_type: "application/jrd+json",
+        body: value.to_string(),
+    }
+}
+
 fn social_federation_is_active(config: &AppConfig) -> bool {
     config.social_federation.enabled
         && !config.social_federation.mode.eq_ignore_ascii_case("Hermit")
 }
 
+fn activitypub_base_url(state: &AppState) -> String {
+    state
+        .config
+        .social_federation
+        .base_url
+        .as_deref()
+        .filter(|value| {
+            reqwest::Url::parse(value).is_ok_and(|url| {
+                matches!(url.scheme(), "http" | "https") && url.host_str().is_some()
+            })
+        })
+        .map(|value| value.trim_end_matches('/').to_owned())
+        .unwrap_or_else(|| format!("http://{}", state.config.http_bind))
+}
+
+fn activitypub_domain(state: &AppState) -> String {
+    state
+        .config
+        .social_federation
+        .domain
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| value.trim().to_owned())
+        .or_else(|| {
+            reqwest::Url::parse(&activitypub_base_url(state))
+                .ok()
+                .and_then(|url| url.host_str().map(str::to_owned))
+        })
+        .unwrap_or_else(|| state.config.http_bind.ip().to_string())
+}
+
+fn activitypub_public_key_pem(state: &AppState) -> String {
+    // SubjectPublicKeyInfo for Ed25519: RFC 8410's fixed algorithm prefix
+    // followed by the raw 32-byte verifying key used by slskR's capability
+    // signer.  This gives ActivityPub peers a real public key instead of a
+    // placeholder while keeping the key stable with the persisted identity.
+    const ED25519_SPKI_PREFIX: [u8; 12] = [
+        0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00,
+    ];
+    let mut der = Vec::with_capacity(ED25519_SPKI_PREFIX.len() + 32);
+    der.extend_from_slice(&ED25519_SPKI_PREFIX);
+    der.extend_from_slice(state.capability_signing_key.verifying_key().as_bytes());
+    format!(
+        "-----BEGIN PUBLIC KEY-----\n{}\n-----END PUBLIC KEY-----",
+        STANDARD.encode(der)
+    )
+}
+
 async fn activitypub_actor_exists(actor: &str, state: &AppState) -> bool {
+    if !social_federation_is_active(&state.config) {
+        return false;
+    }
+
+    // slskdN's LibraryActorService always registers its music actor when the
+    // music content provider is available.  slskR's share index is that
+    // provider boundary, so the native actor is available whenever the
+    // federation service is active.  Generic target actors intentionally
+    // remain unavailable until their domain provider exists.
+    if actor == "music" {
+        return true;
+    }
+
+    // Preserve the older controller-feature records as a compatibility path
+    // for explicitly materialized test/custom actors.  They are not used to
+    // fabricate the native library actor above.
     let prefix = format!("activitypub/{actor}/");
     !state
         .controller_features
@@ -45225,6 +45304,44 @@ async fn activitypub_actor_exists(actor: &str, state: &AppState) -> bool {
         .await
         .values_with_prefix(&prefix)
         .is_empty()
+}
+
+async fn activitypub_music_activities(
+    actor_id: &str,
+    base_url: &str,
+    state: &AppState,
+    limit: usize,
+) -> Vec<serde_json::Value> {
+    let entries = state.shares.read().await.entries.clone();
+    entries
+        .into_iter()
+        .take(limit)
+        .map(|entry| {
+            let work_key = format!("{}|{}", entry.filename, entry.size);
+            let work_id = hex::encode(Sha256::digest(work_key.as_bytes()));
+            let work_id = format!("{base_url}/works/music/{work_id}");
+            let title = virtual_basename(&entry.filename);
+            let work = serde_json::json!({
+                "@context": [
+                    "https://www.w3.org/ns/activitystreams",
+                    "https://w3id.org/federation/workref#"
+                ],
+                "id": work_id,
+                "type": "WorkRef",
+                "domain": "music",
+                "title": title,
+                "attributedTo": actor_id,
+            });
+            serde_json::json!({
+                "id": format!("{actor_id}/activities/{}", hex::encode(Sha256::digest(work_key.as_bytes()))),
+                "type": "Create",
+                "actor": actor_id,
+                "object": work,
+                "to": ["https://www.w3.org/ns/activitystreams#Public"],
+                "published": chrono::Utc::now().to_rfc3339(),
+            })
+        })
+        .collect()
 }
 
 async fn activitypub_get_response(path: &str, state: &AppState) -> HttpResponse {
@@ -45238,19 +45355,39 @@ async fn activitypub_get_response(path: &str, state: &AppState) -> HttpResponse 
         return routing::not_found_response();
     }
 
-    let origin = format!("http://{}", state.config.http_bind);
+    let origin = activitypub_base_url(state);
     let actor_id = format!("{origin}/actors/{actor}");
+    let page_size = usize::try_from(state.config.social_federation.page_size).unwrap_or(20);
     match tail {
-        [] => activitypub_response(serde_json::json!({
-            "@context": ["https://www.w3.org/ns/activitystreams", "https://w3id.org/security/v1"],
-            "id": actor_id.clone(),
-            "type": "Person",
-            "preferredUsername": actor,
-            "inbox": format!("{actor_id}/inbox"),
-            "outbox": format!("{actor_id}/outbox"),
-            "followers": format!("{actor_id}/followers"),
-            "following": format!("{actor_id}/following"),
-        })),
+        [] => {
+            let native_music_actor = actor == "music";
+            let mut document = serde_json::json!({
+                "@context": [
+                    "https://www.w3.org/ns/activitystreams",
+                    "https://w3id.org/security/v1",
+                    "https://w3id.org/federation/workref#"
+                ],
+                "id": actor_id.clone(),
+                "type": if native_music_actor { "Service" } else { "Person" },
+                "preferredUsername": actor,
+                "inbox": format!("{actor_id}/inbox"),
+                "outbox": format!("{actor_id}/outbox"),
+                "followers": format!("{actor_id}/followers"),
+                "following": format!("{actor_id}/following"),
+            });
+            if native_music_actor {
+                document["name"] = serde_json::json!("Music Library");
+                document["summary"] = serde_json::json!(
+                    "A decentralized collection of music shared by community members"
+                );
+                document["publicKey"] = serde_json::json!({
+                    "id": format!("{actor_id}#main-key"),
+                    "owner": actor_id,
+                    "publicKeyPem": activitypub_public_key_pem(state),
+                });
+            }
+            activitypub_response(document)
+        }
         [collection] if matches!(collection.as_str(), "inbox" | "outbox") => {
             let prefix = format!("activitypub/{actor}/{collection}/");
             let records = state
@@ -45258,10 +45395,21 @@ async fn activitypub_get_response(path: &str, state: &AppState) -> HttpResponse 
                 .read()
                 .await
                 .values_with_prefix(&prefix);
-            let items = records
+            let mut items = records
                 .into_iter()
                 .filter_map(|record| record.get("activity").cloned())
+                .take(page_size)
                 .collect::<Vec<_>>();
+            if collection == "outbox" && actor == "music" && items.len() < page_size {
+                let recent = activitypub_music_activities(
+                    &actor_id,
+                    &origin,
+                    state,
+                    page_size.saturating_sub(items.len()),
+                )
+                .await;
+                items.extend(recent);
+            }
             activitypub_response(serde_json::json!({
                 "@context": "https://www.w3.org/ns/activitystreams",
                 "id": format!("{actor_id}/{collection}"),
@@ -45287,34 +45435,58 @@ async fn activitypub_webfinger_response(query: Option<&str>, state: &AppState) -
     let Some(resource) = query_parameter(query, "resource") else {
         return routing::bad_request_response("resource is required");
     };
-    let Some(account) = resource.strip_prefix("acct:") else {
-        return routing::bad_request_response("resource must use acct:username@domain");
+    let resource = resource.trim().to_owned();
+    let parsed = if resource.len() >= 5 && resource[..5].eq_ignore_ascii_case("acct:") {
+        resource[5..]
+            .rsplit_once('@')
+            .map(|(actor, domain)| (actor.trim().to_owned(), domain.trim().to_owned()))
+    } else if resource.len() >= 8 && resource[..8].eq_ignore_ascii_case("https://") {
+        reqwest::Url::parse(&resource).ok().and_then(|url| {
+            let domain = url.host_str()?.to_owned();
+            let segments = url
+                .path_segments()?
+                .filter(|segment| !segment.is_empty())
+                .collect::<Vec<_>>();
+            let actor = match segments.as_slice() {
+                [segment] if segment.starts_with('@') => segment.trim_start_matches('@'),
+                [prefix, actor] if prefix.eq_ignore_ascii_case("actors") => actor,
+                _ => return None,
+            };
+            (!actor.trim().is_empty()).then(|| (actor.trim().to_owned(), domain))
+        })
+    } else {
+        None
     };
-    let Some((actor, domain)) = account.rsplit_once('@') else {
-        return routing::bad_request_response("resource must use acct:username@domain");
+    let Some((actor, domain)) =
+        parsed.filter(|(actor, domain)| !actor.is_empty() && !domain.is_empty())
+    else {
+        return routing::not_found_response();
     };
-    if actor.trim().is_empty() || domain.trim().is_empty() {
-        return routing::bad_request_response("resource must use acct:username@domain");
-    }
-    let configured_domain = state.config.http_bind.to_string();
-    let configured_host = configured_domain
-        .strip_prefix('[')
-        .and_then(|value| value.split_once(']').map(|(host, _)| host))
-        .or_else(|| configured_domain.rsplit_once(':').map(|(host, _)| host))
-        .unwrap_or(configured_domain.as_str());
-    if !domain.eq_ignore_ascii_case(configured_host)
-        || !activitypub_actor_exists(actor, state).await
+    if !domain.eq_ignore_ascii_case(&activitypub_domain(state))
+        || !activitypub_actor_exists(&actor, state).await
     {
         return routing::not_found_response();
     }
-    let actor_url = format!("http://{}/actors/{actor}", state.config.http_bind);
-    activitypub_response(serde_json::json!({
+    let actor_url = format!("{}/actors/{actor}", activitypub_base_url(state));
+    let rel = query_parameter(query, "rel").filter(|value| !value.trim().is_empty());
+    let mut links = vec![
+        serde_json::json!({
+            "rel": "self",
+            "type": "application/activity+json",
+            "href": actor_url,
+        }),
+        serde_json::json!({
+            "rel": "http://webfinger.net/rel/profile-page",
+            "type": "text/html",
+            "href": format!("{}/@{actor}", activitypub_base_url(state)),
+        }),
+    ];
+    if let Some(rel) = rel {
+        links.retain(|link| link["rel"].as_str() == Some(rel.trim()));
+    }
+    webfinger_response(serde_json::json!({
         "subject": resource,
-        "aliases": [actor_url.clone()],
-        "links": [
-            {"rel":"self","type":"application/activity+json","href":actor_url.clone()},
-            {"rel":"http://webfinger.net/rel/profile-page","type":"text/html","href":actor_url}
-        ]
+        "links": links,
     }))
 }
 
@@ -99764,21 +99936,25 @@ mod tests {
 
         let published = super::route_http_request(
             "POST",
-            "/actors/library/outbox",
+            "/actors/music/outbox",
             None,
             r#"{"id":"activity-1","type":"Create","object":{"type":"Note","content":"hello"}}"#,
             &state,
         )
         .await
         .expect("publish activity");
-        assert_eq!(published.status, "202 Accepted");
+        assert_eq!(published.status, "200 OK");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&published.body).unwrap()["type"],
+            "Create"
+        );
 
         for path in [
-            "/actors/library",
-            "/actors/library/inbox",
-            "/actors/library/outbox",
-            "/actors/library/followers",
-            "/actors/library/following",
+            "/actors/music",
+            "/actors/music/inbox",
+            "/actors/music/outbox",
+            "/actors/music/followers",
+            "/actors/music/following",
         ] {
             let response = super::route_http_request("GET", path, None, "", &state)
                 .await
@@ -99793,6 +99969,79 @@ mod tests {
             .expect("mesh services response");
         assert_eq!(mesh.status, "404 Not Found");
         assert_eq!(mesh.body, r#"{"error":"mesh_gateway_disabled"}"#);
+    }
+
+    #[tokio::test]
+    async fn activitypub_music_actor_and_webfinger_match_target_discovery_contract() {
+        let (state, _receiver) = test_state_with_env(
+            MapEnv::default()
+                .with("FEDERATION_ENABLED", "true")
+                .with("FEDERATION_MODE", "Public")
+                .with("FEDERATION_DOMAIN", "social.example")
+                .with("FEDERATION_BASE_URL", "https://social.example/")
+                .with("FEDERATION_PAGE_SIZE", "10"),
+        );
+
+        let actor = super::route_http_request("GET", "/actors/music", None, "", &state)
+            .await
+            .expect("music actor response");
+        assert_eq!(actor.status, "200 OK");
+        assert_eq!(actor.content_type, "application/activity+json");
+        let actor_json = serde_json::from_str::<serde_json::Value>(&actor.body).unwrap();
+        assert_eq!(actor_json["id"], "https://social.example/actors/music");
+        assert_eq!(actor_json["type"], "Service");
+        assert_eq!(actor_json["preferredUsername"], "music");
+        assert_eq!(actor_json["name"], "Music Library");
+        assert!(actor_json["publicKey"]["publicKeyPem"]
+            .as_str()
+            .is_some_and(|key| key.starts_with("-----BEGIN PUBLIC KEY-----")));
+
+        let acct = super::route_http_request(
+            "GET",
+            "/.well-known/webfinger?resource=acct%3Amusic%40social.example",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("acct WebFinger response");
+        assert_eq!(acct.status, "200 OK");
+        assert_eq!(acct.content_type, "application/jrd+json");
+        let acct_json = serde_json::from_str::<serde_json::Value>(&acct.body).unwrap();
+        assert_eq!(acct_json["subject"], "acct:music@social.example");
+        assert_eq!(acct_json["links"].as_array().unwrap().len(), 2);
+
+        let https_resource = super::route_http_request(
+            "GET",
+            "/.well-known/webfinger?resource=https%3A%2F%2Fsocial.example%2F%40music",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("https WebFinger response");
+        assert_eq!(https_resource.status, "200 OK");
+        let https_json = serde_json::from_str::<serde_json::Value>(&https_resource.body).unwrap();
+        assert_eq!(https_json["subject"], "https://social.example/@music");
+        assert_eq!(https_json["links"].as_array().unwrap().len(), 2);
+
+        let filtered = super::route_http_request(
+            "GET",
+            "/.well-known/webfinger?resource=acct%3Amusic%40social.example&rel=self",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("filtered WebFinger response");
+        assert_eq!(filtered.status, "200 OK");
+        let filtered_json = serde_json::from_str::<serde_json::Value>(&filtered.body).unwrap();
+        assert_eq!(filtered_json["links"].as_array().unwrap().len(), 1);
+
+        let generic = super::route_http_request("GET", "/actors/books", None, "", &state)
+            .await
+            .expect("generic actor response");
+        assert_eq!(generic.status, "404 Not Found");
     }
 
     #[tokio::test]

@@ -2069,6 +2069,7 @@ pub struct SocialFederationSettings {
     pub domain: Option<String>,
     pub base_url: Option<String>,
     pub approved_peers: Vec<String>,
+    pub outbox_max_activities: u32,
     pub page_size: u32,
     pub verify_signatures: bool,
     pub http_timeout_seconds: u32,
@@ -2087,6 +2088,18 @@ impl SocialFederationSettings {
         )?;
         if !(10..=100).contains(&page_size) {
             return Err("federation.page_size must be between 10 and 100".to_owned());
+        }
+        let outbox_max_activities = env_parse_any_layer(
+            env,
+            &[
+                "FEDERATION_OUTBOX_MAX_ACTIVITIES",
+                "SLSKR_FEDERATION_OUTBOX_MAX_ACTIVITIES",
+            ],
+            file.outbox_max_activities,
+            100_u32,
+        )?;
+        if !(10..=1_000).contains(&outbox_max_activities) {
+            return Err("federation.outbox_max_activities must be between 10 and 1000".to_owned());
         }
         let http_timeout_seconds = env_parse_any_layer(
             env,
@@ -2135,6 +2148,7 @@ impl SocialFederationSettings {
                 ],
                 file.approved_peers,
             ),
+            outbox_max_activities,
             page_size,
             verify_signatures: env_bool_any_layer(
                 env,
@@ -4582,6 +4596,8 @@ struct SocialFederationFileConfig {
     base_url: Option<String>,
     #[serde(alias = "ApprovedPeers", alias = "approved_peers")]
     approved_peers: Vec<String>,
+    #[serde(alias = "OutboxMaxActivities", alias = "outbox_max_activities")]
+    outbox_max_activities: Option<u32>,
     #[serde(alias = "PageSize", alias = "page_size")]
     page_size: Option<u32>,
     #[serde(alias = "VerifySignatures", alias = "verify_signatures")]
@@ -7661,6 +7677,10 @@ const CONTROLLER_YAML_CORE_MAPPINGS: &[(&str, &str)] = &[
     (
         "socialFederation.approvedPeers",
         "FEDERATION_APPROVED_PEERS",
+    ),
+    (
+        "socialFederation.outboxMaxActivities",
+        "FEDERATION_OUTBOX_MAX_ACTIVITIES",
     ),
     ("socialFederation.pageSize", "FEDERATION_PAGE_SIZE"),
     (
@@ -12535,6 +12555,7 @@ mod tests {
                 .expect("default federation settings");
         assert!(!defaults.social_federation.enabled);
         assert_eq!(defaults.social_federation.mode, "Hermit");
+        assert_eq!(defaults.social_federation.outbox_max_activities, 100);
         assert_eq!(defaults.social_federation.page_size, 20);
         assert!(defaults.social_federation.verify_signatures);
         assert_eq!(defaults.social_federation.http_timeout_seconds, 30);
@@ -12555,6 +12576,7 @@ mod tests {
                 domain: Some("social.example".to_owned()),
                 base_url: Some("https://social.example".to_owned()),
                 approved_peers: vec!["peer-a".to_owned()],
+                outbox_max_activities: Some(250),
                 page_size: Some(40),
                 verify_signatures: Some(false),
                 http_timeout_seconds: Some(45),
@@ -12583,6 +12605,7 @@ mod tests {
         assert!(configured.social_federation.enabled);
         assert_eq!(configured.social_federation.mode, "Public");
         assert_eq!(configured.social_federation.page_size, 50);
+        assert_eq!(configured.social_federation.outbox_max_activities, 250);
         assert_eq!(configured.social_federation.approved_peers, ["peer-a"]);
         assert_eq!(
             configured.federation_publishing.publishable_domains,
@@ -12592,6 +12615,7 @@ mod tests {
 
         for (name, value) in [
             ("FEDERATION_PAGE_SIZE", "9"),
+            ("FEDERATION_OUTBOX_MAX_ACTIVITIES", "1001"),
             ("FEDERATION_HTTP_TIMEOUT_SECONDS", "121"),
             ("FEDERATION_PUBLISHING_MAX_METADATA_SIZE_KB", "0"),
         ] {
