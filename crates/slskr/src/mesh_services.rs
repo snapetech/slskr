@@ -9,6 +9,7 @@ use sha2::{Digest, Sha256};
 use slskr_client::overlay::{
     connect_tls_overlay, MeshHello, MeshServiceCall, FEATURE_MESH_SERVICE,
 };
+use slskr_client::overlay_control::{send_udp_control, ControlEnvelope};
 use tokio::io::AsyncWriteExt;
 use tokio::time::timeout;
 
@@ -155,6 +156,74 @@ pub async fn post_pod_message(
         .filter(|message_id| !message_id.trim().is_empty())
         .map(str::to_owned)
         .ok_or_else(|| "pod message peer omitted the delivered message ID".to_owned())
+}
+
+/// Deliver a PodCore message using the frozen slskdN UDP control envelope.
+///
+/// The target sends the complete `PodMessage` JSON as the envelope payload and
+/// signs the envelope with its persistent Ed25519 control key.  No response is
+/// expected from the UDP transport; a successful kernel send is the target's
+/// `IOverlayClient.SendAsync` success condition.
+pub async fn post_pod_message_control(
+    peer: &TrustedMeshPeer,
+    local_username: &str,
+    authentication_key: &SigningKey,
+    request: &PodMessageControlRequest<'_>,
+) -> Result<String, String> {
+    validate_pod_message(
+        local_username,
+        request.pod_id,
+        request.channel_id,
+        request.body,
+        request.signature,
+    )?;
+    let message_id = if request.message_id.trim().is_empty() {
+        uuid::Uuid::new_v4().simple().to_string()
+    } else {
+        request.message_id.trim().to_owned()
+    };
+    if message_id.len() > 2 * 1024 || message_id.chars().any(char::is_control) {
+        return Err("pod message ID is invalid".to_owned());
+    }
+    let timestamp_unix_ms = if request.timestamp_unix_ms <= 0 {
+        i64::try_from(crate::utils::unix_timestamp_millis())
+            .map_err(|_| "pod message timestamp is out of range".to_owned())?
+    } else {
+        request.timestamp_unix_ms
+    };
+    let payload = serde_json::to_vec(&serde_json::json!({
+        "MessageId": message_id,
+        "PodId": request.pod_id,
+        "ChannelId": request.channel_id,
+        "SenderPeerId": local_username,
+        "Body": request.body,
+        "TimestampUnixMs": timestamp_unix_ms,
+        "Signature": request.signature,
+        "SigVersion": request.sig_version,
+    }))
+    .map_err(|error| format!("pod message control payload encode failed: {error}"))?;
+    let envelope = ControlEnvelope::signed_at(
+        "pod_message",
+        payload,
+        &message_id,
+        timestamp_unix_ms,
+        authentication_key,
+    )
+    .map_err(|error| format!("pod message control envelope failed: {error}"))?;
+    send_udp_control(peer.overlay_endpoint, &envelope)
+        .await
+        .map_err(|error| format!("pod message control send failed: {error}"))?;
+    Ok(message_id)
+}
+
+pub struct PodMessageControlRequest<'a> {
+    pub message_id: &'a str,
+    pub pod_id: &'a str,
+    pub channel_id: &'a str,
+    pub body: &'a str,
+    pub timestamp_unix_ms: i64,
+    pub signature: &'a str,
+    pub sig_version: i32,
 }
 
 async fn fetch_content_inner(
@@ -320,7 +389,46 @@ fn validate_pod_message(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio::net::TcpListener;
+    use tokio::net::{TcpListener, UdpSocket};
+
+    #[tokio::test]
+    async fn slskdn_pod_control_route_emits_signed_messagepack_envelope() {
+        let receiver = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = receiver.local_addr().unwrap();
+        let peer = TrustedMeshPeer {
+            peer_id: "peer".to_owned(),
+            username: "remote".to_owned(),
+            overlay_endpoint: endpoint,
+            certificate_sha256: [1_u8; 32],
+            range_endpoint: None,
+        };
+        let key = SigningKey::from_bytes(&[3_u8; 32]);
+        let request = PodMessageControlRequest {
+            message_id: "message-1",
+            pod_id: "pod-1",
+            channel_id: "general",
+            body: "hello over control",
+            timestamp_unix_ms: 1_725_000_000_123,
+            signature: "pod-signature",
+            sig_version: 1,
+        };
+
+        let returned_id = post_pod_message_control(&peer, "local", &key, &request)
+            .await
+            .expect("send pod control message");
+        assert_eq!(returned_id, "message-1");
+
+        let mut bytes = [0_u8; slskr_client::overlay_control::CONTROL_MAX_DATAGRAM_BYTES];
+        let (length, _) = receiver.recv_from(&mut bytes).await.unwrap();
+        let envelope = ControlEnvelope::decode(&bytes[..length]).unwrap();
+        assert_eq!(envelope.message_type, "pod_message");
+        envelope.verify().unwrap();
+        let payload = serde_json::from_slice::<serde_json::Value>(&envelope.payload).unwrap();
+        assert_eq!(payload["MessageId"], "message-1");
+        assert_eq!(payload["SenderPeerId"], "local");
+        assert_eq!(payload["Body"], "hello over control");
+        assert_eq!(payload["SigVersion"], 1);
+    }
 
     #[tokio::test]
     async fn existing_output_is_never_deleted_when_creation_fails() {

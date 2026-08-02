@@ -17,9 +17,10 @@ use slskr_client::overlay::{
     TunnelDataRequest, TunnelDataResponse, FEATURE_MESH_SERVICE, MAX_OVERLAY_MESSAGE_BYTES,
     OVERLAY_MAGIC, OVERLAY_VERSION,
 };
+use slskr_client::overlay_control::{ControlEnvelope, CONTROL_MAX_DATAGRAM_BYTES};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    net::{lookup_host, tcp::OwnedWriteHalf, TcpListener, TcpStream},
+    net::{lookup_host, tcp::OwnedWriteHalf, TcpListener, TcpStream, UdpSocket},
     sync::{mpsc, Mutex, RwLock, Semaphore},
     time::timeout,
 };
@@ -97,6 +98,7 @@ pub struct Gateway {
     acceptor: TlsAcceptor,
     certificate_sha256: [u8; 32],
     listener: Mutex<Option<TcpListener>>,
+    udp_listener: Mutex<Option<UdpSocket>>,
     connections: Arc<Semaphore>,
     tunnels: RwLock<BTreeMap<String, Arc<Tunnel>>>,
     replay_nonces: Mutex<BTreeMap<(String, String), u64>>,
@@ -127,11 +129,23 @@ impl Gateway {
         let bind = listener
             .local_addr()
             .map_err(|error| format!("overlay listener address failed: {error}"))?;
+        // slskdN's UDP control plane normally shares its public socket with
+        // DHT.  The local DHT owns that socket when enabled, so this optional
+        // listener is deliberately best-effort; standalone/test gateways can
+        // still accept exact ControlEnvelope datagrams.
+        let udp_listener = match UdpSocket::bind(bind).await {
+            Ok(socket) => Some(socket),
+            Err(error) => {
+                tracing::debug!(%error, ?bind, "overlay UDP control listener unavailable");
+                None
+            }
+        };
         Ok(Self {
             bind,
             acceptor: TlsAcceptor::from(Arc::new(config)),
             certificate_sha256,
             listener: Mutex::new(Some(listener)),
+            udp_listener: Mutex::new(udp_listener),
             connections: Arc::new(Semaphore::new(MAX_GATEWAY_CONNECTIONS)),
             tunnels: RwLock::new(BTreeMap::new()),
             replay_nonces: Mutex::new(BTreeMap::new()),
@@ -181,6 +195,13 @@ impl Gateway {
             .await
             .take()
             .ok_or_else(|| "overlay listener is already running".to_owned())?;
+        if let Some(udp_listener) = self.udp_listener.lock().await.take() {
+            let gateway = Arc::clone(&self);
+            let udp_state = Arc::clone(&state);
+            tokio::spawn(async move {
+                gateway.run_udp_control(udp_listener, udp_state).await;
+            });
+        }
         loop {
             let (tcp, _) = listener
                 .accept()
@@ -197,6 +218,54 @@ impl Gateway {
                     tracing::debug!(%error, "overlay gateway connection closed");
                 }
             });
+        }
+    }
+
+    async fn run_udp_control(&self, socket: UdpSocket, state: Arc<super::AppState>) {
+        let mut buffer = [0_u8; CONTROL_MAX_DATAGRAM_BYTES + 1];
+        loop {
+            let received = match socket.recv_from(&mut buffer).await {
+                Ok(received) => received,
+                Err(error) => {
+                    tracing::debug!(%error, "overlay UDP control listener stopped");
+                    return;
+                }
+            };
+            if received.0 > CONTROL_MAX_DATAGRAM_BYTES {
+                continue;
+            }
+            let Ok(envelope) = ControlEnvelope::decode(&buffer[..received.0]) else {
+                continue;
+            };
+            let now = match i64::try_from(super::unix_timestamp_millis()) {
+                Ok(now) => now,
+                Err(_) => continue,
+            };
+            if !envelope.timestamp_is_current(now) || envelope.verify().is_err() {
+                continue;
+            }
+            if envelope.message_type != "pod_message" {
+                // Target ControlDispatcher intentionally ignores unknown
+                // control types after decode; retain that one-way behavior.
+                continue;
+            }
+            let Ok(message) = serde_json::from_slice::<PodControlMessage>(&envelope.payload) else {
+                continue;
+            };
+            if message.sender_peer_id.trim().is_empty()
+                || message.message_id.trim().is_empty()
+                || message.timestamp_unix_ms <= 0
+            {
+                continue;
+            }
+            let _ = self
+                .handle_pods_call(
+                    "PostMessage",
+                    &envelope.payload,
+                    message.sender_peer_id.trim(),
+                    &state,
+                )
+                .await;
         }
     }
 
@@ -973,6 +1042,16 @@ struct PodMessageRequest {
     body: String,
     #[serde(default, alias = "Signature")]
     signature: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct PodControlMessage {
+    #[serde(rename = "MessageId", alias = "messageId")]
+    message_id: String,
+    #[serde(rename = "SenderPeerId", alias = "senderPeerId")]
+    sender_peer_id: String,
+    #[serde(rename = "TimestampUnixMs", alias = "timestampUnixMs")]
+    timestamp_unix_ms: i64,
 }
 
 #[derive(Debug, serde::Deserialize)]

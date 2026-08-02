@@ -82,9 +82,9 @@ generated differential matrix can satisfy all affected route, configuration,
 protocol, persistence, UI, and interoperability cases together.
 
 `scripts/audit-parity-manifest.py --check-frozen` currently materializes 19,122
-unique proof cases across all workstreams: 662 complete, 0 partial, 191 missing,
+unique proof cases across all workstreams: 853 complete, 0 partial, 0 missing,
 and 18,269 needing behavioral proof. There are zero `denominator-missing` cases.
-The 662 complete cases include 417 frozen WebUI call-presence cases; they do not
+The 853 complete cases include 417 frozen WebUI call-presence cases; they do not
 claim that the corresponding rendered workflows are complete.
 
 The 14 frozen `transfers.download` leaves are closed. Both target profiles now

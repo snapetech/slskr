@@ -49307,6 +49307,46 @@ async fn route_pod_message_to_peer(
         .get("signature")
         .and_then(serde_json::Value::as_str)
         .unwrap_or_default();
+    let message_id = message
+        .get("messageId")
+        .or_else(|| message.get("MessageId"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let timestamp_unix_ms = message
+        .get("timestampUnixMs")
+        .or_else(|| message.get("TimestampUnixMs"))
+        .and_then(serde_json::Value::as_i64)
+        .unwrap_or_default();
+    let sig_version = message
+        .get("sigVersion")
+        .or_else(|| message.get("SigVersion"))
+        .and_then(serde_json::Value::as_i64)
+        .and_then(|value| i32::try_from(value).ok())
+        .unwrap_or(1);
+    let use_slskdn_control = state.config.controller_compatibility_target
+        == ControllerCompatibilityTarget::Slskdn
+        && state
+            .private_gateway
+            .as_ref()
+            .is_none_or(|gateway| gateway.bind() != peer.overlay_endpoint);
+    if use_slskdn_control {
+        let request = mesh_services::PodMessageControlRequest {
+            message_id,
+            pod_id,
+            channel_id,
+            body,
+            timestamp_unix_ms,
+            signature,
+            sig_version,
+        };
+        return mesh_services::post_pod_message_control(
+            &peer,
+            &local_username,
+            &state.capability_signing_key,
+            &request,
+        )
+        .await;
+    }
     mesh_services::post_pod_message(
         &peer,
         &local_username,
@@ -58103,6 +58143,13 @@ async fn serve(invocation: ServeInvocation) -> Result<(), String> {
     let backfill_state = BackfillState::load(&config.state_dir)?;
     let pod_channel_store = pod_channels::PodChannelStore::load(&config.state_dir)?;
     let pod_store = pods::PodStore::load(&config.state_dir)?;
+    let dht = if config.dht_enabled && config.advanced_networking.mesh.enable_dht {
+        Some(Arc::new(dht::Rendezvous::new(
+            &config.advanced_networking.dht,
+        )?))
+    } else {
+        None
+    };
     let private_gateway = if config.advanced_networking.mesh.enabled
         && config.advanced_networking.mesh.enable_overlay
     {
@@ -58113,13 +58160,6 @@ async fn serve(invocation: ServeInvocation) -> Result<(), String> {
         } else {
             None
         }
-    } else {
-        None
-    };
-    let dht = if config.dht_enabled && config.advanced_networking.mesh.enable_dht {
-        Some(Arc::new(dht::Rendezvous::new(
-            &config.advanced_networking.dht,
-        )?))
     } else {
         None
     };

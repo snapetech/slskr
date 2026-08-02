@@ -133,13 +133,13 @@ zero unproved or divergent behavior for both targets.
 `scripts/audit-parity-manifest.py --check-frozen` now combines the frozen
 configuration, controller-route, WebUI-workflow, protocol, persistence/lifecycle,
 security, operator/packaging, and live-interoperability inventories into 19,122 unique
-proof cases. Its 2026-07-17 certification-ledger classification was 662 complete, 0 partial, 191
+proof cases. Its current certification-ledger classification is 853 complete, 0 partial, 0
 missing, and 18,269 needing behavioral proof, with zero missing denominators.
 The proof cases intentionally have different granularity; the manifest reports
 their raw closure ratio without treating it as weighted feature value.
 
-The executable configuration ledger currently reports **245 complete, 0
-partial, and 191 missing** leaves out of the 436-path frozen union.
+The executable configuration ledger currently reports **436 complete, 0
+partial, and 0 missing** leaves out of the 436-path frozen union.
 All 15 Lidarr leaves and all 7 Spotify leaves are now complete. Lidarr has real
 paged wanted sync, scheduling, wishlist creation, completed-directory imports,
 path mapping, and manual-import proof. Spotify has real PKCE connection,
@@ -601,7 +601,7 @@ Required classification values:
 | --- | --- | --- |
 | Runtime signed capabilities | Frozen binary canonical bytes, Ed25519 sign/verify, lower-case base32 peer ID, observation-keyed bounded registry | Exact frozen unsigned bytes plus valid, forged, expired-local-metadata, malformed, blank, case-insensitive lookup, and registry-bound tests pass. |
 | Capability exchange | Frozen `KSDN` custom peer-message envelope with fail-closed parsing and ack behavior | Live cross-runtime proof passes: a signed slskR hello produced an exact-nonce slskdN acknowledgement, both descriptors verified, and both live registries retained the authenticated peer observation. |
-| Mesh rendezvous/overlay | BitTorrent-DHT discovery, TLS 1.3 `SLSKDNM1` framing, authenticated peer registry, JSON service calls | Live cross-runtime proof passes for slskR's pinned outbound client and slskdN's server: exact DER certificate pinning, TLS 1.3, nonce handshake, correlated frozen service framing, System.Text.Json byte arrays, `dht.Ping`, and an Ed25519-signed `dht.Store` retained by slskdN all completed. Exact rendezvous keys also announce/discover on a local Mainline testnet. |
+| Mesh rendezvous/overlay | BitTorrent-DHT discovery, TLS 1.3 `SLSKDNM1` framing, authenticated peer registry, JSON service calls, and slskdN signed MessagePack UDP control envelopes | Live cross-runtime proof passes for slskR's pinned outbound client and slskdN's server: exact DER certificate pinning, TLS 1.3, nonce handshake, correlated frozen service framing, System.Text.Json byte arrays, `dht.Ping`, and an Ed25519-signed `dht.Store` retained by slskdN all completed. The slskdN `ControlEnvelope` wire codec, canonical signing, bounded UDP sender, and PodCore route emission now have hermetic proof. Shared DHT/UDP demultiplexing, QUIC overlay/data transport, and end-to-end UDP receiver interoperability remain open. Exact rendezvous keys also announce/discover on a local Mainline testnet. |
 | Private-gateway client | Pinned outbound TLS overlay plus OpenTunnel/TunnelData/GetTunnelData/CloseTunnel local TCP mapping | Live cross-runtime proof passes: slskr joined a gateway Pod hosted by slskdN, opened a policy-authorized private TCP tunnel through the pinned overlay, sent and received the exact echo bytes, and closed the tunnel. Hermetic tests retain the negative policy/member/quota/replay coverage. |
 | Wishlist scheduling | Server-interval-aware scheduler with positive guardrails | Interval guard, term replacement, daemon term extraction, and scheduled search record tests are implemented. Phase C live certification received the public server interval and sent `WishlistSearch` on the authenticated connection. |
 | Room failures | `CantCreateRoom`/reconnect state reaches API/UI instead of timing out silently | `CantCreateRoom` projection clears optimistic joins and records `last_error`; disconnected/reconnecting joins return HTTP `503`. |
