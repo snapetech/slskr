@@ -38041,7 +38041,11 @@ fn capability_service_peer_json(
         "username": descriptor.username,
         "flags": capability_flags_string(flags),
         "flagsValue": flags,
-        "clientVersion": "",
+        // slskdN's SoulseekCapabilityBridgeService records every binary
+        // capability-envelope observation as its runtime capability client;
+        // this is the stable DTO value exposed by CapabilitiesController,
+        // not the unrelated UserInfo version-string parser.
+        "clientVersion": "slskdn/runtime-capability-v1",
         "protocolVersion": 1,
         "canSwarm": flags & CAPABILITY_SUPPORTS_SWARM != 0,
         "canMeshSync": flags & CAPABILITY_SUPPORTS_MESH_SYNC != 0,
@@ -95266,6 +95270,10 @@ mod tests {
         assert!(usernames.contains(&"plain-peer"));
         assert!(!usernames.contains(&"unrelated-soulseek-user"));
         assert_eq!(peers_json["peers"][0]["protocolVersion"], 1);
+        assert_eq!(
+            peers_json["peers"][0]["clientVersion"],
+            "slskdn/runtime-capability-v1"
+        );
         assert_eq!(peers_json["peers"][0]["flagsValue"], 8);
         assert_eq!(peers_json["peers"][0]["flags"], "SupportsMeshSync");
         assert_eq!(peers_json["peers"][0]["canMeshSync"], true);
