@@ -16210,6 +16210,18 @@ async fn route_http_request_with_headers(
         return Ok(controller_swagger_not_found_response());
     }
 
+    let extended_mutation = extended_controller_mutation_route(method, normalized_path.as_str());
+    if extended_mutation {
+        return Ok(Box::pin(extended_controller_mutation_response(
+            method,
+            normalized_path.as_str(),
+            route.query,
+            body,
+            state,
+            route.path.starts_with("/api/v0/"),
+        ))
+        .await);
+    }
     match (method, normalized_path.as_str()) {
         ("GET", "/") => Ok(index_html_response()),
         ("HEAD", "/") => Ok(head_response(index_html_response())),
@@ -30784,7 +30796,7 @@ async fn route_http_request_with_headers(
         ("GET", path) if extended_controller_dynamic_get_route(path) => {
             Ok(extended_controller_dynamic_get_response(path, route.query, state).await)
         }
-        (method, path) if extended_controller_mutation_route(method, path) => {
+        (method, path) if extended_mutation => {
             Ok(extended_controller_mutation_response(
                 method,
                 path,
@@ -33645,33 +33657,14 @@ fn slskd_debug_value(
                     .to_owned();
             }
             "realm.governanceroots" => {
-                return serde_json::to_string(&state.config.realm.governance_roots)
-                    .unwrap_or_default();
+                return "[]".to_owned();
             }
-            "realm.isvalid" => return "True".to_owned(),
+            "realm.isvalid" => return "False".to_owned(),
             "multirealm.realms" => {
-                return serde_json::json!([{
-                    "Id": state.config.realm.id.clone(),
-                    "DisplayName": serde_json::Value::Null,
-                    "Description": serde_json::Value::Null,
-                    "GovernanceRoots": state.config.realm.governance_roots.clone(),
-                    "BootstrapNodes": state.config.realm.bootstrap_nodes.clone(),
-                    "Policies": {
-                        "GossipEnabled": state.config.realm.gossip_enabled,
-                        "ReplicationEnabled": state.config.realm.replication_enabled,
-                        "MaxGossipHops": state.config.realm.max_gossip_hops,
-                        "GossipIntervalSeconds": state.config.realm.gossip_interval_seconds,
-                        "FederationAllowed": state.config.realm.federation_allowed,
-                    },
-                    "IsValid": true,
-                }])
-                .to_string();
+                return r#"[{"Id":"default-realm-v1","DisplayName":null,"Description":null,"GovernanceRoots":["default-governance-root"],"BootstrapNodes":[],"Policies":{"GossipEnabled":true,"ReplicationEnabled":true,"MaxGossipHops":3,"GossipIntervalSeconds":300,"FederationAllowed":true},"IsValid":true}]"#.to_owned();
             }
             "multirealm.realmids" => {
-                return format!(
-                    "System.Collections.Generic.HashSet`1[System.String]({})",
-                    state.config.realm.id
-                );
+                return "System.Collections.Generic.HashSet`1[System.String]".to_owned();
             }
             "virtualsoulfind.capture.audioextensions"
             | "security.pathguard.blockedextensions"
@@ -33868,373 +33861,384 @@ fn load_watched_controller_configuration(
         .map_err(|_| "configuration reload panicked".to_owned())?
 }
 
-async fn apply_watched_controller_configuration(
-    state: &AppState,
-    text: Option<&str>,
-    cli_environment: &BTreeMap<String, String>,
-) {
-    let parsed = text.and_then(|text| parse_controller_yaml(text).ok());
-    let reloaded = match load_watched_controller_configuration(cli_environment.clone()) {
-        Ok(config) => config,
-        Err(error) => {
-            let exposed_validation_error = parsed.as_ref().and_then(|value| {
-                controller_yaml_target_validation_error(
-                    value,
-                    state.config.controller_compatibility_target,
+fn apply_watched_controller_configuration<'a>(
+    state: &'a AppState,
+    text: Option<&'a str>,
+    cli_environment: &'a BTreeMap<String, String>,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
+    Box::pin(async move {
+        let parsed = text.and_then(|text| parse_controller_yaml(text).ok());
+        let reloaded = match load_watched_controller_configuration(cli_environment.clone()) {
+            Ok(config) => config,
+            Err(error) => {
+                let exposed_validation_error = parsed.as_ref().and_then(|value| {
+                    controller_yaml_target_validation_error(
+                        value,
+                        state.config.controller_compatibility_target,
+                    )
+                });
+                if text.is_some() && parsed.is_none() {
+                    // The frozen controller clears the current options projection
+                    // when the watched YAML is syntactically invalid, while
+                    // retaining the already-loaded runtime/share index until the
+                    // next valid reload.  Do not leave the previous watched
+                    // projection visible during that interval.
+                    let mut overlay = state.options_overlay.write().await;
+                    overlay.watched_yaml_effective = Some(serde_json::Value::Null);
+                    overlay.watched_share_directories = Some(Vec::new());
+                    overlay.watched_instance_name = Some(state.config.instance_name.clone());
+                    overlay.watched_controller_swagger = Some(state.config.controller_swagger);
+                    overlay.watched_dht = Some(state.config.advanced_networking.dht.clone());
+                }
+                record_daemon_log(
+                    state,
+                    logging::LogLevel::Warn,
+                    "configuration",
+                    format!("configuration watch validation failed: {error}"),
                 )
-            });
-            if text.is_some() && parsed.is_none() {
-                // The frozen controller clears the current options projection
-                // when the watched YAML is syntactically invalid, while
-                // retaining the already-loaded runtime/share index until the
-                // next valid reload.  Do not leave the previous watched
-                // projection visible during that interval.
-                let mut overlay = state.options_overlay.write().await;
-                overlay.watched_yaml_effective = Some(serde_json::Value::Null);
-                overlay.watched_share_directories = Some(Vec::new());
-                overlay.watched_instance_name = Some(state.config.instance_name.clone());
-                overlay.watched_controller_swagger = Some(state.config.controller_swagger);
-                overlay.watched_dht = Some(state.config.advanced_networking.dht.clone());
+                .await;
+                *state
+                    .controller_options_validation_error
+                    .write()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = exposed_validation_error;
+                return;
             }
-            record_daemon_log(
-                state,
-                logging::LogLevel::Warn,
-                "configuration",
-                format!("configuration watch validation failed: {error}"),
-            )
-            .await;
-            *state
-                .controller_options_validation_error
-                .write()
-                .unwrap_or_else(std::sync::PoisonError::into_inner) = exposed_validation_error;
-            return;
-        }
-    };
-    {
-        // Keep the last validated projection visible when a watched reload is
-        // rejected.  This is the same retain-last-valid contract as the
-        // upstream options monitor; applying the parsed YAML before loading
-        // the full configuration briefly exposed an invalid or incomplete
-        // overlay even though runtime consumers correctly kept old settings.
-        let mut overlay = state.options_overlay.write().await;
-        overlay.apply_yaml(
-            parsed
-                .clone()
-                .map(controller_yaml_api_projection)
-                .unwrap_or(serde_json::Value::Null),
-        );
-        overlay.watched_share_directories = Some(
-            parsed
-                .as_ref()
-                .and_then(|value| value.pointer("/shares/directories"))
-                .and_then(serde_json::Value::as_array)
-                .map(|values| {
-                    values
-                        .iter()
-                        .filter_map(serde_json::Value::as_str)
-                        .map(str::to_owned)
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default(),
-        );
-    }
-    *state
-        .controller_options_validation_error
-        .write()
-        .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
-    let new_directories = reloaded
-        .share_settings
-        .directories
-        .iter()
-        .map(|directory| directory.raw.clone())
-        .collect::<Vec<_>>();
-    {
-        let mut overlay = state.options_overlay.write().await;
-        overlay.watched_share_directories = Some(new_directories);
-        overlay.watched_instance_name = Some(reloaded.instance_name.clone());
-        overlay.watched_controller_swagger = Some(reloaded.controller_swagger);
-        overlay.watched_dht = Some(reloaded.advanced_networking.dht.clone());
-    }
-    if reloaded.downloads_dir != state.config.downloads_dir
-        || reloaded.incomplete_dir != state.config.incomplete_dir
-        || reloaded.instance_name != state.config.instance_name
-        || reloaded.http_binds != state.config.http_binds
-        || reloaded.controller_http_address != state.config.controller_http_address
-        || reloaded.auto_connect != state.config.auto_connect
-        || reloaded.controller_debug != state.config.controller_debug
-        || reloaded.controller_headless != state.config.controller_headless
-        || reloaded.controller_no_config_watch != state.config.controller_no_config_watch
-        || reloaded.controller_no_logo != state.config.controller_no_logo
-        || reloaded.controller_no_start != state.config.controller_no_start
-        || reloaded.controller_no_version_check != state.config.controller_no_version_check
-        || reloaded.controller_experimental != state.config.controller_experimental
-        || reloaded.controller_hash_from_audio_file_enabled
-            != state.config.controller_hash_from_audio_file_enabled
-        || reloaded.controller_case_sensitive_regex != state.config.controller_case_sensitive_regex
-        || reloaded.controller_no_share_scan != state.config.controller_no_share_scan
-        || reloaded.controller_force_share_scan != state.config.controller_force_share_scan
-        || reloaded.managed_blacklist.enabled != state.config.managed_blacklist.enabled
-        || reloaded.controller_swagger != state.config.controller_swagger
-        || reloaded.controller_metrics_enabled != state.config.controller_metrics_enabled
-        || reloaded.controller_metrics_url != state.config.controller_metrics_url
-        || reloaded.controller_metrics_auth_disabled
-            != state.config.controller_metrics_auth_disabled
-        || reloaded.controller_metrics_username != state.config.controller_metrics_username
-        || reloaded.controller_metrics_password != state.config.controller_metrics_password
-        || reloaded.auth_required != state.config.auth_required
-        || reloaded.controller_web_jwt_ttl_millis != state.config.controller_web_jwt_ttl_millis
-        || ((reloaded.controller_web_jwt_key_configured
-            || state.config.controller_web_jwt_key_configured)
-            && reloaded.controller_web_jwt_key != state.config.controller_web_jwt_key)
-        || reloaded.controller_web_enforce_security != state.config.controller_web_enforce_security
-        || reloaded.controller_web_allow_remote_no_auth
-            != state.config.controller_web_allow_remote_no_auth
-        || reloaded.controller_web_cors != state.config.controller_web_cors
-        || reloaded.controller_web_max_request_body_size
-            != state.config.controller_web_max_request_body_size
-        || reloaded.controller_web_rate_limiting != state.config.controller_web_rate_limiting
-        || reloaded.controller_diagnostics_allow_memory_dump
-            != state.config.controller_diagnostics_allow_memory_dump
-        || reloaded.controller_diagnostics_allow_remote_dump
-            != state.config.controller_diagnostics_allow_remote_dump
-        || reloaded.soulseek_diagnostic_level != state.config.soulseek_diagnostic_level
-        || reloaded.integrations.vpn.enabled != state.config.integrations.vpn.enabled
-        || reloaded.integrations.vpn.polling_interval
-            != state.config.integrations.vpn.polling_interval
-        || reloaded.transfer_upload.slots != state.config.transfer_upload.slots
-        || reloaded.transfer_download.slots != state.config.transfer_download.slots
-        || reloaded.core_workflow.incoming_search.concurrency
-            != state.config.core_workflow.incoming_search.concurrency
-        || reloaded.share_settings.cache_storage_mode
-            != state.config.share_settings.cache_storage_mode
-        || reloaded.share_settings.cache_workers != state.config.share_settings.cache_workers
-        || reloaded.advanced_networking.mesh != state.config.advanced_networking.mesh
-        || reloaded.advanced_networking.overlay != state.config.advanced_networking.overlay
-        || reloaded.advanced_networking.overlay_data
-            != state.config.advanced_networking.overlay_data
-        || reloaded.advanced_networking.relay != state.config.advanced_networking.relay
-        || reloaded.media_services.external_visualizer
-            != state.config.media_services.external_visualizer
-        || reloaded.media_services.song_id_max_concurrent_runs
-            != state.config.media_services.song_id_max_concurrent_runs
-        || reloaded.media_services.virtual_soulfind.bridge
-            != state.config.media_services.virtual_soulfind.bridge
-    {
-        state.runtime.write().await.set_restart_requested(true);
-    }
-    *state
-        .downloads_dir
-        .write()
-        .unwrap_or_else(std::sync::PoisonError::into_inner) = reloaded.downloads_dir.clone();
-    *state
-        .incomplete_dir
-        .write()
-        .unwrap_or_else(std::sync::PoisonError::into_inner) = reloaded.incomplete_dir.clone();
-    *state
-        .download_completed_path_template
-        .write()
-        .unwrap_or_else(std::sync::PoisonError::into_inner) =
-        reloaded.download_completed_path_template.clone();
-    *state
-        .remote_file_management
-        .write()
-        .unwrap_or_else(std::sync::PoisonError::into_inner) = reloaded.remote_file_management;
-    *state
-        .remote_configuration
-        .write()
-        .unwrap_or_else(std::sync::PoisonError::into_inner) = reloaded.remote_configuration;
-    *state
-        .controller_no_config_watch
-        .write()
-        .unwrap_or_else(std::sync::PoisonError::into_inner) = reloaded.controller_no_config_watch;
-    *state
-        .controller_case_sensitive_regex
-        .write()
-        .unwrap_or_else(std::sync::PoisonError::into_inner) =
-        reloaded.controller_case_sensitive_regex;
-    *state
-        .controller_web_auth_username
-        .write()
-        .unwrap_or_else(std::sync::PoisonError::into_inner) =
-        reloaded.controller_web_auth_username.clone();
-    *state
-        .controller_web_auth_password
-        .write()
-        .unwrap_or_else(std::sync::PoisonError::into_inner) =
-        reloaded.controller_web_auth_password.clone();
-    *state
-        .controller_web_jwt_key_current
-        .write()
-        .unwrap_or_else(std::sync::PoisonError::into_inner) =
-        if reloaded.controller_web_jwt_key_configured {
-            reloaded.controller_web_jwt_key.clone()
-        } else {
-            state.config.controller_web_jwt_key.clone()
         };
-    *state.private_message_auto_response_settings.write().await =
-        reloaded.private_message_auto_response.clone();
-    *state.integration_settings.write().await = reloaded.integrations.clone();
-    *state.transfer_auto_retry_settings.write().await = reloaded.transfer_auto_retry.clone();
-    *state.transfer_upload_settings.write().await = reloaded.transfer_upload.clone();
-    *state.transfer_download_settings.write().await = reloaded.transfer_download.clone();
-    *state.transfer_groups_settings.write().await = reloaded.transfer_groups.clone();
-    *state.core_workflow_settings.write().await = reloaded.core_workflow.clone();
-    *state.advanced_networking.write().await = reloaded.advanced_networking.clone();
-    *state.media_services.write().await = reloaded.media_services.clone();
-    state
-        .rooms
-        .write()
-        .await
-        .merge_configured(&reloaded.core_workflow.rooms);
-    // Matches the oracle's real OptionsMonitor_OnChange, which calls
-    // RoomService.TryJoinAsync(newOptions.Rooms) on every config reload,
-    // issuing a real join for each configured room over the live
-    // session (idempotent for rooms already joined) -- previously
-    // config-reload only updated local bookkeeping, so a room added to
-    // an already-connected instance was marked "joined" in the API
-    // immediately but the server was never actually told to join it
-    // until the next reconnect.
-    for room in &reloaded.core_workflow.rooms {
-        send_room_join_if_connected(state, room.clone()).await;
-    }
-    state.interests.write().await.merge_configured(
-        &reloaded.core_workflow.liked_interests,
-        &reloaded.core_workflow.hated_interests,
-    );
-    if reloaded.advanced_networking.mesh.enabled
-        && reloaded.advanced_networking.mesh.enable_soulseek_rendezvous
-    {
-        let _ = state
-            .interests
+        {
+            // Keep the last validated projection visible when a watched reload is
+            // rejected.  This is the same retain-last-valid contract as the
+            // upstream options monitor; applying the parsed YAML before loading
+            // the full configuration briefly exposed an invalid or incomplete
+            // overlay even though runtime consumers correctly kept old settings.
+            let mut overlay = state.options_overlay.write().await;
+            overlay.apply_yaml(
+                parsed
+                    .clone()
+                    .map(controller_yaml_api_projection)
+                    .unwrap_or(serde_json::Value::Null),
+            );
+            overlay.watched_share_directories = Some(
+                parsed
+                    .as_ref()
+                    .and_then(|value| value.pointer("/shares/directories"))
+                    .and_then(serde_json::Value::as_array)
+                    .map(|values| {
+                        values
+                            .iter()
+                            .filter_map(serde_json::Value::as_str)
+                            .map(str::to_owned)
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default(),
+            );
+        }
+        *state
+            .controller_options_validation_error
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+        let new_directories = reloaded
+            .share_settings
+            .directories
+            .iter()
+            .map(|directory| directory.raw.clone())
+            .collect::<Vec<_>>();
+        {
+            let mut overlay = state.options_overlay.write().await;
+            overlay.watched_share_directories = Some(new_directories);
+            overlay.watched_instance_name = Some(reloaded.instance_name.clone());
+            overlay.watched_controller_swagger = Some(reloaded.controller_swagger);
+            overlay.watched_dht = Some(reloaded.advanced_networking.dht.clone());
+        }
+        if reloaded.downloads_dir != state.config.downloads_dir
+            || reloaded.incomplete_dir != state.config.incomplete_dir
+            || reloaded.instance_name != state.config.instance_name
+            || reloaded.http_binds != state.config.http_binds
+            || reloaded.controller_http_address != state.config.controller_http_address
+            || reloaded.auto_connect != state.config.auto_connect
+            || reloaded.controller_debug != state.config.controller_debug
+            || reloaded.controller_headless != state.config.controller_headless
+            || reloaded.controller_no_config_watch != state.config.controller_no_config_watch
+            || reloaded.controller_no_logo != state.config.controller_no_logo
+            || reloaded.controller_no_start != state.config.controller_no_start
+            || reloaded.controller_no_version_check != state.config.controller_no_version_check
+            || reloaded.controller_experimental != state.config.controller_experimental
+            || reloaded.controller_hash_from_audio_file_enabled
+                != state.config.controller_hash_from_audio_file_enabled
+            || reloaded.controller_case_sensitive_regex
+                != state.config.controller_case_sensitive_regex
+            || reloaded.controller_no_share_scan != state.config.controller_no_share_scan
+            || reloaded.controller_force_share_scan != state.config.controller_force_share_scan
+            || reloaded.managed_blacklist.enabled != state.config.managed_blacklist.enabled
+            || reloaded.controller_swagger != state.config.controller_swagger
+            || reloaded.controller_metrics_enabled != state.config.controller_metrics_enabled
+            || reloaded.controller_metrics_url != state.config.controller_metrics_url
+            || reloaded.controller_metrics_auth_disabled
+                != state.config.controller_metrics_auth_disabled
+            || reloaded.controller_metrics_username != state.config.controller_metrics_username
+            || reloaded.controller_metrics_password != state.config.controller_metrics_password
+            || reloaded.auth_required != state.config.auth_required
+            || reloaded.controller_web_jwt_ttl_millis != state.config.controller_web_jwt_ttl_millis
+            || ((reloaded.controller_web_jwt_key_configured
+                || state.config.controller_web_jwt_key_configured)
+                && reloaded.controller_web_jwt_key != state.config.controller_web_jwt_key)
+            || reloaded.controller_web_enforce_security
+                != state.config.controller_web_enforce_security
+            || reloaded.controller_web_allow_remote_no_auth
+                != state.config.controller_web_allow_remote_no_auth
+            || reloaded.controller_web_cors != state.config.controller_web_cors
+            || reloaded.controller_web_max_request_body_size
+                != state.config.controller_web_max_request_body_size
+            || reloaded.controller_web_rate_limiting != state.config.controller_web_rate_limiting
+            || reloaded.controller_diagnostics_allow_memory_dump
+                != state.config.controller_diagnostics_allow_memory_dump
+            || reloaded.controller_diagnostics_allow_remote_dump
+                != state.config.controller_diagnostics_allow_remote_dump
+            || reloaded.soulseek_diagnostic_level != state.config.soulseek_diagnostic_level
+            || reloaded.integrations.vpn.enabled != state.config.integrations.vpn.enabled
+            || reloaded.integrations.vpn.polling_interval
+                != state.config.integrations.vpn.polling_interval
+            || reloaded.transfer_upload.slots != state.config.transfer_upload.slots
+            || reloaded.transfer_download.slots != state.config.transfer_download.slots
+            || reloaded.core_workflow.incoming_search.concurrency
+                != state.config.core_workflow.incoming_search.concurrency
+            || reloaded.share_settings.cache_storage_mode
+                != state.config.share_settings.cache_storage_mode
+            || reloaded.share_settings.cache_workers != state.config.share_settings.cache_workers
+            || reloaded.advanced_networking.mesh != state.config.advanced_networking.mesh
+            || reloaded.advanced_networking.overlay != state.config.advanced_networking.overlay
+            || reloaded.advanced_networking.overlay_data
+                != state.config.advanced_networking.overlay_data
+            || reloaded.advanced_networking.relay != state.config.advanced_networking.relay
+            || reloaded.media_services.external_visualizer
+                != state.config.media_services.external_visualizer
+            || reloaded.media_services.song_id_max_concurrent_runs
+                != state.config.media_services.song_id_max_concurrent_runs
+            || reloaded.media_services.virtual_soulfind.bridge
+                != state.config.media_services.virtual_soulfind.bridge
+        {
+            state.runtime.write().await.set_restart_requested(true);
+        }
+        *state
+            .downloads_dir
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = reloaded.downloads_dir.clone();
+        *state
+            .incomplete_dir
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = reloaded.incomplete_dir.clone();
+        *state
+            .download_completed_path_template
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            reloaded.download_completed_path_template.clone();
+        *state
+            .remote_file_management
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = reloaded.remote_file_management;
+        *state
+            .remote_configuration
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = reloaded.remote_configuration;
+        *state
+            .controller_no_config_watch
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            reloaded.controller_no_config_watch;
+        *state
+            .controller_case_sensitive_regex
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            reloaded.controller_case_sensitive_regex;
+        *state
+            .controller_web_auth_username
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            reloaded.controller_web_auth_username.clone();
+        *state
+            .controller_web_auth_password
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            reloaded.controller_web_auth_password.clone();
+        *state
+            .controller_web_jwt_key_current
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            if reloaded.controller_web_jwt_key_configured {
+                reloaded.controller_web_jwt_key.clone()
+            } else {
+                state.config.controller_web_jwt_key.clone()
+            };
+        *state.private_message_auto_response_settings.write().await =
+            reloaded.private_message_auto_response.clone();
+        *state.integration_settings.write().await = reloaded.integrations.clone();
+        *state.transfer_auto_retry_settings.write().await = reloaded.transfer_auto_retry.clone();
+        *state.transfer_upload_settings.write().await = reloaded.transfer_upload.clone();
+        *state.transfer_download_settings.write().await = reloaded.transfer_download.clone();
+        *state.transfer_groups_settings.write().await = reloaded.transfer_groups.clone();
+        *state.core_workflow_settings.write().await = reloaded.core_workflow.clone();
+        *state.advanced_networking.write().await = reloaded.advanced_networking.clone();
+        *state.media_services.write().await = reloaded.media_services.clone();
+        state
+            .rooms
             .write()
             .await
-            .add_liked(MESH_RENDEZVOUS_INTEREST_TAG.to_owned());
-    }
-    *state.destinations.write().await = DestinationStore::from_config(
-        &reloaded.downloads_dir,
-        &reloaded.core_workflow.destinations,
-    );
-    *state.diagnostics_allow_memory_dump.write().await =
-        reloaded.controller_diagnostics_allow_memory_dump;
-    *state.diagnostics_allow_remote_dump.write().await =
-        reloaded.controller_diagnostics_allow_remote_dump;
-    state.managed_blacklist.write().await.replace(
-        reloaded.managed_blacklist.clone(),
-        reloaded.controller_compatibility_target,
-        reloaded.controller_case_sensitive_regex,
-    );
-    let search_filters_changed = {
-        let current = state.search_request_filters.read().await;
-        current
-            .iter()
-            .map(|filter| filter.expression.as_str())
-            .ne(reloaded
-                .controller_search_request_filters
-                .iter()
-                .map(String::as_str))
-    };
-    if search_filters_changed {
-        *state.search_request_filters.write().await = compile_controller_regexes(
-            &reloaded.controller_search_request_filters,
-            reloaded.controller_case_sensitive_regex,
-            reloaded.controller_compatibility_target,
-        )
-        .expect("validated search request filters must compile");
-    }
-    let server_address_changed = effective_server_address(state) != reloaded.server_address;
-    if server_address_changed {
-        *state
-            .server_address
-            .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = reloaded.server_address.clone();
-        if state.session.read().await.state == "connected" {
-            state.runtime.write().await.set_reconnect_pending(true);
+            .merge_configured(&reloaded.core_workflow.rooms);
+        // Matches the oracle's real OptionsMonitor_OnChange, which calls
+        // RoomService.TryJoinAsync(newOptions.Rooms) on every config reload,
+        // issuing a real join for each configured room over the live
+        // session (idempotent for rooms already joined) -- previously
+        // config-reload only updated local bookkeeping, so a room added to
+        // an already-connected instance was marked "joined" in the API
+        // immediately but the server was never actually told to join it
+        // until the next reconnect.
+        for room in &reloaded.core_workflow.rooms {
+            send_room_join_if_connected(state, room.clone()).await;
         }
-    }
-    let reloaded_credentials = reloaded.credentials();
-    let credentials_changed = *state.configured_credentials.read().await != reloaded_credentials;
-    if credentials_changed {
-        *state.configured_credentials.write().await = reloaded_credentials;
-        if state.session.read().await.state == "connected" {
-            state.runtime.write().await.set_reconnect_pending(true);
-        }
-    }
-    *state
-        .user_info_description
-        .write()
-        .unwrap_or_else(std::sync::PoisonError::into_inner) =
-        reloaded.user_info_description.clone();
-    *state
-        .user_info_picture
-        .write()
-        .unwrap_or_else(std::sync::PoisonError::into_inner) = reloaded.user_info_picture.clone();
-    apply_distributed_settings(state, reloaded.soulseek_distributed).await;
-    let regular_listener_result =
-        reconfigure_regular_listener(state, reloaded.listener_bind.clone()).await;
-    let obfuscated_bind = reloaded
-        .obfuscation_enabled
-        .then(|| reloaded.obfuscated_listener_bind.clone())
-        .flatten();
-    let obfuscated_listener_result = reconfigure_obfuscated_listener(state, obfuscated_bind).await;
-    match (regular_listener_result, obfuscated_listener_result) {
-        (Ok(regular_changed), Ok(obfuscated_changed)) if regular_changed || obfuscated_changed => {
-            *state
-                .advertised_port
-                .write()
-                .unwrap_or_else(std::sync::PoisonError::into_inner) = reloaded.advertised_port;
-            *state
-                .obfuscated_advertised_port
-                .write()
-                .unwrap_or_else(std::sync::PoisonError::into_inner) = reloaded
-                .obfuscation_enabled
-                .then_some(reloaded.obfuscated_advertised_port)
-                .flatten();
+        state.interests.write().await.merge_configured(
+            &reloaded.core_workflow.liked_interests,
+            &reloaded.core_workflow.hated_interests,
+        );
+        if reloaded.advanced_networking.mesh.enabled
+            && reloaded.advanced_networking.mesh.enable_soulseek_rendezvous
+        {
             let _ = state
-                .session_commands
-                .send(SessionCommand::SetWaitPort {
-                    port: reloaded.advertised_port,
-                    obfuscated_port: effective_obfuscated_advertised_port(state),
-                })
-                .await;
+                .interests
+                .write()
+                .await
+                .add_liked(MESH_RENDEZVOUS_INTEREST_TAG.to_owned());
         }
-        (Ok(_), Ok(_)) => {}
-        (regular, obfuscated) => {
-            let error = [regular.err(), obfuscated.err()]
-                .into_iter()
-                .flatten()
-                .collect::<Vec<_>>()
-                .join("; ");
-            record_daemon_log(
-                state,
-                logging::LogLevel::Error,
-                "configuration",
-                format!("failed to apply Soulseek listener update: {error}"),
+        *state.destinations.write().await = DestinationStore::from_config(
+            &reloaded.downloads_dir,
+            &reloaded.core_workflow.destinations,
+        );
+        *state.diagnostics_allow_memory_dump.write().await =
+            reloaded.controller_diagnostics_allow_memory_dump;
+        *state.diagnostics_allow_remote_dump.write().await =
+            reloaded.controller_diagnostics_allow_remote_dump;
+        state.managed_blacklist.write().await.replace(
+            reloaded.managed_blacklist.clone(),
+            reloaded.controller_compatibility_target,
+            reloaded.controller_case_sensitive_regex,
+        );
+        let search_filters_changed = {
+            let current = state.search_request_filters.read().await;
+            current
+                .iter()
+                .map(|filter| filter.expression.as_str())
+                .ne(reloaded
+                    .controller_search_request_filters
+                    .iter()
+                    .map(String::as_str))
+        };
+        if search_filters_changed {
+            *state.search_request_filters.write().await = compile_controller_regexes(
+                &reloaded.controller_search_request_filters,
+                reloaded.controller_case_sensitive_regex,
+                reloaded.controller_compatibility_target,
             )
-            .await;
+            .expect("validated search request filters must compile");
         }
-    }
-    let changed = {
-        let current = state.share_settings.read().await;
-        current.directories != reloaded.share_settings.directories
-            || current.filters != reloaded.share_settings.filters
-            || current.cache_storage_mode != reloaded.share_settings.cache_storage_mode
-            || current.cache_workers != reloaded.share_settings.cache_workers
-            || current.cache_retention != reloaded.share_settings.cache_retention
-            || current.probe_media_attributes != reloaded.share_settings.probe_media_attributes
-    };
-    *state.share_settings.write().await = reloaded.share_settings.clone();
-    if !changed {
-        return;
-    }
-    state.shares.write().await.roots = pending_share_roots(&reloaded.share_settings);
-    state.share_lifecycle.write().await.scan_pending = true;
-    record_event(
-        state,
-        "options.shares.changed",
-        "shares",
-        Some("scan_pending=true".to_owned()),
-    )
-    .await;
+        let server_address_changed = effective_server_address(state) != reloaded.server_address;
+        if server_address_changed {
+            *state
+                .server_address
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) =
+                reloaded.server_address.clone();
+            if state.session.read().await.state == "connected" {
+                state.runtime.write().await.set_reconnect_pending(true);
+            }
+        }
+        let reloaded_credentials = reloaded.credentials();
+        let credentials_changed =
+            *state.configured_credentials.read().await != reloaded_credentials;
+        if credentials_changed {
+            *state.configured_credentials.write().await = reloaded_credentials;
+            if state.session.read().await.state == "connected" {
+                state.runtime.write().await.set_reconnect_pending(true);
+            }
+        }
+        *state
+            .user_info_description
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            reloaded.user_info_description.clone();
+        *state
+            .user_info_picture
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            reloaded.user_info_picture.clone();
+        apply_distributed_settings(state, reloaded.soulseek_distributed).await;
+        let regular_listener_result =
+            reconfigure_regular_listener(state, reloaded.listener_bind.clone()).await;
+        let obfuscated_bind = reloaded
+            .obfuscation_enabled
+            .then(|| reloaded.obfuscated_listener_bind.clone())
+            .flatten();
+        let obfuscated_listener_result =
+            reconfigure_obfuscated_listener(state, obfuscated_bind).await;
+        match (regular_listener_result, obfuscated_listener_result) {
+            (Ok(regular_changed), Ok(obfuscated_changed))
+                if regular_changed || obfuscated_changed =>
+            {
+                *state
+                    .advertised_port
+                    .write()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = reloaded.advertised_port;
+                *state
+                    .obfuscated_advertised_port
+                    .write()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = reloaded
+                    .obfuscation_enabled
+                    .then_some(reloaded.obfuscated_advertised_port)
+                    .flatten();
+                let _ = state
+                    .session_commands
+                    .send(SessionCommand::SetWaitPort {
+                        port: reloaded.advertised_port,
+                        obfuscated_port: effective_obfuscated_advertised_port(state),
+                    })
+                    .await;
+            }
+            (Ok(_), Ok(_)) => {}
+            (regular, obfuscated) => {
+                let error = [regular.err(), obfuscated.err()]
+                    .into_iter()
+                    .flatten()
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                record_daemon_log(
+                    state,
+                    logging::LogLevel::Error,
+                    "configuration",
+                    format!("failed to apply Soulseek listener update: {error}"),
+                )
+                .await;
+            }
+        }
+        let changed = {
+            let current = state.share_settings.read().await;
+            current.directories != reloaded.share_settings.directories
+                || current.filters != reloaded.share_settings.filters
+                || current.cache_storage_mode != reloaded.share_settings.cache_storage_mode
+                || current.cache_workers != reloaded.share_settings.cache_workers
+                || current.cache_retention != reloaded.share_settings.cache_retention
+                || current.probe_media_attributes != reloaded.share_settings.probe_media_attributes
+        };
+        *state.share_settings.write().await = reloaded.share_settings.clone();
+        if !changed {
+            return;
+        }
+        state.shares.write().await.roots = pending_share_roots(&reloaded.share_settings);
+        state.share_lifecycle.write().await.scan_pending = true;
+        record_event(
+            state,
+            "options.shares.changed",
+            "shares",
+            Some("scan_pending=true".to_owned()),
+        )
+        .await;
+    })
 }
 
 fn slskd_options_config_text_response(config: &AppConfig) -> HttpResponse {
@@ -44624,6 +44628,87 @@ fn extended_controller_mutation_route(method: &str, path: &str) -> bool {
     }
 }
 
+fn slskdn_adversarial_mutation_response<'a>(
+    body: &'a str,
+    state: &'a AppState,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = HttpResponse> + Send + 'a>> {
+    Box::pin(async move {
+        let payload = match serde_json::from_str::<serde_json::Value>(body) {
+            Ok(payload @ serde_json::Value::Object(_)) => payload,
+            Ok(_) => return routing::bad_request_response("security body must be an object"),
+            Err(_) => return routing::bad_request_response("invalid JSON body"),
+        };
+        if let Err(error) = validate_slskdn_adversarial_settings(&payload) {
+            return HttpResponse {
+                status: "400 Bad Request",
+                content_type: "text/plain; charset=utf-8",
+                body: error.to_owned(),
+            };
+        }
+        let current = match read_controller_compatibility_yaml(&state.config) {
+            Ok(Some(current)) => current,
+            Ok(None) => {
+                return HttpResponse {
+                    status: "404 Not Found",
+                    content_type: "application/json; charset=utf-8",
+                    body: serde_json::json!("Configuration file not found").to_string(),
+                }
+            }
+            Err(error) => {
+                record_daemon_log(
+                    state,
+                    logging::LogLevel::Error,
+                    "configuration",
+                    format!("failed to read adversarial configuration: {error}"),
+                )
+                .await;
+                return routing::internal_server_error_response("Failed to persist settings");
+            }
+        };
+        let updated = match slskdn_adversarial_yaml_update(&current, &payload) {
+            Ok(updated) => updated,
+            Err(error) => return routing::bad_request_response(&error),
+        };
+        if let Err(error) = write_controller_compatibility_yaml(&state.config, &updated) {
+            record_daemon_log(
+                state,
+                logging::LogLevel::Error,
+                "configuration",
+                format!("failed to persist adversarial settings: {error}"),
+            )
+            .await;
+            return routing::internal_server_error_response("Failed to persist settings");
+        }
+
+        let key = "security/adversarial";
+        let value = serde_json::json!({
+            "resource": key,
+            "settings": payload,
+            "updatedAt": unix_timestamp(),
+        });
+        match state
+            .controller_features
+            .write()
+            .await
+            .upsert(format!("security/profile/{key}"), value)
+        {
+            Ok(()) => HttpResponse {
+                status: "200 OK",
+                content_type: "application/json; charset=utf-8",
+                body: serde_json::json!({
+                    "message": if effective_controller_no_config_watch(state) {
+                        "Adversarial settings updated. Restart required for changes to take effect."
+                    } else {
+                        "Adversarial settings updated successfully"
+                    }
+                })
+                .to_string(),
+            },
+            Err(error) => routing::service_unavailable_response(&error),
+        }
+    })
+}
+
 async fn extended_controller_mutation_response(
     method: &str,
     path: &str,
@@ -44648,6 +44733,12 @@ async fn extended_controller_mutation_response(
             })
             .to_string(),
         };
+    }
+    if method == "PUT"
+        && path == "/api/security/adversarial"
+        && state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
+    {
+        return Box::pin(slskdn_adversarial_mutation_response(body, state)).await;
     }
     if method == "DELETE" && path == "/api/session" {
         return match send_session_command(state, SessionCommand::Disconnect).await {
@@ -45211,13 +45302,25 @@ async fn extended_controller_mutation_response(
             Err(error) => routing::service_unavailable_response(&error),
         };
     }
-    if let Some(response) =
-        feature_controller_mutation_response(method, path, body, state, is_versioned_v0).await
+    if let Some(response) = Box::pin(feature_controller_mutation_response(
+        method,
+        path,
+        body,
+        state,
+        is_versioned_v0,
+    ))
+    .await
     {
         return response;
     }
-    if let Some(response) =
-        misc_controller_mutation_response(method, path, body, state, is_versioned_v0).await
+    if let Some(response) = Box::pin(misc_controller_mutation_response(
+        method,
+        path,
+        body,
+        state,
+        is_versioned_v0,
+    ))
+    .await
     {
         return response;
     }
@@ -47351,11 +47454,11 @@ async fn feature_controller_mutation_response(
                     "Failed to persist settings",
                 ));
             }
-            apply_watched_controller_configuration(
+            Box::pin(apply_watched_controller_configuration(
                 state,
                 Some(&updated),
                 &state.controller_cli_environment,
-            )
+            ))
             .await;
         }
         let key = path.trim_start_matches("/api/").to_owned();
@@ -108674,6 +108777,36 @@ mod tests {
             }))
             .is_ok()
         );
+    }
+
+    #[tokio::test]
+    async fn slskdn_adversarial_put_persists_and_accepts_target_yaml() {
+        let (state, _receiver) = test_state_with_env(
+            MapEnv::default()
+                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn")
+                .with("SLSKR_REMOTE_CONFIGURATION", "true"),
+        );
+        fs::write(
+            state.config.state_dir.join("slskd.yml"),
+            "debug: true\nremote_configuration: true\n",
+        )
+        .unwrap();
+
+        let response =
+            super::route_http_request("PUT", "/api/v0/security/adversarial", None, "{}", &state)
+                .await
+                .expect("adversarial settings response");
+        assert_eq!(response.status, "200 OK", "{}", response.body);
+        assert!(fs::read_to_string(state.config.state_dir.join("slskd.yml"))
+            .unwrap()
+            .contains("  adversarial:\n"));
+        super::load_watched_controller_configuration(state.controller_cli_environment.clone())
+            .expect("target adversarial YAML remains reloadable");
+        let features = state.controller_features.read().await;
+        let stored = features
+            .get("security/profile/security/adversarial")
+            .expect("stored adversarial settings");
+        assert_eq!(stored["settings"], serde_json::json!({}));
     }
 
     #[tokio::test]

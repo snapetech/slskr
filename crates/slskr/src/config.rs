@@ -5789,36 +5789,46 @@ pub struct ViolationTrackerFileConfig {
 }
 
 #[derive(Debug, Default, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default)]
 pub struct AdversarialFileConfig {
     privacy: AdversarialPrivacyFileConfig,
     anonymity: AdversarialAnonymityFileConfig,
+    #[serde(flatten)]
+    _slskdn_compatibility: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Default, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default)]
 pub struct AdversarialPrivacyFileConfig {
     padding: AdversarialPaddingFileConfig,
+    #[serde(flatten)]
+    _slskdn_compatibility: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Default, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default)]
 pub struct AdversarialPaddingFileConfig {
     max_unpadded_bytes: Option<usize>,
     max_padded_bytes: Option<usize>,
+    #[serde(flatten)]
+    _slskdn_compatibility: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Default, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default)]
 pub struct AdversarialAnonymityFileConfig {
     relay_only: AdversarialRelayOnlyFileConfig,
+    #[serde(flatten)]
+    _slskdn_compatibility: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Default, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default)]
 pub struct AdversarialRelayOnlyFileConfig {
     relay_peer_data_endpoints: Vec<String>,
     relay_authentication_token: Option<String>,
+    #[serde(flatten)]
+    _slskdn_compatibility: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Default, Deserialize)]
