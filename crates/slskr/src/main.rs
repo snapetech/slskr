@@ -1861,6 +1861,21 @@ fn hashdb_inventory_records(
         .collect()
 }
 
+fn hashdb_inventory_peer_ids(features: &ControllerFeatureState) -> HashSet<String> {
+    features
+        .values_with_prefix(HASHDB_FLAC_INVENTORY_PREFIX)
+        .into_iter()
+        .filter_map(|record| {
+            record
+                .get("peerId")
+                .and_then(serde_json::Value::as_str)
+                .map(str::trim)
+                .filter(|peer_id| !peer_id.is_empty())
+                .map(str::to_owned)
+        })
+        .collect()
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct SearchStore {
     records: Vec<SearchRecord>,
@@ -16864,13 +16879,16 @@ async fn route_http_request_with_headers(
             let persisted_entries = discovery.hash_entries().len();
             let latest_seq = discovery.latest_seq();
             let database_size_bytes = discovery.database_size_bytes();
-            let distinct_peers = discovery.distinct_peer_count();
+            let mut peer_ids = discovery
+                .shadow_records()
+                .iter()
+                .flat_map(|record| record.peer_ids.iter().cloned())
+                .collect::<HashSet<_>>();
             drop(discovery);
-            let inventory = hashdb_inventory_records(
-                &*state.controller_features.read().await,
-                usize::MAX,
-                false,
-            );
+            let features = state.controller_features.read().await;
+            peer_ids.extend(hashdb_inventory_peer_ids(&features));
+            let inventory = hashdb_inventory_records(&features, usize::MAX, false);
+            drop(features);
             let total_flac_entries = inventory.len();
             let hashed_flac_entries = inventory
                 .iter()
@@ -16883,7 +16901,7 @@ async fn route_http_request_with_headers(
                 .count();
             let slskdn_peers = state.mesh.read().await.capability_records.len();
             Ok(routing::ok_response(serde_json::json!({
-                "totalPeers": distinct_peers,
+                "totalPeers": peer_ids.len(),
                 "slskdnPeers": slskdn_peers,
                 "totalFlacEntries": total_flac_entries,
                 "hashedFlacEntries": hashed_flac_entries,
@@ -56073,9 +56091,19 @@ async fn extended_controller_get_response(
         "/api/hashdb/optimize/analyze" => {
             let discovery = state.content_discovery.read().await;
             let hash_db_entry_count = discovery.hash_entries().len();
-            let peer_count = discovery.distinct_peer_count();
+            let mut peer_ids = discovery
+                .shadow_records()
+                .iter()
+                .flat_map(|record| record.peer_ids.iter().cloned())
+                .collect::<HashSet<_>>();
             let database_size_bytes = discovery.database_size_bytes();
             drop(discovery);
+            let features = state.controller_features.read().await;
+            peer_ids.extend(hashdb_inventory_peer_ids(&features));
+            let flac_inventory_entry_count =
+                hashdb_inventory_records(&features, usize::MAX, false).len();
+            drop(features);
+            let peer_count = peer_ids.len();
             let mut recommendations: Vec<&str> = Vec::new();
             if hash_db_entry_count > 100_000 {
                 recommendations
@@ -56090,10 +56118,7 @@ async fn extended_controller_get_response(
                     "analyzed": true,
                     "entries": hash_db_entry_count,
                     "hashDbEntryCount": hash_db_entry_count,
-                    // slskR's content-discovery store has no FlacInventory
-                    // table distinct from HashDb -- there is nothing else
-                    // to count here.
-                    "flacInventoryEntryCount": 0,
+                    "flacInventoryEntryCount": flac_inventory_entry_count,
                     "peerCount": peer_count,
                     "databaseSizeBytes": database_size_bytes,
                     // The store is a single JSON file, not SQLite -- there
@@ -56122,14 +56147,20 @@ async fn extended_controller_get_response(
         }
         "/api/hashdb/peers" => {
             let discovery = state.content_discovery.read().await;
-            let peers = discovery
+            let mut peer_ids = discovery
                 .shadow_records()
                 .iter()
                 .flat_map(|record| record.peer_ids.iter().cloned())
-                .collect::<HashSet<_>>()
+                .collect::<HashSet<_>>();
+            drop(discovery);
+            peer_ids.extend(hashdb_inventory_peer_ids(
+                &*state.controller_features.read().await,
+            ));
+            let mut peers = peer_ids
                 .into_iter()
                 .map(|peer_id| serde_json::json!({"peerId": peer_id}))
                 .collect::<Vec<_>>();
+            peers.sort_by(|left, right| left["peerId"].as_str().cmp(&right["peerId"].as_str()));
             let count = peers.len();
             routing::ok_response(serde_json::json!({"peers": peers, "count": count}).to_string())
         }
@@ -106240,6 +106271,20 @@ mod tests {
         let stats_json = serde_json::from_str::<serde_json::Value>(&stats.body).unwrap();
         assert_eq!(stats_json["totalFlacEntries"], 11);
         assert_eq!(stats_json["hashedFlacEntries"], 0);
+
+        let analysis =
+            super::route_http_request("GET", "/api/v0/hashdb/optimize/analyze", None, "", &state)
+                .await
+                .expect("hashdb optimize analysis after backfill");
+        let analysis_json = serde_json::from_str::<serde_json::Value>(&analysis.body).unwrap();
+        assert_eq!(analysis_json["flacInventoryEntryCount"], 11);
+        assert_eq!(analysis_json["peerCount"], 11);
+
+        let peers = super::route_http_request("GET", "/api/v0/hashdb/peers", None, "", &state)
+            .await
+            .expect("hashdb peers after backfill");
+        let peers_json = serde_json::from_str::<serde_json::Value>(&peers.body).unwrap();
+        assert_eq!(peers_json["count"], 11);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

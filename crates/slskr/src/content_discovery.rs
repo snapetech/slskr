@@ -339,16 +339,6 @@ impl ContentDiscoveryStore {
         &self.shadow_records
     }
 
-    /// Count of distinct peers referenced anywhere in the shadow index --
-    /// the closest real analog to the oracle's `Peers` table row count.
-    pub fn distinct_peer_count(&self) -> usize {
-        self.shadow_records
-            .iter()
-            .flat_map(|record| record.peer_ids.iter())
-            .collect::<std::collections::HashSet<_>>()
-            .len()
-    }
-
     /// Real on-disk size of the state file, matching the oracle's
     /// `FileInfo.Length` over its SQLite file. Zero for an in-memory store
     /// or before the state file has been written yet.
