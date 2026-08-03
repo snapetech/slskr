@@ -117382,6 +117382,219 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof crediting the mediacore content-id/fuzzy-
+    /// match-find/IPLD-link routes' cases, independently re-derived from
+    /// `mediacore_fuzzy_matching_and_ipld_validation_use_persisted_state`'s
+    /// real registered-content-id and persisted-perceptual-hash link-graph
+    /// checks. slskdN-only (confirmed against the frozen registry).
+    #[tokio::test]
+    async fn controller_api_differential_mediacore_ipld_and_fuzzy_find() {
+        let target = "slskdn";
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($method:expr, $route:expr, $case:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!("{target} {} {} [{}]", $method, $route, $case));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": $method,
+                    "route": $route,
+                    "case": $case,
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        let (state, _receiver) = test_state();
+        let target_content = "content:audio:track:differential-target";
+        let candidate_content = "content:audio:track:differential-candidate";
+        let mut register_pass = true;
+        let mut publish_pass = true;
+        for (external_id, content_id) in [
+            ("differential-target", target_content),
+            ("differential-candidate", candidate_content),
+        ] {
+            let registered = super::route_http_request(
+                "POST",
+                "/api/v0/mediacore/contentid/register",
+                None,
+                &serde_json::json!({"externalId": external_id, "contentId": content_id})
+                    .to_string(),
+                &state,
+            )
+            .await
+            .expect("register content id");
+            register_pass &= registered.status == "200 OK";
+
+            let published = super::route_http_request(
+                "POST",
+                "/api/v0/mediacore/publish/descriptor",
+                None,
+                &serde_json::json!({
+                    "descriptor": {
+                        "contentId": content_id,
+                        "hashes": [{"algorithm": "sha256", "hex": external_id}],
+                        "perceptualHashes": [{
+                            "algorithm": "Chromaprint",
+                            "hex": "0000000000001234",
+                            "numericHash": 0x1234_u64,
+                        }],
+                        "signature": {
+                            "publicKey": "key",
+                            "signature": "signature",
+                            "timestampUnixMs": super::unix_timestamp_millis(),
+                        },
+                    },
+                })
+                .to_string(),
+                &state,
+            )
+            .await
+            .expect("publish descriptor");
+            publish_pass &= published.status == "200 OK";
+        }
+        record!(
+            "POST",
+            "/api/v0/mediacore/contentid/register",
+            "nominal-status-headers-body",
+            register_pass
+        );
+        record!(
+            "POST",
+            "/api/v0/mediacore/publish/descriptor",
+            "populated-dynamic-state",
+            publish_pass
+        );
+
+        let matches = super::route_http_request(
+            "POST",
+            &format!("/api/v0/mediacore/fuzzymatch/find/{target_content}"),
+            None,
+            r#"{"minConfidence":0.7,"maxCandidates":50,"maxResults":10}"#,
+            &state,
+        )
+        .await
+        .expect("fuzzy match find");
+        let matches_json = serde_json::from_str::<serde_json::Value>(&matches.body).unwrap_or_default();
+        record!(
+            "POST",
+            "/api/v0/mediacore/fuzzymatch/find/{contentId}",
+            "nominal-status-headers-body",
+            matches.status == "200 OK"
+        );
+        record!(
+            "POST",
+            "/api/v0/mediacore/fuzzymatch/find/{contentId}",
+            "populated-dynamic-state",
+            matches_json["totalCandidates"] == 1
+                && matches_json["matches"][0]["candidateContentId"] == candidate_content
+                && matches_json["matches"][0]["reason"] == "PerceptualHash"
+        );
+
+        let links_route = format!("/api/v0/mediacore/ipld/links/{target_content}");
+        let links = super::route_http_request(
+            "POST",
+            &links_route,
+            None,
+            &serde_json::json!({"links": [
+                {"name": "same", "target": candidate_content},
+                {"name": "broken", "target": "content:audio:track:differential-missing"},
+            ]})
+            .to_string(),
+            &state,
+        )
+        .await
+        .unwrap_or_else(|error| panic!("{links_route}: {error}"));
+        record!(
+            "POST",
+            "/api/v0/mediacore/ipld/links/{contentId}",
+            "nominal-status-headers-body",
+            links.status == "200 OK"
+        );
+
+        let orphan = super::route_http_request(
+            "POST",
+            "/api/v0/mediacore/ipld/links/content:audio:track:differential-orphan",
+            None,
+            &serde_json::json!({"links": [{"name": "same", "target": candidate_content}]})
+                .to_string(),
+            &state,
+        )
+        .await
+        .expect("register orphan link");
+        record!(
+            "POST",
+            "/api/v0/mediacore/ipld/links/{contentId}",
+            "mutation-side-effects-and-readback",
+            orphan.status == "200 OK"
+        );
+
+        let validation =
+            super::route_http_request("GET", "/api/v0/mediacore/ipld/validate", None, "", &state)
+                .await
+                .expect("ipld validate");
+        let validation_json =
+            serde_json::from_str::<serde_json::Value>(&validation.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/api/v0/mediacore/ipld/validate",
+            "nominal-status-headers-body",
+            validation.status == "200 OK"
+        );
+        record!(
+            "GET",
+            "/api/v0/mediacore/ipld/validate",
+            "populated-dynamic-state",
+            validation_json["isValid"] == false
+                && validation_json["totalLinksValidated"] == 2
+                && validation_json["brokenLinks"].as_array().map(Vec::len) == Some(1)
+                && validation_json["orphanedLinks"].as_array().map(Vec::len) == Some(1)
+        );
+
+        let inbound_route = format!("/api/v0/mediacore/ipld/inbound/{candidate_content}");
+        let inbound = super::route_http_request("GET", &inbound_route, None, "", &state)
+            .await
+            .unwrap_or_else(|error| panic!("{inbound_route}: {error}"));
+        let inbound_json = serde_json::from_str::<serde_json::Value>(&inbound.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/api/v0/mediacore/ipld/inbound/{targetContentId}",
+            "nominal-status-headers-body",
+            inbound.status == "200 OK"
+        );
+        record!(
+            "GET",
+            "/api/v0/mediacore/ipld/inbound/{targetContentId}",
+            "populated-dynamic-state",
+            inbound_json["inboundLinks"].as_array().map(Vec::len) == Some(2)
+                && inbound_json["inboundLinks"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|source| source == target_content)
+        );
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("mediacore_ipld_and_fuzzy_find.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api mediacore-ipld-fuzzy-find mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
