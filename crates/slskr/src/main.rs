@@ -122750,6 +122750,245 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof crediting 6 port-forwarding routes' cases,
+    /// independently re-derived from `port_forwarding_reads_are_bounded_
+    /// and_start_requires_an_authorized_pinned_gateway`'s real bounded
+    /// port-listing and gateway-pinning security checks (start is
+    /// forbidden without a real, authorized, certificate-pinned gateway
+    /// pod, and succeeds once one genuinely exists). The registry lists
+    /// these routes as `/api/v0/portforwarding/...` (no hyphen);
+    /// `normalize_api_path` maps that to the hyphenated `/api/port-
+    /// forwarding/...` internal form the source test calls directly --
+    /// both resolve to the same handler (see the `normalize_api_path`
+    /// unit test asserting this exact mapping), so either request path
+    /// exercises the same registered route. slskdN-only (confirmed
+    /// against the frozen registry).
+    #[tokio::test]
+    async fn controller_api_differential_port_forwarding() {
+        let target = "slskdn";
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($method:expr, $route:expr, $case:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!("{target} {} {} [{}]", $method, $route, $case));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": $method,
+                    "route": $route,
+                    "case": $case,
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        let (state, _receiver) = test_state_with_env(
+            MapEnv::default().with("SLSKR_TEST_USER_ENDPOINT_OVERRIDES", "gateway=127.0.0.1:2234"),
+        );
+
+        let status = super::route_http_request(
+            "GET",
+            "/api/v0/portforwarding/status",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("port forwarding status");
+        record!(
+            "GET",
+            "/api/v0/portforwarding/status",
+            "nominal-status-headers-body",
+            status.status == "200 OK" && status.body == "[]"
+        );
+
+        let available = super::route_http_request(
+            "GET",
+            "/api/v0/portforwarding/available-ports?startPort=2000&endPort=2010&limit=3",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("available port page");
+        let available_json =
+            serde_json::from_str::<serde_json::Value>(&available.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/api/v0/portforwarding/available-ports",
+            "nominal-status-headers-body",
+            available.status == "200 OK"
+        );
+        record!(
+            "GET",
+            "/api/v0/portforwarding/available-ports",
+            "populated-dynamic-state",
+            available_json["availablePortCount"] == 11
+                && available_json["usedPortCount"] == 0
+                && available_json["availablePorts"] == serde_json::json!([2000, 2001, 2002])
+        );
+
+        let mut invalid_query_pass = true;
+        for path in [
+            "/api/v0/portforwarding/available-ports?startPort=0",
+            "/api/v0/portforwarding/available-ports?startPort=3000&endPort=2000",
+            "/api/v0/portforwarding/available-ports?limit=0",
+            "/api/v0/portforwarding/available-ports?limit=1001",
+        ] {
+            let response = super::route_http_request("GET", path, None, "", &state)
+                .await
+                .unwrap_or_else(|error| panic!("{path}: {error}"));
+            invalid_query_pass &= response.status == "400 Bad Request";
+        }
+        record!(
+            "GET",
+            "/api/v0/portforwarding/available-ports",
+            "malformed-path-query-or-body",
+            invalid_query_pass
+        );
+
+        let stats = super::route_http_request(
+            "GET",
+            "/api/v0/portforwarding/stream-stats",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("port forwarding stream stats");
+        let stats_json = serde_json::from_str::<serde_json::Value>(&stats.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/api/v0/portforwarding/stream-stats",
+            "nominal-status-headers-body",
+            stats.status == "200 OK"
+        );
+        record!(
+            "GET",
+            "/api/v0/portforwarding/stream-stats",
+            "populated-dynamic-state",
+            stats_json["totalForwardingRules"] == 0 && stats_json["rules"] == serde_json::json!([])
+        );
+
+        let missing = super::route_http_request(
+            "GET",
+            "/api/v0/portforwarding/status/2000",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("missing port forwarding status");
+        record!(
+            "GET",
+            "/api/v0/portforwarding/status/{localPort:int}",
+            "missing-empty-or-conflict-state",
+            missing.status == "404 Not Found"
+        );
+
+        let start_unpinned = super::route_http_request(
+            "POST",
+            "/api/v0/portforwarding/start",
+            None,
+            r#"{"localPort":2000,"podId":"pod-differential-unpinned","destinationHost":"service","destinationPort":80}"#,
+            &state,
+        )
+        .await
+        .expect("unauthorized port forwarding start");
+        record!(
+            "POST",
+            "/api/v0/portforwarding/start",
+            "missing-empty-or-conflict-state",
+            start_unpinned.status == "403 Forbidden"
+        );
+
+        let pin = "07".repeat(32);
+        let create = super::route_http_request(
+            "POST",
+            "/api/v0/pods",
+            None,
+            &format!(
+                r#"{{"pod":{{"podId":"pod-differential-forward","name":"Forward Differential","capabilities":[0],"privateServicePolicy":{{"enabled":true,"maxMembers":2,"gatewayPeerId":"tester","gatewayCertificateSha256":"{pin}","registeredServices":[],"allowedDestinations":[{{"hostPattern":"service","port":80,"protocol":"tcp","allowPublic":false}}]}}}}}}"#
+            ),
+            &state,
+        )
+        .await
+        .expect("create gateway pod fixture");
+        assert_eq!(create.status, "201 Created", "{}", create.body);
+
+        let mut gateway = test_capability_descriptor(
+            "gateway",
+            vec![slskr_client::capabilities::FEATURE_MESH_V1.to_owned()],
+        );
+        gateway.peer_id = "tester".to_owned();
+        state.mesh.write().await.capability_records.push(gateway);
+
+        let probe = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("port probe");
+        let local_port = probe.local_addr().unwrap().port();
+        drop(probe);
+
+        let start = super::route_http_request(
+            "POST",
+            "/api/v0/portforwarding/start",
+            None,
+            &format!(
+                r#"{{"localPort":{local_port},"podId":"pod-differential-forward","destinationHost":"service","destinationPort":80}}"#
+            ),
+            &state,
+        )
+        .await
+        .expect("start port forwarding");
+        record!(
+            "POST",
+            "/api/v0/portforwarding/start",
+            "nominal-status-headers-body",
+            start.status == "200 OK"
+        );
+
+        let status_route = format!("/api/v0/portforwarding/status/{local_port}");
+        let running_status = super::route_http_request("GET", &status_route, None, "", &state)
+            .await
+            .unwrap_or_else(|error| panic!("{status_route}: {error}"));
+        record!(
+            "GET",
+            "/api/v0/portforwarding/status/{localPort:int}",
+            "nominal-status-headers-body",
+            running_status.status == "200 OK" && running_status.body.contains("pod-differential-forward")
+        );
+
+        let stop_route = format!("/api/v0/portforwarding/stop/{local_port}");
+        let stop = super::route_http_request("POST", &stop_route, None, "", &state)
+            .await
+            .unwrap_or_else(|error| panic!("{stop_route}: {error}"));
+        record!(
+            "POST",
+            "/api/v0/portforwarding/stop/{localPort:int}",
+            "mutation-side-effects-and-readback",
+            stop.status == "200 OK"
+        );
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("port_forwarding.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api port-forwarding mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
