@@ -122529,6 +122529,227 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof crediting 2 content-streaming routes'
+    /// cases, independently re-derived from `share_tokens_use_headers_
+    /// and_content_bound_stream_tickets`'s real checks that share
+    /// tokens/tickets are rejected in the query string (header-only),
+    /// are content-bound (a ticket minted for one content id 401s for a
+    /// different one), and are revoked when the owning grant is deleted.
+    /// `/api/collections`/`/api/share-grants` fixture setup uses the
+    /// original test's bare (non-`/api/v0/`) paths -- neither is
+    /// registered in either target, used purely to seed real state, not
+    /// credited. slskdN-only (confirmed against the frozen registry).
+    #[tokio::test]
+    async fn controller_api_differential_content_bound_stream_tickets() {
+        let target = "slskdn";
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($method:expr, $route:expr, $case:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!("{target} {} {} [{}]", $method, $route, $case));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": $method,
+                    "route": $route,
+                    "case": $case,
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        let (state, _receiver) = test_state_with_env(
+            MapEnv::default()
+                .with("SLSKR_AUTH_DISABLED", "false")
+                .with("SLSKR_API_TOKEN", "differential-route-token"),
+        );
+        let api_authorization = Some("Bearer differential-route-token");
+
+        let collection = super::route_http_request(
+            "POST",
+            "/api/collections",
+            api_authorization,
+            r#"{"name":"Private Differential"}"#,
+            &state,
+        )
+        .await
+        .expect("create collection fixture");
+        let collection_id = serde_json::from_str::<serde_json::Value>(&collection.body)
+            .unwrap_or_default()["id"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned();
+        super::route_http_request(
+            "POST",
+            &format!("/api/collections/{collection_id}/items"),
+            api_authorization,
+            r#"{"content_id":"content/differential-one","title":"track.flac","kind":"Audio"}"#,
+            &state,
+        )
+        .await
+        .expect("create collection item fixture");
+        let grant = super::route_http_request(
+            "POST",
+            "/api/share-grants",
+            api_authorization,
+            &format!("{{\"collection_id\":\"{collection_id}\",\"username\":\"friend\"}}"),
+            &state,
+        )
+        .await
+        .expect("create share grant fixture");
+        let grant_id = serde_json::from_str::<serde_json::Value>(&grant.body).unwrap_or_default()
+            ["id"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned();
+        let issued = super::route_http_request(
+            "POST",
+            &format!("/api/share-grants/{grant_id}/token"),
+            api_authorization,
+            r#"{"expiresInSeconds":600}"#,
+            &state,
+        )
+        .await
+        .expect("issue share token fixture");
+        let token = serde_json::from_str::<serde_json::Value>(&issued.body).unwrap_or_default()
+            ["token"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned();
+
+        let query_stream = super::route_http_request(
+            "GET",
+            &format!(
+                "/api/v0/streams/content%2Fdifferential-one?token={}",
+                super::url_encode(&token)
+            ),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("query-string token rejected");
+        record!(
+            "GET",
+            "/api/v0/streams/{contentId}",
+            "malformed-path-query-or-body",
+            query_stream.status == "400 Bad Request"
+        );
+
+        let share_headers = super::RequestSecurityHeaders {
+            x_share_token: Some(token.clone()),
+            ..Default::default()
+        };
+        let ticket_route = "/api/v0/streams/content%2Fdifferential-one/share-ticket";
+        let ticket_response = super::route_http_request_with_headers(
+            "POST",
+            ticket_route,
+            None,
+            "",
+            &state,
+            share_headers,
+        )
+        .await
+        .unwrap_or_else(|error| panic!("{ticket_route}: {error}"));
+        let ticket_json =
+            serde_json::from_str::<serde_json::Value>(&ticket_response.body).unwrap_or_default();
+        let ticket = ticket_json["ticket"].as_str().unwrap_or_default().to_owned();
+        record!(
+            "POST",
+            "/api/v0/streams/{contentId}/share-ticket",
+            "nominal-status-headers-body",
+            ticket_response.status == "200 OK" && !ticket_response.body.contains(&token)
+        );
+
+        let stream = super::route_http_request(
+            "GET",
+            &format!(
+                "/api/v0/streams/content%2Fdifferential-one?ticket={}",
+                super::url_encode(&ticket)
+            ),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("stream with valid ticket");
+        record!(
+            "GET",
+            "/api/v0/streams/{contentId}",
+            "nominal-status-headers-body",
+            stream.status == "200 OK"
+                && serde_json::from_str::<serde_json::Value>(&stream.body).unwrap_or_default()
+                    ["status"]
+                    == "available"
+        );
+
+        let wrong_content = super::route_http_request(
+            "GET",
+            &format!(
+                "/api/v0/streams/differential-different?ticket={}",
+                super::url_encode(&ticket)
+            ),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("ticket rejected for wrong content id");
+        record!(
+            "GET",
+            "/api/v0/streams/{contentId}",
+            "missing-empty-or-conflict-state",
+            wrong_content.status == "401 Unauthorized"
+        );
+
+        let deleted = super::route_http_request(
+            "DELETE",
+            &format!("/api/share-grants/{grant_id}"),
+            api_authorization,
+            "",
+            &state,
+        )
+        .await
+        .expect("delete share grant");
+        let revoked_stream = super::route_http_request(
+            "GET",
+            &format!(
+                "/api/v0/streams/content%2Fdifferential-one?ticket={}",
+                super::url_encode(&ticket)
+            ),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("revoked ticket rejected");
+        record!(
+            "GET",
+            "/api/v0/streams/{contentId}",
+            "mutation-side-effects-and-readback",
+            deleted.status == "200 OK" && revoked_stream.status == "401 Unauthorized"
+        );
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("content_bound_stream_tickets.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api content-bound-stream-tickets mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
