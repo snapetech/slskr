@@ -3622,6 +3622,89 @@ impl TransferQueue {
         queue
     }
 
+    async fn rehydrate_from_database(&mut self, db: &crate::persistence::DatabaseManager) {
+        let records = match db.list_transfers(None, 1000, 0).await {
+            Ok(records) => records,
+            Err(_) => return,
+        };
+        if records.is_empty() {
+            return;
+        }
+        let mut sqlite_entries: Vec<TransferEntry> = records
+            .into_iter()
+            .filter_map(|record| {
+                let id = record.id.parse::<u64>().ok()?;
+                let direction = if record.direction == "upload" { 1 } else { 0 };
+                let status = match record.status.as_str() {
+                    "queued" | "Queued" => "queued",
+                    "in_progress" | "InProgress" => "in_progress",
+                    "completed" | "Completed" => "completed",
+                    "failed" | "Failed" => "failed",
+                    "cancelled" | "Cancelled" => "cancelled",
+                    _ => return None,
+                };
+                Some(TransferEntry {
+                    id,
+                    token: id as u32,
+                    direction,
+                    peer_username: Some(record.peer_username),
+                    filename: record.filename,
+                    size: Some(record.filesize as u64),
+                    status: status.to_owned(),
+                    started_at: Some(record.started_at as u64),
+                    updated_at: record.completed_at.unwrap_or(record.started_at) as u64,
+                    reason: record.reason,
+                    bytes_transferred: record.progress as u64,
+                    local_path: record.local_path,
+                    destination_directory: record.destination_directory,
+                    request_id: record.request_id,
+                    wishlist_item_id: record.wishlist_item_id,
+                    request_name: record.request_name,
+                    batch_id: record.batch_id,
+                    bit_rate: record.bit_rate.map(|rate| rate as u32),
+                    sample_rate: record.sample_rate.map(|rate| rate as u32),
+                    bit_depth: record.bit_depth.map(|depth| depth as u32),
+                    length_seconds: record.length_seconds.map(|secs| secs as u32),
+                    artist: record.artist,
+                    album: record.album,
+                    title: record.title,
+                    track_number: record.track_number.map(|num| num as u32),
+                    year: record.year.map(|year| year as u32),
+                    requested_at: record.started_at as u64,
+                    start_offset: 0,
+                    updated_at_ms: 0,
+                })
+            })
+            .collect();
+        let existing_ids: std::collections::HashSet<u64> =
+            self.entries.iter().map(|entry| entry.id).collect();
+        for entry in sqlite_entries.drain(..) {
+            if !existing_ids.contains(&entry.id) {
+                self.entries.push(entry);
+            }
+        }
+        self.entries.truncate(self.history_limit);
+        self.next_id = self
+            .entries
+            .iter()
+            .map(|entry| entry.id)
+            .max()
+            .unwrap_or(0)
+            .saturating_add(1);
+        self.next_token = self
+            .entries
+            .iter()
+            .map(|entry| entry.token)
+            .max()
+            .unwrap_or(0)
+            .wrapping_add(1)
+            .max(1);
+        self.updated_at = unix_timestamp();
+        if self.state_error.is_none() {
+            self.persist_state();
+        }
+    }
+
     #[cfg(test)]
     fn new_in_memory(history_limit: usize) -> Self {
         let unique = std::time::SystemTime::now()
@@ -61106,6 +61189,14 @@ async fn serve(invocation: ServeInvocation) -> Result<(), String> {
             .await;
         }
     }
+    if let Some(db) = state.db.as_ref() {
+        state
+            .transfers
+            .write()
+            .await
+            .rehydrate_from_database(db)
+            .await;
+    }
     start_controller_version_check(Arc::clone(&state)).await;
     match credential_store::load(&state.config) {
         Ok(Some(stored)) => {
@@ -116861,6 +116952,81 @@ mod tests {
         assert_eq!(reloaded.next_id, 2);
         assert_eq!(reloaded.next_token, 2);
 
+        let _ = std::fs::remove_dir_all(state_dir);
+    }
+
+    #[tokio::test]
+    async fn transfer_queue_rehydrates_from_sqlite_on_startup() {
+        let state_dir = std::env::temp_dir().join(format!(
+            "slskr-transfer-sqlite-test-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&state_dir).expect("state dir");
+        let env = MapEnv::default()
+            .with("SLSKR_STATE_DIR", &state_dir.display().to_string())
+            .with("SLSKR_AUTO_CONNECT", "false")
+            .with("SLSKR_PERSISTENCE_ENABLED", "true");
+        let config =
+            super::AppConfig::from_layers(None, FileConfig::default(), &env).expect("config");
+
+        let db_path = state_dir.join("slskr.db");
+        let db = crate::persistence::DatabaseManager::new(
+            db_path.to_str().unwrap_or("slskr.db"),
+        )
+        .await
+        .expect("database");
+
+        let record = crate::persistence::TransferRecord {
+            id: "42".to_owned(),
+            direction: "download".to_owned(),
+            filename: "Remote/SQLite.flac".to_owned(),
+            peer_username: "sqlite-peer".to_owned(),
+            filesize: 2048,
+            progress: 512,
+            status: "queued".to_owned(),
+            started_at: 1000,
+            completed_at: None,
+            request_id: None,
+            wishlist_item_id: None,
+            request_name: None,
+            destination_directory: None,
+            local_path: None,
+            batch_id: None,
+            reason: None,
+            bit_rate: None,
+            sample_rate: None,
+            bit_depth: None,
+            length_seconds: None,
+            artist: None,
+            album: None,
+            title: None,
+            track_number: None,
+            year: None,
+        };
+        db.insert_transfer(&record).await.expect("insert transfer");
+
+        let mut queue = super::TransferQueue::new(&config);
+        assert!(queue.entries.is_empty(), "JSON queue should be empty");
+
+        queue.rehydrate_from_database(&db).await;
+
+        assert_eq!(queue.entries.len(), 1, "should have rehydrated one transfer");
+        let entry = &queue.entries[0];
+        assert_eq!(entry.id, 42);
+        assert_eq!(entry.direction, 0);
+        assert_eq!(entry.peer_username.as_deref(), Some("sqlite-peer"));
+        assert_eq!(entry.filename, "Remote/SQLite.flac");
+        assert_eq!(entry.size, Some(2048));
+        assert_eq!(entry.bytes_transferred, 512);
+        assert_eq!(entry.status, "queued");
+        assert_eq!(queue.next_id, 43);
+        assert_eq!(queue.next_token, 43);
+
+        drop(db);
         let _ = std::fs::remove_dir_all(state_dir);
     }
 
