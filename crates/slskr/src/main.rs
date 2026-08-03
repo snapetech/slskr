@@ -19720,14 +19720,28 @@ async fn route_http_request_with_headers(
                  "result_count": result_count,
              });
              let correlation_id = format!("search_{}", token);
-             dispatch_webhook_event(
-                 state,
-                 correlation_id,
-                 webhooks::WebhookEvent::SearchCreated,
-                 webhook_data,
-             ).await;
+              dispatch_webhook_event(
+                  state,
+                  correlation_id,
+                  webhooks::WebhookEvent::SearchCreated,
+                  webhook_data,
+              ).await;
 
-             Ok(routing::created_response(record.json()))
+              // Return simplified response matching C# compatibility contract
+              let search_id = record.id.replace("-", "");
+              let results_json = record
+                  .results
+                  .iter()
+                  .map(|r| r.json())
+                  .collect::<Vec<_>>()
+                  .join(",");
+              let response_body = format!(
+                  r#"{{"searchId":"{}","query":"{}","results":[{}]}}"#,
+                  json_escape(&search_id),
+                  json_escape(&record.query),
+                  results_json
+              );
+              Ok(routing::ok_response(response_body))
         }
 
         ("POST", _path) if search_token_path(normalized_path.as_str(), "/complete").is_some() => {
@@ -78195,7 +78209,7 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(csrf_denied.status, "201 Created");
+        assert_eq!(csrf_denied.status, "200 OK");
     }
 
     #[tokio::test]
@@ -85526,14 +85540,12 @@ mod tests {
         )
         .await
         .expect("search route");
-        assert_eq!(search.status, "201 Created");
-        assert!(search.body.contains("\"searchText\":\"Remote Song\""));
+        assert_eq!(search.status, "200 OK");
+        assert!(search.body.contains("\"query\":\"Remote Song\""));
         let search_json = serde_json::from_str::<serde_json::Value>(&search.body).unwrap();
-        assert_eq!(search_json["state"], "InProgress");
-        assert_eq!(search_json["isComplete"], false);
-        assert_eq!(search_json["lockedFileCount"], 0);
-        assert!(search_json["responses"].is_array());
-        assert!(search_json["startedAt"].is_string());
+        assert!(search_json["searchId"].is_string());
+        assert_eq!(search_json["query"], "Remote Song");
+        assert!(search_json["results"].is_array());
         let _ = receiver.try_recv();
 
         let _ = super::route_http_request(
@@ -85564,10 +85576,11 @@ mod tests {
         )
         .await
         .expect("uuid search route");
-        assert_eq!(uuid_search.status, "201 Created");
+        assert_eq!(uuid_search.status, "200 OK");
         let uuid_search_json =
             serde_json::from_str::<serde_json::Value>(&uuid_search.body).unwrap();
-        assert_eq!(uuid_search_json["id"], uuid_search_id);
+        assert!(uuid_search_json["searchId"].is_string());
+        assert_eq!(uuid_search_json["query"], "UUID Song");
         let _ = receiver.try_recv();
 
         for (method, path) in [
@@ -86903,13 +86916,12 @@ mod tests {
         )
         .await
         .expect("create search");
-        assert_eq!(created.status, "201 Created");
-        assert!(created.body.contains("\"token\":1"));
+        assert_eq!(created.status, "200 OK");
         assert!(created.body.contains("\"query\":\"test flac\""));
-        assert!(created.body.contains("\"target\":\"global\""));
-        assert!(created.body.contains("\"status\":\"active\""));
-        assert!(created.body.contains("\"responsesAvailable\":true"));
-        assert!(created.body.contains("\"result_count\":1"));
+        let created_json = serde_json::from_str::<serde_json::Value>(&created.body).unwrap();
+        assert!(created_json["searchId"].is_string());
+        assert_eq!(created_json["query"], "test flac");
+        assert!(created_json["results"].is_array());
         assert_eq!(
             receiver.try_recv().expect("search command"),
             super::SessionCommand::Search {
@@ -87021,7 +87033,7 @@ mod tests {
         )
         .await
         .expect("create persisted search");
-        assert_eq!(created.status, "201 Created");
+        assert_eq!(created.status, "200 OK");
         let _ = receiver.try_recv();
 
         let persisted = db.list_searches(10, 0).await.expect("list persisted");
@@ -87068,7 +87080,7 @@ mod tests {
         )
         .await
         .expect("create search");
-        assert_eq!(created.status, "201 Created");
+        assert_eq!(created.status, "200 OK");
         let _ = receiver.try_recv();
 
         let response = super::route_http_request(
@@ -87152,7 +87164,7 @@ mod tests {
         )
         .await
         .expect("create clearable search");
-        assert_eq!(created.status, "201 Created");
+        assert_eq!(created.status, "200 OK");
         let _ = receiver.try_recv();
         assert_eq!(
             db.list_searches(10, 0)
@@ -89634,14 +89646,10 @@ mod tests {
         )
         .await
         .expect("create search");
-        assert_eq!(created.status, "201 Created");
-        assert!(created.body.contains("\"expires_at\":"));
+        assert_eq!(created.status, "200 OK");
         let created_json = serde_json::from_str::<serde_json::Value>(&created.body).unwrap();
-        assert_eq!(
-            created_json["expires_at"].as_u64().unwrap()
-                - created_json["created_at"].as_u64().unwrap(),
-            1
-        );
+        assert!(created_json["searchId"].is_string());
+        assert_eq!(created_json["query"], "short lived");
         let _ = receiver.try_recv();
 
         {
@@ -89682,13 +89690,10 @@ mod tests {
         )
         .await
         .expect("create search");
-        assert_eq!(created.status, "201 Created");
+        assert_eq!(created.status, "200 OK");
         let created_json = serde_json::from_str::<serde_json::Value>(&created.body).unwrap();
-        assert_eq!(
-            created_json["expires_at"].as_u64().unwrap()
-                - created_json["created_at"].as_u64().unwrap(),
-            super::MAX_SEARCH_TTL_SECONDS
-        );
+        assert!(created_json["searchId"].is_string());
+        assert_eq!(created_json["query"], "bounded");
         let _ = receiver.try_recv();
 
         let invalid = super::route_http_request(
@@ -89969,7 +89974,7 @@ mod tests {
         )
         .await
         .expect("create search");
-        assert_eq!(created_search.status, "201 Created");
+        assert_eq!(created_search.status, "200 OK");
         let logs = db
             .get_webhook_logs(webhook_id, 10, 0)
             .await
@@ -90458,9 +90463,10 @@ mod tests {
         )
         .await
         .expect("user search");
-        assert_eq!(user.status, "201 Created");
-        assert!(user.body.contains("\"target\":\"user\""));
-        assert!(user.body.contains("\"target_name\":\"friend\""));
+        assert_eq!(user.status, "200 OK");
+        let user_json = serde_json::from_str::<serde_json::Value>(&user.body).unwrap();
+        assert!(user_json["searchId"].is_string());
+        assert_eq!(user_json["query"], "rare");
         assert_eq!(
             receiver.try_recv().expect("user search command"),
             super::SessionCommand::Search {
@@ -90479,8 +90485,10 @@ mod tests {
         )
         .await
         .expect("room search");
-        assert_eq!(room.status, "201 Created");
-        assert!(room.body.contains("\"target\":\"room\""));
+        assert_eq!(room.status, "200 OK");
+        let room_json = serde_json::from_str::<serde_json::Value>(&room.body).unwrap();
+        assert!(room_json["searchId"].is_string());
+        assert_eq!(room_json["query"], "ambient");
         assert_eq!(
             receiver.try_recv().expect("room search command"),
             super::SessionCommand::Search {
@@ -90499,8 +90507,10 @@ mod tests {
         )
         .await
         .expect("wishlist search");
-        assert_eq!(wishlist.status, "201 Created");
-        assert!(wishlist.body.contains("\"target\":\"wishlist\""));
+        assert_eq!(wishlist.status, "200 OK");
+        let wishlist_json = serde_json::from_str::<serde_json::Value>(&wishlist.body).unwrap();
+        assert!(wishlist_json["searchId"].is_string());
+        assert_eq!(wishlist_json["query"], "wantlist");
         assert_eq!(
             receiver.try_recv().expect("wishlist search command"),
             super::SessionCommand::Search {

@@ -103,7 +103,7 @@ async fn daemon_http_api_smoke() {
         .send()
         .await
         .unwrap();
-    assert_eq!(bad_csrf.status(), StatusCode::CREATED);
+    assert_eq!(bad_csrf.status(), StatusCode::OK);
 
     let created_body = bad_csrf.text().await.unwrap();
     assert!(created_body.contains("\"query\":\"test flac\""));
