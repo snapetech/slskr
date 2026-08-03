@@ -72,6 +72,8 @@ pub enum ActionBody {
     BrowseDirectory,
     CollectionItem,
     ConversationMessage,
+    ContactDiscovery,
+    ContactInvite,
     DownloadFiles,
     EnabledFalse,
     EnabledTrue,
@@ -1138,14 +1140,14 @@ pub const fn route_actions() -> &'static [RouteAction] {
             surface: "identity",
         },
         RouteAction {
-            body: ActionBody::Username,
+            body: ActionBody::ContactDiscovery,
             label: "Add Discovery Contact",
             method: "POST",
             path: "/contacts/from-discovery",
             surface: "identity",
         },
         RouteAction {
-            body: ActionBody::Username,
+            body: ActionBody::ContactInvite,
             label: "Accept Invite Contact",
             method: "POST",
             path: "/contacts/from-invite",
@@ -1877,7 +1879,7 @@ pub fn action_body_from_value(body: ActionBody, value: &str) -> Option<String> {
             Some(format!(r#""{}""#, escape_json_string(value)))
         }
         ActionBody::NameDescription => Some(format!(
-            r#"{{"name":"{}","description":"Created from the Rust web UI"}}"#,
+            r#"{{"title":"{}","description":"Created from the Rust web UI","type":"ShareList"}}"#,
             escape_json_string(value)
         )),
         ActionBody::Permissions => Some(format!(
@@ -1894,12 +1896,22 @@ pub fn action_body_from_value(body: ActionBody, value: &str) -> Option<String> {
             escape_json_string(if value.is_empty() { "peer1" } else { value })
         )),
         ActionBody::ShareGroupMember => Some(format!(
-            r#"{{"username":"{}"}}"#,
+            r#"{{"userId":"{}"}}"#,
             escape_json_string(if value.is_empty() { "peer1" } else { value })
         )),
         ActionBody::Username => Some(format!(
             r#"{{"username":"{}","note":"Created from the Rust web UI"}}"#,
             escape_json_string(value)
+        )),
+        ActionBody::ContactDiscovery => Some(format!(
+            r#"{{"peerId":"{}","nickname":"{}"}}"#,
+            escape_json_string(if value.is_empty() { "peer1" } else { value }),
+            escape_json_string(if value.is_empty() { "peer1" } else { value })
+        )),
+        ActionBody::ContactInvite => Some(format!(
+            r#"{{"inviteLink":"slskdn://invite/{}","nickname":"{}"}}"#,
+            escape_json_string(if value.is_empty() { "peer1" } else { value }),
+            escape_json_string(if value.is_empty() { "peer1" } else { value })
         )),
     }
 }
@@ -1942,6 +1954,9 @@ pub fn action_input_html(action: RouteAction) -> String {
             r#"<input class="slskr-action-input" data-slskr-action-input="Username" value="peer1" placeholder="Username">"#.to_string()
         }
         ActionBody::Username => {
+            r#"<input class="slskr-action-input" data-slskr-action-input="Username" value="peer1" placeholder="Username">"#.to_string()
+        }
+        ActionBody::ContactDiscovery | ActionBody::ContactInvite => {
             r#"<input class="slskr-action-input" data-slskr-action-input="Username" value="peer1" placeholder="Username">"#.to_string()
         }
     }
@@ -8680,6 +8695,7 @@ fn native_action_fallback(body: ActionBody) -> String {
         ActionBody::ShareGrant | ActionBody::ShareGroupMember | ActionBody::Username => {
             "peer1".to_string()
         }
+        ActionBody::ContactDiscovery | ActionBody::ContactInvite => "peer1".to_string(),
         ActionBody::EnabledFalse | ActionBody::EnabledTrue | ActionBody::None => String::new(),
     }
 }
@@ -18702,7 +18718,7 @@ mod tests {
         );
         assert_eq!(
             action_body_from_value(ActionBody::ShareGroupMember, "peer1").unwrap(),
-            r#"{"username":"peer1"}"#
+            r#"{"userId":"peer1"}"#
         );
         assert!(
             action_body_from_value(ActionBody::FeedPreview, "artist - song")
