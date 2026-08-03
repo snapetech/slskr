@@ -120126,6 +120126,444 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof crediting the large-DTO success-path
+    /// remainder of `versioned_openapi_validation_and_large_dtos_match_
+    /// slskdn_contracts` (everything after the rejection-path table
+    /// credited above): multisource/test, musicbrainz library-bloom
+    /// preview, SongID run's full ~28-field DTO, taste-recommendations
+    /// (+ its 3 sub-route validation guards), portforwarding start/stop
+    /// (start's real Pod-membership guard was previously shadowed by a
+    /// routing-table typo mapping to the wrong internal route -- fixed,
+    /// see the original test's comment), realm-subject-indexes authority-
+    /// decision (real `IsSafeOpaqueReference` validation, not an
+    /// unconditional accept/reject), and a podcore membership/backfill/
+    /// signing/verification/opinions/membership-removal sequence.
+    /// slskdN-only (confirmed against the frozen registry route-by-
+    /// route; `virtualsoulfind/shadow-index/sync/merge` has no registry
+    /// entry in either target and is skipped as genuinely unwireable).
+    #[tokio::test]
+    async fn controller_api_differential_versioned_openapi_large_dtos() {
+        let target = "slskdn";
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($method:expr, $route:expr, $case:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!("{target} {} {} [{}]", $method, $route, $case));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": $method,
+                    "route": $route,
+                    "case": $case,
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        let (state, _receiver) = test_state();
+
+        let multisource_test = super::route_http_request(
+            "POST",
+            "/api/v0/multisource/test",
+            None,
+            r#"{"searchText":"differential"}"#,
+            &state,
+        )
+        .await
+        .expect("multisource test");
+        let multisource_test_json =
+            serde_json::from_str::<serde_json::Value>(&multisource_test.body).unwrap_or_default();
+        record!(
+            "POST",
+            "/api/v0/multisource/test",
+            "nominal-status-headers-body",
+            multisource_test.status == "200 OK"
+                && multisource_test_json["searchText"] == "differential"
+        );
+        record!(
+            "POST",
+            "/api/v0/multisource/test",
+            "mutation-side-effects-and-readback",
+            [
+                "downloadSuccess",
+                "downloadTimeMs",
+                "bytesDownloaded",
+                "sourcesUsed",
+                "outputPath",
+                "finalHash",
+                "averageSpeedMBps",
+            ]
+            .iter()
+            .all(|key| multisource_test_json.get(*key).is_some())
+        );
+
+        let bloom = super::route_http_request(
+            "POST",
+            "/api/v0/musicbrainz/library-bloom/snapshots/preview",
+            None,
+            r#"{"expectedItems":1,"falsePositiveRate":1,"saltId":"differential","rotatesAt":"2026-01-01T00:00:00Z"}"#,
+            &state,
+        )
+        .await
+        .expect("bloom preview");
+        let bloom_json = serde_json::from_str::<serde_json::Value>(&bloom.body).unwrap_or_default();
+        record!(
+            "POST",
+            "/api/v0/musicbrainz/library-bloom/snapshots/preview",
+            "nominal-status-headers-body",
+            bloom.status == "200 OK"
+        );
+        record!(
+            "POST",
+            "/api/v0/musicbrainz/library-bloom/snapshots/preview",
+            "mutation-side-effects-and-readback",
+            [
+                "snapshotId", "scope", "saltId", "createdAt", "rotatesAt", "expectedItems",
+                "falsePositiveRate", "bitSize", "hashFunctionCount", "itemCount", "fillRatio",
+                "bitsBase64", "namespaceItemCounts", "privacyNotes",
+            ]
+            .iter()
+            .all(|key| bloom_json.get(*key).is_some())
+        );
+
+        let songid = super::route_http_request(
+            "POST",
+            "/api/v0/songid/runs",
+            None,
+            r#"{"source":"differential"}"#,
+            &state,
+        )
+        .await
+        .expect("songid run large dto");
+        let songid_json = serde_json::from_str::<serde_json::Value>(&songid.body).unwrap_or_default();
+        record!(
+            "POST",
+            "/api/v0/songid/runs",
+            "mutation-side-effects-and-readback",
+            songid_json["source"] == "differential"
+                && [
+                    "sourceType", "query", "createdAt", "summary", "currentStage",
+                    "percentComplete", "artifactDirectory", "evidence", "tracks", "albums",
+                    "artists", "plans", "options", "scorecard", "assessment", "metadata",
+                    "provenance", "perturbations", "stems", "corpusMatches", "clips",
+                    "transcripts", "ocr", "comments", "chapters", "segments", "mixGroups",
+                    "identityAssessment", "syntheticAssessment",
+                ]
+                .iter()
+                .all(|key| songid_json.get(*key).is_some())
+        );
+
+        let taste = super::route_http_request(
+            "POST",
+            "/api/v0/taste-recommendations",
+            None,
+            r#"{"minimumTrustedSources":1}"#,
+            &state,
+        )
+        .await
+        .expect("taste recommendations");
+        let taste_json = serde_json::from_str::<serde_json::Value>(&taste.body).unwrap_or_default();
+        record!(
+            "POST",
+            "/api/v0/taste-recommendations",
+            "nominal-status-headers-body",
+            taste.status == "200 OK"
+        );
+        record!(
+            "POST",
+            "/api/v0/taste-recommendations",
+            "mutation-side-effects-and-readback",
+            ["minimumTrustedSources", "trustedActorCount", "candidateCount", "recommendations"]
+                .iter()
+                .all(|key| taste_json.get(*key).is_some())
+        );
+
+        let invalid_work_ref =
+            r#"{"workRef":{"@context":null,"domain":"music","title":"Differential"}}"#;
+        for (path, route) in [
+            (
+                "/api/v0/taste-recommendations/wishlist",
+                "/api/v0/taste-recommendations/wishlist",
+            ),
+            (
+                "/api/v0/taste-recommendations/release-radar",
+                "/api/v0/taste-recommendations/release-radar",
+            ),
+            (
+                "/api/v0/taste-recommendations/graph-preview",
+                "/api/v0/taste-recommendations/graph-preview",
+            ),
+        ] {
+            let response = super::route_http_request("POST", path, None, invalid_work_ref, &state)
+                .await
+                .unwrap_or_else(|error| panic!("{path}: {error}"));
+            record!(
+                "POST",
+                route,
+                "malformed-path-query-or-body",
+                response.status == "400 Bad Request"
+            );
+        }
+
+        let start = super::route_http_request(
+            "POST",
+            "/api/v0/portforwarding/start",
+            None,
+            r#"{"localPort":1024,"podId":"pod:differential","destinationHost":"example.invalid","destinationPort":1}"#,
+            &state,
+        )
+        .await
+        .expect("portforwarding start without membership");
+        record!(
+            "POST",
+            "/api/v0/portforwarding/start",
+            "missing-empty-or-conflict-state",
+            start.status == "403 Forbidden"
+        );
+
+        let stop =
+            super::route_http_request("POST", "/api/v0/portforwarding/stop/1", None, "", &state)
+                .await
+                .expect("portforwarding stop");
+        record!(
+            "POST",
+            "/api/v0/portforwarding/stop/{localPort:int}",
+            "nominal-status-headers-body",
+            stop.body == r#"{"message":"Port forwarding stopped"}"#
+        );
+
+        // Not creditable itself (no registry entry in either frozen
+        // target), but required fixture setup: this registers the
+        // "index" index in the "default-realm" realm that the
+        // authority-decision calls below require to exist. The
+        // `payloadHash` is a real signature check over these exact
+        // field values (see `compute_payload_hash` in
+        // realm_subject_index.rs) -- it must match this literal content
+        // verbatim, not a "differential"-renamed variant, or the merge
+        // is rejected as a signature mismatch and the index is never
+        // registered.
+        let index_sync_fixture = super::route_http_request(
+            "POST",
+            "/api/v0/virtualsoulfind/shadow-index/sync/merge",
+            None,
+            r#"{"records":[{"recordingId":"route-audit","peerIds":["peer-a"],"updatedAt":1}],"realmIndexes":[{"id":"index","realmId":"default-realm","subjectNamespace":"music","revision":1,"entries":[{"subjectId":"route-audit","workRef":{"domain":"music","title":"Route Audit","externalIds":{"musicbrainz:recording":"route-audit"}},"externalIds":{},"aliases":[]}],"signature":{"signer":"default-governance","value":"signature","payloadHash":"a890273abd9ae483659d6b08c9bc83dd82cda93bdefc9c940412c91f2ccddcc6"}}]}"#,
+            &state,
+        )
+        .await
+        .expect("register realm index fixture");
+        assert_eq!(
+            index_sync_fixture.status, "200 OK",
+            "realm index fixture setup failed: {}",
+            index_sync_fixture.body
+        );
+
+        let unsafe_decision = super::route_http_request(
+            "POST",
+            "/api/v0/realm-subject-indexes/default-realm/index/authority-decision",
+            None,
+            r#"{"enabled":true,"decidedBy":"/etc/passwd","note":"differential"}"#,
+            &state,
+        )
+        .await
+        .expect("unsafe authority decision");
+        let unsafe_decision_json =
+            serde_json::from_str::<serde_json::Value>(&unsafe_decision.body).unwrap_or_default();
+        record!(
+            "POST",
+            "/api/v0/realm-subject-indexes/{realmId}/{indexId}/authority-decision",
+            "malformed-path-query-or-body",
+            unsafe_decision.status == "400 Bad Request"
+                && unsafe_decision_json["isAccepted"] == false
+                && unsafe_decision_json["errors"][0]
+                    .as_str()
+                    .is_some_and(|error| error.contains("opaque and safe"))
+        );
+
+        let decision = super::route_http_request(
+            "POST",
+            "/api/v0/realm-subject-indexes/default-realm/index/authority-decision",
+            None,
+            r#"{"enabled":true,"decidedBy":"differential","note":"differential"}"#,
+            &state,
+        )
+        .await
+        .expect("safe authority decision");
+        let decision_json =
+            serde_json::from_str::<serde_json::Value>(&decision.body).unwrap_or_default();
+        record!(
+            "POST",
+            "/api/v0/realm-subject-indexes/{realmId}/{indexId}/authority-decision",
+            "nominal-status-headers-body",
+            decision.status == "200 OK"
+                && decision_json["isAccepted"] == true
+                && decision_json["enabled"] == true
+                && decision_json["errors"] == serde_json::json!([])
+        );
+
+        let pod_id = "pod:00000000000000000000000000000005";
+        super::route_http_request(
+            "POST",
+            "/api/v0/podcore/content/create-pod",
+            None,
+            &format!(
+                r#"{{"podId":"{pod_id}","name":"Differential","visibility":"Listed","contentId":"content:music:recording:differential-large-dto","tags":[],"channels":[],"externalBindings":[]}}"#
+            ),
+            &state,
+        )
+        .await
+        .expect("create pod for large-dto sequence");
+
+        let joined = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/membership/join",
+            None,
+            &format!(
+                r#"{{"podId":"{pod_id}","peerId":"00000000-0000-4000-8000-000000000005","requestedRole":"differential","publicKey":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","timestampUnixMs":1,"signature":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","message":"differential","nonce":"differential"}}"#
+            ),
+            &state,
+        )
+        .await
+        .expect("join pod membership");
+        let joined_json = serde_json::from_str::<serde_json::Value>(&joined.body).unwrap_or_default();
+        record!(
+            "POST",
+            "/api/v0/podcore/membership/join",
+            "nominal-status-headers-body",
+            joined.status == "200 OK"
+        );
+        record!(
+            "POST",
+            "/api/v0/podcore/membership/join",
+            "mutation-side-effects-and-readback",
+            joined_json["podId"] == pod_id
+        );
+
+        let empty_backfill_route = format!("/api/v0/podcore/backfill/{pod_id}/sync");
+        let empty_backfill =
+            super::route_http_request("POST", &empty_backfill_route, None, "{}", &state)
+                .await
+                .unwrap_or_else(|error| panic!("{empty_backfill_route}: {error}"));
+        record!(
+            "POST",
+            "/api/v0/podcore/backfill/{podId}/sync",
+            "malformed-path-query-or-body",
+            empty_backfill.status == "400 Bad Request"
+        );
+
+        let last_seen_route = format!("/api/v0/podcore/backfill/{pod_id}/general/last-seen");
+        let last_seen = super::route_http_request("PUT", &last_seen_route, None, "1", &state)
+            .await
+            .unwrap_or_else(|error| panic!("{last_seen_route}: {error}"));
+        record!(
+            "PUT",
+            "/api/v0/podcore/backfill/{podId}/{channelId}/last-seen",
+            "nominal-status-headers-body",
+            last_seen.status == "200 OK" && last_seen.body.is_empty()
+        );
+
+        let verified = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/signing/verify",
+            None,
+            &format!(
+                r#"{{"messageId":"message","podId":"{pod_id}","channelId":"00000000-0000-4000-8000-000000000005","senderPeerId":"00000000-0000-4000-8000-000000000005","body":"differential","timestampUnixMs":1,"signature":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","sigVersion":1}}"#
+            ),
+            &state,
+        )
+        .await
+        .expect("signing verify");
+        record!(
+            "POST",
+            "/api/v0/podcore/signing/verify",
+            "nominal-status-headers-body",
+            verified.body == r#"{"isValid":true}"#
+        );
+
+        let evidence = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/verification/message",
+            None,
+            &format!(
+                r#"{{"messageId":"message","podId":"{pod_id}","channelId":"00000000-0000-4000-8000-000000000005","senderPeerId":"00000000-0000-4000-8000-000000000005","body":"differential","timestampUnixMs":1,"signature":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","sigVersion":1}}"#
+            ),
+            &state,
+        )
+        .await
+        .expect("verification message");
+        let evidence_json =
+            serde_json::from_str::<serde_json::Value>(&evidence.body).unwrap_or_default();
+        record!(
+            "POST",
+            "/api/v0/podcore/verification/message",
+            "nominal-status-headers-body",
+            evidence.status == "200 OK"
+        );
+        record!(
+            "POST",
+            "/api/v0/podcore/verification/message",
+            "mutation-side-effects-and-readback",
+            ["isValid", "isFromValidMember", "hasValidSignature", "isNotBanned", "errorMessage"]
+                .iter()
+                .all(|key| evidence_json.get(*key).is_some())
+        );
+
+        let opinion_route = format!("/api/v0/podcore/{pod_id}/opinions");
+        let opinion = super::route_http_request(
+            "POST",
+            &opinion_route,
+            None,
+            r#"{"contentId":"content:music:recording:differential-large-dto","score":1,"signature":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}"#,
+            &state,
+        )
+        .await
+        .unwrap_or_else(|error| panic!("{opinion_route}: {error}"));
+        record!(
+            "POST",
+            "/api/v0/podcore/{podId}/opinions",
+            "malformed-path-query-or-body",
+            opinion.status == "400 Bad Request"
+        );
+
+        let removed_route = format!(
+            "/api/v0/podcore/membership/{pod_id}/00000000-0000-4000-8000-000000000005"
+        );
+        let removed = super::route_http_request("DELETE", &removed_route, None, "", &state)
+            .await
+            .unwrap_or_else(|error| panic!("{removed_route}: {error}"));
+        let removed_json = serde_json::from_str::<serde_json::Value>(&removed.body).unwrap_or_default();
+        record!(
+            "DELETE",
+            "/api/v0/podcore/membership/{podId}/{peerId}",
+            "nominal-status-headers-body",
+            removed.status == "200 OK"
+        );
+        record!(
+            "DELETE",
+            "/api/v0/podcore/membership/{podId}/{peerId}",
+            "mutation-side-effects-and-readback",
+            removed_json["success"] == true && removed_json.get("dhtKey").is_some()
+        );
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("versioned_openapi_large_dtos.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api versioned-openapi-large-dtos mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
