@@ -119342,6 +119342,136 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof crediting the hashdb entries/sync paging
+    /// routes' cases, independently re-derived from `versioned_hashdb_
+    /// paging_matches_sequence_controller_contract`'s real seq-ordered
+    /// pagination checks (the v0-shaped response omits the legacy
+    /// `offset`/`limit`/`fromSeqId`/`hasMore` echo fields the bare routes
+    /// carry). slskdN-only (confirmed against the frozen registry).
+    #[tokio::test]
+    async fn controller_api_differential_hashdb_paging() {
+        let target = "slskdn";
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($route:expr, $case:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!("{target} GET {} [{}]", $route, $case));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": "GET",
+                    "route": $route,
+                    "case": $case,
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        let (state, _receiver) = test_state();
+        let hash_a = "a".repeat(64);
+        let hash_b = "b".repeat(64);
+        state
+            .content_discovery
+            .write()
+            .await
+            .merge_hash_entries(vec![
+                super::content_discovery::HashDbEntry {
+                    flac_key: hash_a.clone(),
+                    byte_hash: hash_a,
+                    size: 100,
+                    ..Default::default()
+                },
+                super::content_discovery::HashDbEntry {
+                    flac_key: hash_b.clone(),
+                    byte_hash: hash_b,
+                    size: 200,
+                    ..Default::default()
+                },
+            ])
+            .expect("seed hashdb sequence");
+
+        let first =
+            super::route_http_request("GET", "/api/v0/hashdb/entries?limit=1", None, "", &state)
+                .await
+                .expect("first hashdb page");
+        let first_json = serde_json::from_str::<serde_json::Value>(&first.body).unwrap_or_default();
+        record!(
+            "/api/v0/hashdb/entries",
+            "nominal-status-headers-body",
+            first.status == "200 OK"
+        );
+        record!(
+            "/api/v0/hashdb/entries",
+            "populated-dynamic-state",
+            first_json["latestSeq"] == 2
+                && first_json["count"] == 1
+                && first_json["entries"][0]["seqId"] == 1
+                && first_json.get("offset").is_none()
+                && first_json.get("limit").is_none()
+        );
+
+        let second = super::route_http_request(
+            "GET",
+            "/api/v0/hashdb/entries?offset=1&limit=1",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("sequence-offset hashdb page");
+        let second_json =
+            serde_json::from_str::<serde_json::Value>(&second.body).unwrap_or_default();
+        record!(
+            "/api/v0/hashdb/entries",
+            "malformed-path-query-or-body",
+            second.status == "200 OK" && second_json["entries"][0]["seqId"] == 2
+        );
+
+        let sync = super::route_http_request(
+            "GET",
+            "/api/v0/hashdb/sync/since/1?limit=1",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("hashdb sync page");
+        let sync_json = serde_json::from_str::<serde_json::Value>(&sync.body).unwrap_or_default();
+        record!(
+            "/api/v0/hashdb/sync/since/{sinceSeq}",
+            "nominal-status-headers-body",
+            sync.status == "200 OK"
+        );
+        record!(
+            "/api/v0/hashdb/sync/since/{sinceSeq}",
+            "populated-dynamic-state",
+            sync_json["latestSeq"] == 2
+                && sync_json["count"] == 1
+                && sync_json["entries"][0]["seqId"] == 2
+                && sync_json.get("fromSeqId").is_none()
+                && sync_json.get("hasMore").is_none()
+        );
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("hashdb_paging.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api hashdb-paging mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
