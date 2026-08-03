@@ -61542,6 +61542,17 @@ fn spawn_session_manager(state: Arc<AppState>, mut receiver: mpsc::Receiver<Sess
                 .expect("valid wishlist scheduler options"),
         )
         .expect("valid empty wishlist scheduler");
+
+        // Load persisted wishlist scheduler state
+        if let Some(db) = state.db.as_ref() {
+            if let Ok(Some((next_index, server_interval))) =
+                db.load_wishlist_scheduler_state().await
+            {
+                wishlist_scheduler.set_next_index(next_index);
+                wishlist_scheduler.set_server_interval(server_interval);
+            }
+        }
+
         let mut next_wishlist_search = Instant::now() + wishlist_scheduler.interval();
         let mut reconnect_requested = false;
 
@@ -61593,6 +61604,15 @@ fn spawn_session_manager(state: Arc<AppState>, mut receiver: mpsc::Receiver<Sess
                             if wishlist_scheduler.apply_server_message(&message) {
                                 next_wishlist_search =
                                     Instant::now() + wishlist_scheduler.interval();
+                                // Persist updated scheduler state
+                                if let Some(db) = state.db.as_ref() {
+                                    let _ = db
+                                        .save_wishlist_scheduler_state(
+                                            wishlist_scheduler.next_index(),
+                                            wishlist_scheduler.server_interval_seconds(),
+                                        )
+                                        .await;
+                                }
                             }
                             let relogged = matches!(message, ServerMessage::Relogged);
                             project_server_message(&state, active_session, &message).await;
@@ -67355,6 +67375,16 @@ async fn send_due_wishlist_search(
     };
     scheduler.replace_terms(terms);
     *next_wishlist_search = Instant::now() + scheduler.interval();
+
+    // Persist updated scheduler state after term replacement
+    if let Some(db) = state.db.as_ref() {
+        let _ = db
+            .save_wishlist_scheduler_state(
+                scheduler.next_index(),
+                scheduler.server_interval_seconds(),
+            )
+            .await;
+    }
 
     let Some(active_session) = session.as_mut() else {
         return;
@@ -117077,7 +117107,7 @@ mod tests {
     #[tokio::test]
     async fn dispatch_queued_downloads_after_login_sends_transfer_peer_commands() {
         let (state, mut receiver) = test_state();
-        
+
         // Create a queued download
         {
             let mut queue = state.transfers.write().await;
@@ -117089,10 +117119,10 @@ mod tests {
                 Some(1024),
             );
         }
-        
+
         // Call dispatch function
         super::dispatch_queued_downloads_after_login(&state).await;
-        
+
         // Verify TransferPeer command was sent
         let command = receiver.recv().await.expect("should receive command");
         match command {

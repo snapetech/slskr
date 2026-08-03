@@ -1533,6 +1533,19 @@ impl DatabaseManager {
         .execute(&self.pool)
         .await?;
 
+        query(
+            r#"
+            CREATE TABLE IF NOT EXISTS wishlist_scheduler_state (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                next_index INTEGER NOT NULL DEFAULT 0,
+                server_interval_seconds INTEGER,
+                updated_at INTEGER NOT NULL
+            )
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
         // Create indices for common queries
         query("CREATE INDEX IF NOT EXISTS idx_searches_created ON searches(created_at DESC)")
             .execute(&self.pool)
@@ -4493,6 +4506,44 @@ impl DatabaseManager {
 
         Ok(result.rows_affected())
     }
+
+    /// Load wishlist scheduler state
+    pub async fn load_wishlist_scheduler_state(
+        &self,
+    ) -> Result<Option<(usize, Option<u64>)>, Box<dyn std::error::Error>> {
+        let result = query_as::<_, (i64, Option<i64>)>(
+            "SELECT next_index, server_interval_seconds FROM wishlist_scheduler_state WHERE id = 1",
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(result.map(|(next_index, server_interval)| {
+            (next_index as usize, server_interval.map(|secs| secs as u64))
+        }))
+    }
+
+    /// Save wishlist scheduler state
+    pub async fn save_wishlist_scheduler_state(
+        &self,
+        next_index: usize,
+        server_interval_seconds: Option<u64>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
+
+        query(
+            r#"
+            INSERT OR REPLACE INTO wishlist_scheduler_state (id, next_index, server_interval_seconds, updated_at)
+            VALUES (1, ?, ?, ?)
+            "#,
+        )
+        .bind(next_index as i64)
+        .bind(server_interval_seconds.map(|secs| secs as i64))
+        .bind(now)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
 }
 
 fn nonnegative_database_count(value: i64) -> Result<u64, std::num::TryFromIntError> {
@@ -5091,5 +5142,34 @@ mod tests {
 
         db.delete_webhook("hook_1").await.unwrap();
         assert!(db.list_webhooks().await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_wishlist_scheduler_state_operations() {
+        let db = DatabaseManager::in_memory().await.unwrap();
+
+        // Initially no state
+        let state = db.load_wishlist_scheduler_state().await.unwrap();
+        assert!(state.is_none());
+
+        // Save state
+        db.save_wishlist_scheduler_state(5, Some(300))
+            .await
+            .unwrap();
+
+        // Load state
+        let state = db.load_wishlist_scheduler_state().await.unwrap();
+        assert!(state.is_some());
+        let (next_index, server_interval) = state.unwrap();
+        assert_eq!(next_index, 5);
+        assert_eq!(server_interval, Some(300));
+
+        // Update state
+        db.save_wishlist_scheduler_state(10, None).await.unwrap();
+        let state = db.load_wishlist_scheduler_state().await.unwrap();
+        assert!(state.is_some());
+        let (next_index, server_interval) = state.unwrap();
+        assert_eq!(next_index, 10);
+        assert_eq!(server_interval, None);
     }
 }

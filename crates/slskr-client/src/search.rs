@@ -131,6 +131,28 @@ impl WishlistSearchScheduler {
             query,
         }))
     }
+
+    #[must_use]
+    pub const fn next_index(&self) -> usize {
+        self.next_index
+    }
+
+    #[must_use]
+    pub fn server_interval_seconds(&self) -> Option<u64> {
+        self.server_interval.map(|duration| duration.as_secs())
+    }
+
+    pub fn set_next_index(&mut self, index: usize) {
+        if self.terms.is_empty() {
+            self.next_index = 0;
+        } else {
+            self.next_index = index % self.terms.len();
+        }
+    }
+
+    pub fn set_server_interval(&mut self, seconds: Option<u64>) {
+        self.server_interval = seconds.map(Duration::from_secs);
+    }
 }
 
 fn normalize_wishlist_terms(terms: impl IntoIterator<Item = String>) -> Vec<String> {
