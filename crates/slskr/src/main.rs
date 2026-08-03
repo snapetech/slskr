@@ -116460,6 +116460,248 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof crediting 13 podcore maintenance-mutation
+    /// routes' `nominal-status-headers-body` / `populated-dynamic-state`
+    /// cases, independently re-derived from `podcore_maintenance_mutations_
+    /// match_slskdn_result_contracts`'s real DHT/discovery/membership/
+    /// routing/messages/backfill result-contract checks. slskdN-only
+    /// (confirmed against the frozen registry).
+    #[tokio::test]
+    async fn controller_api_differential_podcore_maintenance_mutations() {
+        let target = "slskdn";
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($method:expr, $route:expr, $case:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!("{target} {} {} [{}]", $method, $route, $case));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": $method,
+                    "route": $route,
+                    "case": $case,
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        let (state, _receiver) = test_state();
+        let pod_id = "pod:00000000000000000000000000000002";
+        state
+            .pods
+            .write()
+            .await
+            .create(
+                serde_json::from_value::<super::pods::PodRecord>(serde_json::json!({
+                    "podId": pod_id,
+                    "name": "Maintenance differential",
+                    "visibility": "Listed",
+                    "isPublic": true,
+                }))
+                .expect("deserialize maintenance pod fixture"),
+                "owner-peer".to_owned(),
+            )
+            .expect("create maintenance pod");
+
+        for (action, fields) in [
+            ("publish", vec!["success", "podId", "dhtKey", "publishedAt", "expiresAt"]),
+            ("update", vec!["success", "podId", "dhtKey", "publishedAt", "expiresAt"]),
+        ] {
+            let route = format!("/api/v0/podcore/dht/{action}");
+            let response = super::route_http_request(
+                "POST",
+                &route,
+                None,
+                &serde_json::json!({"pod": {"podId": pod_id, "name": "Maintenance differential"}})
+                    .to_string(),
+                &state,
+            )
+            .await
+            .unwrap_or_else(|error| panic!("{route}: {error}"));
+            let value = serde_json::from_str::<serde_json::Value>(&response.body).unwrap_or_default();
+            record!("POST", route, "nominal-status-headers-body", response.status == "200 OK");
+            record!(
+                "POST",
+                route,
+                "populated-dynamic-state",
+                fields.iter().all(|key| value.get(*key).is_some())
+                    && value["podId"] == pod_id
+            );
+        }
+
+        for (action, fields) in [
+            (
+                "register",
+                vec!["success", "podId", "discoveryKeys", "registeredAt", "expiresAt"],
+            ),
+            (
+                "update",
+                vec!["success", "podId", "discoveryKeys", "registeredAt", "expiresAt"],
+            ),
+        ] {
+            let route = format!("/api/v0/podcore/discovery/{action}");
+            let response = super::route_http_request(
+                "POST",
+                &route,
+                None,
+                &serde_json::json!({
+                    "podId": pod_id,
+                    "name": "Maintenance differential",
+                    "visibility": "Listed",
+                })
+                .to_string(),
+                &state,
+            )
+            .await
+            .unwrap_or_else(|error| panic!("{route}: {error}"));
+            let value = serde_json::from_str::<serde_json::Value>(&response.body).unwrap_or_default();
+            record!("POST", route, "nominal-status-headers-body", response.status == "200 OK");
+            record!(
+                "POST",
+                route,
+                "populated-dynamic-state",
+                fields.iter().all(|key| value.get(*key).is_some())
+            );
+        }
+
+        let refresh = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/discovery/refresh",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("discovery refresh");
+        let refresh_json =
+            serde_json::from_str::<serde_json::Value>(&refresh.body).unwrap_or_default();
+        record!(
+            "POST",
+            "/api/v0/podcore/discovery/refresh",
+            "nominal-status-headers-body",
+            refresh.status == "200 OK"
+        );
+        record!(
+            "POST",
+            "/api/v0/podcore/discovery/refresh",
+            "populated-dynamic-state",
+            ["success", "podId", "wasRepublished", "nextRefresh"]
+                .iter()
+                .all(|key| refresh_json.get(*key).is_some())
+        );
+
+        for (route, fields) in [
+            (
+                "/api/v0/podcore/membership/cleanup",
+                vec!["recordsCleaned", "errorsEncountered", "completedAt"],
+            ),
+            (
+                "/api/v0/podcore/routing/cleanup",
+                vec![
+                    "messagesCleaned",
+                    "messagesRetained",
+                    "cleanupDuration",
+                    "completedAt",
+                ],
+            ),
+        ] {
+            let response = super::route_http_request("POST", route, None, "", &state)
+                .await
+                .unwrap_or_else(|error| panic!("{route}: {error}"));
+            let value = serde_json::from_str::<serde_json::Value>(&response.body).unwrap_or_default();
+            record!("POST", route, "nominal-status-headers-body", response.status == "200 OK");
+            record!(
+                "POST",
+                route,
+                "populated-dynamic-state",
+                fields.iter().all(|key| value.get(*key).is_some())
+            );
+        }
+
+        let seen_route = format!("/api/v0/podcore/routing/seen/maintenance-message-1/{pod_id}");
+        let seen = super::route_http_request("POST", &seen_route, None, "", &state)
+            .await
+            .unwrap_or_else(|error| panic!("{seen_route}: {error}"));
+        let seen_json = serde_json::from_str::<serde_json::Value>(&seen.body).unwrap_or_default();
+        record!(
+            "POST",
+            seen_route,
+            "nominal-status-headers-body",
+            seen.status == "200 OK"
+        );
+        record!(
+            "POST",
+            seen_route,
+            "populated-dynamic-state",
+            seen_json["wasNewlyRegistered"] == true
+        );
+
+        for route in [
+            "/api/v0/podcore/messages/rebuild-index",
+            "/api/v0/podcore/messages/vacuum",
+        ] {
+            let response = super::route_http_request("POST", route, None, "", &state)
+                .await
+                .unwrap_or_else(|error| panic!("{route}: {error}"));
+            record!(
+                "POST",
+                route,
+                "nominal-status-headers-body",
+                response.status == "200 OK" && response.body == "true"
+            );
+        }
+
+        let sync_all = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/backfill/sync-all",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("backfill sync-all");
+        record!(
+            "POST",
+            "/api/v0/podcore/backfill/sync-all",
+            "nominal-status-headers-body",
+            sync_all.status == "200 OK" && sync_all.body == "[]"
+        );
+
+        for (section, action) in [("dht", "unpublish"), ("discovery", "unregister")] {
+            let route = format!("/api/v0/podcore/{section}/{action}/{pod_id}");
+            let response = super::route_http_request("DELETE", &route, None, "", &state)
+                .await
+                .unwrap_or_else(|error| panic!("{route}: {error}"));
+            let value = serde_json::from_str::<serde_json::Value>(&response.body).unwrap_or_default();
+            record!("DELETE", route, "nominal-status-headers-body", response.status == "200 OK");
+            record!(
+                "DELETE",
+                route,
+                "mutation-side-effects-and-readback",
+                value["success"] == true
+            );
+        }
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("podcore_maintenance_mutations.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api podcore-maintenance mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
