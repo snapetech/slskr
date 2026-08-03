@@ -118749,6 +118749,182 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof crediting 5 SongID run-lifecycle routes'
+    /// cases, independently re-derived from `songid_run_creation_
+    /// requires_a_real_non_empty_source`, `songid_run_reports_its_real_
+    /// completed_status_not_stuck_at_queued`, and `songid_run_evidence_
+    /// package_reshapes_real_stored_run_fields`'s real synchronous-
+    /// analysis and stored-run-field checks. slskdN-only (confirmed
+    /// against the frozen registry).
+    #[tokio::test]
+    async fn controller_api_differential_songid_run_lifecycle() {
+        let target = "slskdn";
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($method:expr, $route:expr, $case:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!("{target} {} {} [{}]", $method, $route, $case));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": $method,
+                    "route": $route,
+                    "case": $case,
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        let (state, _receiver) = test_state();
+
+        let mut invalid_pass = true;
+        for body in ["{}", r#"{"source":""}"#, r#"{"source":"   "}"#] {
+            let response = super::route_http_request("POST", "/api/v0/songid/runs", None, body, &state)
+                .await
+                .unwrap_or_else(|error| panic!("{body}: {error}"));
+            invalid_pass &= response.status == "400 Bad Request"
+                && response.body.contains("SongID source is required.");
+        }
+        record!(
+            "POST",
+            "/api/v0/songid/runs",
+            "malformed-path-query-or-body",
+            invalid_pass
+        );
+
+        let before = super::route_http_request("GET", "/api/v0/songid/runs", None, "", &state)
+            .await
+            .expect("runs before");
+        let before_count = serde_json::from_str::<serde_json::Value>(&before.body)
+            .unwrap_or_default()
+            .as_array()
+            .map(Vec::len)
+            .unwrap_or_default();
+        record!(
+            "GET",
+            "/api/v0/songid/runs",
+            "nominal-status-headers-body",
+            before.status == "200 OK"
+        );
+
+        let created = super::route_http_request(
+            "POST",
+            "/api/v0/songid/runs",
+            None,
+            r#"{"source":"differential","query":"Evidence Package Differential"}"#,
+            &state,
+        )
+        .await
+        .expect("create run");
+        let created_json =
+            serde_json::from_str::<serde_json::Value>(&created.body).unwrap_or_default();
+        let run_id = created_json["id"].as_str().unwrap_or_default().to_owned();
+        record!(
+            "POST",
+            "/api/v0/songid/runs",
+            "nominal-status-headers-body",
+            created.status == "202 Accepted"
+                && created_json["status"] == "completed"
+                && created_json["currentStage"] == "completed"
+                && created_json["percentComplete"] == 1.0
+        );
+
+        let after = super::route_http_request("GET", "/api/v0/songid/runs", None, "", &state)
+            .await
+            .expect("runs after");
+        let after_count = serde_json::from_str::<serde_json::Value>(&after.body)
+            .unwrap_or_default()
+            .as_array()
+            .map(Vec::len)
+            .unwrap_or_default();
+        record!(
+            "GET",
+            "/api/v0/songid/runs",
+            "mutation-side-effects-and-readback",
+            after_count == before_count + 1
+        );
+
+        let polled_route = format!("/api/v0/songid/runs/{run_id}");
+        let polled = super::route_http_request("GET", &polled_route, None, "", &state)
+            .await
+            .unwrap_or_else(|error| panic!("{polled_route}: {error}"));
+        let polled_json = serde_json::from_str::<serde_json::Value>(&polled.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/api/v0/songid/runs/{id:guid}",
+            "nominal-status-headers-body",
+            polled.status == "200 OK"
+        );
+        record!(
+            "GET",
+            "/api/v0/songid/runs/{id:guid}",
+            "populated-dynamic-state",
+            polled_json["status"] == "completed"
+        );
+
+        let queue = super::route_http_request("GET", "/api/v0/songid/runs/queue", None, "", &state)
+            .await
+            .expect("queue summary");
+        let queue_json = serde_json::from_str::<serde_json::Value>(&queue.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/api/v0/songid/runs/queue",
+            "nominal-status-headers-body",
+            queue.status == "200 OK"
+        );
+        record!(
+            "GET",
+            "/api/v0/songid/runs/queue",
+            "populated-dynamic-state",
+            queue_json["completedCount"].as_u64().unwrap_or_default() >= 1
+                && queue_json["queuedCount"] == 0
+                && queue_json["runningCount"] == 0
+        );
+
+        let package_route = format!("/api/v0/songid/runs/{run_id}/evidence-package");
+        let package = super::route_http_request("GET", &package_route, None, "", &state)
+            .await
+            .unwrap_or_else(|error| panic!("{package_route}: {error}"));
+        let package_json =
+            serde_json::from_str::<serde_json::Value>(&package.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/api/v0/songid/runs/{id:guid}/evidence-package",
+            "nominal-status-headers-body",
+            package.status == "200 OK"
+        );
+        record!(
+            "GET",
+            "/api/v0/songid/runs/{id:guid}/evidence-package",
+            "populated-dynamic-state",
+            package_json["runId"] == run_id
+                && package_json["status"] == "completed"
+                && package_json["query"] == "Evidence Package Differential"
+                && package_json["completedAt"] == package_json["createdAt"]
+                && package_json["trackCandidates"] == serde_json::json!([])
+                && package_json["artifacts"] == serde_json::json!([])
+        );
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("songid_run_lifecycle.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api songid-run-lifecycle mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
