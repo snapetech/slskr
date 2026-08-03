@@ -113592,6 +113592,269 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof crediting `runtime-failure-and-timeout` for
+    /// the contacts/wishlist/collections families -- independently
+    /// re-verified real DB-close fault injection (own hermetic in-memory
+    /// DB) for the same routes `contact_routes_roll_back_when_persistence_
+    /// fails`, `wishlist_routes_roll_back_when_persistence_fails`, and
+    /// `collection_routes_roll_back_when_persistence_fails` already prove.
+    /// All 3 families are slskdN-only (slskd declares none of these
+    /// routes), confirmed against the frozen registry before crediting.
+    #[tokio::test]
+    async fn controller_api_differential_contact_wishlist_collection_routes_survive_persistence_failure(
+    ) {
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+        let target = "slskdn";
+
+        macro_rules! record {
+            ($method:expr, $route:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!("{target} {} {}", $method, $route));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": $method,
+                    "route": $route,
+                    "case": "runtime-failure-and-timeout",
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        // Contacts: create (2 real declared variants), then mutate/delete.
+        for (call_path, ledger_route) in [
+            ("/api/contacts/from-discovery", "/api/v0/contacts/from-discovery"),
+            ("/api/contacts/from-invite", "/api/v0/contacts/from-invite"),
+        ] {
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, _receiver) = test_state_with_env_parts(
+                MapEnv::default()
+                    .with("SLSKR_PERSISTENCE_ENABLED", "true")
+                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+            db.close_for_test().await;
+            let response =
+                super::route_http_request("POST", call_path, None, r#"{"username":"friend"}"#, &state)
+                    .await
+                    .expect("failed contact creation response");
+            let pass = response.status == "503 Service Unavailable"
+                && response.body.contains("contact persistence failed")
+                && state.contacts.read().await.records.is_empty();
+            record!("POST", ledger_route, pass);
+        }
+        for (method, body, expected_error) in [
+            (
+                "PUT",
+                r#"{"username":"changed","online":true}"#,
+                "contact persistence failed",
+            ),
+            ("DELETE", "", "contact deletion persistence failed"),
+        ] {
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, _receiver) = test_state_with_env_parts(
+                MapEnv::default()
+                    .with("SLSKR_PERSISTENCE_ENABLED", "true")
+                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+            state
+                .contacts
+                .write()
+                .await
+                .create("friend".to_owned())
+                .unwrap();
+            db.close_for_test().await;
+            let response =
+                super::route_http_request(method, "/api/contacts/contact-1", None, body, &state)
+                    .await
+                    .expect("failed contact mutation response");
+            let pass = response.status == "503 Service Unavailable"
+                && response.body.contains(expected_error)
+                && state.contacts.read().await.records.len() == 1;
+            record!(method, "/api/v0/contacts/{id}", pass);
+        }
+
+        // Wishlist: create (3 real declared variants), then mutate/delete.
+        for (call_path, ledger_route, body) in [
+            ("/api/wishlist", "/api/v0/wishlist", r#"{"artist":"Artist","title":"Track"}"#),
+            (
+                "/api/musicbrainz/release-radar/subscriptions",
+                "/api/v0/musicbrainz/release-radar/subscriptions",
+                r#"{"artist":"Artist","title":"Release"}"#,
+            ),
+            (
+                "/api/wishlist/import/csv",
+                "/api/v0/wishlist/import/csv",
+                r#"{"csv":"artist,title\nArtist,One\nArtist,Two"}"#,
+            ),
+        ] {
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, _receiver) = test_state_with_env_parts(
+                MapEnv::default()
+                    .with("SLSKR_PERSISTENCE_ENABLED", "true")
+                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+            let previous = state.wishlist.read().await.clone();
+            db.close_for_test().await;
+            let response = super::route_http_request("POST", call_path, None, body, &state)
+                .await
+                .expect("failed wishlist creation response");
+            let pass = response.status == "503 Service Unavailable"
+                && response.body.contains("wishlist persistence failed")
+                && *state.wishlist.read().await == previous;
+            record!("POST", ledger_route, pass);
+        }
+        for (method, body, expected_error) in [
+            (
+                "PUT",
+                r#"{"artist":"Changed","title":"Changed"}"#,
+                "wishlist persistence failed",
+            ),
+            ("DELETE", "", "wishlist deletion persistence failed"),
+        ] {
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, _receiver) = test_state_with_env_parts(
+                MapEnv::default()
+                    .with("SLSKR_PERSISTENCE_ENABLED", "true")
+                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+            state
+                .wishlist
+                .write()
+                .await
+                .add_item("Artist".to_owned(), "Track".to_owned(), "Audio".to_owned())
+                .unwrap();
+            let previous = state.wishlist.read().await.clone();
+            db.close_for_test().await;
+            let response = super::route_http_request(method, "/api/wishlist/wish-1", None, body, &state)
+                .await
+                .expect("failed wishlist mutation response");
+            let pass = response.status == "503 Service Unavailable"
+                && response.body.contains(expected_error)
+                && *state.wishlist.read().await == previous;
+            record!(method, "/api/v0/wishlist/{id}", pass);
+        }
+
+        // Collections: create, then mutate/delete (item add/edit/remove).
+        {
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, _receiver) = test_state_with_env_parts(
+                MapEnv::default()
+                    .with("SLSKR_PERSISTENCE_ENABLED", "true")
+                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+            let previous = state.collections.read().await.clone();
+            db.close_for_test().await;
+            let response = super::route_http_request(
+                "POST",
+                "/api/collections",
+                None,
+                r#"{"name":"Collection"}"#,
+                &state,
+            )
+            .await
+            .expect("failed collection create response");
+            let pass = response.status == "503 Service Unavailable"
+                && response.body.contains("collection persistence failed")
+                && *state.collections.read().await == previous;
+            record!("POST", "/api/v0/collections", pass);
+        }
+        for (method, path, body, ledger_route) in [
+            (
+                "PUT",
+                "/api/collections/col-1",
+                r#"{"name":"Changed"}"#,
+                "/api/v0/collections/{id}",
+            ),
+            (
+                "POST",
+                "/api/collections/col-1/items",
+                r#"{"title":"Added"}"#,
+                "/api/v0/collections/{id}/items",
+            ),
+            (
+                "PUT",
+                "/api/collections/items/item-1",
+                r#"{"title":"Changed"}"#,
+                "/api/v0/collections/{id}/items/{itemId}",
+            ),
+            (
+                "DELETE",
+                "/api/collections/items/item-1",
+                "",
+                "/api/v0/collections/{id}/items/{itemId}",
+            ),
+        ] {
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, _receiver) = test_state_with_env_parts(
+                MapEnv::default()
+                    .with("SLSKR_PERSISTENCE_ENABLED", "true")
+                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+            let mut collections = state.collections.write().await;
+            collections
+                .create(String::new(), "Collection".to_owned(), String::new())
+                .unwrap();
+            collections
+                .add_item("col-1", "one".to_owned(), String::new(), "One".to_owned(), "Audio".to_owned())
+                .unwrap();
+            collections
+                .add_item("col-1", "two".to_owned(), String::new(), "Two".to_owned(), "Audio".to_owned())
+                .unwrap();
+            let previous = collections.clone();
+            drop(collections);
+            db.close_for_test().await;
+            let response = super::route_http_request(method, path, None, body, &state)
+                .await
+                .expect("failed collection mutation response");
+            let pass = response.status == "503 Service Unavailable"
+                && response.body.contains("collection persistence failed")
+                && *state.collections.read().await == previous;
+            record!(method, ledger_route, pass);
+        }
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("contact_wishlist_collection_routes_survive_persistence_failure.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api contact/wishlist/collection mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn cors_headers_reject_control_characters() {
         assert_eq!(
