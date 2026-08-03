@@ -4736,6 +4736,7 @@ fn server_message_name(message: &ServerMessage) -> &'static str {
         ServerMessage::CantConnectToPeerResponse { .. } => "cant_connect_to_peer_response",
         ServerMessage::CantCreateRoom { .. } => "cant_create_room",
         ServerMessage::CantJoinRoom { .. } => "cant_join_room",
+        ServerMessage::SetRoomTicker { .. } => "set_room_ticker",
         ServerMessage::Unknown { .. } => "unknown",
     }
 }

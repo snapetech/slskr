@@ -67224,6 +67224,8 @@ async fn connect_session(
     *next_ping = Instant::now() + state.config.ping_interval;
     replay_joined_rooms(state, &mut new_session).await;
     replay_watched_users(state, &mut new_session).await;
+    sync_contact_statuses(state, &mut new_session).await;
+    sync_room_tickers(state, &mut new_session).await;
     publish_configured_interests(state, &mut new_session).await;
     dispatch_queued_downloads_after_login(state).await;
     *session = Some(new_session);
@@ -67313,6 +67315,88 @@ async fn replay_watched_users(state: &AppState, session: &mut ServerSession<TcpS
                 logging::LogLevel::Warn,
                 "users",
                 format!("failed to replay watched user {}: {}", username, error),
+            )
+            .await;
+        }
+    }
+}
+
+async fn sync_contact_statuses(state: &AppState, session: &mut ServerSession<TcpStream>) {
+    let contacts: Vec<String> = {
+        let store = state.contacts.read().await;
+        store
+            .records
+            .iter()
+            .map(|record| record.username.clone())
+            .collect()
+    };
+
+    if contacts.is_empty() {
+        return;
+    }
+
+    record_daemon_log(
+        state,
+        logging::LogLevel::Info,
+        "contacts",
+        format!("syncing {} contact statuses after login", contacts.len()),
+    )
+    .await;
+
+    for username in contacts {
+        let message = ServerMessage::GetUserStatusRequest {
+            username: username.clone(),
+        };
+        if let Err(error) = session.send_server_message(message).await {
+            record_daemon_log(
+                state,
+                logging::LogLevel::Warn,
+                "contacts",
+                format!("failed to sync contact status for {}: {}", username, error),
+            )
+            .await;
+        }
+    }
+}
+
+async fn sync_room_tickers(state: &AppState, session: &mut ServerSession<TcpStream>) {
+    let tickers: Vec<(String, String)> = {
+        let rooms = state.rooms.read().await;
+        rooms
+            .records
+            .iter()
+            .filter_map(|record| {
+                record
+                    .ticker
+                    .as_ref()
+                    .map(|ticker| (record.name.clone(), ticker.clone()))
+            })
+            .collect()
+    };
+
+    if tickers.is_empty() {
+        return;
+    }
+
+    record_daemon_log(
+        state,
+        logging::LogLevel::Info,
+        "rooms",
+        format!("syncing {} room tickers after login", tickers.len()),
+    )
+    .await;
+
+    for (room, ticker) in tickers {
+        let message = ServerMessage::SetRoomTicker {
+            room: room.clone(),
+            ticker: ticker.clone(),
+        };
+        if let Err(error) = session.send_server_message(message).await {
+            record_daemon_log(
+                state,
+                logging::LogLevel::Warn,
+                "rooms",
+                format!("failed to sync ticker for room {}: {}", room, error),
             )
             .await;
         }

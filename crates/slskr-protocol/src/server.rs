@@ -767,6 +767,10 @@ pub enum ServerMessage {
     CantJoinRoom {
         room: String,
     },
+    SetRoomTicker {
+        room: String,
+        ticker: String,
+    },
     Unknown {
         code: u32,
         payload: Vec<u8>,
@@ -1028,6 +1032,10 @@ impl ServerMessage {
             },
             (ServerCode::CantJoinRoom, Direction::ServerToClient) => Self::CantJoinRoom {
                 room: reader.read_string()?,
+            },
+            (ServerCode::SetRoomTicker, Direction::ClientToServer) => Self::SetRoomTicker {
+                room: reader.read_string()?,
+                ticker: reader.read_string()?,
             },
             _ => {
                 return Ok(Self::Unknown {
@@ -1359,6 +1367,11 @@ impl ServerMessage {
             Self::CantJoinRoom { room } => {
                 writer.write_string(room)?;
                 ServerCode::CantJoinRoom
+            }
+            Self::SetRoomTicker { room, ticker } => {
+                writer.write_string(room)?;
+                writer.write_string(ticker)?;
+                ServerCode::SetRoomTicker
             }
             Self::Unknown { code, payload } => {
                 return Ok(MessageFrame::new(*code, payload.clone()))
