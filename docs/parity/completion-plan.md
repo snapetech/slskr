@@ -30,7 +30,7 @@ scoring artifact -- confirmed, all report `complete` with
 
 Parity is **not achieved**. Every planned workstream has an executable
 certification denominator. The literal proof-case closure ratio is now
-**9,163 / 19,122 = 47.92%** (was 853 / 19,122 = 4.46% at the start of this
+**9,173 / 19,122 = 47.97%** (was 853 / 19,122 = 4.46% at the start of this
 review cycle), but this is not a product-completion estimate: most
 generated cases are Cartesian proof dimensions initialized as `needs-proof`,
 including behavior already implemented and tested in slskR. Product
@@ -120,8 +120,9 @@ admin-stats/dashboard plus source-feed-imports preview, opinions/
 security-circuits/mediacore-descriptor-stats/pods/podcore-channels plus
 the pod signing keypair/sign/verify real-ed25519-crypto pipeline,
 quarantine-jury signed-verdict/quorum/idempotent-acceptance lifecycle,
-content-bound stream tickets with real revocation-on-grant-delete)
-brought the workstream to 429/5,300 (a `pod_management_routes_persist_
+content-bound stream tickets with real revocation-on-grant-delete,
+port-forwarding bounded-listing and gateway-pinning security checks)
+brought the workstream to 439/5,300 (a `pod_management_routes_persist_
 crud_members_and_bindings` differential was found already credited
 from earlier in this session and a duplicate attempt was discarded
 before committing).
