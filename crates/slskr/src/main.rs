@@ -31741,6 +31741,7 @@ async fn route_http_request_with_headers(
                 body,
                 state,
                 route.path.starts_with("/api/v0/"),
+                &headers,
             )
             .await)
         }
@@ -46037,6 +46038,7 @@ async fn extended_controller_mutation_response(
     body: &str,
     state: &AppState,
     is_versioned_v0: bool,
+    headers: &RequestSecurityHeaders,
 ) -> HttpResponse {
     if is_versioned_v0
         && path == "/api/security/adversarial"
@@ -46851,6 +46853,7 @@ async fn extended_controller_mutation_response(
         body,
         state,
         is_versioned_v0,
+        headers,
     ))
     .await
     {
@@ -47645,6 +47648,7 @@ async fn misc_controller_mutation_response(
     body: &str,
     state: &AppState,
     is_versioned_v0: bool,
+    headers: &RequestSecurityHeaders,
 ) -> Option<HttpResponse> {
     if method == "POST"
         && path.starts_with("/actors/")
@@ -47657,11 +47661,28 @@ async fn misc_controller_mutation_response(
         if !activitypub_actor_exists(actor, state).await {
             return Some(routing::not_found_response());
         }
+        let verified_key_id = if *direction == "inbox" {
+            match Box::pin(verify_activitypub_inbox_signature(
+                method, path, query, body, headers,
+            ))
+            .await
+            {
+                Ok(key_id) => Some(key_id),
+                Err(_) => return Some(routing::unauthorized_response()),
+            }
+        } else {
+            None
+        };
         let activity = match serde_json::from_str::<serde_json::Value>(body) {
             Ok(activity @ serde_json::Value::Object(_)) => activity,
             Ok(_) => return Some(routing::bad_request_response("activity must be an object")),
             Err(_) => return Some(routing::bad_request_response("invalid ActivityPub JSON")),
         };
+        if let Some(verified_key_id) = verified_key_id.as_deref() {
+            if !activitypub_actor_bound_to_signature(&activity, verified_key_id) {
+                return Some(routing::unauthorized_response());
+            }
+        }
         let Some(activity_type) = activity
             .get("type")
             .and_then(serde_json::Value::as_str)
@@ -48169,6 +48190,280 @@ fn activitypub_public_key_pem(state: &AppState) -> String {
         "-----BEGIN PUBLIC KEY-----\n{}\n-----END PUBLIC KEY-----",
         STANDARD.encode(der)
     )
+}
+
+/// A parsed `Signature` request header (RFC draft "Signing HTTP Messages"),
+/// matching the frozen slskdN oracle's `TryParseSignature`.
+struct ActivityPubSignature {
+    key_id: String,
+    algorithm: String,
+    headers: Vec<String>,
+    signature_b64: String,
+    created: Option<i64>,
+}
+
+fn parse_activitypub_signature_header(value: &str) -> Option<ActivityPubSignature> {
+    let mut key_id = None;
+    let mut algorithm = None;
+    let mut headers_list = None;
+    let mut signature_b64 = None;
+    let mut created = None;
+    for part in value.split(',') {
+        let Some((key, raw_value)) = part.split_once('=') else {
+            continue;
+        };
+        let key = key.trim();
+        let mut v = raw_value.trim();
+        if v.len() >= 2 && v.starts_with('"') && v.ends_with('"') {
+            v = &v[1..v.len() - 1];
+        }
+        match key {
+            "keyId" => key_id = Some(v.to_owned()),
+            "algorithm" => algorithm = Some(v.to_owned()),
+            "headers" => headers_list = Some(v.to_owned()),
+            "signature" => signature_b64 = Some(v.to_owned()),
+            "created" => created = v.parse::<i64>().ok(),
+            _ => {}
+        }
+    }
+    let key_id = key_id.filter(|value| !value.is_empty())?;
+    let algorithm = algorithm.filter(|value| !value.is_empty())?;
+    let headers_list = headers_list.filter(|value| !value.is_empty())?;
+    let signature_b64 = signature_b64.filter(|value| !value.is_empty())?;
+    Some(ActivityPubSignature {
+        key_id,
+        algorithm,
+        headers: headers_list
+            .split(' ')
+            .filter(|segment| !segment.is_empty())
+            .map(str::to_owned)
+            .collect(),
+        signature_b64,
+        created,
+    })
+}
+
+/// Matches the oracle's real `HasRequiredSignedHeaders`: `(request-target)`
+/// and `host` are always required, freshness must be provable via either
+/// `date` or `(created)`, and a request carrying a body must sign `digest`.
+/// No signed header name may repeat.
+fn activitypub_signature_has_required_headers(headers: &[String], body_bearing: bool) -> bool {
+    let mut seen = std::collections::HashSet::new();
+    for header in headers {
+        if !seen.insert(header.to_ascii_lowercase()) {
+            return false;
+        }
+    }
+    let has = |name: &str| headers.iter().any(|header| header.eq_ignore_ascii_case(name));
+    has("(request-target)")
+        && has("host")
+        && (has("date") || has("(created)"))
+        && (!body_bearing || has("digest"))
+}
+
+fn activitypub_signature_date_is_fresh(date: &str) -> bool {
+    chrono::DateTime::parse_from_rfc2822(date)
+        .map(|parsed| {
+            (chrono::Utc::now().signed_duration_since(parsed))
+                .num_seconds()
+                .abs()
+                <= 300
+        })
+        .unwrap_or(false)
+}
+
+fn activitypub_signature_created_is_fresh(created: i64) -> bool {
+    let now = i64::try_from(unix_timestamp()).unwrap_or(i64::MAX);
+    (now - created).abs() <= 300
+}
+
+/// Matches the oracle's real `BuildSigningString`. Only the pseudo-headers
+/// and headers slskR actually threads through from the raw request
+/// (`(request-target)`, `host`, `date`, `digest`, `(created)`) can be
+/// reconstructed -- a peer that signs any other header name fails closed
+/// here rather than silently building an incomplete signing string.
+fn activitypub_signing_string(
+    parsed: &ActivityPubSignature,
+    method: &str,
+    path: &str,
+    query: Option<&str>,
+    headers: &RequestSecurityHeaders,
+) -> Option<String> {
+    let mut lines = Vec::with_capacity(parsed.headers.len());
+    for name in &parsed.headers {
+        let line = match name.to_ascii_lowercase().as_str() {
+            "(request-target)" => {
+                let target = match query {
+                    Some(query) if !query.is_empty() => format!("{path}?{query}"),
+                    _ => path.to_owned(),
+                };
+                format!("(request-target): {} {target}", method.to_ascii_lowercase())
+            }
+            "host" => format!("host: {}", headers.host.as_deref()?),
+            "date" => format!("date: {}", headers.date.as_deref()?),
+            "digest" => format!("digest: {}", headers.digest.as_deref()?),
+            "(created)" => format!("(created): {}", parsed.created?),
+            _ => return None,
+        };
+        lines.push(line);
+    }
+    Some(lines.join("\n"))
+}
+
+/// SSRF-safe fetch of a remote ActivityPub actor's Ed25519 public key,
+/// reusing the same DNS-resolve-then-pin pattern and blocked-IP ranges
+/// already proven for integration URLs (`validate_integration_base_url`).
+async fn fetch_activitypub_remote_public_key(key_id: &str) -> Result<VerifyingKey, String> {
+    let actor_url = key_id.split('#').next().unwrap_or(key_id);
+    let resolved = validate_integration_base_url(actor_url)?;
+    let mut client_builder = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .redirect(reqwest::redirect::Policy::none());
+    for addr in &resolved.addrs {
+        client_builder = client_builder.resolve(&resolved.host, *addr);
+    }
+    let client = client_builder
+        .build()
+        .map_err(|error| format!("failed to build ActivityPub key-fetch client: {error}"))?;
+    let response = client
+        .get(actor_url)
+        .header("Accept", "application/activity+json")
+        .send()
+        .await
+        .map_err(|error| format!("ActivityPub actor fetch failed: {error}"))?;
+    if !response.status().is_success() {
+        return Err(format!(
+            "ActivityPub actor fetch returned HTTP {}",
+            response.status()
+        ));
+    }
+    let document = read_bounded_integration_json(response, "ActivityPub actor").await?;
+    let pem = document
+        .get("publicKey")
+        .and_then(|key| key.get("publicKeyPem"))
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| "actor document is missing publicKey.publicKeyPem".to_owned())?;
+    decode_ed25519_pkix_public_key(pem)
+}
+
+/// Decodes the same SubjectPublicKeyInfo shape `activitypub_public_key_pem`
+/// emits: RFC 8410's fixed 12-byte Ed25519 algorithm prefix followed by the
+/// raw 32-byte verifying key, PEM-wrapped.
+fn decode_ed25519_pkix_public_key(pem: &str) -> Result<VerifyingKey, String> {
+    const ED25519_SPKI_PREFIX: [u8; 12] = [
+        0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00,
+    ];
+    let base64_body: String = pem
+        .lines()
+        .filter(|line| !line.starts_with("-----"))
+        .collect();
+    let der = STANDARD
+        .decode(base64_body.trim())
+        .map_err(|_| "publicKeyPem is not valid base64".to_owned())?;
+    let raw_key = der
+        .strip_prefix(&ED25519_SPKI_PREFIX)
+        .ok_or_else(|| "publicKeyPem is not an Ed25519 SubjectPublicKeyInfo".to_owned())?;
+    let raw_key: [u8; 32] = raw_key
+        .try_into()
+        .map_err(|_| "Ed25519 public key must be 32 bytes".to_owned())?;
+    VerifyingKey::from_bytes(&raw_key).map_err(|error| format!("invalid Ed25519 public key: {error}"))
+}
+
+/// Matches the oracle's real `VerifyHttpSignatureAsync`: parses and
+/// validates the `Signature` header, enforces freshness (`Date` or
+/// `created`, +/-5 minutes) and a real `Digest` match for body-bearing
+/// requests, fetches the signer's real public key (SSRF-safe), and
+/// verifies the real Ed25519 signature over the reconstructed signing
+/// string. Returns the verified `keyId` on success so the caller can bind
+/// it to the activity's own declared actor. HARDENING-2026-04-20 H4 in the
+/// frozen oracle: signature verification is always enforced regardless of
+/// the `federation.verify_signatures` config toggle, matched here by never
+/// consulting that flag at all.
+async fn verify_activitypub_inbox_signature(
+    method: &str,
+    path: &str,
+    query: Option<&str>,
+    body: &str,
+    headers: &RequestSecurityHeaders,
+) -> Result<String, &'static str> {
+    use sha2::Digest;
+    let signature_header = headers.signature.as_deref().ok_or("missing Signature header")?;
+    let parsed = parse_activitypub_signature_header(signature_header)
+        .ok_or("malformed Signature header")?;
+    if !matches!(
+        parsed.algorithm.to_ascii_lowercase().as_str(),
+        "ed25519" | "hs2019"
+    ) {
+        return Err("unsupported signature algorithm");
+    }
+    let body_bearing = !body.is_empty();
+    if !activitypub_signature_has_required_headers(&parsed.headers, body_bearing) {
+        return Err("missing required signed headers");
+    }
+    let signs_date = parsed
+        .headers
+        .iter()
+        .any(|header| header.eq_ignore_ascii_case("date"));
+    if signs_date {
+        let date = headers.date.as_deref().ok_or("missing Date header")?;
+        if !activitypub_signature_date_is_fresh(date) {
+            return Err("stale or invalid Date header");
+        }
+    } else {
+        let created = parsed.created.ok_or("missing created parameter")?;
+        if !activitypub_signature_created_is_fresh(created) {
+            return Err("stale created timestamp");
+        }
+    }
+    let signs_digest = parsed
+        .headers
+        .iter()
+        .any(|header| header.eq_ignore_ascii_case("digest"));
+    if body_bearing || signs_digest {
+        let digest = headers.digest.as_deref().ok_or("missing Digest header")?;
+        let mut hasher = Sha256::new();
+        Digest::update(&mut hasher, body.as_bytes());
+        let expected = format!("SHA-256={}", STANDARD.encode(Digest::finalize(hasher)));
+        if digest != expected {
+            return Err("Digest header does not match body");
+        }
+    }
+    let signing_string = activitypub_signing_string(&parsed, method, path, query, headers)
+        .ok_or("cannot reconstruct signing string for the signed headers")?;
+    let public_key = fetch_activitypub_remote_public_key(&parsed.key_id)
+        .await
+        .map_err(|_| "failed to fetch signer public key")?;
+    let signature_bytes = STANDARD
+        .decode(&parsed.signature_b64)
+        .map_err(|_| "invalid signature encoding")?;
+    let signature_bytes: [u8; 64] = signature_bytes
+        .try_into()
+        .map_err(|_| "signature must be 64 bytes")?;
+    let signature = Signature::from_bytes(&signature_bytes);
+    public_key
+        .verify(signing_string.as_bytes(), &signature)
+        .map_err(|_| "signature verification failed")?;
+    Ok(parsed.key_id)
+}
+
+/// Matches the oracle's real `IsActivityActorBoundToSignature`: the
+/// activity's own declared `actor` must equal the verified key's actor
+/// identity, or the verified key must be scoped under that actor (a
+/// `#fragment` or `/`-suffixed key belonging to it).
+fn activitypub_actor_bound_to_signature(activity: &serde_json::Value, verified_key_id: &str) -> bool {
+    let Some(actor) = activity.get("actor").and_then(serde_json::Value::as_str) else {
+        return false;
+    };
+    if actor.is_empty() {
+        return false;
+    }
+    actor.eq_ignore_ascii_case(verified_key_id)
+        || verified_key_id
+            .to_ascii_lowercase()
+            .starts_with(&format!("{}#", actor.to_ascii_lowercase()))
+        || verified_key_id
+            .to_ascii_lowercase()
+            .starts_with(&format!("{}/", actor.to_ascii_lowercase()))
 }
 
 async fn activitypub_actor_exists(actor: &str, state: &AppState) -> bool {
@@ -78215,6 +78510,9 @@ mod tests {
                 x_slskdn_api_key: None,
                 x_slskdn_csrf: None,
                 remote_addr: None,
+                date: None,
+                digest: None,
+                signature: None,
             },
         )
         .await
@@ -106299,36 +106597,73 @@ mod tests {
         assert_eq!(generic.status, "404 Not Found");
     }
 
-    #[tokio::test]
-    async fn activitypub_relationship_collections_track_target_lifecycle() {
-        let (state, _receiver) = test_state_with_env(
-            MapEnv::default()
-                .with("FEDERATION_ENABLED", "true")
-                .with("FEDERATION_MODE", "Public")
-                .with("FEDERATION_DOMAIN", "social.example")
-                .with("FEDERATION_BASE_URL", "https://social.example/")
-                .with("FEDERATION_PAGE_SIZE", "10"),
-        );
-        let follower_one = "https://remote.example/actors/follower-one";
-        let follower_two = "https://remote.example/actors/follower-two";
-        let following_one = "https://remote.example/actors/following-one";
+    // Chaining this many calls through the giant `route_http_request_with_
+    // headers` dispatcher inside one debug-build async fn overflows the
+    // default test-thread stack (same fix as `configured_api_token_
+    // protects_api_routes`): run the real test body on a thread with a
+    // larger, explicit stack instead of splitting a genuine lifecycle
+    // sequence into disconnected fragments.
+    #[test]
+    fn activitypub_relationship_collections_track_target_lifecycle() {
+        std::thread::Builder::new()
+            .name("activitypub-relationship-lifecycle-test".to_owned())
+            .stack_size(64 * 1024 * 1024)
+            .spawn(|| {
+                tokio::runtime::Runtime::new()
+                    .unwrap()
+                    .block_on(activitypub_relationship_collections_track_target_lifecycle_impl())
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
 
-        let response = super::route_http_request(
-            "POST",
-            "/actors/music/inbox",
-            None,
-            &serde_json::json!({
+    async fn activitypub_relationship_collections_track_target_lifecycle_impl() {
+        use sha2::Digest;
+        let fixture = ActivityPubSignatureFixture::spawn().await;
+        let (state, _receiver) = fixture.state();
+        let follower_one = fixture.actor_url("follower-one");
+        let follower_two = fixture.actor_url("follower-two");
+        let following_one = fixture.actor_url("following-one");
+        let signed_inbox_post = |actor_name: &str, activity: serde_json::Value| {
+            let body = activity.to_string();
+            let digest = format!(
+                "SHA-256={}",
+                base64::engine::general_purpose::STANDARD
+                    .encode(sha2::Sha256::digest(body.as_bytes())),
+            );
+            let created = super::unix_timestamp();
+            let signature_b64 =
+                fixture.sign_request("post", "/actors/music/inbox", &digest, created);
+            let headers = fixture.headers_for(
+                &fixture.key_id(actor_name),
+                &digest,
+                &signature_b64,
+                created,
+            );
+            (body, headers)
+        };
+
+        let (body, headers) = signed_inbox_post(
+            "follower-one",
+            serde_json::json!({
                 "id": "follow-one",
                 "type": "Follow",
                 "actor": follower_one,
                 "object": "https://social.example/actors/music"
-            })
-            .to_string(),
+            }),
+        );
+        let response = super::route_http_request_with_headers(
+            "POST",
+            "/actors/music/inbox",
+            None,
+            &body,
             &state,
+            headers,
         )
         .await
         .expect("inbound follow");
-        assert_eq!(response.status, "202 Accepted");
+        assert_eq!(response.status, "202 Accepted", "{}", response.body);
 
         let response = super::route_http_request(
             "POST",
@@ -106346,22 +106681,26 @@ mod tests {
         .expect("outbound follow");
         assert_eq!(response.status, "200 OK");
 
-        let response = super::route_http_request(
-            "POST",
-            "/actors/music/inbox",
-            None,
-            &serde_json::json!({
+        let (body, headers) = signed_inbox_post(
+            "follower-two",
+            serde_json::json!({
                 "id": "accept-two",
                 "type": "Accept",
                 "actor": follower_two,
                 "object": {"type": "Follow", "object": "https://social.example/actors/music"}
-            })
-            .to_string(),
+            }),
+        );
+        let response = super::route_http_request_with_headers(
+            "POST",
+            "/actors/music/inbox",
+            None,
+            &body,
             &state,
+            headers,
         )
         .await
         .expect("inbound accept");
-        assert_eq!(response.status, "202 Accepted");
+        assert_eq!(response.status, "202 Accepted", "{}", response.body);
 
         let response =
             super::route_http_request("GET", "/actors/music/followers", None, "", &state)
@@ -106381,46 +106720,54 @@ mod tests {
             .as_array()
             .unwrap()
             .iter()
-            .any(|item| item == following_one));
+            .any(|item| item == following_one.as_str()));
         assert!(following["orderedItems"]
             .as_array()
             .unwrap()
             .iter()
-            .any(|item| item == follower_two));
+            .any(|item| item == follower_two.as_str()));
 
-        let response = super::route_http_request(
-            "POST",
-            "/actors/music/inbox",
-            None,
-            &serde_json::json!({
+        let (body, headers) = signed_inbox_post(
+            "follower-two",
+            serde_json::json!({
                 "id": "reject-two",
                 "type": "Reject",
                 "actor": follower_two,
                 "object": {"type": "Follow", "object": "https://social.example/actors/music"}
-            })
-            .to_string(),
-            &state,
-        )
-        .await
-        .expect("inbound reject");
-        assert_eq!(response.status, "202 Accepted");
-
-        let response = super::route_http_request(
+            }),
+        );
+        let response = super::route_http_request_with_headers(
             "POST",
             "/actors/music/inbox",
             None,
-            &serde_json::json!({
+            &body,
+            &state,
+            headers,
+        )
+        .await
+        .expect("inbound reject");
+        assert_eq!(response.status, "202 Accepted", "{}", response.body);
+
+        let (body, headers) = signed_inbox_post(
+            "follower-two",
+            serde_json::json!({
                 "id": "follow-three",
                 "type": "Follow",
                 "actor": follower_two,
                 "object": "https://social.example/actors/music"
-            })
-            .to_string(),
+            }),
+        );
+        let response = super::route_http_request_with_headers(
+            "POST",
+            "/actors/music/inbox",
+            None,
+            &body,
             &state,
+            headers,
         )
         .await
         .expect("second inbound follow");
-        assert_eq!(response.status, "202 Accepted");
+        assert_eq!(response.status, "202 Accepted", "{}", response.body);
 
         let response = super::route_http_request(
             "POST",
@@ -106438,39 +106785,47 @@ mod tests {
         .expect("second outbound follow");
         assert_eq!(response.status, "200 OK");
 
-        let response = super::route_http_request(
-            "POST",
-            "/actors/music/inbox",
-            None,
-            &serde_json::json!({
+        let (body, headers) = signed_inbox_post(
+            "follower-two",
+            serde_json::json!({
                 "id": "remove-three",
                 "type": "Remove",
                 "actor": follower_two,
                 "object": {"type": "Follow", "actor": follower_two}
-            })
-            .to_string(),
-            &state,
-        )
-        .await
-        .expect("inbound remove");
-        assert_eq!(response.status, "202 Accepted");
-
-        let response = super::route_http_request(
+            }),
+        );
+        let response = super::route_http_request_with_headers(
             "POST",
             "/actors/music/inbox",
             None,
-            &serde_json::json!({
+            &body,
+            &state,
+            headers,
+        )
+        .await
+        .expect("inbound remove");
+        assert_eq!(response.status, "202 Accepted", "{}", response.body);
+
+        let (body, headers) = signed_inbox_post(
+            "follower-one",
+            serde_json::json!({
                 "id": "undo-one",
                 "type": "Undo",
                 "actor": follower_one,
                 "object": {"type": "Follow", "actor": follower_one}
-            })
-            .to_string(),
+            }),
+        );
+        let response = super::route_http_request_with_headers(
+            "POST",
+            "/actors/music/inbox",
+            None,
+            &body,
             &state,
+            headers,
         )
         .await
         .expect("inbound undo");
-        assert_eq!(response.status, "202 Accepted");
+        assert_eq!(response.status, "202 Accepted", "{}", response.body);
 
         let response = super::route_http_request(
             "POST",
@@ -112054,6 +112409,9 @@ mod tests {
             x_slskdn_api_key: None,
             x_slskdn_csrf: None,
             remote_addr: None,
+            date: None,
+            digest: None,
+            signature: None,
         };
         assert!(!super::request_origin_matches_host(
             &headers,
@@ -112069,6 +112427,9 @@ mod tests {
             x_slskdn_api_key: None,
             x_slskdn_csrf: None,
             remote_addr: None,
+            date: None,
+            digest: None,
+            signature: None,
         };
         assert!(super::request_origin_matches_host(
             &headers,
@@ -112084,6 +112445,9 @@ mod tests {
             x_slskdn_api_key: None,
             x_slskdn_csrf: None,
             remote_addr: None,
+            date: None,
+            digest: None,
+            signature: None,
         };
         assert!(super::request_origin_matches_host(&headers, "[::1]:5030"));
 
@@ -112104,6 +112468,9 @@ mod tests {
                 x_slskdn_api_key: None,
                 x_slskdn_csrf: None,
                 remote_addr: None,
+                date: None,
+                digest: None,
+                signature: None,
             };
             assert!(!super::request_origin_matches_host(
                 &headers,
@@ -112128,6 +112495,9 @@ mod tests {
                 x_slskdn_api_key: None,
                 x_slskdn_csrf: None,
                 remote_addr: None,
+                date: None,
+                digest: None,
+                signature: None,
             };
             assert!(super::request_origin_matches_host(&headers, "localhost"));
         }
@@ -112252,6 +112622,9 @@ mod tests {
             x_slskdn_api_key: None,
             x_slskdn_csrf: None,
             remote_addr: None,
+            date: None,
+            digest: None,
+            signature: None,
         };
         let auth = super::websocket_protocol_authorization(Some("slskr.api-token.route%2Dtoken"));
 
@@ -113852,6 +114225,372 @@ mod tests {
             "{} controller-api contact/wishlist/collection mismatches:\n{}",
             mismatches.len(),
             mismatches.join("\n")
+        );
+    }
+
+    #[test]
+    fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
+        let parsed = super::parse_activitypub_signature_header(
+            r#"keyId="https://peer.example/actors/alice#main-key",algorithm="ed25519",headers="(request-target) host date digest",signature="c2ln",created="1700000000""#,
+        )
+        .expect("well-formed signature header");
+        assert_eq!(parsed.key_id, "https://peer.example/actors/alice#main-key");
+        assert_eq!(parsed.algorithm, "ed25519");
+        assert_eq!(
+            parsed.headers,
+            vec!["(request-target)", "host", "date", "digest"]
+        );
+        assert_eq!(parsed.signature_b64, "c2ln");
+        assert_eq!(parsed.created, Some(1_700_000_000));
+
+        for missing in [
+            r#"algorithm="ed25519",headers="host",signature="c2ln""#,
+            r#"keyId="k",headers="host",signature="c2ln""#,
+            r#"keyId="k",algorithm="ed25519",signature="c2ln""#,
+            r#"keyId="k",algorithm="ed25519",headers="host""#,
+            "",
+        ] {
+            assert!(
+                super::parse_activitypub_signature_header(missing).is_none(),
+                "{missing}"
+            );
+        }
+    }
+
+    #[test]
+    fn activitypub_signature_required_headers_and_freshness_match_oracle_contract() {
+        let owned = |values: &[&str]| values.iter().map(|value| value.to_string()).collect::<Vec<_>>();
+
+        assert!(super::activitypub_signature_has_required_headers(
+            &owned(&["(request-target)", "host", "date"]),
+            false,
+        ));
+        assert!(!super::activitypub_signature_has_required_headers(
+            &owned(&["(request-target)", "host", "date"]),
+            true, // body-bearing without a signed digest must fail
+        ));
+        assert!(super::activitypub_signature_has_required_headers(
+            &owned(&["(request-target)", "host", "date", "digest"]),
+            true,
+        ));
+        assert!(super::activitypub_signature_has_required_headers(
+            &owned(&["(request-target)", "host", "(created)"]),
+            false,
+        ));
+        assert!(!super::activitypub_signature_has_required_headers(
+            &owned(&["(request-target)", "host"]), // no date or (created) at all
+            false,
+        ));
+        assert!(!super::activitypub_signature_has_required_headers(
+            &owned(&["(request-target)", "Host", "date", "host"]), // duplicate, case-insensitive
+            false,
+        ));
+
+        let now = i64::try_from(super::unix_timestamp()).unwrap();
+        assert!(super::activitypub_signature_created_is_fresh(now));
+        assert!(super::activitypub_signature_created_is_fresh(now - 299));
+        assert!(!super::activitypub_signature_created_is_fresh(now - 301));
+        assert!(!super::activitypub_signature_created_is_fresh(now + 301));
+        assert!(!super::activitypub_signature_date_is_fresh("not a date"));
+    }
+
+    #[test]
+    fn activitypub_pkix_ed25519_key_round_trips_through_slskrs_own_encoder() {
+        let (state, _receiver) = test_state();
+        let pem = super::activitypub_public_key_pem(&state);
+        let decoded =
+            super::decode_ed25519_pkix_public_key(&pem).expect("decode slskR's own PKIX key");
+        assert_eq!(
+            decoded.as_bytes(),
+            state.capability_signing_key.verifying_key().as_bytes()
+        );
+
+        assert!(super::decode_ed25519_pkix_public_key("not a pem at all").is_err());
+        assert!(super::decode_ed25519_pkix_public_key(
+            "-----BEGIN PUBLIC KEY-----\nAAAA\n-----END PUBLIC KEY-----"
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn activitypub_actor_binding_matches_oracle_contract() {
+        let activity = |actor: &str| serde_json::json!({"actor": actor});
+        assert!(super::activitypub_actor_bound_to_signature(
+            &activity("https://peer.example/actors/alice"),
+            "https://peer.example/actors/alice",
+        ));
+        assert!(super::activitypub_actor_bound_to_signature(
+            &activity("https://peer.example/actors/alice"),
+            "https://peer.example/actors/alice#main-key",
+        ));
+        assert!(super::activitypub_actor_bound_to_signature(
+            &activity("https://peer.example/actors/alice"),
+            "https://peer.example/actors/alice/main-key",
+        ));
+        assert!(!super::activitypub_actor_bound_to_signature(
+            &activity("https://peer.example/actors/alice"),
+            "https://peer.example/actors/mallory#main-key",
+        ));
+        assert!(!super::activitypub_actor_bound_to_signature(
+            &serde_json::json!({}),
+            "https://peer.example/actors/alice#main-key",
+        ));
+    }
+
+    /// Test-only fixture: a real local HTTP server serving a real
+    /// ActivityPub actor document with a real Ed25519 PKIX public key, plus
+    /// everything needed to sign a request the same way a genuine remote
+    /// federated peer would. Split across several small tests (rather than
+    /// one large one) because chaining several calls through the giant
+    /// `route_http_request_with_headers` dispatcher inside a single debug
+    /// build async fn overflows the default test-thread stack.
+    /// `SLSKR_ALLOW_PRIVATE_INTEGRATION_URLS` is process-global state, and
+    /// Rust's default test harness runs tests in parallel threads within
+    /// one process -- without serializing every test that flips it, one
+    /// test's `Drop` could clear the override while a concurrently running
+    /// test is still relying on it, intermittently failing key fetches for
+    /// a reason that has nothing to do with the signature under test.
+    static ACTIVITYPUB_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    struct ActivityPubSignatureFixture {
+        signing_key: super::SigningKey,
+        address: std::net::SocketAddr,
+        body: String,
+        digest: String,
+        _server: tokio::task::JoinHandle<()>,
+        _env_guard: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl ActivityPubSignatureFixture {
+        /// One real Ed25519 keypair backs every actor path this fixture
+        /// serves -- the server reflects whatever `/actors/{name}` path was
+        /// actually requested back into the document's `id`/`publicKey.id`,
+        /// so a single fixture can stand in for any number of distinct
+        /// remote peers a test needs (each still gets its own real,
+        /// per-path `keyId`, matching a real deployment's one-key-per-actor
+        /// shape closely enough for signature-verification purposes).
+        async fn spawn() -> Self {
+            use sha2::Digest;
+            use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+            let env_guard = ACTIVITYPUB_ENV_LOCK
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let signing_key =
+                super::new_capability_signing_key().expect("generate fixture Ed25519 signing key");
+            const ED25519_SPKI_PREFIX: [u8; 12] = [
+                0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00,
+            ];
+            let mut der = ED25519_SPKI_PREFIX.to_vec();
+            der.extend_from_slice(signing_key.verifying_key().as_bytes());
+            let public_key_pem = format!(
+                "-----BEGIN PUBLIC KEY-----\n{}\n-----END PUBLIC KEY-----",
+                base64::engine::general_purpose::STANDARD.encode(der)
+            );
+
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+                .await
+                .expect("bind fixture actor server");
+            let address = listener.local_addr().expect("fixture address");
+            let server = tokio::spawn(async move {
+                loop {
+                    let Ok((stream, _)) = listener.accept().await else {
+                        return;
+                    };
+                    let mut reader = BufReader::new(stream);
+                    let mut request_line = String::new();
+                    if reader.read_line(&mut request_line).await.unwrap_or(0) == 0 {
+                        continue;
+                    }
+                    let path = request_line
+                        .split_whitespace()
+                        .nth(1)
+                        .unwrap_or("/actors/unknown")
+                        .to_owned();
+                    let actor_url = format!("http://{address}{path}");
+                    let key_id = format!("{actor_url}#main-key");
+                    let document = serde_json::json!({
+                        "id": actor_url,
+                        "publicKey": {"id": key_id, "owner": actor_url, "publicKeyPem": public_key_pem},
+                    })
+                    .to_string();
+                    let mut stream = reader.into_inner();
+                    let _ = stream
+                        .write_all(
+                            format!(
+                                "HTTP/1.1 200 OK\r\nContent-Type: application/activity+json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                                document.len(),
+                                document
+                            )
+                            .as_bytes(),
+                        )
+                        .await;
+                }
+            });
+
+            std::env::set_var("SLSKR_ALLOW_PRIVATE_INTEGRATION_URLS", "1");
+            let actor_url = format!("http://{address}/actors/remote-peer");
+            let body = serde_json::json!({
+                "id": "https://peer.example/activities/1",
+                "type": "Follow",
+                "actor": actor_url,
+            })
+            .to_string();
+            let digest = format!(
+                "SHA-256={}",
+                base64::engine::general_purpose::STANDARD
+                    .encode(sha2::Sha256::digest(body.as_bytes()))
+            );
+            Self {
+                signing_key,
+                address,
+                body,
+                digest,
+                _server: server,
+                _env_guard: env_guard,
+            }
+        }
+
+        fn actor_url(&self, name: &str) -> String {
+            format!("http://{}/actors/{name}", self.address)
+        }
+
+        fn key_id(&self, name: &str) -> String {
+            format!("{}#main-key", self.actor_url(name))
+        }
+
+        fn sign(&self, created: u64) -> String {
+            self.sign_request("post", "/actors/music/inbox", &self.digest, created)
+        }
+
+        fn sign_request(&self, method: &str, path: &str, digest: &str, created: u64) -> String {
+            let signing_string =
+                format!("(request-target): {method} {path}\nhost: 127.0.0.1\ndigest: {digest}\n(created): {created}");
+            let signature: super::Signature =
+                super::Signer::sign(&self.signing_key, signing_string.as_bytes());
+            base64::engine::general_purpose::STANDARD.encode(signature.to_bytes())
+        }
+
+        fn headers(&self, signature_b64: &str, created: u64) -> super::RequestSecurityHeaders {
+            self.headers_for(&self.key_id("remote-peer"), &self.digest, signature_b64, created)
+        }
+
+        fn headers_for(
+            &self,
+            key_id: &str,
+            digest: &str,
+            signature_b64: &str,
+            created: u64,
+        ) -> super::RequestSecurityHeaders {
+            let signature_header = format!(
+                r#"keyId="{key_id}",algorithm="ed25519",headers="(request-target) host digest (created)",signature="{signature_b64}",created="{created}""#
+            );
+            super::RequestSecurityHeaders {
+                host: Some("127.0.0.1".to_owned()),
+                digest: Some(digest.to_owned()),
+                signature: Some(signature_header),
+                ..Default::default()
+            }
+        }
+
+        fn state(&self) -> (Arc<super::AppState>, mpsc::Receiver<super::SessionCommand>) {
+            test_state_with_env(
+                MapEnv::default()
+                    .with("FEDERATION_ENABLED", "true")
+                    .with("FEDERATION_MODE", "Public")
+                    .with("FEDERATION_DOMAIN", "social.example")
+                    .with("FEDERATION_BASE_URL", "https://social.example/"),
+            )
+        }
+    }
+
+    impl Drop for ActivityPubSignatureFixture {
+        fn drop(&mut self) {
+            std::env::remove_var("SLSKR_ALLOW_PRIVATE_INTEGRATION_URLS");
+        }
+    }
+
+    #[tokio::test]
+    async fn activitypub_inbox_rejects_a_request_with_no_signature_header() {
+        let fixture = ActivityPubSignatureFixture::spawn().await;
+        let (state, _receiver) = fixture.state();
+        let unsigned = super::route_http_request_with_headers(
+            "POST",
+            "/actors/music/inbox",
+            None,
+            &fixture.body,
+            &state,
+            super::RequestSecurityHeaders::default(),
+        )
+        .await
+        .expect("unsigned inbox response");
+        assert_eq!(unsigned.status, "401 Unauthorized", "{}", unsigned.body);
+    }
+
+    #[tokio::test]
+    async fn activitypub_inbox_accepts_a_genuinely_valid_signature() {
+        let fixture = ActivityPubSignatureFixture::spawn().await;
+        let (state, _receiver) = fixture.state();
+        let created = super::unix_timestamp();
+        let signature_b64 = fixture.sign(created);
+        let accepted = super::route_http_request_with_headers(
+            "POST",
+            "/actors/music/inbox",
+            None,
+            &fixture.body,
+            &state,
+            fixture.headers(&signature_b64, created),
+        )
+        .await
+        .expect("signed inbox response");
+        assert_eq!(accepted.status, "202 Accepted", "{}", accepted.body);
+    }
+
+    #[tokio::test]
+    async fn activitypub_inbox_rejects_a_tampered_signature() {
+        let fixture = ActivityPubSignatureFixture::spawn().await;
+        let (state, _receiver) = fixture.state();
+        let created = super::unix_timestamp();
+        let mut tampered = fixture.sign(created);
+        let last = tampered.pop().unwrap();
+        tampered.push(if last == 'A' { 'B' } else { 'A' });
+        let tampered_response = super::route_http_request_with_headers(
+            "POST",
+            "/actors/music/inbox",
+            None,
+            &fixture.body,
+            &state,
+            fixture.headers(&tampered, created),
+        )
+        .await
+        .expect("tampered inbox response");
+        assert_eq!(
+            tampered_response.status, "401 Unauthorized",
+            "{}",
+            tampered_response.body
+        );
+    }
+
+    #[tokio::test]
+    async fn activitypub_inbox_rejects_a_stale_created_timestamp() {
+        let fixture = ActivityPubSignatureFixture::spawn().await;
+        let (state, _receiver) = fixture.state();
+        let stale_created = super::unix_timestamp() - 600;
+        let stale_signature_b64 = fixture.sign(stale_created);
+        let stale_response = super::route_http_request_with_headers(
+            "POST",
+            "/actors/music/inbox",
+            None,
+            &fixture.body,
+            &state,
+            fixture.headers(&stale_signature_b64, stale_created),
+        )
+        .await
+        .expect("stale inbox response");
+        assert_eq!(
+            stale_response.status, "401 Unauthorized",
+            "{}",
+            stale_response.body
         );
     }
 
@@ -116829,6 +117568,9 @@ mod tests {
                 x_slskdn_api_key: None,
                 x_slskdn_csrf: None,
                 remote_addr: None,
+                date: None,
+                digest: None,
+                signature: None,
             },
         )
         .await
@@ -116850,6 +117592,9 @@ mod tests {
                 x_slskdn_api_key: None,
                 x_slskdn_csrf: None,
                 remote_addr: None,
+                date: None,
+                digest: None,
+                signature: None,
             },
         )
         .await
@@ -116871,6 +117616,9 @@ mod tests {
                 x_slskdn_api_key: None,
                 x_slskdn_csrf: None,
                 remote_addr: None,
+                date: None,
+                digest: None,
+                signature: None,
             },
         )
         .await
@@ -117110,6 +117858,9 @@ mod tests {
                 x_slskdn_api_key: None,
                 x_slskdn_csrf: None,
                 remote_addr: None,
+                date: None,
+                digest: None,
+                signature: None,
             },
         )
         .await

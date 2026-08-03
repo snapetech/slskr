@@ -87,6 +87,11 @@ pub struct RequestSecurityHeaders {
     pub x_share_token: Option<String>,
     pub x_slskdn_api_key: Option<String>,
     pub x_slskdn_csrf: Option<String>,
+    /// ActivityPub HTTP Signature verification: `Date`, `Digest`, and
+    /// `Signature` headers on inbound federation requests.
+    pub date: Option<String>,
+    pub digest: Option<String>,
+    pub signature: Option<String>,
     pub remote_addr: Option<SocketAddr>,
 }
 
@@ -100,6 +105,9 @@ impl RequestSecurityHeaders {
             x_share_token: h.x_share_token.clone(),
             x_slskdn_api_key: h.x_slskdn_api_key.clone(),
             x_slskdn_csrf: h.x_slskdn_csrf.clone(),
+            date: h.date.clone(),
+            digest: h.digest.clone(),
+            signature: h.signature.clone(),
             remote_addr: None,
         }
     }

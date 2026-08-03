@@ -54,6 +54,12 @@ pub struct HttpHeaders {
     pub x_slskdn_api_key: Option<String>,
     pub x_slskdn_csrf: Option<String>,
     pub x_share_token: Option<String>,
+    /// ActivityPub HTTP Signature verification (RFC draft "Signing HTTP
+    /// Messages"): `Date`, `Digest`, and `Signature` headers on inbound
+    /// federation requests.
+    pub date: Option<String>,
+    pub digest: Option<String>,
+    pub signature: Option<String>,
     pub range: Option<String>,
     pub forwarded: Option<String>,
     pub x_forwarded_for: Option<String>,
@@ -104,6 +110,9 @@ impl HttpHeaders {
                     "x-slskdn-apikey" => headers.x_slskdn_api_key = Some(value.to_string()),
                     "x-slskdn-csrf" => headers.x_slskdn_csrf = Some(value.to_string()),
                     "x-share-token" => headers.x_share_token = Some(value.to_string()),
+                    "date" => headers.date = Some(value.to_string()),
+                    "digest" => headers.digest = Some(value.to_string()),
+                    "signature" => headers.signature = Some(value.to_string()),
                     "range" => headers.range = Some(value.to_string()),
                     "forwarded" => headers.forwarded = Some(value.to_string()),
                     "x-forwarded-for" => headers.x_forwarded_for = Some(value.to_string()),
@@ -341,6 +350,18 @@ async fn read_http_request_inner<R: AsyncBufRead + Unpin>(
             "range" => {
                 reject_duplicate_singleton(&mut singleton_headers, &name)?;
                 headers.range = Some(value.to_string());
+            }
+            "date" => {
+                reject_duplicate_singleton(&mut singleton_headers, &name)?;
+                headers.date = Some(value.to_string());
+            }
+            "digest" => {
+                reject_duplicate_singleton(&mut singleton_headers, &name)?;
+                headers.digest = Some(value.to_string());
+            }
+            "signature" => {
+                reject_duplicate_singleton(&mut singleton_headers, &name)?;
+                headers.signature = Some(value.to_string());
             }
             "forwarded" => append_list_header(&mut headers.forwarded, value),
             "x-forwarded-for" => append_list_header(&mut headers.x_forwarded_for, value),
