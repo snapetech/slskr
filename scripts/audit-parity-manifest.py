@@ -124,10 +124,52 @@ def security_authorization_ledger(root: Path) -> dict[tuple[str, str, str, str],
     }
 
 
+CONTROLLER_API_DIFFERENTIAL_TEST_PREFIX = "controller_api_differential_"
+
+
+def controller_api_ledger(root: Path) -> dict[tuple[str, str, str, str], bool]:
+    """Run every controller-api bulk differential test (crates/slskr/src/main.rs,
+    named `controller_api_differential_*` by convention) and union their
+    evidence ledgers, keyed by (target, method, route, case). Each such test
+    proves a real, executed behavioral case (not route presence alone) for a
+    specific route family -- e.g. malformed/missing-id contract behavior for
+    the UUID-guarded families `versioned_get_failure_contract` already
+    enforces in production. New tests just need the same name prefix and to
+    write their own file under the shared evidence directory; no changes
+    here are needed to pick them up. Raises if any differential test fails:
+    a real behavioral regression must fail manifest generation.
+    """
+    subprocess.run(
+        [
+            "cargo",
+            "test",
+            "-p",
+            "slskr",
+            "--bin",
+            "slskr",
+            "--",
+            CONTROLLER_API_DIFFERENTIAL_TEST_PREFIX,
+        ],
+        cwd=root,
+        check=True,
+    )
+    evidence_dir = Path(tempfile.gettempdir()) / "slskr-parity-evidence" / "controller-api"
+    ledger: dict[tuple[str, str, str, str], bool] = {}
+    if evidence_dir.is_dir():
+        for ledger_path in sorted(evidence_dir.glob("*.json")):
+            rows = json.loads(ledger_path.read_text(encoding="utf-8"))
+            for row in rows:
+                ledger[(row["target"], row["method"], row["route"], row["case"])] = bool(
+                    row["pass"]
+                )
+    return ledger
+
+
 def api_entries(
     target: str,
     rows: list[dict[str, Any]],
     security_ledger: dict[tuple[str, str, str, str], bool] | None = None,
+    controller_ledger: dict[tuple[str, str, str, str], bool] | None = None,
 ) -> list[dict[str, Any]]:
     entries = []
     for row in rows:
@@ -150,6 +192,11 @@ def api_entries(
                 ]
             )
         for case in cases:
+            proven = (
+                controller_ledger.get((target, row["method"], row["route"], case))
+                if controller_ledger is not None
+                else None
+            )
             entries.append(
                 {
                     "id": f"api:{target}:{row['method']}:{row['route']}:{case}",
@@ -159,10 +206,10 @@ def api_entries(
                     "surface": "controller-route-case",
                     "subject": subject,
                     "case": case,
-                    "status": "needs-proof",
+                    "status": "complete" if proven else "needs-proof",
                     "coverage": {
                         "routeInventory": "complete",
-                        "behavioralDifferential": "open",
+                        "behavioralDifferential": "complete" if proven else "open",
                     },
                     "evidence": row["controller"],
                 }
@@ -794,6 +841,15 @@ def main() -> None:
             "only for fast, evidence-incomplete dry runs."
         ),
     )
+    parser.add_argument(
+        "--skip-controller-api-differential",
+        action="store_true",
+        help=(
+            "Skip running the controller_api_differential_* cargo tests "
+            "(crates/slskr). All controller-api cases fall back to "
+            "needs-proof. Use only for fast, evidence-incomplete dry runs."
+        ),
+    )
     args = parser.parse_args()
 
     root = args.slskr_root.resolve()
@@ -824,6 +880,9 @@ def main() -> None:
     )
     security_ledger = (
         None if args.skip_security_differential else security_authorization_ledger(root)
+    )
+    controller_ledger = (
+        None if args.skip_controller_api_differential else controller_api_ledger(root)
     )
     webui = run_json(
         [
@@ -876,8 +935,8 @@ def main() -> None:
 
     entries = [
         *config_entries(config),
-        *api_entries("slskd", slskd_api, security_ledger),
-        *api_entries("slskdn", slskdn_api, security_ledger),
+        *api_entries("slskd", slskd_api, security_ledger, controller_ledger),
+        *api_entries("slskdn", slskdn_api, security_ledger, controller_ledger),
         *webui_entries(webui),
         *persistence_entries("slskd", slskd_database_domains),
         *persistence_entries("slskdn", slskdn_database_domains),

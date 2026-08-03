@@ -112654,6 +112654,519 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof for one slice of the manifest's
+    /// `controller-api` workstream's `malformed-path-query-or-body` case:
+    /// the shared production contract `versioned_get_failure_contract`
+    /// (called for every GET request, see `main.rs` near line 16817) rejects
+    /// a non-UUID first path segment with a real 400 for 7 declared
+    /// route-prefix families. Proves it against the real dispatcher
+    /// (`route_http_request`) for every currently-declared GET route in
+    /// either frozen registry whose first parameter segment falls under one
+    /// of these prefixes -- not a hand-picked sample -- and writes a ledger
+    /// `scripts/audit-parity-manifest.py` reads to promote proven
+    /// `controller-api` cases out of `needs-proof`.
+    #[tokio::test]
+    async fn controller_api_differential_uuid_guarded_families_reject_malformed_first_id() {
+        #[derive(serde::Deserialize)]
+        struct AuthPolicyRow {
+            method: String,
+            route: String,
+            scheme: String,
+        }
+
+        // Same ordered, nested-prefix-first list `versioned_get_failure_contract`
+        // uses -- a more specific nested prefix must be checked before the
+        // shorter prefix it is contained within, or its real id segment
+        // never reaches its own check.
+        const UUID_GUARDED_PREFIXES: [&str; 7] = [
+            "/api/v0/collections/",
+            "/api/v0/contacts/",
+            "/api/v0/share-grants/by-collection/",
+            "/api/v0/share-grants/",
+            "/api/v0/sharegroups/",
+            "/api/v0/wishlist/",
+            "/api/v0/multisource/jobs/",
+        ];
+
+        fn matching_prefix(route: &str) -> Option<&'static str> {
+            UUID_GUARDED_PREFIXES
+                .iter()
+                .copied()
+                .find(|prefix| route.starts_with(prefix))
+        }
+
+        // The segment immediately after the matched prefix must itself be a
+        // template parameter (not a literal sibling route like
+        // "/api/v0/contacts/nearby") for the malformed-id contract to apply.
+        fn first_segment_is_param(route: &str, prefix: &str) -> bool {
+            route
+                .strip_prefix(prefix)
+                .and_then(|rest| rest.split('/').next())
+                .is_some_and(|segment| segment.starts_with('{') && segment.ends_with('}'))
+        }
+
+        fn malformed_id_path(route: &str, prefix: &str) -> String {
+            let rest = route.strip_prefix(prefix).unwrap_or_default();
+            let mut segments: Vec<&str> = rest.split('/').collect();
+            segments[0] = "not-a-valid-uuid";
+            format!("{prefix}{}", segments.join("/"))
+        }
+
+        fn credential_header(scheme: &str) -> &'static str {
+            if scheme == "api_key" {
+                "ApiKey admin-token"
+            } else {
+                "Bearer admin-token"
+            }
+        }
+
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        for (target, source) in [
+            (
+                "slskd",
+                include_str!("../data/slskd-controller-auth-policy.json"),
+            ),
+            (
+                "slskdn",
+                include_str!("../data/slskdn-controller-auth-policy.json"),
+            ),
+        ] {
+            let rules: Vec<AuthPolicyRow> =
+                serde_json::from_str(source).expect("checked controller auth policy registry");
+            let candidates: Vec<&AuthPolicyRow> = rules
+                .iter()
+                .filter(|rule| {
+                    rule.method == "GET"
+                        && matching_prefix(&rule.route)
+                            .is_some_and(|prefix| first_segment_is_param(&rule.route, prefix))
+                })
+                .collect();
+            if candidates.is_empty() {
+                continue;
+            }
+
+            let (state, _receiver) = test_state_with_env(
+                MapEnv::default()
+                    .with("SLSKR_AUTH_DISABLED", "false")
+                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                    .with("SLSKR_API_TOKEN", "admin-token"),
+            );
+
+            for rule in candidates {
+                let prefix = matching_prefix(&rule.route).expect("filtered above");
+                let path = malformed_id_path(&rule.route, prefix);
+                let header = credential_header(&rule.scheme);
+                let response = super::route_http_request("GET", &path, Some(header), "", &state)
+                    .await
+                    .expect("route response");
+                let pass = response.status == "400 Bad Request"
+                    && response.body == "{\"error\":\"The request is invalid\"}";
+                if !pass {
+                    mismatches.push(format!(
+                        "{target} GET {} -> {path}: got {} {}",
+                        rule.route, response.status, response.body
+                    ));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": "GET",
+                    "route": rule.route,
+                    "case": "malformed-path-query-or-body",
+                    "pass": pass,
+                }));
+            }
+        }
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("uuid_guarded_families_reject_malformed_first_id.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api malformed-id mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
+    /// Bulk differential proof for two more real, deterministic (no
+    /// fixture data needed) branches of the shared production contract
+    /// `versioned_get_failure_contract` (`main.rs` near line 16817, called
+    /// for every GET request before its own handler): a fixed list of
+    /// routes that require a query value and 400 without one, and 2 routes
+    /// that are unconditionally not-found/not-configured for the slskdN
+    /// compatibility profile. Credits `malformed-path-query-or-body` (the
+    /// missing-required-query routes) and `missing-empty-or-conflict-state`
+    /// (the always-404 routes) manifest cases.
+    #[tokio::test]
+    async fn controller_api_differential_versioned_get_contract_fixed_route_responses() {
+        #[derive(serde::Deserialize)]
+        struct AuthPolicyRow {
+            method: String,
+            route: String,
+            scheme: String,
+        }
+
+        fn credential_header(scheme: &str) -> &'static str {
+            if scheme == "api_key" {
+                "ApiKey admin-token"
+            } else {
+                "Bearer admin-token"
+            }
+        }
+
+        // (path, manifest case this proves)
+        const MISSING_REQUIRED_QUERY_ROUTES: [&str; 9] = [
+            "/api/v0/library/health/issues/by-type",
+            "/api/v0/multisource/search",
+            "/api/v0/multisource/users",
+            "/api/v0/opinions/summary",
+            "/api/v0/podcore/content/metadata",
+            "/api/v0/podcore/content/search",
+            "/api/v0/telemetry/reports/transfers/exceptions",
+            "/api/v0/telemetry/reports/transfers/exceptions/pareto",
+            "/api/v0/telemetry/reports/transfers/leaderboard",
+        ];
+        const ALWAYS_NOT_FOUND_ROUTES: [&str; 2] =
+            ["/api/v0/security/canaries", "/api/v0/security/tor/status"];
+
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        for (target, source) in [
+            (
+                "slskd",
+                include_str!("../data/slskd-controller-auth-policy.json"),
+            ),
+            (
+                "slskdn",
+                include_str!("../data/slskdn-controller-auth-policy.json"),
+            ),
+        ] {
+            let rules: Vec<AuthPolicyRow> =
+                serde_json::from_str(source).expect("checked controller auth policy registry");
+            let scheme_for = |route: &str| {
+                rules
+                    .iter()
+                    .find(|rule| rule.method == "GET" && rule.route == route)
+                    .map(|rule| rule.scheme.as_str())
+            };
+            // Skip targets that don't declare any of these routes at all --
+            // no manifest denominator exists there, so there's nothing to
+            // credit and no reason to spin up a hermetic state.
+            let declares_any = MISSING_REQUIRED_QUERY_ROUTES
+                .iter()
+                .chain(ALWAYS_NOT_FOUND_ROUTES.iter())
+                .any(|route| scheme_for(route).is_some());
+            if !declares_any {
+                continue;
+            }
+
+            let (state, _receiver) = test_state_with_env(
+                MapEnv::default()
+                    .with("SLSKR_AUTH_DISABLED", "false")
+                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                    .with("SLSKR_API_TOKEN", "admin-token"),
+            );
+
+            for route in MISSING_REQUIRED_QUERY_ROUTES {
+                let Some(scheme) = scheme_for(route) else {
+                    continue;
+                };
+                let response =
+                    super::route_http_request("GET", route, Some(credential_header(scheme)), "", &state)
+                        .await
+                        .expect("route response");
+                let pass = response.status == "400 Bad Request"
+                    && response.body == "{\"error\":\"A required query value is missing\"}";
+                if !pass {
+                    mismatches.push(format!(
+                        "{target} GET {route} (missing query): got {} {}",
+                        response.status, response.body
+                    ));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": "GET",
+                    "route": route,
+                    "case": "malformed-path-query-or-body",
+                    "pass": pass,
+                }));
+            }
+
+            for route in ALWAYS_NOT_FOUND_ROUTES {
+                let Some(scheme) = scheme_for(route) else {
+                    continue;
+                };
+                let response =
+                    super::route_http_request("GET", route, Some(credential_header(scheme)), "", &state)
+                        .await
+                        .expect("route response");
+                let pass = response.status == "404 Not Found";
+                if !pass {
+                    mismatches.push(format!(
+                        "{target} GET {route} (always-not-found): got {} {}",
+                        response.status, response.body
+                    ));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": "GET",
+                    "route": route,
+                    "case": "missing-empty-or-conflict-state",
+                    "pass": pass,
+                }));
+            }
+
+            if target == "slskdn" {
+                let response = super::route_http_request(
+                    "GET",
+                    "/api/v0/security/adversarial",
+                    Some("Bearer admin-token"),
+                    "",
+                    &state,
+                )
+                .await
+                .expect("route response");
+                let pass = response.status == "404 Not Found"
+                    && response.body == "Adversarial features are not configured";
+                if !pass {
+                    mismatches.push(format!(
+                        "{target} GET /api/v0/security/adversarial: got {} {}",
+                        response.status, response.body
+                    ));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": "GET",
+                    "route": "/api/v0/security/adversarial",
+                    "case": "missing-empty-or-conflict-state",
+                    "pass": pass,
+                }));
+            }
+        }
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("versioned_get_contract_fixed_route_responses.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api fixed-route mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
+    /// Bulk differential proof for the "referenced resource does not exist
+    /// yet" family of branches in `versioned_get_failure_contract` (`main.rs`
+    /// near line 16817): conversations, jobs, search responses,
+    /// listening-party radio, MusicBrainz artist lookups, profile, shares,
+    /// transfer entries, browse status, and multisource search results all
+    /// real-check against slskR's own live stores (not a stub) before
+    /// falling through to a real handler. Proven here against a fresh,
+    /// empty hermetic state -- no fixture rows are needed to prove the
+    /// "does not exist" branch, only that a real lookup happens and the
+    /// real oracle-matching negative response comes back. Credits
+    /// `missing-empty-or-conflict-state` manifest cases.
+    #[tokio::test]
+    async fn controller_api_differential_versioned_get_contract_missing_resource_responses() {
+        #[derive(serde::Deserialize)]
+        struct AuthPolicyRow {
+            method: String,
+            route: String,
+            scheme: String,
+        }
+
+        #[derive(Clone, Copy)]
+        enum Expected {
+            StandardNotFound,
+            EmptyBodyNotFound,
+        }
+
+        const CHECKS: [(&str, &str, Expected); 11] = [
+            (
+                "/api/v0/conversations/{username}",
+                "/api/v0/conversations/no-such-user",
+                Expected::StandardNotFound,
+            ),
+            (
+                "/api/v0/jobs/{jobId}",
+                "/api/v0/jobs/no-such-job",
+                Expected::StandardNotFound,
+            ),
+            (
+                "/api/v0/searches/{id}/responses",
+                "/api/v0/searches/no-such-search/responses",
+                Expected::StandardNotFound,
+            ),
+            (
+                "/api/v0/listening-party/radio/{partyId}/{contentId}",
+                "/api/v0/listening-party/radio/no-such-party/no-such-content",
+                Expected::StandardNotFound,
+            ),
+            (
+                "/api/v0/musicbrainz/artist/{artistId}/discography-coverage",
+                "/api/v0/musicbrainz/artist/definitely-no-such-artist/discography-coverage",
+                Expected::StandardNotFound,
+            ),
+            (
+                "/api/v0/musicbrainz/overlays/artist/{artistId}/release-graph",
+                "/api/v0/musicbrainz/overlays/artist/definitely-no-such-artist/release-graph",
+                Expected::StandardNotFound,
+            ),
+            (
+                "/api/v0/profile/{peerId}",
+                "/api/v0/profile/no-such-peer",
+                Expected::StandardNotFound,
+            ),
+            (
+                "/api/v0/shares/{id}",
+                "/api/v0/shares/no-such-share",
+                Expected::EmptyBodyNotFound,
+            ),
+            (
+                "/api/v0/transfers/downloads/{username}",
+                "/api/v0/transfers/downloads/no-such-user",
+                Expected::StandardNotFound,
+            ),
+            (
+                "/api/v0/transfers/uploads/{username}",
+                "/api/v0/transfers/uploads/no-such-user",
+                Expected::StandardNotFound,
+            ),
+            (
+                "/api/v0/users/{username}/browse/status",
+                "/api/v0/users/no-such-user/browse/status",
+                Expected::StandardNotFound,
+            ),
+        ];
+        const SEARCH_RESULTS_REQUIRED: (&str, &str) = (
+            "/api/v0/multisource/users/{username}/files",
+            "/api/v0/multisource/users/no-such-user/files",
+        );
+
+        fn credential_header(scheme: &str) -> &'static str {
+            if scheme == "api_key" {
+                "ApiKey admin-token"
+            } else {
+                "Bearer admin-token"
+            }
+        }
+
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        for (target, source) in [
+            (
+                "slskd",
+                include_str!("../data/slskd-controller-auth-policy.json"),
+            ),
+            (
+                "slskdn",
+                include_str!("../data/slskdn-controller-auth-policy.json"),
+            ),
+        ] {
+            let rules: Vec<AuthPolicyRow> =
+                serde_json::from_str(source).expect("checked controller auth policy registry");
+            let scheme_for = |route: &str| {
+                rules
+                    .iter()
+                    .find(|rule| rule.method == "GET" && rule.route == route)
+                    .map(|rule| rule.scheme.as_str())
+            };
+
+            let (state, _receiver) = test_state_with_env(
+                MapEnv::default()
+                    .with("SLSKR_AUTH_DISABLED", "false")
+                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                    .with("SLSKR_API_TOKEN", "admin-token"),
+            );
+
+            for (route_template, concrete_path, expected) in CHECKS {
+                let header = credential_header(scheme_for(route_template).unwrap_or("any"));
+                let response =
+                    super::route_http_request("GET", concrete_path, Some(header), "", &state)
+                        .await
+                        .expect("route response");
+                let pass = match expected {
+                    Expected::StandardNotFound => {
+                        response.status == "404 Not Found" && response.body == "{\"error\":\"not found\"}"
+                    }
+                    Expected::EmptyBodyNotFound => {
+                        response.status == "404 Not Found" && response.body.is_empty()
+                    }
+                };
+                if !pass {
+                    mismatches.push(format!(
+                        "{target} GET {concrete_path}: got {} {}",
+                        response.status, response.body
+                    ));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": "GET",
+                    "route": route_template,
+                    "case": "missing-empty-or-conflict-state",
+                    "pass": pass,
+                }));
+            }
+
+            let (route_template, concrete_path) = SEARCH_RESULTS_REQUIRED;
+            let header = credential_header(scheme_for(route_template).unwrap_or("any"));
+            let response = super::route_http_request("GET", concrete_path, Some(header), "", &state)
+                .await
+                .expect("route response");
+            let pass = response.status == "400 Bad Request"
+                && response.body
+                    == "{\"error\":\"No search results. Call /users?searchText=... first\"}";
+            if !pass {
+                mismatches.push(format!(
+                    "{target} GET {concrete_path}: got {} {}",
+                    response.status, response.body
+                ));
+            }
+            ledger.push(serde_json::json!({
+                "target": target,
+                "method": "GET",
+                "route": route_template,
+                "case": "missing-empty-or-conflict-state",
+                "pass": pass,
+            }));
+        }
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("versioned_get_contract_missing_resource_responses.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api missing-resource mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn cors_headers_reject_control_characters() {
         assert_eq!(
