@@ -118585,6 +118585,170 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof crediting 3 Soulfind-bridge HTTP routes'
+    /// cases, independently re-derived from `bridge_search_and_download_
+    /// use_real_oracle_shapes`'s real BridgeSearchResult/BridgeDownload
+    /// contract checks and `bridge_admin_clients_never_leaks_unrelated_
+    /// peer_activity`'s real client-isolation check. slskdN-only
+    /// (confirmed against the frozen registry).
+    #[tokio::test]
+    async fn controller_api_differential_bridge_routes() {
+        let target = "slskdn";
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($method:expr, $route:expr, $case:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!("{target} {} {} [{}]", $method, $route, $case));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": $method,
+                    "route": $route,
+                    "case": $case,
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        let (state, _receiver) = test_state();
+        add_test_share(
+            &state,
+            "Virtual/Bridge Differential.flac",
+            Path::new("/nonexistent/bridge-differential.flac"),
+            4096,
+        )
+        .await;
+
+        let search = super::route_http_request(
+            "POST",
+            "/api/v0/bridge/search",
+            None,
+            r#"{"query":"Bridge Differential"}"#,
+            &state,
+        )
+        .await
+        .expect("bridge search");
+        let search_json = serde_json::from_str::<serde_json::Value>(&search.body).unwrap_or_default();
+        let users = search_json["users"].as_array().cloned().unwrap_or_default();
+        record!(
+            "POST",
+            "/api/v0/bridge/search",
+            "nominal-status-headers-body",
+            search.status == "201 Created"
+        );
+        record!(
+            "POST",
+            "/api/v0/bridge/search",
+            "populated-dynamic-state",
+            search_json["query"] == "Bridge Differential"
+                && users.len() == 1
+                && users[0].get("peerId").is_some()
+                && users[0].get("username").is_some()
+                && users[0]["files"].as_array().map(Vec::len) == Some(1)
+                && users[0]["files"][0]["path"] == "Virtual/Bridge Differential.flac"
+                && users[0]["files"][0]["sizeBytes"] == 4096
+                && users[0]["files"][0]["codec"] == "flac"
+        );
+
+        let empty_search = super::route_http_request(
+            "POST",
+            "/api/v0/bridge/search",
+            None,
+            r#"{"query":"nothing-matches-this-differential"}"#,
+            &state,
+        )
+        .await
+        .expect("bridge search with no matches");
+        let empty_search_json =
+            serde_json::from_str::<serde_json::Value>(&empty_search.body).unwrap_or_default();
+        record!(
+            "POST",
+            "/api/v0/bridge/search",
+            "missing-empty-or-conflict-state",
+            empty_search_json["users"] == serde_json::json!([])
+        );
+
+        let download = super::route_http_request(
+            "POST",
+            "/api/v0/bridge/download",
+            None,
+            r#"{"username":"peer","filename":"Virtual/Bridge Differential.flac","targetPath":"/tmp/out-differential.flac"}"#,
+            &state,
+        )
+        .await
+        .expect("bridge download");
+        let download_json =
+            serde_json::from_str::<serde_json::Value>(&download.body).unwrap_or_default();
+        record!(
+            "POST",
+            "/api/v0/bridge/download",
+            "nominal-status-headers-body",
+            download.status == "200 OK"
+        );
+        record!(
+            "POST",
+            "/api/v0/bridge/download",
+            "populated-dynamic-state",
+            download_json["transfer_id"].is_string()
+                && download_json.get("downloadIds").is_none()
+                && download_json.get("enqueued").is_none()
+        );
+
+        let (isolated_state, _isolated_receiver) = test_state();
+        {
+            let mut users = isolated_state.users.write().await;
+            users.watch("online-peer-differential".to_owned());
+            if let Some(record) = users
+                .records
+                .iter_mut()
+                .find(|record| record.username == "online-peer-differential")
+            {
+                record.status = Some("online".to_owned());
+            }
+        }
+        let clients = super::route_http_request(
+            "GET",
+            "/api/bridge/admin/clients",
+            None,
+            "",
+            &isolated_state,
+        )
+        .await
+        .expect("bridge clients");
+        record!(
+            "GET",
+            "/api/bridge/admin/clients",
+            "nominal-status-headers-body",
+            clients.status == "200 OK"
+        );
+        record!(
+            "GET",
+            "/api/bridge/admin/clients",
+            "missing-empty-or-conflict-state",
+            serde_json::from_str::<serde_json::Value>(&clients.body).unwrap_or_default()
+                == serde_json::json!({"clients": [], "count": 0, "status": "disabled", "ready": false})
+        );
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("bridge_routes.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api bridge-routes mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
