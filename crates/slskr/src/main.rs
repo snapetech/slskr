@@ -115207,6 +115207,222 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof crediting 10 PodCore routes' `nominal-
+    /// status-headers-body`, `mutation-side-effects-and-readback`, and
+    /// `missing-empty-or-conflict-state` cases, independently re-derived
+    /// from `pod_management_routes_persist_crud_members_and_bindings`'s
+    /// full real CRUD lifecycle (create -> list -> detail -> members ->
+    /// join -> bind channel -> re-GET shows binding -> ban -> re-GET
+    /// members reflects ban -> rename -> post message -> delete -> re-GET
+    /// 404s). slskdN-only (confirmed against the frozen registry -- slskd
+    /// declares none of these routes).
+    #[tokio::test]
+    async fn controller_api_differential_pod_management_routes_persist_crud_members_and_bindings()
+    {
+        let target = "slskdn";
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($method:expr, $route:expr, $case:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!("{target} {} {} [{}]", $method, $route, $case));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": $method,
+                    "route": $route,
+                    "case": $case,
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        let (state, _receiver) = test_state();
+
+        let created = super::route_http_request(
+            "POST",
+            "/api/v0/pods",
+            None,
+            r#"{"pod":{"podId":"pod:api","name":"API Pod","isPublic":true,"maxMembers":4,"tags":["music"],"channels":[{"channelId":"general","kind":0,"name":"General"}]},"requestingPeerId":"ignored-by-auth"}"#,
+            &state,
+        )
+        .await
+        .expect("create pod");
+        let created_json =
+            serde_json::from_str::<serde_json::Value>(&created.body).unwrap_or_default();
+        let create_pass = created.status == "201 Created"
+            && created_json["podId"] == "pod:api"
+            && created_json["name"] == "API Pod";
+        record!("POST", "/api/v0/pods", "mutation-side-effects-and-readback", create_pass);
+
+        let listed = super::route_http_request("GET", "/api/pods", None, "", &state)
+            .await
+            .expect("list pods");
+        let listed_json =
+            serde_json::from_str::<serde_json::Value>(&listed.body).unwrap_or_default();
+        let list_pass = listed.status == "200 OK"
+            && listed_json.as_array().is_some_and(|array| array.len() == 1)
+            && listed_json[0]["podId"] == "pod:api";
+        record!("GET", "/api/v0/pods", "nominal-status-headers-body", list_pass);
+
+        let detail = super::route_http_request("GET", "/api/pods/pod%3Aapi", None, "", &state)
+            .await
+            .expect("pod detail");
+        record!(
+            "GET",
+            "/api/v0/pods/{podId}",
+            "nominal-status-headers-body",
+            detail.status == "200 OK"
+        );
+
+        let members = super::route_http_request("GET", "/api/pods/pod%3Aapi/members", None, "", &state)
+            .await
+            .expect("pod members");
+        let members_json =
+            serde_json::from_str::<serde_json::Value>(&members.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/api/v0/pods/{podId}/members",
+            "nominal-status-headers-body",
+            members.status == "200 OK"
+                && members_json.as_array().is_some_and(|array| array.len() == 1)
+                && members_json[0]["role"] == "owner"
+        );
+
+        *state.runtime_credentials.write().await =
+            Some(super::LoginCredentials::default_client("member", "secret"));
+        let joined = super::route_http_request(
+            "POST",
+            "/api/pods/pod%3Aapi/join",
+            None,
+            r#"{"peerId":"member"}"#,
+            &state,
+        )
+        .await
+        .expect("join pod");
+        let join_pass = joined.status == "200 OK"
+            && serde_json::from_str::<serde_json::Value>(&joined.body).unwrap_or_default()["joined"]
+                == true;
+        record!(
+            "POST",
+            "/api/v0/pods/{podId}/join",
+            "mutation-side-effects-and-readback",
+            join_pass
+        );
+        *state.runtime_credentials.write().await = None;
+
+        let bound = super::route_http_request(
+            "POST",
+            "/api/pods/pod%3Aapi/channels/general/bind",
+            None,
+            r#"{"roomName":"ambient","mode":"mirror"}"#,
+            &state,
+        )
+        .await
+        .expect("bind pod channel");
+        let bound_detail = super::route_http_request("GET", "/api/pods/pod%3Aapi", None, "", &state)
+            .await
+            .expect("bound pod detail");
+        let bound_detail_json =
+            serde_json::from_str::<serde_json::Value>(&bound_detail.body).unwrap_or_default();
+        record!(
+            "POST",
+            "/api/v0/pods/{podId}/channels/{channelId}/bind",
+            "mutation-side-effects-and-readback",
+            bound.status == "200 OK"
+                && bound_detail_json["channels"][0]["bindingInfo"] == "soulseek-room:ambient"
+        );
+
+        let banned = super::route_http_request(
+            "POST",
+            "/api/pods/pod%3Aapi/ban",
+            None,
+            r#"{"peerId":"member"}"#,
+            &state,
+        )
+        .await
+        .expect("ban pod member");
+        let members_after_ban =
+            super::route_http_request("GET", "/api/pods/pod%3Aapi/members", None, "", &state)
+                .await
+                .expect("members after ban");
+        let members_after_ban_json =
+            serde_json::from_str::<serde_json::Value>(&members_after_ban.body).unwrap_or_default();
+        record!(
+            "POST",
+            "/api/v0/pods/{podId}/ban",
+            "mutation-side-effects-and-readback",
+            banned.status == "200 OK"
+                && members_after_ban_json.as_array().is_some_and(|array| array.len() == 1)
+        );
+
+        let updated = super::route_http_request(
+            "PUT",
+            "/api/pods/pod%3Aapi",
+            None,
+            r#"{"pod":{"podId":"pod:api","name":"Renamed Pod","isPublic":true,"maxMembers":4,"channels":[{"channelId":"general","kind":0,"name":"General"}]}}"#,
+            &state,
+        )
+        .await
+        .expect("update pod");
+        let updated_json =
+            serde_json::from_str::<serde_json::Value>(&updated.body).unwrap_or_default();
+        record!(
+            "PUT",
+            "/api/v0/pods/{podId}",
+            "mutation-side-effects-and-readback",
+            updated.status == "200 OK" && updated_json["name"] == "Renamed Pod"
+        );
+
+        let message = super::route_http_request(
+            "POST",
+            "/api/v0/pods/pod%3Aapi/channels/general/messages",
+            None,
+            r#"{"body":"delete me","senderPeerId":"tester"}"#,
+            &state,
+        )
+        .await
+        .expect("pod message before delete");
+        record!(
+            "POST",
+            "/api/v0/pods/{podId}/channels/{channelId}/messages",
+            "nominal-status-headers-body",
+            message.status == "200 OK"
+        );
+
+        let deleted = super::route_http_request("DELETE", "/api/pods/pod%3Aapi", None, "", &state)
+            .await
+            .expect("delete pod");
+        let missing = super::route_http_request("GET", "/api/pods/pod%3Aapi", None, "", &state)
+            .await
+            .expect("deleted pod");
+        let delete_pass = deleted.status == "204 No Content" && missing.status == "404 Not Found";
+        record!(
+            "DELETE",
+            "/api/v0/pods/{podId}",
+            "missing-empty-or-conflict-state",
+            delete_pass
+        );
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("pod_management_routes_persist_crud_members_and_bindings.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api pod-management mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
