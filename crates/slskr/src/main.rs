@@ -121130,6 +121130,422 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof crediting the library-health portion of
+    /// `compatibility_projections_use_local_state_for_library_jobs_and_
+    /// discovery` (10 registered routes; the source test's remaining
+    /// lidarr/musicbrainz/wishlist/discovery-graph/listening-party
+    /// sections mostly hit slskR-internal bare `/api/...` compat-shell
+    /// routes with no registry entry in either target, or routes already
+    /// credited via other differentials -- not revisited here).
+    /// Independently re-derived from the same real seeded-library-item
+    /// health/dashboard/scan/remediation checks. slskdN-only (confirmed
+    /// against the frozen registry route-by-route; `/api/library/items`
+    /// itself has no registry entry and is used only as fixture setup).
+    #[tokio::test]
+    async fn controller_api_differential_library_health() {
+        let target = "slskdn";
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($method:expr, $route:expr, $case:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!("{target} {} {} [{}]", $method, $route, $case));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": $method,
+                    "route": $route,
+                    "case": $case,
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        let (state, _receiver) = test_state();
+
+        super::route_http_request(
+            "POST",
+            "/api/library/items",
+            None,
+            r#"{"artist":"","title":"Untitled","kind":"Audio"}"#,
+            &state,
+        )
+        .await
+        .expect("create incomplete library item fixture");
+        super::route_http_request(
+            "POST",
+            "/api/library/items",
+            None,
+            r#"{"artist":"Known","title":"Release","kind":"Audio"}"#,
+            &state,
+        )
+        .await
+        .expect("create complete library item fixture");
+
+        let health = super::route_http_request("GET", "/api/library/health/issues", None, "", &state)
+            .await
+            .expect("library issues");
+        let health_json = serde_json::from_str::<serde_json::Value>(&health.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/api/library/health/issues",
+            "nominal-status-headers-body",
+            health.status == "200 OK"
+        );
+        record!(
+            "GET",
+            "/api/library/health/issues",
+            "populated-dynamic-state",
+            health_json["totalCount"] == 1
+                && health_json["issues"][0]["type"] == "MissingMetadata"
+                && health_json["issues"][0]["metadata"]["missingField"] == "missing_artist"
+                && health_json["filter"]["limit"] == 100
+                && health_json["filter"]["offset"] == 0
+        );
+
+        let by_artist = super::route_http_request(
+            "GET",
+            "/api/library/health/issues/by-artist",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("issues by artist");
+        let by_artist_json =
+            serde_json::from_str::<serde_json::Value>(&by_artist.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/api/library/health/issues/by-artist",
+            "nominal-status-headers-body",
+            by_artist.status == "200 OK"
+        );
+        record!(
+            "GET",
+            "/api/library/health/issues/by-artist",
+            "populated-dynamic-state",
+            by_artist_json["groups"].as_array().is_some_and(Vec::is_empty)
+                && by_artist_json["totalArtists"] == 0
+        );
+
+        let summary = super::route_http_request(
+            "GET",
+            "/api/library/health/summary?LibraryPath=%2Fmusic",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("library health summary");
+        let summary_json = serde_json::from_str::<serde_json::Value>(&summary.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/api/library/health/summary",
+            "nominal-status-headers-body",
+            summary.status == "200 OK"
+        );
+        record!(
+            "GET",
+            "/api/library/health/summary",
+            "populated-dynamic-state",
+            summary_json["libraryPath"] == "/music"
+                && summary_json["totalIssues"] == 1
+                && summary_json["issuesOpen"] == 1
+        );
+
+        let dashboard = super::route_http_request(
+            "GET",
+            "/api/library/health/dashboard?libraryPath=%2Fmusic&artistLimit=1&issueLimit=1",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("library health dashboard");
+        let dashboard_json =
+            serde_json::from_str::<serde_json::Value>(&dashboard.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/api/library/health/dashboard",
+            "nominal-status-headers-body",
+            dashboard.status == "200 OK"
+        );
+        record!(
+            "GET",
+            "/api/library/health/dashboard",
+            "populated-dynamic-state",
+            dashboard_json["summary"]["libraryPath"] == "/music"
+                && dashboard_json["issuesByType"][0]["type"] == "MissingMetadata"
+                && dashboard_json["issuesByArtist"]
+                    .as_array()
+                    .is_some_and(Vec::is_empty)
+                && dashboard_json["issues"].as_array().map(Vec::len) == Some(1)
+                && dashboard_json["totalIssues"] == 1
+        );
+
+        let by_codec = super::route_http_request(
+            "GET",
+            "/api/library/health/issues/by-codec",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("issues by codec");
+        let by_codec_json =
+            serde_json::from_str::<serde_json::Value>(&by_codec.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/api/library/health/issues/by-codec",
+            "nominal-status-headers-body",
+            by_codec.status == "200 OK"
+        );
+        record!(
+            "GET",
+            "/api/library/health/issues/by-codec",
+            "populated-dynamic-state",
+            by_codec_json["groups"].as_array().map(Vec::len) == Some(1)
+                && by_codec_json["groups"][0]["codec"] == "UNKNOWN"
+                && by_codec_json["groups"][0]["count"] == 1
+                && by_codec_json["groups"][0]["transcodeSuspect"] == 0
+                && by_codec_json["totalIssues"] == 1
+        );
+
+        let filtered = super::route_http_request(
+            "GET",
+            "/api/library/health/issues?LibraryPath=%2Fmusic&types=CorruptedFile&severities=Medium&statuses=Detected&Limit=2&Offset=999999",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("filtered library issues");
+        let filtered_json =
+            serde_json::from_str::<serde_json::Value>(&filtered.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/api/library/health/issues",
+            "malformed-path-query-or-body",
+            filtered.status == "200 OK"
+                && filtered_json["totalCount"] == 0
+                && filtered_json["filter"]["libraryPath"] == "/music"
+                && filtered_json["filter"]["types"][0] == "CorruptedFile"
+                && filtered_json["filter"]["severities"][0] == "Medium"
+                && filtered_json["filter"]["statuses"][0] == "Detected"
+                && filtered_json["filter"]["limit"] == 2
+                && filtered_json["filter"]["offset"] == 999999
+        );
+
+        let by_type = super::route_http_request(
+            "GET",
+            "/api/library/health/issues/by-type",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("issues by type");
+        let by_type_json = serde_json::from_str::<serde_json::Value>(&by_type.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/api/library/health/issues/by-type",
+            "nominal-status-headers-body",
+            by_type.status == "200 OK"
+        );
+        record!(
+            "GET",
+            "/api/library/health/issues/by-type",
+            "populated-dynamic-state",
+            by_type_json["groups"][0]["type"] == "MissingMetadata"
+                && by_type_json["totalIssues"] == 1
+        );
+
+        let mut bad_query_pass = true;
+        for path in [
+            "/api/library/health/summary",
+            "/api/library/health/dashboard?libraryPath=%2Fmusic&artistLimit=0",
+            "/api/library/health/dashboard?libraryPath=%2Fmusic&issueLimit=251",
+            "/api/library/health/issues?limit=0",
+            "/api/library/health/issues?limit=251",
+            "/api/library/health/issues?offset=-1",
+            "/api/library/health/issues?types=NotAnIssueType",
+            "/api/library/health/issues?severities=Urgent",
+            "/api/library/health/issues?statuses=Open",
+            "/api/library/health/issues/by-artist?limit=101",
+            "/api/library/health/issues/by-release?limit=0",
+        ] {
+            let response = super::route_http_request("GET", path, None, "", &state)
+                .await
+                .unwrap_or_else(|error| panic!("{path}: {error}"));
+            bad_query_pass &= response.status == "400 Bad Request";
+        }
+        record!(
+            "GET",
+            "/api/library/health/summary",
+            "malformed-path-query-or-body",
+            bad_query_pass
+        );
+        record!(
+            "GET",
+            "/api/library/health/dashboard",
+            "malformed-path-query-or-body",
+            bad_query_pass
+        );
+        record!(
+            "GET",
+            "/api/library/health/issues/by-artist",
+            "malformed-path-query-or-body",
+            bad_query_pass
+        );
+        record!(
+            "GET",
+            "/api/library/health/issues/by-release",
+            "malformed-path-query-or-body",
+            bad_query_pass
+        );
+
+        let patched_route = "/api/v0/library/health/issues/lib-1-missing-artist";
+        let patched_issue = super::route_http_request(
+            "PATCH",
+            patched_route,
+            None,
+            r#"{"artist":"Recovered Artist"}"#,
+            &state,
+        )
+        .await
+        .unwrap_or_else(|error| panic!("{patched_route}: {error}"));
+        record!(
+            "PATCH",
+            "/api/v0/library/health/issues/{issueId}",
+            "mutation-side-effects-and-readback",
+            patched_issue.status == "204 No Content"
+                && state.library.read().await.get("lib-1").is_some_and(|record| {
+                    record.artist == "Recovered Artist"
+                })
+        );
+
+        super::route_http_request(
+            "POST",
+            "/api/library/items",
+            None,
+            r#"{"artist":"Fixable","title":"Kindless","kind":""}"#,
+            &state,
+        )
+        .await
+        .expect("create fixable library item fixture");
+
+        let scan = super::route_http_request(
+            "POST",
+            "/api/v0/library/health/scans",
+            None,
+            r#"{"libraryPath":"/music"}"#,
+            &state,
+        )
+        .await
+        .expect("library scan");
+        let scan_json = serde_json::from_str::<serde_json::Value>(&scan.body).unwrap_or_default();
+        let active_id = scan_json["scanId"].as_str().unwrap_or_default().to_owned();
+        record!(
+            "POST",
+            "/api/v0/library/health/scans",
+            "nominal-status-headers-body",
+            scan.status == "200 OK"
+                && scan_json["scanId"].as_str().is_some()
+                && scan_json["message"] == "Scan started successfully"
+        );
+
+        let second_scan = super::route_http_request(
+            "POST",
+            "/api/v0/library/health/scans",
+            None,
+            r#"{"libraryPath":"/music"}"#,
+            &state,
+        )
+        .await
+        .expect("second concurrent library scan");
+        record!(
+            "POST",
+            "/api/v0/library/health/scans",
+            "missing-empty-or-conflict-state",
+            second_scan.status == "409 Conflict" && second_scan.body.contains(&active_id)
+        );
+
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+        let completed_route = format!("/api/library/health/scans/{active_id}");
+        let completed = super::route_http_request("GET", &completed_route, None, "", &state)
+            .await
+            .unwrap_or_else(|error| panic!("{completed_route}: {error}"));
+        record!(
+            "GET",
+            "/api/library/health/scans/{scanId}",
+            "nominal-status-headers-body",
+            serde_json::from_str::<serde_json::Value>(&completed.body).unwrap_or_default()["status"]
+                == "completed"
+        );
+
+        let missing_scan = super::route_http_request(
+            "GET",
+            "/api/library/health/scans/scan-does-not-exist-differential",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("missing library scan");
+        record!(
+            "GET",
+            "/api/library/health/scans/{scanId}",
+            "missing-empty-or-conflict-state",
+            missing_scan.status == "404 Not Found"
+        );
+
+        let fixed = super::route_http_request(
+            "POST",
+            "/api/v0/slskdn/library/remediate",
+            None,
+            r#"{"issue_ids":["lib-3-missing-kind"]}"#,
+            &state,
+        )
+        .await
+        .expect("fix library issues");
+        let fixed_json = serde_json::from_str::<serde_json::Value>(&fixed.body).unwrap_or_default();
+        record!(
+            "POST",
+            "/api/v0/slskdn/library/remediate",
+            "nominal-status-headers-body",
+            fixed.status == "200 OK" && fixed_json["id"].as_str().is_some()
+        );
+        record!(
+            "POST",
+            "/api/v0/slskdn/library/remediate",
+            "mutation-side-effects-and-readback",
+            fixed_json["kind"] == "library_remediation"
+                && fixed_json["status"] == "completed"
+                && fixed_json["fixedCount"] == 1
+                && fixed_json["issueIds"] == serde_json::json!(["lib-3-missing-kind"])
+                && fixed_json["remaining"] == serde_json::Value::Null
+        );
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("library_health.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api library-health mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
