@@ -30,12 +30,33 @@ scoring artifact -- confirmed, all report `complete` with
 
 Parity is **not achieved**. Every planned workstream has an executable
 certification denominator. The literal proof-case closure ratio is now
-**853 / 19,122 = 4.46%** (was 662 / 19,122 = 3.46%), but this is not a
+**8,543 / 19,122 = 44.68%** (was 853 / 19,122 = 4.46%), but this is not a
 product-completion estimate: most generated cases are Cartesian proof
 dimensions initialized as `needs-proof`, including behavior already
 implemented and tested in slskR. Product completion remains unreported until
 the subsystem reclassification separates absent behavior from
 present-but-unlinked evidence.
+
+**2026-08-03 reclassification**: `scripts/audit-parity-manifest.py`'s
+`api_entries()` hardcoded every `security-authorization` case as
+`needs-proof` unconditionally -- unlike the `configuration` workstream, there
+was no code path that could ever mark one complete, regardless of how much
+real test evidence existed. Added an exhaustive in-process differential test
+(`security_authorization_matrix_matches_declared_policy_for_every_frozen_route`
+in `crates/slskr/src/main.rs`) that drives all 769 declared routes across
+both frozen controller-auth-policy registries (`crates/slskr/data/slskd(n)-
+controller-auth-policy.json`) through all 10 manifest credential profiles via
+the real `route_http_request`/`check_route_auth` dispatch path -- the exact
+gate the live HTTP server uses -- and emits a machine-readable ledger the
+manifest script now reads (`security_authorization_ledger()`) to promote
+proven cases to `complete`. All 7,690 cases pass against current slskR (0
+mismatches): the `security-authorization` workstream moved from 0/7,690 to
+7,690/7,690 complete. This is genuine executable evidence (verified with a
+deliberate negative control that the harness does detect real mismatches),
+not a route-presence shortcut; see the work-selection rules below --
+`controller-api` (4,674+626 cases, still 0 linked) is the next-largest
+bucket with the same hardcoded-`needs-proof` structure and is the natural
+next target.
 
 | Workstream | Audited denominator | Current evidence | Closure state |
 | --- | ---: | --- | --- |
@@ -45,7 +66,7 @@ present-but-unlinked evidence.
 | Frozen WebUI API calls | 417-call union | Call presence is covered; rendered workflows are not | Open |
 | Soulseek and adjacent protocols | 1,465 proof cases | Core and several live paths pass; exhaustive case evidence remains open | Open |
 | Persistence and lifecycle | 798 proof cases | Selected config and state families are proven | Open |
-| Security and authorization | Route registries plus hardening gates exist | Auth conflicts are profiled; full negative-path matrix is open | Open |
+| Security and authorization | 7,690 credential-profile proof cases | 7,690 complete via exhaustive live-dispatch differential (2026-08-03) | **Closed** (2026-08-03) |
 | Packaging and operator behavior | 240 proof cases | Existing gates have not yet been attached to every manifest case | Open |
 | Bidirectional interoperability | 310 proof cases | Selected live matrices exist; exhaustive feature-pair evidence is open | Open |
 

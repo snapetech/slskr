@@ -434,6 +434,44 @@ shadow-index, Pod metadata, and listed-Pod index records every 30 minutes. The
 live matrix proves a pinned authenticated Rust Store is accepted and retained
 by slskdN.
 
+## 2026-08-03 security-authorization reclassification
+
+`scripts/audit-parity-manifest.py`'s `security-authorization` workstream
+(7,690 cases: 769 declared routes across both frozen controller-auth-policy
+registries times 10 manifest credential profiles) had never been linked to
+any evidence source -- the manifest builder hardcoded every case as
+`needs-proof` unconditionally, with no classifier at all (unlike
+`configuration`, which reads a real implemented/partial/missing mapping).
+Added an exhaustive in-process differential test in `crates/slskr/src/
+main.rs` (`security_authorization_matrix_matches_declared_policy_for_every_
+frozen_route`) that, for every declared rule in `crates/slskr/data/
+slskd-controller-auth-policy.json` / `slskdn-controller-auth-policy.json`,
+independently reconstructs the expected outcome (allowed / unauthorized /
+forbidden) for all 10 profiles from the declared access/scheme/scopes
+fields, then drives the *real* dispatcher (`route_http_request`'s
+`check_route_auth` gate -- the same code path the live HTTP server uses,
+including route-precedence resolution) and asserts they match. Verified
+with a deliberate negative control (temporarily forcing a wrong expected
+value) that the harness does surface real mismatches before trusting a
+clean run. All 7,690 cases passed against current slskR HEAD with zero
+mismatches. Wired `scripts/audit-parity-manifest.py` to run this test and
+read its JSON ledger (`security_authorization_ledger()`), promoting proven
+`(target, method, route, case)` tuples to `complete`. Net effect: overall
+proof-case closure moved from 853/19,122 (4.46%) to 8,543/19,122 (44.68%)
+in one focused, evidence-backed change -- no denominator drift
+(`--check-frozen` still passes cleanly).
+
+The next-largest hardcoded-`needs-proof` buckets with the identical
+structural gap are `slskdn-controller-api` (4,674 cases) and
+`slskd-controller-api` (626 cases) -- the non-auth behavioral cases
+(nominal-status-headers-body, malformed-path-query-or-body,
+mutation-side-effects-and-readback, etc.) for the same 769 routes -- followed
+by `persistence-lifecycle` (798) and `protocol-behaviors` (1,465), all with
+the same unconditional-`needs-proof` construction in `api_entries()`/
+`persistence_entries()`/the protocol-units builder. Same fix pattern applies:
+build a real classifier fed by genuinely executable evidence, not a
+route-presence shortcut.
+
 ## 2026-07-15 Upstream Delta Audit
 
 The previous ledger date is not a current upstream baseline. At the frozen
