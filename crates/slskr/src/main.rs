@@ -121723,6 +121723,138 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof crediting 3 registered routes found inside
+    /// `compatibility_projections_use_local_state_for_recommendations_
+    /// and_activity` (found via call-density scan): source-feed-imports
+    /// preview, and bridge admin stats/dashboard (which must stay honest
+    /// zeros for a real embedded Soulfind bridge server that doesn't
+    /// exist, never backfilled from slskR's own unrelated transfer
+    /// queue). The rest of that source test hits slskR-internal bare
+    /// `/api/...` compat-shell routes (`/api/nowplaying`, `/api/soulseek/
+    /// interests`, `/api/source-feeds`, `/api/wishlist`) with zero
+    /// registry entry in either frozen target -- confirmed, not
+    /// creditable. slskdN-only (confirmed against the frozen registry).
+    #[tokio::test]
+    async fn controller_api_differential_bridge_admin_stats_and_source_feed_preview() {
+        let target = "slskdn";
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($method:expr, $route:expr, $case:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!("{target} {} {} [{}]", $method, $route, $case));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": $method,
+                    "route": $route,
+                    "case": $case,
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        let (state, _receiver) = test_state();
+
+        let source_preview = super::route_http_request(
+            "POST",
+            "/api/v0/source-feed-imports/preview",
+            None,
+            r#"{"text":"Artist - One\nTwo"}"#,
+            &state,
+        )
+        .await
+        .expect("source preview");
+        let source_preview_json =
+            serde_json::from_str::<serde_json::Value>(&source_preview.body).unwrap_or_default();
+        record!(
+            "POST",
+            "/api/v0/source-feed-imports/preview",
+            "nominal-status-headers-body",
+            source_preview.status == "200 OK"
+        );
+        record!(
+            "POST",
+            "/api/v0/source-feed-imports/preview",
+            "populated-dynamic-state",
+            source_preview_json["suggestionCount"] == 2
+                && source_preview_json["suggestions"][0]["artist"] == "Artist"
+                && source_preview_json["suggestions"][1]["title"] == "Two"
+        );
+
+        super::route_http_request(
+            "POST",
+            "/api/v0/transfers",
+            None,
+            r#"{"direction":0,"peer_username":"peer","filename":"Remote/Differential.flac","size":100}"#,
+            &state,
+        )
+        .await
+        .expect("create bridge transfer fixture");
+
+        let bridge_stats = super::route_http_request("GET", "/api/bridge/admin/stats", None, "", &state)
+            .await
+            .expect("bridge stats");
+        let bridge_stats_json =
+            serde_json::from_str::<serde_json::Value>(&bridge_stats.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/api/bridge/admin/stats",
+            "nominal-status-headers-body",
+            bridge_stats.status == "200 OK"
+        );
+        record!(
+            "GET",
+            "/api/bridge/admin/stats",
+            "populated-dynamic-state",
+            bridge_stats_json["totalConnections"] == 0
+                && bridge_stats_json["currentConnections"] == 0
+                && bridge_stats_json["totalDownloads"] == 0
+                && bridge_stats_json["totalSearches"] == 0
+                && bridge_stats_json["totalRoomJoins"] == 0
+                && bridge_stats_json["totalBytesProxied"] == 0
+        );
+
+        let bridge_dashboard =
+            super::route_http_request("GET", "/api/bridge/admin/dashboard", None, "", &state)
+                .await
+                .expect("bridge dashboard");
+        let bridge_dashboard_json =
+            serde_json::from_str::<serde_json::Value>(&bridge_dashboard.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/api/bridge/admin/dashboard",
+            "nominal-status-headers-body",
+            bridge_dashboard.status == "200 OK"
+        );
+        record!(
+            "GET",
+            "/api/bridge/admin/dashboard",
+            "populated-dynamic-state",
+            bridge_dashboard_json["connectedClients"] == 0
+                && bridge_dashboard_json["stats"]["totalConnections"] == 0
+                && bridge_dashboard_json["stats"]["totalBytesProxied"] == 0
+        );
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("bridge_admin_stats_and_source_feed_preview.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api bridge-admin-stats-source-feed-preview mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
