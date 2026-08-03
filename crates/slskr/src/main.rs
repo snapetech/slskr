@@ -113362,6 +113362,236 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof crediting `runtime-failure-and-timeout` for
+    /// real DB-failure fault injection, independently re-verified (own
+    /// hermetic in-memory DB, own compatibility-target loop) for the same
+    /// routes `runtime_control_routes_roll_back_when_persistence_fails`
+    /// already proves: closes the real persistence DB mid-request, calls
+    /// the route via the compat-alias path that test uses (proven to reach
+    /// the same handler), and asserts a genuine 503 plus untouched
+    /// in-memory state. Credits the manifest's `/api/v0/...` route form
+    /// where that's what the frozen registries actually declare, per
+    /// target -- several of these routes only exist under the slskdN
+    /// compatibility profile.
+    #[tokio::test]
+    async fn controller_api_differential_runtime_control_routes_survive_persistence_failure() {
+        struct Case {
+            method: &'static str,
+            call_path: &'static str,
+            body: &'static str,
+            seed_runtime: &'static str,
+            seed_relay: bool,
+            ledger_route: &'static str,
+            targets: &'static [&'static str],
+        }
+
+        const BOTH: [&str; 2] = ["slskd", "slskdn"];
+        const SLSKDN_ONLY: [&str; 1] = ["slskdn"];
+
+        let cases = [
+            Case {
+                method: "PUT",
+                call_path: "/api/application",
+                body: "{}",
+                seed_runtime: "",
+                seed_relay: false,
+                ledger_route: "/api/v0/application",
+                targets: &BOTH,
+            },
+            Case {
+                method: "DELETE",
+                call_path: "/api/application",
+                body: "",
+                seed_runtime: "restart",
+                seed_relay: false,
+                ledger_route: "/api/v0/application",
+                targets: &BOTH,
+            },
+            Case {
+                method: "POST",
+                call_path: "/api/application/gc",
+                body: "",
+                seed_runtime: "",
+                seed_relay: false,
+                ledger_route: "/api/v0/application/gc",
+                targets: &BOTH,
+            },
+            Case {
+                method: "PUT",
+                call_path: "/api/autoreplace/enable",
+                body: "",
+                seed_runtime: "",
+                seed_relay: false,
+                ledger_route: "/api/v0/autoreplace/enable",
+                targets: &SLSKDN_ONLY,
+            },
+            Case {
+                method: "PUT",
+                call_path: "/api/autoreplace/disable",
+                body: "",
+                seed_runtime: "autoreplace",
+                seed_relay: false,
+                ledger_route: "/api/v0/autoreplace/disable",
+                targets: &SLSKDN_ONLY,
+            },
+            Case {
+                method: "PUT",
+                call_path: "/api/relay/agent",
+                body: r#"{"enabled":true}"#,
+                seed_runtime: "",
+                seed_relay: false,
+                ledger_route: "/api/v0/relay/agent",
+                targets: &BOTH,
+            },
+            Case {
+                method: "DELETE",
+                call_path: "/api/relay/agent",
+                body: "",
+                seed_runtime: "relay_agent",
+                seed_relay: false,
+                ledger_route: "/api/v0/relay/agent",
+                targets: &BOTH,
+            },
+            Case {
+                method: "POST",
+                call_path: "/api/v0/bridge/start",
+                body: "",
+                seed_runtime: "",
+                seed_relay: false,
+                ledger_route: "/api/v0/bridge/start",
+                targets: &SLSKDN_ONLY,
+            },
+            Case {
+                method: "POST",
+                call_path: "/api/v0/bridge/stop",
+                body: "",
+                seed_runtime: "bridge",
+                seed_relay: false,
+                ledger_route: "/api/v0/bridge/stop",
+                targets: &SLSKDN_ONLY,
+            },
+            Case {
+                method: "PUT",
+                call_path: "/api/v0/bridge/admin/config",
+                body: r#"{"enabled":true}"#,
+                seed_runtime: "",
+                seed_relay: false,
+                ledger_route: "/api/v0/bridge/admin/config",
+                targets: &SLSKDN_ONLY,
+            },
+            Case {
+                method: "POST",
+                call_path: "/api/songid/runs",
+                body: r#"{"source":"route-audit"}"#,
+                seed_runtime: "",
+                seed_relay: false,
+                ledger_route: "/api/v0/songid/runs",
+                targets: &SLSKDN_ONLY,
+            },
+            Case {
+                method: "POST",
+                call_path: "/api/integrations/lidarr/wanted/sync",
+                body: "",
+                seed_runtime: "",
+                seed_relay: false,
+                ledger_route: "/api/v0/integrations/lidarr/wanted/sync",
+                targets: &SLSKDN_ONLY,
+            },
+            Case {
+                method: "POST",
+                call_path: "/api/profile/invite",
+                body: "",
+                seed_runtime: "",
+                seed_relay: false,
+                ledger_route: "/api/v0/profile/invite",
+                targets: &SLSKDN_ONLY,
+            },
+        ];
+
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        for target in ["slskd", "slskdn"] {
+            for case in &cases {
+                if !case.targets.contains(&target) {
+                    continue;
+                }
+                let db = super::persistence::DatabaseManager::in_memory()
+                    .await
+                    .expect("in-memory db");
+                let (state, _receiver) = test_state_with_env_parts(
+                    MapEnv::default()
+                        .with("SLSKR_PERSISTENCE_ENABLED", "true")
+                        .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                    super::SearchStore::new(),
+                    Some(db.clone()),
+                );
+                match case.seed_runtime {
+                    "restart" => {
+                        state.runtime.write().await.set_restart_requested(true);
+                    }
+                    "autoreplace" => {
+                        state.runtime.write().await.set_autoreplace(true);
+                    }
+                    "relay_agent" => {
+                        state.runtime.write().await.set_relay_agent(true);
+                    }
+                    "bridge" => {
+                        state.runtime.write().await.set_bridge_running(true, false);
+                    }
+                    _ => {}
+                }
+                if case.seed_relay {
+                    state.relay.write().await.set_enabled(true);
+                }
+                let previous_runtime = state.runtime.read().await.clone();
+                let previous_relay = state.relay.read().await.clone();
+                db.close_for_test().await;
+
+                let response =
+                    super::route_http_request(case.method, case.call_path, None, case.body, &state)
+                        .await
+                        .expect("failed runtime compatibility persistence response");
+                let pass = response.status == "503 Service Unavailable"
+                    && response
+                        .body
+                        .contains("runtime compatibility persistence failed")
+                    && *state.runtime.read().await == previous_runtime
+                    && *state.relay.read().await == previous_relay;
+                if !pass {
+                    mismatches.push(format!(
+                        "{target} {} {}: got {} {}",
+                        case.method, case.call_path, response.status, response.body
+                    ));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": case.method,
+                    "route": case.ledger_route,
+                    "case": "runtime-failure-and-timeout",
+                    "pass": pass,
+                }));
+            }
+        }
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("runtime_control_routes_survive_persistence_failure.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api runtime-failure mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn cors_headers_reject_control_characters() {
         assert_eq!(
