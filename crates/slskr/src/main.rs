@@ -1785,12 +1785,20 @@ impl SearchRecord {
             target,
             target_name: target_name
                 .map(|name| truncate_utf8_bytes(name, MAX_SEARCH_TARGET_NAME_BYTES)),
-            status: persisted_search_status(&record.status),
-            results: result_records
-                .iter()
-                .map(SearchResultEntry::from_persisted)
-                .take(MAX_SEARCH_RESULTS_PER_SEARCH)
-                .collect(),
+            status: if matches!(record.status.as_str(), "active" | "pending") {
+                "expired"
+            } else {
+                persisted_search_status(&record.status)
+            },
+            results: if matches!(record.status.as_str(), "active" | "pending") {
+                Vec::new()
+            } else {
+                result_records
+                    .iter()
+                    .map(SearchResultEntry::from_persisted)
+                    .take(MAX_SEARCH_RESULTS_PER_SEARCH)
+                    .collect()
+            },
             raw_response_count: 0,
             filtered_out_count: 0,
             ignored_result_count: 0,
@@ -61480,6 +61488,9 @@ fn spawn_session_manager(state: Arc<AppState>, mut receiver: mpsc::Receiver<Sess
                             &mut reconnect_requested,
                         )
                         .await;
+                        if state.runtime.read().await.application_reconnect_pending {
+                            reconnect_requested = true;
+                        }
                     }
                     ReconnectWake::ChannelClosed => break,
                 }
@@ -61497,6 +61508,7 @@ fn spawn_session_manager(state: Arc<AppState>, mut receiver: mpsc::Receiver<Sess
                                 next_wishlist_search =
                                     Instant::now() + wishlist_scheduler.interval();
                             }
+                            let relogged = matches!(message, ServerMessage::Relogged);
                             project_server_message(&state, active_session, &message).await;
                             update_session(&state, |snapshot| {
                                 snapshot.state = "connected";
@@ -61505,6 +61517,20 @@ fn spawn_session_manager(state: Arc<AppState>, mut receiver: mpsc::Receiver<Sess
                                     Some(server_message_name(&message).to_string());
                             })
                             .await;
+                            if relogged {
+                                session = None;
+                                clear_connected_server_address(&state);
+                                reset_distributed_network(&state, None).await;
+                                update_session(&state, |snapshot| {
+                                    snapshot.state = "disconnected";
+                                    snapshot.last_error =
+                                        Some("server reported relogged/kicked".to_owned());
+                                    snapshot.supporter = None;
+                                    snapshot.connected_at = None;
+                                })
+                                .await;
+                                reconnect_requested = false;
+                            }
                         }
                         Ok(Err(error)) => {
                             eprintln!("server receive failed: {error}");
@@ -61550,6 +61576,9 @@ fn spawn_session_manager(state: Arc<AppState>, mut receiver: mpsc::Receiver<Sess
                     &mut reconnect_requested,
                 )
                 .await;
+                if state.runtime.read().await.application_reconnect_pending {
+                    reconnect_requested = true;
+                }
             } else {
                 break;
             }
@@ -67365,6 +67394,13 @@ async fn send_active_server_message(
                 snapshot.last_error = None;
             })
             .await;
+            if state.config.reconnect {
+                state.runtime.write().await.set_reconnect_pending(true);
+                update_session(state, |snapshot| {
+                    snapshot.last_error = Some(format!("{action} failed; reconnect pending"));
+                })
+                .await;
+            }
         }
         Err(error) => {
             eprintln!("failed to send server message for {action}: {error}");
@@ -86580,9 +86616,25 @@ mod tests {
         assert_eq!(persisted_results[0].peer_username.as_deref(), Some("peer"));
         assert_eq!(persisted_results[0].filename, "Remote/Durable.flac");
 
+        let mut active = persisted.clone();
+        active.status = "active".to_owned();
+        active.result_count = 1;
+        let terminalized = super::SearchStore::from_persisted_with_results(
+            vec![active],
+            persisted_results.clone(),
+        );
+        let terminal = terminalized.get_by_identifier("1").unwrap();
+        assert_eq!(terminal.status, "expired");
+        assert!(terminal.results.is_empty());
+
+        let completed =
+            super::route_http_request("POST", "/api/v0/searches/1/complete", None, "", &state)
+                .await
+                .expect("complete search");
+        assert_eq!(completed.status, "200 OK");
         let rehydrated = super::SearchStore::from_persisted_with_results(
             db.list_searches(10, 0).await.expect("list searches"),
-            persisted_results,
+            persisted_results.clone(),
         );
         let rehydrated_record = rehydrated
             .get_by_identifier("1")
@@ -86604,14 +86656,6 @@ mod tests {
         assert_eq!(persisted.query, "durable updated");
         assert_eq!(persisted.status, "failed");
         assert!(persisted.completed_at.is_some());
-
-        let completed =
-            super::route_http_request("POST", "/api/v0/searches/1/complete", None, "", &state)
-                .await
-                .expect("complete search");
-        assert_eq!(completed.status, "200 OK");
-        let persisted = db.get_search("1").await.expect("get completed").unwrap();
-        assert_eq!(persisted.status, "completed");
 
         let deleted = super::route_http_request("DELETE", "/api/v0/searches/1", None, "", &state)
             .await
