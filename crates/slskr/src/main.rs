@@ -116237,6 +116237,229 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof crediting 3 podcore routing routes' cases,
+    /// independently re-derived from `podcore_routing_matches_message_
+    /// router_contract_and_updates_real_stats`'s real bloom-filter
+    /// deduplication, banned-member filtering, and validation checks.
+    /// slskdN-only (confirmed against the frozen registry).
+    #[tokio::test]
+    async fn controller_api_differential_podcore_routing() {
+        let target = "slskdn";
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($method:expr, $route:expr, $case:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!("{target} {} {} [{}]", $method, $route, $case));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": $method,
+                    "route": $route,
+                    "case": $case,
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        let (state, _receiver) = test_state();
+        let pod_id = "routing-differential-pod";
+        state
+            .pods
+            .write()
+            .await
+            .create(
+                serde_json::from_value::<super::pods::PodRecord>(serde_json::json!({
+                    "podId": pod_id,
+                    "name": "Routing differential",
+                    "channels": [{"channelId": "general", "name": "General"}]
+                }))
+                .expect("deserialize routing pod"),
+                "sender-peer".to_owned(),
+            )
+            .expect("create routing pod");
+        state
+            .pods
+            .write()
+            .await
+            .upsert_member(
+                pod_id,
+                super::pods::PodMember {
+                    peer_id: "target-peer".to_owned(),
+                    role: "member".to_owned(),
+                    is_banned: false,
+                    public_key: None,
+                    joined_at: None,
+                    last_seen: None,
+                },
+            )
+            .expect("add routing target");
+        state
+            .pods
+            .write()
+            .await
+            .upsert_member(
+                pod_id,
+                super::pods::PodMember {
+                    peer_id: "banned-peer".to_owned(),
+                    role: "member".to_owned(),
+                    is_banned: true,
+                    public_key: None,
+                    joined_at: None,
+                    last_seen: None,
+                },
+            )
+            .expect("add banned routing peer");
+
+        let routed = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/routing/route",
+            None,
+            &serde_json::json!({
+                "messageId": "routing-differential-1",
+                "podId": pod_id,
+                "channelId": "general",
+                "senderPeerId": "sender-peer",
+                "body": "hello",
+            })
+            .to_string(),
+            &state,
+        )
+        .await
+        .expect("route message");
+        record!(
+            "POST",
+            "/api/v0/podcore/routing/route",
+            "runtime-failure-and-timeout",
+            routed.status == "500 Internal Server Error"
+                && serde_json::from_str::<serde_json::Value>(&routed.body).unwrap()["error"]
+                    == "Failed to route message"
+        );
+
+        let direct = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/routing/route-to-peers",
+            None,
+            &serde_json::json!({
+                "message": {
+                    "messageId": "routing-differential-2",
+                    "podId": pod_id,
+                    "channelId": "general",
+                    "senderPeerId": "sender-peer",
+                },
+                "targetPeerIds": [" target-peer ", "target-peer"],
+            })
+            .to_string(),
+            &state,
+        )
+        .await
+        .expect("route message to peers");
+        let direct_json = serde_json::from_str::<serde_json::Value>(&direct.body).unwrap_or_default();
+        record!(
+            "POST",
+            "/api/v0/podcore/routing/route-to-peers",
+            "nominal-status-headers-body",
+            direct.status == "200 OK"
+        );
+        record!(
+            "POST",
+            "/api/v0/podcore/routing/route-to-peers",
+            "populated-dynamic-state",
+            direct_json["success"] == false
+                && direct_json["targetPeerCount"] == 1
+                && direct_json["successfullyRoutedCount"] == 0
+                && direct_json["failedRoutingCount"] == 1
+                && direct_json["failedPeerIds"] == serde_json::json!(["target-peer"])
+        );
+
+        let stats =
+            super::route_http_request("GET", "/api/v0/podcore/routing/stats", None, "", &state)
+                .await
+                .expect("routing stats");
+        let stats_json = serde_json::from_str::<serde_json::Value>(&stats.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/api/v0/podcore/routing/stats",
+            "nominal-status-headers-body",
+            stats.status == "200 OK"
+        );
+        record!(
+            "GET",
+            "/api/v0/podcore/routing/stats",
+            "populated-dynamic-state",
+            stats_json["totalMessagesRouted"] == 1
+                && stats_json["totalRoutingAttempts"] == 1
+                && stats_json["successfulRoutingCount"] == 0
+                && stats_json["failedRoutingCount"] == 1
+                && stats_json["activeDeduplicationItems"] == 1
+                && stats_json["routingStatsByPod"][pod_id] == 1
+        );
+
+        let duplicate = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/routing/route",
+            None,
+            &serde_json::json!({
+                "messageId": "routing-differential-1",
+                "podId": pod_id,
+                "channelId": "general",
+                "senderPeerId": "sender-peer",
+            })
+            .to_string(),
+            &state,
+        )
+        .await
+        .expect("route duplicate message");
+        let duplicate_json =
+            serde_json::from_str::<serde_json::Value>(&duplicate.body).unwrap_or_default();
+        record!(
+            "POST",
+            "/api/v0/podcore/routing/route",
+            "mutation-side-effects-and-readback",
+            duplicate.status == "200 OK"
+                && duplicate_json["targetPeerCount"] == 0
+                && duplicate_json["errorMessage"] == "Message already routed (duplicate)"
+        );
+
+        let missing_channel = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/routing/route",
+            None,
+            &serde_json::json!({
+                "messageId": "routing-differential-invalid",
+                "podId": pod_id,
+            })
+            .to_string(),
+            &state,
+        )
+        .await
+        .expect("validate route message");
+        record!(
+            "POST",
+            "/api/v0/podcore/routing/route",
+            "malformed-path-query-or-body",
+            missing_channel.status == "400 Bad Request"
+        );
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("podcore_routing.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api podcore-routing mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
