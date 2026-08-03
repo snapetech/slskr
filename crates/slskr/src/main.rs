@@ -119657,6 +119657,235 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof crediting 13 miscellaneous deterministic
+    /// mutation routes' cases, independently re-derived from
+    /// `deterministic_openapi_mutations_match_slskdn_status_and_dto_
+    /// contracts`'s real DTO-shape and status-code checks spanning
+    /// autoreplace, destinations, DHT, hashdb optimize, nowplaying,
+    /// integrations, transfers, library-health, and overlay-blocklist.
+    /// slskdN-only (confirmed against the frozen registry).
+    #[tokio::test]
+    async fn controller_api_differential_deterministic_openapi_mutations() {
+        let target = "slskdn";
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($method:expr, $route:expr, $case:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!("{target} {} {} [{}]", $method, $route, $case));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": $method,
+                    "route": $route,
+                    "case": $case,
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        let (state, _receiver) = test_state();
+
+        for (path, route, enabled) in [
+            (
+                "/api/v0/autoreplace/enable",
+                "/api/v0/autoreplace/enable",
+                true,
+            ),
+            (
+                "/api/v0/autoreplace/disable",
+                "/api/v0/autoreplace/disable",
+                false,
+            ),
+        ] {
+            let response = super::route_http_request("PUT", path, None, "", &state)
+                .await
+                .unwrap_or_else(|error| panic!("{path}: {error}"));
+            let value = serde_json::from_str::<serde_json::Value>(&response.body).unwrap_or_default();
+            record!(
+                "PUT",
+                route,
+                "nominal-status-headers-body",
+                response.status == "200 OK" && value["enabled"] == enabled
+            );
+            record!(
+                "PUT",
+                route,
+                "populated-dynamic-state",
+                ["lastRunAt", "lastRunProcessedCount", "lastRunReplacedCount", "intervalSeconds"]
+                    .iter()
+                    .all(|key| value.get(*key).is_some())
+            );
+        }
+
+        let destination = super::route_http_request(
+            "POST",
+            "/api/v0/destinations/validate",
+            None,
+            r#"{"path":"/tmp/slskdn-differential"}"#,
+            &state,
+        )
+        .await
+        .expect("validate destination");
+        let destination_json =
+            serde_json::from_str::<serde_json::Value>(&destination.body).unwrap_or_default();
+        record!(
+            "POST",
+            "/api/v0/destinations/validate",
+            "nominal-status-headers-body",
+            destination.status == "200 OK"
+        );
+        record!(
+            "POST",
+            "/api/v0/destinations/validate",
+            "populated-dynamic-state",
+            destination_json["path"] == "/tmp/slskdn-differential"
+                && destination_json.get("exists").is_some()
+                && destination_json.get("writable").is_some()
+        );
+
+        let announce = super::route_http_request("POST", "/api/v0/dht/announce", None, "", &state)
+            .await
+            .expect("dht announce");
+        record!(
+            "POST",
+            "/api/v0/dht/announce",
+            "missing-empty-or-conflict-state",
+            announce.status == "400 Bad Request"
+                && announce.body == r#"{"error":"Not beacon capable"}"#
+        );
+
+        let discover = super::route_http_request("POST", "/api/v0/dht/discover", None, "", &state)
+            .await
+            .expect("dht discover");
+        let discover_json =
+            serde_json::from_str::<serde_json::Value>(&discover.body).unwrap_or_default();
+        record!(
+            "POST",
+            "/api/v0/dht/discover",
+            "nominal-status-headers-body",
+            discover.status == "200 OK"
+                && discover_json.get("newConnectionsMade").is_some()
+                && discover_json.get("totalMeshConnections").is_some()
+        );
+
+        for (path, message) in [
+            (
+                "/api/v0/hashdb/optimize/indexes",
+                "Index optimization completed",
+            ),
+            (
+                "/api/v0/hashdb/optimize/vacuum",
+                "VACUUM and ANALYZE completed",
+            ),
+        ] {
+            let response = super::route_http_request("POST", path, None, "", &state)
+                .await
+                .unwrap_or_else(|error| panic!("{path}: {error}"));
+            record!(
+                "POST",
+                path,
+                "nominal-status-headers-body",
+                serde_json::from_str::<serde_json::Value>(&response.body).unwrap_or_default()
+                    ["message"]
+                    == message
+            );
+        }
+
+        let profile = super::route_http_request(
+            "POST",
+            "/api/v0/hashdb/optimize/profile",
+            None,
+            r#"{"query":"differential","parameters":{}}"#,
+            &state,
+        )
+        .await
+        .expect("hashdb optimize profile");
+        record!(
+            "POST",
+            "/api/v0/hashdb/optimize/profile",
+            "malformed-path-query-or-body",
+            profile.status == "400 Bad Request"
+        );
+
+        for (method, path) in [
+            ("DELETE", "/api/v0/nowplaying"),
+            ("DELETE", "/api/v0/integrations/spotify"),
+            ("DELETE", "/api/v0/transfers/downloads/all/completed"),
+            ("DELETE", "/api/v0/transfers/uploads/all/completed"),
+            (
+                "PATCH",
+                "/api/v0/library/health/issues/00000000-0000-4000-8000-000000000003",
+            ),
+        ] {
+            let route = if path.starts_with("/api/v0/library/health/issues/") {
+                "/api/v0/library/health/issues/{issueId}"
+            } else {
+                path
+            };
+            let response =
+                super::route_http_request(method, path, None, r#"{"status":"Resolved"}"#, &state)
+                    .await
+                    .unwrap_or_else(|error| panic!("{method} {path}: {error}"));
+            record!(
+                method,
+                route,
+                "nominal-status-headers-body",
+                response.status == "204 No Content" && response.body.is_empty()
+            );
+        }
+
+        let blocked = super::route_http_request(
+            "POST",
+            "/api/v0/overlay/blocklist/username",
+            None,
+            r#"{"username":"differential-peer"}"#,
+            &state,
+        )
+        .await
+        .expect("block username");
+        record!(
+            "POST",
+            "/api/v0/overlay/blocklist/username",
+            "nominal-status-headers-body",
+            blocked.status == "200 OK"
+        );
+
+        let unblocked = super::route_http_request(
+            "DELETE",
+            "/api/v0/overlay/blocklist/username/differential-peer",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("unblock username");
+        record!(
+            "DELETE",
+            "/api/v0/overlay/blocklist/{type}/{target}",
+            "mutation-side-effects-and-readback",
+            unblocked.body == r#"{"message":"Blocklist entry removed"}"#
+        );
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("deterministic_openapi_mutations.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api deterministic-openapi-mutations mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
