@@ -30,7 +30,7 @@ scoring artifact -- confirmed, all report `complete` with
 
 Parity is **not achieved**. Every planned workstream has an executable
 certification denominator. The literal proof-case closure ratio is now
-**8,854 / 19,122 = 46.30%** (was 853 / 19,122 = 4.46% at the start of this
+**8,860 / 19,122 = 46.33%** (was 853 / 19,122 = 4.46% at the start of this
 review cycle), but this is not a product-completion estimate: most
 generated cases are Cartesian proof dimensions initialized as `needs-proof`,
 including behavior already implemented and tested in slskR. Product
@@ -86,8 +86,9 @@ lifecycle to 34/798, and one more controller-api batch (10 PodCore
 routes' full CRUD lifecycle) brought that workstream to 148/5,300.
 Subsequent controller-api batches (Collections/CollectionItems CRUD +
 reorder, activity/hashdb/transport GETs, mesh-rendezvous/capabilities
-GETs, swarm-analytics GETs, podcore membership/message stats GETs)
-brought the workstream to 172/5,300.
+GETs, swarm-analytics GETs, podcore membership/message stats GETs,
+podcore routing route/route-to-peers/stats) brought the workstream to
+178/5,300.
 
 The relay-agent/controller subsystem (deferred as a genuinely missing
 capability, see earlier notes) was investigated further this session to
