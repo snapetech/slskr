@@ -116091,6 +116091,152 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof crediting 2 podcore stats routes'
+    /// `nominal-status-headers-body` / `populated-dynamic-state` cases,
+    /// independently re-derived from `podcore_membership_and_message_stats_
+    /// match_storage_contracts`'s real seeded pod/member/channel-message
+    /// aggregation checks. slskdN-only (confirmed against the frozen
+    /// registry: both routes are `administrator`-scoped and absent from
+    /// the slskd policy file).
+    #[tokio::test]
+    async fn controller_api_differential_podcore_stats_gets() {
+        let target = "slskdn";
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($route:expr, $case:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!("{target} GET {} [{}]", $route, $case));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": "GET",
+                    "route": $route,
+                    "case": $case,
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        let (state, _receiver) = test_state();
+        let pod_id = "pod:stats-differential";
+        state
+            .pods
+            .write()
+            .await
+            .create(
+                serde_json::from_value::<super::pods::PodRecord>(serde_json::json!({
+                    "podId": pod_id,
+                    "name": "Stats differential",
+                    "isPublic": true,
+                    "channels": [{"channelId": "general", "name": "General"}]
+                }))
+                .expect("deserialize stats pod"),
+                "owner-peer".to_owned(),
+            )
+            .expect("create stats pod");
+        state
+            .pods
+            .write()
+            .await
+            .upsert_member(
+                pod_id,
+                super::pods::PodMember {
+                    peer_id: "moderator-peer".to_owned(),
+                    role: "mod".to_owned(),
+                    is_banned: false,
+                    public_key: None,
+                    joined_at: Some("2026-01-01T00:00:00+00:00".to_owned()),
+                    last_seen: Some("2026-01-02T00:00:00+00:00".to_owned()),
+                },
+            )
+            .expect("add stats member");
+        {
+            let mut channels = state.pod_channels.write().await;
+            channels
+                .append(
+                    pod_id.to_owned(),
+                    "general".to_owned(),
+                    "owner-peer".to_owned(),
+                    "one".to_owned(),
+                    String::new(),
+                    1_000,
+                )
+                .expect("append first stats message");
+            channels
+                .append(
+                    pod_id.to_owned(),
+                    "general".to_owned(),
+                    "moderator-peer".to_owned(),
+                    "two".to_owned(),
+                    String::new(),
+                    2_000,
+                )
+                .expect("append second stats message");
+        }
+
+        let membership =
+            super::route_http_request("GET", "/api/v0/podcore/membership/stats", None, "", &state)
+                .await
+                .expect("membership stats");
+        let membership_json =
+            serde_json::from_str::<serde_json::Value>(&membership.body).unwrap_or_default();
+        record!(
+            "/api/v0/podcore/membership/stats",
+            "nominal-status-headers-body",
+            membership.status == "200 OK"
+        );
+        record!(
+            "/api/v0/podcore/membership/stats",
+            "populated-dynamic-state",
+            membership_json["totalMemberships"] == 2
+                && membership_json["activeMemberships"] == 2
+                && membership_json["membershipsByRole"]["owner"] == 1
+                && membership_json["membershipsByRole"]["mod"] == 1
+                && membership_json["membershipsByPod"][pod_id] == 2
+        );
+
+        let messages =
+            super::route_http_request("GET", "/api/v0/podcore/messages/stats", None, "", &state)
+                .await
+                .expect("message stats");
+        let messages_json =
+            serde_json::from_str::<serde_json::Value>(&messages.body).unwrap_or_default();
+        record!(
+            "/api/v0/podcore/messages/stats",
+            "nominal-status-headers-body",
+            messages.status == "200 OK"
+        );
+        record!(
+            "/api/v0/podcore/messages/stats",
+            "populated-dynamic-state",
+            messages_json["totalMessages"] == 2
+                && messages_json["totalSizeBytes"] == 400
+                && messages_json["messagesPerPod"][pod_id] == 2
+                && messages_json["messagesPerChannel"]["general"] == 2
+                && messages_json["oldestMessage"] == "1970-01-01T00:00:01+00:00"
+                && messages_json["newestMessage"] == "1970-01-01T00:00:02+00:00"
+        );
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("podcore_stats_gets.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api podcore-stats mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
