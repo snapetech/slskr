@@ -114228,6 +114228,385 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof crediting `runtime-failure-and-timeout` for
+    /// the library/interests/now-playing/messages families -- independently
+    /// re-verified real DB-close fault injection for the same routes
+    /// `library_routes_`, `interest_routes_`, `now_playing_routes_`, and
+    /// `message_routes_roll_back_when_persistence_fails` already prove.
+    /// Only routes confirmed present in a frozen registry are credited --
+    /// e.g. `library/items` POST/DELETE and the webhook/user-watch/browse
+    /// families this session also checked turned out to be slskR-only
+    /// additions absent from both frozen oracles, so they're skipped here
+    /// rather than crediting a nonexistent manifest case.
+    #[tokio::test]
+    async fn controller_api_differential_library_interests_nowplaying_messages_survive_persistence_failure(
+    ) {
+        #[derive(serde::Deserialize)]
+        struct AuthPolicyRow {
+            method: String,
+            route: String,
+        }
+
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        for (target, source) in [
+            (
+                "slskd",
+                include_str!("../data/slskd-controller-auth-policy.json"),
+            ),
+            (
+                "slskdn",
+                include_str!("../data/slskdn-controller-auth-policy.json"),
+            ),
+        ] {
+            let rules: Vec<AuthPolicyRow> =
+                serde_json::from_str(source).expect("checked controller auth policy registry");
+            let declared = |method: &str, route: &str| {
+                rules
+                    .iter()
+                    .any(|rule| rule.method == method && rule.route == route)
+            };
+
+            macro_rules! record {
+                ($method:expr, $route:expr, $pass:expr) => {
+                    if declared($method, $route) {
+                        if !$pass {
+                            mismatches.push(format!("{target} {} {}", $method, $route));
+                        }
+                        ledger.push(serde_json::json!({
+                            "target": target,
+                            "method": $method,
+                            "route": $route,
+                            "case": "runtime-failure-and-timeout",
+                            "pass": $pass,
+                        }));
+                    }
+                };
+            }
+
+            // Library: create-family (only lidarr/musicbrainz map to real
+            // declared routes; the plain library/items POST doesn't) plus
+            // the 2 declared mutation routes.
+            for (call_path, ledger_route, body) in [
+                (
+                    "/api/integrations/lidarr/manualimport",
+                    "/api/v0/integrations/lidarr/manualimport",
+                    r#"{"artist":"Artist","album":"Release"}"#,
+                ),
+                (
+                    "/api/musicbrainz/targets",
+                    "/api/v0/musicbrainz/targets",
+                    r#"{"artist":"Artist","title":"Release"}"#,
+                ),
+            ] {
+                if !declared("POST", ledger_route) {
+                    continue;
+                }
+                let db = super::persistence::DatabaseManager::in_memory()
+                    .await
+                    .expect("in-memory db");
+                let (state, _receiver) = test_state_with_env_parts(
+                    MapEnv::default()
+                        .with("SLSKR_PERSISTENCE_ENABLED", "true")
+                        .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                    super::SearchStore::new(),
+                    Some(db.clone()),
+                );
+                let previous = state.library.read().await.clone();
+                db.close_for_test().await;
+                let response = super::route_http_request("POST", call_path, None, body, &state)
+                    .await
+                    .expect("failed library creation response");
+                let pass = response.status == "503 Service Unavailable"
+                    && response.body.contains("library persistence failed")
+                    && *state.library.read().await == previous;
+                record!("POST", ledger_route, pass);
+            }
+            for (method, call_path, body, ledger_route) in [
+                (
+                    "PATCH",
+                    "/api/v0/library/health/issues/lib-1-missing-title",
+                    r#"{"title":"Fixed"}"#,
+                    "/api/v0/library/health/issues/{issueId}",
+                ),
+                (
+                    "POST",
+                    "/api/v0/library/health/issues/fix",
+                    "",
+                    "/api/v0/library/health/issues/fix",
+                ),
+            ] {
+                if !declared(method, ledger_route) {
+                    continue;
+                }
+                let db = super::persistence::DatabaseManager::in_memory()
+                    .await
+                    .expect("in-memory db");
+                let (state, _receiver) = test_state_with_env_parts(
+                    MapEnv::default()
+                        .with("SLSKR_PERSISTENCE_ENABLED", "true")
+                        .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                    super::SearchStore::new(),
+                    Some(db.clone()),
+                );
+                state
+                    .library
+                    .write()
+                    .await
+                    .create("Artist".to_owned(), String::new(), String::new())
+                    .unwrap();
+                let previous = state.library.read().await.clone();
+                db.close_for_test().await;
+                let response = super::route_http_request(method, call_path, None, body, &state)
+                    .await
+                    .expect("failed library mutation response");
+                let pass = response.status == "503 Service Unavailable"
+                    && response.body.contains("library persistence failed")
+                    && *state.library.read().await == previous;
+                record!(method, ledger_route, pass);
+            }
+
+            // Interests: create + delete for both liked and hated.
+            for (call_path, ledger_route, body) in [
+                (
+                    "/api/soulseek/interests",
+                    "/api/v0/soulseek/interests",
+                    r#"{"name":"jazz"}"#,
+                ),
+                (
+                    "/api/soulseek/hated-interests",
+                    "/api/v0/soulseek/hated-interests",
+                    r#"{"name":"jazz"}"#,
+                ),
+            ] {
+                if !declared("POST", ledger_route) {
+                    continue;
+                }
+                let db = super::persistence::DatabaseManager::in_memory()
+                    .await
+                    .expect("in-memory db");
+                let (state, _receiver) = test_state_with_env_parts(
+                    MapEnv::default()
+                        .with("SLSKR_PERSISTENCE_ENABLED", "true")
+                        .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                    super::SearchStore::new(),
+                    Some(db.clone()),
+                );
+                db.close_for_test().await;
+                let response = super::route_http_request("POST", call_path, None, body, &state)
+                    .await
+                    .expect("failed interest creation response");
+                let interests = state.interests.read().await;
+                let pass = response.status == "503 Service Unavailable"
+                    && response.body.contains("interest persistence failed")
+                    && interests.liked.is_empty()
+                    && interests.hated.is_empty();
+                drop(interests);
+                record!("POST", ledger_route, pass);
+            }
+            for (call_path, ledger_route, hated) in [
+                (
+                    "/api/soulseek/interests/liked-1",
+                    "/api/v0/soulseek/interests/{item}",
+                    false,
+                ),
+                (
+                    "/api/soulseek/hated-interests/hated-1",
+                    "/api/v0/soulseek/hated-interests/{item}",
+                    true,
+                ),
+            ] {
+                if !declared("DELETE", ledger_route) {
+                    continue;
+                }
+                let db = super::persistence::DatabaseManager::in_memory()
+                    .await
+                    .expect("in-memory db");
+                let (state, _receiver) = test_state_with_env_parts(
+                    MapEnv::default()
+                        .with("SLSKR_PERSISTENCE_ENABLED", "true")
+                        .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                    super::SearchStore::new(),
+                    Some(db.clone()),
+                );
+                if hated {
+                    state
+                        .interests
+                        .write()
+                        .await
+                        .add_hated("noise".to_owned())
+                        .unwrap();
+                } else {
+                    state
+                        .interests
+                        .write()
+                        .await
+                        .add_liked("jazz".to_owned())
+                        .unwrap();
+                }
+                db.close_for_test().await;
+                let response = super::route_http_request("DELETE", call_path, None, "", &state)
+                    .await
+                    .expect("failed interest deletion response");
+                let pass = response.status == "503 Service Unavailable"
+                    && response
+                        .body
+                        .contains("interest deletion persistence failed");
+                record!("DELETE", ledger_route, pass);
+            }
+
+            // Now-playing: PUT upsert and DELETE clear (declared oracle
+            // routes are PUT/DELETE only -- the test's own POST variant of
+            // the same handler has no declared oracle counterpart).
+            if declared("PUT", "/api/v0/nowplaying") {
+                let db = super::persistence::DatabaseManager::in_memory()
+                    .await
+                    .expect("in-memory db");
+                let (state, _receiver) = test_state_with_env_parts(
+                    MapEnv::default()
+                        .with("SLSKR_PERSISTENCE_ENABLED", "true")
+                        .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                    super::SearchStore::new(),
+                    Some(db.clone()),
+                );
+                state.now_playing.write().await.upsert(
+                    "existing".to_owned(),
+                    "Original".to_owned(),
+                    "Track".to_owned(),
+                );
+                db.close_for_test().await;
+                let response = super::route_http_request(
+                    "PUT",
+                    "/api/nowplaying",
+                    None,
+                    r#"{"username":"new","artist":"Changed","title":"Song"}"#,
+                    &state,
+                )
+                .await
+                .expect("failed now-playing persistence response");
+                let now_playing = state.now_playing.read().await;
+                let pass = response.status == "503 Service Unavailable"
+                    && response.body.contains("now-playing persistence failed")
+                    && now_playing.records.len() == 1
+                    && now_playing.records[0].username == "existing";
+                drop(now_playing);
+                record!("PUT", "/api/v0/nowplaying", pass);
+            }
+            if declared("DELETE", "/api/v0/nowplaying") {
+                let db = super::persistence::DatabaseManager::in_memory()
+                    .await
+                    .expect("in-memory db");
+                let (state, _receiver) = test_state_with_env_parts(
+                    MapEnv::default()
+                        .with("SLSKR_PERSISTENCE_ENABLED", "true")
+                        .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                    super::SearchStore::new(),
+                    Some(db.clone()),
+                );
+                state.now_playing.write().await.upsert(
+                    "existing".to_owned(),
+                    "Original".to_owned(),
+                    "Track".to_owned(),
+                );
+                db.close_for_test().await;
+                let response =
+                    super::route_http_request("DELETE", "/api/nowplaying", None, "", &state)
+                        .await
+                        .expect("failed now-playing deletion response");
+                let pass = response.status == "503 Service Unavailable"
+                    && response.body.contains("now-playing clear persistence failed");
+                record!("DELETE", "/api/v0/nowplaying", pass);
+            }
+
+            // Messages: conversations create (single + batch) and ack.
+            for (call_path, ledger_route, body) in [
+                (
+                    "/api/conversations/friend",
+                    "/api/v0/conversations/{username}",
+                    r#"{"body":"conversation"}"#,
+                ),
+                (
+                    "/api/conversations/batch",
+                    "/api/v0/conversations/batch",
+                    r#"{"usernames":["friend","peer"],"body":"batch"}"#,
+                ),
+            ] {
+                if !declared("POST", ledger_route) {
+                    continue;
+                }
+                let db = super::persistence::DatabaseManager::in_memory()
+                    .await
+                    .expect("in-memory db");
+                let (state, _receiver) = test_state_with_env_parts(
+                    MapEnv::default()
+                        .with("SLSKR_PERSISTENCE_ENABLED", "true")
+                        .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                    super::SearchStore::new(),
+                    Some(db.clone()),
+                );
+                let previous = state.messages.read().await.clone();
+                db.close_for_test().await;
+                let response = super::route_http_request("POST", call_path, None, body, &state)
+                    .await
+                    .expect("failed message persistence response");
+                let pass = response.status == "503 Service Unavailable"
+                    && response.body.contains("message persistence failed")
+                    && *state.messages.read().await == previous;
+                record!("POST", ledger_route, pass);
+            }
+            if declared("PUT", "/api/v0/conversations/{username}/{id}") {
+                let db = super::persistence::DatabaseManager::in_memory()
+                    .await
+                    .expect("in-memory db");
+                let (state, _receiver) = test_state_with_env_parts(
+                    MapEnv::default()
+                        .with("SLSKR_PERSISTENCE_ENABLED", "true")
+                        .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                    super::SearchStore::new(),
+                    Some(db.clone()),
+                );
+                state
+                    .messages
+                    .write()
+                    .await
+                    .add("friend".to_owned(), "inbound", "message".to_owned());
+                db.close_for_test().await;
+                let response = super::route_http_request(
+                    "PUT",
+                    "/api/conversations/friend/1",
+                    None,
+                    "",
+                    &state,
+                )
+                .await
+                .expect("failed message ack response");
+                let pass = response.status == "503 Service Unavailable"
+                    && response
+                        .body
+                        .contains("message acknowledgement persistence failed");
+                record!("PUT", "/api/v0/conversations/{username}/{id}", pass);
+            }
+        }
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("library_interests_nowplaying_messages_survive_persistence_failure.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api library/interests/nowplaying/messages mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
