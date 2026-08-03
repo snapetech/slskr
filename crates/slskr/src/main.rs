@@ -116702,6 +116702,162 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof crediting the share-grants CRUD routes'
+    /// cases, independently re-derived from `v0_share_grants_get_real_
+    /// uuid_ids_usable_on_versioned_routes`'s real UUID-id and full
+    /// create/read/update/delete lifecycle checks. slskdN-only (confirmed
+    /// against the frozen registry: absent from the slskd policy file).
+    #[tokio::test]
+    async fn controller_api_differential_share_grants_crud() {
+        let target = "slskdn";
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($method:expr, $route:expr, $case:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!("{target} {} {} [{}]", $method, $route, $case));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": $method,
+                    "route": $route,
+                    "case": $case,
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        let (state, _receiver) = test_state();
+        let collection = super::route_http_request(
+            "POST",
+            "/api/v0/collections",
+            None,
+            r#"{"title":"Share Grant Differential"}"#,
+            &state,
+        )
+        .await
+        .expect("create collection");
+        let collection_id = serde_json::from_str::<serde_json::Value>(&collection.body).unwrap()
+            ["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+
+        let created = super::route_http_request(
+            "POST",
+            "/api/v0/share-grants",
+            None,
+            &format!(r#"{{"collection_id":"{collection_id}","username":"friend"}}"#),
+            &state,
+        )
+        .await
+        .expect("create share grant via the v0 route");
+        let grant_id = serde_json::from_str::<serde_json::Value>(&created.body)
+            .unwrap_or_default()["id"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned();
+        record!(
+            "POST",
+            "/api/v0/share-grants",
+            "nominal-status-headers-body",
+            created.status == "201 Created"
+        );
+        record!(
+            "POST",
+            "/api/v0/share-grants",
+            "populated-dynamic-state",
+            uuid::Uuid::parse_str(&grant_id).is_ok()
+        );
+
+        let get_route = format!("/api/v0/share-grants/{grant_id}");
+        let get = super::route_http_request("GET", &get_route, None, "", &state)
+            .await
+            .unwrap_or_else(|error| panic!("{get_route}: {error}"));
+        let get_json = serde_json::from_str::<serde_json::Value>(&get.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/api/v0/share-grants/{id}",
+            "nominal-status-headers-body",
+            get.status == "200 OK"
+        );
+        record!(
+            "GET",
+            "/api/v0/share-grants/{id}",
+            "populated-dynamic-state",
+            get_json["id"] == grant_id
+                && get_json["collection_id"] == collection_id
+                && get_json["username"] == "friend"
+                && get_json["permissions"].is_string()
+        );
+
+        let update = super::route_http_request(
+            "PUT",
+            &get_route,
+            None,
+            r#"{"permissions":"read,download"}"#,
+            &state,
+        )
+        .await
+        .unwrap_or_else(|error| panic!("{get_route}: {error}"));
+        record!(
+            "PUT",
+            "/api/v0/share-grants/{id}",
+            "nominal-status-headers-body",
+            update.status == "200 OK"
+        );
+
+        let readback = super::route_http_request("GET", &get_route, None, "", &state)
+            .await
+            .unwrap_or_else(|error| panic!("{get_route}: {error}"));
+        let readback_json =
+            serde_json::from_str::<serde_json::Value>(&readback.body).unwrap_or_default();
+        record!(
+            "PUT",
+            "/api/v0/share-grants/{id}",
+            "mutation-side-effects-and-readback",
+            readback_json["permissions"] == "read,download"
+        );
+
+        let delete = super::route_http_request("DELETE", &get_route, None, "", &state)
+            .await
+            .unwrap_or_else(|error| panic!("{get_route}: {error}"));
+        record!(
+            "DELETE",
+            "/api/v0/share-grants/{id}",
+            "nominal-status-headers-body",
+            delete.status == "200 OK"
+        );
+
+        let after_delete = super::route_http_request("GET", &get_route, None, "", &state)
+            .await
+            .unwrap_or_else(|error| panic!("{get_route}: {error}"));
+        record!(
+            "DELETE",
+            "/api/v0/share-grants/{id}",
+            "mutation-side-effects-and-readback",
+            after_delete.status == "404 Not Found"
+        );
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("share_grants_crud.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api share-grants-crud mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
