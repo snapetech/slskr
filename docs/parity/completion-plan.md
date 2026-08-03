@@ -30,7 +30,7 @@ scoring artifact -- confirmed, all report `complete` with
 
 Parity is **not achieved**. Every planned workstream has an executable
 certification denominator. The literal proof-case closure ratio is now
-**9,194 / 19,122 = 48.08%** (was 853 / 19,122 = 4.46% at the start of this
+**9,200 / 19,122 = 48.11%** (was 853 / 19,122 = 4.46% at the start of this
 review cycle), but this is not a product-completion estimate: most
 generated cases are Cartesian proof dimensions initialized as `needs-proof`,
 including behavior already implemented and tested in slskR. Product
@@ -124,10 +124,11 @@ content-bound stream tickets with real revocation-on-grant-delete,
 port-forwarding bounded-listing and gateway-pinning security checks,
 security-reputation real-score/violation-tracking checks,
 realm-subject-index conflict-detection and authority-decision
-lifecycle) brought the workstream to 460/5,300 (a `pod_management_
-routes_persist_crud_members_and_bindings` differential was found
-already credited from earlier in this session and a duplicate attempt
-was discarded before committing).
+lifecycle, musicbrainz-overlay export-review/approval real-gating and
+idempotent-approval checks) brought the workstream to 466/5,300 (a
+`pod_management_routes_persist_crud_members_and_bindings` differential
+was found already credited from earlier in this session and a
+duplicate attempt was discarded before committing).
 
 The relay-agent/controller subsystem (deferred as a genuinely missing
 capability, see earlier notes) was investigated further this session to
