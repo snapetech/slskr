@@ -6312,6 +6312,7 @@ impl BrowseStore {
         }
     }
 
+    #[allow(dead_code)]
     fn from_persisted(records: Vec<crate::persistence::BrowseRecord>) -> Self {
         let mut next_indirect_token = 1_u32;
         let mut updated_at = unix_timestamp();
@@ -60714,15 +60715,9 @@ async fn serve(invocation: ServeInvocation) -> Result<(), String> {
         RoomStore::new()
     };
     room_store.merge_configured(&config.core_workflow.rooms);
-    let browse_store = if let Some(db) = db.as_ref() {
-        let records = db
-            .list_browse_records(EVENT_HISTORY_LIMIT as i32, 0)
-            .await
-            .map_err(|error| format!("failed to load persisted browse records: {error}"))?;
-        BrowseStore::from_persisted(records)
-    } else {
-        BrowseStore::new()
-    };
+    // Browse state is transient - don't rehydrate persisted remote browse results
+    // Frozen targets perform fresh browse operations and don't persist remote results
+    let browse_store = BrowseStore::new();
     let user_note_store = if let Some(db) = db.as_ref() {
         let records = db
             .list_user_notes(EVENT_HISTORY_LIMIT as i32, 0)
@@ -116974,11 +116969,9 @@ mod tests {
             super::AppConfig::from_layers(None, FileConfig::default(), &env).expect("config");
 
         let db_path = state_dir.join("slskr.db");
-        let db = crate::persistence::DatabaseManager::new(
-            db_path.to_str().unwrap_or("slskr.db"),
-        )
-        .await
-        .expect("database");
+        let db = crate::persistence::DatabaseManager::new(db_path.to_str().unwrap_or("slskr.db"))
+            .await
+            .expect("database");
 
         let record = crate::persistence::TransferRecord {
             id: "42".to_owned(),
@@ -117014,7 +117007,11 @@ mod tests {
 
         queue.rehydrate_from_database(&db).await;
 
-        assert_eq!(queue.entries.len(), 1, "should have rehydrated one transfer");
+        assert_eq!(
+            queue.entries.len(),
+            1,
+            "should have rehydrated one transfer"
+        );
         let entry = &queue.entries[0];
         assert_eq!(entry.id, 42);
         assert_eq!(entry.direction, 0);
