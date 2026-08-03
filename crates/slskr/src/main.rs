@@ -121546,6 +121546,183 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof crediting the 6 registered routes found
+    /// inside `compatibility_projections_use_local_state_for_system_
+    /// mutation_shells` (a 53-`route_http_request`-call test found via
+    /// call-density scan): bridge admin config/start/stop/status, and
+    /// federation diagnostics/logs. The other ~47 calls in that source
+    /// test hit slskR-internal bare `/api/...` compat-shell routes
+    /// (`/api/admin/*`, `/api/application`, `/api/relay*`, `/api/batch`,
+    /// `/api/profile/me`, etc.) with zero registry entry in either
+    /// frozen target -- confirmed route-by-route, not creditable.
+    /// slskdN-only (confirmed against the frozen registry).
+    #[tokio::test]
+    async fn controller_api_differential_bridge_admin_and_federation_diagnostics() {
+        let target = "slskdn";
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($method:expr, $route:expr, $case:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!("{target} {} {} [{}]", $method, $route, $case));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": $method,
+                    "route": $route,
+                    "case": $case,
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        let (state, _receiver) = test_state();
+
+        let bridge_config = super::route_http_request(
+            "PUT",
+            "/api/v0/bridge/admin/config",
+            None,
+            r#"{"maxClients":4,"enabled":true}"#,
+            &state,
+        )
+        .await
+        .expect("bridge config update");
+        let bridge_config_json =
+            serde_json::from_str::<serde_json::Value>(&bridge_config.body).unwrap_or_default();
+        record!(
+            "PUT",
+            "/api/v0/bridge/admin/config",
+            "nominal-status-headers-body",
+            bridge_config.status == "200 OK"
+        );
+        record!(
+            "PUT",
+            "/api/v0/bridge/admin/config",
+            "mutation-side-effects-and-readback",
+            bridge_config_json["persisted"] == true
+                && bridge_config_json["configUpdates"] == 1
+                && bridge_config_json["acceptedKeys"]
+                    .as_array()
+                    .is_some_and(|keys| keys.iter().any(|key| key == "enabled"))
+        );
+
+        let bridge_start = super::route_http_request("POST", "/api/v0/bridge/start", None, "{}", &state)
+            .await
+            .expect("bridge start");
+        let bridge_start_json =
+            serde_json::from_str::<serde_json::Value>(&bridge_start.body).unwrap_or_default();
+        record!(
+            "POST",
+            "/api/v0/bridge/start",
+            "nominal-status-headers-body",
+            bridge_start.status == "202 Accepted" && bridge_start_json["persisted"] == true
+        );
+
+        let bridge_status = super::route_http_request("GET", "/api/bridge/status", None, "", &state)
+            .await
+            .expect("bridge status");
+        let bridge_status_json =
+            serde_json::from_str::<serde_json::Value>(&bridge_status.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/api/bridge/status",
+            "nominal-status-headers-body",
+            bridge_status.status == "200 OK"
+        );
+        record!(
+            "GET",
+            "/api/bridge/status",
+            "populated-dynamic-state",
+            bridge_status_json["configUpdates"] == 1
+        );
+
+        let bridge_stop = super::route_http_request("POST", "/api/v0/bridge/stop", None, "{}", &state)
+            .await
+            .expect("bridge stop");
+        let bridge_stop_json =
+            serde_json::from_str::<serde_json::Value>(&bridge_stop.body).unwrap_or_default();
+        record!(
+            "POST",
+            "/api/v0/bridge/stop",
+            "nominal-status-headers-body",
+            bridge_stop.status == "200 OK" && bridge_stop_json["stopped"] == true
+        );
+
+        let federation =
+            super::route_http_request("GET", "/api/v0/federation/diagnostics", None, "", &state)
+                .await
+                .expect("federation diagnostics");
+        let federation_json =
+            serde_json::from_str::<serde_json::Value>(&federation.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/api/v0/federation/diagnostics",
+            "nominal-status-headers-body",
+            federation.status == "200 OK"
+        );
+        record!(
+            "GET",
+            "/api/v0/federation/diagnostics",
+            "populated-dynamic-state",
+            federation_json["federation"]["enabled"] == false
+                && federation_json["federation"]["mode"] == "Hermit"
+                && federation_json["federation"]["exposure"] == "Hermit"
+                && federation_json["publishing"]["publishableDomains"]
+                    == serde_json::json!(["music"])
+                && federation_json["pods"]["joinSignatureMode"] == "Off"
+                && federation_json["mesh"]["selfPeerIdConfigured"] == true
+                && federation_json["warnings"]
+                    == serde_json::json!([
+                        "Pod join signatures are not enforced.",
+                        "Pod message signatures are not enforced."
+                    ])
+        );
+
+        super::record_daemon_log(
+            &state,
+            super::logging::LogLevel::Info,
+            "compat.event",
+            "differential log entry",
+        )
+        .await;
+        let logs = super::route_http_request("GET", "/api/v0/logs", None, "", &state)
+            .await
+            .expect("logs");
+        let logs_json = serde_json::from_str::<serde_json::Value>(&logs.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/api/v0/logs",
+            "nominal-status-headers-body",
+            logs.status == "200 OK"
+        );
+        record!(
+            "GET",
+            "/api/v0/logs",
+            "populated-dynamic-state",
+            logs_json[0]["category"] == "compat.event"
+                && logs_json[0]["context"] == "compat.event"
+                && logs_json[0]["message"] == "differential log entry"
+        );
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("bridge_admin_and_federation_diagnostics.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api bridge-admin-federation-diagnostics mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
