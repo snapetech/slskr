@@ -119200,6 +119200,148 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof crediting the ActivityPub music-actor and
+    /// WebFinger discovery routes' cases, independently re-derived from
+    /// `activitypub_music_actor_and_webfinger_match_target_discovery_
+    /// contract`'s real actor/webfinger response-shape and content-type
+    /// checks. slskdN-only (confirmed against the frozen registry).
+    #[tokio::test]
+    async fn controller_api_differential_activitypub_actor_and_webfinger() {
+        let target = "slskdn";
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($route:expr, $case:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!("{target} GET {} [{}]", $route, $case));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": "GET",
+                    "route": $route,
+                    "case": $case,
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        let (state, _receiver) = test_state_with_env(
+            MapEnv::default()
+                .with("FEDERATION_ENABLED", "true")
+                .with("FEDERATION_MODE", "Public")
+                .with("FEDERATION_DOMAIN", "differential.example")
+                .with("FEDERATION_BASE_URL", "https://differential.example/")
+                .with("FEDERATION_PAGE_SIZE", "10"),
+        );
+
+        let actor = super::route_http_request("GET", "/actors/music", None, "", &state)
+            .await
+            .expect("music actor response");
+        let actor_json = serde_json::from_str::<serde_json::Value>(&actor.body).unwrap_or_default();
+        record!(
+            "/actors/{actorName}",
+            "nominal-status-headers-body",
+            actor.status == "200 OK" && actor.content_type == "application/activity+json"
+        );
+        record!(
+            "/actors/{actorName}",
+            "populated-dynamic-state",
+            actor_json["id"] == "https://differential.example/actors/music"
+                && actor_json["type"] == "Service"
+                && actor_json["preferredUsername"] == "music"
+                && actor_json["name"] == "Music Library"
+                && actor_json["publicKey"]["publicKeyPem"]
+                    .as_str()
+                    .is_some_and(|key| key.starts_with("-----BEGIN PUBLIC KEY-----"))
+        );
+
+        let generic = super::route_http_request("GET", "/actors/books", None, "", &state)
+            .await
+            .expect("generic actor response");
+        record!(
+            "/actors/{actorName}",
+            "missing-empty-or-conflict-state",
+            generic.status == "404 Not Found"
+        );
+
+        let acct = super::route_http_request(
+            "GET",
+            "/.well-known/webfinger?resource=acct%3Amusic%40differential.example",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("acct WebFinger response");
+        let acct_json = serde_json::from_str::<serde_json::Value>(&acct.body).unwrap_or_default();
+        record!(
+            "/.well-known/webfinger",
+            "nominal-status-headers-body",
+            acct.status == "200 OK" && acct.content_type == "application/jrd+json"
+        );
+        record!(
+            "/.well-known/webfinger",
+            "populated-dynamic-state",
+            acct_json["subject"] == "acct:music@differential.example"
+                && acct_json["links"].as_array().map(Vec::len) == Some(2)
+        );
+
+        let https_resource = super::route_http_request(
+            "GET",
+            "/.well-known/webfinger?resource=https%3A%2F%2Fdifferential.example%2F%40music",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("https WebFinger response");
+        let https_json =
+            serde_json::from_str::<serde_json::Value>(&https_resource.body).unwrap_or_default();
+        record!(
+            "/.well-known/webfinger",
+            "mutation-side-effects-and-readback",
+            https_resource.status == "200 OK"
+                && https_json["subject"] == "https://differential.example/@music"
+                && https_json["links"].as_array().map(Vec::len) == Some(2)
+        );
+
+        let filtered = super::route_http_request(
+            "GET",
+            "/.well-known/webfinger?resource=acct%3Amusic%40differential.example&rel=self",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("filtered WebFinger response");
+        let filtered_json =
+            serde_json::from_str::<serde_json::Value>(&filtered.body).unwrap_or_default();
+        record!(
+            "/.well-known/webfinger",
+            "malformed-path-query-or-body",
+            filtered.status == "200 OK"
+                && filtered_json["links"].as_array().map(Vec::len) == Some(1)
+        );
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("activitypub_actor_and_webfinger.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api activitypub-actor-webfinger mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
