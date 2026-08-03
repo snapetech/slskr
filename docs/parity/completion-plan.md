@@ -30,7 +30,7 @@ scoring artifact -- confirmed, all report `complete` with
 
 Parity is **not achieved**. Every planned workstream has an executable
 certification denominator. The literal proof-case closure ratio is now
-**9,200 / 19,122 = 48.11%** (was 853 / 19,122 = 4.46% at the start of this
+**9,210 / 19,122 = 48.16%** (was 853 / 19,122 = 4.46% at the start of this
 review cycle), but this is not a product-completion estimate: most
 generated cases are Cartesian proof dimensions initialized as `needs-proof`,
 including behavior already implemented and tested in slskR. Product
@@ -125,7 +125,8 @@ port-forwarding bounded-listing and gateway-pinning security checks,
 security-reputation real-score/violation-tracking checks,
 realm-subject-index conflict-detection and authority-decision
 lifecycle, musicbrainz-overlay export-review/approval real-gating and
-idempotent-approval checks) brought the workstream to 466/5,300 (a
+idempotent-approval checks, pod-membership-workflow real queued join/
+leave/accept/cancel lifecycle) brought the workstream to 476/5,300 (a
 `pod_management_routes_persist_crud_members_and_bindings` differential
 was found already credited from earlier in this session and a
 duplicate attempt was discarded before committing).
