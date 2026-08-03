@@ -117750,6 +117750,386 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof crediting the remaining tail of
+    /// `openapi_mutation_dtos_match_slskdn_status_and_field_contracts`
+    /// (everything after the Collections/CollectionItems lifecycle, which
+    /// `controller_api_differential_collections_items_crud_reorder_
+    /// lifecycle` already credits): mediacore content-id registration
+    /// validation, nowplaying, podcore content-pod creation, the full
+    /// wishlist lifecycle, overlay IP blocklisting, quarantine-jury
+    /// request validation, and security IP bans. slskdN-only (confirmed
+    /// against the frozen registry).
+    #[tokio::test]
+    async fn controller_api_differential_openapi_mutation_dtos_tail() {
+        let target = "slskdn";
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($method:expr, $route:expr, $case:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!("{target} {} {} [{}]", $method, $route, $case));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": $method,
+                    "route": $route,
+                    "case": $case,
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        let (state, _receiver) = test_state();
+
+        let invalid_content_id = super::route_http_request(
+            "POST",
+            "/api/v0/mediacore/contentid/register",
+            None,
+            r#"{"externalId":"mbid","contentId":"invalid"}"#,
+            &state,
+        )
+        .await
+        .expect("register invalid content id");
+        record!(
+            "POST",
+            "/api/v0/mediacore/contentid/register",
+            "malformed-path-query-or-body",
+            invalid_content_id.status == "400 Bad Request"
+        );
+
+        let valid_content_id = super::route_http_request(
+            "POST",
+            "/api/v0/mediacore/contentid/register",
+            None,
+            r#"{"externalId":"mbid","contentId":"content:music:recording:mbid"}"#,
+            &state,
+        )
+        .await
+        .expect("register valid content id");
+        record!(
+            "POST",
+            "/api/v0/mediacore/contentid/register",
+            "mutation-side-effects-and-readback",
+            valid_content_id.status == "200 OK"
+                && valid_content_id.body.contains("mapping registered successfully")
+        );
+
+        let mut content_id_gets_pass = true;
+        for (path, expected) in [
+            (
+                "/api/v0/mediacore/contentid/exists/mbid",
+                r#"{"exists":true}"#,
+            ),
+            (
+                "/api/v0/mediacore/contentid/external/content%3Amusic%3Arecording%3Ambid",
+                r#"{"externalIds":["mbid"]}"#,
+            ),
+            (
+                "/api/v0/mediacore/contentid/domain/music",
+                r#""contentIds":["content:music:recording:mbid"]"#,
+            ),
+            (
+                "/api/v0/mediacore/contentid/domain/music/type/recording",
+                r#""contentIds":["content:music:recording:mbid"]"#,
+            ),
+        ] {
+            let response = super::route_http_request("GET", path, None, "", &state)
+                .await
+                .unwrap_or_else(|error| panic!("{path}: {error}"));
+            content_id_gets_pass &=
+                response.status == "200 OK" && response.body.contains(expected);
+        }
+        record!(
+            "GET",
+            "/api/v0/mediacore/contentid/exists/{externalId}",
+            "populated-dynamic-state",
+            content_id_gets_pass
+        );
+        record!(
+            "GET",
+            "/api/v0/mediacore/contentid/external/{contentId}",
+            "populated-dynamic-state",
+            content_id_gets_pass
+        );
+        record!(
+            "GET",
+            "/api/v0/mediacore/contentid/domain/{domain}",
+            "populated-dynamic-state",
+            content_id_gets_pass
+        );
+        record!(
+            "GET",
+            "/api/v0/mediacore/contentid/domain/{domain}/type/{type}",
+            "populated-dynamic-state",
+            content_id_gets_pass
+        );
+
+        let now_playing = super::route_http_request(
+            "PUT",
+            "/api/v0/nowplaying",
+            None,
+            r#"{"artist":"Artist","title":"Track","album":"Album"}"#,
+            &state,
+        )
+        .await
+        .expect("set now playing");
+        record!(
+            "PUT",
+            "/api/v0/nowplaying",
+            "nominal-status-headers-body",
+            now_playing.status == "204 No Content" && now_playing.body.is_empty()
+        );
+
+        let invalid_content_pod = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/content/create-pod",
+            None,
+            r#"{"podId":"pod:invalid","name":"Differential","visibility":"Listed","contentId":"content:music:recording:differential"}"#,
+            &state,
+        )
+        .await
+        .expect("create invalid content pod");
+        record!(
+            "POST",
+            "/api/v0/podcore/content/create-pod",
+            "malformed-path-query-or-body",
+            invalid_content_pod.status == "400 Bad Request"
+        );
+
+        let content_pod = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/content/create-pod",
+            None,
+            r#"{"podId":"pod:00000000000000000000000000000003","name":"Differential","visibility":"Listed","contentId":"content:music:recording:differential","tags":[],"channels":[],"externalBindings":[]}"#,
+            &state,
+        )
+        .await
+        .expect("create valid content pod");
+        let content_pod_json =
+            serde_json::from_str::<serde_json::Value>(&content_pod.body).unwrap_or_default();
+        record!(
+            "POST",
+            "/api/v0/podcore/content/create-pod",
+            "nominal-status-headers-body",
+            content_pod.status == "201 Created"
+                && content_pod_json["focusContentId"] == "content:music:recording:differential"
+        );
+
+        let wishlist_item = super::route_http_request(
+            "POST",
+            "/api/v0/wishlist",
+            None,
+            r#"{"searchText":"differential","filter":"differential","enabled":true,"autoDownload":true,"maxResults":1,"maxDownloads":1}"#,
+            &state,
+        )
+        .await
+        .expect("create wishlist item");
+        let wishlist_json =
+            serde_json::from_str::<serde_json::Value>(&wishlist_item.body).unwrap_or_default();
+        let wishlist_id = wishlist_json["id"].as_str().unwrap_or_default().to_owned();
+        record!(
+            "POST",
+            "/api/v0/wishlist",
+            "nominal-status-headers-body",
+            wishlist_item.status == "201 Created"
+        );
+        record!(
+            "POST",
+            "/api/v0/wishlist",
+            "populated-dynamic-state",
+            uuid::Uuid::parse_str(&wishlist_id).is_ok()
+                && wishlist_json["searchText"] == "differential"
+                && wishlist_json["maxResults"] == 1
+                && wishlist_json.get("artist").is_none()
+        );
+
+        let updated_wishlist = super::route_http_request(
+            "PUT",
+            &format!("/api/v0/wishlist/{wishlist_id}"),
+            None,
+            r#"{"searchText":"updated-differential","filter":"lossless","enabled":true,"autoDownload":false,"maxResults":5,"maxDownloads":1}"#,
+            &state,
+        )
+        .await
+        .expect("update wishlist item");
+        let updated_wishlist_json =
+            serde_json::from_str::<serde_json::Value>(&updated_wishlist.body).unwrap_or_default();
+        record!(
+            "PUT",
+            "/api/v0/wishlist/{id}",
+            "mutation-side-effects-and-readback",
+            updated_wishlist_json["searchText"] == "updated-differential"
+                && updated_wishlist_json["maxResults"] == 5
+        );
+
+        let ignored_result = super::route_http_request(
+            "POST",
+            &format!("/api/v0/wishlist/{wishlist_id}/ignored-results"),
+            None,
+            r#"{"username":"differential-peer","directory":"/tmp/slskdn-differential"}"#,
+            &state,
+        )
+        .await
+        .expect("add ignored result");
+        let ignored_json =
+            serde_json::from_str::<serde_json::Value>(&ignored_result.body).unwrap_or_default();
+        let ignored_id = ignored_json["id"].as_str().unwrap_or_default().to_owned();
+        record!(
+            "POST",
+            "/api/v0/wishlist/{id}/ignored-results",
+            "nominal-status-headers-body",
+            ignored_result.status == "201 Created"
+        );
+        record!(
+            "POST",
+            "/api/v0/wishlist/{id}/ignored-results",
+            "populated-dynamic-state",
+            ignored_json["wishlistItemId"] == wishlist_id
+                && ignored_json["directory"] == "/tmp/slskdn-differential"
+        );
+
+        let deleted_ignored = super::route_http_request(
+            "DELETE",
+            &format!("/api/v0/wishlist/{wishlist_id}/ignored-results/{ignored_id}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("delete ignored result");
+        record!(
+            "DELETE",
+            "/api/v0/wishlist/{id}/ignored-results/{ignoredResultId}",
+            "nominal-status-headers-body",
+            deleted_ignored.status == "204 No Content"
+        );
+
+        let marked_viewed = super::route_http_request(
+            "POST",
+            &format!("/api/v0/wishlist/{wishlist_id}/mark-viewed"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("mark wishlist viewed");
+        record!(
+            "POST",
+            "/api/v0/wishlist/{id}/mark-viewed",
+            "nominal-status-headers-body",
+            marked_viewed.status == "204 No Content"
+        );
+
+        let deleted_wishlist = super::route_http_request(
+            "DELETE",
+            &format!("/api/v0/wishlist/{wishlist_id}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("delete wishlist item");
+        record!(
+            "DELETE",
+            "/api/v0/wishlist/{id}",
+            "nominal-status-headers-body",
+            deleted_wishlist.status == "204 No Content"
+        );
+
+        let block = super::route_http_request(
+            "POST",
+            "/api/v0/overlay/blocklist/ip",
+            None,
+            r#"{"ip":"192.0.2.9","reason":"differential"}"#,
+            &state,
+        )
+        .await
+        .expect("block ip");
+        record!(
+            "POST",
+            "/api/v0/overlay/blocklist/ip",
+            "nominal-status-headers-body",
+            block.status == "200 OK" && block.body == r#"{"message":"IP address blocked"}"#
+        );
+
+        let invalid_jury = super::route_http_request(
+            "POST",
+            "/api/v0/quarantine-jury/requests",
+            None,
+            r#"{"evidence":[],"jurors":[],"minJurorVotes":1}"#,
+            &state,
+        )
+        .await
+        .expect("validate invalid jury request");
+        record!(
+            "POST",
+            "/api/v0/quarantine-jury/requests",
+            "malformed-path-query-or-body",
+            invalid_jury.status == "400 Bad Request"
+                && invalid_jury.body.contains("trusted juror")
+                && invalid_jury.body.contains("minimal evidence")
+        );
+
+        let security_ban = super::route_http_request(
+            "POST",
+            "/api/v0/security/bans/ip",
+            None,
+            r#"{"ipAddress":"198.51.100.9","reason":"differential"}"#,
+            &state,
+        )
+        .await
+        .expect("ban ip");
+        record!(
+            "POST",
+            "/api/v0/security/bans/ip",
+            "nominal-status-headers-body",
+            security_ban.status == "200 OK" && security_ban.body.is_empty()
+        );
+
+        let security_bans =
+            super::route_http_request("GET", "/api/v0/security/bans", None, "", &state)
+                .await
+                .expect("list security bans");
+        let security_bans_json =
+            serde_json::from_str::<serde_json::Value>(&security_bans.body).unwrap_or_default();
+        let security_record = security_bans_json
+            .as_array()
+            .and_then(|records| {
+                records
+                    .iter()
+                    .find(|record| record["key"] == "IP:198.51.100.9")
+            })
+            .cloned()
+            .unwrap_or_default();
+        record!(
+            "GET",
+            "/api/v0/security/bans",
+            "populated-dynamic-state",
+            security_bans.status == "200 OK"
+                && security_record["reason"] == "differential"
+                && security_record["isPermanent"] == false
+                && security_record["timeRemaining"].as_str().is_some()
+        );
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("openapi_mutation_dtos_tail.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api openapi-mutation-dtos-tail mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
