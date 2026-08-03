@@ -7245,7 +7245,8 @@ impl SoulseekConnectionSettings {
                 "SLSKD_SLSK_AUTO_ACKNOWLEDGE_PRIVILEGE_NOTIFICATIONS",
                 "SLSK_AUTO_ACKNOWLEDGE_PRIVILEGE_NOTIFICATIONS",
             ],
-            file.auto_acknowledge_privilege_notifications.unwrap_or(false),
+            file.auto_acknowledge_privilege_notifications
+                .unwrap_or(false),
         )?;
         Ok(Self {
             buffer_read,

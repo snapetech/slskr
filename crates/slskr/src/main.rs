@@ -68075,14 +68075,19 @@ async fn project_server_message(
             })
             .await;
             // Auto-acknowledge privilege notifications if configured
-            if state.config.soulseek_connection.auto_acknowledge_privilege_notifications {
+            if state
+                .config
+                .soulseek_connection
+                .auto_acknowledge_privilege_notifications
+            {
                 if let Err(error) = session
                     .send_server_message(ServerMessage::AckNotifyPrivileges { token: *seconds })
                     .await
                 {
                     update_session(state, |snapshot| {
-                        snapshot.last_error =
-                            Some(format!("privilege notification auto-acknowledgment failed: {error}"));
+                        snapshot.last_error = Some(format!(
+                            "privilege notification auto-acknowledgment failed: {error}"
+                        ));
                     })
                     .await;
                 } else {
@@ -68209,14 +68214,19 @@ async fn project_server_message(
                 }
             }
             // Auto-acknowledge private messages if configured
-            if state.config.soulseek_connection.auto_acknowledge_private_messages {
+            if state
+                .config
+                .soulseek_connection
+                .auto_acknowledge_private_messages
+            {
                 if let Err(error) = session
                     .send_server_message(ServerMessage::MessageAcked { id: message.id })
                     .await
                 {
                     update_session(state, |snapshot| {
-                        snapshot.last_error =
-                            Some(format!("private-message auto-acknowledgment failed: {error}"));
+                        snapshot.last_error = Some(format!(
+                            "private-message auto-acknowledgment failed: {error}"
+                        ));
                     })
                     .await;
                 } else {
@@ -112590,7 +112600,11 @@ mod tests {
                     let (header, _) = profile_header_and_credential(profile, &rule.scheme);
                     let expected = expected_outcome(rule, profile);
                     let actual = match super::routing::check_route_auth(
-                        &config, &rule.method, &path, header, &headers,
+                        &config,
+                        &rule.method,
+                        &path,
+                        header,
+                        &headers,
                     ) {
                         Ok(()) => Outcome::Allowed,
                         Err("unauthorized") => Outcome::Unauthorized,
@@ -112628,8 +112642,7 @@ mod tests {
         fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
         fs::write(
             evidence_dir.join("security-authorization.json"),
-            serde_json::to_string_pretty(&ledger)
-                .expect("serialize security-authorization ledger"),
+            serde_json::to_string_pretty(&ledger).expect("serialize security-authorization ledger"),
         )
         .expect("write security-authorization ledger");
 
