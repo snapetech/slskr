@@ -67227,6 +67227,7 @@ async fn connect_session(
     sync_contact_statuses(state, &mut new_session).await;
     sync_room_tickers(state, &mut new_session).await;
     publish_configured_interests(state, &mut new_session).await;
+    check_privileges_after_login(state).await;
     dispatch_queued_downloads_after_login(state).await;
     *session = Some(new_session);
     record_daemon_log(
@@ -67400,6 +67401,26 @@ async fn sync_room_tickers(state: &AppState, session: &mut ServerSession<TcpStre
             )
             .await;
         }
+    }
+}
+
+async fn check_privileges_after_login(state: &AppState) {
+    record_daemon_log(
+        state,
+        logging::LogLevel::Info,
+        "session",
+        "checking privileges after login",
+    )
+    .await;
+
+    if let Err(error) = send_session_command(state, SessionCommand::CheckPrivileges).await {
+        record_daemon_log(
+            state,
+            logging::LogLevel::Warn,
+            "session",
+            format!("failed to check privileges after login: {}", error),
+        )
+        .await;
     }
 }
 
