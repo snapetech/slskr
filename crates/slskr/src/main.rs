@@ -120564,6 +120564,354 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof crediting 10 auxiliary mutation routes'
+    /// cases, independently re-derived from `versioned_auxiliary_
+    /// mutations_match_slskdn_status_and_dto_contracts`'s real status/DTO
+    /// checks and `enabled_warm_cache_hints_normalize_persist_and_bound_
+    /// popularity`'s real persisted-popularity-counter and input-bounds
+    /// checks. slskdN-only (confirmed against the frozen registry;
+    /// `/api/v0/events/{eventType}` has no registry entry in either
+    /// target and is skipped as genuinely unwireable).
+    #[tokio::test]
+    async fn controller_api_differential_versioned_auxiliary_mutations() {
+        let target = "slskdn";
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($method:expr, $route:expr, $case:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!("{target} {} {} [{}]", $method, $route, $case));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": $method,
+                    "route": $route,
+                    "case": $case,
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        let (state, _receiver) = test_state();
+
+        for path in ["/api/slskdn/warm-cache/hints", "/api/v0/slskdn/warm-cache/hints"] {
+            let response = super::route_http_request(
+                "POST",
+                path,
+                None,
+                r#"{"mb_release_ids":[],"mb_artist_ids":[],"mb_label_ids":[]}"#,
+                &state,
+            )
+            .await
+            .unwrap_or_else(|error| panic!("{path}: {error}"));
+            record!(
+                "POST",
+                "/api/v0/slskdn/warm-cache/hints",
+                "malformed-path-query-or-body",
+                response.status == "400 Bad Request"
+                    && response.body == r#"{"error":"Warm cache not enabled"}"#
+            );
+        }
+
+        let shares_delete_before = super::route_http_request("DELETE", "/api/v0/shares", None, "", &state)
+            .await
+            .expect("no scan to cancel");
+        record!(
+            "DELETE",
+            "/api/v0/shares",
+            "missing-empty-or-conflict-state",
+            shares_delete_before.status == "404 Not Found"
+        );
+
+        let scan = super::route_http_request("PUT", "/api/v0/shares", None, "", &state)
+            .await
+            .expect("start share scan");
+        record!(
+            "PUT",
+            "/api/v0/shares",
+            "nominal-status-headers-body",
+            scan.status == "200 OK"
+        );
+
+        let cancelled = super::route_http_request("DELETE", "/api/v0/shares", None, "", &state)
+            .await
+            .expect("cancel completed scan");
+        record!(
+            "DELETE",
+            "/api/v0/shares",
+            "mutation-side-effects-and-readback",
+            cancelled.status == "404 Not Found"
+        );
+
+        let invite = super::route_http_request(
+            "POST",
+            "/api/v0/profile/invite",
+            None,
+            r#"{"expiresInHours":1}"#,
+            &state,
+        )
+        .await
+        .expect("profile invite");
+        let invite_json = serde_json::from_str::<serde_json::Value>(&invite.body).unwrap_or_default();
+        record!(
+            "POST",
+            "/api/v0/profile/invite",
+            "nominal-status-headers-body",
+            invite.status == "200 OK"
+        );
+        record!(
+            "POST",
+            "/api/v0/profile/invite",
+            "mutation-side-effects-and-readback",
+            invite_json["inviteLink"]
+                .as_str()
+                .is_some_and(|link| link.starts_with("slskdn://invite/"))
+                && invite_json["friendCode"]
+                    .as_str()
+                    .is_some_and(|code| code.split('-').map(str::len).collect::<Vec<_>>() == vec![5, 5, 5, 5])
+        );
+
+        let csv_body = r#"{"csvText":"Artist,Track Title,Album\nDifferential Auxiliary,Parity Track,Contract Album","filter":"differential-auxiliary","enabled":true,"autoDownload":true,"maxResults":1,"includeAlbum":true}"#;
+        let imported = super::route_http_request(
+            "POST",
+            "/api/v0/wishlist/import/csv",
+            None,
+            csv_body,
+            &state,
+        )
+        .await
+        .expect("import csv");
+        let imported_json = serde_json::from_str::<serde_json::Value>(&imported.body).unwrap_or_default();
+        record!(
+            "POST",
+            "/api/v0/wishlist/import/csv",
+            "nominal-status-headers-body",
+            imported.status == "200 OK"
+                && imported_json["totalRows"] == 1
+                && imported_json["createdCount"] == 1
+                && imported_json["duplicateCount"] == 0
+                && imported_json["skippedCount"] == 0
+                && imported_json["createdItems"][0]["searchText"]
+                    == "Differential Auxiliary Contract Album"
+                && imported_json["createdItems"][0]["maxResults"] == 1
+                && imported_json["createdItems"][0].get("artist").is_none()
+        );
+
+        let duplicate = super::route_http_request(
+            "POST",
+            "/api/v0/wishlist/import/csv",
+            None,
+            csv_body,
+            &state,
+        )
+        .await
+        .expect("import duplicate csv");
+        let duplicate_json =
+            serde_json::from_str::<serde_json::Value>(&duplicate.body).unwrap_or_default();
+        record!(
+            "POST",
+            "/api/v0/wishlist/import/csv",
+            "mutation-side-effects-and-readback",
+            duplicate_json["createdCount"] == 0 && duplicate_json["duplicateCount"] == 1
+        );
+
+        let invalid_content = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/content/validate",
+            None,
+            r#""differential""#,
+            &state,
+        )
+        .await
+        .expect("validate invalid content id");
+        let invalid_content_json =
+            serde_json::from_str::<serde_json::Value>(&invalid_content.body).unwrap_or_default();
+        record!(
+            "POST",
+            "/api/v0/podcore/content/validate",
+            "malformed-path-query-or-body",
+            invalid_content_json["isValid"] == false
+                && invalid_content_json["contentId"] == "differential"
+                && invalid_content_json["errorMessage"]
+                    == "Invalid content ID format. Expected: content:<domain>:<type>:<id>"
+        );
+
+        let valid_content = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/content/validate",
+            None,
+            r#""content:music:recording:differential""#,
+            &state,
+        )
+        .await
+        .expect("validate valid content id");
+        let valid_content_json =
+            serde_json::from_str::<serde_json::Value>(&valid_content.body).unwrap_or_default();
+        record!(
+            "POST",
+            "/api/v0/podcore/content/validate",
+            "nominal-status-headers-body",
+            valid_content_json["isValid"] == true
+                && valid_content_json["metadata"]["domain"] == "music"
+                && valid_content_json["metadata"]["type"] == "recording"
+        );
+
+        let group = super::route_http_request(
+            "POST",
+            "/api/v0/sharegroups",
+            None,
+            r#"{"name":"Differential Group"}"#,
+            &state,
+        )
+        .await
+        .expect("create sharegroup");
+        let group_json = serde_json::from_str::<serde_json::Value>(&group.body).unwrap_or_default();
+        record!(
+            "POST",
+            "/api/v0/sharegroups",
+            "nominal-status-headers-body",
+            group.status == "201 Created"
+        );
+        record!(
+            "POST",
+            "/api/v0/sharegroups",
+            "mutation-side-effects-and-readback",
+            uuid::Uuid::parse_str(group_json["id"].as_str().unwrap_or_default()).is_ok()
+                && group_json["name"] == "Differential Group"
+                && group_json["ownerUserId"] == "Anonymous"
+                && group_json["createdAt"].as_str().is_some()
+                && group_json.get("members").is_none()
+        );
+
+        let profile = super::route_http_request(
+            "PUT",
+            "/api/v0/profile/me",
+            None,
+            r#"{"displayName":"Differential","avatar":"differential","capabilities":1,"endpoints":[]}"#,
+            &state,
+        )
+        .await
+        .expect("update profile");
+        let profile_json = serde_json::from_str::<serde_json::Value>(&profile.body).unwrap_or_default();
+        record!(
+            "PUT",
+            "/api/v0/profile/me",
+            "nominal-status-headers-body",
+            profile.status == "200 OK"
+        );
+        record!(
+            "PUT",
+            "/api/v0/profile/me",
+            "mutation-side-effects-and-readback",
+            [
+                "peerId", "publicKey", "displayName", "avatar", "capabilities", "endpoints",
+                "createdAt", "expiresAt", "signature",
+            ]
+            .iter()
+            .all(|key| profile_json.get(*key).is_some())
+                && profile_json["displayName"] == "Differential"
+                && profile_json["capabilities"] == 1
+        );
+
+        let verdict = super::route_http_request(
+            "POST",
+            "/api/v0/quarantine-jury/verdicts",
+            None,
+            r#"{"requestId":"00000000-0000-4000-8000-000000000006","juror":"differential","verdict":"NeedsManualReview"}"#,
+            &state,
+        )
+        .await
+        .expect("submit verdict for missing request");
+        record!(
+            "POST",
+            "/api/v0/quarantine-jury/verdicts",
+            "missing-empty-or-conflict-state",
+            verdict.status == "400 Bad Request"
+                && serde_json::from_str::<serde_json::Value>(&verdict.body).unwrap_or_default()
+                    == serde_json::json!({"isValid": false, "errors": ["Request not found."]})
+        );
+
+        let (warm_state, _warm_receiver) = test_state();
+        std::fs::write(
+            warm_state.config.state_dir.join("slskd.yml"),
+            "warmCache:\n  enabled: true\n",
+        )
+        .expect("write warm-cache config");
+        let accepted = super::route_http_request(
+            "POST",
+            "/api/v0/slskdn/warm-cache/hints",
+            None,
+            r#"{"mb_release_ids":[" rel-1 ","REL-1"],"mb_artist_ids":["artist-1"],"mb_label_ids":[]}"#,
+            &warm_state,
+        )
+        .await
+        .expect("accept warm-cache hints");
+        record!(
+            "POST",
+            "/api/v0/slskdn/warm-cache/hints",
+            "nominal-status-headers-body",
+            accepted.status == "200 OK" && accepted.body == r#"{"accepted":true}"#
+        );
+
+        let features = warm_state.controller_features.read().await;
+        let popularity_pass = features
+            .get("warm-cache/popularity/mb:release:rel-1")
+            .is_some_and(|value| value["hits"] == 1)
+            && features
+                .get("warm-cache/popularity/mb:artist:artist-1")
+                .is_some_and(|value| value["hits"] == 1);
+        drop(features);
+        record!(
+            "POST",
+            "/api/v0/slskdn/warm-cache/hints",
+            "mutation-side-effects-and-readback",
+            popularity_pass
+        );
+
+        let invalid_type = super::route_http_request(
+            "POST",
+            "/api/v0/slskdn/warm-cache/hints",
+            None,
+            r#"{"mb_release_ids":[42]}"#,
+            &warm_state,
+        )
+        .await
+        .expect("reject non-string release id");
+        let oversized = super::route_http_request(
+            "POST",
+            "/api/v0/slskdn/warm-cache/hints",
+            None,
+            &serde_json::json!({"mb_release_ids": ["x".repeat(129)]}).to_string(),
+            &warm_state,
+        )
+        .await
+        .expect("reject oversized release id");
+        record!(
+            "POST",
+            "/api/v0/slskdn/warm-cache/hints",
+            "malformed-path-query-or-body",
+            invalid_type.status == "400 Bad Request" && oversized.status == "400 Bad Request"
+        );
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("versioned_auxiliary_mutations.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api versioned-auxiliary-mutations mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
