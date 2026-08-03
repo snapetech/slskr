@@ -1546,6 +1546,32 @@ impl DatabaseManager {
         .execute(&self.pool)
         .await?;
 
+        query(
+            r#"
+            CREATE TABLE IF NOT EXISTS distributed_tree_state (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                branch_level INTEGER NOT NULL DEFAULT 0,
+                branch_root TEXT NOT NULL,
+                parent_username TEXT,
+                updated_at INTEGER NOT NULL
+            )
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
+        query(
+            r#"
+            CREATE TABLE IF NOT EXISTS distributed_children (
+                username TEXT PRIMARY KEY,
+                depth INTEGER NOT NULL DEFAULT 0,
+                updated_at INTEGER NOT NULL
+            )
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
         // Create indices for common queries
         query("CREATE INDEX IF NOT EXISTS idx_searches_created ON searches(created_at DESC)")
             .execute(&self.pool)
@@ -4544,6 +4570,92 @@ impl DatabaseManager {
 
         Ok(())
     }
+
+    /// Load distributed tree state
+    pub async fn load_distributed_tree_state(
+        &self,
+    ) -> Result<Option<(u32, String, Option<String>)>, Box<dyn std::error::Error>> {
+        let result = query_as::<_, (i64, String, Option<String>)>(
+            "SELECT branch_level, branch_root, parent_username FROM distributed_tree_state WHERE id = 1",
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(result.map(|(branch_level, branch_root, parent_username)| {
+            (branch_level as u32, branch_root, parent_username)
+        }))
+    }
+
+    /// Save distributed tree state
+    pub async fn save_distributed_tree_state(
+        &self,
+        branch_level: u32,
+        branch_root: &str,
+        parent_username: Option<&str>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
+
+        query(
+            r#"
+            INSERT OR REPLACE INTO distributed_tree_state (id, branch_level, branch_root, parent_username, updated_at)
+            VALUES (1, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(branch_level as i64)
+        .bind(branch_root)
+        .bind(parent_username)
+        .bind(now)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    /// Load distributed children
+    pub async fn load_distributed_children(
+        &self,
+    ) -> Result<Vec<(String, u32)>, Box<dyn std::error::Error>> {
+        let results = query_as::<_, (String, i64)>(
+            "SELECT username, depth FROM distributed_children ORDER BY username",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(results
+            .into_iter()
+            .map(|(username, depth)| (username, depth as u32))
+            .collect())
+    }
+
+    /// Save distributed children
+    pub async fn save_distributed_children(
+        &self,
+        children: &[(String, u32)],
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
+
+        // Clear existing children
+        query("DELETE FROM distributed_children")
+            .execute(&self.pool)
+            .await?;
+
+        // Insert new children
+        for (username, depth) in children {
+            query(
+                r#"
+                INSERT INTO distributed_children (username, depth, updated_at)
+                VALUES (?, ?, ?)
+                "#,
+            )
+            .bind(username)
+            .bind(*depth as i64)
+            .bind(now)
+            .execute(&self.pool)
+            .await?;
+        }
+
+        Ok(())
+    }
 }
 
 fn nonnegative_database_count(value: i64) -> Result<u64, std::num::TryFromIntError> {
@@ -5142,6 +5254,65 @@ mod tests {
 
         db.delete_webhook("hook_1").await.unwrap();
         assert!(db.list_webhooks().await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_distributed_tree_state_operations() {
+        let db = DatabaseManager::in_memory().await.unwrap();
+
+        // Initially no state
+        let state = db.load_distributed_tree_state().await.unwrap();
+        assert!(state.is_none());
+
+        // Initially no children
+        let children = db.load_distributed_children().await.unwrap();
+        assert!(children.is_empty());
+
+        // Save tree state
+        db.save_distributed_tree_state(5, "root-user", Some("parent-user"))
+            .await
+            .unwrap();
+
+        // Load tree state
+        let state = db.load_distributed_tree_state().await.unwrap();
+        assert!(state.is_some());
+        let (branch_level, branch_root, parent_username) = state.unwrap();
+        assert_eq!(branch_level, 5);
+        assert_eq!(branch_root, "root-user");
+        assert_eq!(parent_username, Some("parent-user".to_owned()));
+
+        // Save children
+        let children = vec![
+            ("child1".to_owned(), 2),
+            ("child2".to_owned(), 3),
+            ("child3".to_owned(), 1),
+        ];
+        db.save_distributed_children(&children).await.unwrap();
+
+        // Load children
+        let loaded_children = db.load_distributed_children().await.unwrap();
+        assert_eq!(loaded_children.len(), 3);
+        assert!(loaded_children.contains(&("child1".to_owned(), 2)));
+        assert!(loaded_children.contains(&("child2".to_owned(), 3)));
+        assert!(loaded_children.contains(&("child3".to_owned(), 1)));
+
+        // Update tree state
+        db.save_distributed_tree_state(10, "new-root", None)
+            .await
+            .unwrap();
+        let state = db.load_distributed_tree_state().await.unwrap();
+        assert!(state.is_some());
+        let (branch_level, branch_root, parent_username) = state.unwrap();
+        assert_eq!(branch_level, 10);
+        assert_eq!(branch_root, "new-root");
+        assert_eq!(parent_username, None);
+
+        // Update children (replaces all)
+        let new_children = vec![("child4".to_owned(), 5)];
+        db.save_distributed_children(&new_children).await.unwrap();
+        let loaded_children = db.load_distributed_children().await.unwrap();
+        assert_eq!(loaded_children.len(), 1);
+        assert_eq!(loaded_children[0], ("child4".to_owned(), 5));
     }
 
     #[tokio::test]

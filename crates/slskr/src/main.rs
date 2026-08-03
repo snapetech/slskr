@@ -14672,6 +14672,39 @@ impl DistributedRuntime {
         }
         value
     }
+
+    /// Load persisted distributed tree state
+    pub async fn load_persisted_state(&mut self, db: &crate::persistence::DatabaseManager) {
+        if let Ok(Some((branch_level, branch_root, parent_username))) =
+            db.load_distributed_tree_state().await
+        {
+            self.branch_level = branch_level;
+            self.branch_root = branch_root;
+            self.parent = parent_username;
+        }
+
+        if let Ok(children) = db.load_distributed_children().await {
+            self.child_depths = children.into_iter().collect();
+        }
+    }
+
+    /// Save distributed tree state to database
+    pub async fn save_persisted_state(&self, db: &crate::persistence::DatabaseManager) {
+        let _ = db
+            .save_distributed_tree_state(
+                self.branch_level,
+                &self.branch_root,
+                self.parent.as_deref(),
+            )
+            .await;
+
+        let children: Vec<(String, u32)> = self
+            .child_depths
+            .iter()
+            .map(|(username, depth)| (username.clone(), *depth))
+            .collect();
+        let _ = db.save_distributed_children(&children).await;
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -61553,6 +61586,16 @@ fn spawn_session_manager(state: Arc<AppState>, mut receiver: mpsc::Receiver<Sess
             }
         }
 
+        // Load persisted distributed tree state
+        if let Some(db) = state.db.as_ref() {
+            state
+                .distributed_network
+                .write()
+                .await
+                .load_persisted_state(db)
+                .await;
+        }
+
         let mut next_wishlist_search = Instant::now() + wishlist_scheduler.interval();
         let mut reconnect_requested = false;
 
@@ -63557,6 +63600,11 @@ async fn connect_distributed_parent(
         runtime.parent_sender = Some(sender.clone());
         runtime.branch_level = 1;
         runtime.branch_root.clone_from(&parent.username);
+
+        // Persist distributed tree state after parent connection
+        if let Some(db) = state.db.as_ref() {
+            runtime.save_persisted_state(db).await;
+        }
     }
     record_soulseek_diagnostic(
         &state,
@@ -63614,6 +63662,16 @@ async fn register_distributed_child(
         runtime.child_depths.insert(key.clone(), 0);
         (runtime.branch_level, runtime.branch_root.clone())
     };
+
+    // Persist distributed tree state after child registration
+    if let Some(db) = state.db.as_ref() {
+        state
+            .distributed_network
+            .read()
+            .await
+            .save_persisted_state(db)
+            .await;
+    }
     tokio::spawn(run_distributed_link(
         Arc::clone(&state),
         username.clone(),
@@ -63691,6 +63749,11 @@ async fn run_distributed_link(
                 runtime.child_depths.remove(&key);
             }
         }
+
+        // Persist distributed tree state after disconnection
+        if let Some(db) = state.db.as_ref() {
+            runtime.save_persisted_state(db).await;
+        }
     }
     if role == DistributedConnectionRole::Parent {
         notify_distributed_branch(&state).await;
@@ -63734,6 +63797,17 @@ async fn handle_distributed_message(
         }
         DistributedMessage::BranchLevel { level } if role == DistributedConnectionRole::Parent => {
             state.distributed_network.write().await.branch_level = level.saturating_add(1);
+
+            // Persist distributed tree state after branch level update
+            if let Some(db) = state.db.as_ref() {
+                state
+                    .distributed_network
+                    .read()
+                    .await
+                    .save_persisted_state(db)
+                    .await;
+            }
+
             notify_distributed_branch(state).await;
         }
         DistributedMessage::BranchRoot { username: root }
@@ -63744,6 +63818,17 @@ async fn handle_distributed_message(
                 ) =>
         {
             state.distributed_network.write().await.branch_root = root;
+
+            // Persist distributed tree state after branch root update
+            if let Some(db) = state.db.as_ref() {
+                state
+                    .distributed_network
+                    .read()
+                    .await
+                    .save_persisted_state(db)
+                    .await;
+            }
+
             notify_distributed_branch(state).await;
         }
         DistributedMessage::ChildDepth { depth } if role == DistributedConnectionRole::Child => {
