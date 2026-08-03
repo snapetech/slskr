@@ -30,7 +30,7 @@ scoring artifact -- confirmed, all report `complete` with
 
 Parity is **not achieved**. Every planned workstream has an executable
 certification denominator. The literal proof-case closure ratio is now
-**8,983 / 19,122 = 46.98%** (was 853 / 19,122 = 4.46% at the start of this
+**8,991 / 19,122 = 47.02%** (was 853 / 19,122 = 4.46% at the start of this
 review cycle), but this is not a product-completion estimate: most
 generated cases are Cartesian proof dimensions initialized as `needs-proof`,
 including behavior already implemented and tested in slskR. Product
@@ -101,8 +101,9 @@ per-caller ownership scoping, share-grants real transitive ownership
 scoping, Soulfind-bridge search/download/admin-clients routes, SongID
 run-lifecycle routes, listening-party membership-gated forgery-resistant
 event lifecycle plus transports-status, ActivityPub music-actor/
-WebFinger discovery, hashdb entries/sync-since paging) brought the
-workstream to 311/5,300.
+WebFinger discovery, hashdb entries/sync-since paging, discovery-graph/opinions/contacts-
+from-discovery/search-item download-stream) brought the workstream to
+319/5,300.
 
 The relay-agent/controller subsystem (deferred as a genuinely missing
 capability, see earlier notes) was investigated further this session to
