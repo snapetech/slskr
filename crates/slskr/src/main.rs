@@ -115423,6 +115423,198 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof crediting 8 Collections/CollectionItems
+    /// routes' `nominal-status-headers-body` and `mutation-side-effects-
+    /// and-readback` cases, independently re-derived from `openapi_
+    /// mutation_dtos_match_slskdn_status_and_field_contracts`'s real CRUD
+    /// lifecycle (create collection -> create item -> update collection ->
+    /// update item -> reorder -> re-GET items reflects reorder -> delete
+    /// item -> delete collection). slskdN-only (confirmed against the
+    /// frozen registry).
+    #[tokio::test]
+    async fn controller_api_differential_collections_items_crud_reorder_lifecycle() {
+        let target = "slskdn";
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($method:expr, $route:expr, $case:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!("{target} {} {} [{}]", $method, $route, $case));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": $method,
+                    "route": $route,
+                    "case": $case,
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        let (state, _receiver) = test_state();
+
+        let collection = super::route_http_request(
+            "POST",
+            "/api/v0/collections",
+            None,
+            r#"{"title":"Route Audit","description":"contract"}"#,
+            &state,
+        )
+        .await
+        .expect("create collection");
+        let collection_json =
+            serde_json::from_str::<serde_json::Value>(&collection.body).unwrap_or_default();
+        let collection_pass = collection.status == "201 Created"
+            && collection_json["title"] == "Route Audit"
+            && collection_json["ownerUserId"] == "";
+        record!("POST", "/api/v0/collections", "nominal-status-headers-body", collection_pass);
+        let collection_id = collection_json["id"].as_str().unwrap_or_default().to_owned();
+
+        let collection_item = super::route_http_request(
+            "POST",
+            &format!("/api/v0/collections/{collection_id}/items"),
+            None,
+            r#"{"contentId":"content:music:recording:route-audit","mediaKind":"Music","contentHash":"abc123","fileName":"Route Audit.flac","title":"Route Audit","artist":"Artist","album":"Album"}"#,
+            &state,
+        )
+        .await
+        .expect("create collection item");
+        let item_json =
+            serde_json::from_str::<serde_json::Value>(&collection_item.body).unwrap_or_default();
+        let item_pass = collection_item.status == "201 Created"
+            && item_json["collectionId"] == collection_id
+            && item_json["contentHash"] == "abc123";
+        record!(
+            "POST",
+            "/api/v0/collections/{id}/items",
+            "mutation-side-effects-and-readback",
+            item_pass
+        );
+        let item_id = item_json["id"].as_str().unwrap_or_default().to_owned();
+
+        let updated_collection = super::route_http_request(
+            "PUT",
+            &format!("/api/v0/collections/{collection_id}"),
+            None,
+            r#"{"title":"Updated Route Audit","type":"Playlist"}"#,
+            &state,
+        )
+        .await
+        .expect("update collection");
+        let updated_collection_json =
+            serde_json::from_str::<serde_json::Value>(&updated_collection.body).unwrap_or_default();
+        record!(
+            "PUT",
+            "/api/v0/collections/{id}",
+            "mutation-side-effects-and-readback",
+            updated_collection.status == "200 OK" && updated_collection_json["title"] == "Updated Route Audit"
+        );
+
+        let updated_item = super::route_http_request(
+            "PUT",
+            &format!("/api/v0/collections/{collection_id}/items/{item_id}"),
+            None,
+            r#"{"title":"Updated Item","album":"Updated Album","sha256":"def456"}"#,
+            &state,
+        )
+        .await
+        .expect("update collection item");
+        let updated_item_json =
+            serde_json::from_str::<serde_json::Value>(&updated_item.body).unwrap_or_default();
+        record!(
+            "PUT",
+            "/api/v0/collections/{id}/items/{itemId}",
+            "mutation-side-effects-and-readback",
+            updated_item.status == "200 OK" && updated_item_json["contentHash"] == "def456"
+        );
+
+        let reordered = super::route_http_request(
+            "POST",
+            &format!("/api/v0/collections/{collection_id}/items/reorder"),
+            None,
+            &format!(r#"{{"itemIds":["{item_id}"]}}"#),
+            &state,
+        )
+        .await
+        .expect("reorder collection items");
+        let reorder_pass = reordered.status == "204 No Content" && reordered.body.is_empty();
+
+        let collection_items = super::route_http_request(
+            "GET",
+            &format!("/api/v0/collections/{collection_id}/items"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("list collection items");
+        let collection_items_json =
+            serde_json::from_str::<serde_json::Value>(&collection_items.body).unwrap_or_default();
+        let list_pass = collection_items.status == "200 OK" && collection_items_json[0]["id"] == item_id;
+        record!(
+            "POST",
+            "/api/v0/collections/{id}/items/reorder",
+            "mutation-side-effects-and-readback",
+            reorder_pass && list_pass
+        );
+        record!(
+            "GET",
+            "/api/v0/collections/{id}/items",
+            "nominal-status-headers-body",
+            list_pass
+        );
+
+        let removed_item = super::route_http_request(
+            "DELETE",
+            &format!("/api/v0/collections/{collection_id}/items/{item_id}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("delete collection item");
+        record!(
+            "DELETE",
+            "/api/v0/collections/{id}/items/{itemId}",
+            "mutation-side-effects-and-readback",
+            removed_item.status == "204 No Content"
+        );
+
+        let removed_collection = super::route_http_request(
+            "DELETE",
+            &format!("/api/v0/collections/{collection_id}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("delete collection");
+        record!(
+            "DELETE",
+            "/api/v0/collections/{id}",
+            "mutation-side-effects-and-readback",
+            removed_collection.status == "204 No Content"
+        );
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("collections_items_crud_reorder_lifecycle.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api collections mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
