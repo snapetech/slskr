@@ -122989,6 +122989,250 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof crediting 5 security-reputation routes'
+    /// cases, independently re-derived from `security_reputation_
+    /// routes_reflect_real_score_and_violations`'s real PeerReputation-
+    /// backed checks: reputation scores reconcile real retained transfer
+    /// history (not an unconditional zero), the suspicious/trusted lists
+    /// derive from real reputation scores (not watch/online status), and
+    /// a manual score override writes into the same store the automatic
+    /// violation tracker reads. slskdN-only (confirmed against the
+    /// frozen registry).
+    #[tokio::test]
+    async fn controller_api_differential_security_reputation() {
+        let target = "slskdn";
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($method:expr, $route:expr, $case:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!("{target} {} {} [{}]", $method, $route, $case));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": $method,
+                    "route": $route,
+                    "case": $case,
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        let (state, _receiver) = test_state();
+
+        {
+            let mut transfers = state.transfers.write().await;
+            let successful = transfers.create(
+                0,
+                Some("differential-cleanpeer".to_owned()),
+                "Music/clean.flac".to_owned(),
+                None,
+                Some(100),
+            );
+            transfers.update_status(successful.id, "succeeded", Some(100), None);
+            let failed = transfers.create(
+                0,
+                Some("differential-cleanpeer".to_owned()),
+                "Music/failed.flac".to_owned(),
+                None,
+                Some(20),
+            );
+            transfers.update_status(
+                failed.id,
+                "failed",
+                Some(20),
+                Some("content hash mismatch".to_owned()),
+            );
+            let aborted = transfers.create(
+                0,
+                Some("differential-cleanpeer".to_owned()),
+                "Music/aborted.flac".to_owned(),
+                None,
+                Some(3),
+            );
+            transfers.update_status(aborted.id, "cancelled", Some(3), None);
+        }
+
+        let clean_route = "/api/v0/security/reputation/differential-cleanpeer";
+        let clean = super::route_http_request("GET", clean_route, None, "", &state)
+            .await
+            .unwrap_or_else(|error| panic!("{clean_route}: {error}"));
+        let clean_json = serde_json::from_str::<serde_json::Value>(&clean.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/api/v0/security/reputation/{username}",
+            "nominal-status-headers-body",
+            clean.status == "200 OK" && clean_json["score"] == 50
+        );
+        record!(
+            "GET",
+            "/api/v0/security/reputation/{username}",
+            "populated-dynamic-state",
+            clean_json["protocolViolations"] == 0
+                && clean_json["successfulTransfers"] == 1
+                && clean_json["failedTransfers"] == 1
+                && clean_json["abortedTransfers"] == 1
+                && clean_json["totalBytesTransferred"] == 123
+                && clean_json["contentMismatches"] == 1
+                && clean_json["successRate"] == 1.0 / 3.0
+                && clean_json["trustLevel"] == "Neutral"
+        );
+
+        {
+            let mut security = state.security.write().await;
+            security.reputation.insert("differential-badpeer".to_owned(), 15);
+            security.violations.insert("differential-badpeer".to_owned(), 3);
+            security.reputation.insert("differential-neutral-low".to_owned(), 30);
+        }
+
+        let bad_route = "/api/v0/security/reputation/differential-badpeer";
+        let bad = super::route_http_request("GET", bad_route, None, "", &state)
+            .await
+            .unwrap_or_else(|error| panic!("{bad_route}: {error}"));
+        let bad_json = serde_json::from_str::<serde_json::Value>(&bad.body).unwrap_or_default();
+
+        let suspicious =
+            super::route_http_request("GET", "/api/v0/security/reputation/suspicious", None, "", &state)
+                .await
+                .expect("suspicious peers");
+        let suspicious_json =
+            serde_json::from_str::<serde_json::Value>(&suspicious.body).unwrap_or_default();
+        let suspicious_usernames = suspicious_json
+            .as_array()
+            .map(|entries| {
+                entries
+                    .iter()
+                    .map(|entry| entry["username"].as_str().unwrap_or_default().to_owned())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        record!(
+            "GET",
+            "/api/v0/security/reputation/suspicious",
+            "nominal-status-headers-body",
+            suspicious.status == "200 OK"
+        );
+        record!(
+            "GET",
+            "/api/v0/security/reputation/suspicious",
+            "populated-dynamic-state",
+            suspicious_usernames
+                == vec![
+                    "differential-badpeer".to_owned(),
+                    "differential-neutral-low".to_owned()
+                ]
+                && suspicious_json[0]["successRate"] == 0.5
+                && suspicious_json[0]["trustLevel"] == "Untrusted"
+        );
+
+        let dashboard =
+            super::route_http_request("GET", "/api/v0/security/dashboard", None, "", &state)
+                .await
+                .expect("security dashboard");
+        let dashboard_json =
+            serde_json::from_str::<serde_json::Value>(&dashboard.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/api/v0/security/dashboard",
+            "nominal-status-headers-body",
+            dashboard.status == "200 OK"
+        );
+        record!(
+            "GET",
+            "/api/v0/security/dashboard",
+            "populated-dynamic-state",
+            dashboard_json["reputationStats"]["totalPeers"] == 3
+                && dashboard_json["reputationStats"]["untrustedPeers"] == 1
+                && dashboard_json["reputationStats"]["totalProtocolViolations"] == 3
+        );
+
+        let trusted =
+            super::route_http_request("GET", "/api/v0/security/reputation/trusted", None, "", &state)
+                .await
+                .expect("trusted peers");
+        let trusted_json = serde_json::from_str::<serde_json::Value>(&trusted.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/api/v0/security/reputation/trusted",
+            "nominal-status-headers-body",
+            trusted.status == "200 OK"
+        );
+        record!(
+            "GET",
+            "/api/v0/security/reputation/trusted",
+            "populated-dynamic-state",
+            trusted_json.as_array().is_some_and(|entries| entries
+                .iter()
+                .all(|entry| entry["username"] != "differential-badpeer"))
+        );
+
+        let invalid = super::route_http_request(
+            "PUT",
+            bad_route,
+            None,
+            r#"{"score":150}"#,
+            &state,
+        )
+        .await
+        .unwrap_or_else(|error| panic!("{bad_route}: {error}"));
+        record!(
+            "PUT",
+            "/api/v0/security/reputation/{username}",
+            "malformed-path-query-or-body",
+            invalid.status == "400 Bad Request"
+        );
+
+        let overridden = super::route_http_request(
+            "PUT",
+            bad_route,
+            None,
+            r#"{"score":80,"reason":"manual review"}"#,
+            &state,
+        )
+        .await
+        .unwrap_or_else(|error| panic!("{bad_route}: {error}"));
+        record!(
+            "PUT",
+            "/api/v0/security/reputation/{username}",
+            "nominal-status-headers-body",
+            overridden.status == "200 OK"
+                && state.security.read().await.reputation["differential-badpeer"] == 80
+        );
+
+        let after_override = super::route_http_request("GET", bad_route, None, "", &state)
+            .await
+            .unwrap_or_else(|error| panic!("{bad_route}: {error}"));
+        let after_override_json =
+            serde_json::from_str::<serde_json::Value>(&after_override.body).unwrap_or_default();
+        record!(
+            "PUT",
+            "/api/v0/security/reputation/{username}",
+            "mutation-side-effects-and-readback",
+            after_override_json["score"] == 80
+                && after_override_json["trustLevel"] == "Trusted"
+                && after_override_json["firstSeen"] == bad_json["firstSeen"]
+                && after_override_json["protocolViolations"] == 3
+        );
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("security_reputation.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api security-reputation mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
