@@ -118925,6 +118925,281 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof crediting the security/transports/status
+    /// and listening-party routes' cases, independently re-derived from
+    /// `slskdn_versioned_extended_gets_match_empty_state_contracts`'s
+    /// real empty-state checks and `listening_party_requires_membership_
+    /// and_reports_a_real_event`'s real membership-gated, forgery-
+    /// resistant event lifecycle. slskdN-only (confirmed against the
+    /// frozen registry).
+    #[tokio::test]
+    async fn controller_api_differential_listening_party_and_transports_status() {
+        let target = "slskdn";
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($method:expr, $route:expr, $case:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!("{target} {} {} [{}]", $method, $route, $case));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": $method,
+                    "route": $route,
+                    "case": $case,
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        let (empty_state, _empty_receiver) = test_state_with_env(
+            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+        );
+        let transports = super::route_http_request(
+            "GET",
+            "/api/v0/security/transports/status",
+            None,
+            "",
+            &empty_state,
+        )
+        .await
+        .expect("transport selector status");
+        let transports_json =
+            serde_json::from_str::<serde_json::Value>(&transports.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/api/v0/security/transports/status",
+            "nominal-status-headers-body",
+            transports.status == "200 OK"
+        );
+        record!(
+            "GET",
+            "/api/v0/security/transports/status",
+            "populated-dynamic-state",
+            transports_json["selectedMode"] == "Direct"
+                && transports_json["totalTransports"] == 1
+                && transports_json["availableTransports"] == 0
+                && transports_json["availableTransportTypes"] == serde_json::json!([])
+                && transports_json["lastConnectivityTest"].is_string()
+                && transports_json["primaryTransportAvailable"] == false
+                && transports_json["fallbackAvailable"] == false
+        );
+
+        let (state, _receiver) = test_state();
+        let pod_id = "pod:listening-party-differential";
+        let channel_id = "general";
+        state
+            .pods
+            .write()
+            .await
+            .create(
+                serde_json::from_value::<super::pods::PodRecord>(serde_json::json!({
+                    "podId": pod_id,
+                    "name": "Listening Party Differential",
+                }))
+                .expect("deserialize pod record fixture"),
+                "tester".to_owned(),
+            )
+            .expect("create pod (tester is the owner/member)");
+        state
+            .pods
+            .write()
+            .await
+            .upsert_channel(
+                pod_id,
+                super::pods::PodChannel {
+                    channel_id: channel_id.to_owned(),
+                    kind: serde_json::json!(0),
+                    name: "General".to_owned(),
+                    binding_info: None,
+                    description: None,
+                },
+            )
+            .expect("create channel");
+
+        let outside_pod = "pod:listening-party-differential-outsider";
+        state
+            .pods
+            .write()
+            .await
+            .create(
+                serde_json::from_value::<super::pods::PodRecord>(serde_json::json!({
+                    "podId": outside_pod,
+                    "name": "Not Tester's Pod",
+                }))
+                .expect("deserialize pod record fixture"),
+                "someone-else".to_owned(),
+            )
+            .expect("create outsider pod");
+        state
+            .pods
+            .write()
+            .await
+            .upsert_channel(
+                outside_pod,
+                super::pods::PodChannel {
+                    channel_id: channel_id.to_owned(),
+                    kind: serde_json::json!(0),
+                    name: "General".to_owned(),
+                    binding_info: None,
+                    description: None,
+                },
+            )
+            .expect("create outsider channel");
+
+        let forbidden_get = super::route_http_request(
+            "GET",
+            &format!("/api/v0/listening-party/{outside_pod}/{channel_id}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("forbidden get");
+        let forbidden_post = super::route_http_request(
+            "POST",
+            &format!("/api/v0/listening-party/{outside_pod}/{channel_id}"),
+            None,
+            r#"{"action":"play","contentId":"content:audio:track:x"}"#,
+            &state,
+        )
+        .await
+        .expect("forbidden post");
+        record!(
+            "GET",
+            "/api/v0/listening-party/{podId}/{channelId}",
+            "missing-empty-or-conflict-state",
+            forbidden_get.status == "403 Forbidden"
+        );
+        record!(
+            "POST",
+            "/api/v0/listening-party/{podId}/{channelId}",
+            "missing-empty-or-conflict-state",
+            forbidden_post.status == "403 Forbidden"
+        );
+
+        let invalid_action = super::route_http_request(
+            "POST",
+            &format!("/api/v0/listening-party/{pod_id}/{channel_id}"),
+            None,
+            r#"{"action":"resume","contentId":"content:audio:track:x"}"#,
+            &state,
+        )
+        .await
+        .expect("invalid action");
+        record!(
+            "POST",
+            "/api/v0/listening-party/{podId}/{channelId}",
+            "malformed-path-query-or-body",
+            invalid_action.status == "400 Bad Request"
+        );
+
+        let before = super::route_http_request(
+            "GET",
+            &format!("/api/v0/listening-party/{pod_id}/{channel_id}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("no state yet");
+        record!(
+            "GET",
+            "/api/v0/listening-party/{podId}/{channelId}",
+            "nominal-status-headers-body",
+            before.status == "204 No Content"
+        );
+
+        let played = super::route_http_request(
+            "POST",
+            &format!("/api/v0/listening-party/{pod_id}/{channel_id}"),
+            None,
+            r#"{"action":"play","contentId":"content:audio:track:x","title":"Track","artist":"Artist","hostPeerId":"forged-peer"}"#,
+            &state,
+        )
+        .await
+        .expect("play event");
+        let played_json = serde_json::from_str::<serde_json::Value>(&played.body).unwrap_or_default();
+        record!(
+            "POST",
+            "/api/v0/listening-party/{podId}/{channelId}",
+            "nominal-status-headers-body",
+            played.status == "200 OK"
+        );
+        record!(
+            "POST",
+            "/api/v0/listening-party/{podId}/{channelId}",
+            "populated-dynamic-state",
+            played_json["action"] == "play"
+                && played_json["podId"] == pod_id
+                && played_json["channelId"] == channel_id
+                && played_json["hostPeerId"] == "tester"
+                && played_json["kind"] == "slskdn.listenAlong.v1"
+                && played_json["partyId"]
+                    .as_str()
+                    .is_some_and(|id| id.starts_with("party:"))
+        );
+
+        let polled = super::route_http_request(
+            "GET",
+            &format!("/api/v0/listening-party/{pod_id}/{channel_id}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("poll event");
+        record!(
+            "GET",
+            "/api/v0/listening-party/{podId}/{channelId}",
+            "populated-dynamic-state",
+            polled.status == "200 OK" && polled.body == played.body
+        );
+
+        let stopped = super::route_http_request(
+            "POST",
+            &format!("/api/v0/listening-party/{pod_id}/{channel_id}"),
+            None,
+            r#"{"action":"stop"}"#,
+            &state,
+        )
+        .await
+        .expect("stop event");
+        let after_stop = super::route_http_request(
+            "GET",
+            &format!("/api/v0/listening-party/{pod_id}/{channel_id}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("state after stop");
+        record!(
+            "POST",
+            "/api/v0/listening-party/{podId}/{channelId}",
+            "mutation-side-effects-and-readback",
+            stopped.status == "200 OK" && after_stop.status == "204 No Content"
+        );
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("listening_party_and_transports_status.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api listening-party-transports mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
