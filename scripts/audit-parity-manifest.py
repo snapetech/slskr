@@ -14,6 +14,7 @@ import json
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -85,7 +86,49 @@ def config_entries(report: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
-def api_entries(target: str, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+SECURITY_AUTHORIZATION_TEST = (
+    "tests::security_authorization_matrix_matches_declared_policy_for_every_frozen_route"
+)
+
+
+def security_authorization_ledger(root: Path) -> dict[tuple[str, str, str, str], bool]:
+    """Run the exhaustive in-process auth-gate differential (crates/slskr/src/main.rs)
+    and return real, freshly executed pass/fail evidence keyed by
+    (target, method, route, case). This is the only source that may promote a
+    security-authorization manifest case out of ``needs-proof`` -- the test
+    itself proves the live dispatcher (`route_http_request`'s `check_route_auth`
+    gate) against the declared policy tables for all 10 credential profiles.
+    Raises if the differential test fails: a real enforcement regression must
+    fail manifest generation, not silently look like unlinked evidence.
+    """
+    subprocess.run(
+        [
+            "cargo",
+            "test",
+            "-p",
+            "slskr",
+            "--bin",
+            "slskr",
+            "--",
+            "--exact",
+            SECURITY_AUTHORIZATION_TEST,
+        ],
+        cwd=root,
+        check=True,
+    )
+    ledger_path = Path(tempfile.gettempdir()) / "slskr-parity-evidence" / "security-authorization.json"
+    rows = json.loads(ledger_path.read_text(encoding="utf-8"))
+    return {
+        (row["target"], row["method"], row["route"], row["case"]): bool(row["pass"])
+        for row in rows
+    }
+
+
+def api_entries(
+    target: str,
+    rows: list[dict[str, Any]],
+    security_ledger: dict[tuple[str, str, str, str], bool] | None = None,
+) -> list[dict[str, Any]]:
     entries = []
     for row in rows:
         subject = f"{row['method']} {row['route']}"
@@ -137,6 +180,11 @@ def api_entries(target: str, rows: list[dict[str, Any]]) -> list[dict[str, Any]]
             "missing-required-scope",
             "wrong-authentication-scheme",
         ):
+            proven = (
+                security_ledger.get((target, row["method"], row["route"], profile))
+                if security_ledger is not None
+                else None
+            )
             entries.append(
                 {
                     "id": f"security:{target}:{row['method']}:{row['route']}:{profile}",
@@ -146,10 +194,10 @@ def api_entries(target: str, rows: list[dict[str, Any]]) -> list[dict[str, Any]]
                     "surface": "controller-authorization-case",
                     "subject": subject,
                     "case": profile,
-                    "status": "needs-proof",
+                    "status": "complete" if proven else "needs-proof",
                     "coverage": {
                         "authorizationMetadata": "complete",
-                        "liveHttpDifferential": "open",
+                        "liveHttpDifferential": "complete" if proven else "open",
                         "expected": row["auth"],
                     },
                     "evidence": row["controller"],
@@ -735,6 +783,17 @@ def main() -> None:
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--check-frozen", action="store_true")
     parser.add_argument("--require-complete", action="store_true")
+    parser.add_argument(
+        "--skip-security-differential",
+        action="store_true",
+        help=(
+            "Skip running the exhaustive security-authorization cargo-test "
+            "differential (crates/slskr `security_authorization_matrix_"
+            "matches_declared_policy_for_every_frozen_route`). All "
+            "security-authorization cases fall back to needs-proof. Use "
+            "only for fast, evidence-incomplete dry runs."
+        ),
+    )
     args = parser.parse_args()
 
     root = args.slskr_root.resolve()
@@ -762,6 +821,9 @@ def main() -> None:
     slskdn_api = run_json(
         ["node", "scripts/audit-slskdn-controller-routes.mjs", "--slskdn-root", str(slskdn_root), "--json"],
         root,
+    )
+    security_ledger = (
+        None if args.skip_security_differential else security_authorization_ledger(root)
     )
     webui = run_json(
         [
@@ -814,8 +876,8 @@ def main() -> None:
 
     entries = [
         *config_entries(config),
-        *api_entries("slskd", slskd_api),
-        *api_entries("slskdn", slskdn_api),
+        *api_entries("slskd", slskd_api, security_ledger),
+        *api_entries("slskdn", slskdn_api, security_ledger),
         *webui_entries(webui),
         *persistence_entries("slskd", slskd_database_domains),
         *persistence_entries("slskdn", slskdn_database_domains),

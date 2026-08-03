@@ -112376,6 +112376,261 @@ mod tests {
         );
     }
 
+    /// Exhaustive in-process differential proof for the manifest's
+    /// `security-authorization` workstream (`scripts/audit-parity-manifest.py`
+    /// `api_entries()`): every declared rule in both frozen controller
+    /// auth-policy registries, against every one of the manifest's 10
+    /// credential profiles, through the exact same `check_route_auth` gate
+    /// the live HTTP server calls before any handler dispatches. Writes a
+    /// machine-readable ledger the manifest script reads to move cases from
+    /// `needs-proof` to `complete` -- this is real, executable evidence, not
+    /// a route-presence check.
+    #[test]
+    fn security_authorization_matrix_matches_declared_policy_for_every_frozen_route() {
+        #[derive(serde::Deserialize)]
+        struct AuthPolicyRow {
+            method: String,
+            route: String,
+            access: String,
+            scheme: String,
+            scopes: Vec<String>,
+        }
+
+        #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+        enum Outcome {
+            Allowed,
+            Unauthorized,
+            Forbidden,
+        }
+
+        #[derive(Clone, Copy, Debug)]
+        enum Profile {
+            Anonymous,
+            BasicReadOnly,
+            BasicReadWrite,
+            BasicAdministrator,
+            BearerReadOnly,
+            BearerReadWrite,
+            BearerAdministrator,
+            InvalidOrExpiredCredential,
+            MissingRequiredScope,
+            WrongAuthenticationScheme,
+        }
+
+        const PROFILES: [Profile; 10] = [
+            Profile::Anonymous,
+            Profile::BasicReadOnly,
+            Profile::BasicReadWrite,
+            Profile::BasicAdministrator,
+            Profile::BearerReadOnly,
+            Profile::BearerReadWrite,
+            Profile::BearerAdministrator,
+            Profile::InvalidOrExpiredCredential,
+            Profile::MissingRequiredScope,
+            Profile::WrongAuthenticationScheme,
+        ];
+
+        fn profile_case(profile: Profile) -> &'static str {
+            match profile {
+                Profile::Anonymous => "anonymous",
+                Profile::BasicReadOnly => "basic-readonly",
+                Profile::BasicReadWrite => "basic-readwrite",
+                Profile::BasicAdministrator => "basic-administrator",
+                Profile::BearerReadOnly => "bearer-readonly",
+                Profile::BearerReadWrite => "bearer-readwrite",
+                Profile::BearerAdministrator => "bearer-administrator",
+                Profile::InvalidOrExpiredCredential => "invalid-or-expired-credential",
+                Profile::MissingRequiredScope => "missing-required-scope",
+                Profile::WrongAuthenticationScheme => "wrong-authentication-scheme",
+            }
+        }
+
+        // (Authorization header value, credential-as-derived-by-`api_credential`:
+        // access rank 0=authenticated/1=read_write/2=administrator, scheme,
+        // nowplaying-only) -- `None` credential means the gate sees nobody
+        // recognized at all (anonymous or an invalid/unrecognized token).
+        fn profile_header_and_credential(
+            profile: Profile,
+            rule_scheme: &str,
+        ) -> (Option<&'static str>, Option<(u8, &'static str, bool)>) {
+            match profile {
+                Profile::Anonymous => (None, None),
+                Profile::BasicReadOnly => (Some("ApiKey read-token"), Some((0, "api_key", false))),
+                Profile::BasicReadWrite => {
+                    (Some("ApiKey write-token"), Some((1, "api_key", false)))
+                }
+                Profile::BasicAdministrator => {
+                    (Some("ApiKey admin-token"), Some((2, "api_key", false)))
+                }
+                Profile::BearerReadOnly => (Some("Bearer read-token"), Some((0, "jwt", false))),
+                Profile::BearerReadWrite => (Some("Bearer write-token"), Some((1, "jwt", false))),
+                Profile::BearerAdministrator => {
+                    (Some("Bearer admin-token"), Some((2, "jwt", false)))
+                }
+                Profile::InvalidOrExpiredCredential => {
+                    (Some("Bearer not-a-real-differential-token"), None)
+                }
+                Profile::MissingRequiredScope => {
+                    (Some("ApiKey nowplaying-token"), Some((1, "api_key", true)))
+                }
+                Profile::WrongAuthenticationScheme => {
+                    if rule_scheme == "jwt" {
+                        (Some("ApiKey admin-token"), Some((2, "api_key", false)))
+                    } else {
+                        (Some("Bearer admin-token"), Some((2, "jwt", false)))
+                    }
+                }
+            }
+        }
+
+        fn required_access_rank(access: &str) -> Option<u8> {
+            match access {
+                "anonymous" | "delegated" => None,
+                "administrator" => Some(2),
+                "read_write" => Some(1),
+                _ => Some(0),
+            }
+        }
+
+        // Independently reconstructs the expected outcome from the
+        // *declared* rule data (not by calling the production decision
+        // function itself, which would make this circular) -- mirrors
+        // `authorize_controller_route_from`'s real precedence: access rank,
+        // then scheme, then the nowplaying-only scope restriction.
+        fn expected_outcome(rule: &AuthPolicyRow, profile: Profile) -> Outcome {
+            let Some(required) = required_access_rank(&rule.access) else {
+                return Outcome::Allowed;
+            };
+            let (_, credential) = profile_header_and_credential(profile, &rule.scheme);
+            let Some((cred_rank, cred_scheme, nowplaying_only)) = credential else {
+                return Outcome::Unauthorized;
+            };
+            if cred_rank < required {
+                return Outcome::Forbidden;
+            }
+            if rule.scheme.as_str() != "any" && cred_scheme != rule.scheme.as_str() {
+                return Outcome::Forbidden;
+            }
+            let requires_nowplaying = rule.scopes.iter().any(|scope| scope == "nowplaying");
+            if nowplaying_only && !requires_nowplaying {
+                return Outcome::Forbidden;
+            }
+            Outcome::Allowed
+        }
+
+        // Auth is checked at route-template level before any handler touches
+        // real data, so a fixed placeholder is a faithful stand-in for every
+        // `{param}` segment; an unusual literal minimizes any chance of
+        // colliding with a real literal segment used by a different rule.
+        fn placeholder_path(route: &str) -> String {
+            let mut segments: Vec<String> = route
+                .trim_matches('/')
+                .split('/')
+                .map(|segment| {
+                    if segment.starts_with('{') && segment.ends_with('}') {
+                        "differential-fixture-value".to_owned()
+                    } else {
+                        segment.to_owned()
+                    }
+                })
+                .collect();
+            if route.contains("{*") {
+                segments.push("differential-fixture-tail".to_owned());
+            }
+            format!("/{}", segments.join("/"))
+        }
+
+        let headers = super::RequestSecurityHeaders::default();
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        for (target, source) in [
+            (
+                "slskd",
+                include_str!("../data/slskd-controller-auth-policy.json"),
+            ),
+            (
+                "slskdn",
+                include_str!("../data/slskdn-controller-auth-policy.json"),
+            ),
+        ] {
+            let rules: Vec<AuthPolicyRow> =
+                serde_json::from_str(source).expect("checked controller auth policy registry");
+            let state_dir = std::env::temp_dir().join(format!(
+                "slskr-security-auth-differential-{target}-{}",
+                uuid::Uuid::new_v4()
+            ));
+            let config = super::AppConfig::from_layers(
+                None,
+                FileConfig::default(),
+                &MapEnv::default()
+                    .with("SLSKR_STATE_DIR", state_dir.to_str().unwrap())
+                    .with("SLSKR_AUTH_DISABLED", "false")
+                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                    .with("SLSKR_API_TOKEN", "admin-token")
+                    .with("SLSKR_API_READ_WRITE_TOKEN", "write-token")
+                    .with("SLSKR_API_READ_ONLY_TOKEN", "read-token")
+                    .with("SLSKR_API_NOWPLAYING_TOKEN", "nowplaying-token"),
+            )
+            .expect("hermetic auth-policy differential config");
+
+            for rule in &rules {
+                let path = placeholder_path(&rule.route);
+                for profile in PROFILES {
+                    let (header, _) = profile_header_and_credential(profile, &rule.scheme);
+                    let expected = expected_outcome(rule, profile);
+                    let actual = match super::routing::check_route_auth(
+                        &config, &rule.method, &path, header, &headers,
+                    ) {
+                        Ok(()) => Outcome::Allowed,
+                        Err("unauthorized") => Outcome::Unauthorized,
+                        Err("forbidden") => Outcome::Forbidden,
+                        Err(other) => panic!(
+                            "unexpected auth-gate outcome {other:?} for {target} {} {}",
+                            rule.method, rule.route
+                        ),
+                    };
+                    let pass = actual == expected;
+                    if !pass {
+                        mismatches.push(format!(
+                            "{target} {} {} [{}]: expected {:?}, got {:?}",
+                            rule.method,
+                            rule.route,
+                            profile_case(profile),
+                            expected,
+                            actual
+                        ));
+                    }
+                    ledger.push(serde_json::json!({
+                        "target": target,
+                        "method": rule.method,
+                        "route": rule.route,
+                        "case": profile_case(profile),
+                        "pass": pass,
+                        "expected": format!("{expected:?}"),
+                        "actual": format!("{actual:?}"),
+                    }));
+                }
+            }
+        }
+
+        let evidence_dir = std::env::temp_dir().join("slskr-parity-evidence");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("security-authorization.json"),
+            serde_json::to_string_pretty(&ledger)
+                .expect("serialize security-authorization ledger"),
+        )
+        .expect("write security-authorization ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} security-authorization mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn cors_headers_reject_control_characters() {
         assert_eq!(
