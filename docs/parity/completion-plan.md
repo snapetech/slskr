@@ -30,7 +30,7 @@ scoring artifact -- confirmed, all report `complete` with
 
 Parity is **not achieved**. Every planned workstream has an executable
 certification denominator. The literal proof-case closure ratio is now
-**8,959 / 19,122 = 46.85%** (was 853 / 19,122 = 4.46% at the start of this
+**8,968 / 19,122 = 46.90%** (was 853 / 19,122 = 4.46% at the start of this
 review cycle), but this is not a product-completion estimate: most
 generated cases are Cartesian proof dimensions initialized as `needs-proof`,
 including behavior already implemented and tested in slskR. Product
@@ -98,8 +98,8 @@ pods/quarantine-jury/security/traces, the openapi-mutation-dtos tail
 covering content-id validation/nowplaying/content-pod/wishlist-lifecycle/
 overlay-blocklist/quarantine-jury/security-bans, Collections real
 per-caller ownership scoping, share-grants real transitive ownership
-scoping, Soulfind-bridge search/download/admin-clients routes) brought
-the workstream to 281/5,300.
+scoping, Soulfind-bridge search/download/admin-clients routes, SongID
+run-lifecycle routes) brought the workstream to 290/5,300.
 
 The relay-agent/controller subsystem (deferred as a genuinely missing
 capability, see earlier notes) was investigated further this session to
