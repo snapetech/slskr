@@ -68239,6 +68239,13 @@ async fn project_server_message(
                 "server reported cant-connect-to-peer".to_owned(),
             )
             .await;
+            record_event(
+                state,
+                "user.cannot.connect",
+                format!("token:{}", token),
+                Some("server reported cant-connect-to-peer".to_owned()),
+            )
+            .await;
         }
         ServerMessage::CantCreateRoom { room } => {
             let mut rooms = state.rooms.write().await;
