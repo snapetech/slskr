@@ -30,7 +30,7 @@ scoring artifact -- confirmed, all report `complete` with
 
 Parity is **not achieved**. Every planned workstream has an executable
 certification denominator. The literal proof-case closure ratio is now
-**8,664 / 19,122 = 45.31%** (was 853 / 19,122 = 4.46% at the start of this
+**8,690 / 19,122 = 45.45%** (was 853 / 19,122 = 4.46% at the start of this
 review cycle), but this is not a product-completion estimate: most
 generated cases are Cartesian proof dimensions initialized as `needs-proof`,
 including behavior already implemented and tested in slskR. Product
@@ -78,6 +78,20 @@ are stored in slskR's generic `controller_features` KV table rather than
 a dedicated SQL table and need a real per-domain rehydration check, not
 a name-matching exercise -- see session memory for the full domain-name
 mapping table before resuming this.
+
+A follow-on batch wired Transfers plus 8 more clean-match domains
+(Collections, CollectionItems, UserNotes, WishlistItems, Contacts,
+ShareGrants, ShareGroups, ShareGroupMembers), bringing persistence-
+lifecycle to 34/798, and one more controller-api batch (10 PodCore
+routes' full CRUD lifecycle) brought that workstream to 148/5,300.
+
+The relay-agent/controller subsystem (deferred as a genuinely missing
+capability, see earlier notes) was investigated further this session to
+confirm scope rather than just estimate it: the frozen oracle's real
+implementation is 2,880 lines (`RelayHub.cs`/`RelayService.cs`/
+`RelayClient.cs`/`RelayController.cs`), and there is no smaller honest
+slice available -- even the HTTP-only controller surface requires real
+agent-registration/token-issuance state first. Remains deferred.
 
 | Workstream | Audited denominator | Current evidence | Closure state |
 | --- | ---: | --- | --- |
