@@ -123494,6 +123494,236 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof crediting 3 musicbrainz-overlay routes'
+    /// cases, independently re-derived from `musicbrainz_overlay_export_
+    /// review_and_approval_match_real_oracle_gating`'s real exportable-
+    /// type gate, unsafe-approvedBy rejection, and idempotent-approval
+    /// (a repeat approval never overwrites the original decision)
+    /// checks. slskdN-only (confirmed against the frozen registry).
+    #[tokio::test]
+    async fn controller_api_differential_musicbrainz_overlay_export() {
+        let target = "slskdn";
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($method:expr, $route:expr, $case:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!("{target} {} {} [{}]", $method, $route, $case));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": $method,
+                    "route": $route,
+                    "case": $case,
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        let (state, _receiver) = test_state();
+
+        let non_exportable = super::route_http_request(
+            "POST",
+            "/api/v0/musicbrainz/overlays/edits",
+            None,
+            r#"{"type":"Other","targetType":"Recording","targetId":"rec-differential-1","field":"title","value":"New Title","evidence":[{"type":"WorkRef","reference":"opaque-ref-differential"}]}"#,
+            &state,
+        )
+        .await
+        .expect("create non-exportable edit");
+        let non_exportable_id = serde_json::from_str::<serde_json::Value>(&non_exportable.body)
+            .unwrap_or_default()["edit"]["editId"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned();
+        record!(
+            "POST",
+            "/api/v0/musicbrainz/overlays/edits",
+            "nominal-status-headers-body",
+            non_exportable.status == "200 OK" && !non_exportable_id.is_empty()
+        );
+
+        let review_route =
+            format!("/api/v0/musicbrainz/overlays/edits/{non_exportable_id}/export-review");
+        let review = super::route_http_request("GET", &review_route, None, "", &state)
+            .await
+            .unwrap_or_else(|error| panic!("{review_route}: {error}"));
+        let review_json = serde_json::from_str::<serde_json::Value>(&review.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/api/v0/musicbrainz/overlays/edits/{editId}/export-review",
+            "nominal-status-headers-body",
+            review.status == "200 OK"
+        );
+        record!(
+            "GET",
+            "/api/v0/musicbrainz/overlays/edits/{editId}/export-review",
+            "populated-dynamic-state",
+            review_json["upstreamTarget"] == "Recording:rec-differential-1"
+                && review_json["proposedChange"] == "title => New Title"
+                && review_json["canApproveExport"] == false
+                && review_json["reviewReason"] == "Overlay edit type is not exportable."
+                && review_json["decision"].is_null()
+        );
+
+        let rejected_route =
+            format!("/api/v0/musicbrainz/overlays/edits/{non_exportable_id}/approve-export");
+        let rejected_approval = super::route_http_request("POST", &rejected_route, None, "{}", &state)
+            .await
+            .unwrap_or_else(|error| panic!("{rejected_route}: {error}"));
+        let rejected_json =
+            serde_json::from_str::<serde_json::Value>(&rejected_approval.body).unwrap_or_default();
+        record!(
+            "POST",
+            "/api/v0/musicbrainz/overlays/edits/{editId}/approve-export",
+            "malformed-path-query-or-body",
+            rejected_approval.status == "400 Bad Request"
+                && rejected_json["errors"]
+                    .as_array()
+                    .is_some_and(|errors| errors
+                        .iter()
+                        .any(|error| error == "Overlay edit type is not exportable."))
+                && rejected_json["decision"].is_null()
+        );
+
+        let unsafe_edit = super::route_http_request(
+            "POST",
+            "/api/v0/musicbrainz/overlays/edits",
+            None,
+            r#"{"type":"TitleCorrection","targetType":"Recording","targetId":"rec-differential-2","field":"title","value":"Corrected","evidence":[{"type":"WorkRef","reference":"opaque-ref-differential"}]}"#,
+            &state,
+        )
+        .await
+        .expect("create exportable edit for unsafe-approver check");
+        let unsafe_edit_id = serde_json::from_str::<serde_json::Value>(&unsafe_edit.body)
+            .unwrap_or_default()["edit"]["editId"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned();
+        let unsafe_route =
+            format!("/api/v0/musicbrainz/overlays/edits/{unsafe_edit_id}/approve-export");
+        let unsafe_approval = super::route_http_request(
+            "POST",
+            &unsafe_route,
+            None,
+            r#"{"approvedBy":"/etc/passwd"}"#,
+            &state,
+        )
+        .await
+        .unwrap_or_else(|error| panic!("{unsafe_route}: {error}"));
+        record!(
+            "POST",
+            "/api/v0/musicbrainz/overlays/edits/{editId}/approve-export",
+            "missing-empty-or-conflict-state",
+            unsafe_approval.status == "400 Bad Request"
+                && serde_json::from_str::<serde_json::Value>(&unsafe_approval.body)
+                    .unwrap_or_default()["errors"]
+                    .as_array()
+                    .is_some_and(|errors| errors
+                        .iter()
+                        .any(|error| error == "Approved-by identifier must be opaque and safe."))
+        );
+
+        let exportable = super::route_http_request(
+            "POST",
+            "/api/v0/musicbrainz/overlays/edits",
+            None,
+            r#"{"type":"TitleCorrection","targetType":"Recording","targetId":"rec-differential-3","field":"title","value":"Corrected Title","evidence":[{"type":"WorkRef","reference":"opaque-ref-differential"}]}"#,
+            &state,
+        )
+        .await
+        .expect("create exportable edit");
+        let exportable_id = serde_json::from_str::<serde_json::Value>(&exportable.body)
+            .unwrap_or_default()["edit"]["editId"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned();
+
+        let approval_route =
+            format!("/api/v0/musicbrainz/overlays/edits/{exportable_id}/approve-export");
+        let approval = super::route_http_request(
+            "POST",
+            &approval_route,
+            None,
+            r#"{"approvedBy":"differential-reviewer","note":"looks good"}"#,
+            &state,
+        )
+        .await
+        .unwrap_or_else(|error| panic!("{approval_route}: {error}"));
+        let approval_json =
+            serde_json::from_str::<serde_json::Value>(&approval.body).unwrap_or_default();
+        record!(
+            "POST",
+            "/api/v0/musicbrainz/overlays/edits/{editId}/approve-export",
+            "nominal-status-headers-body",
+            approval.status == "200 OK"
+                && approval_json["errors"] == serde_json::json!([])
+                && approval_json["decision"]["approvedBy"] == "differential-reviewer"
+                && approval_json["decision"]["note"] == "looks good"
+                && approval_json["decision"]["editId"] == exportable_id
+                && approval_json["decision"]["upstreamTarget"] == "Recording:rec-differential-3"
+                && approval_json["decision"]["proposedChange"] == "title => Corrected Title"
+                && approval_json["decision"]["id"]
+                    .as_str()
+                    .is_some_and(|id| id.starts_with("musicbrainz-overlay-export:"))
+        );
+
+        let post_approval_review_route =
+            format!("/api/v0/musicbrainz/overlays/edits/{exportable_id}/export-review");
+        let post_approval_review =
+            super::route_http_request("GET", &post_approval_review_route, None, "", &state)
+                .await
+                .unwrap_or_else(|error| panic!("{post_approval_review_route}: {error}"));
+        let post_approval_review_json =
+            serde_json::from_str::<serde_json::Value>(&post_approval_review.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/api/v0/musicbrainz/overlays/edits/{editId}/export-review",
+            "mutation-side-effects-and-readback",
+            post_approval_review_json["canApproveExport"] == false
+                && post_approval_review_json["reviewReason"]
+                    == "Upstream export has already been approved locally."
+                && post_approval_review_json["decision"]["approvedBy"] == "differential-reviewer"
+        );
+
+        let repeat_approval = super::route_http_request(
+            "POST",
+            &approval_route,
+            None,
+            r#"{"approvedBy":"different-differential-reviewer"}"#,
+            &state,
+        )
+        .await
+        .unwrap_or_else(|error| panic!("{approval_route}: {error}"));
+        record!(
+            "POST",
+            "/api/v0/musicbrainz/overlays/edits/{editId}/approve-export",
+            "mutation-side-effects-and-readback",
+            repeat_approval.status == "200 OK"
+                && serde_json::from_str::<serde_json::Value>(&repeat_approval.body)
+                    .unwrap_or_default()["decision"]["approvedBy"]
+                    == "differential-reviewer"
+        );
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("musicbrainz_overlay_export.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api musicbrainz-overlay-export mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
