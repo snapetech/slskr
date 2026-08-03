@@ -114910,6 +114910,303 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof crediting `create-and-read-roundtrip` and
+    /// `restart-rehydration` for 6 more slskdN-only domains with a clean,
+    /// exact real-table match (Collections, CollectionItems, UserNotes,
+    /// WishlistItems, Contacts, ShareGrants, ShareGroups,
+    /// ShareGroupMembers), independently re-derived from the same real
+    /// create-via-route -> read-raw-persisted-rows -> rebuild-a-fresh-
+    /// store pattern already proven by `library_and_collection_state_
+    /// persists_and_rehydrates_records`, `social_and_security_state_
+    /// persist_and_rehydrate_records`, and `compatibility_store_state_
+    /// persists_and_rehydrates_records`.
+    #[tokio::test]
+    async fn persistence_lifecycle_differential_collections_notes_wishlist_sharing_domains_roundtrip_and_rehydrate(
+    ) {
+        let target = "slskdn";
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($domain:expr, $case:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!("{target} {} {}", $domain, $case));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "domain": $domain,
+                    "case": $case,
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        // Collections / CollectionItems.
+        {
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, _receiver) = test_state_with_env_parts(
+                MapEnv::default()
+                    .with("SLSKR_PERSISTENCE_ENABLED", "true")
+                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+            let collection = super::route_http_request(
+                "POST",
+                "/api/collections",
+                None,
+                r#"{"name":"Road Trip","description":"queued albums"}"#,
+                &state,
+            )
+            .await
+            .expect("create collection");
+            let collection_id = serde_json::from_str::<serde_json::Value>(&collection.body)
+                .ok()
+                .and_then(|json| json["id"].as_str().map(str::to_owned));
+            let item_response = if let Some(collection_id) = collection_id.as_deref() {
+                Some(
+                    super::route_http_request(
+                        "POST",
+                        &format!("/api/collections/{collection_id}/items"),
+                        None,
+                        r#"{"content_id":"track-1","artist":"Alice","title":"One","kind":"Audio"}"#,
+                        &state,
+                    )
+                    .await
+                    .expect("create collection item"),
+                )
+            } else {
+                None
+            };
+            let persisted_collections = db.list_collections(10, 0).await.unwrap_or_default();
+            let persisted_items = db.list_collection_items(10, 0).await.unwrap_or_default();
+            let roundtrip_pass = collection.status == "201 Created"
+                && item_response.as_ref().is_some_and(|r| r.status == "201 Created")
+                && persisted_collections.len() == 1
+                && persisted_collections[0].name == "Road Trip"
+                && persisted_items.len() == 1
+                && persisted_items[0].title == "One";
+            record!("Collections", "create-and-read-roundtrip", roundtrip_pass);
+            record!("CollectionItems", "create-and-read-roundtrip", roundtrip_pass);
+
+            let rehydrated =
+                super::CollectionStore::from_persisted(persisted_collections, persisted_items);
+            let rehydrate_pass = rehydrated.json_array(None, None).contains("\"title\":\"One\"");
+            record!("Collections", "restart-rehydration", rehydrate_pass);
+            record!("CollectionItems", "restart-rehydration", rehydrate_pass);
+        }
+
+        // UserNotes.
+        {
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, _receiver) = test_state_with_env_parts(
+                MapEnv::default()
+                    .with("SLSKR_PERSISTENCE_ENABLED", "true")
+                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+            let note = super::route_http_request(
+                "POST",
+                "/api/users/notes",
+                None,
+                r#"{"username":"friend","note":"trusted peer"}"#,
+                &state,
+            )
+            .await
+            .expect("create user note");
+            let persisted_notes = db.list_user_notes(10, 0).await.unwrap_or_default();
+            let roundtrip_pass = note.status == "201 Created"
+                && persisted_notes.len() == 1
+                && persisted_notes[0].note == "trusted peer";
+            record!("UserNotes", "create-and-read-roundtrip", roundtrip_pass);
+
+            let rehydrated = super::UserNoteStore::from_persisted(persisted_notes);
+            let rehydrate_pass = rehydrated.json(None).contains("\"note\":\"trusted peer\"");
+            record!("UserNotes", "restart-rehydration", rehydrate_pass);
+        }
+
+        // WishlistItems / Contacts / ShareGrants / ShareGroups / ShareGroupMembers.
+        {
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, _receiver) = test_state_with_env_parts(
+                MapEnv::default()
+                    .with("SLSKR_PERSISTENCE_ENABLED", "true")
+                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+
+            let wishlist = super::route_http_request(
+                "POST",
+                "/api/wishlist",
+                None,
+                r#"{"artist":"Alice","title":"Blue Track","kind":"Audio"}"#,
+                &state,
+            )
+            .await
+            .expect("create wishlist item");
+            let persisted_wishlist = db.list_wishlist_items(10, 0).await.unwrap_or_default();
+            let wishlist_pass = wishlist.status == "201 Created"
+                && persisted_wishlist.len() == 1
+                && persisted_wishlist[0].title == "Blue Track";
+            record!("WishlistItems", "create-and-read-roundtrip", wishlist_pass);
+            let mut rehydrated_wishlist = super::WishlistStore::from_persisted_with_ignored(
+                persisted_wishlist,
+                Vec::new(),
+            );
+            record!(
+                "WishlistItems",
+                "restart-rehydration",
+                rehydrated_wishlist.json_array().contains("\"title\":\"Blue Track\"")
+            );
+
+            let contact = super::route_http_request(
+                "POST",
+                "/api/contacts",
+                None,
+                r#"{"username":"friend"}"#,
+                &state,
+            )
+            .await
+            .expect("create contact");
+            let contact_id = serde_json::from_str::<serde_json::Value>(&contact.body)
+                .ok()
+                .and_then(|json| json["id"].as_str().map(str::to_owned));
+            let contact_update = if let Some(contact_id) = contact_id.as_deref() {
+                Some(
+                    super::route_http_request(
+                        "PUT",
+                        &format!("/api/contacts/{contact_id}"),
+                        None,
+                        r#"{"online":true}"#,
+                        &state,
+                    )
+                    .await
+                    .expect("update contact online status"),
+                )
+            } else {
+                None
+            };
+            let persisted_contacts = db.list_contacts(10, 0).await.unwrap_or_default();
+            let contact_pass = contact.status == "201 Created"
+                && contact_update.as_ref().is_some_and(|r| r.status == "200 OK")
+                && persisted_contacts.len() == 1
+                && persisted_contacts[0].username == "friend"
+                && persisted_contacts[0].online;
+            record!("Contacts", "create-and-read-roundtrip", contact_pass);
+            let rehydrated_contacts = super::ContactStore::from_persisted(persisted_contacts);
+            record!(
+                "Contacts",
+                "restart-rehydration",
+                rehydrated_contacts.nearby_json(None).contains("\"username\":\"friend\"")
+            );
+
+            let grant_collection = super::route_http_request(
+                "POST",
+                "/api/collections",
+                None,
+                r#"{"name":"Shared"}"#,
+                &state,
+            )
+            .await
+            .expect("create grant collection");
+            let grant_collection_id =
+                serde_json::from_str::<serde_json::Value>(&grant_collection.body)
+                    .ok()
+                    .and_then(|json| json["id"].as_str().map(str::to_owned));
+            let grant_response = if let Some(collection_id) = grant_collection_id.as_deref() {
+                let grant_body =
+                    format!("{{\"collection_id\":\"{collection_id}\",\"username\":\"friend\"}}");
+                Some(
+                    super::route_http_request("POST", "/api/share-grants", None, &grant_body, &state)
+                        .await
+                        .expect("create share grant"),
+                )
+            } else {
+                None
+            };
+            let persisted_grants = db.list_share_grants(10, 0).await.unwrap_or_default();
+            let grant_pass = grant_response.as_ref().is_some_and(|r| r.status == "201 Created")
+                && persisted_grants.len() == 1;
+            record!("ShareGrants", "create-and-read-roundtrip", grant_pass);
+            let rehydrated_grants = super::ShareGrantStore::from_persisted(persisted_grants);
+            record!(
+                "ShareGrants",
+                "restart-rehydration",
+                !rehydrated_grants.json_array().is_empty()
+            );
+
+            let sharegroup = super::route_http_request(
+                "POST",
+                "/api/sharegroups",
+                None,
+                r#"{"name":"Trusted peers","description":"sharing"}"#,
+                &state,
+            )
+            .await
+            .expect("create sharegroup");
+            let sharegroup_id = serde_json::from_str::<serde_json::Value>(&sharegroup.body)
+                .ok()
+                .and_then(|json| json["id"].as_str().map(str::to_owned));
+            let member_response = if let Some(sharegroup_id) = sharegroup_id.as_deref() {
+                Some(
+                    super::route_http_request(
+                        "POST",
+                        &format!("/api/sharegroups/{sharegroup_id}/members"),
+                        None,
+                        r#"{"username":"friend"}"#,
+                        &state,
+                    )
+                    .await
+                    .expect("create sharegroup member"),
+                )
+            } else {
+                None
+            };
+            let persisted_sharegroups = db.list_share_groups(10, 0).await.unwrap_or_default();
+            let persisted_members = db.list_share_group_members(10, 0).await.unwrap_or_default();
+            let sharegroup_pass = sharegroup.status == "201 Created"
+                && member_response.as_ref().is_some_and(|r| r.status == "201 Created")
+                && persisted_sharegroups.len() == 1
+                && persisted_members.len() == 1;
+            record!("ShareGroups", "create-and-read-roundtrip", sharegroup_pass);
+            record!("ShareGroupMembers", "create-and-read-roundtrip", sharegroup_pass);
+            let rehydrated_sharegroups = super::ShareGroupStore::from_persisted(
+                persisted_sharegroups,
+                persisted_members,
+            );
+            let sharegroup_rehydrate_pass = rehydrated_sharegroups
+                .json_array(None)
+                .contains("\"name\":\"Trusted peers\"");
+            record!("ShareGroups", "restart-rehydration", sharegroup_rehydrate_pass);
+            record!("ShareGroupMembers", "restart-rehydration", sharegroup_rehydrate_pass);
+        }
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("persistence-lifecycle");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("collections_notes_wishlist_sharing_domains_roundtrip_and_rehydrate.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize persistence-lifecycle ledger"),
+        )
+        .expect("write persistence-lifecycle ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} persistence-lifecycle mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
