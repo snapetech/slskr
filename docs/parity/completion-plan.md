@@ -30,7 +30,7 @@ scoring artifact -- confirmed, all report `complete` with
 
 Parity is **not achieved**. Every planned workstream has an executable
 certification denominator. The literal proof-case closure ratio is now
-**8,617 / 19,122 = 45.06%** (was 853 / 19,122 = 4.46% at the start of this
+**8,662 / 19,122 = 45.30%** (was 853 / 19,122 = 4.46% at the start of this
 review cycle), but this is not a product-completion estimate: most
 generated cases are Cartesian proof dimensions initialized as `needs-proof`,
 including behavior already implemented and tested in slskR. Product
@@ -63,9 +63,21 @@ DB-close fault-injection tests. An Explore audit estimated roughly
 500-650 of the 5,300 controller-api cases already have genuine,
 non-duplicate passing evidence sitting in the test suite unwired to any
 ledger -- the next-highest-value work is wiring more of that existing
-evidence, not writing new tests from scratch. See the
-`parity_manifest_reclassification` session memory for the full family
-breakdown and estimate if picking this back up.
+evidence, not writing new tests from scratch. A second controller-api
+batch (library/interests/now-playing/messages, 15 cases) brought the
+total to 138. See the `parity_manifest_reclassification` session memory
+for the full family breakdown and estimate if picking this back up.
+
+`persistence-lifecycle` (798 cases) reclassification also started: same
+hardcoded-`needs-proof` structure fixed in `persistence_entries()`, one
+differential landed crediting 16 cases (Searches/Events/Conversations/
+PrivateMessages, the cleanest oracle-EF-domain-to-slskR-table matches).
+Most of the other ~60 domains either have a clean table match not yet
+wired (~13 more, including Transfers where the test already exists) or
+are stored in slskR's generic `controller_features` KV table rather than
+a dedicated SQL table and need a real per-domain rehydration check, not
+a name-matching exercise -- see session memory for the full domain-name
+mapping table before resuming this.
 
 | Workstream | Audited denominator | Current evidence | Closure state |
 | --- | ---: | --- | --- |
