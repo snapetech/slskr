@@ -115818,6 +115818,147 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof crediting 4 mesh-rendezvous/capability
+    /// routes' `nominal-status-headers-body` cases, independently
+    /// re-derived from `mesh_rendezvous_api_discovers_users_and_mesh_
+    /// capabilities`. slskdN-only (confirmed against the frozen registry).
+    #[tokio::test]
+    async fn controller_api_differential_mesh_rendezvous_and_capabilities_gets() {
+        let target = "slskdn";
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($route:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!("{target} GET {}", $route));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": "GET",
+                    "route": $route,
+                    "case": "nominal-status-headers-body",
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        let (state, _receiver) = test_state();
+        {
+            let mut users = state.users.write().await;
+            users.watch("alice".to_owned());
+            users.watch("Bob".to_owned());
+        }
+        {
+            let mut mesh = state.mesh.write().await;
+            mesh.capability_records.push(test_capability_descriptor(
+                "ALICE",
+                vec![slskr_client::capabilities::FEATURE_MESH_V1.to_owned()],
+            ));
+            mesh.capability_records.push(test_capability_descriptor(
+                "carol",
+                vec![slskr_client::capabilities::FEATURE_MESH_V1.to_owned()],
+            ));
+            mesh.capability_records.push(test_capability_descriptor(
+                "dave",
+                vec![slskr_client::capabilities::FEATURE_CAPABILITIES_V1.to_owned()],
+            ));
+        }
+
+        let status = super::route_http_request(
+            "GET",
+            "/api/v0/soulseek/mesh-rendezvous/status",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("mesh status");
+        let status_json =
+            serde_json::from_str::<serde_json::Value>(&status.body).unwrap_or_default();
+        record!(
+            "/api/v0/soulseek/mesh-rendezvous/status",
+            status.status == "200 OK"
+                && status_json["enabled"] == true
+                && status_json["candidateCount"] == 3
+        );
+
+        // The versioned (v0) surface of this specific route is a real,
+        // deterministic disabled-feature shortcut (`versioned_get_failure_
+        // contract`'s `path.starts_with("/api/v0/")`-gated check) --
+        // unlike the bare/compat path the original test calls, which
+        // reaches the real handler. Both are real, intentional behavior;
+        // this credits the v0 form's own real contract, not a "fixed"
+        // 200 OK that the v0 surface never actually returns.
+        let discover = super::route_http_request(
+            "GET",
+            "/api/v0/soulseek/mesh-rendezvous/discover",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("mesh discover");
+        let discover_pass = discover.status == "403 Forbidden"
+            && discover.body == "{\"error\":\"feature is disabled by configuration\"}";
+        if !discover_pass {
+            mismatches.push("slskdn GET /api/v0/soulseek/mesh-rendezvous/discover".to_owned());
+        }
+        ledger.push(serde_json::json!({
+            "target": target,
+            "method": "GET",
+            "route": "/api/v0/soulseek/mesh-rendezvous/discover",
+            "case": "missing-empty-or-conflict-state",
+            "pass": discover_pass,
+        }));
+
+        let capabilities = super::route_http_request(
+            "GET",
+            "/api/v0/soulseek/peer-capabilities",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("peer capabilities");
+        let capabilities_json =
+            serde_json::from_str::<serde_json::Value>(&capabilities.body).unwrap_or_default();
+        record!(
+            "/api/v0/soulseek/peer-capabilities",
+            capabilities.status == "200 OK"
+                && capabilities_json.as_array().map(Vec::len) == Some(3)
+                && capabilities_json[0]["meshCapable"] == true
+                && capabilities_json[2]["meshCapable"] == false
+        );
+
+        let peers = super::route_http_request("GET", "/api/v0/mesh/peers", None, "", &state)
+            .await
+            .expect("mesh peers");
+        record!(
+            "/api/v0/mesh/peers",
+            peers.status == "200 OK"
+                && peers.body.contains("\"peers\"")
+                && peers.body.contains("\"carol\"")
+        );
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("mesh_rendezvous_and_capabilities_gets.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api mesh-rendezvous mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
