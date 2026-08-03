@@ -120912,6 +120912,224 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof crediting 5 release-radar routes' cases,
+    /// independently re-derived from `versioned_release_radar_matches_
+    /// slskdn_state_and_result_contracts`'s real SongID-confirmation
+    /// gate, deduplication, and notification-routing checks. slskdN-only
+    /// (confirmed against the frozen registry).
+    #[tokio::test]
+    async fn controller_api_differential_release_radar() {
+        let target = "slskdn";
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($method:expr, $route:expr, $case:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!("{target} {} {} [{}]", $method, $route, $case));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": $method,
+                    "route": $route,
+                    "case": $case,
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        let (state, _receiver) = test_state();
+        let artist_id = "00000000-0000-4000-8000-000000000201";
+
+        let subscription = super::route_http_request(
+            "POST",
+            "/api/v0/musicbrainz/release-radar/subscriptions",
+            None,
+            &format!(
+                r#"{{"artistId":"{artist_id}","artistName":"Differential Artist","scope":"trusted","enabled":true,"mutedReleaseGroupIds":[],"createdAt":"2026-01-01T00:00:00Z"}}"#
+            ),
+            &state,
+        )
+        .await
+        .expect("create subscription");
+        let subscription_json =
+            serde_json::from_str::<serde_json::Value>(&subscription.body).unwrap_or_default();
+        record!(
+            "POST",
+            "/api/v0/musicbrainz/release-radar/subscriptions",
+            "nominal-status-headers-body",
+            subscription.status == "200 OK"
+        );
+        record!(
+            "POST",
+            "/api/v0/musicbrainz/release-radar/subscriptions",
+            "mutation-side-effects-and-readback",
+            subscription_json["id"] == format!("artist-radar:{artist_id}")
+                && subscription_json["artistName"] == "Differential Artist"
+                && subscription_json["createdAt"] == "2026-01-01T00:00:00+00:00"
+        );
+
+        let subscriptions = super::route_http_request(
+            "GET",
+            "/api/v0/musicbrainz/release-radar/subscriptions",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("list subscriptions");
+        let subscriptions_json =
+            serde_json::from_str::<serde_json::Value>(&subscriptions.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/api/v0/musicbrainz/release-radar/subscriptions",
+            "nominal-status-headers-body",
+            subscriptions.status == "200 OK"
+        );
+        record!(
+            "GET",
+            "/api/v0/musicbrainz/release-radar/subscriptions",
+            "populated-dynamic-state",
+            subscriptions_json == serde_json::json!([subscription_json])
+        );
+
+        let rejected = super::route_http_request(
+            "POST",
+            "/api/v0/musicbrainz/release-radar/observations",
+            None,
+            "{}",
+            &state,
+        )
+        .await
+        .expect("reject unconfirmed observation");
+        record!(
+            "POST",
+            "/api/v0/musicbrainz/release-radar/observations",
+            "malformed-path-query-or-body",
+            rejected.status == "400 Bad Request"
+                && serde_json::from_str::<serde_json::Value>(&rejected.body).unwrap_or_default()
+                    == serde_json::json!({
+                        "accepted": false,
+                        "notifications": [],
+                        "rejectionReason": "Observation is not SongID-confirmed.",
+                    })
+        );
+
+        let observation_body = format!(
+            r#"{{"artistId":"{artist_id}","recordingId":"00000000-0000-4000-8000-000000000202","releaseId":"00000000-0000-4000-8000-000000000203","releaseGroupId":"00000000-0000-4000-8000-000000000204","sourceRealm":"realm","sourceActor":"actor","songIdConfirmed":true,"confidence":1,"workRef":{{"id":"00000000-0000-4000-8000-000000000202","type":"recording","domain":"music","externalIds":{{}},"title":"Track","creator":"Artist","year":2026,"metadata":{{}},"attributedTo":"actor","published":"2026-01-01T00:00:00Z"}},"observedAt":"2026-01-01T00:00:00Z"}}"#
+        );
+        let observation = super::route_http_request(
+            "POST",
+            "/api/v0/musicbrainz/release-radar/observations",
+            None,
+            &observation_body,
+            &state,
+        )
+        .await
+        .expect("accept confirmed observation");
+        let observation_json =
+            serde_json::from_str::<serde_json::Value>(&observation.body).unwrap_or_default();
+        let notification = observation_json["notifications"][0].clone();
+        record!(
+            "POST",
+            "/api/v0/musicbrainz/release-radar/observations",
+            "nominal-status-headers-body",
+            observation.status == "200 OK" && observation_json["accepted"] == true
+        );
+        record!(
+            "POST",
+            "/api/v0/musicbrainz/release-radar/observations",
+            "mutation-side-effects-and-readback",
+            notification["subscriptionId"] == format!("artist-radar:{artist_id}")
+                && notification["artistId"] == artist_id
+                && notification["firstSeenAt"] == "2026-01-01T00:00:00+00:00"
+                && notification["read"] == false
+                && notification["workRef"]["@context"]
+                    == serde_json::json!([
+                        "https://www.w3.org/ns/activitystreams",
+                        "https://w3id.org/federation/workref#"
+                    ])
+        );
+
+        let duplicate = super::route_http_request(
+            "POST",
+            "/api/v0/musicbrainz/release-radar/observations",
+            None,
+            &observation_body,
+            &state,
+        )
+        .await
+        .expect("deduplicate observation");
+        record!(
+            "POST",
+            "/api/v0/musicbrainz/release-radar/observations",
+            "concurrency-and-idempotency",
+            serde_json::from_str::<serde_json::Value>(&duplicate.body).unwrap_or_default()
+                == serde_json::json!({"accepted": true, "notifications": []})
+        );
+
+        let notification_id = notification["id"].as_str().unwrap_or_default().to_owned();
+        let route_route = format!(
+            "/api/v0/musicbrainz/release-radar/notifications/{notification_id}/routes"
+        );
+        let route = super::route_http_request(
+            "POST",
+            &route_route,
+            None,
+            r#"{"targetPeerIds":[],"podId":"pod","channelId":"channel","senderPeerId":"sender"}"#,
+            &state,
+        )
+        .await
+        .unwrap_or_else(|error| panic!("{route_route}: {error}"));
+        let route_json = serde_json::from_str::<serde_json::Value>(&route.body).unwrap_or_default();
+        record!(
+            "POST",
+            "/api/v0/musicbrainz/release-radar/notifications/{notificationId}/routes",
+            "malformed-path-query-or-body",
+            route.status == "400 Bad Request"
+                && route_json["notificationId"] == notification_id
+                && route_json["success"] == false
+                && route_json["errorMessage"] == "At least one target peer is required."
+                && route_json["targetPeerIds"] == serde_json::json!([])
+        );
+
+        let routes_list = super::route_http_request("GET", &route_route, None, "", &state)
+            .await
+            .unwrap_or_else(|error| panic!("{route_route}: {error}"));
+        let routes_list_json =
+            serde_json::from_str::<serde_json::Value>(&routes_list.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/api/v0/musicbrainz/release-radar/notifications/{notificationId}/routes",
+            "nominal-status-headers-body",
+            routes_list.status == "200 OK"
+        );
+        record!(
+            "GET",
+            "/api/v0/musicbrainz/release-radar/notifications/{notificationId}/routes",
+            "populated-dynamic-state",
+            routes_list_json.as_array().map(Vec::len) == Some(1)
+                && routes_list_json[0]["id"] == route_json["id"]
+        );
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("release_radar.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api release-radar mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
