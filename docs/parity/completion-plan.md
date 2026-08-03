@@ -30,7 +30,7 @@ scoring artifact -- confirmed, all report `complete` with
 
 Parity is **not achieved**. Every planned workstream has an executable
 certification denominator. The literal proof-case closure ratio is now
-**9,053 / 19,122 = 47.34%** (was 853 / 19,122 = 4.46% at the start of this
+**9,070 / 19,122 = 47.43%** (was 853 / 19,122 = 4.46% at the start of this
 review cycle), but this is not a product-completion estimate: most
 generated cases are Cartesian proof dimensions initialized as `needs-proof`,
 including behavior already implemented and tested in slskR. Product
@@ -108,7 +108,10 @@ nowplaying-DELETE/integrations/transfers/library-health/overlay-
 blocklist, the 26-route versioned-openapi-validation rejection-path
 table plus its large-DTO success-path remainder (multisource/musicbrainz-
 bloom/songid-DTO/taste-recommendations/portforwarding/realm-authority-
-decision/podcore sequence)) brought the workstream to 382/5,300.
+decision/podcore sequence), auxiliary mutations spanning warm-cache
+hints/shares-scan/profile/wishlist-CSV-import/podcore-content-validate/
+sharegroups/quarantine-jury-verdicts) brought the workstream to
+396/5,300.
 
 The relay-agent/controller subsystem (deferred as a genuinely missing
 capability, see earlier notes) was investigated further this session to
