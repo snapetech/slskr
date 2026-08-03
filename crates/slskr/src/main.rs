@@ -123724,6 +123724,247 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof crediting 7 pod-membership-workflow
+    /// routes' cases, independently re-derived from `pod_membership_
+    /// workflow_queues_accepts_lists_leaves_and_cancels`'s real
+    /// queued-request lifecycle: joining queues a pending request rather
+    /// than adding the member immediately, only an authorized acceptor
+    /// (a real pod moderator/owner, not any member) can accept it, and
+    /// leave/cancel follow the same real queued pattern. slskdN-only
+    /// (confirmed against the frozen registry).
+    #[tokio::test]
+    async fn controller_api_differential_pod_membership_workflow() {
+        let target = "slskdn";
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($method:expr, $route:expr, $case:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!("{target} {} {} [{}]", $method, $route, $case));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": $method,
+                    "route": $route,
+                    "case": $case,
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        let (state, _receiver) = test_state();
+        {
+            let mut rooms = state.rooms.write().await;
+            rooms
+                .join("pod:differential-workflow".to_owned())
+                .expect("workflow pod");
+            rooms
+                .add_member("pod:differential-workflow", "differential-owner-peer".to_owned())
+                .expect("owner capacity")
+                .expect("workflow pod");
+            rooms
+                .add_member("pod:differential-workflow", "differential-ordinary-peer".to_owned())
+                .expect("ordinary member capacity")
+                .expect("workflow pod");
+            rooms.records[0].operated = true;
+        }
+        state.pod_membership_workflow.write().await.set_role(
+            "pod:differential-workflow",
+            "differential-owner-peer",
+            "owner".to_owned(),
+        );
+
+        let join = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/membership/join",
+            None,
+            r#"{"podId":"pod:differential-workflow","peerId":"differential-applicant","requestedRole":"moderator"}"#,
+            &state,
+        )
+        .await
+        .expect("join request");
+        record!(
+            "POST",
+            "/api/v0/podcore/membership/join",
+            "nominal-status-headers-body",
+            join.status == "200 OK"
+        );
+        record!(
+            "POST",
+            "/api/v0/podcore/membership/join",
+            "mutation-side-effects-and-readback",
+            !state.rooms.read().await.records[0]
+                .members
+                .iter()
+                .any(|member| member == "differential-applicant")
+        );
+
+        let pending_route = "/api/v0/podcore/membership/join/pending/pod%3Adifferential-workflow";
+        let pending = super::route_http_request("GET", pending_route, None, "", &state)
+            .await
+            .unwrap_or_else(|error| panic!("{pending_route}: {error}"));
+        let pending_json = serde_json::from_str::<serde_json::Value>(&pending.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/api/v0/podcore/membership/join/pending/{podId}",
+            "nominal-status-headers-body",
+            pending.status == "200 OK"
+        );
+        record!(
+            "GET",
+            "/api/v0/podcore/membership/join/pending/{podId}",
+            "populated-dynamic-state",
+            pending_json["pendingJoinRequests"][0]["peerId"] == "differential-applicant"
+        );
+
+        let unauthorized = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/membership/join/accept",
+            None,
+            r#"{"podId":"pod:differential-workflow","peerId":"differential-applicant","acceptedRole":"moderator","acceptorPeerId":"differential-ordinary-peer"}"#,
+            &state,
+        )
+        .await
+        .expect("unauthorized join acceptance");
+        record!(
+            "POST",
+            "/api/v0/podcore/membership/join/accept",
+            "missing-empty-or-conflict-state",
+            unauthorized.status == "400 Bad Request"
+                && unauthorized.body.contains("does not have permission")
+                && state
+                    .pod_membership_workflow
+                    .read()
+                    .await
+                    .pending_joins("pod:differential-workflow")
+                    .len()
+                    == 1
+        );
+
+        let accepted = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/membership/join/accept",
+            None,
+            r#"{"podId":"pod:differential-workflow","peerId":"differential-applicant","acceptedRole":"moderator","acceptorPeerId":"differential-owner-peer"}"#,
+            &state,
+        )
+        .await
+        .expect("join acceptance");
+        record!(
+            "POST",
+            "/api/v0/podcore/membership/join/accept",
+            "nominal-status-headers-body",
+            accepted.status == "200 OK"
+                && state.rooms.read().await.records[0]
+                    .members
+                    .iter()
+                    .any(|member| member == "differential-applicant")
+        );
+
+        let leave = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/membership/leave",
+            None,
+            r#"{"podId":"pod:differential-workflow","peerId":"differential-applicant"}"#,
+            &state,
+        )
+        .await
+        .expect("leave request");
+        record!(
+            "POST",
+            "/api/v0/podcore/membership/leave",
+            "nominal-status-headers-body",
+            leave.status == "200 OK"
+                && serde_json::from_str::<serde_json::Value>(&leave.body).unwrap_or_default()
+                    ["pending"]
+                    == true
+        );
+
+        let pending_leave_route =
+            "/api/v0/podcore/membership/leave/pending/pod%3Adifferential-workflow";
+        let pending_leave = super::route_http_request("GET", pending_leave_route, None, "", &state)
+            .await
+            .unwrap_or_else(|error| panic!("{pending_leave_route}: {error}"));
+        record!(
+            "GET",
+            "/api/v0/podcore/membership/leave/pending/{podId}",
+            "nominal-status-headers-body",
+            pending_leave.status == "200 OK"
+        );
+        record!(
+            "GET",
+            "/api/v0/podcore/membership/leave/pending/{podId}",
+            "populated-dynamic-state",
+            pending_leave.body.contains("differential-applicant")
+        );
+
+        let accepted_leave = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/membership/leave/accept",
+            None,
+            r#"{"podId":"pod:differential-workflow","peerId":"differential-applicant","acceptorPeerId":"differential-owner-peer"}"#,
+            &state,
+        )
+        .await
+        .expect("leave acceptance");
+        record!(
+            "POST",
+            "/api/v0/podcore/membership/leave/accept",
+            "nominal-status-headers-body",
+            accepted_leave.status == "200 OK"
+        );
+        record!(
+            "POST",
+            "/api/v0/podcore/membership/leave/accept",
+            "mutation-side-effects-and-readback",
+            !state.rooms.read().await.records[0]
+                .members
+                .iter()
+                .any(|member| member == "differential-applicant")
+        );
+
+        let second_join = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/membership/join",
+            None,
+            r#"{"podId":"pod:differential-workflow","peerId":"differential-peer-two"}"#,
+            &state,
+        )
+        .await
+        .expect("second join request");
+        assert_eq!(second_join.status, "200 OK");
+
+        let cancel_route =
+            "/api/v0/podcore/membership/join/pod%3Adifferential-workflow/differential-peer-two";
+        let cancelled = super::route_http_request("DELETE", cancel_route, None, "", &state)
+            .await
+            .unwrap_or_else(|error| panic!("{cancel_route}: {error}"));
+        record!(
+            "DELETE",
+            "/api/v0/podcore/membership/join/{podId}/{peerId}",
+            "nominal-status-headers-body",
+            cancelled.status == "200 OK" && cancelled.body == r#"{"cancelled":true}"#
+        );
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("pod_membership_workflow.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api pod-membership-workflow mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
