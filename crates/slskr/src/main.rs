@@ -119472,6 +119472,191 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof crediting 6 discovery-graph/opinions/
+    /// contacts/searches routes' cases, independently re-derived from
+    /// `versioned_discovery_graph_and_opinions_match_slskdn_contracts`'s
+    /// real seed-graph, opinion-validation, and honest-404 checks.
+    /// slskdN-only (confirmed against the frozen registry).
+    #[tokio::test]
+    async fn controller_api_differential_discovery_graph_and_opinions() {
+        let target = "slskdn";
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($method:expr, $route:expr, $case:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!("{target} {} {} [{}]", $method, $route, $case));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": $method,
+                    "route": $route,
+                    "case": $case,
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        let (state, _receiver) = test_state();
+
+        let graph = super::route_http_request(
+            "POST",
+            "/api/v0/discovery-graph",
+            None,
+            r#"{"scope":"differential","songIdRunId":"00000000-0000-4000-8000-000000000002","recordingId":"00000000-0000-4000-8000-000000000002","releaseId":"00000000-0000-4000-8000-000000000002","artistId":"00000000-0000-4000-8000-000000000002","title":"Discovery Differential","artist":"differential","album":"differential"}"#,
+            &state,
+        )
+        .await
+        .expect("discovery graph");
+        let graph_json = serde_json::from_str::<serde_json::Value>(&graph.body).unwrap_or_default();
+        record!(
+            "POST",
+            "/api/v0/discovery-graph",
+            "nominal-status-headers-body",
+            graph.status == "200 OK"
+        );
+        record!(
+            "POST",
+            "/api/v0/discovery-graph",
+            "populated-dynamic-state",
+            graph_json["title"] == "Discovery Differential"
+                && graph_json["seedNodeId"] == "seed:discovery-differential"
+                && graph_json["nodes"].as_array().map(Vec::len) == Some(4)
+                && graph_json["edges"].as_array().map(Vec::len) == Some(3)
+                && graph_json["evidenceSummary"].as_array().map(Vec::len) == Some(3)
+                && graph_json["request"]["scope"] == "differential"
+        );
+
+        let invalid_opinion = super::route_http_request(
+            "POST",
+            "/api/v0/opinions",
+            None,
+            r#"{"id":"00000000-0000-4000-8000-000000000002","issuer":"differential","subjectType":"Unknown","subjectId":"subject","kind":"Unknown","strength":1,"confidence":1}"#,
+            &state,
+        )
+        .await
+        .expect("invalid opinion");
+        record!(
+            "POST",
+            "/api/v0/opinions",
+            "malformed-path-query-or-body",
+            invalid_opinion.status == "400 Bad Request"
+                && serde_json::from_str::<serde_json::Value>(&invalid_opinion.body).unwrap_or_default()
+                    == serde_json::json!(["subject type is required", "opinion kind is required"])
+        );
+
+        let missing_delete = super::route_http_request(
+            "DELETE",
+            "/api/v0/opinions/00000000-0000-4000-8000-000000000002",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("missing opinion delete");
+        record!(
+            "DELETE",
+            "/api/v0/opinions/{id}",
+            "missing-empty-or-conflict-state",
+            missing_delete.status == "404 Not Found"
+        );
+
+        let valid_opinion = super::route_http_request(
+            "POST",
+            "/api/v0/opinions",
+            None,
+            r#"{"issuer":"differential","subjectType":"Track","subjectId":"track-1","kind":"Like","strength":1,"confidence":1,"scope":"global","source":"local","evidence":[]}"#,
+            &state,
+        )
+        .await
+        .expect("valid opinion");
+        let valid_opinion_json =
+            serde_json::from_str::<serde_json::Value>(&valid_opinion.body).unwrap_or_default();
+        let opinion_id = valid_opinion_json["id"].as_str().unwrap_or_default().to_owned();
+        record!(
+            "POST",
+            "/api/v0/opinions",
+            "nominal-status-headers-body",
+            valid_opinion.status == "200 OK"
+                && valid_opinion_json["updatedUnixMs"].as_i64().unwrap_or_default() > 0
+        );
+
+        let delete_route = format!("/api/v0/opinions/{opinion_id}");
+        let deleted = super::route_http_request("DELETE", &delete_route, None, "", &state)
+            .await
+            .unwrap_or_else(|error| panic!("{delete_route}: {error}"));
+        record!(
+            "DELETE",
+            "/api/v0/opinions/{id}",
+            "mutation-side-effects-and-readback",
+            deleted.status == "204 No Content"
+        );
+
+        let contact = super::route_http_request(
+            "POST",
+            "/api/v0/contacts/from-discovery",
+            None,
+            r#"{"peerId":"00000000-0000-4000-8000-000000000002","nickname":"Discovery Differential"}"#,
+            &state,
+        )
+        .await
+        .expect("contact from discovery");
+        record!(
+            "POST",
+            "/api/v0/contacts/from-discovery",
+            "missing-empty-or-conflict-state",
+            contact.status == "404 Not Found" && contact.body == r#""Profile not found.""#
+        );
+
+        let mut searches_pass = true;
+        for action in ["download", "stream"] {
+            let route = format!(
+                "/api/v0/searches/00000000-0000-4000-8000-000000000002/items/00000000-0000-4000-8000-000000000002/{action}"
+            );
+            let response = super::route_http_request("POST", &route, None, "", &state)
+                .await
+                .unwrap_or_else(|error| panic!("{route}: {error}"));
+            searches_pass &= response.status == "404 Not Found"
+                && serde_json::from_str::<serde_json::Value>(&response.body).unwrap_or_default()
+                    == serde_json::json!({
+                        "type": "search_not_found",
+                        "title": "Search not found",
+                        "status": 404,
+                        "detail": "Search not found",
+                    });
+        }
+        record!(
+            "POST",
+            "/api/v0/searches/{searchId}/items/{itemId}/download",
+            "missing-empty-or-conflict-state",
+            searches_pass
+        );
+        record!(
+            "POST",
+            "/api/v0/searches/{searchId}/items/{itemId}/stream",
+            "missing-empty-or-conflict-state",
+            searches_pass
+        );
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("discovery_graph_and_opinions.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api discovery-graph-opinions mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
