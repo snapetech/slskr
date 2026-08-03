@@ -116858,6 +116858,290 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof crediting 14 mediacore routes' cases,
+    /// independently re-derived from `mediacore_mutations_match_slskdn_
+    /// validation_and_result_dtos`'s real fuzzy-match/perceptual-hash/
+    /// portability/retrieval/stats contract checks. slskdN-only (confirmed
+    /// against the frozen registry).
+    #[tokio::test]
+    async fn controller_api_differential_mediacore_mutations() {
+        let target = "slskdn";
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($route:expr, $case:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!("{target} POST {} [{}]", $route, $case));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": "POST",
+                    "route": $route,
+                    "case": $case,
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        let (state, _receiver) = test_state();
+
+        let fuzzy_text = super::route_http_request(
+            "POST",
+            "/api/v0/mediacore/fuzzymatch/text",
+            None,
+            r#"{"textA":"same","textB":"same"}"#,
+            &state,
+        )
+        .await
+        .expect("fuzzy text match");
+        let fuzzy_text_json =
+            serde_json::from_str::<serde_json::Value>(&fuzzy_text.body).unwrap_or_default();
+        record!(
+            "/api/v0/mediacore/fuzzymatch/text",
+            "nominal-status-headers-body",
+            fuzzy_text.status == "200 OK"
+        );
+        record!(
+            "/api/v0/mediacore/fuzzymatch/text",
+            "populated-dynamic-state",
+            fuzzy_text_json["levenshteinSimilarity"] == 1.0
+                && fuzzy_text_json["phoneticSimilarity"] == 1.0
+                && fuzzy_text_json["combinedSimilarity"] == 1.0
+        );
+
+        let fuzzy_perceptual = super::route_http_request(
+            "POST",
+            "/api/v0/mediacore/fuzzymatch/perceptual",
+            None,
+            r#"{"contentIdA":"content:music:recording:a","contentIdB":"content:music:recording:b"}"#,
+            &state,
+        )
+        .await
+        .expect("fuzzy perceptual match");
+        let fuzzy_perceptual_json =
+            serde_json::from_str::<serde_json::Value>(&fuzzy_perceptual.body).unwrap_or_default();
+        record!(
+            "/api/v0/mediacore/fuzzymatch/perceptual",
+            "nominal-status-headers-body",
+            fuzzy_perceptual.status == "200 OK"
+        );
+        record!(
+            "/api/v0/mediacore/fuzzymatch/perceptual",
+            "populated-dynamic-state",
+            fuzzy_perceptual_json["similarity"] == 0.0
+                && fuzzy_perceptual_json["isSimilar"] == false
+                && fuzzy_perceptual_json["threshold"] == 0.7
+        );
+
+        for (route, body) in [
+            (
+                "/api/v0/mediacore/perceptualhash/audio",
+                r#"{"samples":[0.5],"sampleRate":1,"algorithm":"PHash"}"#,
+            ),
+            (
+                "/api/v0/mediacore/perceptualhash/image",
+                r#"{"pixels":"AAAAAA==","width":1,"height":1,"algorithm":"PHash"}"#,
+            ),
+        ] {
+            let response = super::route_http_request("POST", route, None, body, &state)
+                .await
+                .unwrap_or_else(|error| panic!("{route}: {error}"));
+            let value = serde_json::from_str::<serde_json::Value>(&response.body).unwrap_or_default();
+            record!(route, "nominal-status-headers-body", response.status == "200 OK");
+            record!(
+                route,
+                "populated-dynamic-state",
+                value["algorithm"] == "PHash"
+                    && value["hex"] == "0000000000000000"
+                    && value["numericHash"] == 0
+            );
+        }
+
+        let similarity = super::route_http_request(
+            "POST",
+            "/api/v0/mediacore/perceptualhash/similarity",
+            None,
+            r#"{"hashA":"0000000000000000","hashB":"ffffffffffffffff","threshold":0.8}"#,
+            &state,
+        )
+        .await
+        .expect("perceptual hash similarity");
+        let similarity_json =
+            serde_json::from_str::<serde_json::Value>(&similarity.body).unwrap_or_default();
+        record!(
+            "/api/v0/mediacore/perceptualhash/similarity",
+            "nominal-status-headers-body",
+            similarity.status == "200 OK"
+        );
+        record!(
+            "/api/v0/mediacore/perceptualhash/similarity",
+            "populated-dynamic-state",
+            similarity_json["hammingDistance"] == 64
+                && similarity_json["similarity"] == 0.0
+                && similarity_json["areSimilar"] == false
+        );
+
+        for (route, body) in [
+            (
+                "/api/v0/mediacore/ipld/links/content:test:type:id",
+                r#"{"links":[]}"#,
+            ),
+            (
+                "/api/v0/mediacore/portability/export",
+                r#"{"contentIds":[]}"#,
+            ),
+            (
+                "/api/v0/mediacore/publish/republish",
+                r#"{"contentIds":[]}"#,
+            ),
+            (
+                "/api/v0/mediacore/publish/descriptor",
+                r#"{"descriptor":{"contentId":"content:test:type:id"}}"#,
+            ),
+        ] {
+            let response = super::route_http_request("POST", route, None, body, &state)
+                .await
+                .unwrap_or_else(|error| panic!("{route}: {error}"));
+            record!(
+                route,
+                "malformed-path-query-or-body",
+                response.status == "400 Bad Request"
+            );
+        }
+
+        let empty_package = r#"{"package":{"version":"1.0","exportedAt":"2026-01-01T00:00:00Z","source":"test","entries":[],"links":[],"metadata":{"totalEntries":0,"totalLinks":0,"entriesByDomain":{},"checksum":""}}}"#;
+        let analysis = super::route_http_request(
+            "POST",
+            "/api/v0/mediacore/portability/analyze",
+            None,
+            empty_package,
+            &state,
+        )
+        .await
+        .expect("portability analyze");
+        record!(
+            "/api/v0/mediacore/portability/analyze",
+            "nominal-status-headers-body",
+            analysis.status == "200 OK"
+        );
+        record!(
+            "/api/v0/mediacore/portability/analyze",
+            "populated-dynamic-state",
+            analysis.body
+                == r#"{"cleanEntries":0,"conflictingEntries":0,"conflicts":[],"recommendedStrategies":{"Merge":0,"Overwrite":0,"Skip":0},"totalEntries":0}"#
+        );
+
+        let imported = super::route_http_request(
+            "POST",
+            "/api/v0/mediacore/portability/import",
+            None,
+            empty_package,
+            &state,
+        )
+        .await
+        .expect("portability import");
+        let imported_json =
+            serde_json::from_str::<serde_json::Value>(&imported.body).unwrap_or_default();
+        record!(
+            "/api/v0/mediacore/portability/import",
+            "nominal-status-headers-body",
+            imported.status == "200 OK"
+        );
+        record!(
+            "/api/v0/mediacore/portability/import",
+            "populated-dynamic-state",
+            [
+                "success",
+                "entriesProcessed",
+                "entriesImported",
+                "entriesSkipped",
+                "conflictsResolved",
+                "conflicts",
+                "errors",
+                "duration",
+            ]
+            .iter()
+            .all(|key| imported_json.get(*key).is_some())
+        );
+
+        let verify = super::route_http_request(
+            "POST",
+            "/api/v0/mediacore/retrieve/verify",
+            None,
+            r#"{"descriptor":{"contentId":"content:test:type:id","hashes":[]}}"#,
+            &state,
+        )
+        .await
+        .expect("retrieve verify");
+        let verify_json = serde_json::from_str::<serde_json::Value>(&verify.body).unwrap_or_default();
+        record!(
+            "/api/v0/mediacore/retrieve/verify",
+            "nominal-status-headers-body",
+            verify.status == "200 OK"
+        );
+        record!(
+            "/api/v0/mediacore/retrieve/verify",
+            "populated-dynamic-state",
+            verify_json["isValid"] == false
+                && verify_json["signatureValid"] == false
+                && verify_json["freshnessValid"] == false
+                && verify_json["validationError"].as_str().is_some()
+        );
+
+        let cache = super::route_http_request(
+            "POST",
+            "/api/v0/mediacore/retrieve/cache/clear",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("retrieve cache clear");
+        record!(
+            "/api/v0/mediacore/retrieve/cache/clear",
+            "nominal-status-headers-body",
+            cache.status == "200 OK"
+        );
+        record!(
+            "/api/v0/mediacore/retrieve/cache/clear",
+            "populated-dynamic-state",
+            cache.body == r#"{"bytesFreed":0,"entriesCleared":0,"success":true}"#
+        );
+
+        let reset =
+            super::route_http_request("POST", "/api/v0/mediacore/stats/reset", None, "", &state)
+                .await
+                .expect("stats reset");
+        record!(
+            "/api/v0/mediacore/stats/reset",
+            "nominal-status-headers-body",
+            reset.status == "200 OK"
+        );
+        record!(
+            "/api/v0/mediacore/stats/reset",
+            "populated-dynamic-state",
+            reset.body == r#"{"message":"Statistics reset successfully"}"#
+        );
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("mediacore_mutations.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api mediacore mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
