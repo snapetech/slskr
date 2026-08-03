@@ -30,7 +30,7 @@ scoring artifact -- confirmed, all report `complete` with
 
 Parity is **not achieved**. Every planned workstream has an executable
 certification denominator. The literal proof-case closure ratio is now
-**8,694 / 19,122 = 45.47%** (was 853 / 19,122 = 4.46% at the start of this
+**8,756 / 19,122 = 45.79%** (was 853 / 19,122 = 4.46% at the start of this
 review cycle), but this is not a product-completion estimate: most
 generated cases are Cartesian proof dimensions initialized as `needs-proof`,
 including behavior already implemented and tested in slskR. Product
@@ -106,6 +106,13 @@ many more real round-trip test groups not yet mapped to specific oracle
 units -- the single best next lever available (potentially hundreds of
 cases from tests that already exist and pass), see session memory for
 the specific test names identified.
+
+Update: the `soulseek-peer` (25 units) and `soulseek-distributed` (6
+units) families are now fully closed too, both frozen targets --
+protocol-behaviors: 4 -> 70/1465. Only `soulseek-server` (90 units, the
+large remaining family) and the slskdN-only protocol extensions are
+left in this workstream; `tests/server.rs` already has ~40+ real
+round-trip variants ready to be mapped the same way.
 
 | Workstream | Audited denominator | Current evidence | Closure state |
 | --- | ---: | --- | --- |
