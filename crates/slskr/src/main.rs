@@ -122198,6 +122198,337 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof crediting 7 quarantine-jury routes' cases,
+    /// independently re-derived from `quarantine_jury_requires_real_
+    /// quorum_before_accepting_or_releasing`'s real signed-verdict
+    /// validation, quorum enforcement, and idempotent-acceptance checks
+    /// (reuses the shared `quarantine_signed_verdict_json` fixture
+    /// builder, not the original test function). slskdN-only (confirmed
+    /// against the frozen registry).
+    #[tokio::test]
+    async fn controller_api_differential_quarantine_jury() {
+        let target = "slskdn";
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($method:expr, $route:expr, $case:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!("{target} {} {} [{}]", $method, $route, $case));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": $method,
+                    "route": $route,
+                    "case": $case,
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        let (state, _receiver) = test_state();
+
+        let created = super::route_http_request(
+            "POST",
+            "/api/v0/quarantine-jury/requests",
+            None,
+            r#"{"localReason":"differential","jurors":["juror-x","juror-y","juror-z"],"evidence":[{"type":"hash","reference":"opaque-ref-differential"}],"minJurorVotes":2}"#,
+            &state,
+        )
+        .await
+        .expect("create quarantine request");
+        let created_json = serde_json::from_str::<serde_json::Value>(&created.body).unwrap_or_default();
+        let request_id = created_json["request"]["requestId"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned();
+        record!(
+            "POST",
+            "/api/v0/quarantine-jury/requests",
+            "nominal-status-headers-body",
+            created.status == "200 OK" && !request_id.is_empty()
+        );
+
+        let unlisted = super::route_http_request(
+            "POST",
+            "/api/v0/quarantine-jury/verdicts",
+            None,
+            &quarantine_signed_verdict_json(&request_id, "not-a-juror-differential", "ReleaseCandidate")
+                .to_string(),
+            &state,
+        )
+        .await
+        .expect("unlisted juror verdict");
+        let mut verdicts_malformed_pass = unlisted.status == "400 Bad Request";
+
+        let unsigned = super::route_http_request(
+            "POST",
+            "/api/v0/quarantine-jury/verdicts",
+            None,
+            &format!(
+                r#"{{"requestId":"{request_id}","juror":"juror-x","verdict":"ReleaseCandidate"}}"#
+            ),
+            &state,
+        )
+        .await
+        .expect("unsigned verdict");
+        let unsigned_json = serde_json::from_str::<serde_json::Value>(&unsigned.body).unwrap_or_default();
+        verdicts_malformed_pass &= unsigned.status == "400 Bad Request"
+            && unsigned_json["errors"]
+                .as_array()
+                .is_some_and(|errors| errors.iter().any(|error| error == "Signed juror verdict is required."));
+
+        let mut tampered =
+            quarantine_signed_verdict_json(&request_id, "juror-x", "ReleaseCandidate");
+        tampered["verdict"] = serde_json::json!("UpholdQuarantine");
+        let tampered_result = super::route_http_request(
+            "POST",
+            "/api/v0/quarantine-jury/verdicts",
+            None,
+            &tampered.to_string(),
+            &state,
+        )
+        .await
+        .expect("tampered verdict");
+        let tampered_json =
+            serde_json::from_str::<serde_json::Value>(&tampered_result.body).unwrap_or_default();
+        verdicts_malformed_pass &= tampered_result.status == "400 Bad Request"
+            && tampered_json["errors"].as_array().is_some_and(|errors| {
+                errors
+                    .iter()
+                    .any(|error| error == "Signature payload hash does not match verdict contents.")
+            });
+        record!(
+            "POST",
+            "/api/v0/quarantine-jury/verdicts",
+            "malformed-path-query-or-body",
+            verdicts_malformed_pass
+        );
+
+        let too_early = super::route_http_request(
+            "POST",
+            &format!("/api/v0/quarantine-jury/requests/{request_id}/accept-release-candidate"),
+            None,
+            "{}",
+            &state,
+        )
+        .await
+        .expect("accept too early");
+        record!(
+            "POST",
+            "/api/v0/quarantine-jury/requests/{requestId}/accept-release-candidate",
+            "missing-empty-or-conflict-state",
+            too_early.status == "400 Bad Request"
+                && serde_json::from_str::<serde_json::Value>(&too_early.body).unwrap_or_default()
+                    ["isAccepted"]
+                    == false
+        );
+
+        let package_too_early = super::route_http_request(
+            "GET",
+            &format!("/api/v0/quarantine-jury/requests/{request_id}/release-package"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("release package too early");
+        let package_too_early_json =
+            serde_json::from_str::<serde_json::Value>(&package_too_early.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/api/v0/quarantine-jury/requests/{requestId}/release-package",
+            "missing-empty-or-conflict-state",
+            package_too_early.status == "400 Bad Request"
+                && package_too_early_json["isReady"] == false
+                && package_too_early_json["errors"][0]
+                    .as_str()
+                    .is_some_and(|error| error.contains("has not been accepted"))
+        );
+
+        let mut verdicts_nominal_pass = true;
+        for juror in ["juror-x", "juror-y"] {
+            let verdict = super::route_http_request(
+                "POST",
+                "/api/v0/quarantine-jury/verdicts",
+                None,
+                &quarantine_signed_verdict_json(&request_id, juror, "ReleaseCandidate").to_string(),
+                &state,
+            )
+            .await
+            .expect("real signed verdict");
+            verdicts_nominal_pass &= verdict.status == "200 OK";
+        }
+        record!(
+            "POST",
+            "/api/v0/quarantine-jury/verdicts",
+            "nominal-status-headers-body",
+            verdicts_nominal_pass
+        );
+
+        let aggregate_route =
+            format!("/api/v0/quarantine-jury/requests/{request_id}/aggregate");
+        let aggregate = super::route_http_request("GET", &aggregate_route, None, "", &state)
+            .await
+            .unwrap_or_else(|error| panic!("{aggregate_route}: {error}"));
+        let aggregate_json = serde_json::from_str::<serde_json::Value>(&aggregate.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/api/v0/quarantine-jury/requests/{requestId}/aggregate",
+            "nominal-status-headers-body",
+            aggregate.status == "200 OK"
+        );
+        record!(
+            "GET",
+            "/api/v0/quarantine-jury/requests/{requestId}/aggregate",
+            "populated-dynamic-state",
+            aggregate_json["recommendation"] == "ReleaseCandidate"
+                && aggregate_json["totalVerdicts"] == 2
+                && aggregate_json["requiredVotes"] == 2
+                && aggregate_json["quorumReached"] == true
+        );
+
+        let review_route = format!("/api/v0/quarantine-jury/requests/{request_id}/review");
+        let review = super::route_http_request("GET", &review_route, None, "", &state)
+            .await
+            .unwrap_or_else(|error| panic!("{review_route}: {error}"));
+        let review_json = serde_json::from_str::<serde_json::Value>(&review.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/api/v0/quarantine-jury/requests/{requestId}/review",
+            "nominal-status-headers-body",
+            review.status == "200 OK"
+        );
+        record!(
+            "GET",
+            "/api/v0/quarantine-jury/requests/{requestId}/review",
+            "populated-dynamic-state",
+            review_json["canAcceptReleaseCandidate"] == true
+                && review_json["verdicts"].as_array().map(Vec::len) == Some(2)
+        );
+
+        let accept_route =
+            format!("/api/v0/quarantine-jury/requests/{request_id}/accept-release-candidate");
+        let accepted = super::route_http_request(
+            "POST",
+            &accept_route,
+            None,
+            r#"{"acceptedBy":"differential-operator"}"#,
+            &state,
+        )
+        .await
+        .unwrap_or_else(|error| panic!("{accept_route}: {error}"));
+        let accepted_json = serde_json::from_str::<serde_json::Value>(&accepted.body).unwrap_or_default();
+        record!(
+            "POST",
+            "/api/v0/quarantine-jury/requests/{requestId}/accept-release-candidate",
+            "nominal-status-headers-body",
+            accepted.status == "200 OK"
+                && accepted_json["isAccepted"] == true
+                && accepted_json["decision"]["acceptedBy"] == "differential-operator"
+        );
+
+        let reaccepted = super::route_http_request(
+            "POST",
+            &accept_route,
+            None,
+            "{}",
+            &state,
+        )
+        .await
+        .unwrap_or_else(|error| panic!("{accept_route}: {error}"));
+        let reaccepted_json =
+            serde_json::from_str::<serde_json::Value>(&reaccepted.body).unwrap_or_default();
+        record!(
+            "POST",
+            "/api/v0/quarantine-jury/requests/{requestId}/accept-release-candidate",
+            "mutation-side-effects-and-readback",
+            reaccepted.status == "200 OK"
+                && reaccepted_json["decision"]["id"] == accepted_json["decision"]["id"]
+        );
+
+        let package_route =
+            format!("/api/v0/quarantine-jury/requests/{request_id}/release-package");
+        let package = super::route_http_request("GET", &package_route, None, "", &state)
+            .await
+            .unwrap_or_else(|error| panic!("{package_route}: {error}"));
+        let package_json = serde_json::from_str::<serde_json::Value>(&package.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/api/v0/quarantine-jury/requests/{requestId}/release-package",
+            "nominal-status-headers-body",
+            package.status == "200 OK"
+        );
+        record!(
+            "GET",
+            "/api/v0/quarantine-jury/requests/{requestId}/release-package",
+            "populated-dynamic-state",
+            package_json["isReady"] == true
+                && package_json["package"]["requestId"] == request_id
+                && package_json["package"]["currentAggregate"]["recommendation"]
+                    == "ReleaseCandidate"
+                && package_json["package"]["verdicts"].as_array().map(Vec::len) == Some(2)
+        );
+
+        let routes_route = format!("/api/v0/quarantine-jury/requests/{request_id}/routes");
+        let bad_route = super::route_http_request(
+            "POST",
+            &routes_route,
+            None,
+            r#"{"targetJurors":["not-a-juror-differential"]}"#,
+            &state,
+        )
+        .await
+        .unwrap_or_else(|error| panic!("{routes_route}: {error}"));
+        let bad_route_json = serde_json::from_str::<serde_json::Value>(&bad_route.body).unwrap_or_default();
+        record!(
+            "POST",
+            "/api/v0/quarantine-jury/requests/{requestId}/routes",
+            "malformed-path-query-or-body",
+            bad_route.status == "400 Bad Request"
+                && bad_route_json["success"] == false
+                && bad_route_json["errorMessage"]
+                    .as_str()
+                    .is_some_and(|error| error.contains("safe jurors"))
+        );
+
+        let real_route = super::route_http_request(
+            "POST",
+            &routes_route,
+            None,
+            r#"{"targetJurors":["juror-x"]}"#,
+            &state,
+        )
+        .await
+        .unwrap_or_else(|error| panic!("{routes_route}: {error}"));
+        let real_route_json = serde_json::from_str::<serde_json::Value>(&real_route.body).unwrap_or_default();
+        record!(
+            "POST",
+            "/api/v0/quarantine-jury/requests/{requestId}/routes",
+            "runtime-failure-and-timeout",
+            real_route.status == "400 Bad Request"
+                && real_route_json["success"] == false
+                && real_route_json["errorMessage"] == "Routing backend is not available."
+        );
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("quarantine_jury.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api quarantine-jury mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
