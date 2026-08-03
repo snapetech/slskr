@@ -117595,6 +117595,161 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof crediting 17 GET routes'
+    /// `missing-empty-or-conflict-state` cases, independently re-derived
+    /// from `materialized_controller_gets_match_slskdn_empty_state_
+    /// contracts`'s real empty-state response-shape checks for
+    /// nonexistent resources. slskdN-only (confirmed against the frozen
+    /// registry).
+    #[tokio::test]
+    async fn controller_api_differential_materialized_empty_state_gets() {
+        let target = "slskdn";
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        let (state, _receiver) = test_state();
+        let cases = [
+            ("/api/v0/nowplaying", "/api/v0/nowplaying", "204 No Content", None),
+            (
+                "/api/v0/listening-party/missing-pod/missing-channel",
+                "/api/v0/listening-party/{podId}/{channelId}",
+                "404 Not Found",
+                Some("\"error\":\"not found\""),
+            ),
+            (
+                "/api/v0/mediacore/contentid/domain/music",
+                "/api/v0/mediacore/contentid/domain/{domain}",
+                "200 OK",
+                Some("\"contentIds\":[]"),
+            ),
+            (
+                "/api/v0/mediacore/contentid/domain/music/type/recording",
+                "/api/v0/mediacore/contentid/domain/{domain}/type/{type}",
+                "200 OK",
+                Some("\"normalizedType\":\"recording\""),
+            ),
+            (
+                "/api/v0/mediacore/contentid/exists/missing",
+                "/api/v0/mediacore/contentid/exists/{externalId}",
+                "200 OK",
+                Some("\"exists\":false"),
+            ),
+            (
+                "/api/v0/mediacore/contentid/external/missing",
+                "/api/v0/mediacore/contentid/external/{contentId}",
+                "200 OK",
+                Some("\"externalIds\":[]"),
+            ),
+            (
+                "/api/v0/mediacore/contentid/validate/not-a-content-id",
+                "/api/v0/mediacore/contentid/validate/{*contentId}",
+                "200 OK",
+                Some("\"isValid\":false"),
+            ),
+            (
+                "/api/v0/mediacore/ipld/graph/missing",
+                "/api/v0/mediacore/ipld/graph/{*contentId}",
+                "200 OK",
+                Some("\"nodes\":["),
+            ),
+            (
+                "/api/v0/mediacore/ipld/inbound/missing",
+                "/api/v0/mediacore/ipld/inbound/{targetContentId}",
+                "200 OK",
+                Some("\"inboundLinks\":[]"),
+            ),
+            (
+                "/api/v0/mediacore/retrieve/query/domain/music",
+                "/api/v0/mediacore/retrieve/query/domain/{domain}",
+                "200 OK",
+                Some("\"descriptors\":[]"),
+            ),
+            (
+                "/api/v0/podcore/missing/opinions/members/affinity",
+                "/api/v0/podcore/{podId}/opinions/members/affinity",
+                "200 OK",
+                Some("{}"),
+            ),
+            (
+                "/api/v0/podcore/backfill/missing/last-seen",
+                "/api/v0/podcore/backfill/{podId}/last-seen",
+                "200 OK",
+                Some("{}"),
+            ),
+            (
+                "/api/v0/pods/missing/channels/missing/messages",
+                "/api/v0/pods/{podId}/channels/{channelId}/messages",
+                "200 OK",
+                Some("[]"),
+            ),
+            (
+                "/api/v0/quarantine-jury/requests/missing/routes",
+                "/api/v0/quarantine-jury/requests/{requestId}/routes",
+                "200 OK",
+                Some("[]"),
+            ),
+            (
+                "/api/v0/security/disclosure/missing",
+                "/api/v0/security/disclosure/{username}",
+                "200 OK",
+                Some("\"peerTier\":\"Unknown\""),
+            ),
+            (
+                "/api/v0/security/reputation/missing",
+                "/api/v0/security/reputation/{username}",
+                "200 OK",
+                Some("\"score\":50"),
+            ),
+            (
+                "/api/v0/traces/missing/summary",
+                "/api/v0/traces/{jobId}/summary",
+                "200 OK",
+                Some("\"totalEvents\":0"),
+            ),
+        ];
+
+        for (path, route_template, status, expected_body) in cases {
+            let response = super::route_http_request("GET", path, None, "", &state)
+                .await
+                .unwrap_or_else(|error| panic!("{path}: {error}"));
+            let pass = response.status == status
+                && match expected_body {
+                    Some(expected) => response.body.contains(expected),
+                    None => response.body.is_empty(),
+                };
+            if !pass {
+                mismatches.push(format!(
+                    "{target} GET {route_template} [missing-empty-or-conflict-state]: {}",
+                    response.body
+                ));
+            }
+            ledger.push(serde_json::json!({
+                "target": target,
+                "method": "GET",
+                "route": route_template,
+                "case": "missing-empty-or-conflict-state",
+                "pass": pass,
+            }));
+        }
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("materialized_empty_state_gets.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api materialized-empty-state mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
