@@ -30,7 +30,7 @@ scoring artifact -- confirmed, all report `complete` with
 
 Parity is **not achieved**. Every planned workstream has an executable
 certification denominator. The literal proof-case closure ratio is now
-**8,877 / 19,122 = 46.42%** (was 853 / 19,122 = 4.46% at the start of this
+**8,890 / 19,122 = 46.49%** (was 853 / 19,122 = 4.46% at the start of this
 review cycle), but this is not a product-completion estimate: most
 generated cases are Cartesian proof dimensions initialized as `needs-proof`,
 including behavior already implemented and tested in slskR. Product
@@ -90,7 +90,8 @@ GETs, swarm-analytics GETs, podcore membership/message stats GETs,
 podcore routing route/route-to-peers/stats, podcore DHT/discovery/
 membership/routing/messages/backfill maintenance mutations, share-grants
 CRUD lifecycle with a real readback/404-after-delete check the original
-test didn't have) brought the workstream to 195/5,300.
+test didn't have, mediacore fuzzy-match/perceptual-hash/portability/
+retrieval/stats routes) brought the workstream to 209/5,300.
 
 The relay-agent/controller subsystem (deferred as a genuinely missing
 capability, see earlier notes) was investigated further this session to
