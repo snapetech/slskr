@@ -123233,6 +123233,267 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof crediting 5 realm-subject-index routes'
+    /// cases, independently re-derived from `realm_subject_indexes_
+    /// persist_authority_and_compute_conflicts`'s real conflict-
+    /// detection (external-id, recording-subject, workref-identity,
+    /// alias-subject) and authority-decision-disables-conflicts checks.
+    /// Uses the same `compute_payload_hash`-based fixture-building
+    /// closure pattern as the source test (computes a real hash over its
+    /// own content, so index content can be freely varied per fixture
+    /// without breaking signature validation -- unlike the earlier
+    /// session bug with a copy-pasted fixed hash literal). slskdN-only
+    /// (confirmed against the frozen registry).
+    #[tokio::test]
+    async fn controller_api_differential_realm_subject_indexes() {
+        let target = "slskdn";
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($method:expr, $route:expr, $case:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!("{target} {} {} [{}]", $method, $route, $case));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": $method,
+                    "route": $route,
+                    "case": $case,
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        let (state, _receiver) = test_state();
+        let index = |id: &str, subject: &str, title: &str, discogs: &str| {
+            let mut index = serde_json::json!({
+                "id": id,
+                "realmId": super::realm_subject_index::DEFAULT_REALM_ID,
+                "subjectNamespace": "music",
+                "revision": 1,
+                "publishedAt": "2026-08-01T00:00:00Z",
+                "entries": [{
+                    "subjectId": subject,
+                    "workRef": {
+                        "domain": "music",
+                        "title": title,
+                        "creator": "Artist",
+                    },
+                    "externalIds": {
+                        "musicbrainz:recording": "recording-differential",
+                        "discogs": discogs,
+                    },
+                    "aliases": ["shared-alias-differential"],
+                }],
+                "signature": {
+                    "signer": super::realm_subject_index::DEFAULT_GOVERNANCE_ROOT,
+                    "algorithm": "realm-governance-sha256",
+                    "payloadHash": "",
+                    "value": "signature",
+                },
+            });
+            index["signature"]["payloadHash"] =
+                serde_json::json!(super::realm_subject_index::compute_payload_hash(&index));
+            index
+        };
+
+        let merged = super::route_http_request(
+            "POST",
+            "/api/v0/virtualsoulfind/shadow-index/sync/merge",
+            None,
+            &serde_json::json!({
+                "records": [{"recordingId":"recording-differential","peerIds":["peer-a"],"updatedAt":1}],
+                "realmIndexes": [
+                    index("index-differential-a", "subject-a", "Title A", "discogs-a"),
+                    index("index-differential-b", "subject-b", "Title B", "discogs-b"),
+                    index("index-differential-c", "subject-a", "Title C", "discogs-c"),
+                ],
+            })
+            .to_string(),
+            &state,
+        )
+        .await
+        .expect("register realm index fixtures");
+        assert_eq!(merged.status, "200 OK", "{}", merged.body);
+
+        let indexes = super::route_http_request(
+            "GET",
+            "/api/v0/realm-subject-indexes/default-realm",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("list realm indexes");
+        record!(
+            "GET",
+            "/api/v0/realm-subject-indexes/{realmId}",
+            "nominal-status-headers-body",
+            indexes.status == "200 OK"
+        );
+        record!(
+            "GET",
+            "/api/v0/realm-subject-indexes/{realmId}",
+            "populated-dynamic-state",
+            serde_json::from_str::<serde_json::Value>(&indexes.body)
+                .unwrap_or_default()
+                .as_array()
+                .map(Vec::len)
+                == Some(3)
+        );
+
+        let conflicts_route = "/api/v0/realm-subject-indexes/default-realm/conflicts";
+        let conflicts = super::route_http_request("GET", conflicts_route, None, "", &state)
+            .await
+            .unwrap_or_else(|error| panic!("{conflicts_route}: {error}"));
+        let conflicts_json =
+            serde_json::from_str::<serde_json::Value>(&conflicts.body).unwrap_or_default();
+        let conflict_types = conflicts_json["conflicts"]
+            .as_array()
+            .map(|entries| {
+                entries
+                    .iter()
+                    .map(|entry| entry["type"].as_str().unwrap_or_default().to_owned())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        record!(
+            "GET",
+            "/api/v0/realm-subject-indexes/{realmId}/conflicts",
+            "nominal-status-headers-body",
+            conflicts.status == "200 OK"
+        );
+        record!(
+            "GET",
+            "/api/v0/realm-subject-indexes/{realmId}/conflicts",
+            "populated-dynamic-state",
+            conflicts_json["indexCount"] == 3
+                && conflicts_json["entryCount"] == 3
+                && conflicts_json["hasConflicts"] == true
+                && conflict_types.contains(&"external-id".to_owned())
+                && conflict_types.contains(&"recording-subject".to_owned())
+                && conflict_types.contains(&"workref-identity".to_owned())
+                && conflict_types.contains(&"alias-subject".to_owned())
+        );
+
+        let resolutions = super::route_http_request(
+            "GET",
+            "/api/v0/realm-subject-indexes/recordings/recording-differential/resolutions",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("recording resolutions");
+        record!(
+            "GET",
+            "/api/v0/realm-subject-indexes/recordings/{recordingId}/resolutions",
+            "nominal-status-headers-body",
+            resolutions.status == "200 OK"
+        );
+        record!(
+            "GET",
+            "/api/v0/realm-subject-indexes/recordings/{recordingId}/resolutions",
+            "populated-dynamic-state",
+            serde_json::from_str::<serde_json::Value>(&resolutions.body)
+                .unwrap_or_default()
+                .as_array()
+                .map(Vec::len)
+                == Some(3)
+        );
+
+        for index_id in ["index-differential-b", "index-differential-c"] {
+            let route = format!("/api/v0/realm-subject-indexes/default-realm/{index_id}/authority-decision");
+            let disabled = super::route_http_request(
+                "POST",
+                &route,
+                None,
+                r#"{"enabled":false,"decidedBy":"differential-operator","note":"conflicting authority"}"#,
+                &state,
+            )
+            .await
+            .unwrap_or_else(|error| panic!("{route}: {error}"));
+            assert_eq!(disabled.status, "200 OK", "{}", disabled.body);
+        }
+        record!(
+            "POST",
+            "/api/v0/realm-subject-indexes/{realmId}/{indexId}/authority-decision",
+            "mutation-side-effects-and-readback",
+            true
+        );
+
+        let decisions_route = "/api/v0/realm-subject-indexes/default-realm/authority-decisions";
+        let decisions = super::route_http_request("GET", decisions_route, None, "", &state)
+            .await
+            .unwrap_or_else(|error| panic!("{decisions_route}: {error}"));
+        record!(
+            "GET",
+            "/api/v0/realm-subject-indexes/{realmId}/authority-decisions",
+            "nominal-status-headers-body",
+            decisions.status == "200 OK"
+        );
+        record!(
+            "GET",
+            "/api/v0/realm-subject-indexes/{realmId}/authority-decisions",
+            "populated-dynamic-state",
+            serde_json::from_str::<serde_json::Value>(&decisions.body)
+                .unwrap_or_default()
+                .as_array()
+                .map(Vec::len)
+                == Some(2)
+        );
+
+        let after_disable = super::route_http_request("GET", conflicts_route, None, "", &state)
+            .await
+            .unwrap_or_else(|error| panic!("{conflicts_route}: {error}"));
+        let after_disable_json =
+            serde_json::from_str::<serde_json::Value>(&after_disable.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/api/v0/realm-subject-indexes/{realmId}/conflicts",
+            "mutation-side-effects-and-readback",
+            after_disable_json["disabledAuthorityCount"] == 2
+                && after_disable_json["hasConflicts"] == false
+        );
+
+        let missing_route =
+            "/api/v0/realm-subject-indexes/default-realm/missing-differential/authority-decision";
+        let missing_decision = super::route_http_request(
+            "POST",
+            missing_route,
+            None,
+            r#"{"enabled":true,"decidedBy":"differential-operator"}"#,
+            &state,
+        )
+        .await
+        .unwrap_or_else(|error| panic!("{missing_route}: {error}"));
+        record!(
+            "POST",
+            "/api/v0/realm-subject-indexes/{realmId}/{indexId}/authority-decision",
+            "missing-empty-or-conflict-state",
+            missing_decision.status == "400 Bad Request"
+                && missing_decision.body.contains("Index authority was not found")
+        );
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("realm_subject_indexes.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api realm-subject-indexes mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
