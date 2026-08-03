@@ -716,7 +716,38 @@ def protocol_units(root: Path, include_slskdn_extensions: bool) -> list[dict[str
     return units
 
 
-def protocol_entries(target: str, units: list[dict[str, Any]]) -> list[dict[str, Any]]:
+PROTOCOL_DIFFERENTIAL_TEST_PREFIX = "protocol_behaviors_differential_"
+
+
+def protocol_behaviors_ledger(root: Path) -> dict[tuple[str, str, str], bool]:
+    """Run every protocol-behaviors bulk differential test (crates/slskr-
+    protocol, named `protocol_behaviors_differential_*` by convention) and
+    union their evidence ledgers, keyed by (target, subject, case) where
+    subject is `{family}:{name}:{value}` matching protocol_entries()'s own
+    subject format. Each such test independently re-verifies a real,
+    full-message encode/decode round-trip (not just the discriminant byte)
+    against slskr-protocol's own trusted codec.
+    """
+    subprocess.run(
+        ["cargo", "test", "-p", "slskr-protocol", "--", PROTOCOL_DIFFERENTIAL_TEST_PREFIX],
+        cwd=root,
+        check=True,
+    )
+    evidence_dir = Path(tempfile.gettempdir()) / "slskr-parity-evidence" / "protocol-behaviors"
+    ledger: dict[tuple[str, str, str], bool] = {}
+    if evidence_dir.is_dir():
+        for ledger_path in sorted(evidence_dir.glob("*.json")):
+            rows = json.loads(ledger_path.read_text(encoding="utf-8"))
+            for row in rows:
+                ledger[(row["target"], row["subject"], row["case"])] = bool(row["pass"])
+    return ledger
+
+
+def protocol_entries(
+    target: str,
+    units: list[dict[str, Any]],
+    protocol_ledger: dict[tuple[str, str, str], bool] | None = None,
+) -> list[dict[str, Any]]:
     entries = []
     for unit in units:
         subject = f"{unit['family']}:{unit['name']}:{unit['value']}"
@@ -727,6 +758,11 @@ def protocol_entries(target: str, units: list[dict[str, Any]]) -> list[dict[str,
             "timeout-cancel-reconnect-and-failure",
             "live-bidirectional-exchange",
         ):
+            proven = (
+                protocol_ledger.get((target, subject, case))
+                if protocol_ledger is not None
+                else None
+            )
             entries.append(
                 {
                     "id": f"protocol:{target}:{subject}:{case}",
@@ -736,10 +772,12 @@ def protocol_entries(target: str, units: list[dict[str, Any]]) -> list[dict[str,
                     "surface": "protocol-unit-case",
                     "subject": subject,
                     "case": case,
-                    "status": "needs-proof",
+                    "status": "complete" if proven else "needs-proof",
                     "coverage": {
                         "frozenProtocolInventory": "complete",
-                        "behavioralDifferentialOrNotApplicableProof": "open",
+                        "behavioralDifferentialOrNotApplicableProof": "complete"
+                        if proven
+                        else "open",
                     },
                     "evidence": unit["source"],
                 }
@@ -906,6 +944,16 @@ def main() -> None:
             "dry runs."
         ),
     )
+    parser.add_argument(
+        "--skip-protocol-differential",
+        action="store_true",
+        help=(
+            "Skip running the protocol_behaviors_differential_* cargo "
+            "tests (crates/slskr-protocol). All protocol-behaviors cases "
+            "fall back to needs-proof. Use only for fast, "
+            "evidence-incomplete dry runs."
+        ),
+    )
     args = parser.parse_args()
 
     root = args.slskr_root.resolve()
@@ -942,6 +990,9 @@ def main() -> None:
     )
     persistence_ledger = (
         None if args.skip_persistence_differential else persistence_lifecycle_ledger(root)
+    )
+    protocol_ledger = (
+        None if args.skip_protocol_differential else protocol_behaviors_ledger(root)
     )
     webui = run_json(
         [
@@ -1005,8 +1056,8 @@ def main() -> None:
         *security_component_entries("slskdn", slskdn_security_components),
         *operator_entries("slskd", slskd_operator_families),
         *operator_entries("slskdn", slskdn_operator_families),
-        *protocol_entries("slskd", slskd_protocol_units),
-        *protocol_entries("slskdn", slskdn_protocol_units),
+        *protocol_entries("slskd", slskd_protocol_units, protocol_ledger),
+        *protocol_entries("slskdn", slskdn_protocol_units, protocol_ledger),
         *live_interop_entries(interop_features),
     ]
     manifest = {
