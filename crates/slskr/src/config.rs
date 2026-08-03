@@ -696,6 +696,8 @@ pub struct SoulseekConnectionSettings {
     pub timeout_inactivity: Duration,
     pub timeout_transfer: Duration,
     pub proxy: SoulseekProxySettings,
+    pub auto_acknowledge_private_messages: bool,
+    pub auto_acknowledge_privilege_notifications: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -6883,6 +6885,8 @@ pub struct SoulseekConnectionFileConfig {
     timeout: SoulseekConnectionTimeoutFileConfig,
     buffer: SoulseekConnectionBufferFileConfig,
     proxy: SoulseekProxyFileConfig,
+    auto_acknowledge_private_messages: Option<bool>,
+    auto_acknowledge_privilege_notifications: Option<bool>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -7225,6 +7229,24 @@ impl SoulseekConnectionSettings {
         if proxy_enabled && proxy_port.is_none() {
             return Err("Soulseek proxy is enabled but no port is configured".to_owned());
         }
+        let auto_acknowledge_private_messages = env_bool_any_layer(
+            env,
+            &[
+                "SLSKR_SLSK_AUTO_ACKNOWLEDGE_PRIVATE_MESSAGES",
+                "SLSKD_SLSK_AUTO_ACKNOWLEDGE_PRIVATE_MESSAGES",
+                "SLSK_AUTO_ACKNOWLEDGE_PRIVATE_MESSAGES",
+            ],
+            file.auto_acknowledge_private_messages.unwrap_or(false),
+        )?;
+        let auto_acknowledge_privilege_notifications = env_bool_any_layer(
+            env,
+            &[
+                "SLSKR_SLSK_AUTO_ACKNOWLEDGE_PRIVILEGE_NOTIFICATIONS",
+                "SLSKD_SLSK_AUTO_ACKNOWLEDGE_PRIVILEGE_NOTIFICATIONS",
+                "SLSK_AUTO_ACKNOWLEDGE_PRIVILEGE_NOTIFICATIONS",
+            ],
+            file.auto_acknowledge_privilege_notifications.unwrap_or(false),
+        )?;
         Ok(Self {
             buffer_read,
             buffer_write,
@@ -7240,6 +7262,8 @@ impl SoulseekConnectionSettings {
                 username: proxy_username,
                 password: proxy_password,
             },
+            auto_acknowledge_private_messages,
+            auto_acknowledge_privilege_notifications,
         })
     }
 }

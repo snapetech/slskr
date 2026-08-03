@@ -27580,10 +27580,10 @@ async fn route_http_request_with_headers(
                           ))
                       } else {
                           Ok(routing::bad_request_response(&error))
-                      }
-                  }
-              }
-          }
+                    }
+                }
+            }
+        }
 
           ("DELETE", path)
               if pod_resource_segments(path).is_some_and(|segments| segments.len() == 1) =>
@@ -68055,6 +68055,33 @@ async fn project_server_message(
             })
             .await;
         }
+        ServerMessage::NotifyPrivileges { seconds } => {
+            update_session(state, |snapshot| {
+                snapshot.privileges_seconds = Some(*seconds);
+            })
+            .await;
+            // Auto-acknowledge privilege notifications if configured
+            if state.config.soulseek_connection.auto_acknowledge_privilege_notifications {
+                if let Err(error) = session
+                    .send_server_message(ServerMessage::AckNotifyPrivileges { token: *seconds })
+                    .await
+                {
+                    update_session(state, |snapshot| {
+                        snapshot.last_error =
+                            Some(format!("privilege notification auto-acknowledgment failed: {error}"));
+                    })
+                    .await;
+                } else {
+                    record_event(
+                        state,
+                        "privilege.auto_acked",
+                        "privileges",
+                        Some(format!("seconds={seconds}")),
+                    )
+                    .await;
+                }
+            }
+        }
         ServerMessage::MessageUserResponse(message) => {
             if handle_incoming_soulseek_pod_message(state, &message.username, &message.message)
                 .await
@@ -68165,6 +68192,35 @@ async fn project_server_message(
                             .await;
                         }
                     }
+                }
+            }
+            // Auto-acknowledge private messages if configured
+            if state.config.soulseek_connection.auto_acknowledge_private_messages {
+                if let Err(error) = session
+                    .send_server_message(ServerMessage::MessageAcked { id: message.id })
+                    .await
+                {
+                    update_session(state, |snapshot| {
+                        snapshot.last_error =
+                            Some(format!("private-message auto-acknowledgment failed: {error}"));
+                    })
+                    .await;
+                } else {
+                    let mut messages = state.messages.write().await;
+                    messages.ack(u64::from(message.id));
+                    drop(messages);
+                    if let Err(error) =
+                        persist_message_ack_checked(state, u64::from(message.id)).await
+                    {
+                        update_session(state, |snapshot| snapshot.last_error = Some(error)).await;
+                    }
+                    record_event(
+                        state,
+                        "message.auto_acked",
+                        "messages",
+                        Some(format!("id={}", message.id)),
+                    )
+                    .await;
                 }
             }
         }

@@ -717,6 +717,12 @@ pub enum ServerMessage {
     CheckPrivilegesResponse {
         seconds: u32,
     },
+    NotifyPrivileges {
+        seconds: u32,
+    },
+    AckNotifyPrivileges {
+        token: u32,
+    },
     AcceptChildren {
         accept: bool,
     },
@@ -969,6 +975,14 @@ impl ServerMessage {
             (ServerCode::CheckPrivileges, Direction::ServerToClient) => {
                 Self::CheckPrivilegesResponse {
                     seconds: reader.read_u32_le()?,
+                }
+            }
+            (ServerCode::NotifyPrivileges, Direction::ServerToClient) => Self::NotifyPrivileges {
+                seconds: reader.read_u32_le()?,
+            },
+            (ServerCode::AckNotifyPrivileges, Direction::ClientToServer) => {
+                Self::AckNotifyPrivileges {
+                    token: reader.read_u32_le()?,
                 }
             }
             (ServerCode::AcceptChildren, Direction::ClientToServer) => Self::AcceptChildren {
@@ -1288,6 +1302,14 @@ impl ServerMessage {
             Self::CheckPrivilegesResponse { seconds } => {
                 writer.write_u32_le(*seconds);
                 ServerCode::CheckPrivileges
+            }
+            Self::NotifyPrivileges { seconds } => {
+                writer.write_u32_le(*seconds);
+                ServerCode::NotifyPrivileges
+            }
+            Self::AckNotifyPrivileges { token } => {
+                writer.write_u32_le(*token);
+                ServerCode::AckNotifyPrivileges
             }
             Self::AcceptChildren { accept } => {
                 writer.write_bool(*accept);

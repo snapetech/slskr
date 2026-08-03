@@ -4737,6 +4737,8 @@ fn server_message_name(message: &ServerMessage) -> &'static str {
         ServerMessage::CantCreateRoom { .. } => "cant_create_room",
         ServerMessage::CantJoinRoom { .. } => "cant_join_room",
         ServerMessage::SetRoomTicker { .. } => "set_room_ticker",
+        ServerMessage::NotifyPrivileges { .. } => "notify_privileges",
+        ServerMessage::AckNotifyPrivileges { .. } => "ack_notify_privileges",
         ServerMessage::Unknown { .. } => "unknown",
     }
 }
