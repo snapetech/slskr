@@ -119886,6 +119886,246 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof crediting the large table-driven validation
+    /// block of `versioned_openapi_validation_and_large_dtos_match_
+    /// slskdn_contracts` (26 routes' rejection-path contracts: malformed
+    /// body, missing/conflicting resource state, and dependency-
+    /// unavailable runtime failures). Independently re-derived from the
+    /// same real request/response pairs. The remainder of that source
+    /// test (multisource/musicbrainz/songid/taste/portforwarding/
+    /// podcore large-DTO success-path checks) is a separate, still-open
+    /// batch -- see session memory. slskdN-only (confirmed against the
+    /// frozen registry route-by-route).
+    #[tokio::test]
+    async fn controller_api_differential_versioned_openapi_validation_rejections() {
+        let target = "slskdn";
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        let (state, _receiver) = test_state();
+
+        let cases: Vec<(&str, &str, &str, &str, &str)> = vec![
+            (
+                "POST",
+                "/api/v0/searches",
+                "/api/v0/searches",
+                r#"{"searchText":"differential","acquisitionProfile":"differential"}"#,
+                "400 Bad Request",
+            ),
+            (
+                "POST",
+                "/api/v0/mesh/sync/differential-peer",
+                "/api/v0/mesh/sync/{username}",
+                "{}",
+                "400 Bad Request",
+            ),
+            (
+                "POST",
+                "/api/v0/mesh/message",
+                "/api/v0/mesh/message",
+                "",
+                "415 Unsupported Media Type",
+            ),
+            (
+                "POST",
+                "/api/v0/multisource/download",
+                "/api/v0/multisource/download",
+                r#"{"filename":"Differential.flac","fileSize":1,"sources":[]}"#,
+                "400 Bad Request",
+            ),
+            (
+                "POST",
+                "/api/v0/musicbrainz/targets",
+                "/api/v0/musicbrainz/targets",
+                r#"{"releaseId":"00000000-0000-4000-8000-000000000004"}"#,
+                "404 Not Found",
+            ),
+            (
+                "POST",
+                "/api/v0/musicbrainz/overlays/edits",
+                "/api/v0/musicbrainz/overlays/edits",
+                r#"{"id":"00000000-0000-4000-8000-000000000004","evidence":[]}"#,
+                "400 Bad Request",
+            ),
+            (
+                "POST",
+                "/api/v0/musicbrainz/overlays/edits/00000000-0000-4000-8000-000000000004/approve-export",
+                "/api/v0/musicbrainz/overlays/edits/{editId}/approve-export",
+                "{}",
+                "404 Not Found",
+            ),
+            (
+                "POST",
+                "/api/v0/musicbrainz/overlays/edits/00000000-0000-4000-8000-000000000004/routes",
+                "/api/v0/musicbrainz/overlays/edits/{editId}/routes",
+                "{}",
+                "404 Not Found",
+            ),
+            (
+                "POST",
+                "/api/v0/share-grants",
+                "/api/v0/share-grants",
+                r#"{"collectionId":"00000000-0000-4000-8000-000000000004"}"#,
+                "404 Not Found",
+            ),
+            (
+                "POST",
+                "/api/v0/users/differential-peer/directory",
+                "/api/v0/users/{username}/directory",
+                r#"{"directory":"/tmp/slskdn-differential"}"#,
+                "503 Service Unavailable",
+            ),
+            (
+                "PUT",
+                "/api/v0/conversations/differential-peer/1",
+                "/api/v0/conversations/{username}/{id}",
+                "",
+                "503 Service Unavailable",
+            ),
+            (
+                "PUT",
+                "/api/v0/conversations/differential-peer",
+                "/api/v0/conversations/{username}",
+                "",
+                "503 Service Unavailable",
+            ),
+            (
+                "DELETE",
+                "/api/v0/conversations/differential-peer",
+                "/api/v0/conversations/{username}",
+                "",
+                "404 Not Found",
+            ),
+            (
+                "POST",
+                "/api/v0/conversations/differential-peer",
+                "/api/v0/conversations/{username}",
+                r#""differential""#,
+                "503 Service Unavailable",
+            ),
+            (
+                "POST",
+                "/api/v0/rooms/joined",
+                "/api/v0/rooms/joined",
+                r#""differential""#,
+                "503 Service Unavailable",
+            ),
+            (
+                "POST",
+                "/api/v0/session",
+                "/api/v0/session",
+                r#"{"username":"differential-peer","password":"differential"}"#,
+                "401 Unauthorized",
+            ),
+            (
+                "POST",
+                "/api/v0/pods/pod%3A00000000000000000000000000000004/channels/general/bind",
+                "/api/v0/pods/{podId}/channels/{channelId}/bind",
+                r#"{"roomName":"Differential","mode":"differential"}"#,
+                "400 Bad Request",
+            ),
+            (
+                "POST",
+                "/api/v0/pods/pod%3A00000000000000000000000000000004/channels/general/unbind",
+                "/api/v0/pods/{podId}/channels/{channelId}/unbind",
+                "",
+                "404 Not Found",
+            ),
+            ("PATCH", "/api/v0/options", "/api/v0/options", "{}", "403 Forbidden"),
+            (
+                "PUT",
+                "/api/v0/relay/agent",
+                "/api/v0/relay/agent",
+                "",
+                "403 Forbidden",
+            ),
+            (
+                "DELETE",
+                "/api/v0/relay/agent",
+                "/api/v0/relay/agent",
+                "",
+                "403 Forbidden",
+            ),
+            (
+                "POST",
+                "/api/v0/relay/controller/files/differential",
+                "/api/v0/relay/controller/files/{token}",
+                "",
+                "403 Forbidden",
+            ),
+            (
+                "POST",
+                "/api/v0/relay/controller/shares/differential",
+                "/api/v0/relay/controller/shares/{token}",
+                "",
+                "403 Forbidden",
+            ),
+            (
+                "POST",
+                "/api/v0/soulseek/mesh-rendezvous/interest",
+                "/api/v0/soulseek/mesh-rendezvous/interest",
+                "",
+                "403 Forbidden",
+            ),
+            (
+                "DELETE",
+                "/api/v0/soulseek/mesh-rendezvous/interest",
+                "/api/v0/soulseek/mesh-rendezvous/interest",
+                "",
+                "403 Forbidden",
+            ),
+            (
+                "POST",
+                "/api/v0/streams/content%3Amusic%3Arecording%3Amissing-differential/ticket",
+                "/api/v0/streams/{contentId}/ticket",
+                "{}",
+                "404 Not Found",
+            ),
+        ];
+
+        for (method, path, route, body, expected_status) in cases {
+            let case = match expected_status {
+                "400 Bad Request" | "415 Unsupported Media Type" => "malformed-path-query-or-body",
+                "503 Service Unavailable" => "runtime-failure-and-timeout",
+                _ => "missing-empty-or-conflict-state",
+            };
+            let response = super::route_http_request(method, path, None, body, &state)
+                .await
+                .unwrap_or_else(|error| panic!("{method} {path}: {error}"));
+            let pass = response.status == expected_status;
+            if !pass {
+                mismatches.push(format!(
+                    "{target} {method} {route} [{case}]: expected {expected_status}, got {}",
+                    response.status
+                ));
+            }
+            ledger.push(serde_json::json!({
+                "target": target,
+                "method": method,
+                "route": route,
+                "case": case,
+                "pass": pass,
+            }));
+        }
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("versioned_openapi_validation_rejections.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api versioned-openapi-validation-rejections mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
