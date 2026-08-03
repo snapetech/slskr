@@ -121855,6 +121855,349 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof crediting the remaining registered routes
+    /// of `extended_controller_mutations_are_stateful_and_domain_backed`
+    /// (found via call-density scan) not already credited elsewhere:
+    /// opinions GET/DELETE, security circuits (real Tor-circuit-building
+    /// failure, no invented success), mediacore descriptor stats, pods
+    /// creation, podcore channels, and the pod signing keypair/sign/
+    /// verify pipeline (real ed25519 crypto resolved from actual pod
+    /// membership, not a client-supplied key -- a forged sender is
+    /// genuinely rejected). slskdN-only (confirmed against the frozen
+    /// registry; the literal-pod-id-embedded `/api/v0/podcore/pod-
+    /// controller/channels` path in the source test maps to the real
+    /// templated route `/api/v0/podcore/{podId}/channels`, not a
+    /// separate unregistered path).
+    #[tokio::test]
+    async fn controller_api_differential_extended_controller_mutations() {
+        let target = "slskdn";
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($method:expr, $route:expr, $case:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!("{target} {} {} [{}]", $method, $route, $case));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": $method,
+                    "route": $route,
+                    "case": $case,
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        let (state, _receiver) = test_state();
+
+        let opinion = super::route_http_request(
+            "POST",
+            "/api/v0/opinions",
+            None,
+            r#"{"issuer":"differential-test","subjectType":"Track","subjectId":"recording-differential","kind":"Like","strength":0.75,"confidence":1,"comment":"good"}"#,
+            &state,
+        )
+        .await
+        .expect("create opinion");
+        let opinion_json = serde_json::from_str::<serde_json::Value>(&opinion.body).unwrap_or_default();
+        let opinion_id = opinion_json["id"].as_str().unwrap_or_default().to_owned();
+
+        let opinions = super::route_http_request("GET", "/api/v0/opinions", None, "", &state)
+            .await
+            .expect("list opinions");
+        record!(
+            "GET",
+            "/api/v0/opinions",
+            "nominal-status-headers-body",
+            opinions.status == "200 OK"
+        );
+        record!(
+            "GET",
+            "/api/v0/opinions",
+            "populated-dynamic-state",
+            opinions.body.contains("recording-differential")
+        );
+
+        let circuit = super::route_http_request(
+            "POST",
+            "/api/v0/security/circuits",
+            None,
+            r#"{"id":"circuit-differential","peerId":"peer-differential","active":true}"#,
+            &state,
+        )
+        .await
+        .expect("create circuit");
+        record!(
+            "POST",
+            "/api/v0/security/circuits",
+            "runtime-failure-and-timeout",
+            circuit.status == "400 Bad Request"
+                && serde_json::from_str::<serde_json::Value>(&circuit.body).unwrap_or_default()
+                    == serde_json::json!({"error": "Circuit building failed"})
+        );
+
+        let circuits = super::route_http_request("GET", "/api/v0/security/circuits", None, "", &state)
+            .await
+            .expect("list circuits");
+        record!(
+            "GET",
+            "/api/v0/security/circuits",
+            "nominal-status-headers-body",
+            circuits.status == "200 OK"
+        );
+        record!(
+            "GET",
+            "/api/v0/security/circuits",
+            "populated-dynamic-state",
+            circuits.body == "[]"
+        );
+
+        super::route_http_request(
+            "POST",
+            "/api/v0/mediacore/publish/descriptor",
+            None,
+            &serde_json::json!({
+                "descriptor": {
+                    "contentId": "cid-differential",
+                    "hashes": [{"algorithm": "sha256", "hex": "0123456789abcdef"}],
+                    "signature": {
+                        "publicKey": "key",
+                        "signature": "0123456789abcdef",
+                        "timestampUnixMs": super::unix_timestamp_millis(),
+                    },
+                },
+            })
+            .to_string(),
+            &state,
+        )
+        .await
+        .expect("publish descriptor fixture");
+
+        let descriptor_stats = super::route_http_request(
+            "GET",
+            "/api/v0/mediacore/stats/descriptors",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("descriptor stats");
+        let descriptor_stats_json =
+            serde_json::from_str::<serde_json::Value>(&descriptor_stats.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/api/v0/mediacore/stats/descriptors",
+            "nominal-status-headers-body",
+            descriptor_stats.status == "200 OK"
+        );
+        record!(
+            "GET",
+            "/api/v0/mediacore/stats/descriptors",
+            "populated-dynamic-state",
+            descriptor_stats_json["activeCacheEntries"] == 0
+        );
+
+        let created_pod = super::route_http_request(
+            "POST",
+            "/api/v0/pods",
+            None,
+            r#"{"pod":{"podId":"pod-controller-differential","name":"Controller Pod Differential","isPublic":true}}"#,
+            &state,
+        )
+        .await
+        .expect("create pod");
+        record!(
+            "POST",
+            "/api/v0/pods",
+            "nominal-status-headers-body",
+            created_pod.status == "201 Created"
+        );
+
+        let channel = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/pod-controller-differential/channels",
+            None,
+            r#"{"channelId":"general","name":"General"}"#,
+            &state,
+        )
+        .await
+        .expect("create pod channel");
+        record!(
+            "POST",
+            "/api/v0/podcore/{podId}/channels",
+            "nominal-status-headers-body",
+            channel.status == "201 Created"
+        );
+
+        let channels = super::route_http_request(
+            "GET",
+            "/api/v0/podcore/pod-controller-differential/channels",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("list pod channels");
+        record!(
+            "GET",
+            "/api/v0/podcore/{podId}/channels",
+            "nominal-status-headers-body",
+            channels.status == "200 OK"
+        );
+        record!(
+            "GET",
+            "/api/v0/podcore/{podId}/channels",
+            "populated-dynamic-state",
+            channels.body.contains("general")
+        );
+
+        let keypair = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/signing/generate-keypair",
+            None,
+            "{}",
+            &state,
+        )
+        .await
+        .expect("generate pod signing keypair");
+        let keys = serde_json::from_str::<serde_json::Value>(&keypair.body).unwrap_or_default();
+        record!(
+            "POST",
+            "/api/v0/podcore/signing/generate-keypair",
+            "nominal-status-headers-body",
+            keypair.status == "200 OK"
+        );
+        record!(
+            "POST",
+            "/api/v0/podcore/signing/generate-keypair",
+            "mutation-side-effects-and-readback",
+            keys["publicKey"].as_str().is_some() && keys["privateKey"].as_str().is_some()
+        );
+
+        state
+            .pods
+            .write()
+            .await
+            .upsert_member(
+                "pod-controller-differential",
+                super::pods::PodMember {
+                    peer_id: "tester".to_owned(),
+                    role: "member".to_owned(),
+                    is_banned: false,
+                    public_key: keys["publicKey"].as_str().map(str::to_owned),
+                    joined_at: None,
+                    last_seen: None,
+                },
+            )
+            .expect("add tester as a real pod member with a signing public key");
+
+        let signed = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/signing/sign",
+            None,
+            &serde_json::json!({
+                "privateKey": keys["privateKey"],
+                "message": {
+                    "messageId":"message-differential",
+                    "podId":"pod-controller-differential",
+                    "senderPeerId":"tester",
+                    "body":"hello",
+                    "timestampUnixMs": super::unix_timestamp() * 1000,
+                }
+            })
+            .to_string(),
+            &state,
+        )
+        .await
+        .expect("sign pod message");
+        let signed_json = serde_json::from_str::<serde_json::Value>(&signed.body).unwrap_or_default();
+        record!(
+            "POST",
+            "/api/v0/podcore/signing/sign",
+            "nominal-status-headers-body",
+            signed.status == "200 OK"
+        );
+        record!(
+            "POST",
+            "/api/v0/podcore/signing/sign",
+            "mutation-side-effects-and-readback",
+            signed_json["signature"]
+                .as_str()
+                .is_some_and(|signature| signature.starts_with("ed25519:"))
+        );
+
+        let mut forged = signed_json.clone();
+        forged["message"]["senderPeerId"] = serde_json::json!("someone-else");
+        let forged_verified = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/signing/verify",
+            None,
+            &forged.to_string(),
+            &state,
+        )
+        .await
+        .expect("verify forged sender");
+        record!(
+            "POST",
+            "/api/v0/podcore/signing/verify",
+            "missing-empty-or-conflict-state",
+            forged_verified.body == r#"{"isValid":false}"#
+        );
+
+        let ranked = super::route_http_request(
+            "POST",
+            "/api/v0/ranking/rank",
+            None,
+            r#"[{"username":"slow","filename":"x.flac","uploadSpeed":10},{"username":"fast","filename":"x.flac","uploadSpeed":10000,"hasFreeUploadSlot":true}]"#,
+            &state,
+        )
+        .await
+        .expect("rank sources");
+        let ranked_json = serde_json::from_str::<serde_json::Value>(&ranked.body).unwrap_or_default();
+        record!(
+            "POST",
+            "/api/v0/ranking/rank",
+            "nominal-status-headers-body",
+            ranked.status == "200 OK"
+        );
+        record!(
+            "POST",
+            "/api/v0/ranking/rank",
+            "mutation-side-effects-and-readback",
+            ranked_json[0]["candidate"]["username"] == "fast"
+        );
+
+        let opinion_delete_route = format!("/api/v0/opinions/{opinion_id}");
+        let removed_opinion =
+            super::route_http_request("DELETE", &opinion_delete_route, None, "", &state)
+                .await
+                .unwrap_or_else(|error| panic!("{opinion_delete_route}: {error}"));
+        record!(
+            "DELETE",
+            "/api/v0/opinions/{id}",
+            "mutation-side-effects-and-readback",
+            removed_opinion.status == "204 No Content"
+        );
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("extended_controller_mutations.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api extended-controller-mutations mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
