@@ -30,7 +30,7 @@ scoring artifact -- confirmed, all report `complete` with
 
 Parity is **not achieved**. Every planned workstream has an executable
 certification denominator. The literal proof-case closure ratio is now
-**8,917 / 19,122 = 46.63%** (was 853 / 19,122 = 4.46% at the start of this
+**8,936 / 19,122 = 46.73%** (was 853 / 19,122 = 4.46% at the start of this
 review cycle), but this is not a product-completion estimate: most
 generated cases are Cartesian proof dimensions initialized as `needs-proof`,
 including behavior already implemented and tested in slskR. Product
@@ -94,8 +94,10 @@ test didn't have, mediacore fuzzy-match/perceptual-hash/portability/
 retrieval/stats routes, mediacore publish-descriptor/retrieve/stats
 lifecycle, mediacore content-id/fuzzy-find/IPLD-link routes, 17 materialized
 empty-state GETs spanning nowplaying/listening-party/mediacore/podcore/
-pods/quarantine-jury/security/traces) brought the workstream to
-239/5,300.
+pods/quarantine-jury/security/traces, the openapi-mutation-dtos tail
+covering content-id validation/nowplaying/content-pod/wishlist-lifecycle/
+overlay-blocklist/quarantine-jury/security-bans) brought the workstream
+to 258/5,300.
 
 The relay-agent/controller subsystem (deferred as a genuinely missing
 capability, see earlier notes) was investigated further this session to
