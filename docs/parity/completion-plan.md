@@ -30,7 +30,7 @@ scoring artifact -- confirmed, all report `complete` with
 
 Parity is **not achieved**. Every planned workstream has an executable
 certification denominator. The literal proof-case closure ratio is now
-**9,119 / 19,122 = 47.69%** (was 853 / 19,122 = 4.46% at the start of this
+**9,137 / 19,122 = 47.78%** (was 853 / 19,122 = 4.46% at the start of this
 review cycle), but this is not a product-completion estimate: most
 generated cases are Cartesian proof dimensions initialized as `needs-proof`,
 including behavior already implemented and tested in slskR. Product
@@ -116,8 +116,10 @@ by-codec/by-type/summary/dashboard/scans/remediation -- found via a
 `route_http_request` call-density scan after the original test-naming
 catalogue was exhausted, bridge-admin config/start/stop/status plus
 federation-diagnostics/logs from the 53-call sibling test, bridge
-admin-stats/dashboard plus source-feed-imports preview) brought the
-workstream to 443/5,300.
+admin-stats/dashboard plus source-feed-imports preview, opinions/
+security-circuits/mediacore-descriptor-stats/pods/podcore-channels plus
+the pod signing keypair/sign/verify real-ed25519-crypto pipeline)
+brought the workstream to 461/5,300.
 
 The relay-agent/controller subsystem (deferred as a genuinely missing
 capability, see earlier notes) was investigated further this session to
