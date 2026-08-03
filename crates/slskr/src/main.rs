@@ -114807,6 +114807,109 @@ mod tests {
         );
     }
 
+    /// Credits `restart-rehydration` for the `Transfers` domain (both
+    /// targets declare it), independently re-derived from
+    /// `transfer_queue_rehydrates_from_sqlite_on_startup`: insert a raw
+    /// transfer row directly into a real file-backed database, build a
+    /// fresh empty `TransferQueue`, and confirm `rehydrate_from_database`
+    /// picks it up correctly. `create-and-read-roundtrip` isn't credited
+    /// here -- `POST /api/v0/transfers` (slskR's direct transfer-creation
+    /// route) isn't declared in either frozen registry, since the real
+    /// oracle only creates transfers via search-result-driven downloads,
+    /// not a raw REST create endpoint; that case needs a different real
+    /// creation path to prove, not attempted in this batch.
+    #[tokio::test]
+    async fn persistence_lifecycle_differential_transfers_domain_rehydrates_from_sqlite() {
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        for target in ["slskd", "slskdn"] {
+            let state_dir = std::env::temp_dir().join(format!(
+                "slskr-persistence-differential-transfers-{target}-{}",
+                uuid::Uuid::new_v4()
+            ));
+            std::fs::create_dir_all(&state_dir).expect("state dir");
+            let env = MapEnv::default()
+                .with("SLSKR_STATE_DIR", &state_dir.display().to_string())
+                .with("SLSKR_AUTO_CONNECT", "false")
+                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                .with("SLSKR_PERSISTENCE_ENABLED", "true");
+            let config =
+                super::AppConfig::from_layers(None, FileConfig::default(), &env).expect("config");
+
+            let db_path = state_dir.join("slskr.db");
+            let db = crate::persistence::DatabaseManager::new(db_path.to_str().unwrap_or("slskr.db"))
+                .await
+                .expect("database");
+
+            let record = crate::persistence::TransferRecord {
+                id: "42".to_owned(),
+                direction: "download".to_owned(),
+                filename: "Remote/SQLite.flac".to_owned(),
+                peer_username: "sqlite-peer".to_owned(),
+                filesize: 2048,
+                progress: 512,
+                status: "queued".to_owned(),
+                started_at: 1000,
+                completed_at: None,
+                request_id: None,
+                wishlist_item_id: None,
+                request_name: None,
+                destination_directory: None,
+                local_path: None,
+                batch_id: None,
+                reason: None,
+                bit_rate: None,
+                sample_rate: None,
+                bit_depth: None,
+                length_seconds: None,
+                artist: None,
+                album: None,
+                title: None,
+                track_number: None,
+                year: None,
+            };
+            db.insert_transfer(&record).await.expect("insert transfer");
+
+            let mut queue = super::TransferQueue::new(&config);
+            let empty_before = queue.entries.is_empty();
+            queue.rehydrate_from_database(&db).await;
+            let pass = empty_before
+                && queue.entries.len() == 1
+                && queue.entries[0].id == 42
+                && queue.entries[0].peer_username.as_deref() == Some("sqlite-peer")
+                && queue.entries[0].filename == "Remote/SQLite.flac"
+                && queue.entries[0].bytes_transferred == 512
+                && queue.entries[0].status == "queued";
+            if !pass {
+                mismatches.push(format!("{target} Transfers restart-rehydration"));
+            }
+            ledger.push(serde_json::json!({
+                "target": target, "domain": "Transfers", "case": "restart-rehydration", "pass": pass,
+            }));
+
+            drop(db);
+            let _ = std::fs::remove_dir_all(state_dir);
+        }
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("persistence-lifecycle");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("transfers_domain_rehydrates_from_sqlite.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize persistence-lifecycle ledger"),
+        )
+        .expect("write persistence-lifecycle ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} persistence-lifecycle Transfers mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
