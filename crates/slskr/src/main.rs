@@ -118130,6 +118130,237 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof crediting the Collections routes' real
+    /// per-caller ownership enforcement, independently re-derived from
+    /// `collections_are_scoped_to_the_real_authenticated_caller_identity`'s
+    /// checks that a collection created by one authenticated identity is
+    /// invisible to, and immutable by, a different one. Credits
+    /// `missing-empty-or-conflict-state` (cross-user 404) for the mutating
+    /// routes already covered by other cases, plus first-time coverage of
+    /// the single-collection GET and list-collections GET. slskdN-only
+    /// (confirmed against the frozen registry: slskd has no Collections
+    /// routes at all).
+    #[tokio::test]
+    async fn controller_api_differential_collections_ownership_scoping() {
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($target:expr, $method:expr, $route:expr, $case:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!("{} {} {} [{}]", $target, $method, $route, $case));
+                }
+                ledger.push(serde_json::json!({
+                    "target": $target,
+                    "method": $method,
+                    "route": $route,
+                    "case": $case,
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        for target in ["slskdn"] {
+            let keys = serde_json::json!({
+                "alice": {"key": "alice-key-0123456789", "role": "readwrite", "cidr": ""},
+                "bob": {"key": "bob-key-00123456789ab", "role": "readwrite", "cidr": ""},
+            });
+            let (state, _receiver) = test_state_with_env(
+                MapEnv::default()
+                    .with("SLSKR_AUTH_DISABLED", "false")
+                    .with("SLSKD_API_KEYS_JSON", &keys.to_string()),
+            );
+            let alice = Some("ApiKey alice-key-0123456789");
+            let bob = Some("ApiKey bob-key-00123456789ab");
+
+            let created = super::route_http_request(
+                "POST",
+                "/api/v0/collections",
+                alice,
+                r#"{"title":"Ownership Differential"}"#,
+                &state,
+            )
+            .await
+            .expect("alice creates a collection");
+            let created_json =
+                serde_json::from_str::<serde_json::Value>(&created.body).unwrap_or_default();
+            let collection_id = created_json["id"].as_str().unwrap_or_default().to_owned();
+            record!(
+                target,
+                "POST",
+                "/api/v0/collections",
+                "mutation-side-effects-and-readback",
+                created.status == "201 Created" && created_json["ownerUserId"] == "alice"
+            );
+
+            let mut cross_user_pass = true;
+            for (method, path, body) in [
+                ("GET", format!("/api/v0/collections/{collection_id}"), ""),
+                (
+                    "PUT",
+                    format!("/api/v0/collections/{collection_id}"),
+                    r#"{"title":"Hijacked"}"#,
+                ),
+                (
+                    "GET",
+                    format!("/api/v0/collections/{collection_id}/items"),
+                    "",
+                ),
+                (
+                    "POST",
+                    format!("/api/v0/collections/{collection_id}/items"),
+                    r#"{"contentId":"track-1"}"#,
+                ),
+            ] {
+                let response = super::route_http_request(method, &path, bob, body, &state)
+                    .await
+                    .unwrap_or_else(|error| panic!("{method} {path}: {error}"));
+                cross_user_pass &= response.status == "404 Not Found";
+            }
+            record!(
+                target,
+                "GET",
+                "/api/v0/collections/{id}",
+                "missing-empty-or-conflict-state",
+                cross_user_pass
+            );
+            record!(
+                target,
+                "PUT",
+                "/api/v0/collections/{id}",
+                "missing-empty-or-conflict-state",
+                cross_user_pass
+            );
+            record!(
+                target,
+                "GET",
+                "/api/v0/collections/{id}/items",
+                "missing-empty-or-conflict-state",
+                cross_user_pass
+            );
+            record!(
+                target,
+                "POST",
+                "/api/v0/collections/{id}/items",
+                "missing-empty-or-conflict-state",
+                cross_user_pass
+            );
+
+            let alice_get = super::route_http_request(
+                "GET",
+                &format!("/api/v0/collections/{collection_id}"),
+                alice,
+                "",
+                &state,
+            )
+            .await
+            .expect("alice reads her own collection");
+            record!(
+                target,
+                "GET",
+                "/api/v0/collections/{id}",
+                "nominal-status-headers-body",
+                alice_get.status == "200 OK"
+            );
+
+            let bob_created = super::route_http_request(
+                "POST",
+                "/api/v0/collections",
+                bob,
+                r#"{"title":"Bob Ownership Differential"}"#,
+                &state,
+            )
+            .await
+            .expect("bob creates his own collection");
+            let bob_created_json =
+                serde_json::from_str::<serde_json::Value>(&bob_created.body).unwrap_or_default();
+            let bob_owned = bob_created.status == "201 Created"
+                && bob_created_json["ownerUserId"] == "bob";
+
+            let alice_list =
+                super::route_http_request("GET", "/api/v0/collections", alice, "", &state)
+                    .await
+                    .expect("alice lists collections");
+            let alice_titles = serde_json::from_str::<serde_json::Value>(&alice_list.body)
+                .unwrap_or_default()
+                .as_array()
+                .cloned()
+                .unwrap_or_default()
+                .iter()
+                .map(|record| record["title"].as_str().unwrap_or_default().to_owned())
+                .collect::<Vec<_>>();
+            let bob_list = super::route_http_request("GET", "/api/v0/collections", bob, "", &state)
+                .await
+                .expect("bob lists collections");
+            let bob_titles = serde_json::from_str::<serde_json::Value>(&bob_list.body)
+                .unwrap_or_default()
+                .as_array()
+                .cloned()
+                .unwrap_or_default()
+                .iter()
+                .map(|record| record["title"].as_str().unwrap_or_default().to_owned())
+                .collect::<Vec<_>>();
+            record!(
+                target,
+                "GET",
+                "/api/v0/collections",
+                "nominal-status-headers-body",
+                alice_list.status == "200 OK" && bob_list.status == "200 OK"
+            );
+            record!(
+                target,
+                "GET",
+                "/api/v0/collections",
+                "populated-dynamic-state",
+                bob_owned
+                    && alice_titles == vec!["Ownership Differential".to_owned()]
+                    && bob_titles == vec!["Bob Ownership Differential".to_owned()]
+            );
+
+            let bob_delete = super::route_http_request(
+                "DELETE",
+                &format!("/api/v0/collections/{collection_id}"),
+                bob,
+                "",
+                &state,
+            )
+            .await
+            .expect("bob attempts to delete alice's collection");
+            let still_there = super::route_http_request(
+                "GET",
+                &format!("/api/v0/collections/{collection_id}"),
+                alice,
+                "",
+                &state,
+            )
+            .await
+            .expect("alice's collection still exists");
+            record!(
+                target,
+                "DELETE",
+                "/api/v0/collections/{id}",
+                "missing-empty-or-conflict-state",
+                bob_delete.status == "404 Not Found" && still_there.status == "200 OK"
+            );
+        }
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("collections_ownership_scoping.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "controller-api collections-ownership-scoping mismatches:\n{}",
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
