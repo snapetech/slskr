@@ -30,12 +30,12 @@ scoring artifact -- confirmed, all report `complete` with
 
 Parity is **not achieved**. Every planned workstream has an executable
 certification denominator. The literal proof-case closure ratio is now
-**8,543 / 19,122 = 44.68%** (was 853 / 19,122 = 4.46%), but this is not a
-product-completion estimate: most generated cases are Cartesian proof
-dimensions initialized as `needs-proof`, including behavior already
-implemented and tested in slskR. Product completion remains unreported until
-the subsystem reclassification separates absent behavior from
-present-but-unlinked evidence.
+**8,617 / 19,122 = 45.06%** (was 853 / 19,122 = 4.46% at the start of this
+review cycle), but this is not a product-completion estimate: most
+generated cases are Cartesian proof dimensions initialized as `needs-proof`,
+including behavior already implemented and tested in slskR. Product
+completion remains unreported until the subsystem reclassification
+separates absent behavior from present-but-unlinked evidence.
 
 **2026-08-03 reclassification**: `scripts/audit-parity-manifest.py`'s
 `api_entries()` hardcoded every `security-authorization` case as
@@ -53,10 +53,19 @@ proven cases to `complete`. All 7,690 cases pass against current slskR (0
 mismatches): the `security-authorization` workstream moved from 0/7,690 to
 7,690/7,690 complete. This is genuine executable evidence (verified with a
 deliberate negative control that the harness does detect real mismatches),
-not a route-presence shortcut; see the work-selection rules below --
-`controller-api` (4,674+626 cases, still 0 linked) is the next-largest
-bucket with the same hardcoded-`needs-proof` structure and is the natural
-next target.
+not a route-presence shortcut. Followed immediately by a first
+controller-api batch: 5 more `controller_api_differential_*` tests
+(`crates/slskr/src/main.rs`) crediting 123 of the 5,300 controller-api
+cases (74 of which matched a real manifest entry after the frozen-registry
+re-run) via the same pattern, reusing the shared production contract
+`versioned_get_failure_contract` and independently re-verified real
+DB-close fault-injection tests. An Explore audit estimated roughly
+500-650 of the 5,300 controller-api cases already have genuine,
+non-duplicate passing evidence sitting in the test suite unwired to any
+ledger -- the next-highest-value work is wiring more of that existing
+evidence, not writing new tests from scratch. See the
+`parity_manifest_reclassification` session memory for the full family
+breakdown and estimate if picking this back up.
 
 | Workstream | Audited denominator | Current evidence | Closure state |
 | --- | ---: | --- | --- |

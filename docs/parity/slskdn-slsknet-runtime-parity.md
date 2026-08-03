@@ -472,6 +472,23 @@ the same unconditional-`needs-proof` construction in `api_entries()`/
 build a real classifier fed by genuinely executable evidence, not a
 route-presence shortcut.
 
+## 2026-08-03 ActivityPub inbox HTTP Signature verification
+
+`POST /actors/{actor}/inbox` previously accepted any anonymous request
+with no verification at all -- a real, confirmed security gap (any caller
+could forge Follow/Undo/Accept/etc. activities into any actor's inbox).
+Ported the frozen oracle's real `ActivityPubController.
+VerifyHttpSignatureAsync` faithfully: Ed25519-only Signature-header
+parsing and validation, the oracle's exact required-signed-headers
+contract, +/-5 minute freshness (`Date` or `created`), real `Digest`
+verification against the body, an SSRF-safe fetch of the signer's real
+public key (reusing the same DNS-resolve-then-pin pattern already proven
+for Lidarr/Spotify integration URLs), PKIX SubjectPublicKeyInfo decode,
+and `IsActivityActorBoundToSignature`-equivalent actor binding. Outbox is
+unaffected (a local, already-authenticated action, not a federation-facing
+signature surface). See `crates/slskr/src/main.rs`
+`verify_activitypub_inbox_signature` and its neighboring functions.
+
 ## 2026-07-15 Upstream Delta Audit
 
 The previous ledger date is not a current upstream baseline. At the frozen
