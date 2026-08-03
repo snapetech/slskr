@@ -118361,6 +118361,230 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof crediting the share-grants routes' real
+    /// transitive ownership enforcement, independently re-derived from
+    /// `share_grants_are_scoped_to_the_real_collection_owner`'s checks
+    /// that a grant is owned through its collection (`collection.
+    /// OwnerUserId == currentUserId`), so every action 404s for a
+    /// different caller. Uses the `/api/v0/` routes throughout (the
+    /// original test also exercises a legacy `/api/share-grants/{id}`
+    /// alias that has no manifest registry entry in either frozen
+    /// target -- not creditable, matching the documented pattern for
+    /// slskR-internal aliases). slskdN-only (confirmed against the
+    /// frozen registry: absent from the slskd policy file).
+    #[tokio::test]
+    async fn controller_api_differential_share_grants_ownership_scoping() {
+        let target = "slskdn";
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($method:expr, $route:expr, $case:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!("{target} {} {} [{}]", $method, $route, $case));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": $method,
+                    "route": $route,
+                    "case": $case,
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        let keys = serde_json::json!({
+            "alice": {"key": "alice-key-0123456789", "role": "administrator", "cidr": ""},
+            "bob": {"key": "bob-key-00123456789ab", "role": "administrator", "cidr": ""},
+        });
+        let (state, _receiver) = test_state_with_env(
+            MapEnv::default()
+                .with("SLSKR_AUTH_DISABLED", "false")
+                .with("SLSKD_API_KEYS_JSON", &keys.to_string()),
+        );
+        let alice = Some("ApiKey alice-key-0123456789");
+        let bob = Some("ApiKey bob-key-00123456789ab");
+
+        let collection = super::route_http_request(
+            "POST",
+            "/api/v0/collections",
+            alice,
+            r#"{"title":"Alice Grant Ownership"}"#,
+            &state,
+        )
+        .await
+        .expect("alice creates a collection");
+        let collection_id = serde_json::from_str::<serde_json::Value>(&collection.body)
+            .unwrap_or_default()["id"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned();
+
+        let bob_create = super::route_http_request(
+            "POST",
+            "/api/v0/share-grants",
+            bob,
+            &format!(r#"{{"collection_id":"{collection_id}","username":"recipient"}}"#),
+            &state,
+        )
+        .await
+        .expect("bob attempts to grant alice's collection");
+        record!(
+            "POST",
+            "/api/v0/share-grants",
+            "missing-empty-or-conflict-state",
+            bob_create.status == "404 Not Found"
+        );
+
+        let granted = super::route_http_request(
+            "POST",
+            "/api/v0/share-grants",
+            alice,
+            &format!(r#"{{"collection_id":"{collection_id}","username":"recipient"}}"#),
+            &state,
+        )
+        .await
+        .expect("alice grants her own collection");
+        let grant_id = serde_json::from_str::<serde_json::Value>(&granted.body)
+            .unwrap_or_default()["id"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned();
+
+        let mut cross_user_pass = true;
+        for (method, path, body) in [
+            (
+                "GET",
+                format!("/api/v0/share-grants/{grant_id}"),
+                String::new(),
+            ),
+            (
+                "PUT",
+                format!("/api/v0/share-grants/{grant_id}"),
+                r#"{"permissions":"read,download"}"#.to_owned(),
+            ),
+            (
+                "GET",
+                format!("/api/v0/share-grants/by-collection/{collection_id}"),
+                String::new(),
+            ),
+            (
+                "POST",
+                format!("/api/v0/share-grants/{grant_id}/token"),
+                "{}".to_owned(),
+            ),
+        ] {
+            let response = super::route_http_request(method, &path, bob, &body, &state)
+                .await
+                .unwrap_or_else(|error| panic!("{method} {path}: {error}"));
+            cross_user_pass &= response.status == "404 Not Found";
+        }
+        record!(
+            "GET",
+            "/api/v0/share-grants/{id}",
+            "missing-empty-or-conflict-state",
+            cross_user_pass
+        );
+        record!(
+            "PUT",
+            "/api/v0/share-grants/{id}",
+            "missing-empty-or-conflict-state",
+            cross_user_pass
+        );
+        record!(
+            "GET",
+            "/api/v0/share-grants/by-collection/{collectionId}",
+            "missing-empty-or-conflict-state",
+            cross_user_pass
+        );
+        record!(
+            "POST",
+            "/api/v0/share-grants/{id}/token",
+            "missing-empty-or-conflict-state",
+            cross_user_pass
+        );
+
+        let bob_list =
+            super::route_http_request("GET", "/api/v0/share-grants", bob, "", &state)
+                .await
+                .expect("bob lists share grants");
+        let bob_list_empty = serde_json::from_str::<serde_json::Value>(&bob_list.body)
+            .unwrap_or_default()
+            .as_array()
+            .map(Vec::len)
+            == Some(0);
+        record!(
+            "GET",
+            "/api/v0/share-grants",
+            "nominal-status-headers-body",
+            bob_list.status == "200 OK"
+        );
+        record!(
+            "GET",
+            "/api/v0/share-grants",
+            "populated-dynamic-state",
+            bob_list_empty
+        );
+
+        let alice_token = super::route_http_request(
+            "POST",
+            &format!("/api/v0/share-grants/{grant_id}/token"),
+            alice,
+            "{}",
+            &state,
+        )
+        .await
+        .expect("alice mints a token for her own grant");
+        record!(
+            "POST",
+            "/api/v0/share-grants/{id}/token",
+            "nominal-status-headers-body",
+            alice_token.status == "201 Created"
+        );
+
+        let bob_delete = super::route_http_request(
+            "DELETE",
+            &format!("/api/v0/share-grants/{grant_id}"),
+            bob,
+            "",
+            &state,
+        )
+        .await
+        .expect("bob attempts to delete alice's grant");
+        let still_there = super::route_http_request(
+            "GET",
+            &format!("/api/v0/share-grants/{grant_id}"),
+            alice,
+            "",
+            &state,
+        )
+        .await
+        .expect("alice's grant still exists");
+        record!(
+            "DELETE",
+            "/api/v0/share-grants/{id}",
+            "missing-empty-or-conflict-state",
+            bob_delete.status == "404 Not Found" && still_there.status == "200 OK"
+        );
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("share_grants_ownership_scoping.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api share-grants-ownership-scoping mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
