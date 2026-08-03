@@ -117142,6 +117142,246 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof crediting the mediacore descriptor/retrieve/
+    /// stats lifecycle routes' cases, independently re-derived from
+    /// `mediacore_descriptor_updates_imports_and_stats_use_real_records`
+    /// and `mediacore_versioned_descriptor_delete_does_not_overflow_
+    /// worker_stack`'s real published/cached/statistics record checks.
+    /// slskdN-only (confirmed against the frozen registry).
+    #[tokio::test]
+    async fn controller_api_differential_mediacore_descriptor_lifecycle() {
+        let target = "slskdn";
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($method:expr, $route:expr, $case:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!("{target} {} {} [{}]", $method, $route, $case));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": $method,
+                    "route": $route,
+                    "case": $case,
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        let (state, _receiver) = test_state();
+        let content_id = "content:test:recording:differential";
+        let descriptor = serde_json::json!({
+            "contentId": content_id,
+            "title": "before",
+            "hashes": [{"algorithm": "sha256", "hex": "aaaa"}],
+            "signature": {
+                "publicKey": "key",
+                "signature": "signature",
+                "timestampUnixMs": super::unix_timestamp_millis(),
+            },
+        });
+        let published = super::route_http_request(
+            "POST",
+            "/api/v0/mediacore/publish/descriptor",
+            None,
+            &serde_json::json!({"descriptor": descriptor}).to_string(),
+            &state,
+        )
+        .await
+        .expect("publish descriptor");
+        record!(
+            "POST",
+            "/api/v0/mediacore/publish/descriptor",
+            "nominal-status-headers-body",
+            published.status == "200 OK"
+        );
+
+        let updated = super::route_http_request(
+            "PUT",
+            &format!("/api/v0/mediacore/publish/descriptor/{content_id}"),
+            None,
+            r#"{"updates":{"title":"after","genre":"ambient"}}"#,
+            &state,
+        )
+        .await
+        .expect("update descriptor");
+        record!(
+            "PUT",
+            "/api/v0/mediacore/publish/descriptor/{contentId}",
+            "missing-empty-or-conflict-state",
+            updated.status == "400 Bad Request"
+                && serde_json::from_str::<serde_json::Value>(&updated.body).unwrap()["error"]
+                    == "Failed to update descriptor"
+        );
+
+        let retrieved = super::route_http_request(
+            "POST",
+            "/api/v0/mediacore/retrieve/batch",
+            None,
+            &serde_json::json!({"contentIds":[content_id,"content:test:recording:missing"]})
+                .to_string(),
+            &state,
+        )
+        .await
+        .expect("retrieve batch");
+        let retrieved_json =
+            serde_json::from_str::<serde_json::Value>(&retrieved.body).unwrap_or_default();
+        record!(
+            "POST",
+            "/api/v0/mediacore/retrieve/batch",
+            "nominal-status-headers-body",
+            retrieved.status == "200 OK"
+        );
+        record!(
+            "POST",
+            "/api/v0/mediacore/retrieve/batch",
+            "populated-dynamic-state",
+            retrieved_json["requested"] == 2
+                && retrieved_json["found"] == 1
+                && retrieved_json["results"].as_array().map(Vec::len) == Some(2)
+        );
+
+        let stats =
+            super::route_http_request("GET", "/api/v0/mediacore/retrieve/stats", None, "", &state)
+                .await
+                .expect("retrieve stats");
+        let stats_json = serde_json::from_str::<serde_json::Value>(&stats.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/api/v0/mediacore/retrieve/stats",
+            "nominal-status-headers-body",
+            stats.status == "200 OK"
+        );
+        record!(
+            "GET",
+            "/api/v0/mediacore/retrieve/stats",
+            "populated-dynamic-state",
+            stats_json["totalRetrievals"] == 2
+                && stats_json["cacheHits"] == 0
+                && stats_json["cacheMisses"] == 2
+                && stats_json["activeCacheEntries"] == 1
+        );
+
+        let cached_route = format!("/api/v0/mediacore/retrieve/descriptor/{content_id}");
+        let cached = super::route_http_request("GET", &cached_route, None, "", &state)
+            .await
+            .unwrap_or_else(|error| panic!("{cached_route}: {error}"));
+        let cached_json = serde_json::from_str::<serde_json::Value>(&cached.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/api/v0/mediacore/retrieve/descriptor/{contentId}",
+            "nominal-status-headers-body",
+            cached.status == "200 OK"
+        );
+        record!(
+            "GET",
+            "/api/v0/mediacore/retrieve/descriptor/{contentId}",
+            "populated-dynamic-state",
+            cached_json["found"] == true && cached_json["fromCache"] == true
+        );
+
+        let publishing =
+            super::route_http_request("GET", "/api/v0/mediacore/stats/publishing", None, "", &state)
+                .await
+                .expect("publishing stats");
+        let publishing_json =
+            serde_json::from_str::<serde_json::Value>(&publishing.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/api/v0/mediacore/stats/publishing",
+            "nominal-status-headers-body",
+            publishing.status == "200 OK"
+        );
+        record!(
+            "GET",
+            "/api/v0/mediacore/stats/publishing",
+            "populated-dynamic-state",
+            publishing_json["totalPublished"] == 1
+                && publishing_json["activePublications"] == 1
+                && publishing_json["publicationsByDomain"]["test"] == 1
+        );
+
+        let publisher_stats =
+            super::route_http_request("GET", "/api/v0/mediacore/publish/stats", None, "", &state)
+                .await
+                .expect("publisher stats");
+        let publisher_stats_json =
+            serde_json::from_str::<serde_json::Value>(&publisher_stats.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/api/v0/mediacore/publish/stats",
+            "nominal-status-headers-body",
+            publisher_stats.status == "200 OK"
+        );
+        record!(
+            "GET",
+            "/api/v0/mediacore/publish/stats",
+            "populated-dynamic-state",
+            publisher_stats_json["totalPublishedDescriptors"] == 1
+                && publisher_stats_json["activePublications"] == 1
+                && publisher_stats_json["publicationsByDomain"]["test"] == 1
+                && publisher_stats_json["averageTtlHours"].as_f64().unwrap_or(0.0) > 0.0
+        );
+
+        let reset =
+            super::route_http_request("POST", "/api/v0/mediacore/stats/reset", None, "", &state)
+                .await
+                .expect("stats reset");
+        let stats_after_reset =
+            super::route_http_request("GET", "/api/v0/mediacore/retrieve/stats", None, "", &state)
+                .await
+                .expect("retrieve stats after reset");
+        record!(
+            "GET",
+            "/api/v0/mediacore/retrieve/stats",
+            "mutation-side-effects-and-readback",
+            reset.status == "200 OK"
+                && serde_json::from_str::<serde_json::Value>(&stats_after_reset.body).unwrap()
+                    ["totalRetrievals"]
+                    == 0
+        );
+
+        let delete_route = "/api/v0/mediacore/publish/descriptor/content-id-differential";
+        let deleted = super::route_http_request("DELETE", delete_route, None, "", &state)
+            .await
+            .expect("delete descriptor");
+        record!(
+            "DELETE",
+            "/api/v0/mediacore/publish/descriptor/{contentId}",
+            "nominal-status-headers-body",
+            deleted.status == "200 OK"
+        );
+        record!(
+            "DELETE",
+            "/api/v0/mediacore/publish/descriptor/{contentId}",
+            "populated-dynamic-state",
+            serde_json::from_str::<serde_json::Value>(&deleted.body).unwrap()
+                == serde_json::json!({
+                    "contentId": "content-id-differential",
+                    "success": true,
+                    "wasPublished": false,
+                })
+        );
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("mediacore_descriptor_lifecycle.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api mediacore-descriptor-lifecycle mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
