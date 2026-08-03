@@ -67110,6 +67110,7 @@ async fn connect_session(
     *next_ping = Instant::now() + state.config.ping_interval;
     replay_joined_rooms(state, &mut new_session).await;
     publish_configured_interests(state, &mut new_session).await;
+    dispatch_queued_downloads_after_login(state).await;
     *session = Some(new_session);
     record_daemon_log(
         state,
@@ -67148,6 +67149,52 @@ async fn publish_configured_interests(state: &AppState, session: &mut ServerSess
                 logging::LogLevel::Warn,
                 "interests",
                 format!("failed to publish configured {kind} interest {item}: {error}"),
+            )
+            .await;
+        }
+    }
+}
+
+async fn dispatch_queued_downloads_after_login(state: &AppState) {
+    let queued: Vec<TransferEntry> = {
+        let queue = state.transfers.read().await;
+        queue
+            .entries
+            .iter()
+            .filter(|entry| entry.direction == 0 && entry.status == "queued")
+            .cloned()
+            .collect()
+    };
+
+    if queued.is_empty() {
+        return;
+    }
+
+    record_daemon_log(
+        state,
+        logging::LogLevel::Info,
+        "transfers",
+        format!("dispatching {} queued downloads after login", queued.len()),
+    )
+    .await;
+
+    for entry in queued {
+        let Some(peer_username) = entry.peer_username.as_deref() else {
+            continue;
+        };
+        let command = SessionCommand::TransferPeer {
+            id: entry.id,
+            username: peer_username.to_owned(),
+        };
+        if let Err(error) = send_session_command(state, command).await {
+            record_daemon_log(
+                state,
+                logging::LogLevel::Warn,
+                "transfers",
+                format!(
+                    "failed to dispatch queued download {} for {}: {}",
+                    entry.filename, peer_username, error
+                ),
             )
             .await;
         }
@@ -117025,6 +117072,36 @@ mod tests {
 
         drop(db);
         let _ = std::fs::remove_dir_all(state_dir);
+    }
+
+    #[tokio::test]
+    async fn dispatch_queued_downloads_after_login_sends_transfer_peer_commands() {
+        let (state, mut receiver) = test_state();
+        
+        // Create a queued download
+        {
+            let mut queue = state.transfers.write().await;
+            queue.create(
+                0,
+                Some("test-peer".to_owned()),
+                "Remote/Test.flac".to_owned(),
+                None,
+                Some(1024),
+            );
+        }
+        
+        // Call dispatch function
+        super::dispatch_queued_downloads_after_login(&state).await;
+        
+        // Verify TransferPeer command was sent
+        let command = receiver.recv().await.expect("should receive command");
+        match command {
+            super::SessionCommand::TransferPeer { id, username } => {
+                assert_eq!(id, 1);
+                assert_eq!(username, "test-peer");
+            }
+            _ => panic!("Expected TransferPeer command, got {:?}", command),
+        }
     }
 
     #[test]
