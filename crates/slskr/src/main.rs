@@ -3637,7 +3637,8 @@ impl TransferQueue {
                 let direction = if record.direction == "upload" { 1 } else { 0 };
                 let status = match record.status.as_str() {
                     "queued" | "Queued" => "queued",
-                    "in_progress" | "InProgress" => "in_progress",
+                    // Convert in_progress to queued for retry after restart
+                    "in_progress" | "InProgress" => "queued",
                     "completed" | "Completed" => "completed",
                     "failed" | "Failed" => "failed",
                     "cancelled" | "Cancelled" => "cancelled",
@@ -67162,14 +67163,22 @@ async fn connect_session(
     }
     let distributed_settings = *state.soulseek_distributed_settings.read().await;
     if !distributed_settings.disabled {
+        // Use persisted distributed tree state if available, otherwise start fresh
+        let (branch_level, branch_root) = {
+            let runtime = state.distributed_network.read().await;
+            (runtime.branch_level, runtime.branch_root.clone())
+        };
+
         for message in [
             ServerMessage::HaveNoParent { no_parent: true },
             ServerMessage::AcceptChildren {
                 accept: !distributed_settings.disable_children,
             },
-            ServerMessage::BranchLevel { level: 0 },
+            ServerMessage::BranchLevel {
+                level: branch_level,
+            },
             ServerMessage::BranchRoot {
-                username: connected_username.clone(),
+                username: branch_root,
             },
         ] {
             if let Err(error) = new_session.send_server_message(message).await {
@@ -67214,6 +67223,7 @@ async fn connect_session(
     state.runtime.write().await.set_reconnect_pending(false);
     *next_ping = Instant::now() + state.config.ping_interval;
     replay_joined_rooms(state, &mut new_session).await;
+    replay_watched_users(state, &mut new_session).await;
     publish_configured_interests(state, &mut new_session).await;
     dispatch_queued_downloads_after_login(state).await;
     *session = Some(new_session);
@@ -67231,17 +67241,27 @@ async fn connect_session(
 }
 
 async fn publish_configured_interests(state: &AppState, session: &mut ServerSession<TcpStream>) {
-    let settings = state.core_workflow_settings.read().await.clone();
-    for (kind, item) in settings
-        .liked_interests
+    // Publish all interests from the interest_store (includes both config and API-added)
+    let (liked, hated) = {
+        let store = state.interests.read().await;
+        (
+            store
+                .liked
+                .iter()
+                .map(|r| r.name.clone())
+                .collect::<Vec<_>>(),
+            store
+                .hated
+                .iter()
+                .map(|r| r.name.clone())
+                .collect::<Vec<_>>(),
+        )
+    };
+
+    for (kind, item) in liked
         .into_iter()
         .map(|item| ("liked", item))
-        .chain(
-            settings
-                .hated_interests
-                .into_iter()
-                .map(|item| ("hated", item)),
-        )
+        .chain(hated.into_iter().map(|item| ("hated", item)))
     {
         let message = if kind == "liked" {
             ServerMessage::AddThingILike { item: item.clone() }
@@ -67253,7 +67273,46 @@ async fn publish_configured_interests(state: &AppState, session: &mut ServerSess
                 state,
                 logging::LogLevel::Warn,
                 "interests",
-                format!("failed to publish configured {kind} interest {item}: {error}"),
+                format!("failed to publish {kind} interest {item}: {error}"),
+            )
+            .await;
+        }
+    }
+}
+
+async fn replay_watched_users(state: &AppState, session: &mut ServerSession<TcpStream>) {
+    let watched: Vec<String> = {
+        let users = state.users.read().await;
+        users
+            .records
+            .iter()
+            .filter(|record| record.watched)
+            .map(|record| record.username.clone())
+            .collect()
+    };
+
+    if watched.is_empty() {
+        return;
+    }
+
+    record_daemon_log(
+        state,
+        logging::LogLevel::Info,
+        "users",
+        format!("replaying {} watched users after login", watched.len()),
+    )
+    .await;
+
+    for username in watched {
+        let message = ServerMessage::WatchUserRequest {
+            username: username.clone(),
+        };
+        if let Err(error) = session.send_server_message(message).await {
+            record_daemon_log(
+                state,
+                logging::LogLevel::Warn,
+                "users",
+                format!("failed to replay watched user {}: {}", username, error),
             )
             .await;
         }
