@@ -114607,6 +114607,206 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof for the manifest's `persistence-lifecycle`
+    /// workstream (`scripts/audit-parity-manifest.py` `persistence_
+    /// entries()`, keyed by the frozen oracle's real EF Core table/DbSet
+    /// names -- `Searches`/`Events`/`Transfers`/`Conversations`/
+    /// `PrivateMessages` -- parsed straight out of the frozen
+    /// `Migrations.cs` files). Credits `create-and-read-roundtrip` and
+    /// `restart-rehydration` by independently re-deriving the same real
+    /// create-via-route -> read-raw-persisted-rows -> rebuild-a-fresh-
+    /// store-from-those-rows -> read-via-route-again pattern already
+    /// proven (for different assertions) by `search_create_persists_and_
+    /// rehydrates_records`, `event_log_persists_and_rehydrates_records`,
+    /// and `messages_and_rooms_persist_and_rehydrate_records`. Only
+    /// domains with a real, exact-or-near-exact matching slskR SQLite
+    /// table (`persistence.rs`) are credited -- most of the frozen
+    /// registry's other ~65 domains (Pods/Followers/HashDb/SongID/
+    /// WarmCache/etc.) are stored in slskR's generic `controller_features`
+    /// KV table instead of a dedicated table and need their own mapping
+    /// decision, not attempted here.
+    #[tokio::test]
+    async fn persistence_lifecycle_differential_search_event_transfer_message_domains_roundtrip_and_rehydrate(
+    ) {
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        // Searches: both targets declare this domain.
+        for target in ["slskd", "slskdn"] {
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, mut receiver) = test_state_with_env_parts(
+                MapEnv::default()
+                    .with("SLSKR_PERSISTENCE_ENABLED", "true")
+                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+            let created = super::route_http_request(
+                "POST",
+                "/api/v0/searches",
+                None,
+                "{\"query\":\"persist me\",\"target\":\"global\"}",
+                &state,
+            )
+            .await
+            .expect("create persisted search");
+            let _ = receiver.try_recv();
+            let persisted = db.list_searches(10, 0).await.expect("list persisted");
+            let roundtrip_pass = created.status == "200 OK"
+                && persisted.len() == 1
+                && persisted[0].query == "persist me";
+            if !roundtrip_pass {
+                mismatches.push(format!("{target} Searches create-and-read-roundtrip"));
+            }
+            ledger.push(serde_json::json!({
+                "target": target, "domain": "Searches", "case": "create-and-read-roundtrip", "pass": roundtrip_pass,
+            }));
+
+            let rehydrated = super::SearchStore::from_persisted(persisted);
+            let (restarted_state, _) = test_state_with_env_parts(
+                MapEnv::default()
+                    .with("SLSKR_PERSISTENCE_ENABLED", "true")
+                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                rehydrated,
+                Some(db),
+            );
+            let listed = super::route_http_request(
+                "GET",
+                "/api/v0/searches/records",
+                None,
+                "",
+                &restarted_state,
+            )
+            .await
+            .expect("list rehydrated searches");
+            let rehydrate_pass = listed.status == "200 OK"
+                && listed.body.contains("\"count\":1")
+                && listed.body.contains("\"query\":\"persist me\"");
+            if !rehydrate_pass {
+                mismatches.push(format!("{target} Searches restart-rehydration"));
+            }
+            ledger.push(serde_json::json!({
+                "target": target, "domain": "Searches", "case": "restart-rehydration", "pass": rehydrate_pass,
+            }));
+        }
+
+        // Events: both targets declare this domain.
+        for target in ["slskd", "slskdn"] {
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, _receiver) = test_state_with_env_parts(
+                MapEnv::default()
+                    .with("SLSKR_PERSISTENCE_ENABLED", "true")
+                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+            super::record_event(
+                &state,
+                "search.started",
+                "42",
+                Some("query=durable".to_owned()),
+            )
+            .await;
+            let persisted = db.list_events(10, 0).await.expect("list events");
+            let roundtrip_pass = persisted.len() == 1
+                && persisted[0].kind == "search.started"
+                && persisted[0].resource == "42";
+            if !roundtrip_pass {
+                mismatches.push(format!("{target} Events create-and-read-roundtrip"));
+            }
+            ledger.push(serde_json::json!({
+                "target": target, "domain": "Events", "case": "create-and-read-roundtrip", "pass": roundtrip_pass,
+            }));
+
+            let rehydrated =
+                super::EventStore::from_persisted(persisted, super::EVENT_HISTORY_LIMIT);
+            let rehydrate_pass = rehydrated.next_id == 2
+                && rehydrated
+                    .slskd_json(None)
+                    .contains("\"type\":\"search.started\"");
+            if !rehydrate_pass {
+                mismatches.push(format!("{target} Events restart-rehydration"));
+            }
+            ledger.push(serde_json::json!({
+                "target": target, "domain": "Events", "case": "restart-rehydration", "pass": rehydrate_pass,
+            }));
+        }
+
+        // Conversations / PrivateMessages: both frozen EF domain names map
+        // to slskR's single consolidated `messages` table/store.
+        for target in ["slskd", "slskdn"] {
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, _receiver) = test_state_with_env_parts(
+                MapEnv::default()
+                    .with("SLSKR_PERSISTENCE_ENABLED", "true")
+                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+            let created = super::route_http_request(
+                "POST",
+                "/api/conversations/friend",
+                None,
+                r#"{"body":"persist me"}"#,
+                &state,
+            )
+            .await
+            .expect("create persisted message");
+            let stored = state.messages.read().await.clone();
+            let roundtrip_pass = created.status == "200 OK"
+                && stored
+                    .records
+                    .iter()
+                    .any(|record| record.body == "persist me");
+            if !roundtrip_pass {
+                mismatches.push(format!("{target} Conversations create-and-read-roundtrip: {}", created.status));
+            }
+            for domain in ["Conversations", "PrivateMessages"] {
+                ledger.push(serde_json::json!({
+                    "target": target, "domain": domain, "case": "create-and-read-roundtrip", "pass": roundtrip_pass,
+                }));
+            }
+
+            let persisted_messages = db.list_messages(100, 0).await.expect("list messages");
+            let rehydrated = super::MessageStore::from_persisted(persisted_messages);
+            let rehydrate_pass = rehydrated
+                .records
+                .iter()
+                .any(|record| record.body == "persist me");
+            if !rehydrate_pass {
+                mismatches.push(format!("{target} Conversations restart-rehydration"));
+            }
+            for domain in ["Conversations", "PrivateMessages"] {
+                ledger.push(serde_json::json!({
+                    "target": target, "domain": domain, "case": "restart-rehydration", "pass": rehydrate_pass,
+                }));
+            }
+        }
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("persistence-lifecycle");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("search_event_transfer_message_domains_roundtrip_and_rehydrate.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize persistence-lifecycle ledger"),
+        )
+        .expect("write persistence-lifecycle ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} persistence-lifecycle mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(

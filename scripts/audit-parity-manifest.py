@@ -336,7 +336,48 @@ def database_domains(root: Path) -> dict[str, list[str]]:
     return {name: sorted(paths) for name, paths in sorted(domains.items())}
 
 
-def persistence_entries(target: str, domains: dict[str, list[str]]) -> list[dict[str, Any]]:
+PERSISTENCE_DIFFERENTIAL_TEST_PREFIX = "persistence_lifecycle_differential_"
+
+
+def persistence_lifecycle_ledger(root: Path) -> dict[tuple[str, str, str], bool]:
+    """Run every persistence-lifecycle bulk differential test (crates/slskr/
+    src/main.rs, named `persistence_lifecycle_differential_*` by convention)
+    and union their evidence ledgers, keyed by (target, domain, case). Each
+    such test independently re-verifies a real create/rehydrate/roundtrip
+    behavior for a specific database domain against slskR's own real
+    persistence layer, gated on that domain actually mapping (by real table
+    name, not guesswork) to one of the frozen oracle's EF Core domains.
+    Raises if any differential test fails.
+    """
+    subprocess.run(
+        [
+            "cargo",
+            "test",
+            "-p",
+            "slskr",
+            "--bin",
+            "slskr",
+            "--",
+            PERSISTENCE_DIFFERENTIAL_TEST_PREFIX,
+        ],
+        cwd=root,
+        check=True,
+    )
+    evidence_dir = Path(tempfile.gettempdir()) / "slskr-parity-evidence" / "persistence-lifecycle"
+    ledger: dict[tuple[str, str, str], bool] = {}
+    if evidence_dir.is_dir():
+        for ledger_path in sorted(evidence_dir.glob("*.json")):
+            rows = json.loads(ledger_path.read_text(encoding="utf-8"))
+            for row in rows:
+                ledger[(row["target"], row["domain"], row["case"])] = bool(row["pass"])
+    return ledger
+
+
+def persistence_entries(
+    target: str,
+    domains: dict[str, list[str]],
+    persistence_ledger: dict[tuple[str, str, str], bool] | None = None,
+) -> list[dict[str, Any]]:
     entries = []
     for domain, sources in domains.items():
         family = sources[0].split("/", 1)[0].lower() if sources else domain.lower()
@@ -348,6 +389,11 @@ def persistence_entries(target: str, domains: dict[str, list[str]]) -> list[dict
             "transaction-and-concurrency-atomicity",
             "corrupt-state-and-upgrade-failure",
         ):
+            proven = (
+                persistence_ledger.get((target, domain, case))
+                if persistence_ledger is not None
+                else None
+            )
             entries.append(
                 {
                     "id": f"persistence:{target}:{domain}:{case}",
@@ -357,10 +403,10 @@ def persistence_entries(target: str, domains: dict[str, list[str]]) -> list[dict
                     "surface": "database-lifecycle-case",
                     "subject": domain,
                     "case": case,
-                    "status": "needs-proof",
+                    "status": "complete" if proven else "needs-proof",
                     "coverage": {
                         "frozenDatabaseInventory": "complete",
-                        "behavioralDifferential": "open",
+                        "behavioralDifferential": "complete" if proven else "open",
                     },
                     "evidence": sources,
                 }
@@ -850,6 +896,16 @@ def main() -> None:
             "needs-proof. Use only for fast, evidence-incomplete dry runs."
         ),
     )
+    parser.add_argument(
+        "--skip-persistence-differential",
+        action="store_true",
+        help=(
+            "Skip running the persistence_lifecycle_differential_* cargo "
+            "tests (crates/slskr). All persistence-lifecycle cases fall "
+            "back to needs-proof. Use only for fast, evidence-incomplete "
+            "dry runs."
+        ),
+    )
     args = parser.parse_args()
 
     root = args.slskr_root.resolve()
@@ -883,6 +939,9 @@ def main() -> None:
     )
     controller_ledger = (
         None if args.skip_controller_api_differential else controller_api_ledger(root)
+    )
+    persistence_ledger = (
+        None if args.skip_persistence_differential else persistence_lifecycle_ledger(root)
     )
     webui = run_json(
         [
@@ -938,8 +997,8 @@ def main() -> None:
         *api_entries("slskd", slskd_api, security_ledger, controller_ledger),
         *api_entries("slskdn", slskdn_api, security_ledger, controller_ledger),
         *webui_entries(webui),
-        *persistence_entries("slskd", slskd_database_domains),
-        *persistence_entries("slskdn", slskdn_database_domains),
+        *persistence_entries("slskd", slskd_database_domains, persistence_ledger),
+        *persistence_entries("slskdn", slskdn_database_domains, persistence_ledger),
         *file_lifecycle_entries("slskd", slskd_file_write_domains),
         *file_lifecycle_entries("slskdn", slskdn_file_write_domains),
         *security_component_entries("slskd", slskd_security_components),
