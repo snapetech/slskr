@@ -30,7 +30,7 @@ scoring artifact -- confirmed, all report `complete` with
 
 Parity is **not achieved**. Every planned workstream has an executable
 certification denominator. The literal proof-case closure ratio is now
-**9,105 / 19,122 = 47.62%** (was 853 / 19,122 = 4.46% at the start of this
+**9,114 / 19,122 = 47.66%** (was 853 / 19,122 = 4.46% at the start of this
 review cycle), but this is not a product-completion estimate: most
 generated cases are Cartesian proof dimensions initialized as `needs-proof`,
 including behavior already implemented and tested in slskR. Product
@@ -114,7 +114,9 @@ sharegroups/quarantine-jury-verdicts, release-radar subscriptions/
 observations/notification-routing, library-health issues/by-artist/
 by-codec/by-type/summary/dashboard/scans/remediation -- found via a
 `route_http_request` call-density scan after the original test-naming
-catalogue was exhausted) brought the workstream to 429/5,300.
+catalogue was exhausted, bridge-admin config/start/stop/status plus
+federation-diagnostics/logs from the 53-call sibling test) brought the
+workstream to 438/5,300.
 
 The relay-agent/controller subsystem (deferred as a genuinely missing
 capability, see earlier notes) was investigated further this session to
