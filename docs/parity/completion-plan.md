@@ -30,7 +30,7 @@ scoring artifact -- confirmed, all report `complete` with
 
 Parity is **not achieved**. Every planned workstream has an executable
 certification denominator. The literal proof-case closure ratio is now
-**8,690 / 19,122 = 45.45%** (was 853 / 19,122 = 4.46% at the start of this
+**8,694 / 19,122 = 45.47%** (was 853 / 19,122 = 4.46% at the start of this
 review cycle), but this is not a product-completion estimate: most
 generated cases are Cartesian proof dimensions initialized as `needs-proof`,
 including behavior already implemented and tested in slskR. Product
@@ -92,6 +92,20 @@ implementation is 2,880 lines (`RelayHub.cs`/`RelayService.cs`/
 `RelayClient.cs`/`RelayController.cs`), and there is no smaller honest
 slice available -- even the HTTP-only controller surface requires real
 agent-registration/token-issuance state first. Remains deferred.
+
+A 4th workstream, `protocol-behaviors` (1,465 cases), was also confirmed
+to have the same hardcoded-`needs-proof` bug and opened this session:
+`crates/slskr-protocol`'s own trusted codec has Rust enums matching the
+frozen oracle's real Soulseek message codes by name and numeric value
+exactly, making this workstream's proof unusually mechanical. First
+differential closes the `soulseek-initialization` family (2 units, both
+targets since slskd/slskdN share byte-identical `MessageCode.cs`
+base families): 0 -> 4/1465. `crates/slskr-protocol`'s existing test
+files (`tests/peer.rs`/`tests/server.rs`/`tests/distributed.rs`) have
+many more real round-trip test groups not yet mapped to specific oracle
+units -- the single best next lever available (potentially hundreds of
+cases from tests that already exist and pass), see session memory for
+the specific test names identified.
 
 | Workstream | Audited denominator | Current evidence | Closure state |
 | --- | ---: | --- | --- |
