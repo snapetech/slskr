@@ -30,7 +30,7 @@ scoring artifact -- confirmed, all report `complete` with
 
 Parity is **not achieved**. Every planned workstream has an executable
 certification denominator. The literal proof-case closure ratio is now
-**9,387 / 19,122 = 49.09%** (was 853 / 19,122 = 4.46% at the start of this
+**9,395 / 19,122 = 49.13%** (was 853 / 19,122 = 4.46% at the start of this
 review cycle), but this is not a product-completion estimate: most
 generated cases are Cartesian proof dimensions initialized as `needs-proof`,
 including behavior already implemented and tested in slskR. Product
@@ -245,7 +245,25 @@ case brought the workstream to 651/5,300. The mediacore descriptor-delete
 route's real unpublished-baseline response, and the mesh-streams-
 ticket route's real family-specific validation (proven with a much
 smaller fixture than the full raw-TCP preview-fetch machinery its
-source test uses), brought the workstream to 653/5,300. The real VPN-status projection on the application route,
+source test uses), brought the workstream to 653/5,300.
+
+With the controller-api `count==1` AWK tier exhausted, pivoted to the
+`persistence-lifecycle` workstream (798 cases, only 34 complete
+before this pivot) -- checking its own evidence directory directly
+(same discipline as the controller-api work) showed only 2 of its 6
+per-domain cases (`create-and-read-roundtrip`, `restart-rehydration`)
+had EVER been credited, for any domain, across the whole workstream.
+The other 4 cases (`schema-create-and-migrate`, `update-delete-and-
+readback`, `transaction-and-concurrency-atomicity`, `corrupt-state-
+and-upgrade-failure`) were completely untouched even on already-
+partly-credited domains. Added `update-delete-and-readback` for the 8
+domains (Collections, CollectionItems, UserNotes, WishlistItems,
+Contacts, ShareGrants, ShareGroups, ShareGroupMembers) the existing
+`create-and-read-roundtrip` differential already covers, reading
+persisted rows back directly from a real `DatabaseManager` after a
+real PUT/DELETE dispatch. persistence-lifecycle moved 34 -> 42/798.
+
+The real VPN-status projection on the application route,
 the real wire-command dispatch behind an interest mutation, the real
 empty/disabled bridge-admin-clients baseline, one genuinely uncredited
 route from a 17-route materialized-empty-state table, and real
