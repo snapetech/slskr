@@ -128946,6 +128946,103 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof crediting `DELETE /api/v0/mediacore/
+    /// publish/descriptor/{*contentId}`'s real unpublished-baseline
+    /// delete response (independently re-derived from `mediacore_
+    /// versioned_descriptor_delete_does_not_overflow_worker_stack`:
+    /// deleting a descriptor that was never published returns a real
+    /// `wasPublished: false` result, not a stack overflow or a
+    /// hardcoded shape) and `POST /api/v0/mesh-streams/tickets`'s
+    /// real mesh-family validation (independently re-derived from
+    /// `mesh_preview_ticket_fetches_verifies_streams_and_removes_
+    /// staging_file`'s ticket-creation request-validation logic, with
+    /// a much smaller fixture than the source test's full raw-TCP
+    /// preview-fetch machinery: the mesh family genuinely requires a
+    /// real `contentId`, not just a filename/peerId). Confirmed
+    /// against `/tmp/slskr-parity-evidence/controller-api/*.json`
+    /// before writing, per case: both routes had zero prior credit.
+    /// slskdN-only (confirmed against the frozen registry).
+    #[tokio::test]
+    async fn controller_api_differential_mediacore_delete_and_mesh_tickets() {
+        let target = "slskdn";
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($method:expr, $route:expr, $case:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!("{target} {} {} [{}]", $method, $route, $case));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": $method,
+                    "route": $route,
+                    "case": $case,
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        {
+            let (state, _receiver) = test_state();
+            let response = super::route_http_request(
+                "DELETE",
+                "/api/v0/mediacore/publish/descriptor/differential-content-id",
+                None,
+                "",
+                &state,
+            )
+            .await
+            .expect("delete unpublished descriptor response");
+            let response_json =
+                serde_json::from_str::<serde_json::Value>(&response.body).unwrap_or_default();
+            record!(
+                "DELETE",
+                "/api/v0/mediacore/publish/descriptor/{*contentId}",
+                "missing-empty-or-conflict-state",
+                response.status == "200 OK"
+                    && response_json["contentId"] == "differential-content-id"
+                    && response_json["wasPublished"] == false
+            );
+        }
+
+        {
+            let (state, _receiver) = test_state();
+            let response = super::route_http_request(
+                "POST",
+                "/api/v0/mesh-streams/tickets",
+                None,
+                r#"{"filename":"Remote/Differential.flac","peerId":"differential-peer"}"#,
+                &state,
+            )
+            .await
+            .expect("mesh ticket missing contentId response");
+            record!(
+                "POST",
+                "/api/v0/mesh-streams/tickets",
+                "malformed-path-query-or-body",
+                response.status == "400 Bad Request" && response.body.contains("contentId is required")
+            );
+        }
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("mediacore_delete_and_mesh_tickets.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api mediacore-delete-and-mesh-tickets mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
