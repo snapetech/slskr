@@ -30,7 +30,7 @@ scoring artifact -- confirmed, all report `complete` with
 
 Parity is **not achieved**. Every planned workstream has an executable
 certification denominator. The literal proof-case closure ratio is now
-**9,385 / 19,122 = 49.08%** (was 853 / 19,122 = 4.46% at the start of this
+**9,387 / 19,122 = 49.09%** (was 853 / 19,122 = 4.46% at the start of this
 review cycle), but this is not a product-completion estimate: most
 generated cases are Cartesian proof dimensions initialized as `needs-proof`,
 including behavior already implemented and tested in slskR. Product
@@ -241,7 +241,11 @@ overlay mutation and non-object-body rejection, real dynamic DHT-
 status reflection of a watched config change, and real internal-
 host/port redaction across 3 previously entirely uncredited bridge
 projection routes plus the application route's distinct redaction
-case brought the workstream to 651/5,300. The real VPN-status projection on the application route,
+case brought the workstream to 651/5,300. The mediacore descriptor-delete
+route's real unpublished-baseline response, and the mesh-streams-
+ticket route's real family-specific validation (proven with a much
+smaller fixture than the full raw-TCP preview-fetch machinery its
+source test uses), brought the workstream to 653/5,300. The real VPN-status projection on the application route,
 the real wire-command dispatch behind an interest mutation, the real
 empty/disabled bridge-admin-clients baseline, one genuinely uncredited
 route from a 17-route materialized-empty-state table, and real
