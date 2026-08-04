@@ -30,7 +30,7 @@ scoring artifact -- confirmed, all report `complete` with
 
 Parity is **not achieved**. Every planned workstream has an executable
 certification denominator. The literal proof-case closure ratio is now
-**9,346 / 19,122 = 48.88%** (was 853 / 19,122 = 4.46% at the start of this
+**9,350 / 19,122 = 48.90%** (was 853 / 19,122 = 4.46% at the start of this
 review cycle), but this is not a product-completion estimate: most
 generated cases are Cartesian proof dimensions initialized as `needs-proof`,
 including behavior already implemented and tested in slskR. Product
@@ -205,7 +205,11 @@ the workstream to 606/5,300. The analyzer-migration
 (real observed query data, not hardcoded zeros), and telemetry-KPI
 (real `application/json` vs the base route's `text/plain`) route
 families were nearly entirely open, bringing the workstream to
-612/5,300.
+612/5,300. The application/build route (real app version, not the
+wire-protocol version) and the file-delete route (forbidden by
+default, a real file removal with readback confirmation, path-
+traversal rejection) had zero prior credit either, bringing the
+workstream to 616/5,300.
 
 The relay-agent/controller subsystem (deferred as a genuinely missing
 capability, see earlier notes) was investigated further this session to
