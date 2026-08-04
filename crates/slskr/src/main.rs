@@ -126531,6 +126531,138 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof for the real slskdN mesh HTTP gateway
+    /// proxy route (`POST /mesh/http/{serviceName}/{method}`): a
+    /// disallowed service is rejected before any dispatch is attempted
+    /// (real config-driven allowlist, not a hardcoded set), a
+    /// permitted-but-unrouted service reports the same real "no
+    /// providers" state the gateway would report to a genuine caller,
+    /// and a real local `private_gateway::Gateway` instance is used to
+    /// prove the nominal dispatch path actually reaches a real service
+    /// handler rather than a stub -- independently re-derived from
+    /// `mesh_gateway_enabled_enforces_allowlist_and_provider_discovery`
+    /// and `mesh_gateway_enabled_dispatches_to_real_local_service_
+    /// handlers` with fresh fixture data. Confirmed against
+    /// `/tmp/slskr-parity-evidence/controller-api/*.json` before
+    /// writing: this route had no prior case credited. slskdN-only
+    /// (confirmed against the frozen registry).
+    #[tokio::test]
+    async fn controller_api_differential_mesh_http_gateway() {
+        let target = "slskdn";
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($method:expr, $route:expr, $case:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!("{target} {} {} [{}]", $method, $route, $case));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": $method,
+                    "route": $route,
+                    "case": $case,
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        let (state, _receiver) = test_state_with_env(
+            MapEnv::default()
+                .with("SLSKD_MESH_GATEWAY_ENABLED", "true")
+                .with("SLSKD_MESH_GATEWAY_ALLOWED_SERVICES", "pods"),
+        );
+
+        let disallowed = super::route_http_request(
+            "POST",
+            "/mesh/http/differential-service/List",
+            None,
+            "{}",
+            &state,
+        )
+        .await
+        .expect("disallowed service response");
+        record!(
+            "POST",
+            "/mesh/http/{serviceName}/{method}",
+            "missing-empty-or-conflict-state",
+            disallowed.status == "403 Forbidden"
+                && serde_json::from_str::<serde_json::Value>(&disallowed.body).unwrap_or_default()
+                    ["error"]
+                    == "service_not_allowed"
+        );
+
+        let no_provider = super::route_http_request("POST", "/mesh/http/pods/List", None, "{}", &state)
+            .await
+            .expect("no-provider response");
+        record!(
+            "POST",
+            "/mesh/http/{serviceName}/{method}",
+            "runtime-failure-and-timeout",
+            no_provider.status == "503 Service Unavailable"
+                && serde_json::from_str::<serde_json::Value>(&no_provider.body).unwrap_or_default()
+                    ["error"]
+                    == "service_unavailable"
+        );
+
+        let root = std::env::temp_dir().join(format!(
+            "slskr-mesh-http-gateway-differential-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&root).expect("mesh gateway differential state directory");
+        let (mut dispatch_state, _receiver) = test_state_with_env(
+            MapEnv::default()
+                .with("SLSKD_MESH_GATEWAY_ENABLED", "true")
+                .with("SLSKD_MESH_GATEWAY_ALLOWED_SERVICES", "pods"),
+        );
+        let gateway = Arc::new(
+            super::private_gateway::Gateway::load_or_create_with_quic(
+                "127.0.0.1:0".parse().unwrap(),
+                &root,
+                None,
+            )
+            .await
+            .expect("mesh gateway differential fixture"),
+        );
+        Arc::get_mut(&mut dispatch_state)
+            .expect("unshared differential test state")
+            .private_gateway = Some(gateway);
+        let dispatched = super::route_http_request(
+            "POST",
+            "/mesh/http/pods/List",
+            None,
+            "{}",
+            &dispatch_state,
+        )
+        .await
+        .expect("real local service dispatch response");
+        record!(
+            "POST",
+            "/mesh/http/{serviceName}/{method}",
+            "nominal-status-headers-body",
+            dispatched.status == "200 OK" && dispatched.body == "[]"
+        );
+        std::fs::remove_dir_all(root).expect("remove mesh gateway differential state directory");
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("mesh_http_gateway.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api mesh-http-gateway mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
