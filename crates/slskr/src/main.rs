@@ -127165,6 +127165,188 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof crediting the analyzer-migration,
+    /// hashdb-optimize, and telemetry-prometheus route families --
+    /// independently re-derived from `analyzer_migration_requires_
+    /// version_and_returns_exact_result_shape`, `hashdb_optimize_
+    /// profile_and_slow_queries_report_real_observed_data`, and
+    /// `telemetry_kpis_are_always_json_unlike_the_base_prometheus_
+    /// route` with fresh fixture data: the unversioned analyzer-
+    /// migrate route requires a version and the versioned one returns
+    /// the exact `{"updated":0}` shape against an empty analyzer set,
+    /// hashdb's optimize/profile and optimize/slow-queries report real
+    /// observed query data from a seeded hash entry rather than
+    /// hardcoded zeros, and the KPIs route is always real
+    /// `application/json` (unlike the base Prometheus route's
+    /// `text/plain` exposition format). Confirmed against `/tmp/
+    /// slskr-parity-evidence/controller-api/*.json` before writing,
+    /// per case: only `POST /api/v0/hashdb/optimize/profile`'s
+    /// `malformed-path-query-or-body` had any prior credit. slskdN-only
+    /// (confirmed against the frozen registry).
+    #[tokio::test]
+    async fn controller_api_differential_analyzer_hashdb_and_telemetry() {
+        let target = "slskdn";
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($method:expr, $route:expr, $case:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!("{target} {} {} [{}]", $method, $route, $case));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": $method,
+                    "route": $route,
+                    "case": $case,
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        let (state, _receiver) = test_state();
+
+        let unversioned = super::route_http_request(
+            "POST",
+            "/api/audio/analyzers/migrate",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("unversioned analyzer migrate response");
+        record!(
+            "POST",
+            "/api/audio/analyzers/migrate",
+            "missing-empty-or-conflict-state",
+            unversioned.status == "400 Bad Request"
+        );
+
+        let versioned = super::route_http_request(
+            "POST",
+            "/api/v0/audio/analyzers/migrate",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("versioned analyzer migrate response");
+        record!(
+            "POST",
+            "/api/v0/audio/analyzers/migrate",
+            "nominal-status-headers-body",
+            versioned.status == "200 OK" && versioned.body == "{\"updated\":0}"
+        );
+
+        {
+            let mut discovery = state.content_discovery.write().await;
+            discovery
+                .merge_hash_entries(vec![super::content_discovery::HashDbEntry {
+                    flac_key: "differential-key".to_owned(),
+                    size: 123,
+                    file_sha256:
+                        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                            .to_owned(),
+                    ..Default::default()
+                }])
+                .expect("seed differential hash entry");
+        }
+
+        let profile = super::route_http_request(
+            "POST",
+            "/api/v0/hashdb/optimize/profile",
+            None,
+            r#"{"query":"SELECT * FROM hash_entries"}"#,
+            &state,
+        )
+        .await
+        .expect("hashdb optimize profile response");
+        let profile_json = serde_json::from_str::<serde_json::Value>(&profile.body).unwrap_or_default();
+        record!(
+            "POST",
+            "/api/v0/hashdb/optimize/profile",
+            "nominal-status-headers-body",
+            profile.status == "200 OK"
+                && profile_json["rowsReturned"] == 1
+                && profile_json["queryPlan"]
+                    .as_str()
+                    .is_some_and(|plan| plan.contains("linear scan"))
+        );
+
+        let slow_queries = super::route_http_request(
+            "GET",
+            "/api/v0/hashdb/optimize/slow-queries",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("hashdb slow queries response");
+        let slow_queries_json =
+            serde_json::from_str::<serde_json::Value>(&slow_queries.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/api/v0/hashdb/optimize/slow-queries",
+            "populated-dynamic-state",
+            slow_queries.status == "200 OK"
+                && slow_queries_json["totalQueries"] == 1
+                && slow_queries_json["slowQueries"][0]["executionCount"] == 1
+        );
+
+        let base_prometheus = super::route_http_request(
+            "GET",
+            "/api/v0/telemetry/prometheus",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("base prometheus response");
+        record!(
+            "GET",
+            "/api/v0/telemetry/prometheus",
+            "nominal-status-headers-body",
+            base_prometheus.content_type.starts_with("text/plain")
+                && base_prometheus.body.contains("slskr_transfers")
+        );
+
+        let kpis = super::route_http_request(
+            "GET",
+            "/api/v0/telemetry/prometheus/kpis",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("prometheus kpis response");
+        let kpis_json = serde_json::from_str::<serde_json::Value>(&kpis.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/api/v0/telemetry/prometheus/kpis",
+            "nominal-status-headers-body",
+            kpis.content_type.starts_with("application/json")
+                && kpis_json["slskr_transfers"]["type"] == "gauge"
+                && kpis_json["slskr_searches"]["type"] == "gauge"
+        );
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("analyzer_hashdb_and_telemetry.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api analyzer-hashdb-and-telemetry mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
