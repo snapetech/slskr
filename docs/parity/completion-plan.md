@@ -30,7 +30,7 @@ scoring artifact -- confirmed, all report `complete` with
 
 Parity is **not achieved**. Every planned workstream has an executable
 certification denominator. The literal proof-case closure ratio is now
-**9,395 / 19,122 = 49.13%** (was 853 / 19,122 = 4.46% at the start of this
+**9,401 / 19,122 = 49.16%** (was 853 / 19,122 = 4.46% at the start of this
 review cycle), but this is not a product-completion estimate: most
 generated cases are Cartesian proof dimensions initialized as `needs-proof`,
 including behavior already implemented and tested in slskR. Product
@@ -262,6 +262,15 @@ Contacts, ShareGrants, ShareGroups, ShareGroupMembers) the existing
 `create-and-read-roundtrip` differential already covers, reading
 persisted rows back directly from a real `DatabaseManager` after a
 real PUT/DELETE dispatch. persistence-lifecycle moved 34 -> 42/798.
+A follow-on batch added `update-delete-and-readback` for Searches
+(real PUT/DELETE, though the creation response's `searchId` field
+turned out not to round-trip through the store's own identifier
+lookup -- worked around by reading the real persisted id back from
+the store) and Conversations/PrivateMessages (real ack + real per-
+user history delete, both targets), moving persistence-lifecycle to
+48/798. Events and Transfers were investigated and deliberately
+skipped for this case -- neither has a real update/delete HTTP path
+reachable without bypassing dispatch or inventing a route.
 
 The real VPN-status projection on the application route,
 the real wire-command dispatch behind an interest mutation, the real
