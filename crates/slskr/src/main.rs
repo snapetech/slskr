@@ -126663,6 +126663,188 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof for the real slskdN Solid protocol
+    /// status and WebID resolution routes (`GET /api/v0/solid/status`,
+    /// `POST /api/v0/solid/resolve-webid`): the status route reflects
+    /// the real configured `clientId`/`redirectPath` rather than a
+    /// fixed shape, malformed and policy-blocked WebIDs are genuinely
+    /// rejected before any fetch is attempted, and a real successful
+    /// resolution extracts `oidcIssuer` triples from an actual fetched
+    /// Turtle profile document via a local fixture server --
+    /// independently re-derived from `solid_client_id_document_is_
+    /// anonymous_and_uses_configured_origin`, `versioned_solid_
+    /// resolution_uses_slskdn_problem_details`, and `solid_webid_
+    /// route_extracts_oidc_issuers_from_profile` with fresh fixture
+    /// data. Confirmed against `/tmp/slskr-parity-evidence/
+    /// controller-api/*.json` before writing: neither route had any
+    /// prior case credited. slskdN-only (confirmed against the frozen
+    /// registry).
+    #[tokio::test]
+    async fn controller_api_differential_solid_status_and_webid_resolution() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let target = "slskdn";
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($method:expr, $route:expr, $case:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!("{target} {} {} [{}]", $method, $route, $case));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": $method,
+                    "route": $route,
+                    "case": $case,
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        let (state, _receiver) = test_state();
+
+        let default_status = super::route_http_request("GET", "/api/v0/solid/status", None, "", &state)
+            .await
+            .expect("default solid status response");
+        let default_status_json =
+            serde_json::from_str::<serde_json::Value>(&default_status.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/api/v0/solid/status",
+            "nominal-status-headers-body",
+            default_status.status == "200 OK"
+                && default_status_json["enabled"] == true
+                && default_status_json["clientId"] == "/solid/clientid.jsonld"
+        );
+
+        {
+            let mut media_services = state.media_services.write().await;
+            media_services.solid.client_id_url =
+                Some("https://differential.example/clientid.jsonld".to_owned());
+            media_services.solid.redirect_path = "/oidc/differential-callback".to_owned();
+        }
+        let configured_status = super::route_http_request("GET", "/api/v0/solid/status", None, "", &state)
+            .await
+            .expect("configured solid status response");
+        let configured_status_json =
+            serde_json::from_str::<serde_json::Value>(&configured_status.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/api/v0/solid/status",
+            "populated-dynamic-state",
+            configured_status.status == "200 OK"
+                && configured_status_json["clientId"] == "https://differential.example/clientid.jsonld"
+                && configured_status_json["redirectPath"] == "/oidc/differential-callback"
+        );
+
+        let invalid = super::route_http_request(
+            "POST",
+            "/api/v0/solid/resolve-webid",
+            None,
+            "{}",
+            &state,
+        )
+        .await
+        .expect("invalid webid response");
+        record!(
+            "POST",
+            "/api/v0/solid/resolve-webid",
+            "malformed-path-query-or-body",
+            invalid.status == "400 Bad Request"
+                && invalid.content_type == "application/problem+json"
+                && serde_json::from_str::<serde_json::Value>(&invalid.body).unwrap_or_default()
+                    ["detail"]
+                    == "WebId must be an absolute URI."
+        );
+
+        let blocked = super::route_http_request(
+            "POST",
+            "/api/v0/solid/resolve-webid",
+            None,
+            r#"{"webId":"https://differential.example/profile#me"}"#,
+            &state,
+        )
+        .await
+        .expect("blocked webid response");
+        let blocked_json = serde_json::from_str::<serde_json::Value>(&blocked.body).unwrap_or_default();
+        record!(
+            "POST",
+            "/api/v0/solid/resolve-webid",
+            "missing-empty-or-conflict-state",
+            blocked.status == "400 Bad Request" && blocked_json["title"] == "Solid fetch blocked"
+        );
+
+        {
+            let mut media_services = state.media_services.write().await;
+            media_services.solid.allow_insecure_http = true;
+            media_services.solid.allow_localhost_for_web_id = true;
+            media_services.solid.allowed_hosts = vec!["127.0.0.1".to_owned()];
+        }
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind differential profile fixture");
+        let port = listener
+            .local_addr()
+            .expect("profile fixture address")
+            .port();
+        let web_id = format!("http://127.0.0.1:{port}/profile/card#me");
+        let profile = format!(
+            "@prefix solid: <http://www.w3.org/ns/solid/terms#>.\n<{web_id}> solid:oidcIssuer <https://differential-issuer.example/oidc>.\n"
+        );
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.expect("profile request");
+            let mut request = [0_u8; 4096];
+            let _ = stream.read(&mut request).await.expect("read profile request");
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/turtle\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                profile.len(),
+                profile
+            );
+            stream
+                .write_all(response.as_bytes())
+                .await
+                .expect("write profile response");
+        });
+        let resolved = super::route_http_request(
+            "POST",
+            "/api/v0/solid/resolve-webid",
+            None,
+            &serde_json::json!({"webId": web_id}).to_string(),
+            &state,
+        )
+        .await
+        .expect("resolved webid response");
+        server.await.expect("profile fixture task");
+        let resolved_json = serde_json::from_str::<serde_json::Value>(&resolved.body).unwrap_or_default();
+        record!(
+            "POST",
+            "/api/v0/solid/resolve-webid",
+            "nominal-status-headers-body",
+            resolved.status == "200 OK"
+                && resolved_json["webId"] == web_id
+                && resolved_json["oidcIssuers"]
+                    == serde_json::json!(["https://differential-issuer.example/oidc"])
+        );
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("solid_status_and_webid_resolution.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api solid-status-and-webid-resolution mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
