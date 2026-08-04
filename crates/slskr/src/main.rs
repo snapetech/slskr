@@ -127493,6 +127493,403 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof for the `runtime-failure-and-timeout`
+    /// case (security-ban and share/collection-grant routes) -- same
+    /// real closed-database fault injection as the earlier `runtime_
+    /// failure_*` batches, independently re-derived from `security_
+    /// ban_rolls_back_when_persistence_fails`, `security_unban_rolls_
+    /// back_when_persistence_fails`, `collection_delete_rolls_back_
+    /// grant_revocation_when_persistence_fails`, `share_grant_
+    /// revocation_rolls_back_when_persistence_fails`, and `share_
+    /// access_token_issue_rolls_back_when_persistence_fails` with
+    /// fresh fixture data. Confirmed against `/tmp/slskr-parity-
+    /// evidence/controller-api/*.json` before writing, per case: none
+    /// of these 5 routes had `runtime-failure-and-timeout` credited
+    /// (some had other cases already true). slskdN-only (confirmed
+    /// against the frozen registry).
+    #[tokio::test]
+    async fn controller_api_differential_runtime_failure_security_and_shares() {
+        let target = "slskdn";
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($method:expr, $route:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!("{target} {} {} [runtime-failure-and-timeout]", $method, $route));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": $method,
+                    "route": $route,
+                    "case": "runtime-failure-and-timeout",
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        {
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, _receiver) = test_state_with_env_parts(
+                MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+            db.close_for_test().await;
+            let response = super::route_http_request(
+                "POST",
+                "/api/v0/security/bans/username",
+                None,
+                r#"{"username":"differential-must-persist"}"#,
+                &state,
+            )
+            .await
+            .expect("failed ban response");
+            record!(
+                "POST",
+                "/api/v0/security/bans/username",
+                response.status == "503 Service Unavailable"
+                    && state.security.read().await.bans.is_empty()
+            );
+        }
+
+        {
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, _receiver) = test_state_with_env_parts(
+                MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+            state
+                .security
+                .write()
+                .await
+                .ban("username", "differential-must-remain".to_owned())
+                .expect("ban");
+            db.close_for_test().await;
+            let response = super::route_http_request(
+                "DELETE",
+                "/api/v0/security/bans/username/differential-must-remain",
+                None,
+                "",
+                &state,
+            )
+            .await
+            .expect("failed unban response");
+            record!(
+                "DELETE",
+                "/api/v0/security/bans/username/{username}",
+                response.status == "503 Service Unavailable"
+                    && state.security.read().await.active_bans() == 1
+            );
+        }
+
+        {
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, _receiver) = test_state_with_env_parts(
+                MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+            let collection_id = state
+                .collections
+                .write()
+                .await
+                .create(String::new(), "Differential Private".to_owned(), String::new())
+                .expect("collection")
+                .id;
+            state
+                .share_grants
+                .write()
+                .await
+                .create_with_contract(None, collection_id.clone(), "differential-friend".to_owned())
+                .expect("share grant");
+            db.close_for_test().await;
+            let response = super::route_http_request(
+                "DELETE",
+                &format!("/api/v0/collections/{collection_id}"),
+                None,
+                "",
+                &state,
+            )
+            .await
+            .expect("failed collection delete response");
+            record!(
+                "DELETE",
+                "/api/v0/collections/{id}",
+                response.status == "503 Service Unavailable"
+                    && state.collections.read().await.get(&collection_id).is_some()
+            );
+        }
+
+        {
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, _receiver) = test_state_with_env_parts(
+                MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+            state
+                .share_grants
+                .write()
+                .await
+                .create_with_contract(None, "differential-collection".to_owned(), "differential-friend".to_owned())
+                .expect("grant");
+            db.close_for_test().await;
+            let response = super::route_http_request(
+                "DELETE",
+                "/api/v0/share-grants/grant-1",
+                None,
+                "",
+                &state,
+            )
+            .await
+            .expect("failed grant revocation response");
+            record!(
+                "DELETE",
+                "/api/v0/share-grants/{id}",
+                response.status == "503 Service Unavailable"
+                    && state.share_grants.read().await.get("grant-1").is_some()
+            );
+        }
+
+        {
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, _receiver) = test_state_with_env_parts(
+                MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+            state
+                .collections
+                .write()
+                .await
+                .create(String::new(), "Differential Private".to_owned(), String::new())
+                .expect("collection");
+            state
+                .share_grants
+                .write()
+                .await
+                .create_with_contract(None, "col-1".to_owned(), "differential-friend".to_owned())
+                .expect("grant");
+            db.close_for_test().await;
+            let response = super::route_http_request(
+                "POST",
+                "/api/v0/share-grants/grant-1/token",
+                None,
+                r#"{"expiresInSeconds":600}"#,
+                &state,
+            )
+            .await
+            .expect("failed access token issue response");
+            record!(
+                "POST",
+                "/api/v0/share-grants/{id}/token",
+                response.status == "503 Service Unavailable"
+                    && state.share_access_tokens.read().await.records.is_empty()
+            );
+        }
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("runtime_failure_security_and_shares.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api runtime-failure-security-and-shares mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
+    /// Bulk differential proof for the `runtime-failure-and-timeout`
+    /// case (sharegroups routes) plus `concurrency-and-idempotency`
+    /// for the shares-rebuild route -- independently re-derived from
+    /// `share_group_revocation_rolls_back_when_persistence_fails`,
+    /// `share_group_member_revocation_rolls_back_when_persistence_
+    /// fails`, `share_rebuild_routes_roll_back_when_persistence_
+    /// fails`, and `share_rebuild_routes_reject_concurrent_scans`
+    /// (a real held scan-permit genuinely blocks a concurrent rebuild
+    /// with 503, not a race) with fresh fixture data. Confirmed
+    /// against the evidence directory before writing: none of these
+    /// cases had prior credit. slskdN-only (confirmed against the
+    /// frozen registry).
+    #[tokio::test]
+    async fn controller_api_differential_sharegroups_and_shares_rebuild() {
+        let target = "slskdn";
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($method:expr, $route:expr, $case:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!("{target} {} {} [{}]", $method, $route, $case));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": $method,
+                    "route": $route,
+                    "case": $case,
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        {
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, _receiver) = test_state_with_env_parts(
+                MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+            let group_id = state
+                .sharegroups
+                .write()
+                .await
+                .create("Differential Trusted".to_owned(), String::new())
+                .expect("share group")
+                .id;
+            state
+                .sharegroups
+                .write()
+                .await
+                .add_member(&group_id, "differential-friend".to_owned())
+                .expect("member capacity")
+                .expect("share group");
+            db.close_for_test().await;
+            let response = super::route_http_request(
+                "DELETE",
+                &format!("/api/v0/sharegroups/{group_id}"),
+                None,
+                "",
+                &state,
+            )
+            .await
+            .expect("failed share group revocation response");
+            record!(
+                "DELETE",
+                "/api/v0/sharegroups/{id}",
+                "runtime-failure-and-timeout",
+                response.status == "503 Service Unavailable"
+            );
+        }
+
+        {
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, _receiver) = test_state_with_env_parts(
+                MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+            let group_id = state
+                .sharegroups
+                .write()
+                .await
+                .create("Differential Trusted".to_owned(), String::new())
+                .expect("share group")
+                .id;
+            state
+                .sharegroups
+                .write()
+                .await
+                .add_member(&group_id, "differential-friend".to_owned())
+                .expect("member capacity")
+                .expect("share group");
+            db.close_for_test().await;
+            let response = super::route_http_request(
+                "DELETE",
+                &format!("/api/v0/sharegroups/{group_id}/members/differential-friend"),
+                None,
+                "",
+                &state,
+            )
+            .await
+            .expect("failed share group member revocation response");
+            record!(
+                "DELETE",
+                "/api/v0/sharegroups/{id}/members/{userId}",
+                "runtime-failure-and-timeout",
+                response.status == "503 Service Unavailable"
+            );
+        }
+
+        {
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, _receiver) = test_state_with_env_parts(
+                MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+            db.close_for_test().await;
+            let response = super::route_http_request("PUT", "/api/v0/shares", None, "", &state)
+                .await
+                .expect("failed shares rebuild response");
+            record!(
+                "PUT",
+                "/api/v0/shares",
+                "runtime-failure-and-timeout",
+                response.status == "503 Service Unavailable"
+            );
+        }
+
+        {
+            let (state, _receiver) = test_state();
+            let _permit = Arc::clone(&state.share_scans)
+                .acquire_owned()
+                .await
+                .expect("share scan permit");
+            let response = super::route_http_request("PUT", "/api/v0/shares", None, "", &state)
+                .await
+                .expect("concurrent shares rebuild response");
+            record!(
+                "PUT",
+                "/api/v0/shares",
+                "concurrency-and-idempotency",
+                response.status == "503 Service Unavailable"
+                    && response.body == "{\"error\":\"share scan already in progress\"}"
+            );
+        }
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("sharegroups_and_shares_rebuild.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api sharegroups-and-shares-rebuild mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
