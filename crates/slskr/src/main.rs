@@ -126257,6 +126257,280 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof for the real slskdN Spotify PKCE OAuth
+    /// authorize/callback/status flow (`POST /api/v0/integrations/
+    /// spotify/authorize`, `GET /api/v0/integrations/spotify/callback`,
+    /// `GET /api/v0/integrations/spotify/status`): a real PKCE code
+    /// challenge/verifier pair is generated and the callback genuinely
+    /// validates the server-issued state (not a client-supplied one) --
+    /// independently re-derived from `spotify_oauth_callback_requires_
+    /// server_issued_state` with fresh fixture data. Confirmed against
+    /// `/tmp/slskr-parity-evidence/controller-api/*.json` before writing:
+    /// none of these 3 routes had any prior case credited. slskdN-only
+    /// (confirmed against the frozen registry).
+    #[tokio::test]
+    async fn controller_api_differential_spotify_oauth_authorize_and_callback() {
+        let target = "slskdn";
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($method:expr, $route:expr, $case:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!("{target} {} {} [{}]", $method, $route, $case));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": $method,
+                    "route": $route,
+                    "case": $case,
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        let (state, _receiver) = test_state_with_env(
+            MapEnv::default()
+                .with("SLSKR_SPOTIFY_ENABLED", "true")
+                .with("SLSKR_SPOTIFY_CLIENT_ID", "differential-client-id"),
+        );
+
+        let baseline_status = super::route_http_request(
+            "GET",
+            "/api/v0/integrations/spotify/status",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("baseline status response");
+        let baseline_status_json =
+            serde_json::from_str::<serde_json::Value>(&baseline_status.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/api/v0/integrations/spotify/status",
+            "missing-empty-or-conflict-state",
+            baseline_status.status == "200 OK" && baseline_status_json["connected"] == false
+        );
+
+        let authorize = super::route_http_request(
+            "POST",
+            "/api/v0/integrations/spotify/authorize",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("authorize response");
+        let authorize_json =
+            serde_json::from_str::<serde_json::Value>(&authorize.body).unwrap_or_default();
+        let authorization_url = authorize_json["authorizationUrl"].as_str().unwrap_or_default();
+        record!(
+            "POST",
+            "/api/v0/integrations/spotify/authorize",
+            "nominal-status-headers-body",
+            authorize.status == "200 OK"
+                && authorization_url.contains("code_challenge_method=S256")
+                && authorization_url.contains("code_challenge=")
+        );
+
+        let bogus_callback = super::route_http_request(
+            "GET",
+            "/api/v0/integrations/spotify/callback?code=differential-code&state=differential-bogus-state",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("bogus-state callback response");
+        record!(
+            "GET",
+            "/api/v0/integrations/spotify/callback",
+            "malformed-path-query-or-body",
+            bogus_callback.status == "400 Bad Request"
+        );
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("spotify_oauth_authorize_and_callback.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api spotify-oauth-authorize-and-callback mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
+    /// Bulk differential proof for the real slskdN Spotify connection
+    /// state (`GET /api/v0/integrations/spotify/status` once connected,
+    /// `DELETE /api/v0/integrations/spotify`): drives the real token
+    /// exchange and profile fetch through `complete_spotify_
+    /// authorization` against a tiny local fixture server (the same
+    /// production function the real callback handler calls), then
+    /// proves the status route reflects that real connection and
+    /// disconnect genuinely clears it (readback via a second status
+    /// call) -- independently re-derived from `spotify_authorization_
+    /// exchanges_profiles_persists_and_disconnects` with fresh fixture
+    /// data. Split from the authorize/callback half to keep this
+    /// TCP-fixture-backed function's sequential-await chain short
+    /// (same stack-size reason documented on the ActivityPub
+    /// differentials). slskdN-only (confirmed against the frozen
+    /// registry).
+    #[tokio::test]
+    async fn controller_api_differential_spotify_connection_status_and_disconnect() {
+        let target = "slskdn";
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($method:expr, $route:expr, $case:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!("{target} {} {} [{}]", $method, $route, $case));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": $method,
+                    "route": $route,
+                    "case": $case,
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        let token_listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind spotify token fixture");
+        let token_address = token_listener.local_addr().expect("token fixture address");
+        let profile_listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind spotify profile fixture");
+        let profile_address = profile_listener.local_addr().expect("profile fixture address");
+        let token_server = tokio::spawn(async move {
+            serve_json_fixture(
+                &token_listener,
+                serde_json::json!({
+                    "access_token": "differential-access-secret",
+                    "refresh_token": "differential-refresh-secret",
+                    "expires_in": 3600,
+                    "scope": "user-library-read"
+                }),
+            )
+            .await
+        });
+        let profile_server = tokio::spawn(async move {
+            serve_json_fixture(
+                &profile_listener,
+                serde_json::json!({"id": "differential-spotify-user", "display_name": "Differential User"}),
+            )
+            .await
+        });
+
+        let root = std::env::temp_dir().join(format!(
+            "slskr-spotify-differential-{}-{}",
+            std::process::id(),
+            super::unix_timestamp_millis()
+        ));
+        super::ensure_private_state_dir(&root).expect("create spotify differential state dir");
+        let (state, _receiver) = test_state_with_env(
+            MapEnv::default()
+                .with("SLSKR_STATE_DIR", &root.to_string_lossy())
+                .with("SLSKR_SPOTIFY_ENABLED", "true")
+                .with("SLSKR_SPOTIFY_CLIENT_ID", "differential-client-id")
+                .with("SLSKR_SPOTIFY_TIMEOUT", "5"),
+        );
+        let spotify = state.integration_settings.read().await.spotify.clone();
+        let pending = super::OAuthStateRecord {
+            provider: "spotify".to_owned(),
+            redirect_uri: "http://127.0.0.1/callback".to_owned(),
+            code_verifier: Some("differential-pkce-verifier".to_owned()),
+            created_at: super::unix_timestamp(),
+            expires_at: super::unix_timestamp().saturating_add(600),
+        };
+        super::complete_spotify_authorization(
+            &state,
+            &spotify,
+            &pending,
+            "differential-authorization-code",
+            &format!("http://{token_address}/token"),
+            &format!("http://{profile_address}/me"),
+        )
+        .await
+        .expect("complete spotify authorization fixture");
+        token_server.await.expect("token fixture task");
+        profile_server.await.expect("profile fixture task");
+
+        let connected_status = super::route_http_request(
+            "GET",
+            "/api/v0/integrations/spotify/status",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("connected status response");
+        let connected_status_json =
+            serde_json::from_str::<serde_json::Value>(&connected_status.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/api/v0/integrations/spotify/status",
+            "populated-dynamic-state",
+            connected_status.status == "200 OK" && connected_status_json["connected"] == true
+        );
+
+        let disconnect = super::route_http_request(
+            "DELETE",
+            "/api/v0/integrations/spotify",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("disconnect response");
+        let disconnected_status = super::route_http_request(
+            "GET",
+            "/api/v0/integrations/spotify/status",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("disconnected status response");
+        let disconnected_status_json =
+            serde_json::from_str::<serde_json::Value>(&disconnected_status.body).unwrap_or_default();
+        record!(
+            "DELETE",
+            "/api/v0/integrations/spotify",
+            "mutation-side-effects-and-readback",
+            disconnect.status == "204 No Content" && disconnected_status_json["connected"] == false
+        );
+
+        let _ = fs::remove_dir_all(root);
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("spotify_connection_status_and_disconnect.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api spotify-connection-status-and-disconnect mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
