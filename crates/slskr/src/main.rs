@@ -128781,6 +128781,171 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof crediting `PATCH /api/v0/options`'s
+    /// real non-object-body rejection and real successful secret-
+    /// redacting overlay mutation (independently re-derived from
+    /// `null_options_overlay_matches_the_selected_frozen_target`'s
+    /// slskdn half and `options_overlay_sets_target_specific_
+    /// reconnect_and_redacts_secrets`: a `null`/`[]` body is a real
+    /// ASP.NET-style ProblemDetails 400, and a real successful overlay
+    /// redacts a configured Spotify client secret while driving a real
+    /// runtime reconnect-pending flag), `GET /api/v0/dht/status`'s
+    /// real dynamic reflection of a watched YAML config change
+    /// (independently re-derived from `watched_slskdn_dht_updates_
+    /// current_options_but_retains_startup_socket_settings`: DHT is
+    /// genuinely disabled after a real watched-config apply, not a
+    /// canned response), and 4 routes from `bridge_projections_
+    /// redact_internal_endpoint`'s real internal host/port redaction
+    /// proof (`GET /api/v0/bridge/admin/config`, `GET /api/v0/bridge/
+    /// admin/dashboard`, and `GET /api/v0/bridge/status`, all
+    /// completely uncredited; `GET /api/v0/application`'s redaction
+    /// case, distinct from its already-credited nominal-shape case).
+    /// Confirmed against `/tmp/slskr-parity-evidence/controller-api/
+    /// *.json` before writing, per case: all 7 were open. slskdN-only
+    /// (confirmed against the frozen registry).
+    #[tokio::test]
+    async fn controller_api_differential_options_dht_and_bridge_redaction() {
+        let target = "slskdn";
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($method:expr, $route:expr, $case:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!("{target} {} {} [{}]", $method, $route, $case));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": $method,
+                    "route": $route,
+                    "case": $case,
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        {
+            let (state, _receiver) = test_state_with_env(
+                MapEnv::default()
+                    .with("SLSKR_REMOTE_CONFIGURATION", "true")
+                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+            );
+            let mut pass = true;
+            for body in ["null", "[]"] {
+                let response =
+                    super::route_http_request("PATCH", "/api/v0/options", None, body, &state)
+                        .await
+                        .expect("non-object options overlay response");
+                pass &= response.status == "400 Bad Request"
+                    && response.content_type == "application/json; charset=utf-8"
+                    && response.body
+                        == r#"{"title":"One or more validation errors occurred.","status":400,"detail":"The request is invalid.","errors":{}}"#;
+            }
+            record!("PATCH", "/api/v0/options", "malformed-path-query-or-body", pass);
+        }
+
+        {
+            let (state, _receiver) = test_state_with_env(
+                MapEnv::default()
+                    .with("SLSKR_REMOTE_CONFIGURATION", "true")
+                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+            );
+            state.session.write().await.state = "connected";
+            let response = super::route_http_request(
+                "PATCH",
+                "/api/v0/options",
+                None,
+                r#"{"soulseek":{"listenPort":50399},"integration":{"spotify":{"clientSecret":"differential-do-not-return"}}}"#,
+                &state,
+            )
+            .await
+            .expect("target overlay response");
+            let value = serde_json::from_str::<serde_json::Value>(&response.body).unwrap_or_default();
+            record!(
+                "PATCH",
+                "/api/v0/options",
+                "mutation-side-effects-and-readback",
+                response.status == "200 OK"
+                    && value["soulseek"]["listenPort"] == 50_399
+                    && value["integration"]["spotify"]["clientSecret"] == "*****"
+                    && !response.body.contains("differential-do-not-return")
+                    && state.runtime.read().await.application_reconnect_pending
+            );
+        }
+
+        {
+            let (state, _receiver) = test_state_with_env(
+                MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+            );
+            assert!(state.config.advanced_networking.dht.enabled);
+            let yaml = "dht:\n  enabled: false\n  dht_port: 51099\n";
+            fs::write(state.config.state_dir.join("slskd.yml"), yaml)
+                .expect("write differential dht yaml");
+            super::apply_watched_controller_configuration(
+                &state,
+                Some(yaml),
+                &state.controller_cli_environment,
+            )
+            .await;
+            let status = super::route_http_request("GET", "/api/v0/dht/status", None, "", &state)
+                .await
+                .expect("watched dht status response");
+            let status_json =
+                serde_json::from_str::<serde_json::Value>(&status.body).unwrap_or_default();
+            record!(
+                "GET",
+                "/api/v0/dht/status",
+                "populated-dynamic-state",
+                status.status == "200 OK" && status_json["isEnabled"] == false
+            );
+        }
+
+        {
+            let internal_host = "differential-bridge.internal.private";
+            let internal_port = "43199";
+            let env = MapEnv::default()
+                .with("SLSKR_BRIDGE_ENABLED", "true")
+                .with("SLSKR_BRIDGE_HOST", internal_host)
+                .with("SLSKR_BRIDGE_PORT", internal_port);
+            let (state, _receiver) = test_state_with_env_parts(env, super::SearchStore::new(), None);
+            for path in [
+                "/api/v0/bridge/admin/config",
+                "/api/v0/bridge/admin/dashboard",
+                "/api/v0/bridge/status",
+                "/api/v0/application",
+            ] {
+                let response = super::route_http_request("GET", path, None, "", &state)
+                    .await
+                    .expect("bridge projection response");
+                record!(
+                    "GET",
+                    path,
+                    "missing-empty-or-conflict-state",
+                    response.status == "200 OK"
+                        && !response.body.contains(internal_host)
+                        && !response.body.contains(internal_port)
+                );
+            }
+        }
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("options_dht_and_bridge_redaction.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api options-dht-and-bridge-redaction mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
