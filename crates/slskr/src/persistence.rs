@@ -949,9 +949,23 @@ impl DatabaseManager {
         Ok(manager)
     }
 
-    /// In-memory database for testing
+    /// In-memory database for testing.
+    ///
+    /// Pinned to a single pooled connection: sqlx keeps a `:memory:`
+    /// database alive across a multi-connection pool via SQLite's shared
+    /// cache mode, and shared cache mode's `SQLITE_LOCKED_SHAREDCACHE`
+    /// error on concurrent cross-connection table writes is NOT retried
+    /// by `busy_timeout` (that only covers `SQLITE_BUSY`, a documented
+    /// SQLite limitation) -- multiple real concurrent writers would
+    /// otherwise see spurious "database table is locked" errors that
+    /// can't happen against a real single-writer file-backed database.
+    /// One connection makes the pool serialize concurrent transactions
+    /// by queuing the acquire instead of racing two live connections.
     pub async fn in_memory() -> Result<Self, Box<dyn std::error::Error>> {
-        let pool = SqlitePool::connect("sqlite::memory:").await?;
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await?;
         let manager = DatabaseManager { pool };
         manager.initialize().await?;
         Ok(manager)

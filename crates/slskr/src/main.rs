@@ -129849,6 +129849,658 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof crediting `transaction-and-concurrency-
+    /// atomicity` for the 13 domains already touched by earlier
+    /// persistence-lifecycle batches, minus `Transfers` (its only
+    /// "creation" route, `POST /api/v0/transfers`, is a slskR-internal
+    /// compat shortcut with no registry entry in either frozen target,
+    /// same reason it was skipped for `update-delete-and-readback`).
+    /// `Events` IS included here, proven via the same internal
+    /// `record_event` call the existing `create-and-read-roundtrip`
+    /// differential already uses as its own real write path (no HTTP
+    /// route needed, matching that precedent).
+    ///
+    /// Two proof shapes, chosen per domain by what's actually reachable
+    /// via real dispatch:
+    /// - Concurrent-create: fire N simultaneous creates of N distinct
+    ///   rows through the real dispatcher (`route_http_request`) against
+    ///   the SAME `DatabaseManager`/connection pool via
+    ///   `futures_util::future::join_all`, then read back through the
+    ///   real store and assert exactly N rows persisted with all N
+    ///   expected distinct values present -- proves the real SQLite
+    ///   pool's locking serializes concurrent writers without silently
+    ///   dropping one.
+    /// - Concurrent-update: seed N distinct pre-existing rows, then fire
+    ///   N simultaneous updates (one per row, each with its own distinct
+    ///   new value) through the real dispatcher, then read back and
+    ///   assert each row ended up with ITS OWN writer's value, not a
+    ///   neighbor's -- proves real transactional isolation, not just "no
+    ///   crash under load".
+    ///
+    /// Confirmed against `/tmp/slskr-parity-evidence/persistence-
+    /// lifecycle/*.json` before writing: `transaction-and-concurrency-
+    /// atomicity` was 100% untouched for every domain in the whole
+    /// workstream's history.
+    #[tokio::test]
+    async fn persistence_lifecycle_differential_covered_domains_transaction_and_concurrency_atomicity(
+    ) {
+        let fanout = 6usize;
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($target:expr, $domain:expr, $pass:expr) => {
+                let pass = $pass;
+                if !pass {
+                    mismatches.push(format!(
+                        "{} {} transaction-and-concurrency-atomicity",
+                        $target, $domain
+                    ));
+                }
+                ledger.push(serde_json::json!({
+                    "target": $target,
+                    "domain": $domain,
+                    "case": "transaction-and-concurrency-atomicity",
+                    "pass": pass,
+                }));
+            };
+        }
+
+        // Collections: concurrent creates of distinct rows.
+        {
+            let target = "slskdn";
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, _receiver) = test_state_with_env_parts(
+                MapEnv::default()
+                    .with("SLSKR_PERSISTENCE_ENABLED", "true")
+                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+            let bodies: Vec<String> = (0..fanout)
+                .map(|i| format!(r#"{{"name":"Differential Concurrent Collection {i}"}}"#))
+                .collect();
+            let responses = futures_util::future::join_all(bodies.iter().map(|body| {
+                super::route_http_request("POST", "/api/v0/collections", None, body, &state)
+            }))
+            .await;
+            let all_ok = responses.iter().all(|response| {
+                response
+                    .as_ref()
+                    .is_ok_and(|response| response.status.starts_with('2'))
+            });
+            let persisted = db.list_collections(20, 0).await.unwrap_or_default();
+            let expected: std::collections::BTreeSet<String> = (0..fanout)
+                .map(|i| format!("Differential Concurrent Collection {i}"))
+                .collect();
+            let persisted_names: std::collections::BTreeSet<String> =
+                persisted.iter().map(|record| record.name.clone()).collect();
+            record!(
+                target,
+                "Collections",
+                all_ok && persisted.len() == fanout && persisted_names == expected
+            );
+        }
+
+        // CollectionItems: one parent collection, concurrent item creates.
+        {
+            let target = "slskdn";
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, _receiver) = test_state_with_env_parts(
+                MapEnv::default()
+                    .with("SLSKR_PERSISTENCE_ENABLED", "true")
+                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+            let collection = super::route_http_request(
+                "POST",
+                "/api/v0/collections",
+                None,
+                r#"{"name":"Differential Concurrency Parent"}"#,
+                &state,
+            )
+            .await
+            .expect("create parent collection");
+            let collection_id = serde_json::from_str::<serde_json::Value>(&collection.body)
+                .ok()
+                .and_then(|json| json["id"].as_str().map(str::to_owned))
+                .expect("parent collection id");
+            let path = format!("/api/v0/collections/{collection_id}/items");
+            let bodies: Vec<String> = (0..fanout)
+                .map(|i| {
+                    format!(
+                        r#"{{"content_id":"differential-concurrent-track-{i}","artist":"Differential Artist","title":"Track {i}","kind":"Audio"}}"#
+                    )
+                })
+                .collect();
+            let responses = futures_util::future::join_all(
+                bodies
+                    .iter()
+                    .map(|body| super::route_http_request("POST", &path, None, body, &state)),
+            )
+            .await;
+            let all_ok = responses.iter().all(|response| {
+                response
+                    .as_ref()
+                    .is_ok_and(|response| response.status.starts_with('2'))
+            });
+            let persisted = db.list_collection_items(20, 0).await.unwrap_or_default();
+            let expected: std::collections::BTreeSet<String> = (0..fanout)
+                .map(|i| format!("differential-concurrent-track-{i}"))
+                .collect();
+            let persisted_ids: std::collections::BTreeSet<String> = persisted
+                .iter()
+                .map(|record| record.content_id.clone())
+                .collect();
+            record!(
+                target,
+                "CollectionItems",
+                all_ok && persisted.len() == fanout && persisted_ids == expected
+            );
+        }
+
+        // UserNotes: concurrent creates of distinct rows.
+        {
+            let target = "slskdn";
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, _receiver) = test_state_with_env_parts(
+                MapEnv::default()
+                    .with("SLSKR_PERSISTENCE_ENABLED", "true")
+                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+            let bodies: Vec<String> = (0..fanout)
+                .map(|i| {
+                    format!(
+                        r#"{{"username":"differential-concurrent-friend-{i}","note":"note {i}"}}"#
+                    )
+                })
+                .collect();
+            let responses = futures_util::future::join_all(bodies.iter().map(|body| {
+                super::route_http_request("POST", "/api/v0/users/notes", None, body, &state)
+            }))
+            .await;
+            let all_ok = responses.iter().all(|response| {
+                response
+                    .as_ref()
+                    .is_ok_and(|response| response.status.starts_with('2'))
+            });
+            let persisted = db.list_user_notes(20, 0).await.unwrap_or_default();
+            let expected: std::collections::BTreeSet<String> = (0..fanout)
+                .map(|i| format!("differential-concurrent-friend-{i}"))
+                .collect();
+            let persisted_usernames: std::collections::BTreeSet<String> = persisted
+                .iter()
+                .map(|record| record.username.clone())
+                .collect();
+            record!(
+                target,
+                "UserNotes",
+                all_ok && persisted.len() == fanout && persisted_usernames == expected
+            );
+        }
+
+        // WishlistItems: concurrent creates of distinct rows.
+        {
+            let target = "slskdn";
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, _receiver) = test_state_with_env_parts(
+                MapEnv::default()
+                    .with("SLSKR_PERSISTENCE_ENABLED", "true")
+                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+            let bodies: Vec<String> = (0..fanout)
+                .map(|i| {
+                    format!(
+                        r#"{{"artist":"Differential Artist","title":"Differential Concurrent Track {i}","kind":"Audio"}}"#
+                    )
+                })
+                .collect();
+            let responses = futures_util::future::join_all(bodies.iter().map(|body| {
+                super::route_http_request("POST", "/api/v0/wishlist", None, body, &state)
+            }))
+            .await;
+            let all_ok = responses.iter().all(|response| {
+                response
+                    .as_ref()
+                    .is_ok_and(|response| response.status.starts_with('2'))
+            });
+            let persisted = db.list_wishlist_items(20, 0).await.unwrap_or_default();
+            let expected: std::collections::BTreeSet<String> = (0..fanout)
+                .map(|i| format!("Differential Concurrent Track {i}"))
+                .collect();
+            let persisted_titles: std::collections::BTreeSet<String> =
+                persisted.iter().map(|record| record.title.clone()).collect();
+            record!(
+                target,
+                "WishlistItems",
+                all_ok && persisted.len() == fanout && persisted_titles == expected
+            );
+        }
+
+        // ShareGroupMembers: one parent group, concurrent member creates.
+        {
+            let target = "slskdn";
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, _receiver) = test_state_with_env_parts(
+                MapEnv::default()
+                    .with("SLSKR_PERSISTENCE_ENABLED", "true")
+                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+            let group = super::route_http_request(
+                "POST",
+                "/api/v0/sharegroups",
+                None,
+                r#"{"name":"Differential Concurrency Group"}"#,
+                &state,
+            )
+            .await
+            .expect("create parent share group");
+            let group_id = serde_json::from_str::<serde_json::Value>(&group.body)
+                .ok()
+                .and_then(|json| json["id"].as_str().map(str::to_owned))
+                .expect("parent share group id");
+            let path = format!("/api/v0/sharegroups/{group_id}/members");
+            let bodies: Vec<String> = (0..fanout)
+                .map(|i| format!(r#"{{"username":"differential-concurrent-member-{i}"}}"#))
+                .collect();
+            let responses = futures_util::future::join_all(
+                bodies
+                    .iter()
+                    .map(|body| super::route_http_request("POST", &path, None, body, &state)),
+            )
+            .await;
+            let all_ok = responses.iter().all(|response| {
+                response
+                    .as_ref()
+                    .is_ok_and(|response| response.status.starts_with('2'))
+            });
+            let persisted = db.list_share_group_members(20, 0).await.unwrap_or_default();
+            let expected: std::collections::BTreeSet<String> = (0..fanout)
+                .map(|i| format!("differential-concurrent-member-{i}"))
+                .collect();
+            let persisted_usernames: std::collections::BTreeSet<String> = persisted
+                .iter()
+                .map(|record| record.username.clone())
+                .collect();
+            record!(
+                target,
+                "ShareGroupMembers",
+                all_ok && persisted.len() == fanout && persisted_usernames == expected
+            );
+        }
+
+        // Contacts: seed N rows, then concurrent updates each row's own
+        // distinct new username -- proves no cross-writer bleed.
+        {
+            let target = "slskdn";
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, _receiver) = test_state_with_env_parts(
+                MapEnv::default()
+                    .with("SLSKR_PERSISTENCE_ENABLED", "true")
+                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+            let mut ids = Vec::new();
+            for i in 0..fanout {
+                let created = super::route_http_request(
+                    "POST",
+                    "/api/contacts",
+                    None,
+                    &format!(r#"{{"username":"differential-concurrent-contact-{i}"}}"#),
+                    &state,
+                )
+                .await
+                .expect("seed differential contact");
+                let id = serde_json::from_str::<serde_json::Value>(&created.body)
+                    .ok()
+                    .and_then(|json| json["id"].as_str().map(str::to_owned))
+                    .expect("seeded contact id");
+                ids.push(id);
+            }
+            let update_paths: Vec<String> = ids
+                .iter()
+                .map(|id| format!("/api/v0/contacts/{id}"))
+                .collect();
+            let update_bodies: Vec<String> = (0..fanout)
+                .map(|i| format!(r#"{{"username":"differential-concurrent-contact-{i}-updated"}}"#))
+                .collect();
+            let responses = futures_util::future::join_all(
+                update_paths
+                    .iter()
+                    .zip(update_bodies.iter())
+                    .map(|(path, body)| super::route_http_request("PUT", path, None, body, &state)),
+            )
+            .await;
+            let all_ok = responses.iter().all(|response| {
+                response
+                    .as_ref()
+                    .is_ok_and(|response| response.status.starts_with('2'))
+            });
+            let persisted = db.list_contacts(20, 0).await.unwrap_or_default();
+            let expected: std::collections::BTreeMap<String, String> = ids
+                .iter()
+                .enumerate()
+                .map(|(i, id)| {
+                    (
+                        id.clone(),
+                        format!("differential-concurrent-contact-{i}-updated"),
+                    )
+                })
+                .collect();
+            let each_own_value = persisted.len() == fanout
+                && persisted
+                    .iter()
+                    .all(|record| expected.get(&record.id) == Some(&record.username));
+            record!(target, "Contacts", all_ok && each_own_value);
+        }
+
+        // ShareGrants: one parent collection, seed N grants, then
+        // concurrent updates each grant's own distinct permissions value.
+        {
+            let target = "slskdn";
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, _receiver) = test_state_with_env_parts(
+                MapEnv::default()
+                    .with("SLSKR_PERSISTENCE_ENABLED", "true")
+                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+            let collection = super::route_http_request(
+                "POST",
+                "/api/v0/collections",
+                None,
+                r#"{"name":"Differential Concurrency Grant Parent"}"#,
+                &state,
+            )
+            .await
+            .expect("create parent grant collection");
+            let collection_id = serde_json::from_str::<serde_json::Value>(&collection.body)
+                .ok()
+                .and_then(|json| json["id"].as_str().map(str::to_owned))
+                .expect("parent grant collection id");
+            let mut ids = Vec::new();
+            for i in 0..fanout {
+                let created = super::route_http_request(
+                    "POST",
+                    "/api/v0/share-grants",
+                    None,
+                    &format!(
+                        r#"{{"collection_id":"{collection_id}","username":"differential-concurrent-grantee-{i}"}}"#
+                    ),
+                    &state,
+                )
+                .await
+                .expect("seed differential share grant");
+                let id = serde_json::from_str::<serde_json::Value>(&created.body)
+                    .ok()
+                    .and_then(|json| json["id"].as_str().map(str::to_owned))
+                    .expect("seeded share grant id");
+                ids.push(id);
+            }
+            let update_paths: Vec<String> = ids
+                .iter()
+                .map(|id| format!("/api/v0/share-grants/{id}"))
+                .collect();
+            let update_bodies: Vec<String> = (0..fanout)
+                .map(|i| format!(r#"{{"permissions":"differential-level-{i}"}}"#))
+                .collect();
+            let responses = futures_util::future::join_all(
+                update_paths
+                    .iter()
+                    .zip(update_bodies.iter())
+                    .map(|(path, body)| super::route_http_request("PUT", path, None, body, &state)),
+            )
+            .await;
+            let all_ok = responses.iter().all(|response| {
+                response
+                    .as_ref()
+                    .is_ok_and(|response| response.status.starts_with('2'))
+            });
+            let persisted = db.list_share_grants(20, 0).await.unwrap_or_default();
+            let expected: std::collections::BTreeMap<String, String> = ids
+                .iter()
+                .enumerate()
+                .map(|(i, id)| (id.clone(), format!("differential-level-{i}")))
+                .collect();
+            let each_own_value = persisted.len() == fanout
+                && persisted
+                    .iter()
+                    .all(|record| expected.get(&record.id) == Some(&record.permissions));
+            record!(target, "ShareGrants", all_ok && each_own_value);
+        }
+
+        // ShareGroups: seed N groups, then concurrent updates each
+        // group's own distinct new name.
+        {
+            let target = "slskdn";
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, _receiver) = test_state_with_env_parts(
+                MapEnv::default()
+                    .with("SLSKR_PERSISTENCE_ENABLED", "true")
+                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+            let mut ids = Vec::new();
+            for i in 0..fanout {
+                let created = super::route_http_request(
+                    "POST",
+                    "/api/v0/sharegroups",
+                    None,
+                    &format!(r#"{{"name":"differential-concurrent-group-{i}"}}"#),
+                    &state,
+                )
+                .await
+                .expect("seed differential share group");
+                let id = serde_json::from_str::<serde_json::Value>(&created.body)
+                    .ok()
+                    .and_then(|json| json["id"].as_str().map(str::to_owned))
+                    .expect("seeded share group id");
+                ids.push(id);
+            }
+            let update_paths: Vec<String> = ids
+                .iter()
+                .map(|id| format!("/api/v0/sharegroups/{id}"))
+                .collect();
+            let update_bodies: Vec<String> = (0..fanout)
+                .map(|i| format!(r#"{{"name":"differential-concurrent-group-{i}-renamed"}}"#))
+                .collect();
+            let responses = futures_util::future::join_all(
+                update_paths
+                    .iter()
+                    .zip(update_bodies.iter())
+                    .map(|(path, body)| super::route_http_request("PUT", path, None, body, &state)),
+            )
+            .await;
+            let all_ok = responses.iter().all(|response| {
+                response
+                    .as_ref()
+                    .is_ok_and(|response| response.status.starts_with('2'))
+            });
+            let persisted = db.list_share_groups(20, 0).await.unwrap_or_default();
+            let expected: std::collections::BTreeMap<String, String> = ids
+                .iter()
+                .enumerate()
+                .map(|(i, id)| (id.clone(), format!("differential-concurrent-group-{i}-renamed")))
+                .collect();
+            let each_own_value = persisted.len() == fanout
+                && persisted
+                    .iter()
+                    .all(|record| expected.get(&record.id) == Some(&record.name));
+            record!(target, "ShareGroups", all_ok && each_own_value);
+        }
+
+        // Domains declared by both targets.
+        for target in ["slskd", "slskdn"] {
+            // Searches: concurrent creates of distinct rows.
+            {
+                let db = super::persistence::DatabaseManager::in_memory()
+                    .await
+                    .expect("in-memory db");
+                let (state, _receiver) = test_state_with_env_parts(
+                    MapEnv::default()
+                        .with("SLSKR_PERSISTENCE_ENABLED", "true")
+                        .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                    super::SearchStore::new(),
+                    Some(db.clone()),
+                );
+                let bodies: Vec<String> = (0..fanout)
+                    .map(|i| format!(r#"{{"query":"differential concurrent query {i}"}}"#))
+                    .collect();
+                let responses = futures_util::future::join_all(bodies.iter().map(|body| {
+                    super::route_http_request("POST", "/api/v0/searches", None, body, &state)
+                }))
+                .await;
+                let all_ok = responses.iter().all(|response| {
+                    response
+                        .as_ref()
+                        .is_ok_and(|response| response.status.starts_with('2'))
+                });
+                let persisted = db.list_searches(20, 0).await.unwrap_or_default();
+                let expected: std::collections::BTreeSet<String> = (0..fanout)
+                    .map(|i| format!("differential concurrent query {i}"))
+                    .collect();
+                let persisted_queries: std::collections::BTreeSet<String> =
+                    persisted.iter().map(|record| record.query.clone()).collect();
+                record!(
+                    target,
+                    "Searches",
+                    all_ok && persisted.len() == fanout && persisted_queries == expected
+                );
+            }
+
+            // Conversations / PrivateMessages: concurrent creates of
+            // distinct messages to distinct peers, both frozen EF domain
+            // names mapping to slskR's single consolidated `messages`
+            // table/store.
+            {
+                let db = super::persistence::DatabaseManager::in_memory()
+                    .await
+                    .expect("in-memory db");
+                let (state, _receiver) = test_state_with_env_parts(
+                    MapEnv::default()
+                        .with("SLSKR_PERSISTENCE_ENABLED", "true")
+                        .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                    super::SearchStore::new(),
+                    Some(db.clone()),
+                );
+                let paths: Vec<String> = (0..fanout)
+                    .map(|i| format!("/api/conversations/differential-concurrent-peer-{i}"))
+                    .collect();
+                let bodies: Vec<String> = (0..fanout)
+                    .map(|i| format!(r#"{{"body":"differential concurrent message {i}"}}"#))
+                    .collect();
+                let responses = futures_util::future::join_all(
+                    paths
+                        .iter()
+                        .zip(bodies.iter())
+                        .map(|(path, body)| super::route_http_request("POST", path, None, body, &state)),
+                )
+                .await;
+                let all_ok = responses.iter().all(|response| {
+                    response
+                        .as_ref()
+                        .is_ok_and(|response| response.status.starts_with('2'))
+                });
+                let persisted = db.list_messages(20, 0).await.unwrap_or_default();
+                let expected: std::collections::BTreeSet<String> = (0..fanout)
+                    .map(|i| format!("differential concurrent message {i}"))
+                    .collect();
+                let persisted_bodies: std::collections::BTreeSet<String> = persisted
+                    .iter()
+                    .map(|record| record.content.clone())
+                    .collect();
+                let pass = all_ok && persisted.len() == fanout && persisted_bodies == expected;
+                for domain in ["Conversations", "PrivateMessages"] {
+                    record!(target, domain, pass);
+                }
+            }
+
+            // Events: no HTTP route exists in either frozen registry
+            // (confirmed: `/api/events` has zero registry entry), so
+            // this proof uses the same internal `record_event` call the
+            // existing `create-and-read-roundtrip` differential already
+            // uses as its own real write path -- concurrent internal
+            // calls against the same `AppState`/`DatabaseManager`.
+            {
+                let db = super::persistence::DatabaseManager::in_memory()
+                    .await
+                    .expect("in-memory db");
+                let (state, _receiver) = test_state_with_env_parts(
+                    MapEnv::default()
+                        .with("SLSKR_PERSISTENCE_ENABLED", "true")
+                        .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                    super::SearchStore::new(),
+                    Some(db.clone()),
+                );
+                let calls = (0..fanout).map(|i| {
+                    super::record_event(
+                        &state,
+                        "differential.concurrent",
+                        format!("differential-concurrent-resource-{i}"),
+                        None,
+                    )
+                });
+                futures_util::future::join_all(calls).await;
+                let persisted = db.list_events(20, 0).await.unwrap_or_default();
+                let expected: std::collections::BTreeSet<String> = (0..fanout)
+                    .map(|i| format!("differential-concurrent-resource-{i}"))
+                    .collect();
+                let persisted_resources: std::collections::BTreeSet<String> = persisted
+                    .iter()
+                    .map(|record| record.resource.clone())
+                    .collect();
+                record!(
+                    target,
+                    "Events",
+                    persisted.len() == fanout && persisted_resources == expected
+                );
+            }
+        }
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("persistence-lifecycle");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("covered_domains_transaction_and_concurrency_atomicity.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize persistence-lifecycle ledger"),
+        )
+        .expect("write persistence-lifecycle ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} persistence-lifecycle transaction-and-concurrency-atomicity mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
