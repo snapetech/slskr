@@ -30,7 +30,7 @@ scoring artifact -- confirmed, all report `complete` with
 
 Parity is **not achieved**. Every planned workstream has an executable
 certification denominator. The literal proof-case closure ratio is now
-**9,419 / 19,122 = 49.26%** (was 853 / 19,122 = 4.46% at the start of this
+**9,435 / 19,122 = 49.34%** (was 853 / 19,122 = 4.46% at the start of this
 review cycle), but this is not a product-completion estimate: most
 generated cases are Cartesian proof dimensions initialized as `needs-proof`,
 including behavior already implemented and tested in slskR. Product
@@ -286,6 +286,34 @@ slskd and slskdn -- Events and Transfers get this case even though
 they were skipped for `update-delete-and-readback` above, since schema
 creation doesn't depend on a reachable update/delete HTTP path), moving
 persistence-lifecycle to 66/798.
+
+`transaction-and-concurrency-atomicity` credited next for 13 of those
+same domains (all but Transfers, whose only "creation" route has no
+registry entry in either frozen target): concurrent-create proofs
+(N simultaneous creates of N distinct rows fired through the real
+dispatcher against the same connection pool, then read back to assert
+none were lost) for Collections/CollectionItems/UserNotes/
+WishlistItems/ShareGroupMembers/Searches/Conversations/PrivateMessages/
+Events, and concurrent-update proofs (N pre-seeded rows, N simultaneous
+updates each with its own distinct value, then read back to assert
+each row got its OWN writer's value and not a neighbor's) for
+Contacts/ShareGrants/ShareGroups. Events has no HTTP route in either
+registry, so it reused the same internal `record_event` call the
+existing `create-and-read-roundtrip` differential already uses as its
+real write path. Writing this surfaced and fixed a real test-harness
+bug: `DatabaseManager::in_memory()`'s default multi-connection pool
+against a `sqlite::memory:` DSN shares data across connections via
+SQLite's shared cache mode, and shared cache mode's
+`SQLITE_LOCKED_SHAREDCACHE` error on concurrent cross-connection table
+writes is not retried by `busy_timeout` (a documented SQLite
+limitation, distinct from `SQLITE_BUSY`) -- under real concurrent
+access this produced spurious "database table is locked" 503s that
+can't happen against the real single-writer file-backed database
+`DatabaseManager::new()` actually uses in production. Fixed by pinning
+`in_memory()` to a single pooled connection, which makes the pool
+queue concurrent transactions instead of racing two live connections;
+test-only, doesn't change production behavior. persistence-lifecycle
+moved 66 -> 82/798.
 
 The real VPN-status projection on the application route,
 the real wire-command dispatch behind an interest mutation, the real
