@@ -914,6 +914,21 @@ impl DatabaseManager {
         self.pool.close().await;
     }
 
+    /// Executes an arbitrary raw SQL statement, bypassing every typed
+    /// store method. Test-only: used to inject deliberately corrupt data
+    /// (values a normal insert path could never produce, thanks to
+    /// SQLite's weak column typing) so a differential test can prove the
+    /// real rehydration path fails cleanly instead of panicking.
+    #[cfg(test)]
+    pub async fn execute_raw_for_test(&self, sql: &str) -> Result<(), Box<dyn std::error::Error>> {
+        // sqlx's `query()` ties its statement cache key to a `'static`
+        // str; leaking a small owned copy here is fine for a test-only
+        // helper called a handful of times per test run.
+        let sql: &'static str = Box::leak(sql.to_owned().into_boxed_str());
+        query(sql).execute(&self.pool).await?;
+        Ok(())
+    }
+
     #[cfg(test)]
     pub async fn fail_oauth_delete_for_test(&self) -> Result<(), Box<dyn std::error::Error>> {
         query(

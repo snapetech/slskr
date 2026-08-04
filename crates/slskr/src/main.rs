@@ -130501,6 +130501,499 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof crediting `corrupt-state-and-upgrade-
+    /// failure` for 10 of the 13 domains already touched by earlier
+    /// persistence-lifecycle batches. `ShareGroupMembers` is excluded:
+    /// its table has a composite primary key (`group_id`, `username`),
+    /// not a single `id` column, so the "corrupt exactly one row by id"
+    /// technique below doesn't directly apply. `Transfers` is excluded
+    /// for the same reason as every other case in this workstream --
+    /// its only "creation" route has no registry entry in either
+    /// frozen target.
+    ///
+    /// Design: create one real row via the normal dispatch path, then
+    /// directly corrupt one of its `INTEGER NOT NULL` columns via a new
+    /// `DatabaseManager::execute_raw_for_test` raw-SQL escape hatch.
+    /// SQLite's weak column typing lets a value that could never come
+    /// from a real typed insert (a non-numeric string landing in an
+    /// INTEGER column) persist without SQLite itself rejecting it at
+    /// write time -- a realistic stand-in for the kind of row a botched
+    /// manual edit, an interrupted external tool, or a real
+    /// schema-upgrade bug could leave behind. Then call the REAL
+    /// `list_*` method `serve()` itself uses for startup rehydration
+    /// (`main.rs`, the `collection_store`/`search_store`/etc. blocks
+    /// gated behind `.map_err(|error| format!("failed to load
+    /// persisted ...: {error}"))?` -- confirmed by reading that real
+    /// startup code before designing this proof) and assert it returns
+    /// a clean `Err`, not a silently wrong value and not a panic --
+    /// proving corrupted state fails the exact way production startup
+    /// already handles it: a typed, recoverable error the caller
+    /// already propagates, not an unhandled crash.
+    ///
+    /// Confirmed against `/tmp/slskr-parity-evidence/persistence-
+    /// lifecycle/*.json` before writing: `corrupt-state-and-upgrade-
+    /// failure` was 100% untouched for every domain in the whole
+    /// workstream's history -- the last of the 6 case names to be
+    /// opened at all.
+    #[tokio::test]
+    async fn persistence_lifecycle_differential_covered_domains_corrupt_state_and_upgrade_failure(
+    ) {
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($target:expr, $domain:expr, $pass:expr) => {
+                let pass = $pass;
+                if !pass {
+                    mismatches.push(format!(
+                        "{} {} corrupt-state-and-upgrade-failure",
+                        $target, $domain
+                    ));
+                }
+                ledger.push(serde_json::json!({
+                    "target": $target,
+                    "domain": $domain,
+                    "case": "corrupt-state-and-upgrade-failure",
+                    "pass": pass,
+                }));
+            };
+        }
+
+        // Collections.
+        {
+            let target = "slskdn";
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, _receiver) = test_state_with_env_parts(
+                MapEnv::default()
+                    .with("SLSKR_PERSISTENCE_ENABLED", "true")
+                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+            let created = super::route_http_request(
+                "POST",
+                "/api/v0/collections",
+                None,
+                r#"{"name":"Differential Corrupt Collection"}"#,
+                &state,
+            )
+            .await
+            .expect("create differential collection");
+            let id = serde_json::from_str::<serde_json::Value>(&created.body)
+                .ok()
+                .and_then(|json| json["id"].as_str().map(str::to_owned))
+                .expect("differential collection id");
+            db.execute_raw_for_test(&format!(
+                "UPDATE collections SET created_at = 'not-a-number' WHERE id = '{id}'"
+            ))
+            .await
+            .expect("corrupt collections row");
+            record!(
+                target,
+                "Collections",
+                db.list_collections(10, 0).await.is_err()
+            );
+        }
+
+        // CollectionItems.
+        {
+            let target = "slskdn";
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, _receiver) = test_state_with_env_parts(
+                MapEnv::default()
+                    .with("SLSKR_PERSISTENCE_ENABLED", "true")
+                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+            let collection = super::route_http_request(
+                "POST",
+                "/api/v0/collections",
+                None,
+                r#"{"name":"Differential Corrupt Item Parent"}"#,
+                &state,
+            )
+            .await
+            .expect("create parent collection");
+            let collection_id = serde_json::from_str::<serde_json::Value>(&collection.body)
+                .ok()
+                .and_then(|json| json["id"].as_str().map(str::to_owned))
+                .expect("parent collection id");
+            let item = super::route_http_request(
+                "POST",
+                &format!("/api/v0/collections/{collection_id}/items"),
+                None,
+                r#"{"content_id":"differential-corrupt-track","artist":"Differential Artist","title":"Track","kind":"Audio"}"#,
+                &state,
+            )
+            .await
+            .expect("create differential collection item");
+            let item_id = serde_json::from_str::<serde_json::Value>(&item.body)
+                .ok()
+                .and_then(|json| json["id"].as_str().map(str::to_owned))
+                .expect("differential collection item id");
+            db.execute_raw_for_test(&format!(
+                "UPDATE collection_items SET added_at = 'not-a-number' WHERE id = '{item_id}'"
+            ))
+            .await
+            .expect("corrupt collection_items row");
+            record!(
+                target,
+                "CollectionItems",
+                db.list_collection_items(10, 0).await.is_err()
+            );
+        }
+
+        // UserNotes.
+        {
+            let target = "slskdn";
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, _receiver) = test_state_with_env_parts(
+                MapEnv::default()
+                    .with("SLSKR_PERSISTENCE_ENABLED", "true")
+                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+            let created = super::route_http_request(
+                "POST",
+                "/api/users/notes",
+                None,
+                r#"{"username":"differential-corrupt-friend","note":"note"}"#,
+                &state,
+            )
+            .await
+            .expect("create differential user note");
+            let id = serde_json::from_str::<serde_json::Value>(&created.body)
+                .ok()
+                .and_then(|json| json["id"].as_str().map(str::to_owned))
+                .expect("differential note id");
+            db.execute_raw_for_test(&format!(
+                "UPDATE user_notes SET created_at = 'not-a-number' WHERE id = '{id}'"
+            ))
+            .await
+            .expect("corrupt user_notes row");
+            record!(
+                target,
+                "UserNotes",
+                db.list_user_notes(10, 0).await.is_err()
+            );
+        }
+
+        // WishlistItems.
+        {
+            let target = "slskdn";
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, _receiver) = test_state_with_env_parts(
+                MapEnv::default()
+                    .with("SLSKR_PERSISTENCE_ENABLED", "true")
+                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+            let created = super::route_http_request(
+                "POST",
+                "/api/v0/wishlist",
+                None,
+                r#"{"artist":"Differential Artist","title":"Differential Corrupt Track","kind":"Audio"}"#,
+                &state,
+            )
+            .await
+            .expect("create differential wishlist item");
+            let id = serde_json::from_str::<serde_json::Value>(&created.body)
+                .ok()
+                .and_then(|json| json["id"].as_str().map(str::to_owned))
+                .expect("differential wishlist id");
+            db.execute_raw_for_test(&format!(
+                "UPDATE wishlist_items SET added_at = 'not-a-number' WHERE id = '{id}'"
+            ))
+            .await
+            .expect("corrupt wishlist_items row");
+            record!(
+                target,
+                "WishlistItems",
+                db.list_wishlist_items(10, 0).await.is_err()
+            );
+        }
+
+        // Contacts.
+        {
+            let target = "slskdn";
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, _receiver) = test_state_with_env_parts(
+                MapEnv::default()
+                    .with("SLSKR_PERSISTENCE_ENABLED", "true")
+                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+            let created = super::route_http_request(
+                "POST",
+                "/api/contacts",
+                None,
+                r#"{"username":"differential-corrupt-contact"}"#,
+                &state,
+            )
+            .await
+            .expect("create differential contact");
+            let id = serde_json::from_str::<serde_json::Value>(&created.body)
+                .ok()
+                .and_then(|json| json["id"].as_str().map(str::to_owned))
+                .expect("differential contact id");
+            db.execute_raw_for_test(&format!(
+                "UPDATE contacts SET created_at = 'not-a-number' WHERE id = '{id}'"
+            ))
+            .await
+            .expect("corrupt contacts row");
+            record!(target, "Contacts", db.list_contacts(10, 0).await.is_err());
+        }
+
+        // ShareGrants.
+        {
+            let target = "slskdn";
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, _receiver) = test_state_with_env_parts(
+                MapEnv::default()
+                    .with("SLSKR_PERSISTENCE_ENABLED", "true")
+                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+            let collection = super::route_http_request(
+                "POST",
+                "/api/v0/collections",
+                None,
+                r#"{"name":"Differential Corrupt Grant Parent"}"#,
+                &state,
+            )
+            .await
+            .expect("create parent grant collection");
+            let collection_id = serde_json::from_str::<serde_json::Value>(&collection.body)
+                .ok()
+                .and_then(|json| json["id"].as_str().map(str::to_owned))
+                .expect("parent grant collection id");
+            let created = super::route_http_request(
+                "POST",
+                "/api/v0/share-grants",
+                None,
+                &format!(
+                    r#"{{"collection_id":"{collection_id}","username":"differential-corrupt-grantee"}}"#
+                ),
+                &state,
+            )
+            .await
+            .expect("create differential share grant");
+            let id = serde_json::from_str::<serde_json::Value>(&created.body)
+                .ok()
+                .and_then(|json| json["id"].as_str().map(str::to_owned))
+                .expect("differential grant id");
+            db.execute_raw_for_test(&format!(
+                "UPDATE share_grants SET shared_at = 'not-a-number' WHERE id = '{id}'"
+            ))
+            .await
+            .expect("corrupt share_grants row");
+            record!(
+                target,
+                "ShareGrants",
+                db.list_share_grants(10, 0).await.is_err()
+            );
+        }
+
+        // ShareGroups.
+        {
+            let target = "slskdn";
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, _receiver) = test_state_with_env_parts(
+                MapEnv::default()
+                    .with("SLSKR_PERSISTENCE_ENABLED", "true")
+                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+            let created = super::route_http_request(
+                "POST",
+                "/api/v0/sharegroups",
+                None,
+                r#"{"name":"Differential Corrupt Group"}"#,
+                &state,
+            )
+            .await
+            .expect("create differential share group");
+            let id = serde_json::from_str::<serde_json::Value>(&created.body)
+                .ok()
+                .and_then(|json| json["id"].as_str().map(str::to_owned))
+                .expect("differential share group id");
+            db.execute_raw_for_test(&format!(
+                "UPDATE share_groups SET created_at = 'not-a-number' WHERE id = '{id}'"
+            ))
+            .await
+            .expect("corrupt share_groups row");
+            record!(
+                target,
+                "ShareGroups",
+                db.list_share_groups(10, 0).await.is_err()
+            );
+        }
+
+        // Domains declared by both targets.
+        for target in ["slskd", "slskdn"] {
+            // Searches.
+            {
+                let db = super::persistence::DatabaseManager::in_memory()
+                    .await
+                    .expect("in-memory db");
+                let (state, _receiver) = test_state_with_env_parts(
+                    MapEnv::default()
+                        .with("SLSKR_PERSISTENCE_ENABLED", "true")
+                        .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                    super::SearchStore::new(),
+                    Some(db.clone()),
+                );
+                let created = super::route_http_request(
+                    "POST",
+                    "/api/v0/searches",
+                    None,
+                    r#"{"query":"differential corrupt query"}"#,
+                    &state,
+                )
+                .await
+                .expect("create differential search");
+                let id = serde_json::from_str::<serde_json::Value>(&created.body)
+                    .ok()
+                    .and_then(|json| json["id"].as_str().map(str::to_owned));
+                let id = match id {
+                    Some(id) => id,
+                    None => state
+                        .searches
+                        .read()
+                        .await
+                        .records
+                        .first()
+                        .map(|record| record.id.clone())
+                        .expect("differential search id"),
+                };
+                db.execute_raw_for_test(&format!(
+                    "UPDATE searches SET created_at = 'not-a-number' WHERE id = '{id}'"
+                ))
+                .await
+                .expect("corrupt searches row");
+                record!(target, "Searches", db.list_searches(10, 0).await.is_err());
+            }
+
+            // Conversations / PrivateMessages: both frozen EF domain
+            // names map to slskR's single consolidated `messages`
+            // table/store.
+            {
+                let db = super::persistence::DatabaseManager::in_memory()
+                    .await
+                    .expect("in-memory db");
+                let (state, _receiver) = test_state_with_env_parts(
+                    MapEnv::default()
+                        .with("SLSKR_PERSISTENCE_ENABLED", "true")
+                        .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                    super::SearchStore::new(),
+                    Some(db.clone()),
+                );
+                super::route_http_request(
+                    "POST",
+                    "/api/conversations/differential-corrupt-peer",
+                    None,
+                    r#"{"body":"differential corrupt message"}"#,
+                    &state,
+                )
+                .await
+                .expect("create differential message");
+                let id = state
+                    .messages
+                    .read()
+                    .await
+                    .records
+                    .first()
+                    .map(|record| record.id.clone())
+                    .expect("differential message id");
+                db.execute_raw_for_test(&format!(
+                    "UPDATE messages SET created_at = 'not-a-number' WHERE id = '{id}'"
+                ))
+                .await
+                .expect("corrupt messages row");
+                let pass = db.list_messages(10, 0).await.is_err();
+                for domain in ["Conversations", "PrivateMessages"] {
+                    record!(target, domain, pass);
+                }
+            }
+
+            // Events: no HTTP route exists in either frozen registry, so
+            // this proof uses the same internal `record_event` call the
+            // existing `create-and-read-roundtrip` differential already
+            // uses as its own real write path. `events.id` is a real
+            // `INTEGER PRIMARY KEY`, not a UUID string, so the raw SQL
+            // targets it unquoted.
+            {
+                let db = super::persistence::DatabaseManager::in_memory()
+                    .await
+                    .expect("in-memory db");
+                let (state, _receiver) = test_state_with_env_parts(
+                    MapEnv::default()
+                        .with("SLSKR_PERSISTENCE_ENABLED", "true")
+                        .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                    super::SearchStore::new(),
+                    Some(db.clone()),
+                );
+                super::record_event(
+                    &state,
+                    "differential.corrupt",
+                    "differential-corrupt-resource",
+                    None,
+                )
+                .await;
+                let id = db
+                    .list_events(10, 0)
+                    .await
+                    .expect("list events before corruption")
+                    .first()
+                    .map(|record| record.id)
+                    .expect("differential event id");
+                db.execute_raw_for_test(&format!(
+                    "UPDATE events SET created_at = 'not-a-number' WHERE id = {id}"
+                ))
+                .await
+                .expect("corrupt events row");
+                record!(target, "Events", db.list_events(10, 0).await.is_err());
+            }
+        }
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("persistence-lifecycle");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("covered_domains_corrupt_state_and_upgrade_failure.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize persistence-lifecycle ledger"),
+        )
+        .expect("write persistence-lifecycle ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} persistence-lifecycle corrupt-state-and-upgrade-failure mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
