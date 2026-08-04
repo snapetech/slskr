@@ -128470,33 +128470,34 @@ mod tests {
         );
     }
 
-    /// Bulk differential proof crediting `GET /api/v0/telemetry`'s
-    /// real internal-path/error-detail redaction (independently
-    /// re-derived from `telemetry_api_returns_runtime_health_without_
-    /// secrets`: real share-cache and transfer-state error conditions
-    /// are seeded, and the response surfaces meaningful health data
-    /// while genuinely stripping `/private` paths and raw error
-    /// details), `GET /api/v0/files/downloads/directories`'s real
-    /// unknown-query-parameter tolerance and real recursive-listing
-    /// truncation budget (independently re-derived from `slskd_
-    /// storage_directory_routes_ignore_unknown_pagination_parameters`
-    /// and `slskd_recursive_storage_listing_has_lower_budget`: unknown
-    /// `limit`/`offset` params are genuinely ignored rather than
-    /// applied, and a 300-file recursive listing is genuinely
-    /// truncated to the real `SLSKD_STORAGE_RECURSIVE_LIST_DEFAULT_
-    /// ENTRIES` budget), and `GET /api/v0/server`'s real disconnected-
-    /// state shape for the slskdN target specifically (independently
-    /// re-derived from `disconnected_server_endpoint_shape_matches_
-    /// each_frozen_target`'s slskdn half: a disconnected server
-    /// genuinely reports the real slskdN sentinel values
+    /// Bulk differential proof crediting `GET /api/v0/files/downloads/
+    /// directories`'s real unknown-query-parameter tolerance and real
+    /// recursive-listing truncation budget (independently re-derived
+    /// from `slskd_storage_directory_routes_ignore_unknown_pagination_
+    /// parameters` and `slskd_recursive_storage_listing_has_lower_
+    /// budget`: unknown `limit`/`offset` params are genuinely ignored
+    /// rather than applied, and a 300-file recursive listing is
+    /// genuinely truncated to the real `SLSKD_STORAGE_RECURSIVE_LIST_
+    /// DEFAULT_ENTRIES` budget), and `GET /api/v0/server`'s real
+    /// disconnected-state shape for the slskdN target specifically
+    /// (independently re-derived from `disconnected_server_endpoint_
+    /// shape_matches_each_frozen_target`'s slskdn half: a disconnected
+    /// server genuinely reports the real slskdN sentinel values
     /// `address: ""` and `ipEndPoint: "255.255.255.255:0"`, not the
     /// slskd target's omitted-field contract, which would be a
     /// contract-mismatch bug if credited under the slskdN target).
     /// Confirmed against `/tmp/slskr-parity-evidence/controller-api/
-    /// *.json` before writing, per case: all 4 were open. slskdN-only
-    /// (confirmed against the frozen registry).
+    /// *.json` before writing, per case: all 3 were open. (`GET /api/
+    /// v0/telemetry`, from the same source-test cluster's third test
+    /// `telemetry_api_returns_runtime_health_without_secrets`, turned
+    /// out to be a real, working slskR-internal handler with NO
+    /// registered route in either frozen oracle -- confirmed by
+    /// regenerating both route registries fresh rather than trusting
+    /// this session's now-stale `/tmp/slskdn_routes.json` snapshot, so
+    /// it was dropped rather than credited.) slskdN-only (confirmed
+    /// against the frozen registry).
     #[tokio::test]
-    async fn controller_api_differential_telemetry_storage_and_server() {
+    async fn controller_api_differential_storage_and_server() {
         let target = "slskdn";
         let mut ledger = Vec::new();
         let mut mismatches = Vec::new();
@@ -128514,31 +128515,6 @@ mod tests {
                     "pass": $pass,
                 }));
             };
-        }
-
-        {
-            let (state, _receiver) = test_state();
-            state.shares.write().await.cache_error =
-                Some("share cache write failed: /private/differential-share-index.tsv denied".to_owned());
-            {
-                let mut transfers = state.transfers.write().await;
-                transfers.state_error =
-                    Some("transfer state parse failed at /private/differential-transfer-state.json".to_owned());
-                transfers.events_error =
-                    Some("transfer event open failed at /private/differential-transfer-events.tsv".to_owned());
-            }
-            let response = super::route_http_request("GET", "/api/v0/telemetry", None, "", &state)
-                .await
-                .expect("telemetry response");
-            record!(
-                "GET",
-                "/api/v0/telemetry",
-                "populated-dynamic-state",
-                response.status == "200 OK"
-                    && response.body.contains("\"connected\":false")
-                    && !response.body.contains("/private")
-                    && !response.body.contains("denied")
-            );
         }
 
         {
@@ -128619,14 +128595,14 @@ mod tests {
             .join("controller-api");
         fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
         fs::write(
-            evidence_dir.join("telemetry_storage_and_server.json"),
+            evidence_dir.join("storage_and_server.json"),
             serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
         )
         .expect("write controller-api ledger");
 
         assert!(
             mismatches.is_empty(),
-            "{} controller-api telemetry-storage-and-server mismatches:\n{}",
+            "{} controller-api storage-and-server mismatches:\n{}",
             mismatches.len(),
             mismatches.join("\n")
         );
