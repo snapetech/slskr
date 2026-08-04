@@ -30,7 +30,7 @@ scoring artifact -- confirmed, all report `complete` with
 
 Parity is **not achieved**. Every planned workstream has an executable
 certification denominator. The literal proof-case closure ratio is now
-**9,435 / 19,122 = 49.34%** (was 853 / 19,122 = 4.46% at the start of this
+**9,450 / 19,122 = 49.42%** (was 853 / 19,122 = 4.46% at the start of this
 review cycle), but this is not a product-completion estimate: most
 generated cases are Cartesian proof dimensions initialized as `needs-proof`,
 including behavior already implemented and tested in slskR. Product
@@ -314,6 +314,22 @@ can't happen against the real single-writer file-backed database
 queue concurrent transactions instead of racing two live connections;
 test-only, doesn't change production behavior. persistence-lifecycle
 moved 66 -> 82/798.
+
+`corrupt-state-and-upgrade-failure` credited next for 10 of the 13
+domains (`ShareGroupMembers` excluded: composite primary key, no
+single `id` column; `Transfers` excluded as always, no registry-backed
+creation route): a real row is created, then one of its columns is
+directly corrupted via a new raw-SQL test-only escape hatch (SQLite's
+weak typing lets a non-numeric string land in an `INTEGER` column
+without being rejected at write time -- a realistic stand-in for a
+botched manual edit or a real schema-upgrade bug), then the real
+`list_*` method the production startup path (`serve()`) itself uses
+for rehydration is called and asserted to return a clean `Err`, not a
+panic. This is the last of the 6 case names to be opened at all for
+this workstream; all 13 already-touched domains now have every
+applicable case proven (Events/Transfers/ShareGroupMembers each have
+narrower, explicitly-documented per-case exclusions, not oversights).
+persistence-lifecycle moved 82 -> 97/798.
 
 The real VPN-status projection on the application route,
 the real wire-command dispatch behind an interest mutation, the real
