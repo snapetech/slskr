@@ -30,7 +30,7 @@ scoring artifact -- confirmed, all report `complete` with
 
 Parity is **not achieved**. Every planned workstream has an executable
 certification denominator. The literal proof-case closure ratio is now
-**9,371 / 19,122 = 49.01%** (was 853 / 19,122 = 4.46% at the start of this
+**9,374 / 19,122 = 49.02%** (was 853 / 19,122 = 4.46% at the start of this
 review cycle), but this is not a product-completion estimate: most
 generated cases are Cartesian proof dimensions initialized as `needs-proof`,
 including behavior already implemented and tested in slskR. Product
@@ -223,7 +223,15 @@ The Spotify-authorize OAuth-state persistence-failure rollback, real
 caller-identity enforcement on pod creation, the mesh handshake's real
 baseline shape, and the listening-party directory's real content-id
 encoding each had zero prior credit, bringing the workstream to
-632/5,300. The real VPN-status projection on the application route,
+632/5,300. The storage-directory route's real unknown-query-parameter
+tolerance and recursive-listing truncation budget, plus the server
+route's real disconnected-state sentinel shape for the slskdN target,
+brought the workstream to 640/5,300 (a third candidate route, `GET
+/api/v0/telemetry`, turned out to be a real slskR-internal handler
+with no registered route in either frozen oracle -- dropped rather
+than credited after regenerating both registries fresh, since a
+stale mid-session route snapshot had been checked with an overlooked
+negative result). The real VPN-status projection on the application route,
 the real wire-command dispatch behind an interest mutation, the real
 empty/disabled bridge-admin-clients baseline, one genuinely uncredited
 route from a 17-route materialized-empty-state table, and real
