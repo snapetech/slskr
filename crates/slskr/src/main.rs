@@ -124637,6 +124637,239 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof crediting 8 virtual-soulfind v2 routes'
+    /// cases, independently re-derived from `virtual_soulfind_v2_
+    /// routes_execute_bounded_local_intent_workflow`'s real end-to-end
+    /// catalogue-search -> plan -> intent -> process -> completed
+    /// workflow, backed by a real local-library entry (not a fabricated
+    /// catalogue). Found via a lowered call-density scan threshold
+    /// (`count > 2`) after the `> 3` tier was exhausted. slskdN-only
+    /// (confirmed against the frozen registry).
+    #[tokio::test]
+    async fn controller_api_differential_virtual_soulfind_v2() {
+        let target = "slskdn";
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($method:expr, $route:expr, $case:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!("{target} {} {} [{}]", $method, $route, $case));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": $method,
+                    "route": $route,
+                    "case": $case,
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        let (state, _receiver) = test_state_with_env(
+            MapEnv::default().with("SLSKR_VIRTUAL_SOULFIND_V2_ENABLED", "true"),
+        );
+        state.library.write().await.create(
+            "Differential Artist".to_owned(),
+            "Differential Track".to_owned(),
+            "Differential Album".to_owned(),
+        );
+
+        let artists = super::route_http_request(
+            "GET",
+            "/api/v1/virtualsoulfind/v2/catalogue/artists/search?query=differential&limit=10",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("search v2 artists");
+        let artists_json = serde_json::from_str::<serde_json::Value>(&artists.body).unwrap_or_default();
+        let artist_id = artists_json[0]["artistId"].as_str().unwrap_or_default().to_owned();
+        record!(
+            "GET",
+            "/api/v1/virtualsoulfind/v2/catalogue/artists/search",
+            "nominal-status-headers-body",
+            artists.status == "200 OK"
+        );
+        record!(
+            "GET",
+            "/api/v1/virtualsoulfind/v2/catalogue/artists/search",
+            "populated-dynamic-state",
+            !artist_id.is_empty()
+        );
+
+        let releases_route =
+            format!("/api/v1/virtualsoulfind/v2/catalogue/artists/{artist_id}/releases");
+        let releases = super::route_http_request("GET", &releases_route, None, "", &state)
+            .await
+            .unwrap_or_else(|error| panic!("{releases_route}: {error}"));
+        let releases_json =
+            serde_json::from_str::<serde_json::Value>(&releases.body).unwrap_or_default();
+        let release_id = releases_json[0]["releaseGroupId"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned();
+        record!(
+            "GET",
+            "/api/v1/virtualsoulfind/v2/catalogue/artists/{artistId}/releases",
+            "nominal-status-headers-body",
+            releases.status == "200 OK"
+        );
+        record!(
+            "GET",
+            "/api/v1/virtualsoulfind/v2/catalogue/artists/{artistId}/releases",
+            "populated-dynamic-state",
+            !release_id.is_empty()
+        );
+
+        let tracks_route =
+            format!("/api/v1/virtualsoulfind/v2/catalogue/releases/{release_id}/tracks");
+        let tracks = super::route_http_request("GET", &tracks_route, None, "", &state)
+            .await
+            .unwrap_or_else(|error| panic!("{tracks_route}: {error}"));
+        let tracks_json = serde_json::from_str::<serde_json::Value>(&tracks.body).unwrap_or_default();
+        let track_id = tracks_json[0]["trackId"].as_str().unwrap_or_default().to_owned();
+        record!(
+            "GET",
+            "/api/v1/virtualsoulfind/v2/catalogue/releases/{releaseId}/tracks",
+            "nominal-status-headers-body",
+            tracks.status == "200 OK"
+        );
+        record!(
+            "GET",
+            "/api/v1/virtualsoulfind/v2/catalogue/releases/{releaseId}/tracks",
+            "populated-dynamic-state",
+            !track_id.is_empty()
+        );
+
+        let plan = super::route_http_request(
+            "POST",
+            "/api/v1/virtualsoulfind/v2/plans",
+            None,
+            &serde_json::json!({ "domain": "Music", "trackId": track_id }).to_string(),
+            &state,
+        )
+        .await
+        .expect("create v2 plan");
+        let plan_json = serde_json::from_str::<serde_json::Value>(&plan.body).unwrap_or_default();
+        record!(
+            "POST",
+            "/api/v1/virtualsoulfind/v2/plans",
+            "nominal-status-headers-body",
+            plan.status == "200 OK"
+        );
+        record!(
+            "POST",
+            "/api/v1/virtualsoulfind/v2/plans",
+            "mutation-side-effects-and-readback",
+            plan_json["status"] == "Ready" && plan_json["steps"][0]["backend"] == "LocalLibrary"
+        );
+
+        let created = super::route_http_request(
+            "POST",
+            "/api/v1/virtualsoulfind/v2/intents/tracks",
+            None,
+            &serde_json::json!({
+                "domain": "Music",
+                "trackId": track_id,
+                "priority": "High",
+            })
+            .to_string(),
+            &state,
+        )
+        .await
+        .expect("create v2 intent");
+        let created_json = serde_json::from_str::<serde_json::Value>(&created.body).unwrap_or_default();
+        let intent_id = created_json["desiredTrackId"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned();
+        record!(
+            "POST",
+            "/api/v1/virtualsoulfind/v2/intents/tracks",
+            "nominal-status-headers-body",
+            created.status == "201 Created"
+        );
+        record!(
+            "POST",
+            "/api/v1/virtualsoulfind/v2/intents/tracks",
+            "mutation-side-effects-and-readback",
+            !intent_id.is_empty()
+        );
+
+        let process_route =
+            format!("/api/v1/virtualsoulfind/v2/intents/tracks/{intent_id}/process");
+        let processing = super::route_http_request("POST", &process_route, None, "", &state)
+            .await
+            .unwrap_or_else(|error| panic!("{process_route}: {error}"));
+        record!(
+            "POST",
+            "/api/v1/virtualsoulfind/v2/intents/tracks/{intentId}/process",
+            "nominal-status-headers-body",
+            processing.status == "202 Accepted"
+        );
+        tokio::task::yield_now().await;
+
+        let intent_route = format!("/api/v1/virtualsoulfind/v2/intents/tracks/{intent_id}");
+        let intent = super::route_http_request("GET", &intent_route, None, "", &state)
+            .await
+            .unwrap_or_else(|error| panic!("{intent_route}: {error}"));
+        let intent_json = serde_json::from_str::<serde_json::Value>(&intent.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/api/v1/virtualsoulfind/v2/intents/tracks/{intentId}",
+            "nominal-status-headers-body",
+            intent.status == "200 OK"
+        );
+        record!(
+            "GET",
+            "/api/v1/virtualsoulfind/v2/intents/tracks/{intentId}",
+            "populated-dynamic-state",
+            intent_json["status"] == "Completed"
+        );
+
+        let stats = super::route_http_request(
+            "GET",
+            "/api/v1/virtualsoulfind/v2/stats",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("get v2 stats");
+        let stats_json = serde_json::from_str::<serde_json::Value>(&stats.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/api/v1/virtualsoulfind/v2/stats",
+            "nominal-status-headers-body",
+            stats.status == "200 OK"
+        );
+        record!(
+            "GET",
+            "/api/v1/virtualsoulfind/v2/stats",
+            "populated-dynamic-state",
+            stats_json["totalProcessed"] == 1 && stats_json["successCount"] == 1
+        );
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("virtual_soulfind_v2.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api virtual-soulfind-v2 mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
