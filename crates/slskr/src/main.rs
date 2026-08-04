@@ -127347,6 +127347,152 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof for `GET /api/v0/application/build`
+    /// (real app version, not the wire-protocol version) and `DELETE
+    /// /api/v0/files/downloads/files/{base64FileName}` (remote file
+    /// management is forbidden by default, a real file removal is
+    /// genuinely performed and readback-confirmed, and a base64-
+    /// decoded path-traversal attempt is rejected) -- independently
+    /// re-derived from `build_info_uses_app_version_not_protocol_
+    /// version`, `slskd_file_delete_routes_are_forbidden_by_default`,
+    /// and `slskd_file_delete_routes_are_scoped_to_storage_roots` with
+    /// fresh fixture data. Confirmed against `/tmp/slskr-parity-
+    /// evidence/controller-api/*.json` before writing, per case: zero
+    /// prior credit on either route. slskdN-only (confirmed against
+    /// the frozen registry).
+    #[tokio::test]
+    async fn controller_api_differential_build_info_and_file_delete() {
+        let target = "slskdn";
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($method:expr, $route:expr, $case:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!("{target} {} {} [{}]", $method, $route, $case));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": $method,
+                    "route": $route,
+                    "case": $case,
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        let (state, _receiver) = test_state();
+        let build = super::route_http_request("GET", "/api/v0/application/build", None, "", &state)
+            .await
+            .expect("build info response");
+        let build_json = serde_json::from_str::<serde_json::Value>(&build.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/api/v0/application/build",
+            "nominal-status-headers-body",
+            build.status == "200 OK"
+                && build_json["current"] == env!("CARGO_PKG_VERSION")
+                && build_json["protocol"]["major"] == serde_json::json!(super::CLIENT_MAJOR_VERSION)
+        );
+
+        let (disabled_state, _receiver) = test_state();
+        let forbidden = super::route_http_request(
+            "DELETE",
+            "/api/v0/files/downloads/files/differential-token",
+            None,
+            "",
+            &disabled_state,
+        )
+        .await
+        .expect("default remote file management policy response");
+        record!(
+            "DELETE",
+            "/api/v0/files/downloads/files/{base64FileName}",
+            "missing-empty-or-conflict-state",
+            forbidden.status == "403 Forbidden"
+        );
+
+        let (enabled_state, _receiver) = test_state_with_env(
+            MapEnv::default().with("SLSKR_REMOTE_FILE_MANAGEMENT", "true"),
+        );
+        let download_file = enabled_state
+            .config
+            .downloads_dir
+            .join("Remote")
+            .join("DifferentialSong.mp3");
+        std::fs::create_dir_all(download_file.parent().unwrap())
+            .expect("create differential download directory");
+        std::fs::write(&download_file, b"differential-song")
+            .expect("write differential download file");
+        let token = base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            "Remote/DifferentialSong.mp3",
+        );
+        let deleted = super::route_http_request(
+            "DELETE",
+            &format!("/api/v0/files/downloads/files/{token}"),
+            None,
+            "",
+            &enabled_state,
+        )
+        .await
+        .expect("real file delete response");
+        let missing_after = super::route_http_request(
+            "DELETE",
+            &format!("/api/v0/files/downloads/files/{token}"),
+            None,
+            "",
+            &enabled_state,
+        )
+        .await
+        .expect("repeat delete response");
+        record!(
+            "DELETE",
+            "/api/v0/files/downloads/files/{base64FileName}",
+            "mutation-side-effects-and-readback",
+            deleted.status == "204 No Content"
+                && !download_file.exists()
+                && missing_after.status == "404 Not Found"
+        );
+
+        let traversal_token = base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            "../differential-secret",
+        );
+        let traversal = super::route_http_request(
+            "DELETE",
+            &format!("/api/v0/files/downloads/files/{traversal_token}"),
+            None,
+            "",
+            &enabled_state,
+        )
+        .await
+        .expect("traversal delete response");
+        record!(
+            "DELETE",
+            "/api/v0/files/downloads/files/{base64FileName}",
+            "malformed-path-query-or-body",
+            traversal.status == "400 Bad Request"
+        );
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("build_info_and_file_delete.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api build-info-and-file-delete mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
