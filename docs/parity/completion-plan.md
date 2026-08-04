@@ -30,7 +30,7 @@ scoring artifact -- confirmed, all report `complete` with
 
 Parity is **not achieved**. Every planned workstream has an executable
 certification denominator. The literal proof-case closure ratio is now
-**9,350 / 19,122 = 48.90%** (was 853 / 19,122 = 4.46% at the start of this
+**9,359 / 19,122 = 48.94%** (was 853 / 19,122 = 4.46% at the start of this
 review cycle), but this is not a product-completion estimate: most
 generated cases are Cartesian proof dimensions initialized as `needs-proof`,
 including behavior already implemented and tested in slskR. Product
@@ -209,7 +209,12 @@ families were nearly entirely open, bringing the workstream to
 wire-protocol version) and the file-delete route (forbidden by
 default, a real file removal with readback confirmation, path-
 traversal rejection) had zero prior credit either, bringing the
-workstream to 616/5,300.
+workstream to 616/5,300. A further sweep extended the runtime-
+failure-and-timeout fault-injection coverage across security-ban,
+collection/share-grant, sharegroup, and shares-rebuild routes (6
+routes' worth of real closed-database rollback proof, plus a real
+held-scan-permit concurrency proof for the shares-rebuild route),
+bringing the workstream to 625/5,300.
 
 The relay-agent/controller subsystem (deferred as a genuinely missing
 capability, see earlier notes) was investigated further this session to
