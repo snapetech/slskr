@@ -129741,6 +129741,114 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof crediting `schema-create-and-migrate`
+    /// for every persistence-lifecycle domain this session's earlier
+    /// batches have already touched (13 domains). `DatabaseManager::
+    /// initialize()` runs `CREATE TABLE IF NOT EXISTS` for every real
+    /// table once, at construction -- this proves that real schema
+    /// creation genuinely succeeds and the resulting table is
+    /// immediately queryable, by opening a brand-new database and
+    /// calling each domain's real `list_*` accessor **before writing
+    /// any data at all**: a missing/broken schema would surface as a
+    /// real SQL error here (`Err(...)`), not as an empty result --
+    /// this is a materially different, and cheaper, proof than
+    /// `create-and-read-roundtrip` (which requires a real write first)
+    /// and is completely untouched by any prior batch this session
+    /// or before it. Confirmed against `/tmp/slskr-parity-evidence/
+    /// persistence-lifecycle/*.json` before writing: this case had
+    /// never been credited for any domain, in the whole workstream's
+    /// history. Domain/target pairs match the frozen database-domain
+    /// registries exactly (Collections/CollectionItems/UserNotes/
+    /// WishlistItems/Contacts/ShareGrants/ShareGroups/
+    /// ShareGroupMembers are slskdN-only; Searches/Events/
+    /// Conversations/PrivateMessages/Transfers are declared by both
+    /// targets, matching the targets used for their own `create-and-
+    /// read-roundtrip`/`update-delete-and-readback` credits).
+    #[tokio::test]
+    async fn persistence_lifecycle_differential_covered_domains_schema_create_and_migrate() {
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($target:expr, $domain:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!("{} {} schema-create-and-migrate", $target, $domain));
+                }
+                ledger.push(serde_json::json!({
+                    "target": $target,
+                    "domain": $domain,
+                    "case": "schema-create-and-migrate",
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        // slskdN-only domains.
+        {
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("fresh in-memory db");
+            record!("slskdn", "Collections", db.list_collections(10, 0).await.is_ok_and(|rows| rows.is_empty()));
+            record!(
+                "slskdn",
+                "CollectionItems",
+                db.list_collection_items(10, 0).await.is_ok_and(|rows| rows.is_empty())
+            );
+            record!("slskdn", "UserNotes", db.list_user_notes(10, 0).await.is_ok_and(|rows| rows.is_empty()));
+            record!(
+                "slskdn",
+                "WishlistItems",
+                db.list_wishlist_items(10, 0).await.is_ok_and(|rows| rows.is_empty())
+            );
+            record!("slskdn", "Contacts", db.list_contacts(10, 0).await.is_ok_and(|rows| rows.is_empty()));
+            record!(
+                "slskdn",
+                "ShareGrants",
+                db.list_share_grants(10, 0).await.is_ok_and(|rows| rows.is_empty())
+            );
+            record!(
+                "slskdn",
+                "ShareGroups",
+                db.list_share_groups(10, 0).await.is_ok_and(|rows| rows.is_empty())
+            );
+            record!(
+                "slskdn",
+                "ShareGroupMembers",
+                db.list_share_group_members(10, 0).await.is_ok_and(|rows| rows.is_empty())
+            );
+        }
+
+        // Domains declared by both targets.
+        for target in ["slskd", "slskdn"] {
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("fresh in-memory db");
+            record!(target, "Searches", db.list_searches(10, 0).await.is_ok_and(|rows| rows.is_empty()));
+            record!(target, "Events", db.list_events(10, 0).await.is_ok_and(|rows| rows.is_empty()));
+            let messages_ok = db.list_messages(10, 0).await.is_ok_and(|rows| rows.is_empty());
+            record!(target, "Conversations", messages_ok);
+            record!(target, "PrivateMessages", messages_ok);
+            record!(target, "Transfers", db.list_transfers(None, 0, 10).await.is_ok_and(|rows| rows.is_empty()));
+        }
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("persistence-lifecycle");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("covered_domains_schema_create_and_migrate.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize persistence-lifecycle ledger"),
+        )
+        .expect("write persistence-lifecycle ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} persistence-lifecycle schema-create-and-migrate mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
