@@ -125836,6 +125836,346 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof for the real slskdN ActivityPub inbox
+    /// route (`POST /actors/{actorName}/inbox`) and the followers
+    /// collection it feeds (`GET /actors/{actorName}/followers`):
+    /// inbound activities require a genuine HTTP Signature
+    /// (`verify_activitypub_inbox_signature`), the followers collection
+    /// reflects the real relationship store
+    /// (`activitypub_apply_relationship`) rather than a fixed shape, and
+    /// re-delivering the same Follow activity id is idempotent (no
+    /// duplicate follower) -- independently re-derived from
+    /// `activitypub_relationship_collections_track_target_lifecycle_
+    /// impl` with fresh actor identities and activity ids. Split from
+    /// the outbox/undo half (`controller_api_differential_activitypub_
+    /// outbox_and_undo`) to keep each test's sequential-await chain
+    /// short enough to avoid overflowing the default test-thread stack
+    /// (this combination of the heavy `ActivityPubSignatureFixture` and
+    /// the ledger/record! machinery overflows at the original ~10-await
+    /// single-function size, confirmed via `RUST_MIN_STACK`). slskdN-only
+    /// (confirmed against the frozen registry).
+    #[tokio::test]
+    async fn controller_api_differential_activitypub_inbox_relationships() {
+        use sha2::Digest;
+        let target = "slskdn";
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($method:expr, $route:expr, $case:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!("{target} {} {} [{}]", $method, $route, $case));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": $method,
+                    "route": $route,
+                    "case": $case,
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        let fixture = ActivityPubSignatureFixture::spawn().await;
+        let (state, _receiver) = fixture.state();
+        let follower_a = fixture.actor_url("differential-follower-a");
+        let sign_inbox_post = |actor_name: &str, activity: &serde_json::Value| {
+            let body = activity.to_string();
+            let digest = format!(
+                "SHA-256={}",
+                base64::engine::general_purpose::STANDARD
+                    .encode(sha2::Sha256::digest(body.as_bytes())),
+            );
+            let created = super::unix_timestamp();
+            let signature_b64 =
+                fixture.sign_request("post", "/actors/music/inbox", &digest, created);
+            let headers = fixture.headers_for(
+                &fixture.key_id(actor_name),
+                &digest,
+                &signature_b64,
+                created,
+            );
+            (body, headers)
+        };
+
+        let unsigned = Box::pin(super::route_http_request_with_headers(
+            "POST",
+            "/actors/music/inbox",
+            None,
+            r#"{"id":"differential-unsigned","type":"Follow","actor":"http://unsigned.example/actors/x","object":"https://social.example/actors/music"}"#,
+            &state,
+            super::RequestSecurityHeaders::default(),
+        ))
+        .await
+        .expect("unsigned inbox request");
+        record!(
+            "POST",
+            "/actors/{actorName}/inbox",
+            "missing-empty-or-conflict-state",
+            unsigned.status == "401 Unauthorized"
+        );
+
+        let follow_activity = serde_json::json!({
+            "id": "differential-follow-a",
+            "type": "Follow",
+            "actor": follower_a,
+            "object": "https://social.example/actors/music",
+        });
+        let (body, headers) = sign_inbox_post("differential-follower-a", &follow_activity);
+        let followed = Box::pin(super::route_http_request_with_headers(
+            "POST", "/actors/music/inbox", None, &body, &state, headers,
+        ))
+        .await
+        .expect("signed follow");
+        record!(
+            "POST",
+            "/actors/{actorName}/inbox",
+            "nominal-status-headers-body",
+            followed.status == "202 Accepted"
+        );
+
+        let (malformed_body, malformed_headers) = sign_inbox_post(
+            "differential-follower-a",
+            &serde_json::json!({"id": "differential-no-type", "actor": follower_a}),
+        );
+        let malformed = Box::pin(super::route_http_request_with_headers(
+            "POST",
+            "/actors/music/inbox",
+            None,
+            &malformed_body,
+            &state,
+            malformed_headers,
+        ))
+        .await
+        .expect("signed activity missing type");
+        record!(
+            "POST",
+            "/actors/{actorName}/inbox",
+            "malformed-path-query-or-body",
+            malformed.status == "400 Bad Request"
+                && malformed.body == "{\"error\":\"activity type is required\"}"
+        );
+
+        let followers = super::route_http_request("GET", "/actors/music/followers", None, "", &state)
+            .await
+            .expect("followers after follow");
+        let followers_json =
+            serde_json::from_str::<serde_json::Value>(&followers.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/actors/{actorName}/followers",
+            "populated-dynamic-state",
+            followers_json["totalItems"] == 1 && followers_json["orderedItems"][0] == follower_a
+        );
+        record!(
+            "POST",
+            "/actors/{actorName}/inbox",
+            "mutation-side-effects-and-readback",
+            followers_json["totalItems"] == 1
+        );
+
+        // Re-deliver the identical Follow activity id: a real relationship
+        // store deduplicates by target, not by blindly appending every
+        // received activity.
+        let (repeat_body, repeat_headers) =
+            sign_inbox_post("differential-follower-a", &follow_activity);
+        let repeated = Box::pin(super::route_http_request_with_headers(
+            "POST", "/actors/music/inbox", None, &repeat_body, &state, repeat_headers,
+        ))
+        .await
+        .expect("repeated follow");
+        let followers_after_repeat =
+            super::route_http_request("GET", "/actors/music/followers", None, "", &state)
+                .await
+                .expect("followers after repeat");
+        let followers_after_repeat_json =
+            serde_json::from_str::<serde_json::Value>(&followers_after_repeat.body)
+                .unwrap_or_default();
+        record!(
+            "POST",
+            "/actors/{actorName}/inbox",
+            "concurrency-and-idempotency",
+            repeated.status == "202 Accepted" && followers_after_repeat_json["totalItems"] == 1
+        );
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("activitypub_inbox_relationships.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api activitypub-inbox-relationships mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
+    /// Bulk differential proof for the real slskdN ActivityPub outbox
+    /// route (`POST /actors/{actorName}/outbox`), the following
+    /// collection it feeds (`GET /actors/{actorName}/following`), and a
+    /// real inbound Undo removing an existing follower -- independently
+    /// re-derived from `activitypub_relationship_collections_track_
+    /// target_lifecycle_impl` with fresh actor identities and activity
+    /// ids. Split from the inbox half
+    /// (`controller_api_differential_activitypub_inbox_relationships`)
+    /// for the same stack-size reason documented there. slskdN-only
+    /// (confirmed against the frozen registry).
+    #[tokio::test]
+    async fn controller_api_differential_activitypub_outbox_and_undo() {
+        use sha2::Digest;
+        let target = "slskdn";
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($method:expr, $route:expr, $case:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!("{target} {} {} [{}]", $method, $route, $case));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": $method,
+                    "route": $route,
+                    "case": $case,
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        let fixture = ActivityPubSignatureFixture::spawn().await;
+        let (state, _receiver) = fixture.state();
+        let follower_a = fixture.actor_url("differential-undo-follower");
+        let target_b = fixture.actor_url("differential-target-b");
+        let sign_inbox_post = |actor_name: &str, activity: &serde_json::Value| {
+            let body = activity.to_string();
+            let digest = format!(
+                "SHA-256={}",
+                base64::engine::general_purpose::STANDARD
+                    .encode(sha2::Sha256::digest(body.as_bytes())),
+            );
+            let created = super::unix_timestamp();
+            let signature_b64 =
+                fixture.sign_request("post", "/actors/music/inbox", &digest, created);
+            let headers = fixture.headers_for(
+                &fixture.key_id(actor_name),
+                &digest,
+                &signature_b64,
+                created,
+            );
+            (body, headers)
+        };
+
+        let (setup_body, setup_headers) = sign_inbox_post(
+            "differential-undo-follower",
+            &serde_json::json!({
+                "id": "differential-undo-setup-follow",
+                "type": "Follow",
+                "actor": follower_a,
+                "object": "https://social.example/actors/music",
+            }),
+        );
+        let setup = Box::pin(super::route_http_request_with_headers(
+            "POST", "/actors/music/inbox", None, &setup_body, &state, setup_headers,
+        ))
+        .await
+        .expect("setup follow before undo");
+        assert_eq!(setup.status, "202 Accepted", "{}", setup.body);
+
+        let outbound = super::route_http_request(
+            "POST",
+            "/actors/music/outbox",
+            None,
+            &serde_json::json!({
+                "id": "differential-follow-b-outbound",
+                "type": "Follow",
+                "object": target_b,
+            })
+            .to_string(),
+            &state,
+        )
+        .await
+        .expect("outbound follow");
+        record!(
+            "POST",
+            "/actors/{actorName}/outbox",
+            "nominal-status-headers-body",
+            outbound.status == "200 OK"
+        );
+
+        let following = super::route_http_request("GET", "/actors/music/following", None, "", &state)
+            .await
+            .expect("following after outbound follow");
+        let following_json =
+            serde_json::from_str::<serde_json::Value>(&following.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/actors/{actorName}/following",
+            "populated-dynamic-state",
+            following_json["totalItems"] == 1 && following_json["orderedItems"][0] == target_b
+        );
+        record!(
+            "POST",
+            "/actors/{actorName}/outbox",
+            "mutation-side-effects-and-readback",
+            following_json["totalItems"] == 1
+        );
+
+        let (undo_body, undo_headers) = sign_inbox_post(
+            "differential-undo-follower",
+            &serde_json::json!({
+                "id": "differential-undo-a",
+                "type": "Undo",
+                "actor": follower_a,
+                "object": {"type": "Follow", "actor": follower_a},
+            }),
+        );
+        let undo = Box::pin(super::route_http_request_with_headers(
+            "POST", "/actors/music/inbox", None, &undo_body, &state, undo_headers,
+        ))
+        .await
+        .expect("signed undo");
+        assert_eq!(undo.status, "202 Accepted", "{}", undo.body);
+        let followers_after_undo =
+            super::route_http_request("GET", "/actors/music/followers", None, "", &state)
+                .await
+                .expect("followers after undo");
+        let followers_after_undo_json =
+            serde_json::from_str::<serde_json::Value>(&followers_after_undo.body)
+                .unwrap_or_default();
+        record!(
+            "GET",
+            "/actors/{actorName}/followers",
+            "missing-empty-or-conflict-state",
+            followers_after_undo_json["totalItems"] == 0
+                && followers_after_undo_json["orderedItems"]
+                    .as_array()
+                    .is_some_and(Vec::is_empty)
+        );
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("activitypub_outbox_and_undo.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api activitypub-outbox-and-undo mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
