@@ -30,7 +30,7 @@ scoring artifact -- confirmed, all report `complete` with
 
 Parity is **not achieved**. Every planned workstream has an executable
 certification denominator. The literal proof-case closure ratio is now
-**9,307 / 19,122 = 48.67%** (was 853 / 19,122 = 4.46% at the start of this
+**9,317 / 19,122 = 48.72%** (was 853 / 19,122 = 4.46% at the start of this
 review cycle), but this is not a product-completion estimate: most
 generated cases are Cartesian proof dimensions initialized as `needs-proof`,
 including behavior already implemented and tested in slskR. Product
@@ -153,7 +153,15 @@ it, found and fixed a recurrence of the `populated-dynamic-state`
 mislabeling bug in 9 already-committed `mediacore` fuzzy-match/
 perceptual-hash cases (a 3-argument `record!` macro variant that
 hardcodes `"method": "POST"` in the ledger, invisible to the earlier
-targeted fix), bringing the workstream to 573/5,300.
+targeted fix), bringing the workstream to 573/5,300. A follow-on batch
+credited the real ActivityPub actor inbox/outbox/followers/following
+routes (genuine HTTP Signature enforcement, a real relationship store
+behind the followers/following collections, idempotent re-delivery,
+and a real Undo), split into two smaller tests after the combination
+of the heavy signature-fixture and the ledger-macro pattern overflowed
+the default test-thread stack -- `Box::pin`-wrapping the direct
+`route_http_request_with_headers` calls (mirroring the existing
+production idiom) fixed it -- bringing the workstream to 583/5,300.
 
 The relay-agent/controller subsystem (deferred as a genuinely missing
 capability, see earlier notes) was investigated further this session to
