@@ -127076,6 +127076,95 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof for the real slskdN transfer-cancel
+    /// route (`DELETE /api/v0/transfers/downloads/{username}/{id}`):
+    /// cancelling a nonexistent download is a real 404, and cancelling
+    /// a real queued download returns the frozen `204 No Content`
+    /// contract -- independently re-derived from `transfer_
+    /// cancellation_returns_frozen_statuses` with fresh fixture data.
+    /// Confirmed against `/tmp/slskr-parity-evidence/controller-api/
+    /// *.json` before writing: this route had zero prior case credited
+    /// (checked every case, not just route presence). slskdN-only
+    /// (confirmed against the frozen registry).
+    #[tokio::test]
+    async fn controller_api_differential_transfer_download_cancel() {
+        let target = "slskdn";
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($case:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!(
+                        "{target} DELETE /api/v0/transfers/downloads/{{username}}/{{id}} [{}]",
+                        $case
+                    ));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": "DELETE",
+                    "route": "/api/v0/transfers/downloads/{username}/{id}",
+                    "case": $case,
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        let (state, _receiver) = test_state();
+
+        let missing = super::route_http_request(
+            "DELETE",
+            "/api/v0/transfers/downloads/differential-peer/999",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("missing transfer cancel response");
+        record!(
+            "missing-empty-or-conflict-state",
+            missing.status == "404 Not Found"
+        );
+
+        let entry = state.transfers.write().await.create(
+            0,
+            Some("differential-peer".to_owned()),
+            "differential-cancel.flac".to_owned(),
+            None,
+            Some(1),
+        );
+        let cancelled = super::route_http_request(
+            "DELETE",
+            &format!("/api/v0/transfers/downloads/differential-peer/{}", entry.id),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("real transfer cancel response");
+        record!(
+            "mutation-side-effects-and-readback",
+            cancelled.status == "204 No Content"
+        );
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("transfer_download_cancel.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api transfer-download-cancel mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
