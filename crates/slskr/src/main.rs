@@ -124428,6 +124428,215 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof crediting 2 user-group routes' cases,
+    /// independently re-derived from `slskdn_user_group_projects_
+    /// transfer_group_memberships_and_live_user_classification`'s real
+    /// blacklist-before-privileged precedence (a blacklisted user stays
+    /// blacklisted even if the Soulseek server also reports them as
+    /// privileged), leecher/privileged live classification, and
+    /// batch-size bound checks. slskdN-only (confirmed against the
+    /// frozen registry; the source test's own final check -- that these
+    /// routes 404 on the slskd target -- independently confirms they are
+    /// genuinely absent from slskd's registry, matching the frozen
+    /// registry check).
+    #[tokio::test]
+    async fn controller_api_differential_user_group() {
+        let target = "slskdn";
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($method:expr, $route:expr, $case:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!("{target} {} {} [{}]", $method, $route, $case));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": $method,
+                    "route": $route,
+                    "case": $case,
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        let (state, _receiver) = test_state_with_env(
+            MapEnv::default()
+                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn")
+                .with(
+                    "SLSKR_FROZEN_TRANSFER_GROUPS_JSON",
+                    r#"{"leechers":{"thresholds":{"files":2,"directories":2}},"blacklisted":{"members":["differential-blocked"]},"user_defined":{"trusted":{"upload":{"priority":10},"members":["differential-friend"]}}}"#,
+                ),
+        );
+
+        let group = super::route_http_request(
+            "GET",
+            "/api/v0/users/differential-friend/group",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("user group");
+        record!(
+            "GET",
+            "/api/v0/users/{username}/group",
+            "nominal-status-headers-body",
+            group.status == "200 OK"
+                && serde_json::from_str::<String>(&group.body).unwrap_or_default() == "trusted"
+        );
+
+        let unknown = super::route_http_request(
+            "GET",
+            "/api/v0/users/differential-stranger/group",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("unknown user group");
+        record!(
+            "GET",
+            "/api/v0/users/{username}/group",
+            "missing-empty-or-conflict-state",
+            serde_json::from_str::<String>(&unknown.body).unwrap_or_default() == "default"
+        );
+
+        let groups = super::route_http_request(
+            "GET",
+            "/api/v0/users/groups?UserNames=%20differential-friend%20&usernames=DIFFERENTIAL-FRIEND&usernames=differential-stranger&usernames=",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("user group batch");
+        let groups_json = serde_json::from_str::<serde_json::Value>(&groups.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/api/v0/users/groups",
+            "nominal-status-headers-body",
+            groups.status == "200 OK"
+        );
+        record!(
+            "GET",
+            "/api/v0/users/groups",
+            "populated-dynamic-state",
+            groups_json.as_object().map(|object| object.len()) == Some(2)
+                && groups_json["differential-friend"] == "trusted"
+                && groups_json["differential-stranger"] == "default"
+        );
+
+        let blocked = super::route_http_request(
+            "GET",
+            "/api/v0/users/differential-blocked/group",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("blacklisted user group");
+        record!(
+            "GET",
+            "/api/v0/users/{username}/group",
+            "populated-dynamic-state",
+            serde_json::from_str::<String>(&blocked.body).unwrap_or_default() == "blacklisted"
+        );
+
+        {
+            let mut users = state.users.write().await;
+            users.apply_stats(
+                "differential-leecher".to_owned(),
+                &super::UserStats {
+                    average_speed: 1,
+                    upload_count: 0,
+                    unknown: 0,
+                    file_count: 1,
+                    directory_count: 10,
+                },
+            );
+            users.apply_status(&super::UserStatus {
+                username: "differential-supporter".to_owned(),
+                status: 2,
+                privileged: true,
+            });
+            users.apply_status(&super::UserStatus {
+                username: "differential-blocked".to_owned(),
+                status: 2,
+                privileged: true,
+            });
+        }
+        let blocked_but_privileged = super::route_http_request(
+            "GET",
+            "/api/v0/users/differential-blocked/group",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("blacklisted-over-privileged precedence");
+        let leecher = super::route_http_request(
+            "GET",
+            "/api/v0/users/differential-leecher/group",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("leecher classification");
+        let privileged = super::route_http_request(
+            "GET",
+            "/api/v0/users/differential-supporter/group",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("privileged classification");
+        record!(
+            "GET",
+            "/api/v0/users/{username}/group",
+            "mutation-side-effects-and-readback",
+            serde_json::from_str::<String>(&blocked_but_privileged.body).unwrap_or_default()
+                == "blacklisted"
+                && serde_json::from_str::<String>(&leecher.body).unwrap_or_default() == "leechers"
+                && serde_json::from_str::<String>(&privileged.body).unwrap_or_default()
+                    == "privileged"
+        );
+
+        let too_many = (0..=super::MAX_USER_GROUP_BATCH)
+            .map(|index| format!("usernames=differential-user-{index}"))
+            .collect::<Vec<_>>()
+            .join("&");
+        let rejected_route = format!("/api/v0/users/groups?{too_many}");
+        let rejected = super::route_http_request("GET", &rejected_route, None, "", &state)
+            .await
+            .unwrap_or_else(|error| panic!("{rejected_route}: {error}"));
+        record!(
+            "GET",
+            "/api/v0/users/groups",
+            "malformed-path-query-or-body",
+            rejected.status == "400 Bad Request"
+        );
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("user_group.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api user-group mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
