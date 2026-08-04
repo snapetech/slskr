@@ -128039,6 +128039,214 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof crediting `POST /api/v0/integrations/
+    /// spotify/authorize`'s real OAuth-state persistence-failure
+    /// rollback (independently re-derived from `spotify_oauth_state_
+    /// is_not_issued_when_persistence_fails`: a real closed database
+    /// makes state-issuance genuinely fail, and the pre-existing
+    /// (unrelated, expired) OAuth state record is left byte-for-byte
+    /// unchanged), `POST /api/v0/pods`'s real caller-identity
+    /// enforcement (independently re-derived from `pod_creation_
+    /// never_trusts_a_caller_supplied_peer_identity`: without a real
+    /// local Soulseek identity configured, pod creation is genuinely
+    /// forbidden rather than trusting a client-supplied
+    /// `requestingPeerId`), `GET /api/v0/mesh/hello`'s real baseline
+    /// handshake shape (independently re-derived from `mesh_hello_
+    /// matches_frozen_message_dto`: zeroed sequence/hash counters and
+    /// no publication key/signature on a fresh, unpublished mesh
+    /// state), and `GET /api/v0/listening-party`'s real directory
+    /// listing (independently re-derived from `listening_party_
+    /// directory_ticket_streams_local_audio_ranges`'s directory-
+    /// listing half only, skipping its raw-TCP radio-stream half:
+    /// the directory entry's `streamPath` genuinely encodes the real
+    /// content id of a seeded listening-party fixture). Confirmed
+    /// against `/tmp/slskr-parity-evidence/controller-api/*.json`
+    /// before writing, per case: all 4 were open. slskdN-only
+    /// (confirmed against the frozen registry).
+    #[tokio::test]
+    async fn controller_api_differential_spotify_pods_mesh_and_party() {
+        let target = "slskdn";
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($method:expr, $route:expr, $case:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!("{target} {} {} [{}]", $method, $route, $case));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": $method,
+                    "route": $route,
+                    "case": $case,
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        {
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, _receiver) = test_state_with_env_parts(
+                MapEnv::default()
+                    .with("SLSKR_PERSISTENCE_ENABLED", "true")
+                    .with("SLSKR_SPOTIFY_ENABLED", "true")
+                    .with("SLSKR_SPOTIFY_CLIENT_ID", "differential-client-id"),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+            state.oauth_states.write().await.records.insert(
+                "differential-expired".to_owned(),
+                super::OAuthStateRecord {
+                    provider: "spotify".to_owned(),
+                    redirect_uri: "http://localhost/differential-callback".to_owned(),
+                    code_verifier: None,
+                    created_at: 0,
+                    expires_at: 0,
+                },
+            );
+            let previous = state.oauth_states.read().await.clone();
+            db.close_for_test().await;
+            let response = super::route_http_request(
+                "POST",
+                "/api/v0/integrations/spotify/authorize",
+                None,
+                "",
+                &state,
+            )
+            .await
+            .expect("failed oauth state persistence response");
+            record!(
+                "POST",
+                "/api/v0/integrations/spotify/authorize",
+                "runtime-failure-and-timeout",
+                response.status == "503 Service Unavailable"
+                    && *state.oauth_states.read().await == previous
+            );
+        }
+
+        {
+            let (state, _receiver) = test_state_with_env(
+                MapEnv::default()
+                    .with("SLSK_USERNAME", "")
+                    .with("SLSK_PASSWORD", "")
+                    .with("SLSKR_AUTH_DISABLED", "false")
+                    .with("SLSKR_API_TOKEN", "differential-token"),
+            );
+            let response = super::route_http_request(
+                "POST",
+                "/api/v0/pods",
+                Some("Bearer differential-token"),
+                r#"{"pod":{"podId":"pod:differential-spoofed","name":"Spoofed"},"requestingPeerId":"differential-caller-controlled"}"#,
+                &state,
+            )
+            .await
+            .expect("pod create without local identity response");
+            record!(
+                "POST",
+                "/api/v0/pods",
+                "missing-empty-or-conflict-state",
+                response.status == "403 Forbidden"
+            );
+        }
+
+        {
+            let (state, _receiver) = test_state_with_env(
+                MapEnv::default().with("SLSKD_SLSK_USERNAME", "differential-mesh-user"),
+            );
+            let hello = super::route_http_request("GET", "/api/v0/mesh/hello", None, "", &state)
+                .await
+                .expect("mesh hello response");
+            let hello_json = serde_json::from_str::<serde_json::Value>(&hello.body).unwrap_or_default();
+            record!(
+                "GET",
+                "/api/v0/mesh/hello",
+                "nominal-status-headers-body",
+                hello.status == "200 OK"
+                    && hello_json["type"] == 1
+                    && hello_json["latest_seq_id"] == 0
+                    && hello_json["hash_count"] == 0
+                    && hello_json.get("peerId").is_none()
+            );
+        }
+
+        {
+            let root = std::env::temp_dir().join(format!(
+                "slskr-listening-party-differential-{}-{}",
+                std::process::id(),
+                uuid::Uuid::new_v4().simple()
+            ));
+            std::fs::create_dir_all(&root).expect("create differential listening-party share root");
+            std::fs::write(root.join("differential-party.flac"), b"differential-party-audio-bytes")
+                .expect("write differential listening-party fixture");
+            let (state, _receiver) = test_state_with_env(
+                MapEnv::default()
+                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn")
+                    .with("SLSKR_SHARE_FIXTURE", "")
+                    .with("SLSKR_SHARE_DIRS", &root.display().to_string()),
+            );
+            let content_id = {
+                let shares = state.shares.read().await;
+                let entry = shares.entries.first().expect("differential share fixture entry");
+                super::stable_content_hash(&entry.filename, entry.size).to_string()
+            };
+            state
+                .controller_features
+                .write()
+                .await
+                .upsert(
+                    "listening-party/pod:differential-stream-audit/general".to_owned(),
+                    serde_json::json!({
+                        "partyId": "party:differential-stream-audit",
+                        "podId": "pod:differential-stream-audit",
+                        "channelId": "general",
+                        "hostPeerId": "differential-tester",
+                        "action": "play",
+                        "contentId": content_id,
+                        "title": "Differential Party Track",
+                        "artist": "Differential Party Artist",
+                        "serverTimeUnixMs": super::unix_timestamp_millis(),
+                        "listed": true,
+                        "allowMeshStreaming": true,
+                    }),
+                )
+                .expect("persist differential listening-party fixture");
+            let directory =
+                super::route_http_request("GET", "/api/v0/listening-party", None, "", &state)
+                    .await
+                    .expect("list differential listening-party directory");
+            let directory_json =
+                serde_json::from_str::<serde_json::Value>(&directory.body).unwrap_or_default();
+            let stream_path = directory_json[0]["streamPath"].as_str().unwrap_or_default();
+            record!(
+                "GET",
+                "/api/v0/listening-party",
+                "populated-dynamic-state",
+                directory.status == "200 OK"
+                    && stream_path.contains(&super::url_encode(&content_id))
+            );
+            let _ = std::fs::remove_dir_all(root);
+        }
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("spotify_pods_mesh_and_party.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api spotify-pods-mesh-and-party mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
