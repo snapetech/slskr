@@ -129517,6 +129517,230 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof crediting `update-delete-and-readback`
+    /// for the `Searches` and `Conversations`/`PrivateMessages`
+    /// domains, independently re-derived from `persistence_lifecycle_
+    /// differential_search_event_transfer_message_domains_roundtrip_
+    /// and_rehydrate`'s create/rehydrate fixtures with fresh data,
+    /// driving a real PUT then DELETE through the same dispatcher and
+    /// reading persisted rows back from a real `DatabaseManager`:
+    ///
+    /// - Searches: `PUT /api/searches/{id}` genuinely updates the
+    ///   stored query text (verified via `db.list_searches`), and
+    ///   `DELETE /api/searches/{id}` genuinely removes the row.
+    /// - Conversations/PrivateMessages: `PUT /api/conversations/
+    ///   {username}` genuinely marks the message read/acknowledged
+    ///   (verified via `db.list_messages`), and `DELETE /api/
+    ///   conversations/{username}` genuinely removes that user's
+    ///   history while leaving an unrelated user's messages intact.
+    ///
+    /// `Events` and `Transfers` are deliberately NOT attempted here:
+    /// investigated first and found to have no real update/delete
+    /// HTTP path to prove against. Events are the oracle's own
+    /// append-only audit log (no per-event update/delete route
+    /// exists in either frozen registry). Transfers has a real
+    /// `DELETE /api/v0/transfers/downloads/{username}/{id}` (already
+    /// credited under controller-api) but no real per-item HTTP
+    /// update route reachable without the live download pipeline --
+    /// forcing a "real" update proof there would mean bypassing HTTP
+    /// dispatch entirely, which isn't faithful to this session's
+    /// established discipline. Confirmed against `/tmp/slskr-parity-
+    /// evidence/persistence-lifecycle/*.json` before writing: this
+    /// case was open for both domains, both targets. slskd AND
+    /// slskdn (confirmed against both frozen database-domain
+    /// registries).
+    #[tokio::test]
+    async fn persistence_lifecycle_differential_search_and_message_domains_update_delete_and_readback(
+    ) {
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        // Searches: both targets declare this domain.
+        for target in ["slskd", "slskdn"] {
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, mut receiver) = test_state_with_env_parts(
+                MapEnv::default()
+                    .with("SLSKR_PERSISTENCE_ENABLED", "true")
+                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+            let created = super::route_http_request(
+                "POST",
+                "/api/v0/searches",
+                None,
+                "{\"query\":\"differential original\",\"target\":\"global\"}",
+                &state,
+            )
+            .await
+            .expect("create differential search");
+            assert_eq!(created.status, "200 OK", "{target} differential search create");
+            let _ = receiver.try_recv();
+            // The creation response's `searchId` is a dash-stripped
+            // display id that does NOT round-trip through `SearchStore`'s
+            // own `get_by_identifier`/`update_by_identifier` lookup
+            // (which matches on the real, dashed `record.id` or the
+            // numeric `record.token`) -- read the real persisted id
+            // back from the store directly rather than relying on that
+            // response field.
+            let search_id = state
+                .searches
+                .read()
+                .await
+                .records
+                .first()
+                .map(|record| record.id.clone())
+                .expect("differential search id");
+
+            let updated = super::route_http_request(
+                "PUT",
+                &format!("/api/searches/{search_id}"),
+                None,
+                r#"{"query":"differential updated"}"#,
+                &state,
+            )
+            .await
+            .expect("update differential search");
+            let persisted_after_update = db.list_searches(10, 0).await.unwrap_or_default();
+            let update_pass = updated.status == "200 OK"
+                && persisted_after_update.len() == 1
+                && persisted_after_update[0].query == "differential updated";
+            if !update_pass {
+                mismatches.push(format!("{target} Searches update-delete-and-readback (update)"));
+            }
+
+            let deleted = super::route_http_request(
+                "DELETE",
+                &format!("/api/searches/{search_id}"),
+                None,
+                "",
+                &state,
+            )
+            .await
+            .expect("delete differential search");
+            let persisted_after_delete = db.list_searches(10, 0).await.unwrap_or_default();
+            let delete_pass = deleted.status == "200 OK" && persisted_after_delete.is_empty();
+            if !delete_pass {
+                mismatches.push(format!("{target} Searches update-delete-and-readback (delete)"));
+            }
+
+            ledger.push(serde_json::json!({
+                "target": target,
+                "domain": "Searches",
+                "case": "update-delete-and-readback",
+                "pass": update_pass && delete_pass,
+            }));
+        }
+
+        // Conversations / PrivateMessages.
+        for target in ["slskd", "slskdn"] {
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, _receiver) = test_state_with_env_parts(
+                MapEnv::default()
+                    .with("SLSKR_PERSISTENCE_ENABLED", "true")
+                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+            super::route_http_request(
+                "POST",
+                "/api/messages/inbound",
+                None,
+                r#"{"username":"differential-friend","body":"differential inbound"}"#,
+                &state,
+            )
+            .await
+            .expect("create differential inbound message");
+            super::route_http_request(
+                "POST",
+                "/api/messages/inbound",
+                None,
+                r#"{"username":"differential-other","body":"differential retained"}"#,
+                &state,
+            )
+            .await
+            .expect("create differential unrelated message");
+
+            let acked = super::route_http_request(
+                "PUT",
+                "/api/conversations/differential-friend",
+                None,
+                "",
+                &state,
+            )
+            .await
+            .expect("ack differential conversation");
+            let persisted_after_ack = db.list_messages(10, 0).await.unwrap_or_default();
+            let update_pass = acked.status == "200 OK"
+                && persisted_after_ack
+                    .iter()
+                    .find(|message| message.username == "differential-friend")
+                    .is_some_and(|message| message.read);
+            let mut case_mismatches = Vec::new();
+            if !update_pass {
+                case_mismatches.push("update");
+            }
+
+            let deleted = super::route_http_request(
+                "DELETE",
+                "/api/conversations/differential-friend",
+                None,
+                "",
+                &state,
+            )
+            .await
+            .expect("delete differential conversation");
+            let persisted_after_delete = db.list_messages(10, 0).await.unwrap_or_default();
+            let delete_pass = deleted.status == "200 OK"
+                && persisted_after_delete
+                    .iter()
+                    .all(|message| message.username != "differential-friend")
+                && persisted_after_delete
+                    .iter()
+                    .any(|message| message.username == "differential-other");
+            if !delete_pass {
+                case_mismatches.push("delete");
+            }
+            if !case_mismatches.is_empty() {
+                mismatches.push(format!(
+                    "{target} Conversations update-delete-and-readback ({})",
+                    case_mismatches.join(", ")
+                ));
+            }
+
+            let pass = update_pass && delete_pass;
+            for domain in ["Conversations", "PrivateMessages"] {
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "domain": domain,
+                    "case": "update-delete-and-readback",
+                    "pass": pass,
+                }));
+            }
+        }
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("persistence-lifecycle");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("search_and_message_domains_update_delete_and_readback.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize persistence-lifecycle ledger"),
+        )
+        .expect("write persistence-lifecycle ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} persistence-lifecycle search-and-message update-delete-and-readback mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
