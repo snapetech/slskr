@@ -128470,6 +128470,168 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof crediting `GET /api/v0/telemetry`'s
+    /// real internal-path/error-detail redaction (independently
+    /// re-derived from `telemetry_api_returns_runtime_health_without_
+    /// secrets`: real share-cache and transfer-state error conditions
+    /// are seeded, and the response surfaces meaningful health data
+    /// while genuinely stripping `/private` paths and raw error
+    /// details), `GET /api/v0/files/downloads/directories`'s real
+    /// unknown-query-parameter tolerance and real recursive-listing
+    /// truncation budget (independently re-derived from `slskd_
+    /// storage_directory_routes_ignore_unknown_pagination_parameters`
+    /// and `slskd_recursive_storage_listing_has_lower_budget`: unknown
+    /// `limit`/`offset` params are genuinely ignored rather than
+    /// applied, and a 300-file recursive listing is genuinely
+    /// truncated to the real `SLSKD_STORAGE_RECURSIVE_LIST_DEFAULT_
+    /// ENTRIES` budget), and `GET /api/v0/server`'s real disconnected-
+    /// state shape for the slskdN target specifically (independently
+    /// re-derived from `disconnected_server_endpoint_shape_matches_
+    /// each_frozen_target`'s slskdn half: a disconnected server
+    /// genuinely reports the real slskdN sentinel values
+    /// `address: ""` and `ipEndPoint: "255.255.255.255:0"`, not the
+    /// slskd target's omitted-field contract, which would be a
+    /// contract-mismatch bug if credited under the slskdN target).
+    /// Confirmed against `/tmp/slskr-parity-evidence/controller-api/
+    /// *.json` before writing, per case: all 4 were open. slskdN-only
+    /// (confirmed against the frozen registry).
+    #[tokio::test]
+    async fn controller_api_differential_telemetry_storage_and_server() {
+        let target = "slskdn";
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($method:expr, $route:expr, $case:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!("{target} {} {} [{}]", $method, $route, $case));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": $method,
+                    "route": $route,
+                    "case": $case,
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        {
+            let (state, _receiver) = test_state();
+            state.shares.write().await.cache_error =
+                Some("share cache write failed: /private/differential-share-index.tsv denied".to_owned());
+            {
+                let mut transfers = state.transfers.write().await;
+                transfers.state_error =
+                    Some("transfer state parse failed at /private/differential-transfer-state.json".to_owned());
+                transfers.events_error =
+                    Some("transfer event open failed at /private/differential-transfer-events.tsv".to_owned());
+            }
+            let response = super::route_http_request("GET", "/api/v0/telemetry", None, "", &state)
+                .await
+                .expect("telemetry response");
+            record!(
+                "GET",
+                "/api/v0/telemetry",
+                "populated-dynamic-state",
+                response.status == "200 OK"
+                    && response.body.contains("\"connected\":false")
+                    && !response.body.contains("/private")
+                    && !response.body.contains("denied")
+            );
+        }
+
+        {
+            let (state, _receiver) = test_state();
+            let root = state.config.downloads_dir.clone();
+            std::fs::create_dir_all(&root).expect("create differential downloads root");
+            std::fs::write(root.join("differential-a.txt"), b"a").expect("write differential file a");
+            std::fs::write(root.join("differential-b.txt"), b"b").expect("write differential file b");
+            let response = super::route_http_request(
+                "GET",
+                "/api/v0/files/downloads/directories?limit=1&offset=1",
+                None,
+                "",
+                &state,
+            )
+            .await
+            .expect("storage listing with ignored query parameters response");
+            let json = serde_json::from_str::<serde_json::Value>(&response.body).unwrap_or_default();
+            record!(
+                "GET",
+                "/api/v0/files/downloads/directories",
+                "nominal-status-headers-body",
+                response.status == "200 OK"
+                    && json.get("limit").is_none()
+                    && json["files"].as_array().is_some_and(|files| files.len() == 2)
+            );
+        }
+
+        {
+            let (state, _receiver) = test_state();
+            let root = state.config.downloads_dir.clone();
+            std::fs::create_dir_all(&root).expect("create differential recursive downloads root");
+            for index in 0..300 {
+                std::fs::write(root.join(format!("differential-{index:03}.txt")), b"x")
+                    .expect("write differential recursive file");
+            }
+            let response = super::route_http_request(
+                "GET",
+                "/api/v0/files/downloads/directories?recursive=true",
+                None,
+                "",
+                &state,
+            )
+            .await
+            .expect("recursive storage listing response");
+            let json = serde_json::from_str::<serde_json::Value>(&response.body).unwrap_or_default();
+            record!(
+                "GET",
+                "/api/v0/files/downloads/directories",
+                "populated-dynamic-state",
+                response.status == "200 OK"
+                    && json["files"].as_array().is_some_and(|files| {
+                        files.len() == super::SLSKD_STORAGE_RECURSIVE_LIST_DEFAULT_ENTRIES
+                    })
+            );
+        }
+
+        {
+            let (state, _receiver) = test_state_with_env(
+                MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+            );
+            let response = super::route_http_request("GET", "/api/v0/server", None, "", &state)
+                .await
+                .expect("disconnected server response");
+            let json = serde_json::from_str::<serde_json::Value>(&response.body).unwrap_or_default();
+            record!(
+                "GET",
+                "/api/v0/server",
+                "missing-empty-or-conflict-state",
+                response.status == "200 OK"
+                    && json["address"] == ""
+                    && json["ipEndPoint"] == "255.255.255.255:0"
+            );
+        }
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("telemetry_storage_and_server.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api telemetry-storage-and-server mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
