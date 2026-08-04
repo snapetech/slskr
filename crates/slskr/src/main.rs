@@ -116365,7 +116365,7 @@ mod tests {
         record!(
             "POST",
             "/api/v0/podcore/routing/route-to-peers",
-            "populated-dynamic-state",
+            "mutation-side-effects-and-readback",
             direct_json["success"] == false
                 && direct_json["targetPeerCount"] == 1
                 && direct_json["successfullyRoutedCount"] == 0
@@ -116525,7 +116525,7 @@ mod tests {
             record!(
                 "POST",
                 route,
-                "populated-dynamic-state",
+                "mutation-side-effects-and-readback",
                 fields.iter().all(|key| value.get(*key).is_some())
                     && value["podId"] == pod_id
             );
@@ -116561,7 +116561,7 @@ mod tests {
             record!(
                 "POST",
                 route,
-                "populated-dynamic-state",
+                "mutation-side-effects-and-readback",
                 fields.iter().all(|key| value.get(*key).is_some())
             );
         }
@@ -116586,7 +116586,7 @@ mod tests {
         record!(
             "POST",
             "/api/v0/podcore/discovery/refresh",
-            "populated-dynamic-state",
+            "mutation-side-effects-and-readback",
             ["success", "podId", "wasRepublished", "nextRefresh"]
                 .iter()
                 .all(|key| refresh_json.get(*key).is_some())
@@ -116615,7 +116615,7 @@ mod tests {
             record!(
                 "POST",
                 route,
-                "populated-dynamic-state",
+                "mutation-side-effects-and-readback",
                 fields.iter().all(|key| value.get(*key).is_some())
             );
         }
@@ -116634,7 +116634,7 @@ mod tests {
         record!(
             "POST",
             seen_route,
-            "populated-dynamic-state",
+            "mutation-side-effects-and-readback",
             seen_json["wasNewlyRegistered"] == true
         );
 
@@ -116767,7 +116767,7 @@ mod tests {
         record!(
             "POST",
             "/api/v0/share-grants",
-            "populated-dynamic-state",
+            "mutation-side-effects-and-readback",
             uuid::Uuid::parse_str(&grant_id).is_ok()
         );
 
@@ -117236,7 +117236,7 @@ mod tests {
         record!(
             "POST",
             "/api/v0/mediacore/retrieve/batch",
-            "populated-dynamic-state",
+            "mutation-side-effects-and-readback",
             retrieved_json["requested"] == 2
                 && retrieved_json["found"] == 1
                 && retrieved_json["results"].as_array().map(Vec::len) == Some(2)
@@ -117355,7 +117355,7 @@ mod tests {
         record!(
             "DELETE",
             "/api/v0/mediacore/publish/descriptor/{contentId}",
-            "populated-dynamic-state",
+            "mutation-side-effects-and-readback",
             serde_json::from_str::<serde_json::Value>(&deleted.body).unwrap()
                 == serde_json::json!({
                     "contentId": "content-id-differential",
@@ -117465,7 +117465,7 @@ mod tests {
         record!(
             "POST",
             "/api/v0/mediacore/publish/descriptor",
-            "populated-dynamic-state",
+            "mutation-side-effects-and-readback",
             publish_pass
         );
 
@@ -117488,7 +117488,7 @@ mod tests {
         record!(
             "POST",
             "/api/v0/mediacore/fuzzymatch/find/{contentId}",
-            "populated-dynamic-state",
+            "mutation-side-effects-and-readback",
             matches_json["totalCandidates"] == 1
                 && matches_json["matches"][0]["candidateContentId"] == candidate_content
                 && matches_json["matches"][0]["reason"] == "PerceptualHash"
@@ -117937,7 +117937,7 @@ mod tests {
         record!(
             "POST",
             "/api/v0/wishlist",
-            "populated-dynamic-state",
+            "mutation-side-effects-and-readback",
             uuid::Uuid::parse_str(&wishlist_id).is_ok()
                 && wishlist_json["searchText"] == "differential"
                 && wishlist_json["maxResults"] == 1
@@ -117984,7 +117984,7 @@ mod tests {
         record!(
             "POST",
             "/api/v0/wishlist/{id}/ignored-results",
-            "populated-dynamic-state",
+            "mutation-side-effects-and-readback",
             ignored_json["wishlistItemId"] == wishlist_id
                 && ignored_json["directory"] == "/tmp/slskdn-differential"
         );
@@ -118641,7 +118641,7 @@ mod tests {
         record!(
             "POST",
             "/api/v0/bridge/search",
-            "populated-dynamic-state",
+            "mutation-side-effects-and-readback",
             search_json["query"] == "Bridge Differential"
                 && users.len() == 1
                 && users[0].get("peerId").is_some()
@@ -118690,7 +118690,7 @@ mod tests {
         record!(
             "POST",
             "/api/v0/bridge/download",
-            "populated-dynamic-state",
+            "mutation-side-effects-and-readback",
             download_json["transfer_id"].is_string()
                 && download_json.get("downloadIds").is_none()
                 && download_json.get("enqueued").is_none()
@@ -119130,7 +119130,7 @@ mod tests {
         record!(
             "POST",
             "/api/v0/listening-party/{podId}/{channelId}",
-            "populated-dynamic-state",
+            "mutation-side-effects-and-readback",
             played_json["action"] == "play"
                 && played_json["podId"] == pod_id
                 && played_json["channelId"] == channel_id
@@ -119519,7 +119519,7 @@ mod tests {
         record!(
             "POST",
             "/api/v0/discovery-graph",
-            "populated-dynamic-state",
+            "mutation-side-effects-and-readback",
             graph_json["title"] == "Discovery Differential"
                 && graph_json["seedNodeId"] == "seed:discovery-differential"
                 && graph_json["nodes"].as_array().map(Vec::len) == Some(4)
@@ -119712,7 +119712,7 @@ mod tests {
             record!(
                 "PUT",
                 route,
-                "populated-dynamic-state",
+                "mutation-side-effects-and-readback",
                 ["lastRunAt", "lastRunProcessedCount", "lastRunReplacedCount", "intervalSeconds"]
                     .iter()
                     .all(|key| value.get(*key).is_some())
@@ -119739,7 +119739,7 @@ mod tests {
         record!(
             "POST",
             "/api/v0/destinations/validate",
-            "populated-dynamic-state",
+            "mutation-side-effects-and-readback",
             destination_json["path"] == "/tmp/slskdn-differential"
                 && destination_json.get("exists").is_some()
                 && destination_json.get("writable").is_some()
@@ -121777,7 +121777,7 @@ mod tests {
         record!(
             "POST",
             "/api/v0/source-feed-imports/preview",
-            "populated-dynamic-state",
+            "mutation-side-effects-and-readback",
             source_preview_json["suggestionCount"] == 2
                 && source_preview_json["suggestions"][0]["artist"] == "Artist"
                 && source_preview_json["suggestions"][1]["title"] == "Two"
@@ -124260,7 +124260,7 @@ mod tests {
         record!(
             "POST",
             "/api/v0/hashdb/backfill/from-history",
-            "populated-dynamic-state",
+            "mutation-side-effects-and-readback",
             first_json["searchesProcessed"] == 10
                 && first_json["flacsDiscovered"] == 10
                 && first_json["totalSearches"] == 11
