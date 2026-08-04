@@ -30,7 +30,7 @@ scoring artifact -- confirmed, all report `complete` with
 
 Parity is **not achieved**. Every planned workstream has an executable
 certification denominator. The literal proof-case closure ratio is now
-**9,374 / 19,122 = 49.02%** (was 853 / 19,122 = 4.46% at the start of this
+**9,378 / 19,122 = 49.04%** (was 853 / 19,122 = 4.46% at the start of this
 review cycle), but this is not a product-completion estimate: most
 generated cases are Cartesian proof dimensions initialized as `needs-proof`,
 including behavior already implemented and tested in slskR. Product
@@ -231,7 +231,12 @@ brought the workstream to 640/5,300 (a third candidate route, `GET
 with no registered route in either frozen oracle -- dropped rather
 than credited after regenerating both registries fresh, since a
 stale mid-session route snapshot had been checked with an overlooked
-negative result). The real VPN-status projection on the application route,
+negative result). Real dispatch-unavailable rollback for the searches
+route, plus the previously entirely uncredited external-visualizer-
+launch route across all 3 of its real scenarios (successful launch
+with command redaction, failed launch with command redaction, and a
+real held process-pool semaphore blocking a concurrent launch),
+brought the workstream to 644/5,300. The real VPN-status projection on the application route,
 the real wire-command dispatch behind an interest mutation, the real
 empty/disabled bridge-admin-clients baseline, one genuinely uncredited
 route from a 17-route materialized-empty-state table, and real
