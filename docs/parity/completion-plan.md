@@ -30,7 +30,7 @@ scoring artifact -- confirmed, all report `complete` with
 
 Parity is **not achieved**. Every planned workstream has an executable
 certification denominator. The literal proof-case closure ratio is now
-**9,318 / 19,122 = 48.73%** (was 853 / 19,122 = 4.46% at the start of this
+**9,323 / 19,122 = 48.76%** (was 853 / 19,122 = 4.46% at the start of this
 review cycle), but this is not a product-completion estimate: most
 generated cases are Cartesian proof dimensions initialized as `needs-proof`,
 including behavior already implemented and tested in slskR. Product
@@ -172,6 +172,14 @@ earlier in this session. Corrected down to the 1 genuinely new case
 (`DELETE /api/v0/conversations/{username}`), bringing the workstream
 to 584/5,300 -- see session memory for the now-mandatory
 evidence-directory-first duplicate-check rule this established.
+Applying that rule immediately paid off: the real Spotify PKCE OAuth
+flow (authorize/callback/status/disconnect, real code-challenge
+generation, real server-issued-state validation, a real token-exchange
++ profile-fetch round trip through a local fixture server driving the
+same `complete_spotify_authorization` the production callback handler
+calls) had only one pre-existing case credited across all 4 routes --
+confirmed via the evidence directory before writing, so all 5 new
+credits landed real, bringing the workstream to 589/5,300.
 
 The relay-agent/controller subsystem (deferred as a genuinely missing
 capability, see earlier notes) was investigated further this session to
