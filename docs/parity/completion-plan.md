@@ -30,7 +30,7 @@ scoring artifact -- confirmed, all report `complete` with
 
 Parity is **not achieved**. Every planned workstream has an executable
 certification denominator. The literal proof-case closure ratio is now
-**9,340 / 19,122 = 48.84%** (was 853 / 19,122 = 4.46% at the start of this
+**9,346 / 19,122 = 48.88%** (was 853 / 19,122 = 4.46% at the start of this
 review cycle), but this is not a product-completion estimate: most
 generated cases are Cartesian proof dimensions initialized as `needs-proof`,
 including behavior already implemented and tested in slskR. Product
@@ -200,7 +200,12 @@ as "no filter") was the one still-open case among 3 routes already
 partly credited, bringing the workstream to 604/5,300. The real
 transfer-download-cancel route (404 on a nonexistent download, the
 frozen 204 contract on a real cancel) had zero prior credit, bringing
-the workstream to 606/5,300.
+the workstream to 606/5,300. The analyzer-migration
+(version-required, exact `{"updated":0}` shape), hashdb-optimize
+(real observed query data, not hardcoded zeros), and telemetry-KPI
+(real `application/json` vs the base route's `text/plain`) route
+families were nearly entirely open, bringing the workstream to
+612/5,300.
 
 The relay-agent/controller subsystem (deferred as a genuinely missing
 capability, see earlier notes) was investigated further this session to
