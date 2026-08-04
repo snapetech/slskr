@@ -30,7 +30,7 @@ scoring artifact -- confirmed, all report `complete` with
 
 Parity is **not achieved**. Every planned workstream has an executable
 certification denominator. The literal proof-case closure ratio is now
-**9,233 / 19,122 = 48.28%** (was 853 / 19,122 = 4.46% at the start of this
+**9,253 / 19,122 = 48.39%** (was 853 / 19,122 = 4.46% at the start of this
 review cycle), but this is not a product-completion estimate: most
 generated cases are Cartesian proof dimensions initialized as `needs-proof`,
 including behavior already implemented and tested in slskR. Product
@@ -130,10 +130,14 @@ leave/accept/cancel lifecycle, pod-channel-messages sender-identity-
 spoofing rejection and incremental-cursor pagination, hashdb history-
 backfill real batched-progress persistence, user-group blacklist-over-
 privileged precedence and leecher/privileged live classification)
-brought the workstream to 499/5,300 (a `pod_management_routes_persist_
-crud_members_and_bindings` differential was found already credited
-from earlier in this session and a duplicate attempt was discarded
-before committing).
+brought the workstream to 499/5,300, and a separate fix relabeling 20
+POST/PUT/DELETE cases mis-tagged `populated-dynamic-state` (a
+GET-only case name the manifest classifier silently ignores for other
+methods) to the correct `mutation-side-effects-and-readback` brought
+it to 519/5,300 -- a real, no-new-tests correctness fix, not a new
+batch (a `pod_management_routes_persist_crud_members_and_bindings`
+differential was also found already credited from earlier in this
+session and a duplicate attempt was discarded before committing).
 
 The relay-agent/controller subsystem (deferred as a genuinely missing
 capability, see earlier notes) was investigated further this session to
