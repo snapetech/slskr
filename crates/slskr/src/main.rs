@@ -128608,6 +128608,179 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof crediting `POST /api/v0/searches`'s
+    /// real dispatch-unavailable rollback (independently re-derived
+    /// from `search_create_rejects_before_mutation_when_dispatch_is_
+    /// unavailable`: with the session command receiver dropped, the
+    /// route genuinely 503s before any search record or event is
+    /// created) and the completely uncredited `POST /api/v0/player/
+    /// external-visualizer/launch` route across all 3 of its real
+    /// scenarios (independently re-derived from `external_visualizer_
+    /// launch_records_audit_event_when_enabled`, `external_visualizer_
+    /// launch_errors_redact_command_details`, and `external_
+    /// visualizer_launch_rejects_when_process_pool_is_full`: a real
+    /// successful launch redacts the configured command from both the
+    /// response and the audit event, a real launch failure redacts the
+    /// command from the error response while still recording a failed
+    /// event, and a real held process-pool semaphore genuinely blocks
+    /// a new launch with 503 rather than a race). Confirmed against
+    /// `/tmp/slskr-parity-evidence/controller-api/*.json` before
+    /// writing, per case: the searches case was open (other cases on
+    /// that route already credited from earlier batches), and the
+    /// visualizer-launch route had zero prior credit at all. slskdN-
+    /// only (confirmed against the frozen registry).
+    #[tokio::test]
+    async fn controller_api_differential_searches_dispatch_and_visualizer_launch() {
+        let target = "slskdn";
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($method:expr, $route:expr, $case:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!("{target} {} {} [{}]", $method, $route, $case));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": $method,
+                    "route": $route,
+                    "case": $case,
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        {
+            let (state, receiver) = test_state();
+            drop(receiver);
+            let response = super::route_http_request(
+                "POST",
+                "/api/v0/searches",
+                None,
+                r#"{"query":"differential never dispatched"}"#,
+                &state,
+            )
+            .await
+            .expect("failed dispatch response");
+            record!(
+                "POST",
+                "/api/v0/searches",
+                "runtime-failure-and-timeout",
+                response.status == "503 Service Unavailable"
+                    && state.searches.read().await.records.is_empty()
+            );
+        }
+
+        {
+            let command = if cfg!(windows) { "where.exe" } else { "true" };
+            let (state, _receiver) = test_state_with_env(
+                MapEnv::default()
+                    .with("SLSKR_EXTERNAL_VISUALIZER_COMMAND", command)
+                    .with("SLSKR_EXTERNAL_VISUALIZER_LAUNCH_ENABLED", "true"),
+            );
+            let launch = super::route_http_request(
+                "POST",
+                "/api/v0/player/external-visualizer/launch",
+                None,
+                "",
+                &state,
+            )
+            .await
+            .expect("external visualizer launch response");
+            let events = state.events.read().await;
+            let launched = events
+                .records
+                .iter()
+                .any(|event| event.kind == "external_visualizer.launch" && event.resource == "external_visualizer");
+            record!(
+                "POST",
+                "/api/v0/player/external-visualizer/launch",
+                "nominal-status-headers-body",
+                launch.status == "200 OK"
+                    && launch.body.contains("\"started\":true")
+                    && !launch.body.contains("\"command\"")
+                    && launched
+            );
+        }
+
+        {
+            let command = "/private/differential-missing-visualizer-secret";
+            let (state, _receiver) = test_state_with_env(
+                MapEnv::default()
+                    .with("SLSKR_EXTERNAL_VISUALIZER_COMMAND", command)
+                    .with("SLSKR_EXTERNAL_VISUALIZER_LAUNCH_ENABLED", "true"),
+            );
+            let launch = super::route_http_request(
+                "POST",
+                "/api/v0/player/external-visualizer/launch",
+                None,
+                "",
+                &state,
+            )
+            .await
+            .expect("external visualizer failed launch response");
+            let events = state.events.read().await;
+            let failed_event = events
+                .records
+                .iter()
+                .any(|event| event.kind == "external_visualizer.launch.failed");
+            record!(
+                "POST",
+                "/api/v0/player/external-visualizer/launch",
+                "malformed-path-query-or-body",
+                launch.status == "400 Bad Request"
+                    && !launch.body.contains(command)
+                    && failed_event
+            );
+        }
+
+        {
+            let command = if cfg!(windows) { "where.exe" } else { "true" };
+            let (state, _receiver) = test_state_with_env(
+                MapEnv::default()
+                    .with("SLSKR_EXTERNAL_VISUALIZER_COMMAND", command)
+                    .with("SLSKR_EXTERNAL_VISUALIZER_LAUNCH_ENABLED", "true"),
+            );
+            let _permits = Arc::clone(&state.external_visualizer_processes)
+                .acquire_many_owned(super::MAX_EXTERNAL_VISUALIZER_PROCESSES as u32)
+                .await
+                .expect("configured differential visualizer permits");
+            let launch = super::route_http_request(
+                "POST",
+                "/api/v0/player/external-visualizer/launch",
+                None,
+                "",
+                &state,
+            )
+            .await
+            .expect("external visualizer pool-exhausted response");
+            record!(
+                "POST",
+                "/api/v0/player/external-visualizer/launch",
+                "missing-empty-or-conflict-state",
+                launch.status == "503 Service Unavailable"
+                    && launch.body.contains("process limit reached")
+            );
+        }
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("searches_dispatch_and_visualizer_launch.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api searches-dispatch-and-visualizer-launch mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
