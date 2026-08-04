@@ -128247,6 +128247,229 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof crediting `GET /api/v0/application`'s
+    /// real VPN-status projection (independently re-derived from
+    /// `vpn_state_projects_and_blocks_soulseek_until_ready`'s
+    /// non-trivial nested `vpn` object once the VPN is ready), `POST
+    /// /api/v0/soulseek/interests`'s real wire-command dispatch
+    /// (independently re-derived from `versioned_interest_mutations_
+    /// use_item_payload_and_wire_commands`: a real `AddThingILike`
+    /// server message is queued, not just a 204), `GET /api/v0/bridge/
+    /// admin/clients`'s real empty/disabled baseline that never leaks
+    /// unrelated peer activity into the legacy-client list
+    /// (independently re-derived from `bridge_admin_clients_never_
+    /// leaks_unrelated_peer_activity`), `GET /api/v0/mediacore/ipld/
+    /// inbound/{*targetContentId}`'s real empty-inbound-links shape
+    /// for a missing content id (the one genuinely uncredited route
+    /// out of the 17-route `materialized_controller_gets_match_
+    /// slskdn_empty_state_contracts` table, independently re-derived
+    /// with a fresh path), and `PUT /api/v0/security/adversarial`'s
+    /// real target-YAML persistence and KV-store readback
+    /// (independently re-derived from `slskdn_adversarial_put_
+    /// persists_and_accepts_target_yaml`: the on-disk YAML is genuinely
+    /// updated, remains reloadable, and the settings are readable back
+    /// from the real controller-features store). Confirmed against
+    /// `/tmp/slskr-parity-evidence/controller-api/*.json` before
+    /// writing, per case: all 5 were open. slskdN-only (confirmed
+    /// against the frozen registry).
+    #[tokio::test]
+    async fn controller_api_differential_application_interests_bridge_mediacore_adversarial() {
+        let target = "slskdn";
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($method:expr, $route:expr, $case:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!("{target} {} {} [{}]", $method, $route, $case));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": $method,
+                    "route": $route,
+                    "case": $case,
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        {
+            let (state, _receiver) = test_state_with_env(
+                MapEnv::default()
+                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn")
+                    .with("SLSKD_VPN", "true")
+                    .with("SLSKD_VPN_GLUETUN_URL", "http://127.0.0.1:8000"),
+            );
+            state.runtime.write().await.vpn = super::vpn::Status {
+                is_ready: true,
+                is_connected: true,
+                public_ip_address: Some("203.0.113.9".parse().unwrap()),
+                location: "Differential, Testland".to_owned(),
+                forwarded_port: Some(44_499),
+                port_forwards: vec![super::vpn::PortForward {
+                    slot: 0,
+                    local_port: 50_399,
+                    target_port: 50_399,
+                    proto: "tcp".to_owned(),
+                    public_port: 44_499,
+                    public_ip_address: Some("203.0.113.9".parse().unwrap()),
+                    namespace: "slskdn".to_owned(),
+                }],
+                relay: None,
+            };
+            let response = super::route_http_request("GET", "/api/v0/application", None, "", &state)
+                .await
+                .expect("application response");
+            let application =
+                serde_json::from_str::<serde_json::Value>(&response.body).unwrap_or_default();
+            record!(
+                "GET",
+                "/api/v0/application",
+                "nominal-status-headers-body",
+                response.status == "200 OK"
+                    && application["vpn"]["isReady"] == true
+                    && application["vpn"]["location"] == "Differential, Testland"
+                    && application["vpn"]["forwardedPort"] == 44_499
+            );
+        }
+
+        {
+            use slskr_client::protocol::server::ServerMessage;
+            let (state, mut receiver) = test_state();
+            state.session.write().await.state = "connected";
+            let liked = super::route_http_request(
+                "POST",
+                "/api/v0/soulseek/interests",
+                None,
+                r#"{"item":"differential-ambient"}"#,
+                &state,
+            )
+            .await
+            .expect("interest mutation response");
+            let dispatched = matches!(
+                receiver.recv().await,
+                Some(super::SessionCommand::SendServerMessage(ServerMessage::AddThingILike { item }))
+                    if item == "differential-ambient"
+            );
+            record!(
+                "POST",
+                "/api/v0/soulseek/interests",
+                "mutation-side-effects-and-readback",
+                liked.status == "204 No Content" && dispatched
+            );
+        }
+
+        {
+            let (state, _receiver) = test_state();
+            {
+                let mut users = state.users.write().await;
+                users.watch("differential-online-peer".to_owned());
+                if let Some(record) = users
+                    .records
+                    .iter_mut()
+                    .find(|record| record.username == "differential-online-peer")
+                {
+                    record.status = Some("online".to_owned());
+                }
+            }
+            let clients = super::route_http_request(
+                "GET",
+                "/api/v0/bridge/admin/clients",
+                None,
+                "",
+                &state,
+            )
+            .await
+            .expect("bridge admin clients response");
+            let clients_json =
+                serde_json::from_str::<serde_json::Value>(&clients.body).unwrap_or_default();
+            record!(
+                "GET",
+                "/api/v0/bridge/admin/clients",
+                "missing-empty-or-conflict-state",
+                clients.status == "200 OK"
+                    && clients_json
+                        == serde_json::json!({"clients": [], "count": 0, "status": "disabled", "ready": false})
+            );
+        }
+
+        {
+            let (state, _receiver) = test_state();
+            let response = super::route_http_request(
+                "GET",
+                "/api/v0/mediacore/ipld/inbound/differential-missing",
+                None,
+                "",
+                &state,
+            )
+            .await
+            .expect("ipld inbound links response");
+            record!(
+                "GET",
+                "/api/v0/mediacore/ipld/inbound/{*targetContentId}",
+                "missing-empty-or-conflict-state",
+                response.status == "200 OK" && response.body.contains("\"inboundLinks\":[]")
+            );
+        }
+
+        {
+            let (state, _receiver) = test_state_with_env(
+                MapEnv::default()
+                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn")
+                    .with("SLSKR_REMOTE_CONFIGURATION", "true"),
+            );
+            fs::write(
+                state.config.state_dir.join("slskd.yml"),
+                "debug: true\nremote_configuration: true\n",
+            )
+            .expect("write differential base yaml");
+            let response = super::route_http_request(
+                "PUT",
+                "/api/v0/security/adversarial",
+                None,
+                "{}",
+                &state,
+            )
+            .await
+            .expect("adversarial settings response");
+            let yaml_updated = fs::read_to_string(state.config.state_dir.join("slskd.yml"))
+                .unwrap_or_default()
+                .contains("  adversarial:\n");
+            let reload_ok = super::load_watched_controller_configuration(
+                state.controller_cli_environment.clone(),
+            )
+            .is_ok();
+            let features = state.controller_features.read().await;
+            let stored = features.get("security/profile/security/adversarial");
+            record!(
+                "PUT",
+                "/api/v0/security/adversarial",
+                "mutation-side-effects-and-readback",
+                response.status == "200 OK"
+                    && yaml_updated
+                    && reload_ok
+                    && stored.is_some_and(|value| value["settings"] == serde_json::json!({}))
+            );
+        }
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("application_interests_bridge_mediacore_adversarial.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api application-interests-bridge-mediacore-adversarial mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
