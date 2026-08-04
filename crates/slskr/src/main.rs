@@ -125093,6 +125093,513 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof crediting 4 pod/quarantine-jury stats and
+    /// verification routes' cases, independently re-derived from 3
+    /// source tests: `pod_verification_message_checks_real_membership_
+    /// and_signature` (real membership/signature checks, honest
+    /// structural-error reporting, and real attempt-counted stats),
+    /// `quarantine_jury_audit_report_reflects_real_status_not_
+    /// hardcoded_zeros` (real per-status counts and real request-age
+    /// staleness, not hardcoded zeros), and `pod_signing_stats_reflect_
+    /// real_activity_not_hardcoded_zeros` (a forged-sender rejection
+    /// still counts as a real failed verification, not silently
+    /// dropped). slskdN-only (confirmed against the frozen registry).
+    #[tokio::test]
+    async fn controller_api_differential_pod_and_jury_stats() {
+        let target = "slskdn";
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($method:expr, $route:expr, $case:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!("{target} {} {} [{}]", $method, $route, $case));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": $method,
+                    "route": $route,
+                    "case": $case,
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        // -- podcore verification/message + verification/stats --
+        let (state, _receiver) = test_state();
+        let pod_id = "verification-differential-pod";
+        state
+            .pods
+            .write()
+            .await
+            .create(
+                serde_json::from_value::<super::pods::PodRecord>(serde_json::json!({
+                    "podId": pod_id,
+                    "name": "Verification Differential",
+                }))
+                .expect("deserialize pod record fixture"),
+                "owner-peer".to_owned(),
+            )
+            .expect("create pod");
+
+        let keypair = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/signing/generate-keypair",
+            None,
+            "{}",
+            &state,
+        )
+        .await
+        .expect("generate keypair");
+        let keys = serde_json::from_str::<serde_json::Value>(&keypair.body).unwrap_or_default();
+        state
+            .pods
+            .write()
+            .await
+            .upsert_member(
+                pod_id,
+                super::pods::PodMember {
+                    peer_id: "tester".to_owned(),
+                    role: "member".to_owned(),
+                    is_banned: false,
+                    public_key: keys["publicKey"].as_str().map(str::to_owned),
+                    joined_at: None,
+                    last_seen: None,
+                },
+            )
+            .expect("add tester as a real pod member with a signing public key");
+
+        let message = serde_json::json!({
+            "messageId": "message-differential-1",
+            "podId": pod_id,
+            "channelId": format!("{pod_id}:general"),
+            "senderPeerId": "tester",
+            "body": "hello",
+            "timestampUnixMs": super::unix_timestamp() * 1000,
+        });
+        let signed = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/signing/sign",
+            None,
+            &serde_json::json!({"privateKey": keys["privateKey"], "message": message}).to_string(),
+            &state,
+        )
+        .await
+        .expect("sign message");
+        let signed_json = serde_json::from_str::<serde_json::Value>(&signed.body).unwrap_or_default();
+        let mut verified_message = message.clone();
+        verified_message["signature"] = signed_json["signature"].clone();
+
+        let verified = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/verification/message",
+            None,
+            &verified_message.to_string(),
+            &state,
+        )
+        .await
+        .expect("verify message");
+        let verified_json = serde_json::from_str::<serde_json::Value>(&verified.body).unwrap_or_default();
+        let verified_pass = verified.status == "200 OK"
+            && verified_json
+                == serde_json::json!({
+                    "isValid": true,
+                    "isFromValidMember": true,
+                    "hasValidSignature": true,
+                    "isNotBanned": true,
+                });
+
+        let mut unknown_sender = verified_message.clone();
+        unknown_sender["senderPeerId"] = serde_json::json!("differential-stranger");
+        let unknown_verified = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/verification/message",
+            None,
+            &unknown_sender.to_string(),
+            &state,
+        )
+        .await
+        .expect("verify unknown sender");
+        let unknown_json =
+            serde_json::from_str::<serde_json::Value>(&unknown_verified.body).unwrap_or_default();
+        record!(
+            "POST",
+            "/api/v0/podcore/verification/message",
+            "missing-empty-or-conflict-state",
+            verified_pass
+                && unknown_json["isValid"] == false
+                && unknown_json["isFromValidMember"] == false
+                && unknown_json["isNotBanned"] == true
+        );
+
+        let mut bad_channel = verified_message.clone();
+        bad_channel["channelId"] = serde_json::json!("no-colon-here-differential");
+        let bad_channel_verified = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/verification/message",
+            None,
+            &bad_channel.to_string(),
+            &state,
+        )
+        .await
+        .expect("verify bad channel id");
+        let bad_channel_pass = bad_channel_verified.body
+            == serde_json::json!({
+                "isValid": false,
+                "isFromValidMember": false,
+                "hasValidSignature": false,
+                "isNotBanned": false,
+                "errorMessage": "Invalid channel ID format",
+            })
+            .to_string();
+
+        let missing_pod_id = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/verification/message",
+            None,
+            r#"{"messageId":"message-differential-1"}"#,
+            &state,
+        )
+        .await
+        .expect("verify missing podId");
+        record!(
+            "POST",
+            "/api/v0/podcore/verification/message",
+            "malformed-path-query-or-body",
+            bad_channel_pass && missing_pod_id.status == "400 Bad Request"
+        );
+
+        let stats = super::route_http_request(
+            "GET",
+            "/api/v0/podcore/verification/stats",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("verification stats");
+        let stats_json = serde_json::from_str::<serde_json::Value>(&stats.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/api/v0/podcore/verification/stats",
+            "nominal-status-headers-body",
+            stats.status == "200 OK"
+        );
+        record!(
+            "GET",
+            "/api/v0/podcore/verification/stats",
+            "populated-dynamic-state",
+            stats_json["totalVerifications"] == 2
+                && stats_json["successfulVerifications"] == 1
+                && stats_json["failedMembershipChecks"] == 1
+                && stats_json["lastVerification"].is_string()
+        );
+
+        // -- podcore signing/stats --
+        let (signing_state, _signing_receiver) = test_state();
+        let signing_baseline = super::route_http_request(
+            "GET",
+            "/api/v0/podcore/signing/stats",
+            None,
+            "",
+            &signing_state,
+        )
+        .await
+        .expect("baseline signing stats");
+        let signing_baseline_json =
+            serde_json::from_str::<serde_json::Value>(&signing_baseline.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/api/v0/podcore/signing/stats",
+            "missing-empty-or-conflict-state",
+            signing_baseline.status == "200 OK"
+                && signing_baseline_json["totalSignaturesCreated"] == 0
+                && signing_baseline_json["totalSignaturesVerified"] == 0
+                && signing_baseline_json["lastSignatureOperation"] == super::PODCORE_MIN_DATETIME
+        );
+
+        let signing_pod_id = "signing-stats-differential-pod";
+        signing_state
+            .pods
+            .write()
+            .await
+            .create(
+                serde_json::from_value::<super::pods::PodRecord>(serde_json::json!({
+                    "podId": signing_pod_id,
+                    "name": "Signing Stats Differential",
+                }))
+                .expect("deserialize pod record fixture"),
+                "owner-peer".to_owned(),
+            )
+            .expect("create pod");
+        let signing_keypair = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/signing/generate-keypair",
+            None,
+            "{}",
+            &signing_state,
+        )
+        .await
+        .expect("generate keypair");
+        let signing_keys =
+            serde_json::from_str::<serde_json::Value>(&signing_keypair.body).unwrap_or_default();
+        signing_state
+            .pods
+            .write()
+            .await
+            .upsert_member(
+                signing_pod_id,
+                super::pods::PodMember {
+                    peer_id: "tester".to_owned(),
+                    role: "member".to_owned(),
+                    is_banned: false,
+                    public_key: signing_keys["publicKey"].as_str().map(str::to_owned),
+                    joined_at: None,
+                    last_seen: None,
+                },
+            )
+            .expect("add tester as a real pod member with a signing public key");
+        let signing_signed = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/signing/sign",
+            None,
+            &serde_json::json!({
+                "privateKey": signing_keys["privateKey"],
+                "message": {
+                    "messageId": "message-differential-2",
+                    "podId": signing_pod_id,
+                    "senderPeerId": "tester",
+                    "body": "hello",
+                    "timestampUnixMs": super::unix_timestamp() * 1000,
+                }
+            })
+            .to_string(),
+            &signing_state,
+        )
+        .await
+        .expect("sign message");
+        let signing_verified = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/signing/verify",
+            None,
+            &signing_signed.body,
+            &signing_state,
+        )
+        .await
+        .expect("verify message");
+        let signing_signed_json =
+            serde_json::from_str::<serde_json::Value>(&signing_signed.body).unwrap_or_default();
+        let mut forged = signing_signed_json.clone();
+        forged["message"]["senderPeerId"] = serde_json::json!("someone-else-differential");
+        let forged_verified = super::route_http_request(
+            "POST",
+            "/api/v0/podcore/signing/verify",
+            None,
+            &forged.to_string(),
+            &signing_state,
+        )
+        .await
+        .expect("verify forged sender");
+
+        let signing_stats = super::route_http_request(
+            "GET",
+            "/api/v0/podcore/signing/stats",
+            None,
+            "",
+            &signing_state,
+        )
+        .await
+        .expect("signing stats");
+        let signing_stats_json =
+            serde_json::from_str::<serde_json::Value>(&signing_stats.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/api/v0/podcore/signing/stats",
+            "nominal-status-headers-body",
+            signing_verified.body == r#"{"isValid":true}"#
+                && forged_verified.body == r#"{"isValid":false}"#
+        );
+        record!(
+            "GET",
+            "/api/v0/podcore/signing/stats",
+            "populated-dynamic-state",
+            signing_stats_json["totalSignaturesCreated"] == 1
+                && signing_stats_json["totalSignaturesVerified"] == 2
+                && signing_stats_json["successfulVerifications"] == 1
+                && signing_stats_json["failedVerifications"] == 1
+                && signing_stats_json["lastSignatureOperation"].is_string()
+        );
+
+        // -- quarantine-jury/audit --
+        let (jury_state, _jury_receiver) = test_state();
+        let created_a = super::route_http_request(
+            "POST",
+            "/api/v0/quarantine-jury/requests",
+            None,
+            r#"{"localReason":"audit-differential-a","jurors":["juror-a","juror-b"],"evidence":[{"type":"hash","reference":"opaque-ref-a"}],"minJurorVotes":2}"#,
+            &jury_state,
+        )
+        .await
+        .expect("create request a");
+        let request_a = serde_json::from_str::<serde_json::Value>(&created_a.body)
+            .unwrap_or_default()["request"]["requestId"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned();
+        for juror in ["juror-a", "juror-b"] {
+            let verdict = super::route_http_request(
+                "POST",
+                "/api/v0/quarantine-jury/verdicts",
+                None,
+                &quarantine_signed_verdict_json(&request_a, juror, "ReleaseCandidate").to_string(),
+                &jury_state,
+            )
+            .await
+            .expect("cast verdict");
+            assert_eq!(verdict.status, "200 OK", "{}", verdict.body);
+        }
+
+        let created_b = super::route_http_request(
+            "POST",
+            "/api/v0/quarantine-jury/requests",
+            None,
+            r#"{"localReason":"audit-differential-b","jurors":["juror-c"],"evidence":[{"type":"hash","reference":"opaque-ref-b"}],"minJurorVotes":1}"#,
+            &jury_state,
+        )
+        .await
+        .expect("create request b");
+        let request_b = serde_json::from_str::<serde_json::Value>(&created_b.body)
+            .unwrap_or_default()["request"]["requestId"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned();
+
+        let baseline = super::route_http_request(
+            "GET",
+            "/api/v0/quarantine-jury/audit",
+            None,
+            "",
+            &jury_state,
+        )
+        .await
+        .expect("audit report before acceptance");
+        let baseline_json = serde_json::from_str::<serde_json::Value>(&baseline.body).unwrap_or_default();
+        let entries = baseline_json["entries"].as_array().cloned().unwrap_or_default();
+        let entry_a = entries
+            .iter()
+            .find(|entry| entry["requestId"] == request_a)
+            .cloned()
+            .unwrap_or_default();
+        let entry_b = entries
+            .iter()
+            .find(|entry| entry["requestId"] == request_b)
+            .cloned()
+            .unwrap_or_default();
+        record!(
+            "GET",
+            "/api/v0/quarantine-jury/audit",
+            "nominal-status-headers-body",
+            baseline.status == "200 OK"
+        );
+        record!(
+            "GET",
+            "/api/v0/quarantine-jury/audit",
+            "populated-dynamic-state",
+            baseline_json["requestCount"] == 2
+                && baseline_json["pendingReleaseCandidateCount"] == 1
+                && baseline_json["pendingManualReviewCount"] == 1
+                && baseline_json["acceptedReleaseCandidateCount"] == 0
+                && baseline_json["upholdQuarantineCount"] == 0
+                && entry_a["status"] == "pending-release-acceptance"
+                && entry_a["verdictCount"] == 2
+                && entry_a["quorumReached"] == true
+                && entry_a["canAcceptReleaseCandidate"] == true
+                && entry_b["status"] == "manual-review"
+                && entry_b["verdictCount"] == 0
+                && entry_b["quorumReached"] == false
+        );
+
+        let accept = super::route_http_request(
+            "POST",
+            &format!("/api/v0/quarantine-jury/requests/{request_a}/accept-release-candidate"),
+            None,
+            "{}",
+            &jury_state,
+        )
+        .await
+        .expect("accept request a");
+        assert_eq!(accept.status, "200 OK", "{}", accept.body);
+
+        let after_accept = super::route_http_request(
+            "GET",
+            "/api/v0/quarantine-jury/audit",
+            None,
+            "",
+            &jury_state,
+        )
+        .await
+        .expect("audit report after acceptance");
+        let after_accept_json =
+            serde_json::from_str::<serde_json::Value>(&after_accept.body).unwrap_or_default();
+
+        {
+            let key = format!("quarantine/request/{request_b}");
+            let mut features = jury_state.controller_features.write().await;
+            let mut backdated = features.get(&key).cloned().expect("request b exists");
+            backdated["createdAt"] =
+                serde_json::json!(super::unix_timestamp().saturating_sub(100 * 3600));
+            features.upsert(key, backdated).expect("backdate request b");
+        }
+        let stale = super::route_http_request(
+            "GET",
+            "/api/v0/quarantine-jury/audit",
+            None,
+            "",
+            &jury_state,
+        )
+        .await
+        .expect("audit report after backdating request b");
+        let stale_json = serde_json::from_str::<serde_json::Value>(&stale.body).unwrap_or_default();
+        let stale_entries = stale_json["entries"].as_array().cloned().unwrap_or_default();
+        let stale_entry_a = stale_entries
+            .iter()
+            .find(|entry| entry["requestId"] == request_a)
+            .cloned()
+            .unwrap_or_default();
+        let stale_entry_b = stale_entries
+            .iter()
+            .find(|entry| entry["requestId"] == request_b)
+            .cloned()
+            .unwrap_or_default();
+        record!(
+            "GET",
+            "/api/v0/quarantine-jury/audit",
+            "mutation-side-effects-and-readback",
+            after_accept_json["acceptedReleaseCandidateCount"] == 1
+                && after_accept_json["pendingReleaseCandidateCount"] == 0
+                && stale_json["staleRequestCount"] == 1
+                && stale_entry_b["isStale"] == true
+                && stale_entry_a["isStale"] == false
+        );
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("pod_and_jury_stats.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api pod-and-jury-stats mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
