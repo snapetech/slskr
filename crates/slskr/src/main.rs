@@ -127890,6 +127890,155 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof crediting `PUT /api/v0/options`'s
+    /// remote-configuration-disabled-by-default gate (independently
+    /// re-derived from `remote_configuration_routes_are_forbidden_by_
+    /// default`, which already fully credited `PATCH /api/v0/options`
+    /// for the same case but not `PUT`), `POST /api/v0/conversations/
+    /// batch`'s real per-recipient database persistence (independently
+    /// re-derived from `conversations_batch_persists_each_outbound_
+    /// message`, using a real in-memory `DatabaseManager` and reading
+    /// the persisted rows back directly, not just the HTTP response),
+    /// and `GET /api/v0/conversations/{username}`'s real replay-
+    /// deduplication projection (independently re-derived from
+    /// `inbound_private_message_replays_update_one_record_and_retain_
+    /// replay_flag`: two server-pushed `MessageUserResponse` frames for
+    /// the same message id collapse to one stored record with
+    /// `wasReplayed` preserved, reusing the real `project_server_
+    /// message` production function against a real loopback session).
+    /// Confirmed against `/tmp/slskr-parity-evidence/controller-api/
+    /// *.json` before writing, per case: all 3 were open. slskdN-only
+    /// (confirmed against the frozen registry).
+    #[tokio::test]
+    async fn controller_api_differential_options_and_conversations_projection() {
+        let target = "slskdn";
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($method:expr, $route:expr, $case:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!("{target} {} {} [{}]", $method, $route, $case));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": $method,
+                    "route": $route,
+                    "case": $case,
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        let (state, _receiver) = test_state();
+        let forbidden = super::route_http_request("PUT", "/api/options", None, "{}", &state)
+            .await
+            .expect("remote configuration policy response");
+        record!(
+            "PUT",
+            "/api/v0/options",
+            "missing-empty-or-conflict-state",
+            forbidden.status == "403 Forbidden"
+        );
+
+        {
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, mut receiver) = test_state_with_env_parts(
+                MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+            let response = super::route_http_request(
+                "POST",
+                "/api/v0/conversations/batch",
+                None,
+                r#"{"usernames":["differential-friend","differential-peer"],"body":"differential persisted batch"}"#,
+                &state,
+            )
+            .await
+            .expect("batch message response");
+            let dispatched = matches!(
+                receiver.try_recv(),
+                Ok(super::SessionCommand::MessageUsers { .. })
+            );
+            let mut persisted = db.list_messages(10, 0).await.expect("list messages");
+            persisted.sort_by(|left, right| left.username.cmp(&right.username));
+            record!(
+                "POST",
+                "/api/v0/conversations/batch",
+                "mutation-side-effects-and-readback",
+                response.status == "201 Created"
+                    && dispatched
+                    && persisted.len() == 2
+                    && persisted[0].username == "differential-friend"
+                    && persisted[0].content == "differential persisted batch"
+                    && persisted[1].username == "differential-peer"
+            );
+        }
+
+        {
+            use slskr_client::protocol::server::{PrivateMessage, ServerMessage};
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let client = tokio::net::TcpStream::connect(address);
+            let server = listener.accept();
+            let (client, server) = tokio::join!(client, server);
+            let (server, _) = server.unwrap();
+            let mut session = slskr_client::server::ServerSession::new(
+                slskr_client::stream::ServerConnection::new(server),
+            );
+            let _client = slskr_client::stream::ServerConnection::new(client.unwrap());
+            let message = |replayed| {
+                ServerMessage::MessageUserResponse(PrivateMessage {
+                    id: 177,
+                    timestamp: 188,
+                    username: "differential-peer".to_owned(),
+                    message: "differential hello".to_owned(),
+                    is_new: true,
+                    was_replayed: replayed,
+                })
+            };
+            super::project_server_message(&state, &mut session, &message(false)).await;
+            super::project_server_message(&state, &mut session, &message(true)).await;
+            let response = super::route_http_request(
+                "GET",
+                "/api/v0/conversations/differential-peer",
+                None,
+                "",
+                &state,
+            )
+            .await
+            .expect("conversation projection response");
+            let json = serde_json::from_str::<serde_json::Value>(&response.body).unwrap_or_default();
+            let messages = json["messages"].as_array().cloned().unwrap_or_default();
+            record!(
+                "GET",
+                "/api/v0/conversations/{username}",
+                "populated-dynamic-state",
+                messages.len() == 1 && messages[0]["wasReplayed"] == true
+            );
+        }
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("options_and_conversations_projection.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api options-and-conversations-projection mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
