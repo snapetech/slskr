@@ -30,7 +30,7 @@ scoring artifact -- confirmed, all report `complete` with
 
 Parity is **not achieved**. Every planned workstream has an executable
 certification denominator. The literal proof-case closure ratio is now
-**9,331 / 19,122 = 48.80%** (was 853 / 19,122 = 4.46% at the start of this
+**9,335 / 19,122 = 48.82%** (was 853 / 19,122 = 4.46% at the start of this
 review cycle), but this is not a product-completion estimate: most
 generated cases are Cartesian proof dimensions initialized as `needs-proof`,
 including behavior already implemented and tested in slskR. Product
@@ -190,7 +190,11 @@ clientId/redirectPath reflection, malformed and policy-blocked WebIDs
 genuinely rejected pre-fetch, and a real successful resolution
 extracting oidcIssuer triples from an actual fetched Turtle profile
 via a local fixture server) had no prior credit either, bringing the
-workstream to 597/5,300.
+workstream to 597/5,300. The real pod-membership self-publish routes
+(impersonation and non-self/non-moderator updates genuinely rejected,
+self-escalation attempts in the request body pinned back to the real
+stored role) had no prior credit either, bringing the workstream to
+601/5,300.
 
 The relay-agent/controller subsystem (deferred as a genuinely missing
 capability, see earlier notes) was investigated further this session to
