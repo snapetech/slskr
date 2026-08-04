@@ -30,7 +30,7 @@ scoring artifact -- confirmed, all report `complete` with
 
 Parity is **not achieved**. Every planned workstream has an executable
 certification denominator. The literal proof-case closure ratio is now
-**9,401 / 19,122 = 49.16%** (was 853 / 19,122 = 4.46% at the start of this
+**9,419 / 19,122 = 49.26%** (was 853 / 19,122 = 4.46% at the start of this
 review cycle), but this is not a product-completion estimate: most
 generated cases are Cartesian proof dimensions initialized as `needs-proof`,
 including behavior already implemented and tested in slskR. Product
@@ -271,6 +271,21 @@ user history delete, both targets), moving persistence-lifecycle to
 48/798. Events and Transfers were investigated and deliberately
 skipped for this case -- neither has a real update/delete HTTP path
 reachable without bypassing dispatch or inventing a route.
+
+`DatabaseManager::initialize()` runs `CREATE TABLE IF NOT EXISTS` for
+every real table once, at construction, which makes `schema-create-
+and-migrate` cheaply provable for every domain already touched: open
+a brand-new in-memory database and call the domain's real `list_*`
+accessor before writing any data at all -- a missing or broken schema
+surfaces as a real SQL error, not an empty result, so this is genuine
+executable evidence and not a route-presence shortcut. Credited across
+all 13 domains touched so far (18 target/domain pairs: the 8 slskdN-
+only domains from the collections/notes/wishlist/sharing batch, plus
+Searches/Events/Conversations/PrivateMessages/Transfers for both
+slskd and slskdn -- Events and Transfers get this case even though
+they were skipped for `update-delete-and-readback` above, since schema
+creation doesn't depend on a reachable update/delete HTTP path), moving
+persistence-lifecycle to 66/798.
 
 The real VPN-status projection on the application route,
 the real wire-command dispatch behind an interest mutation, the real
