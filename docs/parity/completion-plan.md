@@ -30,7 +30,7 @@ scoring artifact -- confirmed, all report `complete` with
 
 Parity is **not achieved**. Every planned workstream has an executable
 certification denominator. The literal proof-case closure ratio is now
-**9,326 / 19,122 = 48.77%** (was 853 / 19,122 = 4.46% at the start of this
+**9,331 / 19,122 = 48.80%** (was 853 / 19,122 = 4.46% at the start of this
 review cycle), but this is not a product-completion estimate: most
 generated cases are Cartesian proof dimensions initialized as `needs-proof`,
 including behavior already implemented and tested in slskR. Product
@@ -184,7 +184,13 @@ mesh HTTP gateway proxy route (`POST /mesh/http/{serviceName}/
 {method}`: config-driven service allowlist rejection, a genuine "no
 providers" 503, and a real local `private_gateway::Gateway` instance
 proving the nominal dispatch path reaches an actual service handler)
-had no prior credit either, bringing the workstream to 592/5,300.
+had no prior credit either, bringing the workstream to 592/5,300. The
+real Solid protocol status/WebID-resolution routes (real configured
+clientId/redirectPath reflection, malformed and policy-blocked WebIDs
+genuinely rejected pre-fetch, and a real successful resolution
+extracting oidcIssuer triples from an actual fetched Turtle profile
+via a local fixture server) had no prior credit either, bringing the
+workstream to 597/5,300.
 
 The relay-agent/controller subsystem (deferred as a genuinely missing
 capability, see earlier notes) was investigated further this session to
