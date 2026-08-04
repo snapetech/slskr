@@ -124179,6 +124179,255 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof crediting 5 hashdb routes' cases,
+    /// independently re-derived from `hashdb_history_backfill_batches_
+    /// persists_inventory_and_progress`'s real batched-backfill-progress
+    /// checks (a real batch size limits how many search-history records
+    /// are consumed per call, progress persists and resumes across
+    /// calls, and `reset=true` genuinely restarts from the full history).
+    /// slskdN-only (confirmed against the frozen registry; the bare
+    /// `/api/hashdb/peers` compatibility-surface comparison in the
+    /// source test has no registry entry and is not called here).
+    #[tokio::test]
+    async fn controller_api_differential_hashdb_history_backfill() {
+        let target = "slskdn";
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($method:expr, $route:expr, $case:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!("{target} {} {} [{}]", $method, $route, $case));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": $method,
+                    "route": $route,
+                    "case": $case,
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        let (state, _receiver) = test_state();
+        {
+            let mut searches = state.searches.write().await;
+            for index in 1..=11_u64 {
+                searches.records.push(super::SearchRecord {
+                    id: format!("history-differential-{index}"),
+                    token: u32::try_from(index).unwrap(),
+                    query: format!("history differential {index}"),
+                    target: "global",
+                    target_name: None,
+                    status: "completed",
+                    results: vec![super::SearchResultEntry {
+                        peer_username: Some(format!("differential-peer-{index}")),
+                        filename: format!("Library/DifferentialTrack-{index}.flac"),
+                        size: 32_768 + index,
+                        extension: "flac".to_owned(),
+                        locked: false,
+                        slot_free: Some(true),
+                        average_speed: Some(1_000),
+                        queue_length: Some(0),
+                    }],
+                    raw_response_count: 1,
+                    filtered_out_count: 0,
+                    ignored_result_count: 0,
+                    hidden_locked_count: 0,
+                    expires_at: 0,
+                    created_at: index,
+                    updated_at: index,
+                });
+            }
+        }
+
+        let first = super::route_http_request(
+            "POST",
+            "/api/v0/hashdb/backfill/from-history?batchSize=10",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("first history backfill batch");
+        let first_json = serde_json::from_str::<serde_json::Value>(&first.body).unwrap_or_default();
+        record!(
+            "POST",
+            "/api/v0/hashdb/backfill/from-history",
+            "nominal-status-headers-body",
+            first.status == "200 OK"
+        );
+        record!(
+            "POST",
+            "/api/v0/hashdb/backfill/from-history",
+            "populated-dynamic-state",
+            first_json["searchesProcessed"] == 10
+                && first_json["flacsDiscovered"] == 10
+                && first_json["totalSearches"] == 11
+                && first_json["remainingSearches"] == 1
+                && first_json["complete"] == false
+        );
+
+        let candidates = super::route_http_request(
+            "GET",
+            "/api/v0/hashdb/backfill/candidates?limit=20",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("hashdb backfill candidates");
+        let candidates_json =
+            serde_json::from_str::<serde_json::Value>(&candidates.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/api/v0/hashdb/backfill/candidates",
+            "nominal-status-headers-body",
+            candidates.status == "200 OK"
+        );
+        record!(
+            "GET",
+            "/api/v0/hashdb/backfill/candidates",
+            "populated-dynamic-state",
+            candidates_json["count"] == 10
+                && candidates_json["entries"].as_array().map(Vec::len) == Some(10)
+        );
+
+        let second = super::route_http_request(
+            "POST",
+            "/api/v0/hashdb/backfill/from-history?batchSize=10",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("second history backfill batch");
+        let second_json = serde_json::from_str::<serde_json::Value>(&second.body).unwrap_or_default();
+        record!(
+            "POST",
+            "/api/v0/hashdb/backfill/from-history",
+            "mutation-side-effects-and-readback",
+            second_json["searchesProcessed"] == 1
+                && second_json["flacsDiscovered"] == 1
+                && second_json["remainingSearches"] == 0
+                && second_json["complete"] == true
+        );
+
+        let complete = super::route_http_request(
+            "POST",
+            "/api/v0/hashdb/backfill/from-history",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("completed history backfill");
+        let complete_json =
+            serde_json::from_str::<serde_json::Value>(&complete.body).unwrap_or_default();
+        record!(
+            "POST",
+            "/api/v0/hashdb/backfill/from-history",
+            "concurrency-and-idempotency",
+            complete_json["searchesProcessed"] == 0
+                && complete_json["flacsDiscovered"] == 0
+                && complete_json["complete"] == true
+        );
+
+        let reset = super::route_http_request(
+            "POST",
+            "/api/v0/hashdb/backfill/from-history?reset=true",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("reset history backfill");
+        let reset_json = serde_json::from_str::<serde_json::Value>(&reset.body).unwrap_or_default();
+        record!(
+            "POST",
+            "/api/v0/hashdb/backfill/from-history",
+            "restart-persistence-or-reset",
+            reset_json["searchesProcessed"] == 11
+                && reset_json["flacsDiscovered"] == 11
+                && reset_json["complete"] == true
+        );
+
+        let stats = super::route_http_request("GET", "/api/v0/hashdb/stats", None, "", &state)
+            .await
+            .expect("hashdb stats after backfill");
+        let stats_json = serde_json::from_str::<serde_json::Value>(&stats.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/api/v0/hashdb/stats",
+            "nominal-status-headers-body",
+            stats.status == "200 OK"
+        );
+        record!(
+            "GET",
+            "/api/v0/hashdb/stats",
+            "populated-dynamic-state",
+            stats_json["totalFlacEntries"] == 11 && stats_json["hashedFlacEntries"] == 0
+        );
+
+        let analysis = super::route_http_request(
+            "GET",
+            "/api/v0/hashdb/optimize/analyze",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("hashdb optimize analysis after backfill");
+        let analysis_json =
+            serde_json::from_str::<serde_json::Value>(&analysis.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/api/v0/hashdb/optimize/analyze",
+            "nominal-status-headers-body",
+            analysis.status == "200 OK"
+        );
+        record!(
+            "GET",
+            "/api/v0/hashdb/optimize/analyze",
+            "populated-dynamic-state",
+            analysis_json["flacInventoryEntryCount"] == 11 && analysis_json["peerCount"] == 11
+        );
+
+        let peers = super::route_http_request("GET", "/api/v0/hashdb/peers", None, "", &state)
+            .await
+            .expect("hashdb peers after backfill");
+        let peers_json = serde_json::from_str::<serde_json::Value>(&peers.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/api/v0/hashdb/peers",
+            "nominal-status-headers-body",
+            peers.status == "200 OK"
+        );
+        record!(
+            "GET",
+            "/api/v0/hashdb/peers",
+            "populated-dynamic-state",
+            peers_json["count"] == 0
+        );
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("hashdb_history_backfill.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api hashdb-history-backfill mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
