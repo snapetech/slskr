@@ -127005,6 +127005,77 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof crediting `missing-empty-or-conflict-
+    /// state` for the transfer-reports family (`GET /api/v0/telemetry/
+    /// reports/transfers/leaderboard`, `/exceptions`, `/exceptions/
+    /// pareto`): a missing `direction` query parameter is a real 400
+    /// (`Enum.TryParse<TransferDirection>` failure path), not silently
+    /// treated as "no filter" and mixing Upload/Download rows into one
+    /// report -- independently re-derived from `transfer_reports_
+    /// require_a_real_direction_not_a_silent_default` with fresh
+    /// request shapes. Confirmed against `/tmp/slskr-parity-evidence/
+    /// controller-api/*.json` before writing: all 3 routes already had
+    /// `malformed-path-query-or-body` credited from an earlier batch,
+    /// but none had this case. slskdN-only (confirmed against the
+    /// frozen registry).
+    #[tokio::test]
+    async fn controller_api_differential_transfer_reports_required_direction() {
+        let target = "slskdn";
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($route:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!(
+                        "{target} GET {} [missing-empty-or-conflict-state]",
+                        $route
+                    ));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": "GET",
+                    "route": $route,
+                    "case": "missing-empty-or-conflict-state",
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        let (state, _receiver) = test_state();
+        for path in [
+            "/api/v0/telemetry/reports/transfers/leaderboard",
+            "/api/v0/telemetry/reports/transfers/exceptions",
+            "/api/v0/telemetry/reports/transfers/exceptions/pareto",
+        ] {
+            let missing =
+                super::route_http_request("GET", &format!("{path}?limit=5"), None, "", &state)
+                    .await
+                    .unwrap_or_else(|error| panic!("{path}: {error}"));
+            record!(
+                path,
+                missing.status == "400 Bad Request" && missing.body.contains("Direction is required")
+            );
+        }
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("transfer_reports_required_direction.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api transfer-reports-required-direction mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
