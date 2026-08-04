@@ -129043,6 +129043,480 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof crediting the `update-delete-and-
+    /// readback` persistence-lifecycle case for the 8 database domains
+    /// `persistence_lifecycle_differential_collections_notes_wishlist_
+    /// sharing_domains_roundtrip_and_rehydrate` already proved
+    /// `create-and-read-roundtrip` and `restart-rehydration` for
+    /// (Collections, CollectionItems, UserNotes, WishlistItems,
+    /// Contacts, ShareGrants, ShareGroups, ShareGroupMembers) --
+    /// independently re-derived with fresh fixture data, driving a
+    /// real PUT/DELETE through the same route dispatcher and reading
+    /// the persisted rows back directly from a real in-memory
+    /// `DatabaseManager` (not trusting the HTTP response alone) to
+    /// prove the update is genuinely written, the delete genuinely
+    /// removes the row, and a re-list after delete comes back empty.
+    /// Confirmed against `/tmp/slskr-parity-evidence/persistence-
+    /// lifecycle/*.json` before writing: this case was open for every
+    /// one of these 8 domains (only `create-and-read-roundtrip` and
+    /// `restart-rehydration` had ever been credited across the whole
+    /// persistence-lifecycle workstream, for any domain). slskdN-only
+    /// (confirmed against the frozen database-domain registry).
+    #[tokio::test]
+    async fn persistence_lifecycle_differential_collections_notes_wishlist_sharing_domains_update_delete_and_readback(
+    ) {
+        let target = "slskdn";
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($domain:expr, $case:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!("{target} {} {}", $domain, $case));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "domain": $domain,
+                    "case": $case,
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        // Collections / CollectionItems.
+        {
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, _receiver) = test_state_with_env_parts(
+                MapEnv::default()
+                    .with("SLSKR_PERSISTENCE_ENABLED", "true")
+                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+            let collection = super::route_http_request(
+                "POST",
+                "/api/collections",
+                None,
+                r#"{"name":"Differential Road Trip","description":"queued albums"}"#,
+                &state,
+            )
+            .await
+            .expect("create differential collection");
+            let collection_id = serde_json::from_str::<serde_json::Value>(&collection.body)
+                .ok()
+                .and_then(|json| json["id"].as_str().map(str::to_owned))
+                .expect("differential collection id");
+            let item = super::route_http_request(
+                "POST",
+                &format!("/api/collections/{collection_id}/items"),
+                None,
+                r#"{"content_id":"differential-track-1","artist":"Differential Artist","title":"Original","kind":"Audio"}"#,
+                &state,
+            )
+            .await
+            .expect("create differential collection item");
+            let item_id = serde_json::from_str::<serde_json::Value>(&item.body)
+                .ok()
+                .and_then(|json| json["id"].as_str().map(str::to_owned))
+                .expect("differential collection item id");
+
+            let renamed = super::route_http_request(
+                "PUT",
+                &format!("/api/collections/{collection_id}"),
+                None,
+                r#"{"name":"Differential Renamed"}"#,
+                &state,
+            )
+            .await
+            .expect("rename differential collection");
+            let persisted_after_rename = db.list_collections(10, 0).await.unwrap_or_default();
+            let rename_pass = renamed.status == "200 OK"
+                && persisted_after_rename.len() == 1
+                && persisted_after_rename[0].name == "Differential Renamed";
+
+            let item_deleted = super::route_http_request(
+                "DELETE",
+                &format!("/api/collections/items/{item_id}"),
+                None,
+                "",
+                &state,
+            )
+            .await
+            .expect("delete differential collection item");
+            let persisted_items_after_delete =
+                db.list_collection_items(10, 0).await.unwrap_or_default();
+            let item_delete_pass =
+                item_deleted.status == "200 OK" && persisted_items_after_delete.is_empty();
+
+            record!(
+                "Collections",
+                "update-delete-and-readback",
+                rename_pass && item_delete_pass
+            );
+            record!(
+                "CollectionItems",
+                "update-delete-and-readback",
+                item_delete_pass
+            );
+        }
+
+        // UserNotes.
+        {
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, _receiver) = test_state_with_env_parts(
+                MapEnv::default()
+                    .with("SLSKR_PERSISTENCE_ENABLED", "true")
+                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+            let note = super::route_http_request(
+                "POST",
+                "/api/users/notes",
+                None,
+                r#"{"username":"differential-friend","note":"original note"}"#,
+                &state,
+            )
+            .await
+            .expect("create differential user note");
+            let note_id = serde_json::from_str::<serde_json::Value>(&note.body)
+                .ok()
+                .and_then(|json| json["id"].as_str().map(str::to_owned))
+                .expect("differential note id");
+
+            let updated = super::route_http_request(
+                "PUT",
+                &format!("/api/users/notes/{note_id}"),
+                None,
+                r#"{"note":"updated note"}"#,
+                &state,
+            )
+            .await
+            .expect("update differential user note");
+            let persisted_after_update = db.list_user_notes(10, 0).await.unwrap_or_default();
+            let update_pass = updated.status == "200 OK"
+                && persisted_after_update.len() == 1
+                && persisted_after_update[0].note == "updated note";
+
+            let deleted = super::route_http_request(
+                "DELETE",
+                &format!("/api/users/notes/{note_id}"),
+                None,
+                "",
+                &state,
+            )
+            .await
+            .expect("delete differential user note");
+            let persisted_after_delete = db.list_user_notes(10, 0).await.unwrap_or_default();
+            let delete_pass = deleted.status == "200 OK" && persisted_after_delete.is_empty();
+
+            record!("UserNotes", "update-delete-and-readback", update_pass && delete_pass);
+        }
+
+        // WishlistItems.
+        {
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, _receiver) = test_state_with_env_parts(
+                MapEnv::default()
+                    .with("SLSKR_PERSISTENCE_ENABLED", "true")
+                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+            let wishlist = super::route_http_request(
+                "POST",
+                "/api/wishlist",
+                None,
+                r#"{"artist":"Differential Artist","title":"Original Track","kind":"Audio"}"#,
+                &state,
+            )
+            .await
+            .expect("create differential wishlist item");
+            let wishlist_id = serde_json::from_str::<serde_json::Value>(&wishlist.body)
+                .ok()
+                .and_then(|json| json["id"].as_str().map(str::to_owned))
+                .expect("differential wishlist id");
+
+            let updated = super::route_http_request(
+                "PUT",
+                &format!("/api/wishlist/{wishlist_id}"),
+                None,
+                r#"{"artist":"Differential Artist","title":"Updated Track"}"#,
+                &state,
+            )
+            .await
+            .expect("update differential wishlist item");
+            let persisted_after_update = db.list_wishlist_items(10, 0).await.unwrap_or_default();
+            let update_pass = updated.status == "200 OK"
+                && persisted_after_update.len() == 1
+                && persisted_after_update[0].title == "Updated Track";
+
+            let deleted = super::route_http_request(
+                "DELETE",
+                &format!("/api/wishlist/{wishlist_id}"),
+                None,
+                "",
+                &state,
+            )
+            .await
+            .expect("delete differential wishlist item");
+            let persisted_after_delete = db.list_wishlist_items(10, 0).await.unwrap_or_default();
+            let delete_pass = deleted.status == "200 OK" && persisted_after_delete.is_empty();
+
+            record!(
+                "WishlistItems",
+                "update-delete-and-readback",
+                update_pass && delete_pass
+            );
+        }
+
+        // Contacts.
+        {
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, _receiver) = test_state_with_env_parts(
+                MapEnv::default()
+                    .with("SLSKR_PERSISTENCE_ENABLED", "true")
+                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+            let contact = super::route_http_request(
+                "POST",
+                "/api/contacts",
+                None,
+                r#"{"username":"differential-friend"}"#,
+                &state,
+            )
+            .await
+            .expect("create differential contact");
+            let contact_id = serde_json::from_str::<serde_json::Value>(&contact.body)
+                .ok()
+                .and_then(|json| json["id"].as_str().map(str::to_owned))
+                .expect("differential contact id");
+
+            let updated = super::route_http_request(
+                "PUT",
+                &format!("/api/contacts/{contact_id}"),
+                None,
+                r#"{"online":true}"#,
+                &state,
+            )
+            .await
+            .expect("update differential contact");
+            let persisted_after_update = db.list_contacts(10, 0).await.unwrap_or_default();
+            let update_pass = updated.status == "200 OK"
+                && persisted_after_update.len() == 1
+                && persisted_after_update[0].online;
+
+            let deleted = super::route_http_request(
+                "DELETE",
+                &format!("/api/contacts/{contact_id}"),
+                None,
+                "",
+                &state,
+            )
+            .await
+            .expect("delete differential contact");
+            let persisted_after_delete = db.list_contacts(10, 0).await.unwrap_or_default();
+            let delete_pass = deleted.status == "200 OK" && persisted_after_delete.is_empty();
+
+            record!("Contacts", "update-delete-and-readback", update_pass && delete_pass);
+        }
+
+        // ShareGrants (requires a real collection to grant against).
+        {
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, _receiver) = test_state_with_env_parts(
+                MapEnv::default()
+                    .with("SLSKR_PERSISTENCE_ENABLED", "true")
+                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+            let collection = super::route_http_request(
+                "POST",
+                "/api/collections",
+                None,
+                r#"{"name":"Differential Grant Collection"}"#,
+                &state,
+            )
+            .await
+            .expect("create differential grant collection");
+            let collection_id = serde_json::from_str::<serde_json::Value>(&collection.body)
+                .ok()
+                .and_then(|json| json["id"].as_str().map(str::to_owned))
+                .expect("differential grant collection id");
+            let grant = super::route_http_request(
+                "POST",
+                "/api/share-grants",
+                None,
+                &format!(r#"{{"collection_id":"{collection_id}","username":"differential-peer"}}"#),
+                &state,
+            )
+            .await
+            .expect("create differential share grant");
+            let grant_id = serde_json::from_str::<serde_json::Value>(&grant.body)
+                .ok()
+                .and_then(|json| json["id"].as_str().map(str::to_owned))
+                .expect("differential grant id");
+
+            let updated = super::route_http_request(
+                "PUT",
+                &format!("/api/share-grants/{grant_id}"),
+                None,
+                r#"{"permissions":"restricted"}"#,
+                &state,
+            )
+            .await
+            .expect("update differential share grant");
+            let persisted_after_update = db.list_share_grants(10, 0).await.unwrap_or_default();
+            let update_pass = updated.status == "200 OK"
+                && persisted_after_update.len() == 1
+                && persisted_after_update[0].permissions == "restricted";
+
+            let deleted = super::route_http_request(
+                "DELETE",
+                &format!("/api/share-grants/{grant_id}"),
+                None,
+                "",
+                &state,
+            )
+            .await
+            .expect("delete differential share grant");
+            let persisted_after_delete = db.list_share_grants(10, 0).await.unwrap_or_default();
+            let delete_pass = deleted.status == "200 OK" && persisted_after_delete.is_empty();
+
+            record!(
+                "ShareGrants",
+                "update-delete-and-readback",
+                update_pass && delete_pass
+            );
+        }
+
+        // ShareGroups / ShareGroupMembers.
+        {
+            let db = super::persistence::DatabaseManager::in_memory()
+                .await
+                .expect("in-memory db");
+            let (state, _receiver) = test_state_with_env_parts(
+                MapEnv::default()
+                    .with("SLSKR_PERSISTENCE_ENABLED", "true")
+                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                super::SearchStore::new(),
+                Some(db.clone()),
+            );
+            let group = super::route_http_request(
+                "POST",
+                "/api/sharegroups",
+                None,
+                r#"{"name":"Differential Trusted"}"#,
+                &state,
+            )
+            .await
+            .expect("create differential share group");
+            let group_id = serde_json::from_str::<serde_json::Value>(&group.body)
+                .ok()
+                .and_then(|json| json["id"].as_str().map(str::to_owned))
+                .expect("differential share group id");
+            let member_added = super::route_http_request(
+                "POST",
+                &format!("/api/sharegroups/{group_id}/members"),
+                None,
+                r#"{"username":"differential-peer"}"#,
+                &state,
+            )
+            .await
+            .expect("add differential share group member");
+
+            let renamed = super::route_http_request(
+                "PUT",
+                &format!("/api/sharegroups/{group_id}"),
+                None,
+                r#"{"name":"Differential Renamed Group"}"#,
+                &state,
+            )
+            .await
+            .expect("rename differential share group");
+            let persisted_groups_after_rename =
+                db.list_share_groups(10, 0).await.unwrap_or_default();
+            let rename_pass = member_added.status == "201 Created"
+                && renamed.status == "200 OK"
+                && persisted_groups_after_rename.len() == 1
+                && persisted_groups_after_rename[0].name == "Differential Renamed Group";
+            let persisted_members_before_delete =
+                db.list_share_group_members(10, 0).await.unwrap_or_default();
+
+            let member_removed = super::route_http_request(
+                "DELETE",
+                &format!("/api/sharegroups/{group_id}/members/differential-peer"),
+                None,
+                "",
+                &state,
+            )
+            .await
+            .expect("remove differential share group member");
+            let persisted_members_after_delete =
+                db.list_share_group_members(10, 0).await.unwrap_or_default();
+            let member_delete_pass = member_removed.status == "200 OK"
+                && persisted_members_before_delete.len() == 1
+                && persisted_members_after_delete.is_empty();
+
+            let group_deleted = super::route_http_request(
+                "DELETE",
+                &format!("/api/sharegroups/{group_id}"),
+                None,
+                "",
+                &state,
+            )
+            .await
+            .expect("delete differential share group");
+            let persisted_groups_after_delete =
+                db.list_share_groups(10, 0).await.unwrap_or_default();
+            let group_delete_pass =
+                group_deleted.status == "200 OK" && persisted_groups_after_delete.is_empty();
+
+            record!(
+                "ShareGroups",
+                "update-delete-and-readback",
+                rename_pass && group_delete_pass
+            );
+            record!(
+                "ShareGroupMembers",
+                "update-delete-and-readback",
+                member_delete_pass
+            );
+        }
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("persistence-lifecycle");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join(
+                "collections_notes_wishlist_sharing_domains_update_delete_and_readback.json",
+            ),
+            serde_json::to_string_pretty(&ledger).expect("serialize persistence-lifecycle ledger"),
+        )
+        .expect("write persistence-lifecycle ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} persistence-lifecycle update-delete-and-readback mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
