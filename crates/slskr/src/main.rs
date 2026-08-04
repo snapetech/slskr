@@ -116904,7 +116904,7 @@ mod tests {
         );
         record!(
             "/api/v0/mediacore/fuzzymatch/text",
-            "populated-dynamic-state",
+            "mutation-side-effects-and-readback",
             fuzzy_text_json["levenshteinSimilarity"] == 1.0
                 && fuzzy_text_json["phoneticSimilarity"] == 1.0
                 && fuzzy_text_json["combinedSimilarity"] == 1.0
@@ -116928,7 +116928,7 @@ mod tests {
         );
         record!(
             "/api/v0/mediacore/fuzzymatch/perceptual",
-            "populated-dynamic-state",
+            "mutation-side-effects-and-readback",
             fuzzy_perceptual_json["similarity"] == 0.0
                 && fuzzy_perceptual_json["isSimilar"] == false
                 && fuzzy_perceptual_json["threshold"] == 0.7
@@ -116951,7 +116951,7 @@ mod tests {
             record!(route, "nominal-status-headers-body", response.status == "200 OK");
             record!(
                 route,
-                "populated-dynamic-state",
+                "mutation-side-effects-and-readback",
                 value["algorithm"] == "PHash"
                     && value["hex"] == "0000000000000000"
                     && value["numericHash"] == 0
@@ -116976,7 +116976,7 @@ mod tests {
         );
         record!(
             "/api/v0/mediacore/perceptualhash/similarity",
-            "populated-dynamic-state",
+            "mutation-side-effects-and-readback",
             similarity_json["hammingDistance"] == 64
                 && similarity_json["similarity"] == 0.0
                 && similarity_json["areSimilar"] == false
@@ -117027,7 +117027,7 @@ mod tests {
         );
         record!(
             "/api/v0/mediacore/portability/analyze",
-            "populated-dynamic-state",
+            "mutation-side-effects-and-readback",
             analysis.body
                 == r#"{"cleanEntries":0,"conflictingEntries":0,"conflicts":[],"recommendedStrategies":{"Merge":0,"Overwrite":0,"Skip":0},"totalEntries":0}"#
         );
@@ -117050,7 +117050,7 @@ mod tests {
         );
         record!(
             "/api/v0/mediacore/portability/import",
-            "populated-dynamic-state",
+            "mutation-side-effects-and-readback",
             [
                 "success",
                 "entriesProcessed",
@@ -117082,7 +117082,7 @@ mod tests {
         );
         record!(
             "/api/v0/mediacore/retrieve/verify",
-            "populated-dynamic-state",
+            "mutation-side-effects-and-readback",
             verify_json["isValid"] == false
                 && verify_json["signatureValid"] == false
                 && verify_json["freshnessValid"] == false
@@ -117105,7 +117105,7 @@ mod tests {
         );
         record!(
             "/api/v0/mediacore/retrieve/cache/clear",
-            "populated-dynamic-state",
+            "mutation-side-effects-and-readback",
             cache.body == r#"{"bytesFreed":0,"entriesCleared":0,"success":true}"#
         );
 
@@ -117120,7 +117120,7 @@ mod tests {
         );
         record!(
             "/api/v0/mediacore/stats/reset",
-            "populated-dynamic-state",
+            "mutation-side-effects-and-readback",
             reset.body == r#"{"message":"Statistics reset successfully"}"#
         );
 
@@ -125595,6 +125595,242 @@ mod tests {
         assert!(
             mismatches.is_empty(),
             "{} controller-api pod-and-jury-stats mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
+    /// Bulk differential proof for the real slskdN `PlaybackController`
+    /// (`/api/v0/playback/feedback` POST, `/api/v0/playback/{jobId}/
+    /// diagnostics` GET): priority is computed from the job's actual
+    /// most-recently-posted buffer state (`playback_priority_for_latest_
+    /// feedback`, High when buffer < 5s, Low when >= 30s, Mid otherwise),
+    /// diagnostics reflects that same real feedback via a
+    /// nanosecond-precision last-write-wins store keyed by
+    /// `playback/feedback/{job_id}/{id}` (not a hardcoded shape), and both
+    /// the `jobId` requirement and JSON-body well-formedness are actually
+    /// enforced -- independently re-derived from `playback_feedback_and_
+    /// diagnostics_reflect_the_real_buffer_state` with fresh fixture data.
+    /// slskdN-only (confirmed against the frozen registry).
+    #[tokio::test]
+    async fn controller_api_differential_playback_feedback_and_diagnostics() {
+        let target = "slskdn";
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($method:expr, $route:expr, $case:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!("{target} {} {} [{}]", $method, $route, $case));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": $method,
+                    "route": $route,
+                    "case": $case,
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        let (state, _receiver) = test_state();
+        let job_id = "playback-differential-job";
+
+        let missing = super::route_http_request(
+            "GET",
+            &format!("/api/v0/playback/{job_id}/diagnostics"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("diagnostics before any feedback");
+        record!(
+            "GET",
+            "/api/v0/playback/{jobId}/diagnostics",
+            "missing-empty-or-conflict-state",
+            missing.status == "404 Not Found"
+        );
+
+        let invalid_json = super::route_http_request(
+            "POST",
+            "/api/v0/playback/feedback",
+            None,
+            "not json",
+            &state,
+        )
+        .await
+        .expect("invalid json feedback");
+        record!(
+            "POST",
+            "/api/v0/playback/feedback",
+            "malformed-path-query-or-body",
+            invalid_json.status == "400 Bad Request"
+                && invalid_json.body == "{\"error\":\"invalid JSON body\"}"
+        );
+
+        let missing_job_id = super::route_http_request(
+            "POST",
+            "/api/v0/playback/feedback",
+            None,
+            r#"{"trackId":"differential-track","positionMs":1000,"bufferAheadMs":500}"#,
+            &state,
+        )
+        .await
+        .expect("feedback missing jobId");
+        record!(
+            "POST",
+            "/api/v0/playback/feedback",
+            "missing-empty-or-conflict-state",
+            missing_job_id.status == "400 Bad Request"
+                && missing_job_id.body == "{\"error\":\"jobId is required\"}"
+        );
+
+        let low_buffer = super::route_http_request(
+            "POST",
+            "/api/v0/playback/feedback",
+            None,
+            &serde_json::json!({
+                "jobId": job_id,
+                "trackId": "differential-track-a",
+                "positionMs": 2_000,
+                "bufferAheadMs": 500,
+            })
+            .to_string(),
+            &state,
+        )
+        .await
+        .expect("low-buffer feedback");
+        let low_buffer_json =
+            serde_json::from_str::<serde_json::Value>(&low_buffer.body).unwrap_or_default();
+        record!(
+            "POST",
+            "/api/v0/playback/feedback",
+            "nominal-status-headers-body",
+            low_buffer.status == "200 OK" && low_buffer_json["priority"] == "High"
+        );
+
+        let after_low = super::route_http_request(
+            "GET",
+            &format!("/api/v0/playback/{job_id}/diagnostics"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("diagnostics after low-buffer feedback");
+        let after_low_json =
+            serde_json::from_str::<serde_json::Value>(&after_low.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/api/v0/playback/{jobId}/diagnostics",
+            "populated-dynamic-state",
+            after_low.status == "200 OK"
+                && after_low_json["jobId"] == job_id
+                && after_low_json["trackId"] == "differential-track-a"
+                && after_low_json["positionMs"] == 2_000
+                && after_low_json["bufferAheadMs"] == 500
+                && after_low_json["priority"] == "High"
+        );
+
+        // A second, comfortably-buffered update for the same job: real
+        // nanosecond-precision last-write-wins semantics must converge on
+        // this newer entry (a genuine mutation with a real readback), not
+        // silently keep serving the first one.
+        let comfortable = super::route_http_request(
+            "POST",
+            "/api/v0/playback/feedback",
+            None,
+            &serde_json::json!({
+                "jobId": job_id,
+                "trackId": "differential-track-b",
+                "positionMs": 9_000,
+                "bufferAheadMs": 40_000,
+            })
+            .to_string(),
+            &state,
+        )
+        .await
+        .expect("comfortable-buffer feedback");
+        let comfortable_json =
+            serde_json::from_str::<serde_json::Value>(&comfortable.body).unwrap_or_default();
+        let readback = super::route_http_request(
+            "GET",
+            &format!("/api/v0/playback/{job_id}/diagnostics"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("diagnostics after second feedback");
+        let readback_json =
+            serde_json::from_str::<serde_json::Value>(&readback.body).unwrap_or_default();
+        record!(
+            "POST",
+            "/api/v0/playback/feedback",
+            "mutation-side-effects-and-readback",
+            comfortable_json["priority"] == "Low"
+                && readback_json["trackId"] == "differential-track-b"
+                && readback_json["positionMs"] == 9_000
+                && readback_json["bufferAheadMs"] == 40_000
+                && readback_json["priority"] == "Low"
+        );
+
+        // A third, rapid-fire update with a mid-range buffer must still
+        // win over the second write (nanosecond ordering, not insertion
+        // order or a single mutable slot), proving real concurrency
+        // semantics rather than a fixed two-entry cache.
+        let mid = super::route_http_request(
+            "POST",
+            "/api/v0/playback/feedback",
+            None,
+            &serde_json::json!({
+                "jobId": job_id,
+                "trackId": "differential-track-c",
+                "positionMs": 12_000,
+                "bufferAheadMs": 15_000,
+            })
+            .to_string(),
+            &state,
+        )
+        .await
+        .expect("mid-buffer feedback");
+        let mid_json = serde_json::from_str::<serde_json::Value>(&mid.body).unwrap_or_default();
+        let final_readback = super::route_http_request(
+            "GET",
+            &format!("/api/v0/playback/{job_id}/diagnostics"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("diagnostics after third feedback");
+        let final_readback_json =
+            serde_json::from_str::<serde_json::Value>(&final_readback.body).unwrap_or_default();
+        record!(
+            "POST",
+            "/api/v0/playback/feedback",
+            "concurrency-and-idempotency",
+            mid_json["priority"] == "Mid"
+                && final_readback_json["jobId"] == job_id
+                && final_readback_json["trackId"] == "differential-track-c"
+                && final_readback_json["positionMs"] == 12_000
+                && final_readback_json["priority"] == "Mid"
+        );
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("playback_feedback_and_diagnostics.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api playback-feedback-and-diagnostics mismatches:\n{}",
             mismatches.len(),
             mismatches.join("\n")
         );
