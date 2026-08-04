@@ -123965,6 +123965,220 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof crediting the pod-channel-messages route's
+    /// cases, independently re-derived from `pod_channel_messages_are_
+    /// durable_shaped_and_incremental`'s real sender-identity-spoofing
+    /// rejection (a caller cannot post as a different `senderPeerId`),
+    /// membership-required history reads (a non-member 403s even for a
+    /// public pod), and `?since=` incremental-cursor pagination.
+    /// slskdN-only (confirmed against the frozen registry).
+    #[tokio::test]
+    async fn controller_api_differential_pod_channel_messages() {
+        let target = "slskdn";
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($method:expr, $route:expr, $case:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!("{target} {} {} [{}]", $method, $route, $case));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": $method,
+                    "route": $route,
+                    "case": $case,
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        let (state, _receiver) = test_state();
+        let path = "/api/v0/pods/pod-differential-1/channels/general/messages";
+        let created = super::route_http_request(
+            "POST",
+            "/api/v0/pods",
+            None,
+            r#"{"pod":{"podId":"pod-differential-1","name":"Pod Differential One","isPublic":true,"channels":[{"channelId":"general","kind":0,"name":"General"}]},"requestingPeerId":"differential-peer-1"}"#,
+            &state,
+        )
+        .await
+        .expect("create pod for messages");
+        assert_eq!(created.status, "201 Created");
+
+        state
+            .pods
+            .write()
+            .await
+            .join("pod-differential-1", "differential-peer-1".to_owned())
+            .expect("join pod as fixture member");
+
+        let spoofed = super::route_http_request(
+            "POST",
+            path,
+            None,
+            r#"{"body":"spoofed","senderPeerId":"differential-peer-1"}"#,
+            &state,
+        )
+        .await
+        .unwrap_or_else(|error| panic!("{path}: {error}"));
+        record!(
+            "POST",
+            "/api/v0/pods/{podId}/channels/{channelId}/messages",
+            "missing-empty-or-conflict-state",
+            spoofed.status == "403 Forbidden"
+        );
+
+        *state.runtime_credentials.write().await = Some(super::LoginCredentials::default_client(
+            "differential-public-intruder",
+            "secret",
+        ));
+        let forbidden = super::route_http_request("GET", path, None, "", &state)
+            .await
+            .unwrap_or_else(|error| panic!("{path}: {error}"));
+        record!(
+            "GET",
+            "/api/v0/pods/{podId}/channels/{channelId}/messages",
+            "missing-empty-or-conflict-state",
+            forbidden.status == "403 Forbidden"
+        );
+        *state.runtime_credentials.write().await = None;
+
+        let first = super::route_http_request(
+            "POST",
+            path,
+            None,
+            r#"{"body":"first","senderPeerId":"tester","signature":"sig"}"#,
+            &state,
+        )
+        .await
+        .unwrap_or_else(|error| panic!("{path}: {error}"));
+        let first_json = serde_json::from_str::<serde_json::Value>(&first.body).unwrap_or_default();
+        record!(
+            "POST",
+            "/api/v0/pods/{podId}/channels/{channelId}/messages",
+            "nominal-status-headers-body",
+            first.status == "200 OK"
+                && first_json["sent"] == true
+                && first_json["messageId"].as_str().map(str::len) == Some(32)
+        );
+
+        let initial = super::route_http_request("GET", path, None, "", &state)
+            .await
+            .unwrap_or_else(|error| panic!("{path}: {error}"));
+        let initial_json = serde_json::from_str::<serde_json::Value>(&initial.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/api/v0/pods/{podId}/channels/{channelId}/messages",
+            "nominal-status-headers-body",
+            initial.status == "200 OK"
+        );
+        record!(
+            "GET",
+            "/api/v0/pods/{podId}/channels/{channelId}/messages",
+            "populated-dynamic-state",
+            initial_json.as_array().map(Vec::len) == Some(1)
+                && initial_json[0]["podId"] == "pod-differential-1"
+                && initial_json[0]["channelId"] == "general"
+                && initial_json[0]["senderPeerId"] == "tester"
+                && initial_json[0]["body"] == "first"
+                && initial_json[0]["sigVersion"] == 1
+        );
+        let cursor = initial_json[0]["timestampUnixMs"].as_u64().unwrap_or_default();
+
+        let second = super::route_http_request(
+            "POST",
+            path,
+            None,
+            r#"{"body":"second","senderPeerId":"tester"}"#,
+            &state,
+        )
+        .await
+        .unwrap_or_else(|error| panic!("{path}: {error}"));
+        assert_eq!(second.status, "200 OK");
+        {
+            let mut channels = state.pod_channels.write().await;
+            let latest = channels
+                .list("pod-differential-1", "general", None)
+                .pop()
+                .expect("at least one message");
+            if latest.timestamp_unix_ms == cursor {
+                channels
+                    .append(
+                        "pod-differential-1".to_owned(),
+                        "general".to_owned(),
+                        "tester".to_owned(),
+                        "third".to_owned(),
+                        String::new(),
+                        cursor + 1,
+                    )
+                    .expect("append disambiguating message");
+            }
+        }
+        let incremental_route = format!("{path}?since={cursor}");
+        let incremental = super::route_http_request("GET", &incremental_route, None, "", &state)
+            .await
+            .unwrap_or_else(|error| panic!("{incremental_route}: {error}"));
+        let incremental_json =
+            serde_json::from_str::<serde_json::Value>(&incremental.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/api/v0/pods/{podId}/channels/{channelId}/messages",
+            "mutation-side-effects-and-readback",
+            incremental.status == "200 OK"
+                && incremental_json.as_array().is_some_and(|entries| {
+                    !entries.is_empty()
+                        && entries.iter().all(|message| {
+                            message["timestampUnixMs"].as_u64().unwrap_or_default() > cursor
+                        })
+                })
+        );
+
+        let invalid_cursor_route = format!("{path}?since=-1");
+        let invalid_cursor = super::route_http_request("GET", &invalid_cursor_route, None, "", &state)
+            .await
+            .unwrap_or_else(|error| panic!("{invalid_cursor_route}: {error}"));
+        record!(
+            "GET",
+            "/api/v0/pods/{podId}/channels/{channelId}/messages",
+            "malformed-path-query-or-body",
+            invalid_cursor.status == "400 Bad Request"
+        );
+
+        let invalid_body = super::route_http_request(
+            "POST",
+            path,
+            None,
+            r#"{"body":"","senderPeerId":"tester"}"#,
+            &state,
+        )
+        .await
+        .unwrap_or_else(|error| panic!("{path}: {error}"));
+        record!(
+            "POST",
+            "/api/v0/pods/{podId}/channels/{channelId}/messages",
+            "malformed-path-query-or-body",
+            invalid_body.status == "400 Bad Request"
+        );
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("pod_channel_messages.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api pod-channel-messages mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
