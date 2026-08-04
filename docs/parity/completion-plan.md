@@ -30,7 +30,7 @@ scoring artifact -- confirmed, all report `complete` with
 
 Parity is **not achieved**. Every planned workstream has an executable
 certification denominator. The literal proof-case closure ratio is now
-**9,290 / 19,122 = 48.58%** (was 853 / 19,122 = 4.46% at the start of this
+**9,307 / 19,122 = 48.67%** (was 853 / 19,122 = 4.46% at the start of this
 review cycle), but this is not a product-completion estimate: most
 generated cases are Cartesian proof dimensions initialized as `needs-proof`,
 including behavior already implemented and tested in slskR. Product
@@ -145,7 +145,15 @@ source-discovery's real session-command dispatch, overlapping-run
 rejection, and search-result projection (6 routes), plus pod/jury
 verification and stats routes (real membership/signature checks,
 real per-status audit counts and staleness, forged-sender rejection
-counted in stats), bringing the workstream to 556/5,300.
+counted in stats), bringing the workstream to 556/5,300. A further
+batch credited the real slskdN `PlaybackController` (buffer-derived
+priority thresholds, nanosecond-precision last-write-wins feedback
+storage with a real multi-write readback check) and, while verifying
+it, found and fixed a recurrence of the `populated-dynamic-state`
+mislabeling bug in 9 already-committed `mediacore` fuzzy-match/
+perceptual-hash cases (a 3-argument `record!` macro variant that
+hardcodes `"method": "POST"` in the ledger, invisible to the earlier
+targeted fix), bringing the workstream to 573/5,300.
 
 The relay-agent/controller subsystem (deferred as a genuinely missing
 capability, see earlier notes) was investigated further this session to
