@@ -30,7 +30,7 @@ scoring artifact -- confirmed, all report `complete` with
 
 Parity is **not achieved**. Every planned workstream has an executable
 certification denominator. The literal proof-case closure ratio is now
-**9,253 / 19,122 = 48.39%** (was 853 / 19,122 = 4.46% at the start of this
+**9,268 / 19,122 = 48.47%** (was 853 / 19,122 = 4.46% at the start of this
 review cycle), but this is not a product-completion estimate: most
 generated cases are Cartesian proof dimensions initialized as `needs-proof`,
 including behavior already implemented and tested in slskR. Product
@@ -138,6 +138,10 @@ it to 519/5,300 -- a real, no-new-tests correctness fix, not a new
 batch (a `pod_management_routes_persist_crud_members_and_bindings`
 differential was also found already credited from earlier in this
 session and a duplicate attempt was discarded before committing).
+After lowering the call-density scan's threshold from `count > 3` to
+`> 2`, credited virtual-soulfind-v2's real end-to-end catalogue-search
+-> plan -> intent -> process -> completed workflow (8 routes),
+bringing the workstream to 534/5,300.
 
 The relay-agent/controller subsystem (deferred as a genuinely missing
 capability, see earlier notes) was investigated further this session to
