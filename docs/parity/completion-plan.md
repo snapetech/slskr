@@ -30,7 +30,7 @@ scoring artifact -- confirmed, all report `complete` with
 
 Parity is **not achieved**. Every planned workstream has an executable
 certification denominator. The literal proof-case closure ratio is now
-**9,215 / 19,122 = 48.19%** (was 853 / 19,122 = 4.46% at the start of this
+**9,227 / 19,122 = 48.25%** (was 853 / 19,122 = 4.46% at the start of this
 review cycle), but this is not a product-completion estimate: most
 generated cases are Cartesian proof dimensions initialized as `needs-proof`,
 including behavior already implemented and tested in slskR. Product
@@ -127,11 +127,11 @@ realm-subject-index conflict-detection and authority-decision
 lifecycle, musicbrainz-overlay export-review/approval real-gating and
 idempotent-approval checks, pod-membership-workflow real queued join/
 leave/accept/cancel lifecycle, pod-channel-messages sender-identity-
-spoofing rejection and incremental-cursor pagination) brought the
-workstream to 481/5,300 (a `pod_management_routes_persist_crud_
-members_and_bindings` differential was found already credited from
-earlier in this session and a duplicate attempt was discarded before
-committing).
+spoofing rejection and incremental-cursor pagination, hashdb history-
+backfill real batched-progress persistence) brought the workstream to
+493/5,300 (a `pod_management_routes_persist_crud_members_and_bindings`
+differential was found already credited from earlier in this session
+and a duplicate attempt was discarded before committing).
 
 The relay-agent/controller subsystem (deferred as a genuinely missing
 capability, see earlier notes) was investigated further this session to
