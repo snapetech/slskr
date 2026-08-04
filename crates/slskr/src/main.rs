@@ -124870,6 +124870,229 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof crediting 6 source-discovery routes'
+    /// cases, independently re-derived from `source_discovery_routes_
+    /// dispatch_and_project_bounded_search_sources`'s real session-
+    /// command dispatch (a genuine `SessionCommand::Search` is sent, not
+    /// a fabricated success), overlapping-discovery-run rejection (409
+    /// Conflict), and real search-result projection into by-size/by-
+    /// filename/summary views. slskdN-only (confirmed against the
+    /// frozen registry).
+    #[tokio::test]
+    async fn controller_api_differential_source_discovery() {
+        let target = "slskdn";
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($method:expr, $route:expr, $case:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!("{target} {} {} [{}]", $method, $route, $case));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": $method,
+                    "route": $route,
+                    "case": $case,
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        let (state, mut receiver) = test_state();
+        let started = super::route_http_request(
+            "POST",
+            "/api/v0/discovery/start",
+            None,
+            r#"{"searchTerm":"differential recording","enableHashVerification":true}"#,
+            &state,
+        )
+        .await
+        .expect("start source discovery");
+        record!(
+            "POST",
+            "/api/v0/discovery/start",
+            "nominal-status-headers-body",
+            started.status == "200 OK"
+        );
+        let token = match receiver.recv().await.expect("discovery search command") {
+            super::SessionCommand::Search {
+                token,
+                query,
+                target: super::SearchDispatchTarget::Global,
+            } => {
+                assert_eq!(query, "differential recording");
+                token
+            }
+            command => panic!("unexpected command: {command:?}"),
+        };
+        record!(
+            "POST",
+            "/api/v0/discovery/start",
+            "mutation-side-effects-and-readback",
+            true
+        );
+
+        let conflict = super::route_http_request(
+            "POST",
+            "/api/v0/discovery/start",
+            None,
+            r#"{"searchTerm":"second"}"#,
+            &state,
+        )
+        .await
+        .expect("reject overlapping discovery");
+        record!(
+            "POST",
+            "/api/v0/discovery/start",
+            "missing-empty-or-conflict-state",
+            conflict.status == "409 Conflict"
+        );
+
+        {
+            let mut searches = state.searches.write().await;
+            let record = searches
+                .records
+                .iter_mut()
+                .find(|record| record.token == token)
+                .expect("discovery search record");
+            record.results.push(super::SearchResultEntry {
+                peer_username: Some("differential-source-peer".to_owned()),
+                filename: "Rare/DifferentialRecording.flac".to_owned(),
+                size: 42,
+                extension: "flac".to_owned(),
+                locked: false,
+                slot_free: Some(true),
+                average_speed: Some(1234),
+                queue_length: Some(0),
+            });
+        }
+
+        let status = super::route_http_request("GET", "/api/v0/discovery", None, "", &state)
+            .await
+            .expect("source discovery status");
+        let status_json = serde_json::from_str::<serde_json::Value>(&status.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/api/v0/discovery",
+            "nominal-status-headers-body",
+            status.status == "200 OK"
+        );
+        record!(
+            "GET",
+            "/api/v0/discovery",
+            "populated-dynamic-state",
+            status_json["isRunning"] == true
+                && status_json["stats"]["totalFiles"] == 1
+                && status_json["stats"]["totalUsers"] == 1
+                && status_json["stats"]["searchCycles"] == 1
+        );
+
+        let by_size = super::route_http_request(
+            "GET",
+            "/api/v0/discovery/sources/by-size/42?limit=10",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("sources by size");
+        let by_size_json = serde_json::from_str::<serde_json::Value>(&by_size.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/api/v0/discovery/sources/by-size/{size}",
+            "nominal-status-headers-body",
+            by_size.status == "200 OK"
+        );
+        record!(
+            "GET",
+            "/api/v0/discovery/sources/by-size/{size}",
+            "populated-dynamic-state",
+            by_size_json["sourceCount"] == 1
+                && by_size_json["sources"][0]["username"] == "differential-source-peer"
+        );
+
+        let by_name = super::route_http_request(
+            "GET",
+            "/api/v0/discovery/sources/by-filename?pattern=recording&limit=10",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("sources by filename");
+        record!(
+            "GET",
+            "/api/v0/discovery/sources/by-filename",
+            "nominal-status-headers-body",
+            by_name.status == "200 OK"
+        );
+        record!(
+            "GET",
+            "/api/v0/discovery/sources/by-filename",
+            "populated-dynamic-state",
+            by_name.body.contains("Rare/DifferentialRecording.flac")
+        );
+
+        let summaries = super::route_http_request(
+            "GET",
+            "/api/v0/discovery/summaries?minSources=1",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("source summaries");
+        let summaries_json =
+            serde_json::from_str::<serde_json::Value>(&summaries.body).unwrap_or_default();
+        record!(
+            "GET",
+            "/api/v0/discovery/summaries",
+            "nominal-status-headers-body",
+            summaries.status == "200 OK"
+        );
+        record!(
+            "GET",
+            "/api/v0/discovery/summaries",
+            "populated-dynamic-state",
+            summaries_json["summaries"][0]["size"] == 42
+        );
+
+        let stopped = super::route_http_request("POST", "/api/v0/discovery/stop", None, "{}", &state)
+            .await
+            .expect("stop source discovery");
+        let stopped_json = serde_json::from_str::<serde_json::Value>(&stopped.body).unwrap_or_default();
+        record!(
+            "POST",
+            "/api/v0/discovery/stop",
+            "nominal-status-headers-body",
+            stopped.status == "200 OK"
+        );
+        record!(
+            "POST",
+            "/api/v0/discovery/stop",
+            "mutation-side-effects-and-readback",
+            stopped_json["stats"]["lastCycleNewFiles"] == 1
+        );
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("source_discovery.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api source-discovery mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
