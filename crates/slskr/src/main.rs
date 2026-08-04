@@ -126845,6 +126845,166 @@ mod tests {
         );
     }
 
+    /// Bulk differential proof for the real slskdN pod-membership
+    /// self-publish routes (`POST /api/v0/podcore/membership/{podId}/
+    /// members`, `PUT /api/v0/podcore/membership/{podId}/members/
+    /// {peerId}`): impersonation (publishing membership for a peer
+    /// other than the caller) and non-self/non-moderator updates are
+    /// genuinely rejected, and a self-publish/self-update that tries to
+    /// escalate its own role or clear its ban via the request body is
+    /// accepted but the role is pinned back to the real stored value,
+    /// not taken from client input -- independently re-derived from
+    /// `pod_membership_add_requires_self` and `pod_membership_update_
+    /// requires_moderator_or_self_and_pins_role` with fresh fixture
+    /// data. Confirmed against `/tmp/slskr-parity-evidence/
+    /// controller-api/*.json` before writing: neither route had any
+    /// prior case credited. slskdN-only (confirmed against the frozen
+    /// registry).
+    #[tokio::test]
+    async fn controller_api_differential_pod_membership_self_publish() {
+        let target = "slskdn";
+        let mut ledger = Vec::new();
+        let mut mismatches = Vec::new();
+
+        macro_rules! record {
+            ($method:expr, $route:expr, $case:expr, $pass:expr) => {
+                if !$pass {
+                    mismatches.push(format!("{target} {} {} [{}]", $method, $route, $case));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": $method,
+                    "route": $route,
+                    "case": $case,
+                    "pass": $pass,
+                }));
+            };
+        }
+
+        let pod_id = "pod:differential-membership-self-publish";
+        let (state, _receiver) =
+            pod_fixture_with_local_role("differential-local-peer", "differential-owner", pod_id)
+                .await;
+
+        let impersonation = super::route_http_request(
+            "POST",
+            &format!("/api/v0/podcore/membership/{pod_id}/members"),
+            None,
+            r#"{"peerId":"differential-someone-else","role":"member","isBanned":false}"#,
+            &state,
+        )
+        .await
+        .expect("impersonation response");
+        record!(
+            "POST",
+            "/api/v0/podcore/membership/{podId}/members",
+            "missing-empty-or-conflict-state",
+            impersonation.status == "403 Forbidden"
+        );
+
+        let escalation = super::route_http_request(
+            "POST",
+            &format!("/api/v0/podcore/membership/{pod_id}/members"),
+            None,
+            r#"{"peerId":"differential-local-peer","role":"mod","isBanned":false}"#,
+            &state,
+        )
+        .await
+        .expect("self-publish escalation response");
+        let escalation_json =
+            serde_json::from_str::<serde_json::Value>(&escalation.body).unwrap_or_default();
+        record!(
+            "POST",
+            "/api/v0/podcore/membership/{podId}/members",
+            "mutation-side-effects-and-readback",
+            escalation.status == "200 OK" && escalation_json["member"]["role"] == "member"
+        );
+
+        state
+            .pods
+            .write()
+            .await
+            .upsert_member(
+                pod_id,
+                super::pods::PodMember {
+                    peer_id: "differential-local-peer".to_owned(),
+                    role: "member".to_owned(),
+                    is_banned: false,
+                    public_key: None,
+                    joined_at: None,
+                    last_seen: None,
+                },
+            )
+            .expect("add local peer as ordinary member");
+        state
+            .pods
+            .write()
+            .await
+            .upsert_member(
+                pod_id,
+                super::pods::PodMember {
+                    peer_id: "differential-target-member".to_owned(),
+                    role: "member".to_owned(),
+                    is_banned: false,
+                    public_key: None,
+                    joined_at: None,
+                    last_seen: None,
+                },
+            )
+            .expect("add target member");
+
+        let denied = super::route_http_request(
+            "PUT",
+            &format!("/api/v0/podcore/membership/{pod_id}/members/differential-target-member"),
+            None,
+            r#"{"role":"member","isBanned":false}"#,
+            &state,
+        )
+        .await
+        .expect("non-moderator update response");
+        record!(
+            "PUT",
+            "/api/v0/podcore/membership/{podId}/members/{peerId}",
+            "missing-empty-or-conflict-state",
+            denied.status == "403 Forbidden"
+        );
+
+        let self_update = super::route_http_request(
+            "PUT",
+            &format!("/api/v0/podcore/membership/{pod_id}/members/differential-local-peer"),
+            None,
+            r#"{"role":"mod","isBanned":false}"#,
+            &state,
+        )
+        .await
+        .expect("self-update response");
+        let self_update_json =
+            serde_json::from_str::<serde_json::Value>(&self_update.body).unwrap_or_default();
+        record!(
+            "PUT",
+            "/api/v0/podcore/membership/{podId}/members/{peerId}",
+            "mutation-side-effects-and-readback",
+            self_update.status == "200 OK" && self_update_json["member"]["role"] == "member"
+        );
+
+        let evidence_dir = std::env::temp_dir()
+            .join("slskr-parity-evidence")
+            .join("controller-api");
+        fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+        fs::write(
+            evidence_dir.join("pod_membership_self_publish.json"),
+            serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
+        )
+        .expect("write controller-api ledger");
+
+        assert!(
+            mismatches.is_empty(),
+            "{} controller-api pod-membership-self-publish mismatches:\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
+    }
+
     #[test]
     fn activitypub_signature_header_parses_declared_fields_and_rejects_incomplete_headers() {
         let parsed = super::parse_activitypub_signature_header(
