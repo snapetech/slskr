@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-repo_root="$(cd "$(dirname "$BASH_SOURCE")/.." && pwd)"
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
 if [[ "$#" -eq 0 ]]; then
-  printf 'usage: %s <command> [args...]\n' "$BASH_SOURCE" >&2
+  printf 'usage: %s <command> [args...]\n' "${BASH_SOURCE[0]}" >&2
   exit 2
 fi
 
@@ -45,6 +45,15 @@ if [[ "${SLSKR_PROCESS_MEMORY_GUARD_DISABLE_SYSTEMD:-0}" != "1" ]] \
   && command -v systemctl >/dev/null 2>&1 \
   && systemctl --user show-environment >/dev/null 2>&1; then
   unit_name="slskr-process-memory-guard-${BASHPID}-${RANDOM}.service"
+  systemd_environment_args=()
+  while IFS= read -r -d '' environment_entry; do
+    case "$environment_entry" in
+      SLSKR_PROCESS_MEMORY_GUARD_HELD=*)
+        continue
+        ;;
+    esac
+    systemd_environment_args+=("--setenv=$environment_entry")
+  done < <(env -0)
   cleanup_unit() {
     local status="$?"
     trap - EXIT INT TERM
@@ -57,6 +66,7 @@ if [[ "${SLSKR_PROCESS_MEMORY_GUARD_DISABLE_SYSTEMD:-0}" != "1" ]] \
     --working-directory="$repo_root" \
     --property="MemoryMax=${memory_kib}K" \
     --property="TasksMax=${tasks_max}" \
+    "${systemd_environment_args[@]}" \
     --setenv=SLSKR_PROCESS_MEMORY_GUARD_HELD=1 \
     "$@"
   exit "$?"
