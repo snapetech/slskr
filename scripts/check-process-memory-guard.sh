@@ -26,6 +26,14 @@ if ! rg -q 'with-process-memory-guard\.sh' scripts/audit-parity-manifest.py; the
   printf 'Process memory guard check failed: parity manifest browser/build subprocesses are unguarded\n' >&2
   status=1
 fi
+if ! rg -q 'command = guarded_process_command\(command, cwd\)' scripts/audit-parity-manifest.py; then
+  printf 'Process memory guard check failed: parity manifest Node inventory commands are unguarded\n' >&2
+  status=1
+fi
+if ! rg -q 'with-process-memory-guard\.sh' scripts/run-release-gate.sh; then
+  printf 'Process memory guard check failed: release-gate Node subprocesses are unguarded\n' >&2
+  status=1
+fi
 
 if [[ "$status" -ne 0 ]]; then
   exit "$status"

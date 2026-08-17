@@ -45,6 +45,7 @@ if [[ "${SLSKR_PROCESS_MEMORY_GUARD_DISABLE_SYSTEMD:-0}" != "1" ]] \
   && command -v systemctl >/dev/null 2>&1 \
   && systemctl --user show-environment >/dev/null 2>&1; then
   exec systemd-run --user --wait --pipe --collect \
+    --working-directory="$repo_root" \
     --property="MemoryMax=${memory_kib}K" \
     --property="TasksMax=${tasks_max}" \
     --setenv=SLSKR_PROCESS_MEMORY_GUARD_HELD=1 \

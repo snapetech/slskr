@@ -75,6 +75,7 @@ UNIVERSAL_LIFECYCLE_SCENARIOS = frozenset(
 
 def run_json(command: list[str], cwd: Path) -> Any:
     command = guarded_cargo_command(command, cwd)
+    command = guarded_process_command(command, cwd)
     completed = subprocess.run(
         command,
         cwd=cwd,
@@ -89,6 +90,7 @@ def run_json(command: list[str], cwd: Path) -> Any:
 def run_logged(command: list[str], cwd: Path, env: dict[str, str] | None = None) -> None:
     """Run a proof command without contaminating the machine-readable manifest."""
     command = guarded_cargo_command(command, cwd)
+    command = guarded_process_command(command, cwd)
     completed = subprocess.run(
         command,
         cwd=cwd,
@@ -120,7 +122,7 @@ def guarded_cargo_command(command: list[str], cwd: Path) -> list[str]:
 
 def guarded_process_command(command: list[str], cwd: Path) -> list[str]:
     """Bound browser and frontend subprocesses before they can allocate."""
-    if not command or command[0] not in {"node", "npm", "npx"}:
+    if not command or Path(command[0]).name not in {"node", "nodejs", "npm", "npx"}:
         return command
     return [str(cwd / "scripts" / "with-process-memory-guard.sh"), *command]
 
