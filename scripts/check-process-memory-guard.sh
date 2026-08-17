@@ -22,6 +22,10 @@ if ! rg -q 'ulimit -v' "$guard"; then
   printf 'Process memory guard check failed: portable virtual-memory fallback is missing\n' >&2
   status=1
 fi
+if ! rg -q -- '--working-directory="\$repo_root"' "$guard"; then
+  printf 'Process memory guard check failed: systemd units must preserve the repository working directory\n' >&2
+  status=1
+fi
 if ! rg -q 'with-process-memory-guard\.sh' scripts/audit-parity-manifest.py; then
   printf 'Process memory guard check failed: parity manifest browser/build subprocesses are unguarded\n' >&2
   status=1
