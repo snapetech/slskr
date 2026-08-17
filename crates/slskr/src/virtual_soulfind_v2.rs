@@ -284,6 +284,7 @@ impl State {
         self.executions.get(id).cloned()
     }
 
+    #[allow(dead_code)]
     pub fn latest_execution_id(&self) -> Option<String> {
         self.executions.keys().next_back().cloned()
     }

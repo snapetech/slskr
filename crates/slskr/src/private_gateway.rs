@@ -152,6 +152,7 @@ impl fmt::Debug for Gateway {
     }
 }
 
+#[allow(dead_code, clippy::too_many_arguments)]
 impl Gateway {
     pub async fn load_or_create_with_quic(
         bind: SocketAddr,
@@ -584,53 +585,57 @@ impl Gateway {
                 continue;
             }
             if received.0 > CONTROL_MAX_DATAGRAM_BYTES {
-                if quic_proxy_backend.is_some() && is_quic_initial_packet(&buffer[..received.0]) {
-                    if quic_sessions.len() >= QUIC_PROXY_MAX_SESSIONS {
-                        continue;
-                    }
-                    let Some(admission_lease) = quic_admission.try_acquire(received.1) else {
-                        continue;
-                    };
-                    if let Ok(session) = QuicProxySession::new(
-                        received.1,
-                        quic_proxy_backend.expect("checked above"),
-                        Arc::clone(&public_socket),
-                        admission_lease,
-                    )
-                    .await
-                    {
-                        session
-                            .sender
-                            .send(buffer[..received.0].to_vec())
-                            .await
-                            .ok();
-                        quic_sessions.insert(received.1, session);
+                if is_quic_initial_packet(&buffer[..received.0]) {
+                    if let Some(quic_proxy_backend) = quic_proxy_backend {
+                        if quic_sessions.len() >= QUIC_PROXY_MAX_SESSIONS {
+                            continue;
+                        }
+                        let Some(admission_lease) = quic_admission.try_acquire(received.1) else {
+                            continue;
+                        };
+                        if let Ok(session) = QuicProxySession::new(
+                            received.1,
+                            quic_proxy_backend,
+                            Arc::clone(&public_socket),
+                            admission_lease,
+                        )
+                        .await
+                        {
+                            session
+                                .sender
+                                .send(buffer[..received.0].to_vec())
+                                .await
+                                .ok();
+                            quic_sessions.insert(received.1, session);
+                        }
                     }
                 }
                 continue;
             }
             let Ok(envelope) = ControlEnvelope::decode(&buffer[..received.0]) else {
-                if quic_proxy_backend.is_some() && is_quic_initial_packet(&buffer[..received.0]) {
-                    if quic_sessions.len() >= QUIC_PROXY_MAX_SESSIONS {
-                        continue;
-                    }
-                    let Some(admission_lease) = quic_admission.try_acquire(received.1) else {
-                        continue;
-                    };
-                    if let Ok(session) = QuicProxySession::new(
-                        received.1,
-                        quic_proxy_backend.expect("checked above"),
-                        Arc::clone(&public_socket),
-                        admission_lease,
-                    )
-                    .await
-                    {
-                        session
-                            .sender
-                            .send(buffer[..received.0].to_vec())
-                            .await
-                            .ok();
-                        quic_sessions.insert(received.1, session);
+                if is_quic_initial_packet(&buffer[..received.0]) {
+                    if let Some(quic_proxy_backend) = quic_proxy_backend {
+                        if quic_sessions.len() >= QUIC_PROXY_MAX_SESSIONS {
+                            continue;
+                        }
+                        let Some(admission_lease) = quic_admission.try_acquire(received.1) else {
+                            continue;
+                        };
+                        if let Ok(session) = QuicProxySession::new(
+                            received.1,
+                            quic_proxy_backend,
+                            Arc::clone(&public_socket),
+                            admission_lease,
+                        )
+                        .await
+                        {
+                            session
+                                .sender
+                                .send(buffer[..received.0].to_vec())
+                                .await
+                                .ok();
+                            quic_sessions.insert(received.1, session);
+                        }
                     }
                 }
                 continue;

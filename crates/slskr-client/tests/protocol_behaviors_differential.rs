@@ -103,10 +103,10 @@ async fn raw_message_frame_bidirectional(code: u32) -> bool {
         server_task.abort();
         return false;
     }
-    let first_reply = match read_message_frame(&mut client).await {
-        Ok(frame) if frame == MessageFrame::new(code, [0xb1, code as u8]) => true,
-        _ => false,
-    };
+    let first_reply = matches!(
+        read_message_frame(&mut client).await,
+        Ok(frame) if frame == MessageFrame::new(code, [0xb1, code as u8])
+    );
     if !first_reply
         || write_message_frame(&mut client, &MessageFrame::new(code, [0xa2, code as u8]))
             .await
@@ -157,10 +157,10 @@ async fn raw_init_frame_bidirectional(code: u8) -> bool {
         server_task.abort();
         return false;
     }
-    let first_reply = match read_init_frame(&mut client).await {
-        Ok(frame) if frame == InitFrame::new(code, [0xb1, code]) => true,
-        _ => false,
-    };
+    let first_reply = matches!(
+        read_init_frame(&mut client).await,
+        Ok(frame) if frame == InitFrame::new(code, [0xb1, code])
+    );
     if !first_reply
         || write_init_frame(&mut client, &InitFrame::new(code, [0xa2, code]))
             .await
@@ -273,10 +273,9 @@ async fn peer_capability_timeout_and_reconnect() -> bool {
         let _ = first_server.await;
         return false;
     }
-    let timed_out = matches!(
-        tokio::time::timeout(Duration::from_millis(25), first_client.receive()).await,
-        Err(_)
-    );
+    let timed_out = tokio::time::timeout(Duration::from_millis(25), first_client.receive())
+        .await
+        .is_err();
     first_server.abort();
     let _ = first_server.await;
 
@@ -358,10 +357,9 @@ async fn mesh_sync_timeout_and_reconnect(message: MeshSyncMessage) -> bool {
         let _ = first_server.await;
         return false;
     }
-    let timed_out = matches!(
-        tokio::time::timeout(Duration::from_millis(25), first_client.receive()).await,
-        Err(_)
-    );
+    let timed_out = tokio::time::timeout(Duration::from_millis(25), first_client.receive())
+        .await
+        .is_err();
     first_server.abort();
     let _ = first_server.await;
 
@@ -427,14 +425,12 @@ async fn overlay_handshake_timeout_and_reconnect() -> bool {
         #[allow(unreachable_code)]
         false
     });
-    let timed_out = matches!(
-        tokio::time::timeout(
-            Duration::from_millis(25),
-            OverlayClient::handshake(client_stream, hello.clone())
-        )
-        .await,
-        Err(_)
-    );
+    let timed_out = tokio::time::timeout(
+        Duration::from_millis(25),
+        OverlayClient::handshake(client_stream, hello.clone()),
+    )
+    .await
+    .is_err();
     first_server.abort();
     let _ = first_server.await;
 

@@ -1,3 +1,5 @@
+#![allow(clippy::too_many_arguments)]
+
 use std::{
     collections::BTreeSet,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket},
@@ -54,6 +56,7 @@ struct Status {
 }
 
 impl Rendezvous {
+    #[allow(dead_code)]
     pub fn new(settings: &crate::config::DhtSettings) -> Result<Self, String> {
         Self::new_with_shared_udp(settings, false)
     }
@@ -283,6 +286,7 @@ impl Rendezvous {
     }
 
     #[cfg(test)]
+    #[allow(dead_code)]
     pub async fn insert_test_peer(&self, peer: SocketAddrV4) {
         self.peers.write().await.insert(peer);
     }

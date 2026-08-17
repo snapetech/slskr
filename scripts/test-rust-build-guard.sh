@@ -52,4 +52,22 @@ if SLSKR_BUILD_LOCK_PATH="$test_lock_path" \
   exit 1
 fi
 
+if SLSKR_BUILD_LOCK_PATH="$test_lock_path" \
+  scripts/with-build-guard.sh cargo test -p slskr --features full-controller-tests --no-run >/dev/null 2>&1; then
+  printf 'Rust build guard test failed: monolithic controller tests were allowed\n' >&2
+  exit 1
+fi
+
+if SLSKR_BUILD_LOCK_PATH="$test_lock_path" \
+  scripts/with-build-guard.sh cargo test --all-features --no-run >/dev/null 2>&1; then
+  printf 'Rust build guard test failed: all-features tests were allowed\n' >&2
+  exit 1
+fi
+
+if SLSKR_BUILD_LOCK_PATH="$test_lock_path" \
+  scripts/with-build-guard.sh /bin/true --cfg 'feature="full-controller-tests"' >/dev/null 2>&1; then
+  printf 'Rust build guard test failed: compiler-wrapper feature bypass was allowed\n' >&2
+  exit 1
+fi
+
 printf 'Rust build guard lock test passed\n'

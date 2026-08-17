@@ -6,6 +6,8 @@
 //! latter can continue to be persisted as the small runtime projection it has
 //! always been.
 
+#![allow(clippy::too_many_arguments)]
+
 use std::collections::BTreeMap;
 use std::fs;
 use std::net::IpAddr;
@@ -60,28 +62,24 @@ static HUB_CONNECTIONS: OnceLock<Mutex<BTreeMap<String, UnboundedSender<String>>
 /// A controller request for an agent file is completed by a later multipart
 /// HTTP request.  The sender is deliberately process-local: a live stream
 /// waiter cannot be persisted or reconstructed after a restart.
-static FILE_UPLOAD_WAITERS: OnceLock<
-    Mutex<BTreeMap<String, oneshot::Sender<Result<UploadedFile, String>>>>,
-> = OnceLock::new();
+type FileUploadWaiters = Mutex<BTreeMap<String, oneshot::Sender<Result<UploadedFile, String>>>>;
+static FILE_UPLOAD_WAITERS: OnceLock<FileUploadWaiters> = OnceLock::new();
 
 /// File-info and stream failures are callbacks on the same authenticated hub
 /// connection as the successful upload response.  Keep those waiters process
 /// local for the same reason as the upload stream waiters.
-static FILE_INFO_WAITERS: OnceLock<
-    Mutex<BTreeMap<String, oneshot::Sender<Result<FileInfo, String>>>>,
-> = OnceLock::new();
+type FileInfoWaiters = Mutex<BTreeMap<String, oneshot::Sender<Result<FileInfo, String>>>>;
+static FILE_INFO_WAITERS: OnceLock<FileInfoWaiters> = OnceLock::new();
 
 fn hub_connections() -> &'static Mutex<BTreeMap<String, UnboundedSender<String>>> {
     HUB_CONNECTIONS.get_or_init(|| Mutex::new(BTreeMap::new()))
 }
 
-fn file_upload_waiters(
-) -> &'static Mutex<BTreeMap<String, oneshot::Sender<Result<UploadedFile, String>>>> {
+fn file_upload_waiters() -> &'static FileUploadWaiters {
     FILE_UPLOAD_WAITERS.get_or_init(|| Mutex::new(BTreeMap::new()))
 }
 
-fn file_info_waiters() -> &'static Mutex<BTreeMap<String, oneshot::Sender<Result<FileInfo, String>>>>
-{
+fn file_info_waiters() -> &'static FileInfoWaiters {
     FILE_INFO_WAITERS.get_or_init(|| Mutex::new(BTreeMap::new()))
 }
 
@@ -443,10 +441,7 @@ pub(crate) fn parse_multipart(
     let marker = format!("--{boundary}").into_bytes();
     let mut cursor = 0;
     let mut parts = Vec::new();
-    loop {
-        let Some(start) = find_bytes(body, &marker, cursor) else {
-            break;
-        };
+    while let Some(start) = find_bytes(body, &marker, cursor) {
         cursor = start + marker.len();
         if body.get(cursor..cursor + 2) == Some(b"--") {
             break;
@@ -795,6 +790,7 @@ impl RuntimeState {
     }
 
     #[cfg(test)]
+    #[allow(dead_code)]
     pub(crate) fn issue_file_upload_token(
         &mut self,
         agent_name: &str,
@@ -1168,6 +1164,7 @@ impl RuntimeState {
     }
 
     #[cfg(test)]
+    #[allow(dead_code)]
     pub(crate) fn registered_agent_remote_ip(&self, agent_name: &str) -> Option<IpAddr> {
         self.registered_agents
             .get(agent_name)

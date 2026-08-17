@@ -5,8 +5,6 @@
 //! local, bounded, and redacted at the reporting boundary so the callers can
 //! compose them without leaking peer identifiers or secret material.
 
-#![allow(dead_code)]
-
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     net::IpAddr,
@@ -602,8 +600,7 @@ impl VerificationControl {
             return None;
         }
         let target = ((f64::from(total_chunks) * sample_rate).ceil() as usize)
-            .max(Self::MINIMUM_CHUNKS)
-            .min(Self::MAXIMUM_CHUNKS)
+            .clamp(Self::MINIMUM_CHUNKS, Self::MAXIMUM_CHUNKS)
             .min(total_chunks as usize);
         let selected = (0..target as u32).collect::<HashSet<_>>();
         let mut sessions = self.sessions.lock().expect("verification control lock");

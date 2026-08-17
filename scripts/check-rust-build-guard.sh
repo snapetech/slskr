@@ -49,6 +49,14 @@ if ! rg -q '^max_virtual_memory_kib=12582912$' scripts/with-build-guard.sh; then
   printf 'Rust build guard check failed: the wrapper hard ceiling must be 12 GiB\n' >&2
   status=1
 fi
+if ! rg -q 'full-controller-tests is rejected under the 12 GiB memory-safe profile' scripts/with-build-guard.sh; then
+  printf 'Rust build guard check failed: the known monolithic controller test profile must be rejected\n' >&2
+  status=1
+fi
+if ! rg -q -- '--all-features' scripts/with-build-guard.sh; then
+  printf 'Rust build guard check failed: all-features test requests must be covered by the monolithic-profile rejection\n' >&2
+  status=1
+fi
 if ! rg -q '^ulimit -v "\$interop_virtual_memory_kib"$' scripts/run-live-interop-matrix.sh; then
   printf 'Rust build guard check failed: the live interop launcher must enforce the 12 GiB ceiling before reuse or build\n' >&2
   status=1

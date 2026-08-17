@@ -743,6 +743,7 @@ impl ConnectionRateLimiter {
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[allow(clippy::enum_variant_names)]
 pub enum MeshTransportType {
     DirectQuic,
     TorOnionQuic,
@@ -1095,7 +1096,7 @@ impl CertificatePinManager {
         match pin_type {
             CertificatePinType::Current => {
                 if !info.current_pins.iter().any(|candidate| candidate == pin) {
-                    info.previous_pins.extend(info.current_pins.drain(..));
+                    info.previous_pins.append(&mut info.current_pins);
                     info.current_pins.push(pin.to_owned());
                     info.last_rotation = unix_seconds();
                 }

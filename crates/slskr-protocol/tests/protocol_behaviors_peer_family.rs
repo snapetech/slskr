@@ -15,6 +15,7 @@ use slskr_protocol::peer::{
 };
 use slskr_protocol::primitives::ProtocolTextEncoding;
 
+#[allow(clippy::vec_init_then_push)]
 #[test]
 fn protocol_behaviors_differential_peer_family_round_trips() {
     fn round_trips(message: PeerMessage) -> bool {

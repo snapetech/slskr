@@ -1619,6 +1619,7 @@ struct SearchRecord {
     updated_at: u64,
 }
 
+#[allow(dead_code)]
 impl SearchRecord {
     fn wishlist_item_id(&self) -> Option<&str> {
         (self.target == "wishlist")
@@ -1961,6 +1962,7 @@ fn search_create_error_response(error: SearchCreateError) -> HttpResponse {
     }
 }
 
+#[allow(dead_code)]
 impl SearchStore {
     fn new() -> Self {
         Self {
@@ -3665,6 +3667,7 @@ struct AudioTechnicalMetadata {
     length_seconds: Option<u32>,
 }
 
+#[allow(dead_code)]
 impl TransferQueue {
     fn new(config: &AppConfig) -> Self {
         let events_path = transfer_events_path(&config.state_dir);
@@ -4421,7 +4424,7 @@ impl TransferQueue {
                 .push(entry);
         }
 
-        let transfers = grouped
+        grouped
             .into_iter()
             .map(|(username, directories)| {
                 let directories = directories
@@ -4443,8 +4446,7 @@ impl TransferQueue {
                     "directories": directories,
                 })
             })
-            .collect::<Vec<_>>();
-        transfers
+            .collect::<Vec<_>>()
     }
 
     fn slskd_transfers_json(&self, direction: u32, username: Option<&str>) -> String {
@@ -8473,6 +8475,7 @@ struct CollectionStore {
     max_items_per_collection: usize,
 }
 
+#[allow(dead_code)]
 impl CollectionStore {
     fn new() -> Self {
         Self::with_limits(MAX_COLLECTIONS, MAX_COLLECTION_ITEMS)
@@ -9166,12 +9169,8 @@ async fn controller_slskdn_virtual_soulfind_read_failure_response(
     {
         return None;
     }
-    let Some(kind) = virtual_soulfind_legacy_dynamic_id(path) else {
-        return None;
-    };
-    let Some(db) = state.db.as_ref() else {
-        return None;
-    };
+    let kind = virtual_soulfind_legacy_dynamic_id(path)?;
+    let db = state.db.as_ref()?;
     if db.list_hash_db_entries().await.is_ok() {
         return None;
     }
@@ -10454,6 +10453,7 @@ struct ShareGroupStore {
     max_members_per_group: usize,
 }
 
+#[allow(dead_code)]
 impl ShareGroupStore {
     fn new() -> Self {
         Self::with_limits(MAX_SHARE_GROUPS, MAX_SHARE_GROUP_MEMBERS)
@@ -11423,6 +11423,7 @@ impl RelayState {
         }
     }
 
+    #[allow(dead_code)]
     fn from_persisted(record: &crate::persistence::RuntimeCompatRecord) -> Self {
         Self {
             enabled: record.relay_enabled,
@@ -11850,6 +11851,7 @@ impl RuntimeCompatState {
         })
     }
 
+    #[allow(dead_code)]
     fn from_persisted(record: &crate::persistence::RuntimeCompatRecord) -> Self {
         Self::try_from_persisted(record).unwrap_or_else(|_| Self::new())
     }
@@ -17237,6 +17239,7 @@ impl Default for OAuthStateStore {
     }
 }
 
+#[allow(dead_code)]
 impl OAuthStateStore {
     fn with_max_records(max_records: usize) -> Self {
         Self {
@@ -28392,11 +28395,7 @@ async fn route_http_request_with_headers(
                 .or_else(|| (!versioned).then(|| extract_json_string_field(body, "title")).flatten())
                 .unwrap_or_default();
             if artist.trim().is_empty() || title.trim().is_empty() {
-                return Ok(routing::bad_request_response(if versioned {
-                    "Artist and title are required"
-                } else {
-                    "Artist and title are required"
-                }));
+                return Ok(routing::bad_request_response("Artist and title are required"));
             }
             let mut now_playing = state.now_playing.write().await;
             let previous = now_playing.clone();
@@ -34018,7 +34017,7 @@ async fn route_http_request_with_headers(
                     return Ok(routing::bad_request_response(if request_is_versioned_v0 {
                         "Leave request could not be processed"
                     } else {
-                        &error
+                        error
                     }));
                 }
             } else {
@@ -34840,6 +34839,7 @@ fn solid_private_or_reserved(ip: IpAddr) -> bool {
 }
 
 #[cfg(test)]
+#[allow(dead_code)]
 fn public_lidarr_error(error: Option<&str>) -> Option<&'static str> {
     error.map(|_| "Lidarr connection failed")
 }
@@ -35069,6 +35069,7 @@ fn is_rust_wasm_shell(file: &Path) -> bool {
 }
 
 #[cfg(any(test, not(unix)))]
+#[allow(dead_code)]
 fn read_bounded_web_static_file(file: &Path) -> Result<Vec<u8>, String> {
     let mut options = fs::OpenOptions::new();
     options.read(true);
@@ -35152,6 +35153,7 @@ fn read_bounded_web_static_handle(mut file: fs::File) -> Result<Vec<u8>, String>
 }
 
 #[cfg(test)]
+#[allow(dead_code)]
 fn read_bounded_web_static_string(file: &Path) -> Result<String, String> {
     let bytes = read_bounded_web_static_file(file)?;
     String::from_utf8(bytes).map_err(|error| format!("static asset is not UTF-8: {error}"))
@@ -45183,6 +45185,7 @@ async fn read_bounded_integration_json(
 /// `MapToAlbumTarget`: `Ok(None)` when the release doesn't exist or has no
 /// resolvable artist credit, `Err` only on a genuine transport/parse failure.
 #[cfg(test)]
+#[allow(dead_code)]
 async fn musicbrainz_release_target(
     base_url: &str,
     release_id: &str,
@@ -47747,7 +47750,7 @@ async fn versioned_relay_request_bytes(
             &settings,
             relay::credential_scheme(state.config.controller_compatibility_target),
             token,
-            &filename,
+            filename,
             credential,
             unix_timestamp(),
         );
@@ -66467,10 +66470,10 @@ fn versioned_conversation_mutation_validation_response(
                 return Some(routing::bad_request_response("id must be positive"));
             }
         }
-        ("PUT", [username]) | ("DELETE", [username]) => {
-            if decoded_path_segment(username).trim().is_empty() {
-                return Some(routing::bad_request_response("username is required"));
-            }
+        ("PUT", [username]) | ("DELETE", [username])
+            if decoded_path_segment(username).trim().is_empty() =>
+        {
+            return Some(routing::bad_request_response("username is required"));
         }
         _ => {}
     }
@@ -66725,6 +66728,7 @@ fn slskd_filesystem_timestamp(metadata: &fs::Metadata, created: bool) -> String 
 const SLSKD_STORAGE_DIRECT_LIST_DEFAULT_ENTRIES: usize = 1_024;
 const SLSKD_STORAGE_RECURSIVE_LIST_DEFAULT_ENTRIES: usize = 256;
 #[cfg(test)]
+#[allow(dead_code)]
 const SLSKD_STORAGE_RECURSIVE_LIST_MAX_ENTRIES: usize = 1_024;
 const SLSKD_STORAGE_MAX_SCANNED_DIRECTORY_ENTRIES: usize = 16_384;
 const SLSKD_STORAGE_MAX_RECURSION_DEPTH: usize = 24;
@@ -70863,6 +70867,7 @@ fn rollback_auto_retry_search(
 }
 
 #[cfg(test)]
+#[allow(dead_code)]
 async fn run_download_auto_retry_cycle(
     state: &AppState,
     tracker: &mut AutoRetryTracker,
@@ -74579,6 +74584,7 @@ fn render_completed_download_path(
 }
 
 #[cfg(test)]
+#[allow(dead_code)]
 fn download_root(state_dir: &Path) -> PathBuf {
     state_dir.join("downloads")
 }
@@ -81029,20 +81035,18 @@ fn controller_slskdn_search_query_validation(
             .any(|(key, value)| key.eq_ignore_ascii_case(name) && parse_bool_value(value).is_none())
     };
 
-    if method == "GET" && path == "/api/v0/searches" {
-        if invalid_i32("limit") || invalid_i32("offset") {
-            return Some(routing::bad_request_response("The request is invalid"));
-        }
-    } else if method == "GET"
-        && controller_slskdn_search_guid_from_path(path).is_some()
-        && !path.ends_with("/responses")
-        && invalid_optional_bool("includeResponses")
+    if (method == "GET"
+        && path == "/api/v0/searches"
+        && (invalid_i32("limit") || invalid_i32("offset")))
+        || (method == "GET"
+            && controller_slskdn_search_guid_from_path(path).is_some()
+            && !path.ends_with("/responses")
+            && invalid_optional_bool("includeResponses"))
+        || (method == "POST"
+            && path == "/api/v0/searches/cleanup"
+            && (invalid_i32("maxAgeDays") || invalid_i32("maxCount")))
     {
         return Some(routing::bad_request_response("The request is invalid"));
-    } else if method == "POST" && path == "/api/v0/searches/cleanup" {
-        if invalid_i32("maxAgeDays") || invalid_i32("maxCount") {
-            return Some(routing::bad_request_response("The request is invalid"));
-        }
     }
     None
 }

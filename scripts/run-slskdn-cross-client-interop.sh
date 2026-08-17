@@ -26,6 +26,7 @@ cd "$repo_root"
 env_files=(
   "${SLSKR_LIVE_ENV_FILE:-$repo_root/.env}"
   "${SLSKR_SLSKDN_ENV_FILE:-$repo_root/../slskdn/.env}"
+  "${SLSKR_LIVE_ACCOUNT_ENV_FILE:-$repo_root/.secrets/generated-soulseek-accounts.env}"
   "${SLSKR_SLSKDN_ACCOUNT_POOL_FILE:-$repo_root/../slskdn/tests/slskd.Tests.Integration/local-mesh-account-pool.env}"
 )
 
@@ -1382,6 +1383,13 @@ run_message_interop_checks || status=1
 run_room_interop_checks || status=1
 run_mesh_runtime_checks || status=1
 record_final_diagnostics
+
+failed_checks="$(awk -F '\t' 'NR > 1 && $3 != "ok" { print }' "$result_file")"
+if [[ -n "$failed_checks" ]]; then
+  status=1
+  echo "cross-client interop failed checks:" >&2
+  printf '%s\n' "$failed_checks" >&2
+fi
 
 if ((soak_seconds > 0)); then
   sleep "$soak_seconds"

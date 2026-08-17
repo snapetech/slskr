@@ -33,6 +33,67 @@ if [[ "$build_jobs" != "1" ]]; then
   exit 2
 fi
 
+# The historical monolithic controller test target is known to exceed the
+# safe LLVM profile even with the virtual-memory ceiling applied. Refuse the
+# two Cargo spellings that enable it before Cargo or rustc starts; the default
+# focused test target remains the supported memory-safe path.
+if [[ "$1" == "cargo" ]]; then
+  cargo_test_requested=0
+  full_controller_tests_requested=0
+  argument_index=2
+  while ((argument_index <= $#)); do
+    argument="${!argument_index}"
+    if [[ "$argument" == "test" ]]; then
+      cargo_test_requested=1
+    elif [[ "$argument" == "--all-features" ]]; then
+      full_controller_tests_requested=1
+    elif [[ "$argument" == "--features" ]]; then
+      argument_index=$((argument_index + 1))
+      feature_list="${!argument_index:-}"
+      feature_list="${feature_list//,/ }"
+      read -r -a requested_features <<<"$feature_list"
+      for feature in "${requested_features[@]}"; do
+        [[ "$feature" == "full-controller-tests" ]] && full_controller_tests_requested=1
+      done
+    elif [[ "$argument" == --features=* ]]; then
+      feature_list="${argument#--features=}"
+      feature_list="${feature_list//,/ }"
+      read -r -a requested_features <<<"$feature_list"
+      for feature in "${requested_features[@]}"; do
+        [[ "$feature" == "full-controller-tests" ]] && full_controller_tests_requested=1
+      done
+    fi
+    argument_index=$((argument_index + 1))
+  done
+  if [[ "$cargo_test_requested" -eq 1 && "$full_controller_tests_requested" -eq 1 ]]; then
+    printf 'Rust build guard: full-controller-tests is rejected under the 12 GiB memory-safe profile\n' >&2
+    printf 'Rust build guard: use the default focused controller test target\n' >&2
+    exit 2
+  fi
+else
+  # Cargo also invokes this file as rustc-wrapper. Reject the feature at that
+  # layer too, so a direct Cargo test invocation cannot bypass the outer command-line
+  # check through .cargo/config.toml.
+  expect_cfg_value=0
+  for argument in "$@"; do
+    if [[ "$expect_cfg_value" -eq 1 ]]; then
+      if [[ "$argument" == 'feature="full-controller-tests"' || "$argument" == 'feature=full-controller-tests' ]]; then
+        printf 'Rust build guard: full-controller-tests is rejected under the 12 GiB memory-safe profile\n' >&2
+        printf 'Rust build guard: use the default focused controller test target\n' >&2
+        exit 2
+      fi
+      expect_cfg_value=0
+    fi
+    if [[ "$argument" == "--cfg" ]]; then
+      expect_cfg_value=1
+    elif [[ "$argument" == '--cfg=feature="full-controller-tests"' || "$argument" == "--cfg=feature=full-controller-tests" ]]; then
+      printf 'Rust build guard: full-controller-tests is rejected under the 12 GiB memory-safe profile\n' >&2
+      printf 'Rust build guard: use the default focused controller test target\n' >&2
+      exit 2
+    fi
+  done
+fi
+
 mkdir -p "$repo_root/target"
 lock_path="${SLSKR_BUILD_LOCK_PATH:-$repo_root/target/.slskr-rust-build.lock}"
 if command -v flock >/dev/null 2>&1; then

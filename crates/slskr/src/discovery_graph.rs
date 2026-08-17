@@ -5,6 +5,8 @@
 //! to those two slskR stores instead of manufacturing a graph from request
 //! strings alone.
 
+#![allow(clippy::too_many_arguments)]
+
 use std::cmp::Ordering;
 
 use serde_json::{json, Map, Value};
@@ -901,40 +903,45 @@ fn add_comparison_overlay(graph: &mut Graph, request: &Value, run: Option<&Value
         &["Pinned from graph UI".to_owned()],
     );
 
-    if run.is_some() && node_type.eq_ignore_ascii_case("artist") {
-        for track in graph_track_candidates(run.expect("run checked"))
-            .into_iter()
-            .filter(|track| string_field(track, "musicBrainzArtistId").as_deref() == Some(raw_id))
-            .take(3)
-        {
-            let Some(recording_id) = string_field(&track, "recordingId") else {
-                continue;
-            };
-            let node_id = format!("track:{recording_id}");
-            let artist =
-                string_field(&track, "artist").unwrap_or_else(|| "Unknown artist".to_owned());
-            let title = string_field(&track, "title").unwrap_or_else(|| "Unknown track".to_owned());
-            let identity = number_field(&track, "identityScore");
-            let action = number_field(&track, "actionScore");
-            graph.add_node(
-                node_id.clone(),
-                format!("{artist} - {title}"),
-                "track",
-                action,
-                2,
-                "candidate",
-                "Track attached to the pinned comparison artist.",
-            );
-            graph.add_edge(
-                &compare_node_id,
-                &node_id,
-                "comparison_context",
-                identity,
-                "Track branch attached to the pinned comparison artist.",
-                "songid",
-                &[("identity", identity), ("action", action)],
-                &candidate_evidence(&track, "Track candidate"),
-            );
+    if node_type.eq_ignore_ascii_case("artist") {
+        if let Some(run) = run {
+            for track in graph_track_candidates(run)
+                .into_iter()
+                .filter(|track| {
+                    string_field(track, "musicBrainzArtistId").as_deref() == Some(raw_id)
+                })
+                .take(3)
+            {
+                let Some(recording_id) = string_field(&track, "recordingId") else {
+                    continue;
+                };
+                let node_id = format!("track:{recording_id}");
+                let artist =
+                    string_field(&track, "artist").unwrap_or_else(|| "Unknown artist".to_owned());
+                let title =
+                    string_field(&track, "title").unwrap_or_else(|| "Unknown track".to_owned());
+                let identity = number_field(&track, "identityScore");
+                let action = number_field(&track, "actionScore");
+                graph.add_node(
+                    node_id.clone(),
+                    format!("{artist} - {title}"),
+                    "track",
+                    action,
+                    2,
+                    "candidate",
+                    "Track attached to the pinned comparison artist.",
+                );
+                graph.add_edge(
+                    &compare_node_id,
+                    &node_id,
+                    "comparison_context",
+                    identity,
+                    "Track branch attached to the pinned comparison artist.",
+                    "songid",
+                    &[("identity", identity), ("action", action)],
+                    &candidate_evidence(&track, "Track candidate"),
+                );
+            }
         }
     }
 }
@@ -1070,8 +1077,8 @@ fn graph_track_candidates(run: &Value) -> Vec<Value> {
             && string_field(track, "title").is_some()
             && string_field(track, "artist").is_some()
             && (can_expand
-                || bool_field(&track, "isExact")
-                || number_field(&track, "identityScore") >= MINIMUM_TRACK_IDENTITY_FOR_WEAK_RUN)
+                || bool_field(track, "isExact")
+                || number_field(track, "identityScore") >= MINIMUM_TRACK_IDENTITY_FOR_WEAK_RUN)
     });
     sort_candidates(&mut tracks);
     tracks

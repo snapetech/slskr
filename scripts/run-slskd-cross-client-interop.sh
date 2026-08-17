@@ -182,6 +182,12 @@ cleanup() {
     fi
   done
   if [[ -n "${result_file:-}" && -f "$result_file" ]]; then
+    # Preserve failed evidence for diagnosis. A failed run is never promoted
+    # to the canonical all-green artifact, but deleting the only row-level
+    # record would make transient network failures indistinguishable from
+    # implementation regressions.
+    failed_result_file="$output_dir/slskr-slskd-cross-client-interop.failed-$$.tsv"
+    cp -- "$result_file" "$failed_result_file"
     rm -f -- "$result_file"
   fi
 }
@@ -621,5 +627,15 @@ else
 fi
 
 record_check interop-adapter-slskd ok "endpoint_override=bounded-test-only"
+
+failed_checks="$(awk -F '\t' 'NR > 1 && $3 != "ok" { print }' "$result_file")"
+if [[ -n "$failed_checks" ]]; then
+  echo "cross-client interop failed checks:" >&2
+  printf '%s\n' "$failed_checks" >&2
+  echo "result_file=$result_file" >&2
+  echo "work_dir=$work_dir" >&2
+  exit 1
+fi
+
 mv "$result_file" "$final_result_file"
 echo "result_file=$final_result_file"

@@ -697,6 +697,7 @@ async fn handle_server_invocation(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn upload_file(
     state: &Arc<AppState>,
     settings: &RelaySettings,
