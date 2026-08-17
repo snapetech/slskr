@@ -20,6 +20,11 @@ export DOTNET_PROCESSOR_COUNT=2
 export DOTNET_ThreadPool_MinThreads=2
 export DOTNET_ThreadPool_MaxThreads=16
 
+curl_failure_args=(-f)
+if curl --help all 2>/dev/null | grep -Fq -- '--fail-with-body'; then
+  curl_failure_args=(--fail-with-body)
+fi
+
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
@@ -30,6 +35,8 @@ env_files=(
   "${SLSKR_SLSKDN_ACCOUNT_POOL_FILE:-$repo_root/../slskdn/tests/slskd.Tests.Integration/local-mesh-account-pool.env}"
 )
 
+explicit_slskdn_binary="${SLSKDN_BINARY_PATH:-}"
+
 for env_file in "${env_files[@]}"; do
   if [[ -f "$env_file" ]]; then
     set -a
@@ -38,6 +45,13 @@ for env_file in "${env_files[@]}"; do
     set +a
   fi
 done
+
+# A caller-supplied frozen executable is authoritative. The credential/env
+# files may contain a developer-local build path, but must not silently replace
+# an explicit oracle selected for a certification run.
+if [[ -n "$explicit_slskdn_binary" ]]; then
+  export SLSKDN_BINARY_PATH="$explicit_slskdn_binary"
+fi
 
 api_token="${SLSKR_CROSS_CLIENT_API_TOKEN:-slskr-cross-client-interop}"
 timeout_seconds="${SLSKR_CROSS_CLIENT_TIMEOUT_SECONDS:-240}"
@@ -120,9 +134,9 @@ process.stdin.on('end', () => {
 auth_get() {
   local url="$1"
   if [[ "$url" == "http://127.0.0.1:$slskdn_http_port/"* ]]; then
-    curl -fsS "$url"
+    curl -sS "${curl_failure_args[@]}" "$url"
   else
-    curl -fsS -H "Authorization: Bearer $api_token" "$url"
+    curl -sS "${curl_failure_args[@]}" -H "Authorization: Bearer $api_token" "$url"
   fi
 }
 
@@ -130,9 +144,9 @@ auth_post_json() {
   local url="$1"
   local payload="$2"
   if [[ "$url" == "http://127.0.0.1:$slskdn_http_port/"* ]]; then
-    curl -fsS -H "Content-Type: application/json" -d "$payload" "$url"
+    curl -sS "${curl_failure_args[@]}" -H "Content-Type: application/json" -d "$payload" "$url"
   else
-    curl -fsS -H "Authorization: Bearer $api_token" -H "Content-Type: application/json" -d "$payload" "$url"
+    curl -sS "${curl_failure_args[@]}" -H "Authorization: Bearer $api_token" -H "Content-Type: application/json" -d "$payload" "$url"
   fi
 }
 
@@ -1261,9 +1275,10 @@ run_user_watch_interop_checks() {
 }
 
 run_distributed_peer_interop_checks() {
-  local distributed_peer_log distributed_target_state distributed_target_ready
+  local distributed_peer_log distributed_target_state distributed_target_summary distributed_target_ready
   distributed_peer_log="$work_dir/slskr-distributed-peer.log"
   distributed_target_state=""
+  distributed_target_summary=""
   distributed_target_ready=false
   if [[ "$upstream_username" != "$slskr_username" && "$upstream_username" != "$slskdn_username" ]]; then
     for _ in $(seq 1 "${SLSKR_CROSS_CLIENT_DISTRIBUTED_READY_ATTEMPTS:-30}"); do
@@ -1275,6 +1290,29 @@ run_distributed_peer_interop_checks() {
       sleep "${SLSKR_CROSS_CLIENT_DISTRIBUTED_READY_DELAY_SECONDS:-1}"
     done
   fi
+  printf '\n[distributed-target-state]\n%s\n' "$distributed_target_state" >>"$diag_file"
+  distributed_target_summary="$(printf '%s' "$distributed_target_state" | node -e '
+let input = "";
+process.stdin.on("data", chunk => input += chunk);
+process.stdin.on("end", () => {
+  try {
+    const state = JSON.parse(input);
+    const distributed = state.distributedNetwork || {};
+    const server = state.server || {};
+    process.stdout.write(JSON.stringify({
+      isLoggedIn: server.isLoggedIn,
+      canAcceptChildren: distributed.canAcceptChildren,
+      hasParent: distributed.hasParent,
+      branchLevel: distributed.branchLevel,
+      childCount: Array.isArray(distributed.children) ? distributed.children.length : undefined,
+      childLimit: distributed.childLimit,
+      state: distributed.state,
+    }));
+  } catch {
+    process.exit(1);
+  }
+});
+' 2>/dev/null || true)"
   if [[ "$distributed_target_ready" == true ]] \
     && SLSK_SERVER="$server_endpoint" \
     SLSK_USERNAME="$upstream_username" \
@@ -1286,7 +1324,7 @@ run_distributed_peer_interop_checks() {
       "$slskr_binary" probe distributed-peer >"$distributed_peer_log" 2>&1; then
     record_check protocol-slskr-distributed-peer-slskdn ok "peer=$slskdn_username ping=received probe_contract=distributed-ping-response-v2"
   elif [[ "$distributed_target_ready" != true ]]; then
-    record_check protocol-slskr-distributed-peer-slskdn fail "detail=target distributed network not ready after ${SLSKR_CROSS_CLIENT_DISTRIBUTED_READY_ATTEMPTS:-30}s state=${distributed_target_state:0:240}"
+    record_check protocol-slskr-distributed-peer-slskdn fail "detail=target distributed network not ready after ${SLSKR_CROSS_CLIENT_DISTRIBUTED_READY_ATTEMPTS:-30}s summary=${distributed_target_summary:-unparseable}"
     return 1
   else
     record_check protocol-slskr-distributed-peer-slskdn fail "detail=$(tail -n 4 "$distributed_peer_log" 2>/dev/null | tr '\n\t' '  ')"
