@@ -23,6 +23,11 @@ scripts/with-build-guard.sh cargo build --release -p slskr
 scripts/with-build-guard.sh cargo test --workspace
 ```
 
+The `slskr` package defaults to its bounded focused controller-test target.
+The historical monolithic controller suite is opt-in as
+`--features full-controller-tests` and is not part of the memory-safe default
+workspace test path.
+
 The live slskd automation-client compatibility smoke is opt-in because it starts
 a local daemon and may install the Python `slskd-api` package:
 

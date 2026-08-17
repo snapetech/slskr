@@ -86397,7 +86397,7 @@ fn encode_file_entry(writer: &mut Writer, entry: &FileEntry) -> Result<(), Strin
     Ok(())
 }
 
-#[cfg(all(test, not(feature = "focused-controller-tests")))]
+#[cfg(all(test, feature = "full-controller-tests"))]
 mod tests {
     use std::{
         collections::{BTreeMap, BTreeSet, HashSet},
@@ -227867,6 +227867,6 @@ mod tests {
     }
 }
 
-#[cfg(all(test, feature = "focused-controller-tests"))]
+#[cfg(all(test, not(feature = "full-controller-tests")))]
 #[path = "focused_controller_tests.rs"]
 mod focused_controller_tests;

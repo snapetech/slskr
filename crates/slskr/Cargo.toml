@@ -11,7 +11,12 @@ repository.workspace = true
 rust-version.workspace = true
 
 [features]
+default = ["focused-controller-tests"]
 focused-controller-tests = []
+# The historical controller differential suite is a single monolithic test
+# module. Keep it opt-in so ordinary workspace tests stay within the repository
+# memory budget; the guarded CI path deliberately exercises the bounded suite.
+full-controller-tests = []
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }

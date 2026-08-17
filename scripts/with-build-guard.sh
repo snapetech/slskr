@@ -95,6 +95,9 @@ printf '\n' >&2
   # defaults disabled inside the guard so a build stays below the repository
   # ceiling instead of exhausting the host while LLVM is linking.
   export CARGO_PROFILE_DEV_DEBUG="${CARGO_PROFILE_DEV_DEBUG:-0}"
+  export CARGO_PROFILE_TEST_DEBUG="${CARGO_PROFILE_TEST_DEBUG:-0}"
+  export CARGO_PROFILE_TEST_CODEGEN_UNITS="${CARGO_PROFILE_TEST_CODEGEN_UNITS:-256}"
+  export CARGO_PROFILE_TEST_LTO="${CARGO_PROFILE_TEST_LTO:-false}"
   export CARGO_INCREMENTAL="${CARGO_INCREMENTAL:-0}"
   export RUST_TEST_THREADS=1
   export RUST_MIN_STACK="${RUST_MIN_STACK:-16777216}"

@@ -38,9 +38,9 @@ guard_limits="$({
   SLSKR_BUILD_GUARD_HELD=0 \
   SLSKR_BUILD_LOCK_PATH="$test_lock_path" \
   SLSKR_RUST_BUILD_JOBS=1 \
-    RUST_TEST_THREADS=16 scripts/with-build-guard.sh bash -c 'printf "%s %s %s %s %s %s" "$(ulimit -v)" "$CARGO_BUILD_JOBS" "$RUST_TEST_THREADS" "$RUST_MIN_STACK" "$CARGO_PROFILE_DEV_DEBUG" "$CARGO_INCREMENTAL"'
+  RUST_TEST_THREADS=16 scripts/with-build-guard.sh bash -c 'printf "%s %s %s %s %s %s %s %s %s" "$(ulimit -v)" "$CARGO_BUILD_JOBS" "$RUST_TEST_THREADS" "$RUST_MIN_STACK" "$CARGO_PROFILE_DEV_DEBUG" "$CARGO_PROFILE_TEST_DEBUG" "$CARGO_PROFILE_TEST_CODEGEN_UNITS" "$CARGO_PROFILE_TEST_LTO" "$CARGO_INCREMENTAL"'
 } 2>/dev/null)"
-if [[ "$guard_limits" != "12582912 1 1 16777216 0 0" ]]; then
+if [[ "$guard_limits" != "12582912 1 1 16777216 0 0 256 false 0" ]]; then
   printf 'Rust build guard test failed: unexpected inherited limits: %s\n' "$guard_limits" >&2
   exit 1
 fi
