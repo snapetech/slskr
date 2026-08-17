@@ -20,6 +20,7 @@ const settleMs = Math.min(
   2000,
   Math.max(0, Number.parseInt(process.env.SLSKR_RUST_WEB_AUDIT_SETTLE_MS || '500', 10) || 0),
 );
+const browserExecutablePath = process.env.SLSKR_PLAYWRIGHT_EXECUTABLE_PATH || undefined;
 
 const routes = [
   ['/searches', 'Search', 'searches'],
@@ -136,7 +137,10 @@ if (process.env.SLSKR_RUST_WEB_AUDIT_SKIP_BUILD !== '1') {
 const server = await startStaticServer();
 await mkdir(auditDir, { recursive: true });
 const { port } = server.address();
-const browser = await chromium.launch({ headless: process.env.HEADLESS !== 'false' });
+const browser = await chromium.launch({
+  executablePath: browserExecutablePath,
+  headless: process.env.HEADLESS !== 'false',
+});
 const audit = {
   apiResponses: [],
   evidenceMode: liveBackendUrl ? 'live' : 'mock',

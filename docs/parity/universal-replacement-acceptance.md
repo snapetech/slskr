@@ -55,6 +55,7 @@ These are open until fresh evidence or implementation closes them:
 | Relay | The local relay data plane exists, but live cross-client certification remains open. |
 | Mesh sync | Exact codec/runtime evidence exists, but frozen-target live interoperability and reconnect/retry proof remain open. |
 | VirtualSoulfind | Dispatcher and nominal runtime evidence exist, but timeout, reconnect, and live interop cases remain open. |
+| Frozen slskdN advanced services | The 2026-08-17 pinned run passed 35/38 checks but the frozen target returned `503 "VirtualSoulfind v2 is disabled"`, reported `canAcceptChildren=false` with no parent or children, and rejected the overlay `pods` service as not found. These are reproducible target-side failures; they keep the universal gate open until a valid pinned-target result or an explicit compatibility resolution exists. |
 | Evidence integrity | The old manifest can report 100% while reusing retained evidence and treating target-local rows as not applicable; that mode is not sufficient for this goal. |
 
 The goal remains open until this table is empty and a fresh universal gate

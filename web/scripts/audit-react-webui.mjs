@@ -115,6 +115,7 @@ const viewports = [
 ].filter((viewport) => !requestedViewports || requestedViewports.has(viewport.name));
 const skipScreenshots = process.env.SLSKR_REACT_WEB_AUDIT_SKIP_SCREENSHOTS === '1';
 const skipNavigation = process.env.SLSKR_REACT_WEB_AUDIT_SKIP_NAVIGATION === '1';
+const browserExecutablePath = process.env.SLSKR_PLAYWRIGHT_EXECUTABLE_PATH || undefined;
 const endpointSweep = process.env.SLSKR_REACT_WEB_AUDIT_ENDPOINT_SWEEP
   ? JSON.parse(process.env.SLSKR_REACT_WEB_AUDIT_ENDPOINT_SWEEP)
   : [];
@@ -808,7 +809,10 @@ await fs.mkdir(outputDir, { recursive: true });
 const server = await startStaticServer();
 const { port } = server.address();
 const baseUrl = `http://127.0.0.1:${port}`;
-const browser = await chromium.launch({ headless: process.env.HEADLESS !== 'false' });
+const browser = await chromium.launch({
+  executablePath: browserExecutablePath,
+  headless: process.env.HEADLESS !== 'false',
+});
 const audit = {
   apiResponses: [],
   allowedLiveStatus: allowedLiveStatusRules.map((rule) => rule.join('|')),

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-repo_root="$(cd "$(dirname "$BASH_SOURCE")/.." && pwd)"
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
 guard=scripts/with-process-memory-guard.sh
@@ -36,6 +36,16 @@ working_directory="$(
 )"
 if [[ "$working_directory" != "$repo_root" ]]; then
   printf 'Process memory guard test failed: working directory was %s\n' "$working_directory" >&2
+  exit 1
+fi
+
+forwarded_environment="$(
+  SLSKDN_BINARY_PATH=/tmp/frozen-slskdn \
+  SLSKR_CROSS_CLIENT_INDEX=bounded \
+    "$guard" bash -c 'printf "%s|%s|%s" "$SLSKDN_BINARY_PATH" "$SLSKR_CROSS_CLIENT_INDEX" "$SLSKR_PROCESS_MEMORY_GUARD_HELD"'
+)"
+if [[ "$forwarded_environment" != "/tmp/frozen-slskdn|bounded|1" ]]; then
+  printf 'Process memory guard test failed: caller environment was not forwarded: %s\n' "$forwarded_environment" >&2
   exit 1
 fi
 
