@@ -1,0 +1,12 @@
+[web]
+port = 5030
+
+[soulseek]
+username = ""
+password = ""
+listen_port = 2234
+
+[directories]
+shared = "/var/packages/slskr/shares/slskr/shared"
+downloads = "/var/packages/slskr/shares/slskr/downloads"
+incomplete = "/var/packages/slskr/shares/slskr/incomplete"

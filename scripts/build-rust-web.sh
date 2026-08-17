@@ -20,11 +20,11 @@ fi
 
 if [[ -z "$wasm_bindgen_bin" ]]; then
   echo "missing wasm-bindgen CLI" >&2
-  echo "install it with: cargo install wasm-bindgen-cli" >&2
+  echo "install it with: scripts/with-build-guard.sh cargo install wasm-bindgen-cli" >&2
   exit 2
 fi
 
-cargo build -p slskr-web --release --target "$wasm_target"
+scripts/with-build-guard.sh cargo build -p slskr-web --release --target "$wasm_target"
 
 rm -rf "$target_dir"
 mkdir -p "$target_dir"

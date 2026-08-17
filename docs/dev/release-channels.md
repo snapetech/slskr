@@ -1,8 +1,10 @@
 # Release Channels
 
 slskR publishes downstream packages from `.github/workflows/release-publish.yml`
-after a GitHub Release is published. The workflow reuses the same account layout
-as the slskdN release system, with slskR-specific package and project names.
+as a required reusable job after the tag release uploads its assets. GHCR
+publication and the published-image shutdown smoke test must pass before the
+release workflow completes. The workflow reuses the same account layout as the
+slskdN release system, with slskR-specific package and project names.
 
 | Channel | Target | Credentials |
 | --- | --- | --- |

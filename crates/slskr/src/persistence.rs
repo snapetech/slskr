@@ -90,6 +90,53 @@ pub struct TransferRecord {
     pub year: Option<i64>,
 }
 
+/// Durable transfer-batch metadata.  The frozen slskd target stores batches
+/// in its Transfers database separately from the associated transfer rows;
+/// keeping that boundary here prevents the controller-feature JSON file from
+/// becoming the source of truth for the slskd compatibility profile.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TransferBatchRecord {
+    pub id: String,
+    pub search_id: Option<String>,
+    pub username: String,
+    pub direction: i64,
+    pub created_at: String,
+    pub options_json: Option<String>,
+}
+
+/// Durable HashDb row using the core columns shared by the frozen slskdN
+/// schema and slskR's content-discovery model.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct HashDbRecord {
+    pub flac_key: String,
+    pub byte_hash: String,
+    pub size: i64,
+    pub first_seen_at: i64,
+    pub last_updated_at: i64,
+    pub seq_id: i64,
+    pub use_count: i64,
+    pub full_file_hash: String,
+    pub musicbrainz_id: String,
+    pub file_sha256: String,
+}
+
+/// Durable key/value state for HashDb cursors and backfill progress.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct HashDbStateRecord {
+    pub key: String,
+    pub value: Option<String>,
+}
+
+/// Durable overlay/Soulseek traffic counters used by the slskdN fairness
+/// guard projection.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct TrafficTotalsRecord {
+    pub overlay_upload_bytes: i64,
+    pub overlay_download_bytes: i64,
+    pub soulseek_upload_bytes: i64,
+    pub soulseek_download_bytes: i64,
+}
+
 /// Transfer transition/progress event record for persistence
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TransferEventRecord {
@@ -389,6 +436,7 @@ pub struct RuntimeCompatRecord {
     pub cache_warm_runs: i64,
     pub backfill_runs: i64,
     pub songid_runs: i64,
+    pub songid_run_records_json: String,
     pub lidarr_sync_runs: i64,
     pub lidarr_manual_imports: i64,
     pub updated_at: i64,
@@ -496,6 +544,62 @@ impl<'r> FromRow<'r, SqliteRow> for TransferRecord {
             title: row.try_get("title")?,
             track_number: row.try_get("track_number")?,
             year: row.try_get("year")?,
+        })
+    }
+}
+
+impl<'r> FromRow<'r, SqliteRow> for TransferBatchRecord {
+    fn from_row(row: &'r SqliteRow) -> Result<Self, Error> {
+        Ok(Self {
+            id: row.try_get("Id")?,
+            search_id: row.try_get("SearchId")?,
+            username: row.try_get("Username")?,
+            direction: row.try_get("Direction")?,
+            created_at: row.try_get("CreatedAt")?,
+            options_json: row.try_get("Options")?,
+        })
+    }
+}
+
+impl<'r> FromRow<'r, SqliteRow> for HashDbRecord {
+    fn from_row(row: &'r SqliteRow) -> Result<Self, Error> {
+        Ok(Self {
+            flac_key: row.try_get("flac_key")?,
+            byte_hash: row.try_get("byte_hash")?,
+            size: row.try_get("size")?,
+            first_seen_at: row.try_get("first_seen_at")?,
+            last_updated_at: row.try_get("last_updated_at")?,
+            seq_id: row.try_get::<Option<i64>, _>("seq_id")?.unwrap_or_default(),
+            use_count: row.try_get::<Option<i64>, _>("use_count")?.unwrap_or(1),
+            full_file_hash: row
+                .try_get::<Option<String>, _>("full_file_hash")?
+                .unwrap_or_default(),
+            musicbrainz_id: row
+                .try_get::<Option<String>, _>("musicbrainz_id")?
+                .unwrap_or_default(),
+            file_sha256: row
+                .try_get::<Option<String>, _>("file_sha256")?
+                .unwrap_or_default(),
+        })
+    }
+}
+
+impl<'r> FromRow<'r, SqliteRow> for HashDbStateRecord {
+    fn from_row(row: &'r SqliteRow) -> Result<Self, Error> {
+        Ok(Self {
+            key: row.try_get("key")?,
+            value: row.try_get("value")?,
+        })
+    }
+}
+
+impl<'r> FromRow<'r, SqliteRow> for TrafficTotalsRecord {
+    fn from_row(row: &'r SqliteRow) -> Result<Self, Error> {
+        Ok(Self {
+            overlay_upload_bytes: row.try_get("overlay_upload_bytes")?,
+            overlay_download_bytes: row.try_get("overlay_download_bytes")?,
+            soulseek_upload_bytes: row.try_get("soulseek_upload_bytes")?,
+            soulseek_download_bytes: row.try_get("soulseek_download_bytes")?,
         })
     }
 }
@@ -842,6 +946,9 @@ impl<'r> FromRow<'r, SqliteRow> for RuntimeCompatRecord {
             cache_warm_runs: row.try_get("cache_warm_runs")?,
             backfill_runs: row.try_get("backfill_runs")?,
             songid_runs: row.try_get("songid_runs")?,
+            songid_run_records_json: row
+                .try_get("songid_run_records_json")
+                .unwrap_or_else(|_| "[]".to_owned()),
             lidarr_sync_runs: row.try_get("lidarr_sync_runs")?,
             lidarr_manual_imports: row.try_get("lidarr_manual_imports")?,
             updated_at: row.try_get("updated_at")?,
@@ -1061,6 +1168,82 @@ impl DatabaseManager {
         )
         .execute(&self.pool)
         .await?;
+
+        // Create the durable slskd-compatible transfer batch table.  This is
+        // intentionally separate from the generic controller feature store:
+        // batch reads must fail with the Transfers database, and batch rows
+        // must survive a process restart alongside their transfer records.
+        query(
+            r#"
+            CREATE TABLE IF NOT EXISTS Batches (
+                Id TEXT NOT NULL CONSTRAINT PK_Batches PRIMARY KEY,
+                SearchId TEXT,
+                Username TEXT,
+                Direction INTEGER NOT NULL,
+                CreatedAt TEXT NOT NULL,
+                Options TEXT
+            )
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+        query("CREATE INDEX IF NOT EXISTS IDX_Batches_SearchId ON Batches (SearchId)")
+            .execute(&self.pool)
+            .await?;
+
+        // Core HashDb and cursor state tables.  The controller cache remains
+        // useful for projections, but these tables are the durable source of
+        // truth for hash entries and progress when SQLite persistence is on.
+        query(
+            r#"
+            CREATE TABLE IF NOT EXISTS HashDb (
+                flac_key TEXT PRIMARY KEY,
+                byte_hash TEXT NOT NULL,
+                size INTEGER NOT NULL,
+                meta_flags INTEGER,
+                first_seen_at INTEGER NOT NULL,
+                last_updated_at INTEGER NOT NULL,
+                seq_id INTEGER,
+                use_count INTEGER DEFAULT 1,
+                full_file_hash TEXT,
+                musicbrainz_id TEXT,
+                file_sha256 TEXT
+            )
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+        query(
+            r#"
+            CREATE TABLE IF NOT EXISTS HashDbState (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+        query(
+            r#"
+            CREATE TABLE IF NOT EXISTS TrafficStats (
+                key TEXT PRIMARY KEY,
+                overlay_upload_bytes INTEGER NOT NULL DEFAULT 0,
+                overlay_download_bytes INTEGER NOT NULL DEFAULT 0,
+                soulseek_upload_bytes INTEGER NOT NULL DEFAULT 0,
+                soulseek_download_bytes INTEGER NOT NULL DEFAULT 0,
+                updated_at INTEGER NOT NULL DEFAULT 0
+            )
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+        for statement in [
+            "CREATE INDEX IF NOT EXISTS idx_hashdb_size ON HashDb(size)",
+            "CREATE INDEX IF NOT EXISTS idx_hashdb_seq ON HashDb(seq_id)",
+            "CREATE INDEX IF NOT EXISTS idx_hashdb_hash ON HashDb(byte_hash)",
+        ] {
+            query(statement).execute(&self.pool).await?;
+        }
 
         // Create durable transfer event trail table
         query(
@@ -1488,6 +1671,7 @@ impl DatabaseManager {
                 cache_warm_runs INTEGER NOT NULL,
                 backfill_runs INTEGER NOT NULL,
                 songid_runs INTEGER NOT NULL,
+                songid_run_records_json TEXT NOT NULL DEFAULT '[]',
                 lidarr_sync_runs INTEGER NOT NULL,
                 lidarr_manual_imports INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL
@@ -1736,6 +1920,7 @@ impl DatabaseManager {
             "ALTER TABLE runtime_compat_state ADD COLUMN options_updates INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE runtime_compat_state ADD COLUMN options_yaml_uploads INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE runtime_compat_state ADD COLUMN options_yaml_validations INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE runtime_compat_state ADD COLUMN songid_run_records_json TEXT NOT NULL DEFAULT '[]'",
         ] {
             if let Err(error) = query(statement).execute(&self.pool).await {
                 let message = error.to_string();
@@ -2152,6 +2337,292 @@ impl DatabaseManager {
     // ========================================================================
     // Transfer Operations
     // ========================================================================
+
+    /// Insert a durable transfer batch.  The primary key deliberately remains
+    /// database-enforced so concurrent callers cannot create the same batch
+    /// twice.
+    pub async fn insert_transfer_batch(
+        &self,
+        record: &TransferBatchRecord,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        query(
+            r#"
+            INSERT INTO Batches (Id, SearchId, Username, Direction, CreatedAt, Options)
+            VALUES (?, ?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(&record.id)
+        .bind(&record.search_id)
+        .bind(&record.username)
+        .bind(record.direction)
+        .bind(&record.created_at)
+        .bind(&record.options_json)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Read one durable transfer batch without hydrating its associated
+    /// transfer rows.
+    pub async fn get_transfer_batch(
+        &self,
+        id: &str,
+    ) -> Result<Option<TransferBatchRecord>, Box<dyn std::error::Error>> {
+        let record = query_as::<_, TransferBatchRecord>(
+            "SELECT Id, SearchId, Username, Direction, CreatedAt, Options FROM Batches WHERE Id = ?",
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(record)
+    }
+
+    /// Update durable transfer-batch metadata for lifecycle migrations and
+    /// administrative maintenance.
+    pub async fn update_transfer_batch(
+        &self,
+        record: &TransferBatchRecord,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        query(
+            r#"
+            UPDATE Batches
+            SET SearchId = ?, Username = ?, Direction = ?, CreatedAt = ?, Options = ?
+            WHERE Id = ?
+            "#,
+        )
+        .bind(&record.search_id)
+        .bind(&record.username)
+        .bind(record.direction)
+        .bind(&record.created_at)
+        .bind(&record.options_json)
+        .bind(&record.id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Delete one durable transfer batch and return whether a row existed.
+    pub async fn delete_transfer_batch(
+        &self,
+        id: &str,
+    ) -> Result<bool, Box<dyn std::error::Error>> {
+        let result = query("DELETE FROM Batches WHERE Id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
+    /// Replace the durable HashDb snapshot and its latest-sequence cursor in
+    /// one transaction.  Callers can therefore never restart with a row set
+    /// whose cursor points past the rows that were committed.
+    pub async fn replace_hash_db_snapshot(
+        &self,
+        records: &[HashDbRecord],
+        latest_seq: i64,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut transaction = self.pool.begin().await?;
+        query("DELETE FROM HashDb")
+            .execute(&mut *transaction)
+            .await?;
+        for record in records {
+            query(
+                r#"
+                INSERT INTO HashDb
+                    (flac_key, byte_hash, size, first_seen_at, last_updated_at, seq_id, use_count, full_file_hash, musicbrainz_id, file_sha256)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                "#,
+            )
+            .bind(&record.flac_key)
+            .bind(&record.byte_hash)
+            .bind(record.size)
+            .bind(record.first_seen_at)
+            .bind(record.last_updated_at)
+            .bind(record.seq_id)
+            .bind(record.use_count)
+            .bind(&record.full_file_hash)
+            .bind(&record.musicbrainz_id)
+            .bind(&record.file_sha256)
+            .execute(&mut *transaction)
+            .await?;
+        }
+        query(
+            r#"
+            INSERT INTO HashDbState (key, value) VALUES ('latest_seq', ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            "#,
+        )
+        .bind(latest_seq.to_string())
+        .execute(&mut *transaction)
+        .await?;
+        transaction.commit().await?;
+        Ok(())
+    }
+
+    /// Read all durable HashDb rows in sequence order for startup rehydration.
+    pub async fn list_hash_db_entries(
+        &self,
+    ) -> Result<Vec<HashDbRecord>, Box<dyn std::error::Error>> {
+        Ok(query_as::<_, HashDbRecord>(
+            "SELECT flac_key, byte_hash, size, first_seen_at, last_updated_at, seq_id, use_count, full_file_hash, musicbrainz_id, file_sha256 FROM HashDb ORDER BY seq_id, flac_key",
+        )
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
+    /// Read one durable HashDb entry.
+    pub async fn get_hash_db_entry(
+        &self,
+        flac_key: &str,
+    ) -> Result<Option<HashDbRecord>, Box<dyn std::error::Error>> {
+        Ok(query_as::<_, HashDbRecord>(
+            "SELECT flac_key, byte_hash, size, first_seen_at, last_updated_at, seq_id, use_count, full_file_hash, musicbrainz_id, file_sha256 FROM HashDb WHERE flac_key = ?",
+        )
+        .bind(flac_key)
+        .fetch_optional(&self.pool)
+        .await?)
+    }
+
+    /// Insert or update one HashDb entry for targeted lifecycle operations.
+    pub async fn upsert_hash_db_entry(
+        &self,
+        record: &HashDbRecord,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        query(
+            r#"
+            INSERT INTO HashDb
+                (flac_key, byte_hash, size, first_seen_at, last_updated_at, seq_id, use_count, full_file_hash, musicbrainz_id, file_sha256)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(flac_key) DO UPDATE SET
+                byte_hash = excluded.byte_hash,
+                size = excluded.size,
+                first_seen_at = excluded.first_seen_at,
+                last_updated_at = excluded.last_updated_at,
+                seq_id = excluded.seq_id,
+                use_count = excluded.use_count,
+                full_file_hash = excluded.full_file_hash,
+                musicbrainz_id = excluded.musicbrainz_id,
+                file_sha256 = excluded.file_sha256
+            "#,
+        )
+        .bind(&record.flac_key)
+        .bind(&record.byte_hash)
+        .bind(record.size)
+        .bind(record.first_seen_at)
+        .bind(record.last_updated_at)
+        .bind(record.seq_id)
+        .bind(record.use_count)
+        .bind(&record.full_file_hash)
+        .bind(&record.musicbrainz_id)
+        .bind(&record.file_sha256)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Delete one HashDb entry and report whether it existed.
+    pub async fn delete_hash_db_entry(
+        &self,
+        flac_key: &str,
+    ) -> Result<bool, Box<dyn std::error::Error>> {
+        let result = query("DELETE FROM HashDb WHERE flac_key = ?")
+            .bind(flac_key)
+            .execute(&self.pool)
+            .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
+    /// Read one HashDb key/value state record.
+    pub async fn get_hash_db_state(
+        &self,
+        key: &str,
+    ) -> Result<Option<HashDbStateRecord>, Box<dyn std::error::Error>> {
+        Ok(
+            query_as::<_, HashDbStateRecord>("SELECT key, value FROM HashDbState WHERE key = ?")
+                .bind(key)
+                .fetch_optional(&self.pool)
+                .await?,
+        )
+    }
+
+    /// Insert or replace one HashDb key/value state record.
+    pub async fn upsert_hash_db_state(
+        &self,
+        record: &HashDbStateRecord,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        query(
+            r#"
+            INSERT INTO HashDbState (key, value) VALUES (?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            "#,
+        )
+        .bind(&record.key)
+        .bind(&record.value)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Read the durable global overlay/Soulseek traffic counters.  A missing
+    /// row is the same neutral zero state returned by the frozen HashDb
+    /// service before any traffic has been accounted.
+    pub async fn get_traffic_totals(
+        &self,
+    ) -> Result<TrafficTotalsRecord, Box<dyn std::error::Error>> {
+        Ok(query_as::<_, TrafficTotalsRecord>(
+            "SELECT overlay_upload_bytes, overlay_download_bytes, soulseek_upload_bytes, soulseek_download_bytes FROM TrafficStats WHERE key = 'global'",
+        )
+        .fetch_optional(&self.pool)
+        .await?
+        .unwrap_or_default())
+    }
+
+    /// Add bytes to the durable global traffic counters used by fairness.
+    pub async fn add_traffic(
+        &self,
+        overlay_upload_bytes: i64,
+        overlay_download_bytes: i64,
+        soulseek_upload_bytes: i64,
+        soulseek_download_bytes: i64,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let updated_at = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| i64::try_from(duration.as_secs()).unwrap_or(i64::MAX))
+            .unwrap_or_default();
+        query(
+            r#"
+            INSERT INTO TrafficStats
+                (key, overlay_upload_bytes, overlay_download_bytes, soulseek_upload_bytes, soulseek_download_bytes, updated_at)
+            VALUES ('global', ?, ?, ?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET
+                overlay_upload_bytes = TrafficStats.overlay_upload_bytes + excluded.overlay_upload_bytes,
+                overlay_download_bytes = TrafficStats.overlay_download_bytes + excluded.overlay_download_bytes,
+                soulseek_upload_bytes = TrafficStats.soulseek_upload_bytes + excluded.soulseek_upload_bytes,
+                soulseek_download_bytes = TrafficStats.soulseek_download_bytes + excluded.soulseek_download_bytes,
+                updated_at = excluded.updated_at
+            "#,
+        )
+        .bind(overlay_upload_bytes)
+        .bind(overlay_download_bytes)
+        .bind(soulseek_upload_bytes)
+        .bind(soulseek_download_bytes)
+        .bind(updated_at)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Delete one HashDb key/value state record and report whether it existed.
+    pub async fn delete_hash_db_state(
+        &self,
+        key: &str,
+    ) -> Result<bool, Box<dyn std::error::Error>> {
+        let result = query("DELETE FROM HashDbState WHERE key = ?")
+            .bind(key)
+            .execute(&self.pool)
+            .await?;
+        Ok(result.rows_affected() > 0)
+    }
 
     /// Insert transfer record
     pub async fn insert_transfer(
@@ -3893,8 +4364,9 @@ impl DatabaseManager {
             (id, application_restart_requested, gc_runs, autoreplace_enabled, relay_enabled,
              relay_agent_enabled, bridge_running, bridge_config_updates, profile_invites_created,
              options_updates, options_yaml_uploads, options_yaml_validations, cache_warm_runs,
-             backfill_runs, songid_runs, lidarr_sync_runs, lidarr_manual_imports, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             backfill_runs, songid_runs, songid_run_records_json, lidarr_sync_runs,
+             lidarr_manual_imports, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&runtime.id)
@@ -3912,6 +4384,7 @@ impl DatabaseManager {
         .bind(runtime.cache_warm_runs)
         .bind(runtime.backfill_runs)
         .bind(runtime.songid_runs)
+        .bind(&runtime.songid_run_records_json)
         .bind(runtime.lidarr_sync_runs)
         .bind(runtime.lidarr_manual_imports)
         .bind(runtime.updated_at)
@@ -4124,8 +4597,9 @@ impl DatabaseManager {
             (id, application_restart_requested, gc_runs, autoreplace_enabled, relay_enabled,
              relay_agent_enabled, bridge_running, bridge_config_updates, profile_invites_created,
              options_updates, options_yaml_uploads, options_yaml_validations, cache_warm_runs,
-             backfill_runs, songid_runs, lidarr_sync_runs, lidarr_manual_imports, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             backfill_runs, songid_runs, songid_run_records_json, lidarr_sync_runs,
+             lidarr_manual_imports, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&record.id)
@@ -4143,6 +4617,7 @@ impl DatabaseManager {
         .bind(record.cache_warm_runs)
         .bind(record.backfill_runs)
         .bind(record.songid_runs)
+        .bind(&record.songid_run_records_json)
         .bind(record.lidarr_sync_runs)
         .bind(record.lidarr_manual_imports)
         .bind(record.updated_at)

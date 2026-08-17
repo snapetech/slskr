@@ -1,0 +1,14 @@
+#!/bin/sh
+set -e
+. "$(dirname "$0")/common"
+create_directory "$SHARE_PATH" "$PACKAGE_USER" "$PACKAGE_GROUP"
+create_directory "$SHARE_PATH/shared" "$PACKAGE_USER" "$PACKAGE_GROUP"
+create_directory "$SHARE_PATH/downloads" "$PACKAGE_USER" "$PACKAGE_GROUP"
+create_directory "$SHARE_PATH/incomplete" "$PACKAGE_USER" "$PACKAGE_GROUP"
+create_directory "$CONFIG_PATH" "$PACKAGE_USER" "$PACKAGE_GROUP"
+if [ ! -f "$CONFIG_PATH/config.toml" ]; then
+  cp "$(dirname "$0")/../conf/slskr.toml" "$CONFIG_PATH/config.toml"
+  chown "$PACKAGE_USER:$PACKAGE_GROUP" "$CONFIG_PATH/config.toml"
+  chmod 600 "$CONFIG_PATH/config.toml"
+fi
+log_step "slskR post-install completed"

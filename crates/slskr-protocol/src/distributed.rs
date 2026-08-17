@@ -59,6 +59,7 @@ pub struct DistributedSearch {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DistributedMessage {
     Ping,
+    PingResponse { token: u32 },
     Search(DistributedSearch),
     BranchLevel { level: u32 },
     BranchRoot { username: String },
@@ -79,7 +80,15 @@ impl DistributedMessage {
 
         let mut reader = Reader::new(&frame.payload);
         let message = match code {
-            DistributedCode::Ping => Self::Ping,
+            DistributedCode::Ping => {
+                if reader.is_empty() {
+                    Self::Ping
+                } else {
+                    Self::PingResponse {
+                        token: reader.read_u32_le()?,
+                    }
+                }
+            }
             DistributedCode::Search => Self::Search(DistributedSearch {
                 identifier: reader.read_u32_le()?,
                 username: reader.read_string()?,
@@ -99,9 +108,10 @@ impl DistributedMessage {
                 if let Ok(frame) = MessageFrame::decode(&frame.payload) {
                     return Ok(Self::EmbeddedServerMessage(frame));
                 }
+                let code = reader.read_u8()?;
                 Self::EmbeddedMessage {
-                    code: reader.read_u8()?,
-                    payload: reader.read_len_prefixed_bytes()?,
+                    code,
+                    payload: reader.read_bytes(reader.remaining())?.to_vec(),
                 }
             }
         };
@@ -117,6 +127,10 @@ impl DistributedMessage {
         let mut writer = Writer::new();
         let code = match self {
             Self::Ping => DistributedCode::Ping.as_u8(),
+            Self::PingResponse { token } => {
+                writer.write_u32_le(*token);
+                DistributedCode::Ping.as_u8()
+            }
             Self::Search(value) => {
                 writer.write_u32_le(value.identifier);
                 writer.write_string(&value.username)?;
@@ -138,7 +152,7 @@ impl DistributedMessage {
             }
             Self::EmbeddedMessage { code, payload } => {
                 writer.write_u8(*code);
-                writer.write_len_prefixed_bytes("distributed embedded payload", payload)?;
+                writer.write_bytes(payload);
                 DistributedCode::EmbeddedMessage.as_u8()
             }
             Self::EmbeddedServerMessage(frame) => {

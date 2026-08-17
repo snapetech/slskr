@@ -1,0 +1,10 @@
+[Unit]
+Description=Renew slskR VPN ingress every minute
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=60s
+Unit=slskr-vpn-ingress-renew.service
+
+[Install]
+WantedBy=timers.target

@@ -283,6 +283,10 @@ impl State {
     pub fn execution(&self, id: &str) -> Option<Value> {
         self.executions.get(id).cloned()
     }
+
+    pub fn latest_execution_id(&self) -> Option<String> {
+        self.executions.keys().next_back().cloned()
+    }
 }
 
 pub fn search_artists(catalogue: &[CatalogueItem], query: &str, limit: usize) -> Value {

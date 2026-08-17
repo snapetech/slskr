@@ -1,0 +1,17 @@
+[Unit]
+Description=slskR VPN ingress state reconciliation
+After=network-online.target slskr.service
+Wants=network-online.target slskr.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/slskr-vpn-agent ingress
+ExecStop=/usr/local/bin/slskr-vpn-agent cleanup-ingress
+TimeoutStartSec=60s
+NoNewPrivileges=true
+ProtectHome=true
+ReadWritePaths=/var/lib/slskr-vpn
+
+[Install]
+WantedBy=multi-user.target

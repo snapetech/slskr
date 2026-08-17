@@ -14,6 +14,15 @@ workspace tests, RustSec audit when `cargo-audit` is installed, workspace
 packaging, web tests, Rust/WASM web checks, the Rust web UI headless parity
 audit, and subpath smoke checks.
 
+All compile-capable Cargo commands in this repository must use
+`scripts/with-build-guard.sh`. The wrapper serializes Rust commands, forces one
+Cargo job, and caps virtual memory at 12 GiB by default (16 GiB maximum):
+
+```sh
+scripts/with-build-guard.sh cargo build --release -p slskr
+scripts/with-build-guard.sh cargo test --workspace
+```
+
 The live slskd automation-client compatibility smoke is opt-in because it starts
 a local daemon and may install the Python `slskd-api` package:
 
@@ -55,6 +64,28 @@ The archive includes:
 - `README.md`, `LICENSE`, `NOTICE`, `COMPLIANCE.md`
 - `docs/slskr.config.example.toml`
 - `RUN.txt`
+
+## Release notes and changelog
+
+User-facing, security, operational, and user-facing documentation changes add
+one new validated fragment under `release-notes/`. Pull-request validation
+requires that fragment or an explicit internal-only selection, and fragments
+are append-only. Each fragment records its category, audience, product area,
+required action, and breaking-change status.
+
+Preview the grouped release text locally with:
+
+```sh
+python3 scripts/release_notes.py preview --base <base> --head <head>
+```
+
+The tag workflow assembles the fragments into `release/RELEASE_NOTES.md`, uses
+that exact body for the GitHub Release, and sends the same curated body in the
+Discord embed. The pull-request job exposes a separate capture-metadata table
+so the source fragment fields remain auditable. Keep `CHANGELOG.md` append-only
+at the release-section level and move shipped `## [Unreleased]` bullets into a
+dated section when preparing a release; the CI and tag workflows reject a
+missing or placeholder section.
 
 ## CI Matrix
 

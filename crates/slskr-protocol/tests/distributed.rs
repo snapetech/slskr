@@ -35,6 +35,7 @@ fn distributed_code_inventory_is_complete_and_unique() {
 fn distributed_core_messages_round_trip() {
     let messages = [
         DistributedMessage::Ping,
+        DistributedMessage::PingResponse { token: 91 },
         DistributedMessage::Search(DistributedSearch {
             identifier: 49,
             username: "sender".to_owned(),
@@ -74,6 +75,27 @@ fn embedded_server_message_encodes_as_code_93_payload() {
         DistributedMessage::decode_embedded_server(server_frame.clone()),
         DistributedMessage::EmbeddedServerMessage(server_frame)
     );
+}
+
+#[test]
+fn embedded_distributed_search_uses_raw_nested_payload() {
+    let search = DistributedMessage::Search(DistributedSearch {
+        identifier: 0,
+        username: "sender".to_owned(),
+        token: 77,
+        query: "search text".to_owned(),
+    });
+    let search_frame = search.encode().unwrap();
+    let embedded = DistributedMessage::EmbeddedMessage {
+        code: search_frame.code,
+        payload: search_frame.payload.clone(),
+    };
+    let frame = embedded.encode().unwrap();
+
+    assert_eq!(frame.code, 93);
+    assert_eq!(frame.payload.first().copied(), Some(3));
+    assert_eq!(&frame.payload[1..], search_frame.payload.as_slice());
+    assert_eq!(DistributedMessage::decode(frame).unwrap(), embedded);
 }
 
 #[test]

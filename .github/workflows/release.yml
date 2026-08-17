@@ -143,9 +143,9 @@ jobs:
           key: cargo-audit-${{ runner.os }}-${{ runner.arch }}-${{ env.CARGO_AUDIT_VERSION }}
       - name: Install cargo-audit
         if: steps.cargo-audit-cache.outputs.cache-hit != 'true'
-        run: '"$(rustup which cargo)" install cargo-audit --version "$CARGO_AUDIT_VERSION" --locked'
+        run: scripts/with-build-guard.sh cargo install cargo-audit --version "$CARGO_AUDIT_VERSION" --locked
       - name: Install wasm-bindgen CLI
-        run: '"$(rustup which cargo)" install wasm-bindgen-cli --version "$WASM_BINDGEN_CLI_VERSION" --locked --force'
+        run: scripts/with-build-guard.sh cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_CLI_VERSION" --locked --force
       - name: Install Playwright browsers
         run: |
           npm --prefix web ci --allow-git=root --legacy-peer-deps
@@ -248,7 +248,7 @@ jobs:
           sudo apt-get install -y ${{ matrix.apt }}
       - name: Install wasm-bindgen CLI
         shell: bash
-        run: '"$(rustup which cargo)" install wasm-bindgen-cli --version "$WASM_BINDGEN_CLI_VERSION" --locked --force'
+        run: scripts/with-build-guard.sh cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_CLI_VERSION" --locked --force
       - name: Build archive
         shell: bash
         env:
@@ -270,13 +270,17 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/release-v')
     needs: [version, build]
     runs-on: ubuntu-latest
+    outputs:
+      release_body: ${{ steps.release-body.outputs.release_body }}
     permissions:
-      actions: write
+      actions: read
       contents: write
       attestations: write
       id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # actions/checkout@v6
+        with:
+          fetch-depth: 0
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # actions/download-artifact@v8.0.1
         with:
           path: artifacts
@@ -300,33 +304,67 @@ jobs:
             release/SHA256SUMS.txt
       - name: Create release notes
         shell: bash
+        env:
+          RELEASE_VERSION: ${{ needs.version.outputs.version }}
         run: |
+          set -euo pipefail
+          # The assembler inserts the ### User-facing changes section from release-notes/.
           cat > release/RELEASE_NOTES.md <<EOF
-          # slskr ${{ needs.version.outputs.version }}
+          # slskr ${RELEASE_VERSION}
 
           Binary archives for Linux, macOS, and Windows.
 
           Verify downloads with \`SHA256SUMS.txt\`.
+
+          ## Highlights
+
+          - Published verified binary archives and dependency manifests for all supported release targets.
           EOF
+          previous_tag="$(git describe --tags --match 'release-v*' --abbrev=0 "${GITHUB_SHA}^" 2>/dev/null || true)"
+          release_notes_base="${previous_tag:-$(git hash-object -t tree /dev/null)}"
+          python3 scripts/release_notes.py assemble \
+            --base "$release_notes_base" \
+            --head "$GITHUB_SHA" \
+            --input release/RELEASE_NOTES.md \
+            --output release/RELEASE_NOTES.md
+          scripts/validate-changelog.sh "$RELEASE_VERSION"
+          scripts/validate-release-notes.sh "$RELEASE_VERSION" release/RELEASE_NOTES.md
+          cat release/RELEASE_NOTES.md
       - uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.ref_name }}
           name: slskr ${{ needs.version.outputs.version }}
           body_path: release/RELEASE_NOTES.md
           files: release/*
-      - name: Trigger downstream package publish
+      - name: Export release body
+        id: release-body
         shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          echo "Triggering downstream package publish for ${RELEASE_TAG}..."
-          gh workflow run release-publish.yml --ref main -f tag="${RELEASE_TAG}"
+          set -euo pipefail
+          delimiter="release_body_${GITHUB_RUN_ID}"
+          {
+            echo "release_body<<${delimiter}"
+            cat release/RELEASE_NOTES.md
+            echo "${delimiter}"
+          } >> "$GITHUB_OUTPUT"
+
+  downstream-publish:
+    name: Publish Downstream Packages
+    if: startsWith(github.ref, 'refs/tags/release-v')
+    needs: [release]
+    permissions:
+      actions: read
+      contents: write
+      packages: write
+    uses: ./.github/workflows/release-publish.yml
+    with:
+      tag: ${{ github.ref_name }}
+    secrets: inherit
 
   discord:
     name: Announce Discord Release
     if: startsWith(github.ref, 'refs/tags/release-v')
-    needs: [version, release]
+    needs: [version, release, downstream-publish]
     runs-on: ubuntu-latest
     steps:
       - name: Post release announcement
@@ -336,6 +374,7 @@ jobs:
           RELEASE_VERSION: ${{ needs.version.outputs.version }}
           RELEASE_TAG: ${{ github.ref_name }}
           RELEASE_URL: https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}
+          RELEASE_BODY: ${{ needs.release.outputs.release_body }}
         run: |
           if [[ -z "$DISCORD_RELEASE_WEBHOOK_URL" ]]; then
             echo "DISCORD_RELEASE_WEBHOOK_URL secret is required for release announcements" >&2
@@ -348,15 +387,19 @@ jobs:
           version = os.environ["RELEASE_VERSION"]
           tag = os.environ["RELEASE_TAG"]
           url = os.environ["RELEASE_URL"]
+          body = os.environ["RELEASE_BODY"] + "\n\nRelease artifacts are available on GitHub."
+          if len(body) > 3800:
+              body = body[:3797] + "…"
           payload = {
-              "content": f"slskr {version} is released: {url}",
+              "username": "slskr Releases",
               "embeds": [
                   {
-                      "title": f"slskr {version}",
+                      "title": f"slskr {version} is live",
                       "url": url,
-                      "description": "A new tagged GitHub release is available.",
+                      "description": body,
                       "fields": [
                           {"name": "Tag", "value": tag, "inline": True},
+                          {"name": "Workflow", "value": os.environ.get("GITHUB_SERVER_URL", "https://github.com") + "/" + os.environ["GITHUB_REPOSITORY"] + "/actions/runs/" + os.environ["GITHUB_RUN_ID"], "inline": True},
                       ],
                   }
               ],

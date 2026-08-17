@@ -47,6 +47,8 @@ materialize_reference "$SLSKR_SLSKD_ROOT" "$slskd_ref" created_slskd
 materialize_reference "$SLSKR_SLSKDN_ROOT" "$slskdn_ref" created_slskdn
 
 GATES=(
+  scripts/check-rust-build-guard.sh
+  scripts/test-rust-build-guard.sh
   scripts/check-endpoint-parity-drift.sh
   scripts/check-slskdn-controller-parity.sh
   scripts/check-controller-auth-profiles.sh
@@ -77,6 +79,7 @@ GATES=(
   scripts/check-client-sdk-gates.sh
   scripts/check-audit-tooling.sh
   scripts/check-rust-module-hygiene.sh
+  scripts/check-web-audit.sh
   scripts/check-dev-tooling.sh
   scripts/check-openapi-docs-drift.sh
   scripts/check-docs-freshness.sh

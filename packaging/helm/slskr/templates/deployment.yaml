@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "slskr.fullname" . }}
+  labels:
+    app.kubernetes.io/name: {{ include "slskr.name" . }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "slskr.name" . }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "slskr.name" . }}
+    spec:
+      securityContext:
+        runAsNonRoot: {{ .Values.securityContext.runAsNonRoot }}
+        runAsUser: {{ .Values.securityContext.runAsUser }}
+      containers:
+        - name: slskr
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: {{ .Values.securityContext.allowPrivilegeEscalation }}
+            readOnlyRootFilesystem: {{ .Values.securityContext.readOnlyRootFilesystem }}
+          ports:
+            - name: http
+              containerPort: 5030
+              protocol: TCP
+          env:
+            - name: SLSKR_CONFIG
+              value: {{ .Values.env.SLSKR_CONFIG | quote }}
+            - name: SLSKR_HTTP_PORT
+              value: {{ .Values.env.SLSKR_HTTP_PORT | quote }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          volumeMounts:
+            - name: config
+              mountPath: /app/config
+            - name: downloads
+              mountPath: /app/downloads
+            - name: incomplete
+              mountPath: /app/incomplete
+            - name: shares
+              mountPath: /app/shares
+              readOnly: {{ .Values.persistence.shares.readOnly }}
+      volumes:
+        - name: config
+          persistentVolumeClaim:
+            claimName: {{ include "slskr.fullname" . }}-config
+        - name: downloads
+          persistentVolumeClaim:
+            claimName: {{ include "slskr.fullname" . }}-downloads
+        - name: incomplete
+          persistentVolumeClaim:
+            claimName: {{ include "slskr.fullname" . }}-incomplete
+        - name: shares
+          persistentVolumeClaim:
+            claimName: {{ include "slskr.fullname" . }}-shares

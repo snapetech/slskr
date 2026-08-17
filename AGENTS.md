@@ -15,3 +15,21 @@ These interaction rules are standard for all model interfaces used with this rep
 - Surface negative conclusions and bad news directly.
 - Optimize for accuracy, not approval.
 - If you do not know, say so. Never fabricate.
+
+## Release-note contract
+
+Do not let user-facing behavior, security changes, operational changes, or
+user-facing documentation changes reach a release without a new validated
+fragment under `release-notes/`. Fragments are append-only and must capture the
+audience, product area, required action (or `none`), and breaking-change status.
+Internal-only work must be explicitly marked in the pull request. Preview the
+range with `python3 scripts/release_notes.py preview --base <base> --head <head>`.
+
+## Rust build resource guard
+
+Every repository Cargo subcommand—including build, check, test, clippy, fmt,
+run, package, metadata, tree, audit, install, and bench—must run through
+`scripts/with-build-guard.sh`. Node/Python helpers that spawn Cargo must invoke
+the wrapper as well. The guard serializes Rust commands, forces one Cargo job,
+and applies a bounded virtual-memory limit. Do not invoke Cargo directly from
+scripts, workflows, documentation examples, or agent sessions.

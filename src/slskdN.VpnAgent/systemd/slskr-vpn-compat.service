@@ -1,0 +1,19 @@
+[Unit]
+Description=slskR VPN compatibility API
+After=network-online.target slskr.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/slskr-vpn-agent api
+Restart=always
+RestartSec=2s
+User=root
+Group=root
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/var/lib/slskr-vpn
+
+[Install]
+WantedBy=multi-user.target

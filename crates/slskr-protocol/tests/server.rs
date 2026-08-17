@@ -545,6 +545,64 @@ fn private_message_and_error_messages_round_trip() {
 }
 
 #[test]
+fn private_message_notification_uses_one_replay_flag() {
+    let mut payload = Writer::new();
+    payload.write_u32_le(7);
+    payload.write_u32_le(1_780_000_000);
+    payload.write_string("peer").unwrap();
+    payload.write_string("hello").unwrap();
+    payload.write_bool(true);
+
+    let decoded = ServerMessage::decode(
+        MessageFrame::new(ServerCode::MessageUser.as_u32(), payload.into_inner()),
+        Direction::ServerToClient,
+    )
+    .unwrap();
+
+    assert_eq!(
+        decoded,
+        ServerMessage::MessageUserResponse(slskr_protocol::server::PrivateMessage {
+            id: 7,
+            timestamp: 1_780_000_000,
+            username: "peer".to_owned(),
+            message: "hello".to_owned(),
+            is_new: true,
+            was_replayed: false,
+        })
+    );
+
+    let replayed = ServerMessage::decode(
+        MessageFrame::new(
+            ServerCode::MessageUser.as_u32(),
+            [
+                7_u32.to_le_bytes().as_slice(),
+                1_780_000_000_u32.to_le_bytes().as_slice(),
+                4_u32.to_le_bytes().as_slice(),
+                b"peer".as_slice(),
+                5_u32.to_le_bytes().as_slice(),
+                b"hello".as_slice(),
+                &[0],
+            ]
+            .concat(),
+        ),
+        Direction::ServerToClient,
+    )
+    .unwrap();
+
+    assert_eq!(
+        replayed,
+        ServerMessage::MessageUserResponse(slskr_protocol::server::PrivateMessage {
+            id: 7,
+            timestamp: 1_780_000_000,
+            username: "peer".to_owned(),
+            message: "hello".to_owned(),
+            is_new: false,
+            was_replayed: true,
+        })
+    );
+}
+
+#[test]
 fn possible_parents_rejects_untrusted_count_without_preallocating() {
     let frame = MessageFrame::new(ServerCode::PossibleParents.as_u32(), u32::MAX.to_le_bytes());
     let decoded = ServerMessage::decode(frame, Direction::ServerToClient);

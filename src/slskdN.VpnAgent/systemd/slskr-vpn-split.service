@@ -1,0 +1,15 @@
+[Unit]
+Description=Route the slskR service UID through the VPN interface
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/slskr-vpn-agent split
+RemainAfterExit=yes
+NoNewPrivileges=true
+ProtectHome=true
+ReadWritePaths=/var/lib/slskr-vpn
+
+[Install]
+WantedBy=multi-user.target

@@ -24,8 +24,8 @@ use tokio::{
     time::{sleep, timeout},
 };
 
-const MAX_FORWARDING_RULES: usize = 128;
-const MAX_FORWARDING_CONNECTIONS: usize = 128;
+pub(crate) const MAX_FORWARDING_RULES: usize = 128;
+pub(crate) const MAX_FORWARDING_CONNECTIONS: usize = 128;
 pub(crate) const MAX_GATEWAY_ENDPOINTS: usize = 4;
 const TUNNEL_CHUNK_BYTES: usize = 8 * 1024;
 const MAX_TUNNEL_ID_BYTES: usize = 128;
@@ -464,7 +464,7 @@ async fn service_call(
     Ok(reply.payload)
 }
 
-fn validate_start_request(request: &StartRequest) -> Result<(), String> {
+pub(crate) fn validate_start_request(request: &StartRequest) -> Result<(), String> {
     if request.local_port < 1_024
         || request.destination_port == 0
         || request.pod_id.trim().is_empty()

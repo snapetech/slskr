@@ -24,7 +24,7 @@ export SLSK_SOAK_OBFUSCATED_LISTENER_BIND="${SLSK_SOAK_OBFUSCATED_LISTENER_BIND:
 
 cd "$repo_root"
 
-cargo build -q -p slskr
+scripts/with-build-guard.sh cargo build -q -p slskr
 slskr_bin="$repo_root/target/debug/slskr"
 
 {

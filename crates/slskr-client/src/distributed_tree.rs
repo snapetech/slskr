@@ -266,6 +266,7 @@ impl<S> DistributedTree<S> {
     pub fn handle_parent_message(&mut self, message: DistributedMessage) -> DistributedEvent {
         match message {
             DistributedMessage::Ping => DistributedEvent::Ping,
+            DistributedMessage::PingResponse { .. } => DistributedEvent::Ignored,
             DistributedMessage::Search(search) => {
                 if validate_distributed_search(&search).is_err() {
                     return DistributedEvent::Ignored;
@@ -308,6 +309,7 @@ impl<S> DistributedTree<S> {
 
         match message {
             DistributedMessage::Ping => DistributedEvent::Ping,
+            DistributedMessage::PingResponse { .. } => DistributedEvent::Ignored,
             DistributedMessage::Search(search) => {
                 if validate_distributed_search(&search).is_err() {
                     return DistributedEvent::Ignored;

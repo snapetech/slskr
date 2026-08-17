@@ -298,7 +298,7 @@ run_hardening_rejection() {
 }
 
 [[ -f "$dll" ]] || { printf 'missing frozen slskdN binary: %s\n' "$dll" >&2; exit 1; }
-cargo build -p slskr --manifest-path "$repo_root/Cargo.toml" >/dev/null
+scripts/with-build-guard.sh cargo build -p slskr --manifest-path "$repo_root/Cargo.toml" >/dev/null
 for implementation in upstream slskr; do
   run_static_modes "$implementation"
   run_watch_restart "$implementation" memory

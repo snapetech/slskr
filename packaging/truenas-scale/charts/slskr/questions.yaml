@@ -1,0 +1,7 @@
+- variable: service.port
+  label: Web UI port
+  description: TCP port exposed by the Web UI service.
+  schema:
+    type: int
+    default: 5030
+    required: true

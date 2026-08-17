@@ -32,19 +32,22 @@ run_optional_step() {
 
 run_step "Remediation baseline" scripts/check-remediation-baseline.sh
 run_step "Public posture check" scripts/check-public-posture.sh
+run_step "Changelog validation" scripts/validate-changelog.sh
+run_step "Rust build guard check" scripts/check-rust-build-guard.sh
 run_step "Shell syntax check" bash -n scripts/*.sh
+run_step "Release-note tooling tests" python3 scripts/test_release_notes.py
 run_optional_step shellcheck "Shell lint" shellcheck \
   -e SC1090,SC2016,SC2030,SC2031,SC2034,SC2100,SC2155,SC2206,SC2317,SC2329 \
   scripts/*.sh
 run_optional_step actionlint "GitHub workflow lint" actionlint
 run_step "Security scans" scripts/run-security-scans.sh
-run_step "Rust formatting" cargo fmt --all --check
-run_step "Rust clippy" cargo clippy --workspace --all-targets -- -D warnings
-run_step "Rust wasm web check" cargo check -p slskr-web --target wasm32-unknown-unknown
-run_step "Rust tests" cargo test --workspace
+run_step "Rust formatting" scripts/with-build-guard.sh cargo fmt --all --check
+run_step "Rust clippy" scripts/with-build-guard.sh cargo clippy --workspace --all-targets -- -D warnings
+run_step "Rust wasm web check" scripts/with-build-guard.sh cargo check -p slskr-web --target wasm32-unknown-unknown
+run_step "Rust tests" scripts/with-build-guard.sh cargo test --workspace
 
-if cargo audit --version >/dev/null 2>&1; then
-  run_step "RustSec audit" cargo audit
+if scripts/with-build-guard.sh cargo audit --version >/dev/null 2>&1; then
+  run_step "RustSec audit" scripts/with-build-guard.sh cargo audit
 else
   printf '\n==> RustSec audit\n'
   printf 'cargo-audit is not installed; skipping local advisory scan.\n'

@@ -1,0 +1,40 @@
+name: Publish Chocolatey
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to publish
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Download release asset
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          gh release download $env:RELEASE_TAG --pattern 'slskr-*-x86_64-pc-windows-msvc.zip' --dir release-assets
+      - name: Render and pack Chocolatey artifact
+        shell: pwsh
+        run: |
+          $asset = Get-ChildItem release-assets\*.zip | Select-Object -First 1
+          $hash = (Get-FileHash $asset.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          (Get-Content packaging\chocolatey\tools\chocolateyinstall.ps1) `
+            -replace '\$url\s*=\s*".*"', "`$url = `"$($asset.Name)`"" `
+            -replace '\$checksum\s*=\s*".*"', "`$checksum = `"$hash`"" |
+            Set-Content packaging\chocolatey\tools\chocolateyinstall.ps1
+          choco pack packaging\chocolatey\slskr.nuspec --outputdirectory release-assets
+      - name: Push package when credentials are configured
+        if: env.CHOCO_API_KEY != ''
+        shell: pwsh
+        env:
+          CHOCO_API_KEY: ${{ secrets.CHOCO_API_KEY }}
+        run: choco push (Get-ChildItem release-assets\*.nupkg | Select-Object -First 1) --source https://push.chocolatey.org/ --api-key $env:CHOCO_API_KEY

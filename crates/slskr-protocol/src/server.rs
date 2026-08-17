@@ -616,6 +616,36 @@ pub struct JoinedRoom {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Recommendation {
+    pub item: String,
+    pub score: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SimilarUser {
+    pub username: String,
+    pub rating: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ItemRecommendations {
+    pub item: String,
+    pub recommendations: Vec<Recommendation>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ItemSimilarUsers {
+    pub item: String,
+    pub usernames: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RoomTicker {
+    pub username: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ServerMessage {
     LoginRequest(LoginRequest),
     LoginResponse(LoginResponse),
@@ -671,6 +701,14 @@ pub enum ServerMessage {
         private: bool,
     },
     JoinedRoom(JoinedRoom),
+    UserJoinedRoom {
+        room: String,
+        user: RoomUser,
+    },
+    UserLeftRoom {
+        room: String,
+        username: String,
+    },
     LeaveRoom {
         room: String,
     },
@@ -695,14 +733,28 @@ pub enum ServerMessage {
     UserInterests(UserInterests),
     Relogged,
     UserSearch(TargetedSearchRequest),
+    RecommendationsRequest {
+        global: bool,
+    },
+    RecommendationsResponse {
+        global: bool,
+        recommendations: Vec<Recommendation>,
+        unrecommendations: Vec<Recommendation>,
+    },
     AddThingILike {
         item: String,
     },
     RemoveThingILike {
         item: String,
     },
+    GlobalAdminMessage {
+        message: String,
+    },
     RoomListRequest,
     RoomList(RoomList),
+    AddPrivilegedUser {
+        username: String,
+    },
     PrivilegedUsers(Vec<String>),
     HaveNoParent {
         no_parent: bool,
@@ -712,6 +764,21 @@ pub enum ServerMessage {
     },
     ParentSpeedRatio {
         ratio: u32,
+    },
+    ParentInactivityTimeout {
+        seconds: u32,
+    },
+    SearchInactivityTimeout {
+        seconds: u32,
+    },
+    MinParentsInCache {
+        count: u32,
+    },
+    DistribPingInterval {
+        seconds: u32,
+    },
+    ParentIp {
+        ip: Option<Ipv4Addr>,
     },
     CheckPrivilegesRequest,
     CheckPrivilegesResponse {
@@ -731,9 +798,42 @@ pub enum ServerMessage {
     WishlistInterval {
         seconds: u32,
     },
+    SimilarUsersRequest,
+    SimilarUsers(Vec<SimilarUser>),
+    ItemRecommendationsRequest {
+        item: String,
+    },
+    ItemRecommendations(ItemRecommendations),
+    ItemSimilarUsersRequest {
+        item: String,
+    },
+    ItemSimilarUsers(ItemSimilarUsers),
+    RoomTickers {
+        room: String,
+        tickers: Vec<RoomTicker>,
+    },
+    RoomTickerAdded {
+        room: String,
+        ticker: RoomTicker,
+    },
+    RoomTickerRemoved {
+        room: String,
+        username: String,
+    },
     RoomSearch(TargetedSearchRequest),
     SendUploadSpeed {
         speed: u32,
+    },
+    UserPrivilegesRequest {
+        username: String,
+    },
+    UserPrivilege {
+        username: String,
+        privileged: bool,
+    },
+    GivePrivileges {
+        username: String,
+        days: i32,
     },
     BranchLevel {
         level: u32,
@@ -741,7 +841,62 @@ pub enum ServerMessage {
     BranchRoot {
         username: String,
     },
+    ChildDepth {
+        depth: u32,
+    },
     ResetDistributed,
+    EmbeddedMessage {
+        distributed_code: u8,
+        payload: Vec<u8>,
+    },
+    PrivateRoomUsers {
+        room: String,
+        users: Vec<String>,
+    },
+    PrivateRoomAddUser {
+        room: String,
+        username: String,
+    },
+    PrivateRoomRemoveUser {
+        room: String,
+        username: String,
+    },
+    PrivateRoomDropMembership {
+        room: String,
+    },
+    PrivateRoomDropOwnership {
+        room: String,
+    },
+    PrivateRoomAdded {
+        room: String,
+    },
+    PrivateRoomRemoved {
+        room: String,
+    },
+    PrivateRoomToggle {
+        accept_invitations: bool,
+    },
+    ChangePassword {
+        password: String,
+    },
+    PrivateRoomAddOperator {
+        room: String,
+        username: String,
+    },
+    PrivateRoomRemoveOperator {
+        room: String,
+        username: String,
+    },
+    PrivateRoomOperatorAdded {
+        room: String,
+    },
+    PrivateRoomOperatorRemoved {
+        room: String,
+    },
+    PrivateRoomOwned {
+        room: String,
+        users: Vec<String>,
+    },
     MessageUsers {
         usernames: Vec<String>,
         message: String,
@@ -880,13 +1035,21 @@ impl ServerMessage {
                 message: reader.read_string()?,
             },
             (ServerCode::MessageUser, Direction::ServerToClient) => {
+                let id = reader.read_u32_le()?;
+                let timestamp = reader.read_u32_le()?;
+                let username = reader.read_string()?;
+                let message = reader.read_string()?;
+                // The server wire format has one flag here.  The frozen
+                // slskd/slskdN runtime calls it `replayed` and encodes it as
+                // 1 for a new message and 0 for a replayed message.
+                let was_replayed = !reader.read_bool()?;
                 Self::MessageUserResponse(PrivateMessage {
-                    id: reader.read_u32_le()?,
-                    timestamp: reader.read_u32_le()?,
-                    username: reader.read_string()?,
-                    message: reader.read_string()?,
-                    is_new: reader.read_bool()?,
-                    was_replayed: reader.read_bool()?,
+                    id,
+                    timestamp,
+                    username,
+                    message,
+                    is_new: !was_replayed,
+                    was_replayed,
                 })
             }
             (ServerCode::MessageAcked, Direction::ClientToServer) => Self::MessageAcked {
@@ -911,6 +1074,14 @@ impl ServerMessage {
             (ServerCode::JoinRoom, Direction::ServerToClient) => {
                 Self::JoinedRoom(decode_joined_room(&mut reader)?)
             }
+            (ServerCode::UserJoinedRoom, Direction::ServerToClient) => Self::UserJoinedRoom {
+                room: reader.read_string()?,
+                user: decode_room_user(&mut reader)?,
+            },
+            (ServerCode::UserLeftRoom, Direction::ServerToClient) => Self::UserLeftRoom {
+                room: reader.read_string()?,
+                username: reader.read_string()?,
+            },
             (ServerCode::LeaveRoom, _) => Self::LeaveRoom {
                 room: reader.read_string()?,
             },
@@ -947,16 +1118,46 @@ impl ServerMessage {
             (ServerCode::UserSearch, Direction::ClientToServer) => {
                 Self::UserSearch(decode_targeted_search_request(&mut reader)?)
             }
+            (ServerCode::Recommendations, Direction::ClientToServer) => {
+                Self::RecommendationsRequest { global: false }
+            }
+            (ServerCode::GlobalRecommendations, Direction::ClientToServer) => {
+                Self::RecommendationsRequest { global: true }
+            }
+            (ServerCode::Recommendations, Direction::ServerToClient) => {
+                let (recommendations, unrecommendations) =
+                    decode_recommendation_lists(&mut reader)?;
+                Self::RecommendationsResponse {
+                    global: false,
+                    recommendations,
+                    unrecommendations,
+                }
+            }
+            (ServerCode::GlobalRecommendations, Direction::ServerToClient) => {
+                let (recommendations, unrecommendations) =
+                    decode_recommendation_lists(&mut reader)?;
+                Self::RecommendationsResponse {
+                    global: true,
+                    recommendations,
+                    unrecommendations,
+                }
+            }
             (ServerCode::AddThingILike, Direction::ClientToServer) => Self::AddThingILike {
                 item: reader.read_string()?,
             },
             (ServerCode::RemoveThingILike, Direction::ClientToServer) => Self::RemoveThingILike {
                 item: reader.read_string()?,
             },
+            (ServerCode::AdminMessage, Direction::ServerToClient) => Self::GlobalAdminMessage {
+                message: reader.read_string()?,
+            },
             (ServerCode::RoomList, Direction::ClientToServer) => Self::RoomListRequest,
             (ServerCode::RoomList, Direction::ServerToClient) => {
                 Self::RoomList(decode_room_list(&mut reader)?)
             }
+            (ServerCode::AddToPrivileged, Direction::ServerToClient) => Self::AddPrivilegedUser {
+                username: reader.read_string()?,
+            },
             (ServerCode::PrivilegedUsers, Direction::ServerToClient) => {
                 Self::PrivilegedUsers(decode_string_vec(&mut reader)?)
             }
@@ -969,6 +1170,32 @@ impl ServerMessage {
             (ServerCode::ParentSpeedRatio, Direction::ServerToClient) => Self::ParentSpeedRatio {
                 ratio: reader.read_u32_le()?,
             },
+            (ServerCode::ParentInactivityTimeout, Direction::ServerToClient) => {
+                Self::ParentInactivityTimeout {
+                    seconds: reader.read_u32_le()?,
+                }
+            }
+            (ServerCode::SearchInactivityTimeout, Direction::ServerToClient) => {
+                Self::SearchInactivityTimeout {
+                    seconds: reader.read_u32_le()?,
+                }
+            }
+            (ServerCode::MinParentsInCache, Direction::ServerToClient) => Self::MinParentsInCache {
+                count: reader.read_u32_le()?,
+            },
+            (ServerCode::DistribPingInterval, Direction::ServerToClient) => {
+                Self::DistribPingInterval {
+                    seconds: reader.read_u32_le()?,
+                }
+            }
+            (ServerCode::ParentIp, Direction::ClientToServer) => {
+                let ip = match reader.remaining() {
+                    0 => None,
+                    4 => Some(reader.read_ipv4()?),
+                    remaining => return Err(DecodeError::TrailingBytes(remaining)),
+                };
+                Self::ParentIp { ip }
+            }
             (ServerCode::CheckPrivileges, Direction::ClientToServer) => {
                 Self::CheckPrivilegesRequest
             }
@@ -988,6 +1215,14 @@ impl ServerMessage {
             (ServerCode::AcceptChildren, Direction::ClientToServer) => Self::AcceptChildren {
                 accept: reader.read_bool()?,
             },
+            (ServerCode::EmbeddedMessage, Direction::ServerToClient) => {
+                let distributed_code = reader.read_u8()?;
+                let payload = reader.read_bytes(reader.remaining())?.to_vec();
+                Self::EmbeddedMessage {
+                    distributed_code,
+                    payload,
+                }
+            }
             (ServerCode::PossibleParents, Direction::ServerToClient) => {
                 Self::PossibleParents(decode_possible_parents(&mut reader)?)
             }
@@ -997,11 +1232,59 @@ impl ServerMessage {
             (ServerCode::WishlistInterval, Direction::ServerToClient) => Self::WishlistInterval {
                 seconds: reader.read_u32_le()?,
             },
+            (ServerCode::SimilarUsers, Direction::ClientToServer) => Self::SimilarUsersRequest,
+            (ServerCode::SimilarUsers, Direction::ServerToClient) => {
+                Self::SimilarUsers(decode_similar_users(&mut reader)?)
+            }
+            (ServerCode::ItemRecommendations, Direction::ClientToServer) => {
+                Self::ItemRecommendationsRequest {
+                    item: reader.read_string()?,
+                }
+            }
+            (ServerCode::ItemRecommendations, Direction::ServerToClient) => {
+                Self::ItemRecommendations(decode_item_recommendations(&mut reader)?)
+            }
+            (ServerCode::ItemSimilarUsers, Direction::ClientToServer) => {
+                Self::ItemSimilarUsersRequest {
+                    item: reader.read_string()?,
+                }
+            }
+            (ServerCode::ItemSimilarUsers, Direction::ServerToClient) => {
+                Self::ItemSimilarUsers(decode_item_similar_users(&mut reader)?)
+            }
+            (ServerCode::RoomTickers, Direction::ServerToClient) => Self::RoomTickers {
+                room: reader.read_string()?,
+                tickers: decode_room_tickers(&mut reader)?,
+            },
+            (ServerCode::RoomTickerAdded, Direction::ServerToClient) => Self::RoomTickerAdded {
+                room: reader.read_string()?,
+                ticker: RoomTicker {
+                    username: reader.read_string()?,
+                    message: reader.read_string()?,
+                },
+            },
+            (ServerCode::RoomTickerRemoved, Direction::ServerToClient) => Self::RoomTickerRemoved {
+                room: reader.read_string()?,
+                username: reader.read_string()?,
+            },
             (ServerCode::RoomSearch, Direction::ClientToServer) => {
                 Self::RoomSearch(decode_targeted_search_request(&mut reader)?)
             }
             (ServerCode::SendUploadSpeed, Direction::ClientToServer) => Self::SendUploadSpeed {
                 speed: reader.read_u32_le()?,
+            },
+            (ServerCode::UserPrivileged, Direction::ClientToServer) => {
+                Self::UserPrivilegesRequest {
+                    username: reader.read_string()?,
+                }
+            }
+            (ServerCode::UserPrivileged, Direction::ServerToClient) => Self::UserPrivilege {
+                username: reader.read_string()?,
+                privileged: reader.read_bool()?,
+            },
+            (ServerCode::GivePrivileges, Direction::ClientToServer) => Self::GivePrivileges {
+                username: reader.read_string()?,
+                days: reader.read_i32_le()?,
             },
             (ServerCode::BranchLevel, Direction::ClientToServer) => Self::BranchLevel {
                 level: reader.read_u32_le()?,
@@ -1009,7 +1292,70 @@ impl ServerMessage {
             (ServerCode::BranchRoot, Direction::ClientToServer) => Self::BranchRoot {
                 username: reader.read_string()?,
             },
+            (ServerCode::ChildDepth, Direction::ClientToServer) => Self::ChildDepth {
+                depth: reader.read_u32_le()?,
+            },
             (ServerCode::ResetDistributed, Direction::ServerToClient) => Self::ResetDistributed,
+            (ServerCode::RoomMembers, Direction::ServerToClient) => Self::PrivateRoomUsers {
+                room: reader.read_string()?,
+                users: decode_string_vec(&mut reader)?,
+            },
+            (ServerCode::AddRoomMember, _) => Self::PrivateRoomAddUser {
+                room: reader.read_string()?,
+                username: reader.read_string()?,
+            },
+            (ServerCode::RemoveRoomMember, _) => Self::PrivateRoomRemoveUser {
+                room: reader.read_string()?,
+                username: reader.read_string()?,
+            },
+            (ServerCode::CancelRoomMembership, Direction::ClientToServer) => {
+                Self::PrivateRoomDropMembership {
+                    room: reader.read_string()?,
+                }
+            }
+            (ServerCode::CancelRoomOwnership, Direction::ClientToServer) => {
+                Self::PrivateRoomDropOwnership {
+                    room: reader.read_string()?,
+                }
+            }
+            (ServerCode::RoomMembershipGranted, Direction::ServerToClient) => {
+                Self::PrivateRoomAdded {
+                    room: reader.read_string()?,
+                }
+            }
+            (ServerCode::RoomMembershipRevoked, Direction::ServerToClient) => {
+                Self::PrivateRoomRemoved {
+                    room: reader.read_string()?,
+                }
+            }
+            (ServerCode::EnableRoomInvitations, _) => Self::PrivateRoomToggle {
+                accept_invitations: reader.read_bool()?,
+            },
+            (ServerCode::ChangePassword, _) => Self::ChangePassword {
+                password: reader.read_string()?,
+            },
+            (ServerCode::AddRoomOperator, _) => Self::PrivateRoomAddOperator {
+                room: reader.read_string()?,
+                username: reader.read_string()?,
+            },
+            (ServerCode::RemoveRoomOperator, _) => Self::PrivateRoomRemoveOperator {
+                room: reader.read_string()?,
+                username: reader.read_string()?,
+            },
+            (ServerCode::RoomOperatorshipGranted, Direction::ServerToClient) => {
+                Self::PrivateRoomOperatorAdded {
+                    room: reader.read_string()?,
+                }
+            }
+            (ServerCode::RoomOperatorshipRevoked, Direction::ServerToClient) => {
+                Self::PrivateRoomOperatorRemoved {
+                    room: reader.read_string()?,
+                }
+            }
+            (ServerCode::RoomOperators, Direction::ServerToClient) => Self::PrivateRoomOwned {
+                room: reader.read_string()?,
+                users: decode_string_vec(&mut reader)?,
+            },
             (ServerCode::MessageUsers, Direction::ClientToServer) => Self::MessageUsers {
                 usernames: decode_string_vec(&mut reader)?,
                 message: reader.read_string()?,
@@ -1200,8 +1546,9 @@ impl ServerMessage {
                 writer.write_u32_le(value.timestamp);
                 writer.write_string(&value.username)?;
                 writer.write_string(&value.message)?;
-                writer.write_bool(value.is_new);
-                writer.write_bool(value.was_replayed);
+                // PrivateMessage has only one server-to-client wire flag;
+                // `is_new` is the inverse projection of `was_replayed`.
+                writer.write_bool(!value.was_replayed);
                 ServerCode::MessageUser
             }
             Self::MessageAcked { id } => {
@@ -1230,6 +1577,16 @@ impl ServerMessage {
             Self::JoinedRoom(value) => {
                 encode_joined_room(&mut writer, value)?;
                 ServerCode::JoinRoom
+            }
+            Self::UserJoinedRoom { room, user } => {
+                writer.write_string(room)?;
+                encode_room_user(&mut writer, user)?;
+                ServerCode::UserJoinedRoom
+            }
+            Self::UserLeftRoom { room, username } => {
+                writer.write_string(room)?;
+                writer.write_string(username)?;
+                ServerCode::UserLeftRoom
             }
             Self::LeaveRoom { room } => {
                 writer.write_string(room)?;
@@ -1269,6 +1626,26 @@ impl ServerMessage {
                 encode_targeted_search_request(&mut writer, value)?;
                 ServerCode::UserSearch
             }
+            Self::RecommendationsRequest { global } => {
+                if *global {
+                    ServerCode::GlobalRecommendations
+                } else {
+                    ServerCode::Recommendations
+                }
+            }
+            Self::RecommendationsResponse {
+                global,
+                recommendations,
+                unrecommendations,
+            } => {
+                encode_recommendation_list(&mut writer, recommendations)?;
+                encode_recommendation_list(&mut writer, unrecommendations)?;
+                if *global {
+                    ServerCode::GlobalRecommendations
+                } else {
+                    ServerCode::Recommendations
+                }
+            }
             Self::AddThingILike { item } => {
                 writer.write_string(item)?;
                 ServerCode::AddThingILike
@@ -1277,10 +1654,18 @@ impl ServerMessage {
                 writer.write_string(item)?;
                 ServerCode::RemoveThingILike
             }
+            Self::GlobalAdminMessage { message } => {
+                writer.write_string(message)?;
+                ServerCode::AdminMessage
+            }
             Self::RoomListRequest => ServerCode::RoomList,
             Self::RoomList(value) => {
                 encode_room_list(&mut writer, value)?;
                 ServerCode::RoomList
+            }
+            Self::AddPrivilegedUser { username } => {
+                writer.write_string(username)?;
+                ServerCode::AddToPrivileged
             }
             Self::PrivilegedUsers(value) => {
                 encode_string_vec(&mut writer, value)?;
@@ -1297,6 +1682,28 @@ impl ServerMessage {
             Self::ParentSpeedRatio { ratio } => {
                 writer.write_u32_le(*ratio);
                 ServerCode::ParentSpeedRatio
+            }
+            Self::ParentInactivityTimeout { seconds } => {
+                writer.write_u32_le(*seconds);
+                ServerCode::ParentInactivityTimeout
+            }
+            Self::SearchInactivityTimeout { seconds } => {
+                writer.write_u32_le(*seconds);
+                ServerCode::SearchInactivityTimeout
+            }
+            Self::MinParentsInCache { count } => {
+                writer.write_u32_le(*count);
+                ServerCode::MinParentsInCache
+            }
+            Self::DistribPingInterval { seconds } => {
+                writer.write_u32_le(*seconds);
+                ServerCode::DistribPingInterval
+            }
+            Self::ParentIp { ip } => {
+                if let Some(ip) = ip {
+                    writer.write_ipv4(*ip);
+                }
+                ServerCode::ParentIp
             }
             Self::CheckPrivilegesRequest => ServerCode::CheckPrivileges,
             Self::CheckPrivilegesResponse { seconds } => {
@@ -1315,6 +1722,14 @@ impl ServerMessage {
                 writer.write_bool(*accept);
                 ServerCode::AcceptChildren
             }
+            Self::EmbeddedMessage {
+                distributed_code,
+                payload,
+            } => {
+                writer.write_u8(*distributed_code);
+                writer.write_bytes(payload);
+                ServerCode::EmbeddedMessage
+            }
             Self::PossibleParents(value) => {
                 encode_possible_parents(&mut writer, value)?;
                 ServerCode::PossibleParents
@@ -1327,6 +1742,43 @@ impl ServerMessage {
                 writer.write_u32_le(*seconds);
                 ServerCode::WishlistInterval
             }
+            Self::SimilarUsersRequest => ServerCode::SimilarUsers,
+            Self::SimilarUsers(value) => {
+                encode_similar_users(&mut writer, value)?;
+                ServerCode::SimilarUsers
+            }
+            Self::ItemRecommendationsRequest { item } => {
+                writer.write_string(item)?;
+                ServerCode::ItemRecommendations
+            }
+            Self::ItemRecommendations(value) => {
+                encode_item_recommendations(&mut writer, value)?;
+                ServerCode::ItemRecommendations
+            }
+            Self::ItemSimilarUsersRequest { item } => {
+                writer.write_string(item)?;
+                ServerCode::ItemSimilarUsers
+            }
+            Self::ItemSimilarUsers(value) => {
+                encode_item_similar_users(&mut writer, value)?;
+                ServerCode::ItemSimilarUsers
+            }
+            Self::RoomTickers { room, tickers } => {
+                writer.write_string(room)?;
+                encode_room_tickers(&mut writer, tickers)?;
+                ServerCode::RoomTickers
+            }
+            Self::RoomTickerAdded { room, ticker } => {
+                writer.write_string(room)?;
+                writer.write_string(&ticker.username)?;
+                writer.write_string(&ticker.message)?;
+                ServerCode::RoomTickerAdded
+            }
+            Self::RoomTickerRemoved { room, username } => {
+                writer.write_string(room)?;
+                writer.write_string(username)?;
+                ServerCode::RoomTickerRemoved
+            }
             Self::RoomSearch(value) => {
                 encode_targeted_search_request(&mut writer, value)?;
                 ServerCode::RoomSearch
@@ -1334,6 +1786,23 @@ impl ServerMessage {
             Self::SendUploadSpeed { speed } => {
                 writer.write_u32_le(*speed);
                 ServerCode::SendUploadSpeed
+            }
+            Self::UserPrivilegesRequest { username } => {
+                writer.write_string(username)?;
+                ServerCode::UserPrivileged
+            }
+            Self::UserPrivilege {
+                username,
+                privileged,
+            } => {
+                writer.write_string(username)?;
+                writer.write_bool(*privileged);
+                ServerCode::UserPrivileged
+            }
+            Self::GivePrivileges { username, days } => {
+                writer.write_string(username)?;
+                writer.write_i32_le(*days);
+                ServerCode::GivePrivileges
             }
             Self::BranchLevel { level } => {
                 writer.write_u32_le(*level);
@@ -1343,7 +1812,73 @@ impl ServerMessage {
                 writer.write_string(username)?;
                 ServerCode::BranchRoot
             }
+            Self::ChildDepth { depth } => {
+                writer.write_u32_le(*depth);
+                ServerCode::ChildDepth
+            }
             Self::ResetDistributed => ServerCode::ResetDistributed,
+            Self::PrivateRoomUsers { room, users } => {
+                writer.write_string(room)?;
+                encode_string_vec(&mut writer, users)?;
+                ServerCode::RoomMembers
+            }
+            Self::PrivateRoomAddUser { room, username } => {
+                writer.write_string(room)?;
+                writer.write_string(username)?;
+                ServerCode::AddRoomMember
+            }
+            Self::PrivateRoomRemoveUser { room, username } => {
+                writer.write_string(room)?;
+                writer.write_string(username)?;
+                ServerCode::RemoveRoomMember
+            }
+            Self::PrivateRoomDropMembership { room } => {
+                writer.write_string(room)?;
+                ServerCode::CancelRoomMembership
+            }
+            Self::PrivateRoomDropOwnership { room } => {
+                writer.write_string(room)?;
+                ServerCode::CancelRoomOwnership
+            }
+            Self::PrivateRoomAdded { room } => {
+                writer.write_string(room)?;
+                ServerCode::RoomMembershipGranted
+            }
+            Self::PrivateRoomRemoved { room } => {
+                writer.write_string(room)?;
+                ServerCode::RoomMembershipRevoked
+            }
+            Self::PrivateRoomToggle { accept_invitations } => {
+                writer.write_bool(*accept_invitations);
+                ServerCode::EnableRoomInvitations
+            }
+            Self::ChangePassword { password } => {
+                writer.write_string(password)?;
+                ServerCode::ChangePassword
+            }
+            Self::PrivateRoomAddOperator { room, username } => {
+                writer.write_string(room)?;
+                writer.write_string(username)?;
+                ServerCode::AddRoomOperator
+            }
+            Self::PrivateRoomRemoveOperator { room, username } => {
+                writer.write_string(room)?;
+                writer.write_string(username)?;
+                ServerCode::RemoveRoomOperator
+            }
+            Self::PrivateRoomOperatorAdded { room } => {
+                writer.write_string(room)?;
+                ServerCode::RoomOperatorshipGranted
+            }
+            Self::PrivateRoomOperatorRemoved { room } => {
+                writer.write_string(room)?;
+                ServerCode::RoomOperatorshipRevoked
+            }
+            Self::PrivateRoomOwned { room, users } => {
+                writer.write_string(room)?;
+                encode_string_vec(&mut writer, users)?;
+                ServerCode::RoomOperators
+            }
             Self::MessageUsers { usernames, message } => {
                 encode_string_vec(&mut writer, usernames)?;
                 writer.write_string(message)?;
@@ -1683,6 +2218,143 @@ fn encode_joined_room(writer: &mut Writer, value: &JoinedRoom) -> Result<(), Enc
     if let Some(owner) = &value.owner {
         writer.write_string(owner)?;
         encode_string_vec(writer, &value.operators)?;
+    }
+    Ok(())
+}
+
+fn decode_room_user(reader: &mut Reader<'_>) -> Result<RoomUser, DecodeError> {
+    Ok(RoomUser {
+        username: reader.read_string()?,
+        status: reader.read_u32_le()?,
+        average_speed: reader.read_u32_le()?,
+        upload_count: reader.read_u64_le()?,
+        file_count: reader.read_u32_le()?,
+        directory_count: reader.read_u32_le()?,
+        slots_free: reader.read_u32_le()?,
+        country_code: reader.read_string()?,
+    })
+}
+
+fn encode_room_user(writer: &mut Writer, value: &RoomUser) -> Result<(), EncodeError> {
+    writer.write_string(&value.username)?;
+    writer.write_u32_le(value.status);
+    writer.write_u32_le(value.average_speed);
+    writer.write_u64_le(value.upload_count);
+    writer.write_u32_le(value.file_count);
+    writer.write_u32_le(value.directory_count);
+    writer.write_u32_le(value.slots_free);
+    writer.write_string(&value.country_code)
+}
+
+fn decode_recommendation_list(reader: &mut Reader<'_>) -> Result<Vec<Recommendation>, DecodeError> {
+    let count = reader.read_bounded_count("recommendation", 8)?;
+    let mut values = Vec::with_capacity(count);
+    for _ in 0..count {
+        values.push(Recommendation {
+            item: reader.read_string()?,
+            score: reader.read_i32_le()?,
+        });
+    }
+    Ok(values)
+}
+
+fn encode_recommendation_list(
+    writer: &mut Writer,
+    values: &[Recommendation],
+) -> Result<(), EncodeError> {
+    let count = u32::try_from(values.len())
+        .map_err(|_| EncodeError::length_overflow("recommendations", values.len()))?;
+    writer.write_u32_le(count);
+    for value in values {
+        writer.write_string(&value.item)?;
+        writer.write_i32_le(value.score);
+    }
+    Ok(())
+}
+
+fn decode_recommendation_lists(
+    reader: &mut Reader<'_>,
+) -> Result<(Vec<Recommendation>, Vec<Recommendation>), DecodeError> {
+    Ok((
+        decode_recommendation_list(reader)?,
+        decode_recommendation_list(reader)?,
+    ))
+}
+
+fn decode_similar_users(reader: &mut Reader<'_>) -> Result<Vec<SimilarUser>, DecodeError> {
+    let count = reader.read_bounded_count("similar user", 8)?;
+    let mut values = Vec::with_capacity(count);
+    for _ in 0..count {
+        values.push(SimilarUser {
+            username: reader.read_string()?,
+            rating: reader.read_i32_le()?,
+        });
+    }
+    Ok(values)
+}
+
+fn encode_similar_users(writer: &mut Writer, values: &[SimilarUser]) -> Result<(), EncodeError> {
+    let count = u32::try_from(values.len())
+        .map_err(|_| EncodeError::length_overflow("similar users", values.len()))?;
+    writer.write_u32_le(count);
+    for value in values {
+        writer.write_string(&value.username)?;
+        writer.write_i32_le(value.rating);
+    }
+    Ok(())
+}
+
+fn decode_item_recommendations(
+    reader: &mut Reader<'_>,
+) -> Result<ItemRecommendations, DecodeError> {
+    Ok(ItemRecommendations {
+        item: reader.read_string()?,
+        recommendations: decode_recommendation_list(reader)?,
+    })
+}
+
+fn encode_item_recommendations(
+    writer: &mut Writer,
+    value: &ItemRecommendations,
+) -> Result<(), EncodeError> {
+    writer.write_string(&value.item)?;
+    encode_recommendation_list(writer, &value.recommendations)
+}
+
+fn decode_item_similar_users(reader: &mut Reader<'_>) -> Result<ItemSimilarUsers, DecodeError> {
+    Ok(ItemSimilarUsers {
+        item: reader.read_string()?,
+        usernames: decode_string_vec(reader)?,
+    })
+}
+
+fn encode_item_similar_users(
+    writer: &mut Writer,
+    value: &ItemSimilarUsers,
+) -> Result<(), EncodeError> {
+    writer.write_string(&value.item)?;
+    encode_string_vec(writer, &value.usernames)
+}
+
+fn decode_room_tickers(reader: &mut Reader<'_>) -> Result<Vec<RoomTicker>, DecodeError> {
+    let count = reader.read_bounded_count("room ticker", 8)?;
+    let mut values = Vec::with_capacity(count);
+    for _ in 0..count {
+        values.push(RoomTicker {
+            username: reader.read_string()?,
+            message: reader.read_string()?,
+        });
+    }
+    Ok(values)
+}
+
+fn encode_room_tickers(writer: &mut Writer, values: &[RoomTicker]) -> Result<(), EncodeError> {
+    let count = u32::try_from(values.len())
+        .map_err(|_| EncodeError::length_overflow("room tickers", values.len()))?;
+    writer.write_u32_le(count);
+    for value in values {
+        writer.write_string(&value.username)?;
+        writer.write_string(&value.message)?;
     }
     Ok(())
 }

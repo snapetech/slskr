@@ -213,7 +213,7 @@ run_download_probe_optional() {
       "$repo_root/scripts/run-proton-natpmp-command.sh"
     )
   fi
-  command+=(cargo run -q -p slskr -- probe download-peer)
+  command+=(scripts/with-build-guard.sh cargo run -q -p slskr -- probe download-peer)
   run_probe_optional "$scope" "$check" "$expected" "$actor_index" "$peer_user" "${command[@]}"
 }
 
@@ -325,9 +325,9 @@ run_commons_download_probe_optional() {
     host="$slskr_ns_ip"
   fi
 
-  run_probe_optional "$scope" open-commons-browse "open commons browse proof failed; text fixture browse remains the blocking proof" "$actor_index" "$peer_user" env SLSK_BROWSE_HOST_OVERRIDE="$host" SLSK_BROWSE_EXPECTED=commons-click-track.ogg cargo run -q -p slskr -- probe browse-peer
+  run_probe_optional "$scope" open-commons-browse "open commons browse proof failed; text fixture browse remains the blocking proof" "$actor_index" "$peer_user" env SLSK_BROWSE_HOST_OVERRIDE="$host" SLSK_BROWSE_EXPECTED=commons-click-track.ogg scripts/with-build-guard.sh cargo run -q -p slskr -- probe browse-peer
   run_download_probe_optional "$scope" open-commons-download "open commons payload download failed; text fixture transfer remains the blocking proof" "$actor_index" "$peer_user" "$host" "${daemon_name}\\open-commons\\commons-click-track.ogg" "" e5e09f8ef9617a355e71e2d0b00f2554201aa124a9a821c4a7f76f0441a369a0 2240
-  run_account_command_optional "$scope" open-commons-search "public search indexing can lag or suppress fresh daemon shares" "$actor_index" env SLSK_SOAK_LISTENER_BIND=127.0.0.1:0 SLSK_SOAK_SEARCH_QUERY=commons-click-track.ogg SLSK_SOAK_SECONDS=15 cargo run -q -p slskr -- soak live
+  run_account_command_optional "$scope" open-commons-search "public search indexing can lag or suppress fresh daemon shares" "$actor_index" env SLSK_SOAK_LISTENER_BIND=127.0.0.1:0 SLSK_SOAK_SEARCH_QUERY=commons-click-track.ogg SLSK_SOAK_SECONDS=15 scripts/with-build-guard.sh cargo run -q -p slskr -- soak live
 }
 
 start_daemon() {
@@ -417,7 +417,7 @@ wait_for_peer() {
     local stdout_file stderr_file status detail
     stdout_file="$(mktemp)"
     stderr_file="$(mktemp)"
-    local command=(cargo run -q -p slskr -- probe peer-address)
+    local command=(scripts/with-build-guard.sh cargo run -q -p slskr -- probe peer-address)
     if [[ "$probe_vpn_enabled" == "1" ]]; then
       local label host_ip ns_ip subnet namespace config
       mapfile -t probe_args < <(probe_netns_args "$scope")
@@ -485,7 +485,7 @@ run_restart_matrix_for_daemon() {
   wait_for_daemon_preflight "$scope" "$name" "$daemon_host" "$http_port" || true
   local user_var="SLSKR_TEST_${account_index}_USERNAME"
   if wait_for_peer "$scope" "$probe_index" "${!user_var}" "${SLSKR_RESTART_READINESS_ATTEMPTS:-8}"; then
-    run_probe_optional "$scope" restart-browse "restart preserved listener metadata but browse proof failed; inspect daemon app dir and share cache" "$probe_index" "${!user_var}" env SLSK_BROWSE_HOST_OVERRIDE="$daemon_host" SLSK_BROWSE_EXPECTED="slskr-interop-${fixture_name}.txt" cargo run -q -p slskr -- probe browse-peer
+    run_probe_optional "$scope" restart-browse "restart preserved listener metadata but browse proof failed; inspect daemon app dir and share cache" "$probe_index" "${!user_var}" env SLSK_BROWSE_HOST_OVERRIDE="$daemon_host" SLSK_BROWSE_EXPECTED="slskr-interop-${fixture_name}.txt" scripts/with-build-guard.sh cargo run -q -p slskr -- probe browse-peer
     run_commons_download_probe_optional "$scope" "$probe_index" "${!user_var}" "$fixture_name"
     record "$scope" restart-persistence ok "daemon restarted with preserved app/share dir; peer metadata, browse, search, and queued open-commons payload probes completed"
   else
@@ -506,7 +506,7 @@ cleanup() {
 trap cleanup EXIT
 
 if prepare_commons_fixtures; then
-  run_logged slskr fixture-peer-smoke "$repo_root" cargo run -q -p slskr -- smoke fixture-peer
+  run_logged slskr fixture-peer-smoke "$repo_root" scripts/with-build-guard.sh cargo run -q -p slskr -- smoke fixture-peer
 else
   record slskr fixture-peer-smoke skipped "open commons fixtures unavailable"
 fi
@@ -554,11 +554,11 @@ if [[ "$run_daemons" == "1" ]]; then
     wait_for_daemon_preflight slskr-to-slskr slskr "$slskr_host" 55130 || true
     slskr_user_var="SLSKR_TEST_${slskr_account_index}_USERNAME"
     if wait_for_peer slskr-to-slskr "$slskr_probe_account_index" "${!slskr_user_var}"; then
-      run_probe_optional slskr-to-slskr plain-peer "public login/reset instability or daemon listener race; local peer smoke remains the blocking proof" "$slskr_probe_account_index" "${!slskr_user_var}" env SLSK_PLAIN_HOST_OVERRIDE="$slskr_host" cargo run -q -p slskr -- probe plain-peer
-      run_probe_optional slskr-to-slskr browse-peer "public login/reset instability or daemon listener race; open commons fixture smoke remains the blocking payload proof" "$slskr_probe_account_index" "${!slskr_user_var}" env SLSK_BROWSE_HOST_OVERRIDE="$slskr_host" SLSK_BROWSE_EXPECTED=slskr-interop-slskr.txt cargo run -q -p slskr -- probe browse-peer
+      run_probe_optional slskr-to-slskr plain-peer "public login/reset instability or daemon listener race; local peer smoke remains the blocking proof" "$slskr_probe_account_index" "${!slskr_user_var}" env SLSK_PLAIN_HOST_OVERRIDE="$slskr_host" scripts/with-build-guard.sh cargo run -q -p slskr -- probe plain-peer
+      run_probe_optional slskr-to-slskr browse-peer "public login/reset instability or daemon listener race; open commons fixture smoke remains the blocking payload proof" "$slskr_probe_account_index" "${!slskr_user_var}" env SLSK_BROWSE_HOST_OVERRIDE="$slskr_host" SLSK_BROWSE_EXPECTED=slskr-interop-slskr.txt scripts/with-build-guard.sh cargo run -q -p slskr -- probe browse-peer
       run_download_probe_optional slskr-to-slskr download-peer "queued fixture download failed; inspect browse preview for exact remote path and daemon logs for transfer rejection" "$slskr_probe_account_index" "${!slskr_user_var}" "$slskr_host" 'slskr\slskr-interop-slskr.txt' 'slskr interop fixture slskr' a06260a33bda3cf8cb147107c2d09723b4d59fc6a40d1ac9177424614f4f2202 2240
       run_commons_download_probe_optional slskr-to-slskr "$slskr_probe_account_index" "${!slskr_user_var}" slskr
-      run_probe_optional slskr-to-slskr file-transfer-peer "raw transfer token echo requires a queued transfer on slskr; real payload transfer is covered by queued download probes" "$slskr_probe_account_index" "${!slskr_user_var}" env SLSK_FILE_HOST_OVERRIDE="$slskr_host" cargo run -q -p slskr -- probe file-transfer-peer
+      run_probe_optional slskr-to-slskr file-transfer-peer "raw transfer token echo requires a queued transfer on slskr; real payload transfer is covered by queued download probes" "$slskr_probe_account_index" "${!slskr_user_var}" env SLSK_FILE_HOST_OVERRIDE="$slskr_host" scripts/with-build-guard.sh cargo run -q -p slskr -- probe file-transfer-peer
       run_restart_matrix_for_daemon slskr-to-slskr slskr "$slskr_repo" "$slskr_account_index" "$slskr_probe_account_index" 55130 55100 "$slskr_vpn_label" "$slskr_ns_host_ip" "$slskr_ns_ip" "$slskr_ns_subnet" "$slskr_host" slskr slskr_pid
     else
       record_daemon_tail slskr-to-slskr slskr
@@ -576,12 +576,12 @@ if [[ "$run_daemons" == "1" ]]; then
     wait_for_daemon_preflight slskr-to-slskr slskr "$slskr_host" 55131 || true
     slskr_user_var="SLSKR_TEST_${slskr_account_index}_USERNAME"
     if wait_for_peer slskr-to-slskr "$slskr_probe_account_index" "${!slskr_user_var}"; then
-      run_probe_optional slskr-to-slskr plain-peer "public login/reset instability or daemon listener race; local peer smoke remains the blocking proof" "$slskr_probe_account_index" "${!slskr_user_var}" env SLSK_PLAIN_HOST_OVERRIDE="$slskr_host" cargo run -q -p slskr -- probe plain-peer
-      run_probe_optional slskr-to-slskr browse-peer "public login/reset instability or daemon listener race; open commons fixture smoke remains the blocking payload proof" "$slskr_probe_account_index" "${!slskr_user_var}" env SLSK_BROWSE_HOST_OVERRIDE="$slskr_host" SLSK_BROWSE_EXPECTED=slskr-interop-slskr.txt cargo run -q -p slskr -- probe browse-peer
+      run_probe_optional slskr-to-slskr plain-peer "public login/reset instability or daemon listener race; local peer smoke remains the blocking proof" "$slskr_probe_account_index" "${!slskr_user_var}" env SLSK_PLAIN_HOST_OVERRIDE="$slskr_host" scripts/with-build-guard.sh cargo run -q -p slskr -- probe plain-peer
+      run_probe_optional slskr-to-slskr browse-peer "public login/reset instability or daemon listener race; open commons fixture smoke remains the blocking payload proof" "$slskr_probe_account_index" "${!slskr_user_var}" env SLSK_BROWSE_HOST_OVERRIDE="$slskr_host" SLSK_BROWSE_EXPECTED=slskr-interop-slskr.txt scripts/with-build-guard.sh cargo run -q -p slskr -- probe browse-peer
       run_download_probe_optional slskr-to-slskr download-peer "queued fixture download failed; inspect browse preview for exact remote path and daemon logs for transfer rejection" "$slskr_probe_account_index" "${!slskr_user_var}" "$slskr_host" 'slskr\slskr-interop-slskr.txt' 'slskr interop fixture slskr' 98be10759b80d65a17fa825c5459338fbd319c338280f7aff65b9cc4bba859a9 2240
       run_commons_download_probe_optional slskr-to-slskr "$slskr_probe_account_index" "${!slskr_user_var}" slskr
-      run_probe_optional slskr-to-slskr file-transfer-peer "raw transfer token echo requires a queued transfer on slskr; real payload transfer is covered by queued download probes" "$slskr_probe_account_index" "${!slskr_user_var}" env SLSK_FILE_HOST_OVERRIDE="$slskr_host" cargo run -q -p slskr -- probe file-transfer-peer
-      run_probe_optional slskr-to-slskr obfuscated-peer "obfuscated peer probe is only mandatory when the target advertises an active obfuscated listener" "$slskr_probe_account_index" "${!slskr_user_var}" env SLSK_OBFUSCATED_PEER_USERNAME="${!slskr_user_var}" SLSK_OBFUSCATED_HOST_OVERRIDE="$slskr_host" cargo run -q -p slskr -- probe obfuscated-peer
+      run_probe_optional slskr-to-slskr file-transfer-peer "raw transfer token echo requires a queued transfer on slskr; real payload transfer is covered by queued download probes" "$slskr_probe_account_index" "${!slskr_user_var}" env SLSK_FILE_HOST_OVERRIDE="$slskr_host" scripts/with-build-guard.sh cargo run -q -p slskr -- probe file-transfer-peer
+      run_probe_optional slskr-to-slskr obfuscated-peer "obfuscated peer probe is only mandatory when the target advertises an active obfuscated listener" "$slskr_probe_account_index" "${!slskr_user_var}" env SLSK_OBFUSCATED_PEER_USERNAME="${!slskr_user_var}" SLSK_OBFUSCATED_HOST_OVERRIDE="$slskr_host" scripts/with-build-guard.sh cargo run -q -p slskr -- probe obfuscated-peer
       run_restart_matrix_for_daemon slskr-to-slskr slskr "$slskr_repo" "$slskr_account_index" "$slskr_probe_account_index" 55131 55110 "$slskr_vpn_label" "$slskr_ns_host_ip" "$slskr_ns_ip" "$slskr_ns_subnet" "$slskr_host" slskr slskr_pid
     else
       record_daemon_tail slskr-to-slskr slskr

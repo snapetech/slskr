@@ -55,6 +55,15 @@ for i in $(seq 1 "${SLSKR_TEST_ACCOUNT_COUNT:-4}"); do
   require_var "SLSKR_TEST_${i}_PASSWORD"
 done
 
+slskr_binary="$repo_root/target/debug/slskr"
+if [[ ! -x "$slskr_binary" ]]; then
+  ulimit -v "${SLSKR_RUST_VIRTUAL_MEMORY_KIB:-16777216}"
+  export CARGO_BUILD_JOBS=1
+  export RUST_MIN_STACK="${RUST_MIN_STACK:-16777216}"
+  export CARGO_NET_OFFLINE="${CARGO_NET_OFFLINE:-true}"
+  scripts/with-build-guard.sh cargo build -q -p slskr
+fi
+
 run_sanitized() {
   local stdout_file="$1"
   local stderr_file="$2"
@@ -134,7 +143,7 @@ run_account_login() {
   set +e
   SLSK_USERNAME="$username" \
   SLSK_PASSWORD="$password" \
-    run_sanitized "$stdout_file" "$stderr_file" run_live_command "$index" cargo run -q -p slskr -- login smoke
+    run_sanitized "$stdout_file" "$stderr_file" run_live_command "$index" "$slskr_binary" login smoke
   status=$?
   set -e
 
@@ -167,7 +176,7 @@ SLSKR_A_PASSWORD="${!local_peer_a_pass_var}" \
 SLSKR_B_USERNAME="${!local_peer_b_user_var}" \
 SLSKR_B_PASSWORD="${!local_peer_b_pass_var}" \
 SLSKR_INDIRECT_HOST_OVERRIDE="${SLSKR_INDIRECT_HOST_OVERRIDE:-127.0.0.1}" \
-  run_sanitized "$pair_stdout" "$pair_stderr" run_live_command "$local_peer_a_index" cargo run -q -p slskr -- smoke local-peer
+  run_sanitized "$pair_stdout" "$pair_stderr" run_live_command "$local_peer_a_index" "$slskr_binary" smoke local-peer
 pair_status=$?
 set -e
 pair_detail="$(summarize_output "$pair_stdout" "$pair_stderr")"
@@ -192,7 +201,7 @@ SLSK_USERNAME="${!private_sender_user_var}" \
 SLSK_PASSWORD="${!private_sender_pass_var}" \
 SLSK_MESSAGE_USERNAME="${!private_receiver_user_var}" \
 SLSK_MESSAGE_PASSWORD="${!private_receiver_pass_var}" \
-  run_sanitized "$social_stdout" "$social_stderr" run_live_command "$private_message_sender_index" cargo run -q -p slskr -- probe private-message
+  run_sanitized "$social_stdout" "$social_stderr" run_live_command "$private_message_sender_index" "$slskr_binary" probe private-message
 social_status=$?
 set -e
 social_detail="$(summarize_output "$social_stdout" "$social_stderr")"
@@ -211,7 +220,7 @@ room_pass_var="SLSKR_TEST_${room_message_account_index}_PASSWORD"
 set +e
 SLSK_USERNAME="${!room_user_var}" \
 SLSK_PASSWORD="${!room_pass_var}" \
-  run_sanitized "$room_stdout" "$room_stderr" run_live_command "$room_message_account_index" cargo run -q -p slskr -- probe room-message
+  run_sanitized "$room_stdout" "$room_stderr" run_live_command "$room_message_account_index" "$slskr_binary" probe room-message
 room_status=$?
 set -e
 room_detail="$(summarize_output "$room_stdout" "$room_stderr")"

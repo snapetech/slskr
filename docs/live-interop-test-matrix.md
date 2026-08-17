@@ -109,8 +109,8 @@ For account rotation, add more `SLSKR_TEST_N_USERNAME` / `SLSKR_TEST_N_PASSWORD`
 
 | Scope | Result | Evidence |
 | --- | --- | --- |
-| `slskr` Rust formatting | Passed | `cargo fmt --all --check` |
-| `slskr` Rust workspace tests | Passed | `cargo test --workspace`: all protocol, client, daemon, API smoke, and Soulfind contract tests passed |
+| `slskr` Rust formatting | Passed | `scripts/with-build-guard.sh cargo fmt --all --check` |
+| `slskr` Rust workspace tests | Passed | `scripts/with-build-guard.sh cargo test --workspace`: all protocol, client, daemon, API smoke, and Soulfind contract tests passed |
 | `slskr` web tests | Passed | `web npm test`: 82 files, 508 tests passed |
 | `slskr` web production build | Passed | `web npm run build` |
 | `slskr` live account login | Passed | `scripts/run-live-interop-matrix.sh`: four generated `slskrtest20260504_*` accounts logged in |
@@ -150,7 +150,7 @@ For account rotation, add more `SLSKR_TEST_N_USERNAME` / `SLSKR_TEST_N_PASSWORD`
 | --- | --- | --- |
 | Live harness | `scripts/run-live-interop-matrix.sh` had a malformed command substitution after warning filtering was added. | Rewrote the runner with temp files and sanitized summaries so credentials are not printed and compiler warnings do not pollute TSV detail fields. |
 | Web UX | Room unread/activity alert missed migrated `slskr` localStorage state because only the new `slskr.rooms.lastSeenActivity` key was read. | Added fallback read from `slskr.rooms.lastSeenActivity` while continuing to write the current `slskr` key. |
-| Rust formatting | Existing Rust sources had trailing whitespace that blocked `cargo fmt`. | Stripped trailing whitespace and reran formatting. |
+| Rust formatting | Existing Rust sources had trailing whitespace that blocked the Rust formatter. | Stripped trailing whitespace and reran formatting through the build guard. |
 | Runtime unit tests | `SearchInternal` mismatched-token test expected an exception even though current behavior safely ignores stale token responses. | Updated the test expectation to assert no exception and no callback. |
 | slskd automation files API | Python `slskd_api` 0.2.4 uses MIME-style base64 with newline wrapping for file-management route segments; the strict HTTP target validator rejected the encoded newline before routing. | Scoped percent-encoded ASCII whitespace acceptance to the final base64 segment of slskd file-management routes, stripped base64 whitespace before decoding, and changed the smoke to use real raw directory/file names and storage fixtures. |
 | Queued cross-client downloads | slskdN generates a new upload token after returning `Queued`; slskR incorrectly required that token to equal its original download-request token and closed the peer-message connection. | Validate the initial queued response against the request token, then adopt the nonzero collision-free upload token from the matching follow-up request. A focused regression and the bidirectional live hash transfer pass. |

@@ -57,13 +57,17 @@ jobs:
           key: cargo-audit-${{ runner.os }}-${{ runner.arch }}-${{ env.CARGO_AUDIT_VERSION }}
       - name: Install cargo-audit
         if: steps.cargo-audit-cache.outputs.cache-hit != 'true'
-        run: '"$(rustup which cargo)" install cargo-audit --version "$CARGO_AUDIT_VERSION" --locked'
+        run: scripts/with-build-guard.sh cargo install cargo-audit --version "$CARGO_AUDIT_VERSION" --locked
+      - run: scripts/check-rust-build-guard.sh
+      - run: scripts/test-rust-build-guard.sh
       - run: scripts/check-public-posture.sh
-      - run: cargo fmt --all --check
-      - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo check -p slskr-web --target wasm32-unknown-unknown
-      - run: cargo test --workspace
-      - run: cargo audit
+      - run: scripts/validate-changelog.sh
+      - run: python3 scripts/test_release_notes.py
+      - run: scripts/with-build-guard.sh cargo fmt --all --check
+      - run: scripts/with-build-guard.sh cargo clippy --workspace --all-targets -- -D warnings
+      - run: scripts/with-build-guard.sh cargo check -p slskr-web --target wasm32-unknown-unknown
+      - run: scripts/with-build-guard.sh cargo test --workspace
+      - run: scripts/with-build-guard.sh cargo audit
       - run: scripts/run-security-scans.sh
       - run: scripts/check-client-sdk-gates.sh
       - run: npm --prefix web ci --allow-git=root --legacy-peer-deps
@@ -100,6 +104,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y musl-tools
       - name: Check native GNU build
-        run: cargo check --workspace --all-targets
+        run: scripts/with-build-guard.sh cargo check --workspace --all-targets
       - name: Check static musl build
-        run: cargo check -p slskr --target aarch64-unknown-linux-musl
+        run: scripts/with-build-guard.sh cargo check -p slskr --target aarch64-unknown-linux-musl

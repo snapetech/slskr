@@ -4,7 +4,8 @@ import { fileURLToPath } from 'node:url';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const jsonOutput = process.argv.includes('--json');
-const result = spawnSync('cargo', [
+const result = spawnSync(resolve(repoRoot, 'scripts/with-build-guard.sh'), [
+  'cargo',
   'test',
   '-p',
   'slskr-web',

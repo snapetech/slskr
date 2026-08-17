@@ -1,0 +1,12 @@
+#!/bin/sh
+. "$(dirname "$0")/common"
+SERVICE_SCRIPT="/usr/local/etc/rc.d/${PACKAGE_NAME}.sh"
+case "$1" in
+  start) start_service ;;
+  stop) stop_service ;;
+  status)
+    [ -f "${SHARE_PATH}/slskr.pid" ] && kill -0 "$(cat "${SHARE_PATH}/slskr.pid")" 2>/dev/null
+    ;;
+  restart) "$0" stop; sleep 1; "$0" start ;;
+  *) echo "Usage: $0 {start|stop|status|restart}" >&2; exit 1 ;;
+esac

@@ -11,7 +11,7 @@ If you find yourself writing `FINAL_*.md`, `*_COMPLETION_*.md`, or
 
 ## 0. Snapshot (2026-05-13)
 
-- `cargo test --workspace` passes.
+- `scripts/with-build-guard.sh cargo test --workspace` passes.
 - `scripts/check-remediation-baseline.sh` passes.
 - `scripts/run-bug-council-all-phases.sh` passes and all current council
   candidate classes are classified/guarded at the fresh scan counts.
@@ -124,7 +124,7 @@ This is the contract we owe consumers. Everything outside it can be cut.
 
 ## 5. Phased plan
 
-Each phase ends with `cargo check --workspace`, `cargo test --workspace
+Each phase ends with `scripts/with-build-guard.sh cargo check --workspace`, `scripts/with-build-guard.sh cargo test --workspace
 --exclude slskr` (until slskr tests are real), and a single commit. No
 intermediate "phase complete" docs.
 
@@ -133,11 +133,11 @@ intermediate "phase complete" docs.
 - [x] **0.1** `http_server.rs` was already tracked and compiling (no action needed).
 - [x] **0.2** Build was already clean; no `RequestSecurityHeaders` fix required.
 - [x] **0.3** Skipped — `response_cache.rs` deleted in Phase 1.
-- [x] **0.4** `cargo check -p slskr` green.
+- [x] **0.4** `scripts/with-build-guard.sh cargo check -p slskr` green.
 - [x] **0.5** 49 prior-agent docs moved to `archive/`. Commit: `c06d35df`.
 - [x] **0.6** `README.md` Status paragraph rewritten honestly.
 
-**Definition of done:** `cargo build --workspace` succeeds. Root `ls *.md`
+**Definition of done:** `scripts/with-build-guard.sh cargo build --workspace` succeeds. Root `ls *.md`
 returns ≤6 entries. No commit message contains the words "FINAL", "COMPLETE",
 or "100%".
 
@@ -175,7 +175,7 @@ their `mod` declarations and any `use` statements. No replacements yet.
 
 - [x] **1.1** Deleted 23 ghost modules; removed `mod` declarations.
 - [x] **1.2** `openapi.rs` audited — 2 call sites serve real swagger UI + JSON spec. Kept standalone.
-- [x] **1.3** `cargo check -p slskr` green.
+- [x] **1.3** `scripts/with-build-guard.sh cargo check -p slskr` green.
 - [x] **1.4** `#![allow(dead_code, unused_imports)]` removed. All warnings in `main.rs` fixed
       (unused imports, dead constants/methods/structs, 10 unreachable route arms). 37 warnings
       remain in kept modules (batch, logging, rate_limit, tracing, webhooks, storage,
@@ -186,11 +186,11 @@ in `main.rs` header drops from ~30 to ~10.
 
 ### Phase 2 — Strip cargo-cult dependencies
 
-After Phase 1, run `cargo machete` (or by inspection) and remove every
+After Phase 1, run `scripts/with-build-guard.sh cargo machete` (or by inspection) and remove every
 dependency that has zero `use` sites:
 
 - [x] **2.1** Dropped all listed deps. Cargo.lock shrunk by 135 packages. Commit: `aecd46fb`.
-- [x] **2.2** `cargo check --workspace` clean.
+- [x] **2.2** `scripts/with-build-guard.sh cargo check --workspace` clean.
 - [x] **2.3** Done.
 
 ### Phase 3 — Honest HTTP server
@@ -430,7 +430,7 @@ existing rows; add a new dated entry.
 - **2026-05-04** — Phase 7 complete. Deleted the tautological external
   integration test, added `tests/api_smoke.rs` that spawns `slskr serve` and
   hits real HTTP endpoints with `reqwest`, and confirmed existing CI already
-  runs it through `cargo test --workspace`.
+  runs it through `scripts/with-build-guard.sh cargo test --workspace`.
 - **2026-05-04** — Phase 8.1–8.3 complete. README/PLAN/docs now describe the
   current single-node daemon reality: plain WebSocket events, partial web UI,
   default-off SQLite search persistence, configurable rate limits, and descoped
@@ -439,5 +439,5 @@ existing rows; add a new dated entry.
   lake after the one-week cooldown elapsed.
 - **2026-05-04** — Follow-up cleanup. Removed the remaining fake SSE route
   responses, retired `/hub/*` SignalR compatibility stubs, and removed no-op
-  persistence record assignments for transfers/messages. `cargo test -p slskr`
+  persistence record assignments for transfers/messages. `scripts/with-build-guard.sh cargo test -p slskr`
   still passes.

@@ -189,13 +189,13 @@ With `--release` optimizations:
 
 ```bash
 # CPU profiling
-cargo flamegraph --bin slskr
+scripts/with-build-guard.sh cargo flamegraph --bin slskr
 
 # Memory profiling
 valgrind --tool=massif ./target/release/slskr
 
 # Benchmark
-cargo bench --bench http_api
+scripts/with-build-guard.sh cargo bench --bench http_api
 
 # Lock contention
 perf record ./target/release/slskr

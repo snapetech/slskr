@@ -5,7 +5,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
 if [[ "${1:-}" != "--skip-package" ]]; then
-  cargo package -p slskr-protocol -p slskr-client -p slskr --no-verify
+  scripts/with-build-guard.sh cargo package -p slskr-protocol -p slskr-client -p slskr --no-verify
 fi
 
 python3 - <<'PY'
@@ -128,7 +128,14 @@ all = "warn"
     env.setdefault("SLSKR_BUILD_WEB", "")
     env.pop("SLSKR_BUILD_WEB", None)
     subprocess.check_call(
-        ["cargo", "check", "--workspace", "--manifest-path", str(workspace_root / "Cargo.toml")],
+        [
+            str(root / "scripts" / "with-build-guard.sh"),
+            "cargo",
+            "check",
+            "--workspace",
+            "--manifest-path",
+            str(workspace_root / "Cargo.toml"),
+        ],
         cwd=workspace_root,
         env=env,
     )

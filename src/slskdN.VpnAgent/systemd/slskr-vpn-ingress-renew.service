@@ -1,0 +1,7 @@
+[Unit]
+Description=Renew slskR VPN ingress state
+After=slskr-vpn-ingress.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/systemctl restart slskr-vpn-ingress.service

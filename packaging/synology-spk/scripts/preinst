@@ -1,0 +1,12 @@
+#!/bin/sh
+set -e
+. "$(dirname "$0")/common"
+log_step "slskR pre-install"
+if ! synouser --get "$PACKAGE_USER" >/dev/null 2>&1; then
+  synouser --add "$PACKAGE_USER" "" "" 0 "" 0
+fi
+if ! synogroup --get "$PACKAGE_GROUP" >/dev/null 2>&1; then
+  synogroup --add "$PACKAGE_GROUP"
+fi
+check_port() { ! netstat -tln 2>/dev/null | grep -q ":$1 "; }
+check_port 5030 || { log_error "port 5030 is unavailable"; exit 1; }

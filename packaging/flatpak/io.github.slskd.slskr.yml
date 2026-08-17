@@ -1,0 +1,35 @@
+app-id: io.github.slskd.slskr
+runtime: org.freedesktop.Platform
+runtime-version: '23.08'
+sdk: org.freedesktop.Sdk
+command: slskr-wrapper
+
+finish-args:
+  - --share=network
+  - --filesystem=xdg-download
+  - --filesystem=xdg-music
+  - --filesystem=~/.config/slskr:create
+  - --filesystem=~/.local/share/slskr:create
+
+modules:
+  - name: slskr
+    buildsystem: simple
+    build-commands:
+      - mkdir -p /app/bin /app/lib/slskr
+      - cp -r . /app/lib/slskr/
+      - |
+        cat > /app/bin/slskr-wrapper <<'EOF'
+        #!/usr/bin/env bash
+        set -e
+        CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/slskr"
+        mkdir -p "$CONFIG_DIR"
+        if [ ! -f "$CONFIG_DIR/config.toml" ]; then
+          printf '%s\n' '[web]' 'port = 5030' > "$CONFIG_DIR/config.toml"
+        fi
+        exec /app/lib/slskr/slskr serve --config "$CONFIG_DIR/config.toml"
+        EOF
+      - chmod +x /app/bin/slskr-wrapper
+    sources:
+      - type: archive
+        url: https://github.com/snapetech/slskr/releases/download/release-v0.2.15/slskr-v0.2.15-x86_64-unknown-linux-gnu.tar.gz
+        sha256: 719ed6b26b34ec51ac45370cef64ab8dd5cf85b1f56d18f8ba38b126296a814e

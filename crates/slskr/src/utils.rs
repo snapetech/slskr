@@ -84,9 +84,12 @@ pub struct RequestSecurityHeaders {
     pub origin: Option<String>,
     pub referer: Option<String>,
     pub cookie: Option<String>,
+    pub content_type: Option<String>,
     pub x_share_token: Option<String>,
     pub x_slskdn_api_key: Option<String>,
     pub x_slskdn_csrf: Option<String>,
+    pub x_relay_agent: Option<String>,
+    pub x_relay_credential: Option<String>,
     /// ActivityPub HTTP Signature verification: `Date`, `Digest`, and
     /// `Signature` headers on inbound federation requests.
     pub date: Option<String>,
@@ -102,9 +105,12 @@ impl RequestSecurityHeaders {
             origin: h.origin.clone(),
             referer: h.referer.clone(),
             cookie: h.cookie.clone(),
+            content_type: h.content_type.clone(),
             x_share_token: h.x_share_token.clone(),
             x_slskdn_api_key: h.x_slskdn_api_key.clone(),
             x_slskdn_csrf: h.x_slskdn_csrf.clone(),
+            x_relay_agent: h.x_relay_agent.clone(),
+            x_relay_credential: h.x_relay_credential.clone(),
             date: h.date.clone(),
             digest: h.digest.clone(),
             signature: h.signature.clone(),
@@ -1479,8 +1485,8 @@ mod controller_auth_tests {
 
     #[test]
     fn frozen_slskd_and_slskdn_auth_registries_are_exhaustively_enforced() {
-        assert_registry("slskd", &SLSKD_CONTROLLER_AUTH_RULES, 91);
-        assert_registry("slskdn", &SLSKDN_CONTROLLER_AUTH_RULES, 678);
+        assert_registry("slskd", &SLSKD_CONTROLLER_AUTH_RULES, 96);
+        assert_registry("slskdn", &SLSKDN_CONTROLLER_AUTH_RULES, 683);
     }
 
     #[test]

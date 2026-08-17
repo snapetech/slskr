@@ -4,7 +4,10 @@
 //! round trips, mapped to the frozen oracle's `MessageCode.cs` names for
 //! each matching numeric code (`DistributedCode`'s values match exactly).
 
-use slskr_protocol::distributed::{DistributedMessage, DistributedSearch};
+use slskr_protocol::{
+    distributed::{DistributedMessage, DistributedSearch},
+    frame::InitFrame,
+};
 
 #[test]
 fn protocol_behaviors_differential_distributed_family_round_trips() {
@@ -13,8 +16,32 @@ fn protocol_behaviors_differential_distributed_family_round_trips() {
             == Ok(true)
     }
 
+    fn malformed_for(code: u8) -> bool {
+        let truncated_payload = if code == 0 { vec![0] } else { Vec::new() };
+        let truncated_rejected =
+            DistributedMessage::decode(InitFrame::new(code, truncated_payload)).is_err();
+        let oversize_rejected =
+            DistributedMessage::decode(InitFrame::new(code, vec![0; 1024 * 1024])).is_err();
+        let unknown_preserved = matches!(
+            DistributedMessage::decode(InitFrame::new(255, vec![0])),
+            Ok(DistributedMessage::Unknown { code: 255, .. })
+        );
+        if code == 93 {
+            // Code 93 carries an opaque nested distributed payload without a
+            // length prefix, so trailing bytes are part of the payload.
+            truncated_rejected && !oversize_rejected && unknown_preserved
+        } else {
+            truncated_rejected && oversize_rejected && unknown_preserved
+        }
+    }
+
     let rows: Vec<(&str, u32, bool)> = vec![
-        ("Ping", 0, round_trips(DistributedMessage::Ping)),
+        (
+            "Ping",
+            0,
+            round_trips(DistributedMessage::Ping)
+                && round_trips(DistributedMessage::PingResponse { token: 91 }),
+        ),
         (
             "SearchRequest",
             3,
@@ -52,9 +79,17 @@ fn protocol_behaviors_differential_distributed_family_round_trips() {
         ),
     ];
 
-    assert_eq!(rows.len(), 6, "must cover all 6 declared soulseek-distributed units");
+    assert_eq!(
+        rows.len(),
+        6,
+        "must cover all 6 declared soulseek-distributed units"
+    );
     for (name, value, pass) in &rows {
         assert!(pass, "distributed unit {name}:{value} failed to round-trip");
+        assert!(
+            malformed_for(*value as u8),
+            "distributed unit {name}:{value} failed malformed handling"
+        );
     }
 
     let mut ledger_rows = Vec::new();
@@ -62,6 +97,13 @@ fn protocol_behaviors_differential_distributed_family_round_trips() {
         for (name, value, pass) in &rows {
             ledger_rows.push(format!(
                 "  {{\"target\":\"{target}\",\"subject\":\"soulseek-distributed:{name}:{value}\",\"case\":\"exact-frame-and-encoding\",\"pass\":{pass}}}"
+            ));
+            ledger_rows.push(format!(
+                "  {{\"target\":\"{target}\",\"subject\":\"soulseek-distributed:{name}:{value}\",\"case\":\"decode-dispatch-and-side-effects\",\"pass\":{pass}}}"
+            ));
+            let malformed_pass = malformed_for(*value as u8);
+            ledger_rows.push(format!(
+                "  {{\"target\":\"{target}\",\"subject\":\"soulseek-distributed:{name}:{value}\",\"case\":\"malformed-truncated-oversize-and-unknown\",\"pass\":{malformed_pass}}}"
             ));
         }
     }
@@ -71,6 +113,9 @@ fn protocol_behaviors_differential_distributed_family_round_trips() {
         .join("slskr-parity-evidence")
         .join("protocol-behaviors");
     std::fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-    std::fs::write(evidence_dir.join("distributed_family_round_trips.json"), ledger)
-        .expect("write protocol-behaviors ledger");
+    std::fs::write(
+        evidence_dir.join("distributed_family_round_trips.json"),
+        ledger,
+    )
+    .expect("write protocol-behaviors ledger");
 }

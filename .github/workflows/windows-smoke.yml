@@ -42,14 +42,25 @@ jobs:
             dashboard/package-lock.json
             client-ts/package-lock.json
 
+      - name: Rust build guard
+        shell: bash
+        run: scripts/check-rust-build-guard.sh
+
+      - name: Rust build guard lock regression
+        shell: bash
+        run: scripts/test-rust-build-guard.sh
+
       - name: Rust fmt
-        run: cargo fmt --all --check
+        shell: bash
+        run: scripts/with-build-guard.sh cargo fmt --all --check
 
       - name: Rust tests
-        run: cargo test --workspace
+        shell: bash
+        run: scripts/with-build-guard.sh cargo test --workspace
 
       - name: WASM check
-        run: cargo check -p slskr-web --target wasm32-unknown-unknown
+        shell: bash
+        run: scripts/with-build-guard.sh cargo check -p slskr-web --target wasm32-unknown-unknown
 
       - name: Web build
         run: |

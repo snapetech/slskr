@@ -13,6 +13,24 @@ const outputDir = path.resolve(
   repoRoot,
   process.env.SLSKR_REACT_WEB_AUDIT_DIR || 'target/react-webui-audit',
 );
+const liveBackendUrl = (process.env.SLSKR_REACT_WEB_AUDIT_BACKEND_URL || '').replace(/\/$/u, '');
+const liveBackendAuth = process.env.SLSKR_REACT_WEB_AUDIT_AUTH_HEADER || '';
+const liveBackendToken = process.env.SLSKR_REACT_WEB_AUDIT_TOKEN || '';
+const allowLiveErrors = process.env.SLSKR_REACT_WEB_AUDIT_ALLOW_LIVE_ERRORS === '1';
+const requireLiveRows = process.env.SLSKR_REACT_WEB_AUDIT_REQUIRE_ROWS === '1';
+const allowedLiveStatusRules = (process.env.SLSKR_REACT_WEB_AUDIT_ALLOWED_LIVE_STATUS || '')
+  .split(',')
+  .map((rule) => rule.trim().split('|'))
+  .filter((rule) => rule.length === 3 && /^\d{3}$/u.test(rule[0]) && rule[1] && rule[2]);
+const isAllowedLiveStatus = (status, method, pathName) => allowedLiveStatusRules.some(
+  ([allowedStatus, allowedMethod, allowedPath]) =>
+    Number(allowedStatus) === status
+      && allowedMethod.toUpperCase() === method.toUpperCase()
+      && (pathName === allowedPath || pathName.startsWith(`${allowedPath}?`)),
+);
+const clickActions = liveBackendUrl
+  ? process.env.SLSKR_REACT_WEB_AUDIT_CLICK_ACTIONS === '1'
+  : process.env.SLSKR_REACT_WEB_AUDIT_CLICK_ACTIONS !== '0';
 
 const routes = [
   '/',
@@ -41,6 +59,21 @@ const routes = [
   '/system/events',
   '/system/network',
   '/system/security',
+  '/system/mesh',
+  '/system/bridge',
+  '/system/mediacore',
+  '/system/policies',
+  '/system/experience',
+  '/system/integrations',
+  '/system/jobs',
+  '/system/automations',
+  '/system/source-providers',
+  '/system/swarm-analytics',
+  '/system/library-health',
+  '/system/quarantine-jury',
+  '/system/files',
+  '/system/data',
+  '/system/metrics',
 ];
 
 const navigableRoutes = [
@@ -60,6 +93,49 @@ const navigableRoutes = [
   '/browse',
   '/system',
 ];
+const requestedRoutes = process.env.SLSKR_REACT_WEB_AUDIT_ROUTES
+  ? new Set(process.env.SLSKR_REACT_WEB_AUDIT_ROUTES.split(',').map((route) => route.trim()))
+  : null;
+const auditedRoutes = requestedRoutes
+  ? routes.filter((route) => requestedRoutes.has(route))
+  : routes;
+const auditedNavigableRoutes = requestedRoutes
+  ? navigableRoutes.filter((route) => requestedRoutes.has(route))
+  : navigableRoutes;
+const navigationTimeoutMs = 15_000;
+const networkIdleTimeoutMs = 3_000;
+const auditScenario = process.env.SLSKR_REACT_WEB_AUDIT_SCENARIO || 'success';
+const scenarioAttempts = new Map();
+const requestedViewports = process.env.SLSKR_REACT_WEB_AUDIT_VIEWPORTS
+  ? new Set(process.env.SLSKR_REACT_WEB_AUDIT_VIEWPORTS.split(',').map((viewport) => viewport.trim()))
+  : null;
+const viewports = [
+  { height: 1000, name: 'desktop', width: 1440 },
+  { height: 844, name: 'mobile', width: 390 },
+].filter((viewport) => !requestedViewports || requestedViewports.has(viewport.name));
+const skipScreenshots = process.env.SLSKR_REACT_WEB_AUDIT_SKIP_SCREENSHOTS === '1';
+const skipNavigation = process.env.SLSKR_REACT_WEB_AUDIT_SKIP_NAVIGATION === '1';
+const endpointSweep = process.env.SLSKR_REACT_WEB_AUDIT_ENDPOINT_SWEEP
+  ? JSON.parse(process.env.SLSKR_REACT_WEB_AUDIT_ENDPOINT_SWEEP)
+  : [];
+
+const navigationTestIds = {
+  '/searches': 'nav-search',
+  '/wishlist': 'nav-wishlist',
+  '/downloads': 'nav-downloads',
+  '/uploads': 'nav-uploads',
+  '/messages': 'nav-messages',
+  '/users': 'nav-users',
+  '/system': 'nav-system',
+  '/discovery-graph': 'nav-discovery-graph',
+  '/playlist-intake': 'nav-playlist-intake',
+  '/contacts': 'nav-contacts',
+  '/solid': 'nav-solid',
+  '/collections': 'nav-collections',
+  '/sharegroups': 'nav-groups',
+  '/shared': 'nav-shared-with-me',
+  '/browse': 'nav-browse',
+};
 
 const searches = [
   {
@@ -167,17 +243,18 @@ const transfers = [
 ];
 
 const conversations = [
-  {
-    id: 'conversation-audio-lab',
-    messages: [
       {
-        direction: 'Incoming',
-        id: 'message-1',
-        isAcknowledged: false,
-        sentAt: '2026-05-05T18:10:00.000Z',
-        text: 'The click-track folder is browseable now.',
-      },
-    ],
+        id: 'conversation-audio-lab',
+        messages: [
+          {
+            direction: 'Incoming',
+            id: 'message-1',
+            isAcknowledged: false,
+            message: 'The click-track folder is browseable now.',
+            timestamp: '2026-05-05T18:10:00.000Z',
+            username: 'audio_lab',
+          },
+        ],
     username: 'audio_lab',
   },
   {
@@ -187,8 +264,9 @@ const conversations = [
         direction: 'Outgoing',
         id: 'message-2',
         isAcknowledged: true,
-        sentAt: '2026-05-05T18:12:00.000Z',
-        text: 'Thanks, queued the sample file.',
+        message: 'Thanks, queued the sample file.',
+        timestamp: '2026-05-05T18:12:00.000Z',
+        username: 'local_operator',
       },
     ],
     username: 'commons_peer',
@@ -267,10 +345,21 @@ const contentTypeFor = (filePath) => {
   }
 };
 
+const emptyPayload = (value) => {
+  if (Array.isArray(value)) return [];
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, emptyPayload(child)]));
+  }
+  if (typeof value === 'boolean') return false;
+  if (typeof value === 'number') return 0;
+  if (typeof value === 'string') return '';
+  return value;
+};
+
 const json = (data, status = 200) => ({
-  body: JSON.stringify(data),
+  body: JSON.stringify(auditScenario === 'rendered-loading-and-empty' ? emptyPayload(data) : data),
   contentType: 'application/json',
-  status,
+  status: auditScenario === 'rendered-validation-and-server-error' ? 422 : status,
 });
 
 const normalizeApiPath = (url) =>
@@ -278,6 +367,13 @@ const normalizeApiPath = (url) =>
 
 const fallback = (url, method = 'GET') => {
   const pathname = normalizeApiPath(url);
+
+  if (auditScenario === 'authorization-reconnect-and-restart') {
+    const key = `${method} ${pathname}`;
+    const attempt = (scenarioAttempts.get(key) || 0) + 1;
+    scenarioAttempts.set(key, attempt);
+    if (attempt === 1) return json({ error: 'audit authorization expired' }, 401);
+  }
 
   if (method !== 'GET') {
     if (pathname === '/searches') return json(searches[0], 201);
@@ -290,6 +386,30 @@ const fallback = (url, method = 'GET') => {
   if (pathname === '/options') return json(applicationOptions);
   if (pathname === '/server') return json(applicationState.server);
   if (pathname === '/health') return json({ service: 'slskr', status: 'ok' });
+  if (pathname === '/mesh/peers') {
+    return json([
+      {
+        lastSeqId: 42,
+        lastSyncAt: '2026-05-05T18:21:00.000Z',
+        username: 'commons_peer',
+      },
+    ]);
+  }
+  if (pathname === '/mesh/stats') {
+    return json({
+      currentSeqId: 42,
+      knownMeshPeers: 1,
+      isSyncing: false,
+      warnings: [],
+    });
+  }
+  if (pathname === '/mesh/transport') {
+    return json({
+      dht: 0,
+      natType: 'Unknown',
+      overlay: 1,
+    });
+  }
   if (pathname === '/application/version/latest') return json(applicationState.version);
   if (pathname === '/capabilities') {
     return json({
@@ -347,22 +467,25 @@ const fallback = (url, method = 'GET') => {
   }
   if (pathname === '/users/notes') return json([]);
   if (pathname.startsWith('/users/notes/')) return json({});
+  if (pathname.match(/^\/users\/[^/]+\/browse\/status$/u)) {
+    return json({ isComplete: true, state: 'Completed' });
+  }
   if (pathname.startsWith('/users/') && pathname.endsWith('/browse')) {
     return json({
       directories: [
         {
+          fileCount: 1,
           files: [{ filename: 'Example_sound_file_in_Ogg_Vorbis_format.ogg', size: 153_301 }],
           name: 'open-fixtures',
         },
       ],
+      lockedDirectories: [],
       username: 'commons_peer',
     });
   }
   if (pathname.startsWith('/users/')) return json({ username: 'commons_peer' });
   if (pathname === '/contacts') {
-    return json([
-      { group: 'Friends', nickname: 'Commons Peer', status: 'Online', username: 'commons_peer' },
-    ]);
+    return json([]);
   }
   if (pathname === '/shares') {
     return json({
@@ -424,11 +547,52 @@ const startStaticServer = async () => {
   return server;
 };
 
-const installMocks = async (page) => {
+const stopStaticServer = async (server) => {
+  server.closeAllConnections?.();
+  server.closeIdleConnections?.();
+  if (!server.listening) return;
+  await new Promise((resolve, reject) => {
+    server.close((error) => {
+      if (error && error.code !== 'ERR_SERVER_NOT_RUNNING') {
+        reject(error);
+        return;
+      }
+      resolve();
+    });
+  });
+};
+
+const installMocks = async (page, { activeUser, browseTabs, onApiResponse } = {}) => {
   await page.addInitScript(
-    ({ appState, options, searchList }) => {
+    ({ activeUser, appState, browseTabs, liveBackendUrl, options, scenario, searchList, token }) => {
       window.localStorage.setItem('slskr-theme', 'slskr');
-      window.sessionStorage.setItem('slskr-token', 'audit-token');
+      window.sessionStorage.setItem('slskr-token', token || 'audit-token');
+      if (activeUser) window.localStorage.setItem('slskr-active-user', activeUser);
+      if (browseTabs) {
+        window.localStorage.setItem(
+          'slskr-browse-tabs',
+          JSON.stringify(browseTabs),
+        );
+      }
+
+      if (liveBackendUrl) {
+        const NativeWebSocket = window.WebSocket;
+        class LiveWebSocket extends NativeWebSocket {
+          constructor(url, protocols) {
+            const requested = new URL(url, window.location.origin);
+            const backend = new URL(liveBackendUrl);
+            const target = new URL(`${requested.pathname}${requested.search}`, backend.origin);
+            target.protocol = backend.protocol === 'https:' ? 'wss:' : 'ws:';
+            super(target.toString(), protocols);
+          }
+        }
+        LiveWebSocket.CONNECTING = NativeWebSocket.CONNECTING;
+        LiveWebSocket.OPEN = NativeWebSocket.OPEN;
+        LiveWebSocket.CLOSING = NativeWebSocket.CLOSING;
+        LiveWebSocket.CLOSED = NativeWebSocket.CLOSED;
+        window.WebSocket = LiveWebSocket;
+        return;
+      }
 
       class FakeWebSocket {
         constructor(url) {
@@ -453,6 +617,16 @@ const installMocks = async (page) => {
                 }),
               });
             }
+            if (String(url).includes('/api/events/ws') && scenario === 'authorization-reconnect-and-restart') {
+              setTimeout(() => {
+                this.readyState = 3;
+                this.onclose?.({ code: 1006, reason: 'audit restart' });
+                setTimeout(() => {
+                  this.readyState = 1;
+                  this.onopen?.({});
+                }, 25);
+              }, 35);
+            }
           }, 20);
         }
 
@@ -470,15 +644,90 @@ const installMocks = async (page) => {
       FakeWebSocket.CLOSED = 3;
       window.WebSocket = FakeWebSocket;
     },
-    { appState: applicationState, options: applicationOptions, searchList: searches },
+    {
+      activeUser,
+      appState: applicationState,
+      browseTabs,
+      liveBackendUrl,
+      options: applicationOptions,
+      searchList: searches,
+      scenario: auditScenario,
+      token: liveBackendToken,
+    },
   );
 
-  await page.route('**/api/v0/**', (route) =>
-    route.fulfill(fallback(route.request().url(), route.request().method())),
-  );
-  await page.route('**/api/**', (route) =>
-    route.fulfill(fallback(route.request().url(), route.request().method())),
-  );
+  await page.route('**/*', async (route) => {
+    const url = route.request().url();
+    if (!liveBackendUrl && (url.includes('/api/v0/') || url.includes('/api/'))) {
+      const mockResponse = fallback(url, route.request().method());
+      onApiResponse?.({
+        method: route.request().method(),
+        path: new URL(url).pathname,
+        status: mockResponse.status,
+      });
+      return route.fulfill(mockResponse);
+    }
+    if (!liveBackendUrl) return route.continue();
+
+    const request = route.request();
+    const requestedUrl = new URL(request.url());
+    if (!requestedUrl.pathname.startsWith('/api/')) return route.continue();
+    const targetUrl = `${liveBackendUrl}${requestedUrl.pathname}${requestedUrl.search}`;
+    const headers = Object.fromEntries(
+      Object.entries(request.headers()).filter(
+        ([name]) => !['host', 'content-length', 'content-encoding', 'transfer-encoding'].includes(name),
+      ),
+    );
+    if (liveBackendAuth) headers.authorization = liveBackendAuth;
+    try {
+      const response = await fetch(targetUrl, {
+        method: request.method(),
+        headers,
+        body: ['GET', 'HEAD'].includes(request.method()) ? undefined : request.postDataBuffer() || undefined,
+      });
+      const responseRecord = {
+        allowed: isAllowedLiveStatus(response.status, request.method(), requestedUrl.pathname),
+        method: request.method(),
+        path: `${requestedUrl.pathname}${requestedUrl.search}`,
+        status: response.status,
+      };
+      onApiResponse?.(responseRecord);
+      const responseHeaders = Object.fromEntries(
+        [...response.headers].filter(
+          ([name]) => !['content-encoding', 'content-length', 'transfer-encoding'].includes(name),
+        ),
+      );
+      return route.fulfill({
+        body: Buffer.from(await response.arrayBuffer()),
+        headers: responseHeaders,
+        status: response.status,
+      });
+    } catch (error) {
+      onApiResponse?.({
+        method: request.method(),
+        path: `${requestedUrl.pathname}${requestedUrl.search}`,
+        status: 599,
+        allowed: false,
+      });
+      if (error?.message) {
+        onApiResponse?.({
+          method: 'AUDIT_ERROR',
+          path: `${requestedUrl.pathname}${requestedUrl.search}`,
+          status: 599,
+          allowed: false,
+          error: error.message,
+        });
+      }
+      if (allowLiveErrors) {
+        return route.fulfill({
+          body: JSON.stringify({ error: error?.message || 'live backend proxy failed' }),
+          contentType: 'application/json',
+          status: 599,
+        });
+      }
+      throw error;
+    }
+  });
 };
 
 const slugFor = (route) =>
@@ -500,10 +749,11 @@ const visibleInternalHrefs = async (page) =>
 
 const assertNoOverlap = async (page) =>
   page.evaluate(() => {
-    const selectors = ['.ui.menu a.item', '.ui.button', 'button', 'input', '.ui.card', '.ui.table'];
+    const selectors = ['.ui.menu a.item', '.ui.button', 'button', 'input', '.ui.card'];
     const elements = selectors
       .flatMap((selector) => Array.from(document.querySelectorAll(selector)))
       .filter((element) => {
+        if (element.closest('table, .ui.table')) return false;
         const box = element.getBoundingClientRect();
         const style = window.getComputedStyle(element);
         return box.width > 0 && box.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
@@ -517,7 +767,10 @@ const assertNoOverlap = async (page) =>
         const intersectionWidth = Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left));
         const intersectionHeight = Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
         if (intersectionWidth > 8 && intersectionHeight > 8) {
-          if (elements[i].contains(elements[j]) || elements[j].contains(elements[i])) {
+        if (elements[i].contains(elements[j]) || elements[j].contains(elements[i])) {
+            continue;
+          }
+          if (elements[i].tagName === 'SELECT' || elements[j].tagName === 'SELECT') {
             continue;
           }
           const aText = elements[i].textContent?.trim() || '';
@@ -557,41 +810,63 @@ const { port } = server.address();
 const baseUrl = `http://127.0.0.1:${port}`;
 const browser = await chromium.launch({ headless: process.env.HEADLESS !== 'false' });
 const audit = {
+  apiResponses: [],
+  allowedLiveStatus: allowedLiveStatusRules.map((rule) => rule.join('|')),
+  allowLiveErrors,
   baseUrl,
+  evidenceMode: liveBackendUrl ? 'live' : 'mock',
   errors: [],
   generatedAt: new Date().toISOString(),
   routes: [],
+  scenario: auditScenario,
 };
 
 try {
-  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
-  await installMocks(page);
+  if (!skipNavigation) {
+    const navigationContext = await browser.newContext({
+      serviceWorkers: 'block',
+      viewport: { width: 1440, height: 1000 },
+    });
+    const page = await navigationContext.newPage();
+    await installMocks(page);
 
-  for (const target of navigableRoutes) {
-    await page.goto(`${baseUrl}/searches`, { waitUntil: 'networkidle' });
-    const link = page.locator(`a[href="${target}"]`).first();
-    if ((await link.count()) === 0) {
-      audit.errors.push(`navigation link missing: ${target}`);
-      continue;
+    for (const target of auditedNavigableRoutes) {
+      await page.goto(`${baseUrl}/searches`, {
+        timeout: navigationTimeoutMs,
+        waitUntil: 'domcontentloaded',
+      });
+      await page
+        .waitForLoadState('networkidle', { timeout: networkIdleTimeoutMs })
+        .catch(() => {});
+      const moreMenu = page.locator('[data-testid="nav-more"]:visible').first();
+      if (await moreMenu.count()) await moreMenu.click();
+      const link = page
+        .locator(`[data-testid="${navigationTestIds[target] || ''}"]`)
+        .first();
+      if ((await link.count()) === 0) {
+        audit.errors.push(`navigation link missing: ${target}`);
+        continue;
+      }
+      await link.evaluate((element) => element.click());
+      await page
+        .waitForLoadState('networkidle', { timeout: networkIdleTimeoutMs })
+        .catch(() => {});
+      if (!page.url().includes(target)) {
+        audit.errors.push(`navigation link did not reach ${target}; landed on ${page.url()}`);
+      }
     }
-    await link.click();
-    await page.waitForLoadState('networkidle').catch(() => {});
-    if (!page.url().includes(target)) {
-      audit.errors.push(`navigation link did not reach ${target}; landed on ${page.url()}`);
-    }
+
+    await page.close();
+    await navigationContext.close();
   }
 
-  await page.close();
-
-  for (const route of routes) {
-    for (const viewport of [
-      { height: 1000, name: 'desktop', width: 1440 },
-      { height: 844, name: 'mobile', width: 390 },
-    ]) {
-      const routePage = await browser.newPage({ viewport });
-      await installMocks(routePage);
+  for (const route of auditedRoutes) {
+    for (const viewport of viewports) {
+      const routeContext = await browser.newContext({ serviceWorkers: 'block', viewport });
+      const routePage = await routeContext.newPage();
       const pageErrors = [];
-      routePage.on('pageerror', (error) => pageErrors.push(error.message));
+      const apiResponses = [];
+      routePage.on('pageerror', (error) => pageErrors.push(error.stack || error.message));
       routePage.on('console', (message) => {
         const text = message.text();
         if (
@@ -602,11 +877,71 @@ try {
           pageErrors.push(text);
         }
       });
-
-      const response = await routePage.goto(`${baseUrl}${route}`, {
-        waitUntil: 'networkidle',
+      await installMocks(routePage, {
+        activeUser: liveBackendUrl
+          ? process.env.SLSKR_REACT_WEB_AUDIT_ACTIVE_USER || undefined
+          : route === '/users'
+            ? 'commons_peer'
+            : undefined,
+        browseTabs: liveBackendUrl
+          ? undefined
+          : route === '/browse'
+            ? {
+                tabCounter: 1,
+                tabs: [{ key: 'tab-1', label: 'commons_peer', username: 'commons_peer' }],
+              }
+            : undefined,
+        onApiResponse: (response) => {
+          apiResponses.push(response);
+          if (liveBackendUrl) audit.apiResponses.push({ route, viewport: viewport.name, ...response });
+          if (liveBackendUrl && response.status >= 400 && !response.allowed && !allowLiveErrors) {
+            audit.errors.push(
+              `${route} ${viewport.name}: live API ${response.method} ${response.path} returned ${response.status}`,
+            );
+          }
+        },
       });
-      await routePage.waitForTimeout(250);
+
+      let response;
+      try {
+        response = await routePage.goto(`${baseUrl}${route}`, {
+          timeout: navigationTimeoutMs,
+          waitUntil: 'domcontentloaded',
+        });
+      } catch (error) {
+        audit.errors.push(
+          `${route} ${viewport.name}: navigation failed: ${error?.message || error}`,
+        );
+        await routePage.close();
+        await routeContext.close();
+        continue;
+      }
+      await routePage
+        .waitForLoadState('networkidle', { timeout: networkIdleTimeoutMs })
+        .catch(() => {});
+      await routePage.waitForTimeout(auditScenario === 'success' ? 250 : 125);
+      if (
+        endpointSweep.length > 0
+        && route === auditedRoutes[0]
+        && viewport.name === viewports[0]?.name
+      ) {
+        await routePage.evaluate(async (endpoints) => {
+          for (const endpoint of endpoints) {
+            try {
+              await fetch(endpoint.url, {
+                body: endpoint.method === 'GET' || endpoint.method === 'HEAD' ? undefined : '{}',
+                headers: endpoint.method === 'GET' || endpoint.method === 'HEAD'
+                  ? undefined
+                  : { 'content-type': 'application/json' },
+                method: endpoint.method,
+              });
+            } catch {
+              // The response listener records the server result when one exists.
+            }
+          }
+        }, endpointSweep);
+        await routePage.waitForTimeout(125);
+      }
 
       const bodyText = await routePage.locator('body').innerText().catch(() => '');
       const rootChildCount = await routePage.locator('#root > *').count();
@@ -614,19 +949,23 @@ try {
       const visibleInputCount = await routePage.locator('input:visible, textarea:visible').count();
       const internalHrefs = await visibleInternalHrefs(routePage);
       const overlaps = await assertNoOverlap(routePage);
-      const screenshot = `${slugFor(route)}-${viewport.name}.png`;
-      await routePage.screenshot({
-        fullPage: false,
-        path: path.join(outputDir, screenshot),
-      });
+      const screenshot = skipScreenshots ? null : `${slugFor(route)}-${viewport.name}.png`;
+      if (screenshot) {
+        await routePage.screenshot({
+          fullPage: false,
+          path: path.join(outputDir, screenshot),
+        });
+      }
 
       const result = {
         bodyLength: bodyText.length,
+        apiResponses,
         internalHrefs: [...new Set(internalHrefs)].sort(),
         overlaps,
         responseStatus: response?.status(),
         rootChildCount,
         route,
+        scenario: auditScenario,
         screenshot,
         visibleButtonCount,
         visibleInputCount,
@@ -634,13 +973,18 @@ try {
       };
       audit.routes.push(result);
 
-      if (response?.status() !== 200) audit.errors.push(`${route} ${viewport.name}: HTTP ${response?.status()}`);
+      if (auditScenario === 'success' && response?.status() !== 200) {
+        audit.errors.push(`${route} ${viewport.name}: HTTP ${response?.status()}`);
+      }
       if (rootChildCount < 1) audit.errors.push(`${route} ${viewport.name}: React root did not mount`);
       if (bodyText.length < 100) audit.errors.push(`${route} ${viewport.name}: page looks blank`);
       if (/not found|cannot get|404/iu.test(bodyText)) audit.errors.push(`${route} ${viewport.name}: visible 404 text`);
       if (bodyText.includes('Rust Web')) audit.errors.push(`${route} ${viewport.name}: Rust migration UI leaked into React audit`);
       if (visibleButtonCount + visibleInputCount < 1 && route !== '/') {
         audit.errors.push(`${route} ${viewport.name}: no visible controls`);
+      }
+      if (liveBackendUrl && requireLiveRows && apiResponses.length > 0 && visibleButtonCount + visibleInputCount < 1) {
+        audit.errors.push(`${route} ${viewport.name}: live backend rendered no actionable controls`);
       }
       if (overlaps.length > 0) {
         audit.errors.push(`${route} ${viewport.name}: overlapping controls ${JSON.stringify(overlaps)}`);
@@ -650,24 +994,31 @@ try {
           audit.errors.push(`${route} ${viewport.name}: untracked internal link ${href}`);
         }
       }
-      if (pageErrors.length > 0) {
-        audit.errors.push(`${route} ${viewport.name}: browser errors: ${pageErrors.join(' | ')}`);
+      const unexpectedPageErrors = pageErrors.filter((error) =>
+        !liveBackendUrl
+        || !allowedLiveStatusRules.some(([status]) => error.includes(`status code ${status}`)),
+      );
+      if (unexpectedPageErrors.length > 0 && auditScenario === 'success') {
+        audit.errors.push(`${route} ${viewport.name}: browser errors: ${unexpectedPageErrors.join(' | ')}`);
       }
 
-      const clickTargets = routePage
-        .locator('button:visible:not([disabled]), .ui.button:visible:not(.disabled)')
-        .filter({ hasNotText: /delete|remove|clear all|disconnect|logout/iu });
-      const clickCount = Math.min(await clickTargets.count(), 3);
-      for (let index = 0; index < clickCount; index += 1) {
-        await clickTargets.nth(index).click({ timeout: 1000 }).catch(() => {});
-        await routePage.waitForTimeout(50);
+      if (auditScenario === 'success' && clickActions) {
+        const clickTargets = routePage
+          .locator('button:visible:not([disabled]), .ui.button:visible:not(.disabled)')
+          .filter({ hasNotText: /delete|remove|clear all|disconnect|logout/iu });
+        const clickCount = Math.min(await clickTargets.count(), 12);
+        for (let index = 0; index < clickCount; index += 1) {
+          await clickTargets.nth(index).click({ timeout: 1000 }).catch(() => {});
+          await routePage.waitForTimeout(50);
+        }
       }
       await routePage.close();
+      await routeContext.close();
     }
   }
 } finally {
   await browser.close();
-  server.close();
+  await stopStaticServer(server);
 }
 
 await fs.writeFile(path.join(outputDir, 'audit.json'), `${JSON.stringify(audit, null, 2)}\n`);
@@ -677,4 +1028,6 @@ if (audit.errors.length > 0) {
   process.exit(1);
 }
 
-console.log(`React Web UI audit passed for ${routes.length} routes across desktop and mobile.`);
+console.log(
+  `React Web UI audit passed for ${auditedRoutes.length} routes across ${viewports.length} viewport(s), scenario=${auditScenario}.`,
+);

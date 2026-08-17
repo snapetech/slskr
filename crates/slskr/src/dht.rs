@@ -214,6 +214,11 @@ impl Rendezvous {
             .collect()
     }
 
+    #[cfg(test)]
+    pub async fn insert_test_peer(&self, peer: SocketAddrV4) {
+        self.peers.write().await.insert(peer);
+    }
+
     pub async fn status_json(&self) -> String {
         let status = self.status.read().await.clone();
         let peer_count = self.peers.read().await.len();

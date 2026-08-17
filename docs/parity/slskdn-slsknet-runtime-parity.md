@@ -146,10 +146,13 @@ per envelope, MessagePack size bounds, Ed25519/timestamp validation, and the
 target's base64 SHA-256 public-key-value certificate pin are covered by
 hermetic tests. Daemon startup reuses the durable overlay certificate and
 routes explicitly pinned, non-shared-port Pod control peers through QUIC.
-Shared DHT/UDP demultiplexing and public-port QUIC proxying, QUIC data-plane
-transfers, and live cross-runtime QUIC receiver proof remain open; the default
-shared-port path therefore retains its UDP fallback until those pieces are
-implemented.
+The separate `slskdn-overlay-data` ALPN now has a bounded Rust client/server,
+exact-byte tests, daemon receive wiring, and the frozen authenticated
+`RELAY_TCP` framing with allowlist, byte, duration, and concurrency limits.
+Shared DHT/UDP demultiplexing, public-port QUIC proxying, application-level
+data delivery, and live cross-runtime QUIC receiver proof remain open; the
+default shared-port path therefore retains its UDP fallback until those pieces
+are implemented.
 
 The executable configuration ledger currently reports **436 complete, 0
 partial, and 0 missing** leaves out of the 436-path frozen union.
@@ -669,7 +672,7 @@ Required classification values:
 | --- | --- | --- |
 | Runtime signed capabilities | Frozen binary canonical bytes, Ed25519 sign/verify, lower-case base32 peer ID, observation-keyed bounded registry | Exact frozen unsigned bytes plus valid, forged, expired-local-metadata, malformed, blank, case-insensitive lookup, and registry-bound tests pass. |
 | Capability exchange | Frozen `KSDN` custom peer-message envelope with fail-closed parsing and ack behavior | Live cross-runtime proof passes: a signed slskR hello produced an exact-nonce slskdN acknowledgement, both descriptors verified, and both live registries retained the authenticated peer observation. |
-| Mesh rendezvous/overlay | BitTorrent-DHT discovery, TLS 1.3 `SLSKDNM1` framing, authenticated peer registry, JSON service calls, and slskdN signed MessagePack UDP control envelopes | Live cross-runtime proof passes for slskR's pinned outbound client and slskdN's server: exact DER certificate pinning, TLS 1.3, nonce handshake, correlated frozen service framing, System.Text.Json byte arrays, `dht.Ping`, and an Ed25519-signed `dht.Store` retained by slskdN all completed. The slskdN `ControlEnvelope` wire codec, canonical signing, bounded UDP sender, and PodCore route emission now have hermetic proof. Shared DHT/UDP demultiplexing, QUIC overlay/data transport, and end-to-end UDP receiver interoperability remain open. Exact rendezvous keys also announce/discover on a local Mainline testnet. |
+| Mesh rendezvous/overlay | BitTorrent-DHT discovery, TLS 1.3 `SLSKDNM1` framing, authenticated peer registry, JSON service calls, and slskdN signed MessagePack UDP control envelopes | Live cross-runtime proof passes for slskR's pinned outbound client and slskdN's server: exact DER certificate pinning, TLS 1.3, nonce handshake, correlated frozen service framing, System.Text.Json byte arrays, `dht.Ping`, and an Ed25519-signed `dht.Store` retained by slskdN all completed. The slskdN `ControlEnvelope` wire codec, canonical signing, bounded UDP sender, PodCore route emission, bounded QUIC data streams, reusable data streams, and bounded public-proxy admission now have hermetic proof. Shared DHT/UDP demultiplexing, shared-port proxy wiring, and end-to-end UDP receiver interoperability remain open. Exact rendezvous keys also announce/discover on a local Mainline testnet. |
 | Private-gateway client | Pinned outbound TLS overlay plus OpenTunnel/TunnelData/GetTunnelData/CloseTunnel local TCP mapping | Live cross-runtime proof passes: slskr joined a gateway Pod hosted by slskdN, opened a policy-authorized private TCP tunnel through the pinned overlay, sent and received the exact echo bytes, and closed the tunnel. Hermetic tests retain the negative policy/member/quota/replay coverage. |
 | Wishlist scheduling | Server-interval-aware scheduler with positive guardrails | Interval guard, term replacement, daemon term extraction, and scheduled search record tests are implemented. Phase C live certification received the public server interval and sent `WishlistSearch` on the authenticated connection. |
 | Room failures | `CantCreateRoom`/reconnect state reaches API/UI instead of timing out silently | `CantCreateRoom` projection clears optimistic joins and records `last_error`; disconnected/reconnecting joins return HTTP `503`. |
@@ -700,7 +703,7 @@ Required classification values:
 - `scripts/check-openapi-docs-drift.sh`
 - `scripts/check-upstream-parity-classification.sh`
 - `scripts/check-remediation-baseline.sh`
-- `cargo test --workspace`
+- `scripts/with-build-guard.sh cargo test --workspace`
 - Rust WebUI audit when UI behavior changes
 - Live bidirectional interop matrices against both frozen daemons
 - `scripts/audit-upstream-config-surface.py --require-complete`

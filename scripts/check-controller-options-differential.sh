@@ -8683,6 +8683,7 @@ overlay:
 overlay_data:
   enable: false
   listen_port: 51019
+  max_concurrent_streams: 7
   relay_authentication_token: overlay-token
   allowed_relay_destinations: ['8.8.8.8:443']
   max_concurrent_relays: 3
@@ -9020,7 +9021,7 @@ dotnet build "$slskdn_root/src/slskd/slskd.csproj" -c Release -r linux-x64 --sel
 # base directory and refuses to start if it is absent. The audited API
 # scenarios do not need UI assets, but they do need the validated directory.
 mkdir -p "$slskdn_root/src/slskd/bin/Release/net10.0/linux-x64/wwwroot"
-cargo build -q -p slskr
+scripts/with-build-guard.sh cargo build -q -p slskr
 
 if scenario_enabled options; then
   run_target slskd "$slskd_root"

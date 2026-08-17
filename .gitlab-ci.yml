@@ -18,10 +18,12 @@ rust:
     - rustup component add clippy rustfmt
     - rustup target add wasm32-unknown-unknown
   script:
-    - cargo fmt --all --check
-    - cargo clippy --workspace --all-targets -- -D warnings
-    - cargo check -p slskr-web --target wasm32-unknown-unknown
-    - cargo test --workspace
+    - scripts/check-rust-build-guard.sh
+    - scripts/test-rust-build-guard.sh
+    - scripts/with-build-guard.sh cargo fmt --all --check
+    - scripts/with-build-guard.sh cargo clippy --workspace --all-targets -- -D warnings
+    - scripts/with-build-guard.sh cargo check -p slskr-web --target wasm32-unknown-unknown
+    - scripts/with-build-guard.sh cargo test --workspace
 
 go:client:
   stage: test

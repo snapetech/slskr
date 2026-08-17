@@ -1,0 +1,42 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>slskr</Name>
+  <Repository>ghcr.io/snapetech/slskr:0.2.15</Repository>
+  <Registry>https://ghcr.io</Registry>
+  <Network>bridge</Network>
+  <Branch>stable</Branch>
+  <Privileged>false</Privileged>
+  <Overview>Rust Soulseek daemon with bundled Web UI.</Overview>
+  <WebUI>http://[IP]:[PORT:5030]/</WebUI>
+  <Networking>
+    <Mode>bridge</Mode>
+    <Port>
+      <HostPort>5030</HostPort>
+      <ContainerPort>5030</ContainerPort>
+      <Protocol>tcp</Protocol>
+    </Port>
+    <Port>
+      <HostPort>2234</HostPort>
+      <ContainerPort>2234</ContainerPort>
+      <Protocol>tcp</Protocol>
+    </Port>
+  </Networking>
+  <Environment>
+    <Variable>
+      <Name>SLSKR_HTTP_PORT</Name>
+      <Value>5030</Value>
+    </Variable>
+    <Variable>
+      <Name>SLSKR_CONFIG</Name>
+      <Value>/app/config/config.toml</Value>
+    </Variable>
+  </Environment>
+  <Data>
+    <Config Name="Config" Target="/app/config" Default="/mnt/user/appdata/slskr/config" Mode="rw" />
+    <Config Name="Downloads" Target="/app/downloads" Default="/mnt/user/data/slskr/downloads" Mode="rw" />
+    <Config Name="Incomplete" Target="/app/incomplete" Default="/mnt/user/data/slskr/incomplete" Mode="rw" />
+    <Config Name="Shares" Target="/app/shares" Default="/mnt/user/data/slskr/shares" Mode="ro" />
+  </Data>
+  <ExtraParams>--restart=unless-stopped</ExtraParams>
+  <PostArgs />
+</Container>

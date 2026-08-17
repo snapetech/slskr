@@ -1,0 +1,10 @@
+[Unit]
+Description=Check slskR VPN health and recover ingress
+After=slskr.service slskr-vpn-ingress.service slskr-vpn-compat.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/slskr-vpn-agent watchdog
+NoNewPrivileges=true
+ProtectHome=true
+ReadWritePaths=/var/lib/slskr-vpn

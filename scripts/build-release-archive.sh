@@ -106,7 +106,7 @@ cargo_args=(build --release -p slskr)
 if [[ -n "$target" ]]; then
   cargo_args+=(--target "$target")
 fi
-cargo "${cargo_args[@]}"
+scripts/with-build-guard.sh cargo "${cargo_args[@]}"
 
 binary_path="target/$target/$profile/$binary_name"
 if [[ ! -f "$binary_path" ]]; then

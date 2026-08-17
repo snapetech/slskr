@@ -19,7 +19,7 @@ RUN apt-get update \
 
 COPY . .
 COPY --from=web-builder /src/web/build web/build
-RUN SLSKR_RELEASE_VERSION="${VERSION}" cargo build --release -p slskr
+RUN SLSKR_RELEASE_VERSION="${VERSION}" scripts/with-build-guard.sh cargo build --release -p slskr
 
 FROM debian:bookworm-slim
 
@@ -55,5 +55,7 @@ ENV SLSKR_HTTP_BIND=0.0.0.0:5030 \
 HEALTHCHECK --interval=60s --timeout=3s --start-period=60s --retries=3 \
     CMD wget -q -O - http://localhost:5030/health || exit 1
 
+# Keep the daemon's shutdown handler in control of container termination.
+STOPSIGNAL SIGTERM
 ENTRYPOINT ["slskr"]
 CMD ["serve"]

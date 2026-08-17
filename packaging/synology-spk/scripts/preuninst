@@ -1,0 +1,6 @@
+#!/bin/sh
+set -e
+. "$(dirname "$0")/common"
+log_step "slskR pre-uninstall"
+stop_service
+backup_config

@@ -262,6 +262,19 @@ impl PodStore {
         })
     }
 
+    pub fn member_for_verification(&self, pod_id: &str, peer_id: &str) -> Option<PodMember> {
+        if !self.reserved_pod_available(pod_id) {
+            return None;
+        }
+        self.pods.get(pod_id).and_then(|stored| {
+            stored
+                .members
+                .iter()
+                .find(|member| peer_ids_equal(&member.peer_id, peer_id))
+                .cloned()
+        })
+    }
+
     pub fn membership_stats(&self) -> PodMembershipStats {
         let mut stats = PodMembershipStats::default();
         for (pod_id, stored) in &self.pods {
@@ -291,6 +304,18 @@ impl PodStore {
             }
         }
         stats
+    }
+
+    pub fn validate_storage(&self) -> Result<(), String> {
+        let metadata = match fs::symlink_metadata(&self.state_path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(format!("pod state metadata failed: {error}")),
+        };
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err("pod state path must be a regular file".to_owned());
+        }
+        Ok(())
     }
 
     pub fn ensure_gold_star_club(&mut self) -> Result<PodRecord, String> {

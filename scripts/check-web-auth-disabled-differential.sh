@@ -253,7 +253,7 @@ PY
 }
 
 cd "$repo_root"
-cargo build -q -p slskr
+scripts/with-build-guard.sh cargo build -q -p slskr
 
 for target in slskd slskdn; do
   for implementation in upstream slskr; do

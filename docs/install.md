@@ -10,7 +10,7 @@ default; the fallback dashboard is also available at `/dashboard`.
 ## Build
 
 ```sh
-cargo build --release -p slskr
+scripts/with-build-guard.sh cargo build --release -p slskr
 ```
 
 The binary lands at `target/release/slskr`. For a local user install:
@@ -238,6 +238,11 @@ The container should run the same app command:
 ```sh
 slskr serve
 ```
+
+The image runs `slskr` as PID 1, declares `SIGTERM` as its stop signal, and
+performs the same graceful Soulseek disconnect used by the HTTP shutdown route.
+Keep the default state layout, or create any explicitly configured download and
+incomplete directories before starting the container.
 
 Mount config read-only and state read-write:
 

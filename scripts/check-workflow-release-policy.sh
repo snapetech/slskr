@@ -117,6 +117,39 @@ if rg -n -F "types: [published]" .github/workflows/release-publish.yml >/dev/nul
 fi
 
 for expected in \
+  'workflow_call:' \
+  'Build and push (ghcr)' \
+  'platforms: linux/amd64,linux/arm64' \
+  'push: true' \
+  'Verify pushed GHCR manifest' \
+  'scripts/run-container-shutdown-smoke.sh'; do
+  if ! rg -n -F -- "$expected" .github/workflows/release-publish.yml >/dev/null; then
+    printf 'workflow release policy check failed: container publishing contract token missing: %s\n' "$expected" >&2
+    status=1
+  fi
+done
+
+for expected in \
+  'uses: ./.github/workflows/release-publish.yml' \
+  'secrets: inherit' \
+  'needs: [release]' \
+  'packages: write'; do
+  if ! rg -n -F -- "$expected" .github/workflows/release.yml >/dev/null; then
+    printf 'workflow release policy check failed: release must call the downstream publisher: %s\n' "$expected" >&2
+    status=1
+  fi
+done
+
+for dockerfile in Dockerfile packaging/docker/release.Dockerfile; do
+  for expected in 'STOPSIGNAL SIGTERM' 'ENTRYPOINT ["slskr"]' 'CMD ["serve"]'; do
+    if ! rg -n -F -- "$expected" "$dockerfile" >/dev/null; then
+      printf 'workflow release policy check failed: container lifecycle token missing from %s: %s\n' "$dockerfile" "$expected" >&2
+      status=1
+    fi
+  done
+done
+
+for expected in \
   'push:' \
   'branches:' \
   '- main' \
@@ -144,7 +177,12 @@ for expected in \
   "startsWith(github.ref, 'refs/tags/release-v')" \
   'version="${GITHUB_REF_NAME#release-}"' \
   'DISCORD_RELEASE_WEBHOOK_URL' \
-  'Announce Discord Release'; do
+  'Announce Discord Release' \
+  'scripts/release_notes.py' \
+  'User-facing changes' \
+  'RELEASE_BODY' \
+  'slskr Releases' \
+  'scripts/validate-changelog.sh'; do
   if ! rg -n -F -- "$expected" .github/workflows/release.yml >/dev/null; then
     printf 'workflow release policy check failed: release tag policy token missing: %s\n' "$expected" >&2
     status=1

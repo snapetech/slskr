@@ -1,6 +1,25 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Keep every live interop child bounded when this runner is invoked directly.
+# A stricter parent limit is preserved rather than raised.
+interop_virtual_memory_kib="${SLSKR_INTEROP_VIRTUAL_MEMORY_KIB:-12582912}"
+if [[ ! "$interop_virtual_memory_kib" =~ ^[1-9][0-9]{0,7}$ || "$interop_virtual_memory_kib" -gt 12582912 ]]; then
+  echo "SLSKR_INTEROP_VIRTUAL_MEMORY_KIB must be between 1 and 12582912" >&2
+  exit 2
+fi
+parent_virtual_memory_kib="$(ulimit -v)"
+if [[ "$parent_virtual_memory_kib" =~ ^[0-9]+$ && "$parent_virtual_memory_kib" -lt "$interop_virtual_memory_kib" ]]; then
+  interop_virtual_memory_kib="$parent_virtual_memory_kib"
+fi
+ulimit -v "$interop_virtual_memory_kib"
+export NODE_OPTIONS='--max-old-space-size=1024'
+export DOTNET_GCHeapHardLimit=1073741824
+export COMPlus_GCHeapHardLimit=1073741824
+export DOTNET_PROCESSOR_COUNT=2
+export DOTNET_ThreadPool_MinThreads=2
+export DOTNET_ThreadPool_MaxThreads=16
+
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
@@ -28,7 +47,8 @@ server_host="${SLSKR_CROSS_CLIENT_SERVER_HOST:-${SLSK_SERVER_ADDRESS:-vps.slskne
 server_port="${SLSKR_CROSS_CLIENT_SERVER_PORT:-${SLSK_SERVER_PORT:-2271}}"
 server_endpoint="${SLSKR_CROSS_CLIENT_SERVER:-$server_host:$server_port}"
 mkdir -p "$work_dir" "$output_dir"
-result_file="$output_dir/slskr-slskdn-cross-client-interop.tsv"
+final_result_file="$output_dir/slskr-slskdn-cross-client-interop.tsv"
+result_file="$output_dir/.slskr-slskdn-cross-client-interop.$$.tsv"
 diag_file="$work_dir/diagnostics.log"
 
 pick_free_port() {
@@ -122,6 +142,24 @@ auth_put_empty() {
   else
     curl -fsS -X PUT -H "Authorization: Bearer $api_token" "$url"
   fi
+}
+
+rust_search_diagnostics() {
+  auth_get "http://127.0.0.1:$slskr_http_port/api/v0/logs" 2>/dev/null |
+    node -e '
+let input = "";
+process.stdin.on("data", chunk => input += chunk);
+process.stdin.on("end", () => {
+  let entries;
+  try { entries = JSON.parse(input); } catch { process.exit(0); }
+  const selected = (Array.isArray(entries) ? entries : [])
+    .filter(entry => entry.category === "search" || /incoming public search/i.test(entry.message || ""))
+    .slice(0, 8)
+    .map(entry => `${entry.level || "?"}:${entry.message || ""}`)
+    .join(" | ");
+  process.stdout.write(selected.replace(/[\r\n\t]+/g, " ").slice(0, 900));
+});
+' 2>/dev/null || true
 }
 
 try_request() {
@@ -306,10 +344,19 @@ gateway_echo_port="$(pick_port)"
 gateway_echo_host="$(ip -4 route get 1.1.1.1 | awk '{ for (i = 1; i <= NF; i++) if ($i == "src") { print $(i + 1); exit } }')"
 
 slskr_state="$work_dir/slskr-state"
+slskr_config="$work_dir/slskr.toml"
 slskr_share="$work_dir/slskr-share"
 slskdn_app="$work_dir/slskdn-app"
 slskdn_share="$slskdn_app/shares"
 mkdir -p "$slskr_state" "$slskr_share" "$slskdn_app/config" "$slskdn_app/downloads" "$slskdn_app/incomplete" "$slskdn_share"
+
+cat >"$slskr_config" <<'TOML'
+[mesh]
+enabled = true
+enable_soulseek_capability_handshake = true
+enable_soulseek_rendezvous = true
+probe_soulseek_rendezvous_capabilities = true
+TOML
 
 slskr_fixture_name="slskr-to-slskdn-$(date -u +%Y%m%d%H%M%S).flac"
 slskdn_fixture_name="slskdn-to-slskr-$(date -u +%Y%m%d%H%M%S).flac"
@@ -330,10 +377,15 @@ slskdn_pid=""
 gateway_echo_pid=""
 
 # Build before either daemon starts. slskdN's test endpoint overrides live in its
-# bounded endpoint cache, so compiling through `cargo run` after launch can
+# bounded endpoint cache, so compiling the daemon after launch can
 # consume their useful lifetime before the cross-client checks begin.
-cargo build -q -p slskr
 slskr_binary="$repo_root/target/debug/slskr"
+if [[ ! -x "$slskr_binary" ]]; then
+  export CARGO_BUILD_JOBS=1
+  export RUST_MIN_STACK="${RUST_MIN_STACK:-16777216}"
+  export CARGO_NET_OFFLINE="${CARGO_NET_OFFLINE:-true}"
+  scripts/with-build-guard.sh cargo build -q -p slskr
+fi
 
 node -e '
 const net = require("net");
@@ -349,6 +401,15 @@ cleanup() {
       wait "$pid" 2>/dev/null || true
     fi
   done
+  if [[ -n "${result_file:-}" && -f "$result_file" ]]; then
+    # Preserve failed evidence for diagnosis. A failed run is never promoted
+    # to the canonical all-green artifact, but deleting the only row-level
+    # record makes transient network failures impossible to distinguish from
+    # implementation regressions after the child daemons are cleaned up.
+    failed_result_file="$output_dir/slskr-slskdn-cross-client-interop.failed-$$.tsv"
+    cp -- "$result_file" "$failed_result_file"
+    rm -f -- "$result_file"
+  fi
 }
 trap cleanup EXIT
 
@@ -376,6 +437,10 @@ feature:
   identityFriends: true
   collectionsSharing: true
   streaming: true
+  pods: true
+  virtualSoulfind: true
+virtualSoulfindV2:
+  enabled: true
 soulseek:
   address: $server_host
   port: $server_port
@@ -401,6 +466,7 @@ YAML
 (
   export SLSK_SERVER="$server_endpoint"
   export SLSKR_HTTP_BIND="127.0.0.1:$slskr_http_port"
+  export SLSKR_CONFIG="$slskr_config"
   export SLSKR_STATE_DIR="$slskr_state"
   export SLSK_USERNAME="$slskr_username"
   export SLSK_PASSWORD="$slskr_password"
@@ -523,7 +589,7 @@ probe_peer_address() {
     SLSK_PEER_USERNAME="$peer_username" \
     SLSK_PEER_ADDRESS_PROBE_ATTEMPTS=1 \
     SLSK_PEER_ADDRESS_PROBE_TIMEOUT_SECONDS=15 \
-      timeout 45 cargo run -q -p slskr -- probe peer-address
+      timeout 45 "$slskr_binary" probe peer-address
   } >>"$diag_file" 2>&1 || {
     printf '[peer-address:%s] failed\n' "$label" >>"$diag_file"
     return 1
@@ -691,7 +757,7 @@ run_search_interop_checks() {
     SLSK_SEARCH_FORCE_LOGIN=true \
     SLSK_SEARCH_PROBE_ATTEMPTS=3 \
     SLSK_SEARCH_PROBE_TIMEOUT_SECONDS=20 \
-      timeout 75 cargo run -q -p slskr -- probe search-peer >>"$diag_file" 2>&1; then
+      timeout 75 "$slskr_binary" probe search-peer >>"$diag_file" 2>&1; then
     record_check protocol-slskr-searches-slskdn ok "query=slskdn expected=$slskdn_fixture_name"
   else
     record_check protocol-slskr-searches-slskdn fail "$(tail -n 1 "$diag_file")"
@@ -710,10 +776,11 @@ run_search_interop_checks() {
     SLSK_SEARCH_FORCE_LOGIN=true \
     SLSK_SEARCH_PROBE_ATTEMPTS=3 \
     SLSK_SEARCH_PROBE_TIMEOUT_SECONDS=20 \
-      timeout 75 cargo run -q -p slskr -- probe search-peer >>"$diag_file" 2>&1; then
+      timeout 75 "$slskr_binary" probe search-peer >>"$diag_file" 2>&1; then
     record_check protocol-slskdn-searches-slskr ok "query=slskr expected=$slskr_fixture_name"
   else
-    record_check protocol-slskdn-searches-slskr fail "$(tail -n 1 "$diag_file")"
+    search_diagnostics="$(rust_search_diagnostics)"
+    record_check protocol-slskdn-searches-slskr fail "detail=$(tail -n 1 "$diag_file") rust_diagnostics=${search_diagnostics:-none}"
     return 1
   fi
 
@@ -745,12 +812,45 @@ run_message_interop_checks() {
   record_check protocol-private-message-server-roundtrip ok "sender=$slskr_username receiver=$slskdn_username"
 }
 
+run_room_interop_checks() {
+  local room target_message rust_message status=0
+  room="${SLSKR_CROSS_CLIENT_ROOM_NAME:-slskr-live-interop}"
+  if ! auth_post_json "http://127.0.0.1:$slskdn_http_port/api/v0/rooms/joined" "\"$room\"" >/dev/null; then
+    record_check protocol-slskdn-public-room fail "target room join failed"
+    record_check protocol-slskr-public-room-slskdn fail "target room join failed"
+    return 1
+  fi
+  if ! auth_post_json "http://127.0.0.1:$slskr_http_port/api/v0/rooms/$room/join" '{}' >/dev/null; then
+    record_check protocol-slskdn-public-room fail "slskr room join failed"
+    record_check protocol-slskr-public-room-slskdn fail "slskr room join failed"
+    return 1
+  fi
+  sleep 3
+
+  target_message="slskdn-room-to-slskr-$(date +%s%N)"
+  if ! auth_post_json "http://127.0.0.1:$slskdn_http_port/api/v0/rooms/joined/$room/messages" "\"$target_message\"" >/dev/null; then
+    record_check protocol-slskdn-public-room fail "room=$room target_message=$target_message"
+    status=1
+  elif ! wait_json_contains protocol-slskdn-public-room "http://127.0.0.1:$slskr_http_port/api/rooms/joined/$room/messages" "$target_message"; then
+    status=1
+  fi
+
+  rust_message="slskr-room-to-slskdn-$(date +%s%N)"
+  if ! auth_post_json "http://127.0.0.1:$slskr_http_port/api/rooms/joined/$room/messages" "{\"body\":\"$rust_message\"}" >/dev/null; then
+    record_check protocol-slskr-public-room-slskdn fail "room=$room rust_message=$rust_message"
+    status=1
+  elif ! wait_json_contains protocol-slskr-public-room-slskdn "http://127.0.0.1:$slskdn_http_port/api/v0/rooms/joined/$room/messages" "$rust_message"; then
+    status=1
+  fi
+  return "$status"
+}
+
 run_mesh_runtime_checks() {
   local escaped_slskr escaped_slskdn capability_probe slskr_capabilities slskdn_capabilities overlay_pin overlay_output health stats transport ticket
   escaped_slskr="$(url_escape "$slskr_username")"
   escaped_slskdn="$(url_escape "$slskdn_username")"
 
-  capability_probe="$(auth_post_json "http://127.0.0.1:$slskr_http_port/api/v0/mesh/sync/$escaped_slskdn" '{}')"
+  capability_probe="$(auth_post_json "http://127.0.0.1:$slskr_http_port/api/mesh/sync/$escaped_slskdn" '{}')"
   if [[ "$capability_probe" != *'"probeQueued":true'* ]]; then
     record_check protocol-ksdn-probe-dispatch fail "$capability_probe"
     return 1
@@ -1130,6 +1230,66 @@ process.stdout.write(JSON.stringify({
 probe_peer_address slskr "$slskr_username" || true
 probe_peer_address slskdn "$slskdn_username" || true
 
+run_user_watch_interop_checks() {
+  local escaped_slskr user_watch_log target_user_status target_user_info
+  escaped_slskr="$(url_escape "$slskr_username")"
+  user_watch_log="$work_dir/slskr-user-watch.log"
+  if [[ "$upstream_username" != "$slskr_username" && "$upstream_username" != "$slskdn_username" ]] \
+    && SLSK_SERVER="$server_endpoint" \
+    SLSK_USERNAME="$upstream_username" \
+    SLSK_PASSWORD="$upstream_password" \
+    SLSK_PEER_USERNAME="$slskdn_username" \
+      "$slskr_binary" probe user-watch >"$user_watch_log" 2>&1; then
+    record_check protocol-slskr-user-watch-slskdn ok "watched=$slskdn_username stats=received"
+  else
+    record_check protocol-slskr-user-watch-slskdn fail "detail=$(tail -n 4 "$user_watch_log" 2>/dev/null | tr '\n\t' '  ')"
+    return 1
+  fi
+
+  target_user_status="$(auth_get "http://127.0.0.1:$slskdn_http_port/api/v0/users/$escaped_slskr/status" 2>/dev/null || true)"
+  target_user_info="$(auth_get "http://127.0.0.1:$slskdn_http_port/api/v0/users/$escaped_slskr/info" 2>/dev/null || true)"
+  if [[ -n "$target_user_status" && -n "$target_user_info" ]]; then
+    record_check protocol-slskdn-user-watch-slskr ok "status-and-info=$slskr_username"
+  else
+    record_check protocol-slskdn-user-watch-slskr fail "status=$target_user_status info=$target_user_info"
+    return 1
+  fi
+}
+
+run_distributed_peer_interop_checks() {
+  local distributed_peer_log distributed_target_state distributed_target_ready
+  distributed_peer_log="$work_dir/slskr-distributed-peer.log"
+  distributed_target_state=""
+  distributed_target_ready=false
+  if [[ "$upstream_username" != "$slskr_username" && "$upstream_username" != "$slskdn_username" ]]; then
+    for _ in $(seq 1 "${SLSKR_CROSS_CLIENT_DISTRIBUTED_READY_ATTEMPTS:-30}"); do
+      distributed_target_state="$(auth_get "http://127.0.0.1:$slskdn_http_port/api/v0/application" 2>/dev/null || true)"
+      if [[ "$(printf '%s' "$distributed_target_state" | json_get distributedNetwork.canAcceptChildren 2>/dev/null || true)" == "true" ]]; then
+        distributed_target_ready=true
+        break
+      fi
+      sleep "${SLSKR_CROSS_CLIENT_DISTRIBUTED_READY_DELAY_SECONDS:-1}"
+    done
+  fi
+  if [[ "$distributed_target_ready" == true ]] \
+    && SLSK_SERVER="$server_endpoint" \
+    SLSK_USERNAME="$upstream_username" \
+    SLSK_PASSWORD="$upstream_password" \
+    SLSK_PEER_USERNAME="$slskdn_username" \
+    SLSK_DISTRIBUTED_PEER_USERNAME="$slskdn_username" \
+    SLSK_DISTRIBUTED_HOST_OVERRIDE=127.0.0.1 \
+    SLSK_DISTRIBUTED_PORT_OVERRIDE="$slskdn_listen_port" \
+      "$slskr_binary" probe distributed-peer >"$distributed_peer_log" 2>&1; then
+    record_check protocol-slskr-distributed-peer-slskdn ok "peer=$slskdn_username ping=received probe_contract=distributed-ping-response-v2"
+  elif [[ "$distributed_target_ready" != true ]]; then
+    record_check protocol-slskr-distributed-peer-slskdn fail "detail=target distributed network not ready after ${SLSKR_CROSS_CLIENT_DISTRIBUTED_READY_ATTEMPTS:-30}s state=${distributed_target_state:0:240}"
+    return 1
+  else
+    record_check protocol-slskr-distributed-peer-slskdn fail "detail=$(tail -n 4 "$distributed_peer_log" 2>/dev/null | tr '\n\t' '  ')"
+    return 1
+  fi
+}
+
 run_slskdn_to_slskr_download() {
   local created transfer_id status bytes transfer_json download_path
   if ! created="$(auth_post_json \
@@ -1210,10 +1370,13 @@ run_runtime_protocol_checks || status=1
 run_virtual_soulfind_v2_checks || status=1
 run_browse_interop_checks || status=1
 run_search_interop_checks || status=1
+run_user_watch_interop_checks || status=1
+run_distributed_peer_interop_checks || status=1
 run_slskr_backfill_probe || status=1
 run_slskr_to_slskdn_download || status=1
 run_slskdn_to_slskr_download || status=1
 run_message_interop_checks || status=1
+run_room_interop_checks || status=1
 run_mesh_runtime_checks || status=1
 record_final_diagnostics
 
@@ -1233,7 +1396,8 @@ if [[ "$status" -ne 0 ]]; then
   exit "$status"
 fi
 
+mv "$result_file" "$final_result_file"
 echo "cross-client interop ok"
-echo "result_file=$result_file"
+echo "result_file=$final_result_file"
 echo "work_dir=$work_dir"
 echo "slskr_user=$(redact "$slskr_username") slskdn_user=$(redact "$slskdn_username")"

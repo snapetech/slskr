@@ -1,28 +1,38 @@
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashMap, VecDeque},
     fmt, fs,
     io::{Read as _, Seek as _, SeekFrom},
     net::{IpAddr, SocketAddr},
     path::Path,
-    sync::Arc,
+    sync::{
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        Arc, Mutex as StdMutex,
+    },
     time::{Duration, Instant},
 };
 
+use crate::mesh_security::OverlayRateLimiter;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use rcgen::generate_simple_self_signed;
 use sha2::{Digest, Sha256};
 use slskr_client::overlay::{
-    CloseTunnelRequest, GetTunnelDataRequest, MeshHello, MeshHelloAck, MeshServiceCall,
-    MeshServiceReply, OpenTunnelRequest, OpenTunnelResponse, OverlayFramer, Ping, Pong,
-    TunnelDataRequest, TunnelDataResponse, FEATURE_MESH_SERVICE, MAX_OVERLAY_MESSAGE_BYTES,
+    CloseTunnelRequest, GetTunnelDataRequest, MeshHello, MeshHelloAck, MeshSearchFileDto,
+    MeshSearchRequestMessage, MeshSearchResponseMessage, MeshServiceCall, MeshServiceReply,
+    OpenTunnelRequest, OpenTunnelResponse, OverlayFramer, Ping, Pong, TunnelDataRequest,
+    TunnelDataResponse, FEATURE_MESH_SEARCH, FEATURE_MESH_SERVICE, MAX_OVERLAY_MESSAGE_BYTES,
     OVERLAY_MAGIC, OVERLAY_VERSION,
 };
 use slskr_client::overlay_control::{ControlEnvelope, CONTROL_MAX_DATAGRAM_BYTES};
 use slskr_client::quic_control::{QuicControlConnection, QuicControlError, QuicControlServer};
+use slskr_client::quic_data::{
+    QuicDataConnection, QuicDataError, QuicDataInboundStream, QuicDataReceiveStream,
+    QuicDataSendStream, QuicDataServer,
+};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{lookup_host, tcp::OwnedWriteHalf, TcpListener, TcpStream, UdpSocket},
     sync::{mpsc, Mutex, RwLock, Semaphore},
+    task::JoinSet,
     time::timeout,
 };
 use tokio_rustls::{
@@ -54,6 +64,14 @@ const OVERLAY_IDLE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 const INBOUND_BUFFER_CHUNKS: usize = 64;
 const TUNNEL_CHUNK_BYTES: usize = 8 * 1024;
 const MAX_POD_MESSAGE_BODY_BYTES: usize = 4 * 1024;
+const QUIC_DATA_MAX_PAYLOAD_BYTES: usize = slskr_client::quic_data::DEFAULT_MAX_PAYLOAD_BYTES;
+const QUIC_PROXY_MAX_SESSIONS: usize = 128;
+const QUIC_PROXY_PREFIX_SESSION_LIMIT: usize = 8;
+const QUIC_PROXY_GLOBAL_ATTEMPT_LIMIT: usize = 64;
+const QUIC_PROXY_PREFIX_ATTEMPT_LIMIT: usize = 4;
+const QUIC_PROXY_ATTEMPT_WINDOW: Duration = Duration::from_secs(10);
+const QUIC_PROXY_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
+const QUIC_PROXY_PENDING_TIMEOUT: Duration = Duration::from_secs(10);
 
 struct OverlayLiveness {
     last_inbound: Instant,
@@ -94,6 +112,15 @@ const MAX_CONTENT_ID_BYTES: usize = 512;
 const MAX_SHADOW_MBID_BYTES: usize = 100;
 const MAX_SHADOW_BATCH: usize = 20;
 
+#[derive(Clone, Debug)]
+pub struct QuicDataPolicy {
+    pub relay_authentication_token: String,
+    pub allowed_relay_destinations: Vec<String>,
+    pub max_concurrent_relays: usize,
+    pub max_relay_bytes_per_direction: u64,
+    pub max_relay_duration: Duration,
+}
+
 pub struct Gateway {
     bind: SocketAddr,
     acceptor: TlsAcceptor,
@@ -101,10 +128,16 @@ pub struct Gateway {
     listener: Mutex<Option<TcpListener>>,
     udp_listener: Mutex<Option<UdpSocket>>,
     quic_listener: Mutex<Option<QuicControlServer>>,
+    quic_data_listener: Mutex<Option<QuicDataServer>>,
+    quic_proxy_backend: Option<SocketAddr>,
+    quic_data_policy: Option<Arc<QuicDataPolicy>>,
+    quic_data_max_concurrent_streams: usize,
+    quic_data_relays: Arc<Semaphore>,
     connections: Arc<Semaphore>,
     tunnels: RwLock<BTreeMap<String, Arc<Tunnel>>>,
     overlay_connections: RwLock<BTreeMap<String, OverlayConnectionMetadata>>,
     replay_nonces: Mutex<BTreeMap<(String, String), u64>>,
+    overlay_rate_limiter: Arc<OverlayRateLimiter>,
 }
 
 impl fmt::Debug for Gateway {
@@ -123,6 +156,53 @@ impl Gateway {
         state_dir: &Path,
         quic_bind: Option<SocketAddr>,
     ) -> Result<Self, String> {
+        Self::load_or_create_with_quic_and_data(bind, state_dir, quic_bind, None).await
+    }
+
+    pub async fn load_or_create_with_quic_and_data(
+        bind: SocketAddr,
+        state_dir: &Path,
+        quic_bind: Option<SocketAddr>,
+        quic_data_bind: Option<SocketAddr>,
+    ) -> Result<Self, String> {
+        Self::load_or_create_with_quic_and_data_policy(
+            bind,
+            state_dir,
+            quic_bind,
+            quic_data_bind,
+            None,
+        )
+        .await
+    }
+
+    pub async fn load_or_create_with_quic_and_data_policy(
+        bind: SocketAddr,
+        state_dir: &Path,
+        quic_bind: Option<SocketAddr>,
+        quic_data_bind: Option<SocketAddr>,
+        quic_data_policy: Option<QuicDataPolicy>,
+    ) -> Result<Self, String> {
+        Self::load_or_create_with_quic_and_data_policy_and_proxy(
+            bind,
+            state_dir,
+            quic_bind,
+            quic_data_bind,
+            None,
+            quic_data_policy,
+            slskr_client::quic_data::DEFAULT_MAX_CONCURRENT_STREAMS as usize,
+        )
+        .await
+    }
+
+    pub async fn load_or_create_with_quic_and_data_policy_and_proxy(
+        bind: SocketAddr,
+        state_dir: &Path,
+        quic_bind: Option<SocketAddr>,
+        quic_data_bind: Option<SocketAddr>,
+        quic_proxy_bind: Option<SocketAddr>,
+        quic_data_policy: Option<QuicDataPolicy>,
+        max_concurrent_streams: usize,
+    ) -> Result<Self, String> {
         let (certificate, private_key) = load_or_create_certificate(state_dir)?;
         let certificate_sha256 = Sha256::digest(certificate.as_ref()).into();
         let config =
@@ -131,10 +211,25 @@ impl Gateway {
                 .with_single_cert(vec![certificate.clone()], private_key.clone_key().into())
                 .map_err(|error| format!("overlay TLS configuration failed: {error}"))?;
         let quic_listener = quic_bind.and_then(|bind| {
-            match QuicControlServer::bind(bind, certificate, private_key) {
+            match QuicControlServer::bind(bind, certificate.clone(), private_key.clone_key()) {
                 Ok(listener) => Some(listener),
                 Err(error) => {
                     tracing::warn!(%error, ?bind, "overlay QUIC control listener unavailable");
+                    None
+                }
+            }
+        });
+        let quic_data_listener = quic_data_bind.and_then(|bind| {
+            match QuicDataServer::bind_with_limits(
+                bind,
+                certificate,
+                private_key,
+                QUIC_DATA_MAX_PAYLOAD_BYTES,
+                u32::try_from(max_concurrent_streams).unwrap_or(u32::MAX),
+            ) {
+                Ok(listener) => Some(listener),
+                Err(error) => {
+                    tracing::warn!(%error, ?bind, "overlay QUIC data listener unavailable");
                     None
                 }
             }
@@ -149,10 +244,11 @@ impl Gateway {
         // DHT.  The local DHT owns that socket when enabled, so this optional
         // listener is deliberately best-effort; standalone/test gateways can
         // still accept exact ControlEnvelope datagrams.
-        let udp_listener = match UdpSocket::bind(bind).await {
+        let udp_bind = quic_proxy_bind.unwrap_or(bind);
+        let udp_listener = match UdpSocket::bind(udp_bind).await {
             Ok(socket) => Some(socket),
             Err(error) => {
-                tracing::debug!(%error, ?bind, "overlay UDP control listener unavailable");
+                tracing::debug!(%error, ?udp_bind, "overlay UDP control listener unavailable");
                 None
             }
         };
@@ -163,10 +259,20 @@ impl Gateway {
             listener: Mutex::new(Some(listener)),
             udp_listener: Mutex::new(udp_listener),
             quic_listener: Mutex::new(quic_listener),
+            quic_data_listener: Mutex::new(quic_data_listener),
+            quic_proxy_backend: quic_proxy_bind.and(quic_bind),
+            quic_data_max_concurrent_streams: max_concurrent_streams.clamp(1, 1_024),
+            quic_data_relays: Arc::new(Semaphore::new(
+                quic_data_policy
+                    .as_ref()
+                    .map_or(1, |policy| policy.max_concurrent_relays.max(1)),
+            )),
+            quic_data_policy: quic_data_policy.map(Arc::new),
             connections: Arc::new(Semaphore::new(MAX_GATEWAY_CONNECTIONS)),
             tunnels: RwLock::new(BTreeMap::new()),
             overlay_connections: RwLock::new(BTreeMap::new()),
             replay_nonces: Mutex::new(BTreeMap::new()),
+            overlay_rate_limiter: Arc::new(OverlayRateLimiter::new()),
         })
     }
 
@@ -262,8 +368,11 @@ impl Gateway {
         if let Some(udp_listener) = self.udp_listener.lock().await.take() {
             let gateway = Arc::clone(&self);
             let udp_state = Arc::clone(&state);
+            let quic_proxy_backend = self.quic_proxy_backend;
             tokio::spawn(async move {
-                gateway.run_udp_control(udp_listener, udp_state).await;
+                gateway
+                    .run_udp_control(udp_listener, udp_state, quic_proxy_backend)
+                    .await;
             });
         }
         if let Some(quic_listener) = self.quic_listener.lock().await.take() {
@@ -273,12 +382,27 @@ impl Gateway {
                 gateway.run_quic_control(quic_listener, quic_state).await;
             });
         }
+        if let Some(quic_data_listener) = self.quic_data_listener.lock().await.take() {
+            let gateway = Arc::clone(&self);
+            tokio::spawn(async move {
+                gateway.run_quic_data(quic_data_listener).await;
+            });
+        }
         loop {
-            let (tcp, _) = listener
+            let (tcp, remote_address) = listener
                 .accept()
                 .await
                 .map_err(|error| format!("overlay listener accept failed: {error}"))?;
+            let remote_ip = remote_address.ip();
+            if !self
+                .overlay_rate_limiter
+                .check_connection(remote_ip)
+                .allowed
+            {
+                continue;
+            }
             let Ok(permit) = Arc::clone(&self.connections).try_acquire_owned() else {
+                self.overlay_rate_limiter.record_disconnection(remote_ip);
                 continue;
             };
             let gateway = Arc::clone(&self);
@@ -288,24 +412,100 @@ impl Gateway {
                 if let Err(error) = gateway.handle_connection(tcp, &state).await {
                     tracing::debug!(%error, "overlay gateway connection closed");
                 }
+                gateway.overlay_rate_limiter.record_disconnection(remote_ip);
             });
         }
     }
 
-    async fn run_udp_control(&self, socket: UdpSocket, state: Arc<super::AppState>) {
-        let mut buffer = [0_u8; CONTROL_MAX_DATAGRAM_BYTES + 1];
+    async fn run_udp_control(
+        &self,
+        socket: UdpSocket,
+        state: Arc<super::AppState>,
+        quic_proxy_backend: Option<SocketAddr>,
+    ) {
+        let public_socket = Arc::new(socket);
+        let mut quic_sessions = HashMap::new();
+        let quic_admission = QuicProxyAdmissionGate::default();
+        let mut buffer = [0_u8; 65_536];
         loop {
-            let received = match socket.recv_from(&mut buffer).await {
+            prune_quic_proxy_sessions(&mut quic_sessions);
+            let received = match public_socket.recv_from(&mut buffer).await {
                 Ok(received) => received,
                 Err(error) => {
                     tracing::debug!(%error, "overlay UDP control listener stopped");
                     return;
                 }
             };
+            if let Some(session) = quic_sessions.get_mut(&received.1) {
+                session
+                    .last_activity
+                    .store(super::unix_timestamp(), Ordering::Relaxed);
+                if session
+                    .sender
+                    .send(buffer[..received.0].to_vec())
+                    .await
+                    .is_err()
+                {
+                    quic_sessions.remove(&received.1);
+                }
+                continue;
+            }
+            if is_dht_packet(&buffer[..received.0]) {
+                // The mainline DHT owns this packet class when the shared
+                // public socket is available. A standalone gateway cannot
+                // answer DHT RPCs, so never misroute it to the overlay.
+                continue;
+            }
             if received.0 > CONTROL_MAX_DATAGRAM_BYTES {
+                if quic_proxy_backend.is_some() && is_quic_initial_packet(&buffer[..received.0]) {
+                    if quic_sessions.len() >= QUIC_PROXY_MAX_SESSIONS {
+                        continue;
+                    }
+                    let Some(admission_lease) = quic_admission.try_acquire(received.1) else {
+                        continue;
+                    };
+                    if let Ok(session) = QuicProxySession::new(
+                        received.1,
+                        quic_proxy_backend.expect("checked above"),
+                        Arc::clone(&public_socket),
+                        admission_lease,
+                    )
+                    .await
+                    {
+                        session
+                            .sender
+                            .send(buffer[..received.0].to_vec())
+                            .await
+                            .ok();
+                        quic_sessions.insert(received.1, session);
+                    }
+                }
                 continue;
             }
             let Ok(envelope) = ControlEnvelope::decode(&buffer[..received.0]) else {
+                if quic_proxy_backend.is_some() && is_quic_initial_packet(&buffer[..received.0]) {
+                    if quic_sessions.len() >= QUIC_PROXY_MAX_SESSIONS {
+                        continue;
+                    }
+                    let Some(admission_lease) = quic_admission.try_acquire(received.1) else {
+                        continue;
+                    };
+                    if let Ok(session) = QuicProxySession::new(
+                        received.1,
+                        quic_proxy_backend.expect("checked above"),
+                        Arc::clone(&public_socket),
+                        admission_lease,
+                    )
+                    .await
+                    {
+                        session
+                            .sender
+                            .send(buffer[..received.0].to_vec())
+                            .await
+                            .ok();
+                        quic_sessions.insert(received.1, session);
+                    }
+                }
                 continue;
             };
             let now = match i64::try_from(super::unix_timestamp_millis()) {
@@ -352,14 +552,202 @@ impl Gateway {
             let Ok(connection) = connection else {
                 continue;
             };
+            let remote_ip = connection.remote_address().ip();
+            if !self
+                .overlay_rate_limiter
+                .check_connection(remote_ip)
+                .allowed
+            {
+                continue;
+            }
             let gateway = Arc::clone(&self);
             let connection_state = Arc::clone(&state);
             tokio::spawn(async move {
                 gateway
                     .handle_quic_connection(connection, connection_state)
                     .await;
+                gateway.overlay_rate_limiter.record_disconnection(remote_ip);
             });
         }
+    }
+
+    async fn run_quic_data(self: Arc<Self>, server: QuicDataServer) {
+        loop {
+            let Some(connection) = server.accept().await else {
+                return;
+            };
+            let Ok(connection) = connection else {
+                continue;
+            };
+            let remote_ip = connection.remote_address().ip();
+            if !self
+                .overlay_rate_limiter
+                .check_connection(remote_ip)
+                .allowed
+            {
+                continue;
+            }
+            let Ok(permit) = Arc::clone(&self.connections).try_acquire_owned() else {
+                self.overlay_rate_limiter.record_disconnection(remote_ip);
+                continue;
+            };
+            let gateway = Arc::clone(&self);
+            tokio::spawn(async move {
+                let _permit = permit;
+                Arc::clone(&gateway)
+                    .handle_quic_data_connection(connection)
+                    .await;
+                gateway.overlay_rate_limiter.record_disconnection(remote_ip);
+            });
+        }
+    }
+
+    async fn handle_quic_data_connection(self: Arc<Self>, connection: QuicDataConnection) {
+        let remote = connection.remote_address();
+        let stream_permits = Arc::new(Semaphore::new(self.quic_data_max_concurrent_streams));
+        let mut stream_tasks = JoinSet::new();
+        loop {
+            let stream = match connection.accept_inbound_stream().await {
+                Ok(stream) => stream,
+                Err(QuicDataError::Connection(error)) => {
+                    tracing::debug!(%error, ?remote, "overlay QUIC data connection closed");
+                    break;
+                }
+                Err(error) => {
+                    tracing::debug!(%error, ?remote, "overlay QUIC data stream rejected");
+                    continue;
+                }
+            };
+            let Ok(permit) = Arc::clone(&stream_permits).acquire_owned().await else {
+                break;
+            };
+            let gateway = Arc::clone(&self);
+            stream_tasks.spawn(async move {
+                let _permit = permit;
+                match stream {
+                    QuicDataInboundStream::Bidirectional(stream) => {
+                        gateway.handle_quic_data_stream(stream, remote).await;
+                    }
+                    QuicDataInboundStream::Unidirectional(mut receive) => {
+                        match receive.read_to_end().await {
+                            Ok(payload) => tracing::debug!(
+                                size = payload.len(),
+                                ?remote,
+                                "received overlay QUIC unidirectional data payload"
+                            ),
+                            Err(error) => tracing::debug!(
+                                %error,
+                                ?remote,
+                                "overlay QUIC unidirectional data payload rejected"
+                            ),
+                        }
+                    }
+                }
+            });
+        }
+        while stream_tasks.join_next().await.is_some() {}
+    }
+
+    async fn handle_quic_data_stream(
+        &self,
+        stream: slskr_client::quic_data::QuicDataStream,
+        remote: SocketAddr,
+    ) {
+        let (mut send, mut receive) = stream.split();
+        let (line, line_bytes) = match read_quic_data_command_line(&mut receive).await {
+            Ok(value) => value,
+            Err(error) => {
+                tracing::debug!(%error, ?remote, "overlay QUIC data command rejected");
+                return;
+            }
+        };
+
+        if line.starts_with("RELAY_TCP ") {
+            let _ = write_quic_data_error(&mut send, "authentication required").await;
+            return;
+        }
+
+        if line.starts_with("AUTH ") {
+            let Some(policy) = self.quic_data_policy.as_ref() else {
+                let _ = write_quic_data_error(&mut send, "relay disabled").await;
+                return;
+            };
+            if !relay_authentication_valid(&line, &policy.relay_authentication_token) {
+                let _ = write_quic_data_error(&mut send, "authentication failed").await;
+                return;
+            }
+            let Ok((relay_line, _)) = read_quic_data_command_line(&mut receive).await else {
+                let _ = write_quic_data_error(&mut send, "bad command").await;
+                return;
+            };
+            let parts = relay_line.split(' ').collect::<Vec<_>>();
+            let Some((_, host, port)) =
+                (parts.len() == 3).then(|| (parts[0], parts[1], parts[2].parse::<u16>().ok()))
+            else {
+                let _ = write_quic_data_error(&mut send, "bad command").await;
+                return;
+            };
+            let Some(port) = port else {
+                let _ = write_quic_data_error(&mut send, "bad command").await;
+                return;
+            };
+            if parts[0] != "RELAY_TCP" {
+                let _ = write_quic_data_error(&mut send, "bad command").await;
+                return;
+            }
+            if !allowed_relay_destination(policy, host, port) {
+                let _ = write_quic_data_error(&mut send, "destination denied").await;
+                return;
+            }
+            let destination = match resolve_public_relay_destination(host, port).await {
+                Ok(destination) => destination,
+                Err(_) => {
+                    let _ = write_quic_data_error(&mut send, "destination denied").await;
+                    return;
+                }
+            };
+            let Ok(permit) = Arc::clone(&self.quic_data_relays).try_acquire_owned() else {
+                let _ = write_quic_data_error(&mut send, "relay capacity reached").await;
+                return;
+            };
+            let tcp =
+                match timeout(DESTINATION_CONNECT_TIMEOUT, TcpStream::connect(destination)).await {
+                    Ok(Ok(tcp)) => tcp,
+                    _ => {
+                        let _ = write_quic_data_error(&mut send, "relay failed").await;
+                        drop(permit);
+                        return;
+                    }
+                };
+            if send.write_all(b"OK\n").await.is_err() {
+                drop(permit);
+                return;
+            }
+            let (tcp_read, tcp_write) = tcp.into_split();
+            let max_bytes = policy.max_relay_bytes_per_direction.max(1);
+            let relay = async {
+                tokio::select! {
+                    result = copy_quic_to_tcp(receive, tcp_write, max_bytes) => result,
+                    result = copy_tcp_to_quic(tcp_read, send, max_bytes) => result,
+                }
+            };
+            let _ = timeout(policy.max_relay_duration.max(Duration::from_secs(1)), relay).await;
+            drop(permit);
+            return;
+        }
+
+        let remaining = match receive.read_to_end_after(line_bytes.len()).await {
+            Ok(remaining) => remaining,
+            Err(error) => {
+                tracing::debug!(%error, ?remote, "overlay QUIC data payload rejected");
+                return;
+            }
+        };
+        tracing::debug!(
+            size = line_bytes.len().saturating_add(remaining.len()),
+            ?remote,
+            "received overlay QUIC data payload"
+        );
     }
 
     async fn handle_quic_connection(
@@ -411,7 +799,296 @@ impl Gateway {
                 .await;
         }
     }
+}
 
+struct QuicProxySession {
+    sender: mpsc::Sender<Vec<u8>>,
+    last_activity: Arc<AtomicU64>,
+    address_validated: Arc<AtomicBool>,
+    _admission_lease: QuicProxyAdmissionLease,
+}
+
+impl QuicProxySession {
+    async fn new(
+        remote: SocketAddr,
+        backend: SocketAddr,
+        public_socket: Arc<UdpSocket>,
+        admission_lease: QuicProxyAdmissionLease,
+    ) -> Result<Self, std::io::Error> {
+        let bind = match backend {
+            SocketAddr::V4(_) => "0.0.0.0:0",
+            SocketAddr::V6(_) => "[::]:0",
+        };
+        let backend_socket = UdpSocket::bind(bind).await?;
+        let (sender, mut receiver) = mpsc::channel::<Vec<u8>>(32);
+        let last_activity = Arc::new(AtomicU64::new(super::unix_timestamp()));
+        let address_validated = Arc::new(AtomicBool::new(false));
+        let task_last_activity = Arc::clone(&last_activity);
+        let task_address_validated = Arc::clone(&address_validated);
+        tokio::spawn(async move {
+            let mut response = vec![0_u8; 65_536];
+            loop {
+                tokio::select! {
+                    packet = receiver.recv() => {
+                        let Some(packet) = packet else { return; };
+                        if backend_socket.send_to(&packet, backend).await.is_err() {
+                            return;
+                        }
+                        task_last_activity.store(super::unix_timestamp(), Ordering::Relaxed);
+                    }
+                    received = backend_socket.recv_from(&mut response) => {
+                        let Ok((length, source)) = received else { return; };
+                        if source != backend {
+                            continue;
+                        }
+                        task_address_validated.store(true, Ordering::Relaxed);
+                        task_last_activity.store(super::unix_timestamp(), Ordering::Relaxed);
+                        if public_socket.send_to(&response[..length], remote).await.is_err() {
+                            return;
+                        }
+                    }
+                }
+            }
+        });
+        Ok(Self {
+            sender,
+            last_activity,
+            address_validated,
+            _admission_lease: admission_lease,
+        })
+    }
+}
+
+fn prune_quic_proxy_sessions(sessions: &mut HashMap<SocketAddr, QuicProxySession>) {
+    let now = super::unix_timestamp();
+    sessions.retain(|_, session| {
+        let timeout = if session.address_validated.load(Ordering::Relaxed) {
+            QUIC_PROXY_IDLE_TIMEOUT
+        } else {
+            QUIC_PROXY_PENDING_TIMEOUT
+        };
+        now.saturating_sub(session.last_activity.load(Ordering::Relaxed)) <= timeout.as_secs()
+    });
+}
+
+fn is_dht_packet(buffer: &[u8]) -> bool {
+    buffer.first().copied() == Some(b'd')
+}
+
+fn is_quic_initial_packet(buffer: &[u8]) -> bool {
+    if buffer.len() < 1_200 || buffer[0] & 0xc0 != 0xc0 {
+        return false;
+    }
+    let version = u32::from_be_bytes([buffer[1], buffer[2], buffer[3], buffer[4]]);
+    let packet_type = (buffer[0] & 0x30) >> 4;
+    (version == 0x0000_0001 && packet_type == 0) || (version == 0x6b33_43cf && packet_type == 1)
+}
+
+#[derive(Clone, Default)]
+struct QuicProxyAdmissionGate {
+    state: Arc<StdMutex<QuicProxyAdmissionState>>,
+}
+
+#[derive(Default)]
+struct QuicProxyAdmissionState {
+    active_sessions: usize,
+    active_by_prefix: HashMap<String, usize>,
+    recent_attempts: VecDeque<(u64, String)>,
+}
+
+impl QuicProxyAdmissionGate {
+    fn try_acquire(&self, remote: SocketAddr) -> Option<QuicProxyAdmissionLease> {
+        let prefix = quic_proxy_network_prefix(remote.ip());
+        let now = super::unix_timestamp();
+        let mut state = self.state.lock().ok()?;
+        while state.recent_attempts.front().is_some_and(|(timestamp, _)| {
+            now.saturating_sub(*timestamp) > QUIC_PROXY_ATTEMPT_WINDOW.as_secs()
+        }) {
+            state.recent_attempts.pop_front();
+        }
+        let active_for_prefix = state.active_by_prefix.get(&prefix).copied().unwrap_or(0);
+        let attempts_for_prefix = state
+            .recent_attempts
+            .iter()
+            .filter(|(_, attempted_prefix)| attempted_prefix == &prefix)
+            .count();
+        if state.active_sessions >= QUIC_PROXY_MAX_SESSIONS
+            || active_for_prefix >= QUIC_PROXY_PREFIX_SESSION_LIMIT
+            || state.recent_attempts.len() >= QUIC_PROXY_GLOBAL_ATTEMPT_LIMIT
+            || attempts_for_prefix >= QUIC_PROXY_PREFIX_ATTEMPT_LIMIT
+        {
+            return None;
+        }
+        state.recent_attempts.push_back((now, prefix.clone()));
+        state.active_sessions = state.active_sessions.saturating_add(1);
+        state
+            .active_by_prefix
+            .insert(prefix.clone(), active_for_prefix.saturating_add(1));
+        Some(QuicProxyAdmissionLease {
+            state: Arc::clone(&self.state),
+            prefix,
+        })
+    }
+
+    fn release(&self, prefix: &str) {
+        let Ok(mut state) = self.state.lock() else {
+            return;
+        };
+        state.active_sessions = state.active_sessions.saturating_sub(1);
+        if let Some(active) = state.active_by_prefix.get_mut(prefix) {
+            *active = active.saturating_sub(1);
+            if *active == 0 {
+                state.active_by_prefix.remove(prefix);
+            }
+        }
+    }
+}
+
+struct QuicProxyAdmissionLease {
+    state: Arc<StdMutex<QuicProxyAdmissionState>>,
+    prefix: String,
+}
+
+impl Drop for QuicProxyAdmissionLease {
+    fn drop(&mut self) {
+        let gate = QuicProxyAdmissionGate {
+            state: Arc::clone(&self.state),
+        };
+        gate.release(&self.prefix);
+    }
+}
+
+fn quic_proxy_network_prefix(address: IpAddr) -> String {
+    match address {
+        IpAddr::V4(address) => {
+            let [first, second, third, _] = address.octets();
+            format!("{first}.{second}.{third}")
+        }
+        IpAddr::V6(address) => match address.to_ipv4() {
+            Some(address) => {
+                let [first, second, third, _] = address.octets();
+                format!("{first}.{second}.{third}")
+            }
+            None => {
+                let bytes = address.octets();
+                hex::encode(&bytes[..7])
+            }
+        },
+    }
+}
+
+async fn read_quic_data_command_line(
+    receive: &mut QuicDataReceiveStream,
+) -> Result<(String, Vec<u8>), QuicDataError> {
+    let mut bytes = Vec::with_capacity(256);
+    let mut byte = [0_u8; 1];
+    while bytes.len() < 256 {
+        let read = receive.read_chunk(&mut byte).await?;
+        if read == 0 {
+            break;
+        }
+        bytes.push(byte[0]);
+        if byte[0] == b'\n' {
+            break;
+        }
+    }
+    let line = String::from_utf8_lossy(&bytes).trim_end().to_owned();
+    Ok((line, bytes))
+}
+
+async fn write_quic_data_error(
+    send: &mut QuicDataSendStream,
+    reason: &str,
+) -> Result<(), QuicDataError> {
+    send.write_all(format!("ERR {reason}\n").as_bytes()).await?;
+    send.finish()
+}
+
+fn relay_authentication_valid(line: &str, configured_token: &str) -> bool {
+    if configured_token.is_empty() || !line.starts_with("AUTH ") {
+        return false;
+    }
+    let Ok(presented) = BASE64.decode(line[5..].trim()) else {
+        return false;
+    };
+    let expected = configured_token.as_bytes();
+    if presented.len() != expected.len() {
+        return false;
+    }
+    let difference = presented
+        .iter()
+        .zip(expected)
+        .fold(0_u8, |difference, (left, right)| {
+            difference | (left ^ right)
+        });
+    difference == 0
+}
+
+fn allowed_relay_destination(policy: &QuicDataPolicy, host: &str, port: u16) -> bool {
+    let requested = if host.contains(':') {
+        format!("[{host}]:{port}")
+    } else {
+        format!("{host}:{port}")
+    };
+    policy
+        .allowed_relay_destinations
+        .iter()
+        .any(|allowed| allowed.eq_ignore_ascii_case(&requested))
+}
+
+async fn copy_quic_to_tcp(
+    mut receive: QuicDataReceiveStream,
+    mut target: tokio::net::tcp::OwnedWriteHalf,
+    max_bytes: u64,
+) -> Result<(), String> {
+    let mut total = 0_u64;
+    let mut buffer = [0_u8; 8 * 1024];
+    while total < max_bytes {
+        let remaining =
+            usize::try_from((max_bytes - total).min(buffer.len() as u64)).unwrap_or(buffer.len());
+        let read = receive
+            .read_chunk(&mut buffer[..remaining])
+            .await
+            .map_err(|error| error.to_string())?;
+        if read == 0 {
+            break;
+        }
+        target
+            .write_all(&buffer[..read])
+            .await
+            .map_err(|error| error.to_string())?;
+        total = total.saturating_add(read as u64);
+    }
+    Ok(())
+}
+
+async fn copy_tcp_to_quic(
+    mut source: tokio::net::tcp::OwnedReadHalf,
+    mut send: QuicDataSendStream,
+    max_bytes: u64,
+) -> Result<(), String> {
+    let mut total = 0_u64;
+    let mut buffer = [0_u8; 8 * 1024];
+    while total < max_bytes {
+        let remaining =
+            usize::try_from((max_bytes - total).min(buffer.len() as u64)).unwrap_or(buffer.len());
+        let read = source
+            .read(&mut buffer[..remaining])
+            .await
+            .map_err(|error| error.to_string())?;
+        if read == 0 {
+            break;
+        }
+        send.write_all(&buffer[..read])
+            .await
+            .map_err(|error| error.to_string())?;
+        total = total.saturating_add(read as u64);
+    }
+    let _ = send.finish();
+    Ok(())
+}
+
+impl Gateway {
     async fn handle_connection(
         &self,
         tcp: TcpStream,
@@ -438,12 +1115,16 @@ impl Gateway {
         hello
             .validate()
             .map_err(|error| format!("overlay hello rejected: {error}"))?;
-        if !hello
+        let supports_mesh_service = hello
             .features
             .iter()
-            .any(|feature| feature.eq_ignore_ascii_case(FEATURE_MESH_SERVICE))
-        {
-            return Err("overlay peer does not advertise mesh_service".to_owned());
+            .any(|feature| feature.eq_ignore_ascii_case(FEATURE_MESH_SERVICE));
+        let supports_mesh_search = hello
+            .features
+            .iter()
+            .any(|feature| feature.eq_ignore_ascii_case(FEATURE_MESH_SEARCH));
+        if !supports_mesh_service && !supports_mesh_search {
+            return Err("overlay peer advertises no supported feature".to_owned());
         }
         authenticate_overlay_peer(state, &hello, remote_address.ip(), &self.certificate_sha256)
             .await?;
@@ -451,12 +1132,19 @@ impl Gateway {
         let local_username = super::pod_request_peer_id(state)
             .await
             .ok_or_else(|| "local gateway identity is unavailable".to_owned())?;
+        let features = [
+            (FEATURE_MESH_SERVICE, supports_mesh_service),
+            (FEATURE_MESH_SEARCH, supports_mesh_search),
+        ]
+        .into_iter()
+        .filter_map(|(feature, supported)| supported.then_some(feature.to_owned()))
+        .collect();
         let acknowledgement = MeshHelloAck {
             magic: OVERLAY_MAGIC.to_owned(),
             message_type: "mesh_hello_ack".to_owned(),
             version: OVERLAY_VERSION,
             username: local_username,
-            features: vec![FEATURE_MESH_SERVICE.to_owned()],
+            features,
             soulseek_ports: None,
             overlay_port: Some(self.bind.port()),
             nonce_echo: hello.nonce,
@@ -530,6 +1218,24 @@ impl Gateway {
                             .await
                             .map_err(|error| format!("overlay service reply failed: {error}"))?;
                     }
+                    "mesh_search_req" if supports_mesh_search => {
+                        let request: MeshSearchRequestMessage = serde_json::from_slice(&raw)
+                            .map_err(|error| {
+                                format!("overlay mesh search request is invalid: {error}")
+                            })?;
+                        // The frozen dispatcher drops invalid requests after recording a
+                        // violation; it does not manufacture a response for malformed input.
+                        if request.validate().is_err() {
+                            continue;
+                        }
+                        let response = self.handle_mesh_search(request, state).await;
+                        framer.write(&response).await.map_err(|error| {
+                            format!("overlay mesh search response failed: {error}")
+                        })?;
+                    }
+                    "mesh_search_req" => {
+                        return Err("overlay mesh search is not negotiated".to_owned());
+                    }
                     "ping" => {
                         let ping: Ping = serde_json::from_slice(&raw)
                             .map_err(|error| format!("overlay ping is invalid: {error}"))?;
@@ -563,6 +1269,38 @@ impl Gateway {
             .await
             .remove(&connection_id);
         result
+    }
+
+    async fn handle_mesh_search(
+        &self,
+        request: MeshSearchRequestMessage,
+        state: &super::AppState,
+    ) -> MeshSearchResponseMessage {
+        let request_id = request.request_id.clone();
+        let search = timeout(Duration::from_secs(5), async {
+            let entries = state.shares.read().await.entries.clone();
+            let mut matches = super::search_shares(&entries, &request.search_text);
+            matches.sort_by(|left, right| left.filename.cmp(&right.filename));
+
+            let max_results = usize::try_from(request.max_results).unwrap_or(1);
+            let truncated = matches.len() > max_results;
+            matches.truncate(max_results);
+            let files = matches
+                .iter()
+                .filter_map(mesh_search_file_dto)
+                .collect::<Vec<_>>();
+            MeshSearchResponseMessage::new(request.request_id, files, truncated, None)
+        })
+        .await;
+
+        match search {
+            Ok(Ok(response)) => response,
+            Ok(Err(error)) => {
+                tracing::debug!(%error, "mesh search response validation failed");
+                mesh_search_error_response(request_id, "Search failed")
+            }
+            Err(_) => mesh_search_error_response(request_id, "Search failed"),
+        }
     }
 
     async fn handle_call(
@@ -1131,6 +1869,78 @@ fn overlay_timestamp() -> String {
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
 }
 
+fn mesh_search_file_dto(entry: &super::FileEntry) -> Option<MeshSearchFileDto> {
+    let size = i64::try_from(entry.size).ok()?;
+    let extension = (!entry.extension.is_empty()).then(|| entry.extension.clone());
+    let bitrate = entry
+        .attributes
+        .iter()
+        .find(|attribute| attribute.code == 0)
+        .and_then(|attribute| i32::try_from(attribute.value).ok());
+    let duration = entry
+        .attributes
+        .iter()
+        .find(|attribute| attribute.code == 1)
+        .and_then(|attribute| i32::try_from(attribute.value).ok());
+
+    Some(MeshSearchFileDto {
+        filename: entry.filename.clone(),
+        size,
+        extension,
+        bitrate,
+        duration,
+        codec: mesh_search_codec(entry.extension.as_str()),
+        media_kinds: mesh_search_media_kinds(entry.extension.as_str()),
+        content_id: None,
+        hash: None,
+    })
+}
+
+fn mesh_search_error_response(request_id: String, error: &str) -> MeshSearchResponseMessage {
+    MeshSearchResponseMessage::new(request_id, Vec::new(), false, Some(error.to_owned()))
+        .expect("validated mesh search request id must produce a valid error response")
+}
+
+fn mesh_search_codec(extension: &str) -> Option<String> {
+    match extension
+        .trim_start_matches('.')
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "flac" => Some("FLAC".to_owned()),
+        "mp3" => Some("MP3".to_owned()),
+        "m4a" | "aac" => Some("AAC".to_owned()),
+        "opus" => Some("Opus".to_owned()),
+        "ogg" => Some("Vorbis".to_owned()),
+        "wav" => Some("WAV".to_owned()),
+        _ => None,
+    }
+}
+
+fn mesh_search_media_kinds(extension: &str) -> Option<Vec<String>> {
+    let extension = extension.trim_start_matches('.').to_ascii_lowercase();
+    let mut kinds = Vec::new();
+    if matches!(
+        extension.as_str(),
+        "mp3" | "flac" | "m4a" | "aac" | "opus" | "ogg" | "wav" | "wma" | "ape" | "mka"
+    ) {
+        kinds.push("Music".to_owned());
+    }
+    if matches!(
+        extension.as_str(),
+        "mp4" | "mkv" | "avi" | "mov" | "wmv" | "flv" | "webm" | "m4v" | "mpg" | "mpeg"
+    ) {
+        kinds.push("Video".to_owned());
+    }
+    if matches!(
+        extension.as_str(),
+        "jpg" | "jpeg" | "png" | "gif" | "bmp" | "webp" | "svg" | "ico"
+    ) {
+        kinds.push("Image".to_owned());
+    }
+    (!kinds.is_empty()).then_some(kinds)
+}
+
 fn service_reply(
     correlation_id: String,
     status_code: i32,
@@ -1329,12 +2139,35 @@ async fn resolve_destination(host: &str, port: u16) -> Result<SocketAddr, String
         .ok_or_else(|| "Destination did not resolve to a usable address".to_owned())
 }
 
+async fn resolve_public_relay_destination(host: &str, port: u16) -> Result<SocketAddr, String> {
+    let mut addresses = timeout(DESTINATION_RESOLVE_TIMEOUT, lookup_host((host, port)))
+        .await
+        .map_err(|_| "Relay destination resolution timed out".to_owned())?
+        .map_err(|_| "Relay destination resolution failed".to_owned())?;
+    addresses
+        .find(|address| valid_public_relay_ip(address.ip()))
+        .ok_or_else(|| "Relay destination is not public".to_owned())
+}
+
 async fn authenticate_overlay_peer(
     state: &super::AppState,
     hello: &MeshHello,
     remote_ip: IpAddr,
     gateway_certificate_sha256: &[u8; 32],
 ) -> Result<(), String> {
+    if state
+        .security
+        .read()
+        .await
+        .is_blocked("ip", &remote_ip.to_string())
+        || state
+            .security
+            .read()
+            .await
+            .is_blocked("username", &hello.username)
+    {
+        return Err("overlay peer is blocklisted".to_owned());
+    }
     let public_key = state
         .mesh
         .read()
@@ -1381,6 +2214,31 @@ fn valid_destination_ip(ip: IpAddr) -> bool {
                 && (address.is_unique_local()
                     || address.is_loopback()
                     || address.is_unicast_link_local())
+        }
+    }
+}
+
+fn valid_public_relay_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(address) => {
+            let [first, second, ..] = address.octets();
+            first != 0
+                && first != 10
+                && first != 127
+                && !(first == 100 && (64..=127).contains(&second))
+                && !(first == 169 && second == 254)
+                && !(first == 172 && (16..=31).contains(&second))
+                && !(first == 192 && second == 168)
+                && first < 224
+        }
+        IpAddr::V6(address) => {
+            let bytes = address.octets();
+            !address.is_unspecified()
+                && !address.is_loopback()
+                && !address.is_unicast_link_local()
+                && !address.is_unique_local()
+                && !address.is_multicast()
+                && (bytes[0] & 0xfe) != 0xfc
         }
     }
 }
@@ -1567,6 +2425,97 @@ mod tests {
             "2001:4860:4860::8888".parse().unwrap()
         ));
         assert!(!valid_destination_ip("0.0.0.0".parse().unwrap()));
+    }
+
+    #[test]
+    fn quic_relay_destinations_are_confined_to_public_addresses() {
+        assert!(valid_public_relay_ip("8.8.8.8".parse().unwrap()));
+        assert!(valid_public_relay_ip(
+            "2001:4860:4860::8888".parse().unwrap()
+        ));
+        for address in [
+            "0.0.0.0",
+            "10.0.0.1",
+            "100.64.0.1",
+            "127.0.0.1",
+            "169.254.1.1",
+            "172.16.0.1",
+            "192.168.1.1",
+            "224.0.0.1",
+            "fc00::1",
+            "fe80::1",
+        ] {
+            assert!(
+                !valid_public_relay_ip(address.parse().unwrap()),
+                "{address}"
+            );
+        }
+    }
+
+    #[test]
+    fn quic_relay_authentication_uses_the_configured_token_bytes() {
+        let encoded = BASE64.encode("relay-token");
+        assert!(relay_authentication_valid(
+            &format!("AUTH {encoded}"),
+            "relay-token"
+        ));
+        assert!(!relay_authentication_valid(
+            &format!("AUTH {encoded}"),
+            "other-token"
+        ));
+        assert!(!relay_authentication_valid(
+            "AUTH not-base64",
+            "relay-token"
+        ));
+    }
+
+    #[test]
+    fn quic_proxy_admission_matches_frozen_global_and_prefix_limits() {
+        let gate = QuicProxyAdmissionGate::default();
+        let first_prefix = [
+            "198.51.100.1:50_305",
+            "198.51.100.2:50_305",
+            "198.51.100.3:50_305",
+            "198.51.100.4:50_305",
+        ];
+        let leases = first_prefix
+            .into_iter()
+            .map(|address| gate.try_acquire(address.parse().unwrap()))
+            .collect::<Option<Vec<_>>>();
+        assert!(leases.is_some());
+        assert!(gate
+            .try_acquire("198.51.100.5:50_305".parse().unwrap())
+            .is_none());
+        drop(leases);
+
+        let global_gate = QuicProxyAdmissionGate::default();
+        let mut global_leases = Vec::new();
+        for third_octet in 0..64_u8 {
+            let address = SocketAddr::from(([203, 0, third_octet, 1], 50_305));
+            global_leases.push(
+                global_gate
+                    .try_acquire(address)
+                    .expect("global admission slot"),
+            );
+        }
+        assert!(global_gate
+            .try_acquire("203.0.64.1:50_305".parse().unwrap())
+            .is_none());
+    }
+
+    #[test]
+    fn quic_packet_classifier_accepts_only_frozen_initial_shapes() {
+        let mut packet = vec![0_u8; 1_200];
+        packet[0] = 0xc0;
+        packet[1..5].copy_from_slice(&1_u32.to_be_bytes());
+        assert!(is_quic_initial_packet(&packet));
+        packet[1..5].copy_from_slice(&0x6b33_43cf_u32.to_be_bytes());
+        packet[0] = 0xd0;
+        assert!(is_quic_initial_packet(&packet));
+        packet[0] = 0x40;
+        assert!(!is_quic_initial_packet(&packet));
+        assert!(is_dht_packet(b"d1:ad2:id20:01234567890123456789ee"));
+        assert!(!is_dht_packet(b"\xc0"));
     }
 
     #[test]

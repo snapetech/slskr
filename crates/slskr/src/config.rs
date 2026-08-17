@@ -79,6 +79,7 @@ pub struct AppConfig {
     pub obfuscation_advertise_regular_port: bool,
     pub obfuscation_prefer_outbound: bool,
     pub peer_host_override: Option<Ipv4Addr>,
+    pub distributed_parent_override: Option<SocketAddr>,
     pub test_user_endpoint_overrides: BTreeMap<String, SocketAddr>,
     pub user_info_description: String,
     pub user_info_picture: Option<PathBuf>,
@@ -1140,6 +1141,7 @@ impl AppConfig {
         )?;
         let PeerProfileSettings {
             peer_host_override,
+            distributed_parent_override,
             test_user_endpoint_overrides,
             user_info_description,
             user_info_picture,
@@ -1454,6 +1456,7 @@ impl AppConfig {
             obfuscation_advertise_regular_port,
             obfuscation_prefer_outbound,
             peer_host_override,
+            distributed_parent_override,
             test_user_endpoint_overrides,
             user_info_description,
             user_info_picture,
@@ -1899,6 +1902,21 @@ pub struct MeshRuntimeSettings {
     pub max_remote_payload_size: usize,
 }
 
+impl MeshRuntimeSettings {
+    /// Match slskdN's MeshSecurityOptions effective cap.  Disabling the
+    /// strict remote limit relaxes it by at most 10x, but never beyond 10 MiB;
+    /// it does not remove the bound entirely.
+    pub fn effective_max_remote_payload_size(&self) -> usize {
+        if self.enforce_remote_payload_limits {
+            self.max_remote_payload_size
+        } else {
+            self.max_remote_payload_size
+                .saturating_mul(10)
+                .min(10 * 1024 * 1024)
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MeshGatewaySettings {
     pub enabled: bool,
@@ -2103,6 +2121,7 @@ pub struct MeshSyncSecuritySettings {
     pub quarantine_violation_threshold: u32,
     pub quarantine_duration: Duration,
     pub proof_of_possession_enabled: bool,
+    pub require_signed_entries: bool,
     pub consensus_min_peers: usize,
     pub consensus_min_agreements: usize,
     pub alert_threshold_signature_failures: u32,
@@ -2125,6 +2144,7 @@ pub struct OverlaySettings {
 pub struct OverlayDataSettings {
     pub enable: bool,
     pub listen_port: u16,
+    pub max_concurrent_streams: usize,
     pub relay_authentication_token: String,
     pub allowed_relay_destinations: Vec<String>,
     pub max_concurrent_relays: usize,
@@ -5684,6 +5704,8 @@ pub struct MeshSyncSecurityFileConfig {
     quarantine_violation_threshold: Option<u32>,
     quarantine_duration_minutes: Option<u64>,
     proof_of_possession_enabled: Option<bool>,
+    #[serde(alias = "requireSignedEntries", alias = "RequireSignedEntries")]
+    require_signed_entries: Option<bool>,
     consensus_min_peers: Option<usize>,
     consensus_min_agreements: Option<usize>,
     alert_threshold_signature_failures: Option<u32>,
@@ -5893,6 +5915,7 @@ impl MeshSyncSecurityFileConfig {
             || self.quarantine_violation_threshold.is_some()
             || self.quarantine_duration_minutes.is_some()
             || self.proof_of_possession_enabled.is_some()
+            || self.require_signed_entries.is_some()
             || self.consensus_min_peers.is_some()
             || self.consensus_min_agreements.is_some()
             || self.alert_threshold_signature_failures.is_some()
@@ -5918,6 +5941,7 @@ pub struct OverlayFileConfig {
 pub struct OverlayDataFileConfig {
     enable: Option<bool>,
     listen_port: Option<u16>,
+    max_concurrent_streams: Option<usize>,
     relay_authentication_token: Option<String>,
     allowed_relay_destinations: Vec<String>,
     max_concurrent_relays: Option<usize>,
@@ -6304,6 +6328,7 @@ impl AdvancedNetworkingSettings {
                     .saturating_mul(60),
             )?,
             proof_of_possession_enabled: sync.proof_of_possession_enabled.unwrap_or(false),
+            require_signed_entries: sync.require_signed_entries.unwrap_or(false),
             consensus_min_peers: sync.consensus_min_peers.unwrap_or(5),
             consensus_min_agreements: sync.consensus_min_agreements.unwrap_or(3),
             alert_threshold_signature_failures: sync
@@ -6352,6 +6377,7 @@ impl AdvancedNetworkingSettings {
         let overlay_data = OverlayDataSettings {
             enable: overlay_data_file.enable.unwrap_or(false),
             listen_port: overlay_data_file.listen_port.unwrap_or(50_401),
+            max_concurrent_streams: overlay_data_file.max_concurrent_streams.unwrap_or(8),
             relay_authentication_token: overlay_data_file
                 .relay_authentication_token
                 .clone()
@@ -6368,6 +6394,7 @@ impl AdvancedNetworkingSettings {
             trusted_certificate_pins: overlay_data_file.trusted_certificate_pins.clone(),
         };
         if overlay_data.listen_port == 0
+            || overlay_data.max_concurrent_streams == 0
             || overlay_data.max_concurrent_relays == 0
             || overlay_data.max_relay_bytes_per_direction == 0
             || overlay_data.allowed_relay_destinations.len() > 256
@@ -9784,6 +9811,7 @@ fn resolve_controller_api_keys<E: ConfigEnv>(
 
 struct PeerProfileSettings {
     peer_host_override: Option<Ipv4Addr>,
+    distributed_parent_override: Option<SocketAddr>,
     test_user_endpoint_overrides: BTreeMap<String, SocketAddr>,
     user_info_description: String,
     user_info_picture: Option<PathBuf>,
@@ -9803,6 +9831,18 @@ fn resolve_peer_profile<E: ConfigEnv>(
             value
                 .parse::<Ipv4Addr>()
                 .map_err(|error| format!("invalid SLSKR_PEER_HOST_OVERRIDE: {error}"))
+        })
+        .transpose()?;
+    let distributed_parent_override = env
+        .var("SLSKR_DISTRIBUTED_PARENT_OVERRIDE")
+        .map(|value| {
+            let address = value
+                .parse::<SocketAddr>()
+                .map_err(|error| format!("invalid SLSKR_DISTRIBUTED_PARENT_OVERRIDE: {error}"))?;
+            if address.port() == 0 {
+                return Err("SLSKR_DISTRIBUTED_PARENT_OVERRIDE port must be non-zero".to_owned());
+            }
+            Ok(address)
         })
         .transpose()?;
     let test_user_endpoint_overrides =
@@ -9867,6 +9907,7 @@ fn resolve_peer_profile<E: ConfigEnv>(
     )?;
     Ok(PeerProfileSettings {
         peer_host_override,
+        distributed_parent_override,
         test_user_endpoint_overrides,
         user_info_description,
         user_info_picture,
@@ -13817,6 +13858,7 @@ overlay:
 overlay_data:
   enable: true
   listen_port: 51009
+  max_concurrent_streams: 7
   relay_authentication_token: overlay-token
   allowed_relay_destinations: ["8.8.8.8:443"]
   max_concurrent_relays: 3
@@ -13907,6 +13949,7 @@ security:
             super::PodSignatureMode::Enforce
         );
         assert_eq!(advanced.overlay.quic_backend_listen_port, 51_008);
+        assert_eq!(advanced.overlay_data.max_concurrent_streams, 7);
         assert_eq!(advanced.overlay_data.max_concurrent_relays, 3);
         assert!(advanced.relay.enabled);
         assert_eq!(advanced.relay.agents["edge"].instance_name, "edge-one");

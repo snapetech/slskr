@@ -14,7 +14,7 @@ if [[ ! -f "$policy" ]]; then
 fi
 
 duplicate_roots="$(
-  cargo tree -d -p slskr |
+  scripts/with-build-guard.sh cargo tree -d -p slskr |
     awk '/^[[:alnum:]_-]+ v[0-9]/{print $1}' |
     sort -u
 )"

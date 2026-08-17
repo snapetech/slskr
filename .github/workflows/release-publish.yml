@@ -1,6 +1,12 @@
 name: Publish Downstream Packages
 
 on:
+  workflow_call:
+    inputs:
+      tag:
+        description: "Release tag to publish, for example release-v0.2.15"
+        required: true
+        type: string
   workflow_dispatch:
     inputs:
       tag:
@@ -8,6 +14,7 @@ on:
         required: true
 
 permissions:
+  actions: read
   contents: write
   packages: write
 
@@ -22,6 +29,7 @@ jobs:
       tag: ${{ steps.version.outputs.tag }}
       release_version: ${{ steps.version.outputs.release_version }}
       pkgver: ${{ steps.version.outputs.pkgver }}
+      release_sha: ${{ steps.version.outputs.release_sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -29,7 +37,8 @@ jobs:
       - name: Resolve version
         id: version
         env:
-          RELEASE_TAG: ${{ github.event.inputs.tag || github.event.release.tag_name }}
+          RELEASE_TAG: ${{ inputs.tag || github.event.inputs.tag || github.event.release.tag_name }}
+          RELEASE_SHA: ${{ github.sha }}
         shell: bash
         run: |
           set -euo pipefail
@@ -41,6 +50,7 @@ jobs:
             echo "tag=${tag}"
             echo "release_version=${release_version}"
             echo "pkgver=${pkgver}"
+            echo "release_sha=${RELEASE_SHA}"
           } >> "$GITHUB_OUTPUT"
       - name: Download release assets
         env:
@@ -516,11 +526,15 @@ jobs:
           push: true
           build-args: |
             VERSION=${{ needs.metadata.outputs.release_version }}
-            REVISION=${{ github.sha }}
+            REVISION=${{ needs.metadata.outputs.release_sha }}
             BUILD_DATE=${{ github.event.release.published_at || github.run_id }}
           tags: ${{ steps.tags.outputs.ghcr }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      - name: Verify pushed GHCR manifest
+        env:
+          IMAGE: ghcr.io/snapetech/slskr:${{ needs.metadata.outputs.release_version }}
+        run: docker buildx imagetools inspect "$IMAGE"
       # Docker Hub is a mirror. A bad/expired DOCKERHUB_TOKEN or a missing
       # repo must not sink an otherwise-good ghcr release; it reuses the
       # cache from the step above so this is a fast re-push, not a rebuild.
@@ -534,10 +548,14 @@ jobs:
           push: true
           build-args: |
             VERSION=${{ needs.metadata.outputs.release_version }}
-            REVISION=${{ github.sha }}
+            REVISION=${{ needs.metadata.outputs.release_sha }}
             BUILD_DATE=${{ github.event.release.published_at || github.run_id }}
           tags: ${{ steps.tags.outputs.dockerhub }}
           cache-from: type=gha
+      - name: Smoke-test published container shutdown
+        env:
+          IMAGE: ghcr.io/snapetech/slskr:${{ needs.metadata.outputs.release_version }}
+        run: bash scripts/run-container-shutdown-smoke.sh "$IMAGE"
 
   homebrew:
     name: Update Homebrew Tap

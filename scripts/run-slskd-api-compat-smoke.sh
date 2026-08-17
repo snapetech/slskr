@@ -46,7 +46,7 @@ else
   "$python_bin" -m pip install --quiet --target "$api_pythonpath" "slskd-api==$api_version"
 fi
 
-cargo build -q -p slskr
+scripts/with-build-guard.sh cargo build -q -p slskr
 
 (
   export SLSKR_HTTP_BIND="127.0.0.1:$http_port"

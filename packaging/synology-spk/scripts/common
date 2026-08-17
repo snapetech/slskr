@@ -1,0 +1,34 @@
+#!/bin/sh
+
+PACKAGE_NAME="slskr"
+PACKAGE_USER="slskr"
+PACKAGE_GROUP="slskr"
+SHARE_PATH="/var/packages/${PACKAGE_NAME}/shares/${PACKAGE_NAME}"
+TARGET_PATH="/var/packages/${PACKAGE_NAME}/target"
+CONFIG_PATH="${SHARE_PATH}/config"
+
+log_step() {
+  mkdir -p "/var/log/packages"
+  printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$1" >> "/var/log/packages/${PACKAGE_NAME}.log"
+  printf '%s\n' "$1"
+}
+
+log_error() {
+  log_step "ERROR: $1" >&2
+}
+
+create_directory() {
+  mkdir -p "$1"
+  chown "$2:$3" "$1"
+  chmod 755 "$1"
+}
+
+backup_config() {
+  if [ -d "$CONFIG_PATH" ]; then
+    mkdir -p "${SHARE_PATH}/backup"
+    cp -R "$CONFIG_PATH" "${SHARE_PATH}/backup/config.$(date +%Y%m%d%H%M%S)"
+  fi
+}
+
+start_service() { "/usr/local/etc/rc.d/${PACKAGE_NAME}.sh" start; }
+stop_service() { [ -x "/usr/local/etc/rc.d/${PACKAGE_NAME}.sh" ] && "/usr/local/etc/rc.d/${PACKAGE_NAME}.sh" stop || true; }

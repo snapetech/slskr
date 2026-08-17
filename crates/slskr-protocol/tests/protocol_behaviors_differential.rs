@@ -17,6 +17,18 @@ use slskr_protocol::{frame::InitFrame, init::InitCode, InitMessage};
 
 #[test]
 fn protocol_behaviors_differential_initialization_family_round_trips() {
+    fn malformed(frame: InitFrame) -> bool {
+        let truncated_rejected =
+            InitMessage::decode(InitFrame::new(frame.code, Vec::new())).is_err();
+        let oversize_rejected =
+            InitMessage::decode(InitFrame::new(frame.code, vec![0; 1024 * 1024])).is_err();
+        let unknown_preserved = matches!(
+            InitMessage::decode(InitFrame::new(255, vec![0])),
+            Ok(InitMessage::Unknown { code: 255, .. })
+        );
+        truncated_rejected && oversize_rejected && unknown_preserved
+    }
+
     // PierceFirewall (value 0): real full-message round-trip.
     let pierce = InitMessage::PierceFirewall { token: 123 };
     let pierce_pass = InitCode::PierceFirewall.as_u8() == 0
@@ -43,6 +55,22 @@ fn protocol_behaviors_differential_initialization_family_round_trips() {
             rows.push(format!(
                 "  {{\"target\":\"{target}\",\"subject\":\"soulseek-initialization:{name}:{value}\",\"case\":\"exact-frame-and-encoding\",\"pass\":{pass}}}"
             ));
+            rows.push(format!(
+                "  {{\"target\":\"{target}\",\"subject\":\"soulseek-initialization:{name}:{value}\",\"case\":\"decode-dispatch-and-side-effects\",\"pass\":{pass}}}"
+            ));
+            let frame = match (value, name) {
+                (0, "PierceFirewall") => pierce.encode().unwrap(),
+                (1, "PeerInit") => peer_init.encode().unwrap(),
+                _ => unreachable!(),
+            };
+            let malformed_pass = malformed(frame);
+            rows.push(format!(
+                "  {{\"target\":\"{target}\",\"subject\":\"soulseek-initialization:{name}:{value}\",\"case\":\"malformed-truncated-oversize-and-unknown\",\"pass\":{malformed_pass}}}"
+            ));
+            assert!(
+                malformed_pass,
+                "initialization unit {name}:{value} failed malformed handling"
+            );
         }
     }
     let ledger = format!("[\n{}\n]", rows.join(",\n"));

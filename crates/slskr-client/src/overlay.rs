@@ -23,17 +23,20 @@ use tokio_rustls::{
     },
     TlsConnector,
 };
+use uuid::Uuid;
 
 pub const OVERLAY_MAGIC: &str = "SLSKDNM1";
 pub const OVERLAY_VERSION: i32 = 1;
 pub const MAX_OVERLAY_MESSAGE_BYTES: usize = 64 * 1024;
 pub const FEATURE_MESH_SERVICE: &str = "mesh_service";
+pub const FEATURE_MESH_SEARCH: &str = "mesh_search";
 const MAX_HANDSHAKE_FEATURES: usize = 20;
 const MAX_FEATURE_BYTES: usize = 32;
 const MAX_USERNAME_BYTES: usize = 64;
 const MAX_NONCE_BYTES: usize = 64;
 const MAX_SERVICE_FIELD_BYTES: usize = 128;
 const MAX_SERVICE_ERROR_BYTES: usize = 1_024;
+const MAX_DISCONNECT_REASON_BYTES: usize = 256;
 const MAX_POD_ID_BYTES: usize = 512;
 const MAX_DESTINATION_HOST_BYTES: usize = 255;
 const MAX_UNMATCHED_SERVICE_FRAMES: usize = 32;
@@ -489,6 +492,155 @@ impl Pong {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Disconnect {
+    pub magic: String,
+    #[serde(rename = "type")]
+    pub message_type: String,
+    pub version: i32,
+    pub reason: Option<String>,
+}
+
+impl Disconnect {
+    pub fn validate(&self) -> Result<(), OverlayError> {
+        validate_overlay_base(&self.magic, &self.message_type, self.version)?;
+        if self.message_type != "disconnect" {
+            return Err(OverlayError::InvalidMessageType);
+        }
+        if self
+            .reason
+            .as_ref()
+            .is_some_and(|reason| reason.len() > MAX_DISCONNECT_REASON_BYTES)
+        {
+            return Err(OverlayError::InvalidDisconnectReason);
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MeshSearchFileDto {
+    pub filename: String,
+    pub size: i64,
+    pub extension: Option<String>,
+    pub bitrate: Option<i32>,
+    pub duration: Option<i32>,
+    pub codec: Option<String>,
+    #[serde(rename = "mediaKinds")]
+    pub media_kinds: Option<Vec<String>>,
+    #[serde(rename = "contentId")]
+    pub content_id: Option<String>,
+    pub hash: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MeshSearchRequestMessage {
+    pub magic: String,
+    #[serde(rename = "type")]
+    pub message_type: String,
+    pub version: i32,
+    #[serde(rename = "request_id")]
+    pub request_id: String,
+    #[serde(rename = "search_text")]
+    pub search_text: String,
+    #[serde(rename = "max_results")]
+    pub max_results: i32,
+    pub scope: Option<String>,
+}
+
+impl MeshSearchRequestMessage {
+    pub fn new(
+        request_id: impl Into<String>,
+        search_text: impl Into<String>,
+        max_results: i32,
+        scope: Option<String>,
+    ) -> Result<Self, OverlayError> {
+        let message = Self {
+            magic: OVERLAY_MAGIC.to_owned(),
+            message_type: "mesh_search_req".to_owned(),
+            version: OVERLAY_VERSION,
+            request_id: request_id.into(),
+            search_text: search_text.into(),
+            max_results,
+            scope,
+        };
+        message.validate()?;
+        Ok(message)
+    }
+
+    pub fn validate(&self) -> Result<(), OverlayError> {
+        validate_overlay_base(&self.magic, &self.message_type, self.version)?;
+        if self.message_type != "mesh_search_req" {
+            return Err(OverlayError::InvalidMessageType);
+        }
+        if Uuid::parse_str(&self.request_id).is_err() {
+            return Err(OverlayError::InvalidMeshSearchRequest("request_id"));
+        }
+        if self.search_text.trim().is_empty() || self.search_text.encode_utf16().count() > 256 {
+            return Err(OverlayError::InvalidMeshSearchRequest("search_text"));
+        }
+        if !(1..=200).contains(&self.max_results) {
+            return Err(OverlayError::InvalidMeshSearchRequest("max_results"));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MeshSearchResponseMessage {
+    pub magic: String,
+    #[serde(rename = "type")]
+    pub message_type: String,
+    pub version: i32,
+    #[serde(rename = "request_id")]
+    pub request_id: String,
+    pub files: Vec<MeshSearchFileDto>,
+    pub truncated: bool,
+    pub error: Option<String>,
+}
+
+impl MeshSearchResponseMessage {
+    pub fn new(
+        request_id: impl Into<String>,
+        files: Vec<MeshSearchFileDto>,
+        truncated: bool,
+        error: Option<String>,
+    ) -> Result<Self, OverlayError> {
+        let message = Self {
+            magic: OVERLAY_MAGIC.to_owned(),
+            message_type: "mesh_search_resp".to_owned(),
+            version: OVERLAY_VERSION,
+            request_id: request_id.into(),
+            files,
+            truncated,
+            error,
+        };
+        message.validate()?;
+        Ok(message)
+    }
+
+    pub fn validate(&self) -> Result<(), OverlayError> {
+        validate_overlay_base(&self.magic, &self.message_type, self.version)?;
+        if self.message_type != "mesh_search_resp" {
+            return Err(OverlayError::InvalidMessageType);
+        }
+        if Uuid::parse_str(&self.request_id).is_err() {
+            return Err(OverlayError::InvalidMeshSearchResponse("request_id"));
+        }
+        if self.files.len() > 500 {
+            return Err(OverlayError::InvalidMeshSearchResponse("files"));
+        }
+        if self
+            .files
+            .iter()
+            .any(|file| file.filename.is_empty() || !(0..=10_000_000_000).contains(&file.size))
+        {
+            return Err(OverlayError::InvalidMeshSearchResponse("file"));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MeshServiceCall {
     pub magic: String,
     #[serde(rename = "type")]
@@ -599,7 +751,15 @@ where
         self.call_with_timeout(call, SERVICE_CALL_TIMEOUT).await
     }
 
-    async fn call_with_timeout(
+    pub async fn search(
+        &mut self,
+        request: &MeshSearchRequestMessage,
+    ) -> Result<MeshSearchResponseMessage, OverlayError> {
+        self.search_with_timeout(request, SERVICE_CALL_TIMEOUT)
+            .await
+    }
+
+    pub async fn call_with_timeout(
         &mut self,
         call: &MeshServiceCall,
         deadline: Duration,
@@ -646,6 +806,76 @@ where
                     reply.validate()?;
                     if reply.correlation_id == call.correlation_id {
                         return Ok(reply);
+                    }
+                    unmatched_frames += 1;
+                }
+                "ping" => {
+                    let ping: Ping = serde_json::from_slice(&payload)?;
+                    ping.validate()?;
+                    control_frames += 1;
+                    self.framer
+                        .write(&Pong {
+                            magic: OVERLAY_MAGIC.to_owned(),
+                            message_type: "pong".to_owned(),
+                            version: OVERLAY_VERSION,
+                            timestamp: ping.timestamp,
+                        })
+                        .await?;
+                }
+                "disconnect" => return Err(OverlayError::Disconnected),
+                _ => unmatched_frames += 1,
+            }
+        }
+        Err(OverlayError::ReplyNotFound)
+    }
+
+    pub async fn search_with_timeout(
+        &mut self,
+        request: &MeshSearchRequestMessage,
+        deadline: Duration,
+    ) -> Result<MeshSearchResponseMessage, OverlayError> {
+        if self.failed {
+            return Err(OverlayError::Disconnected);
+        }
+        request.validate()?;
+        if !self
+            .remote_features
+            .iter()
+            .any(|feature| feature.eq_ignore_ascii_case(FEATURE_MESH_SEARCH))
+        {
+            return Err(OverlayError::MeshSearchUnsupported);
+        }
+        match timeout(deadline, self.search_inner(request)).await {
+            Ok(Ok(response)) => Ok(response),
+            Ok(Err(error)) => {
+                self.failed = true;
+                Err(error)
+            }
+            Err(_) => {
+                self.failed = true;
+                Err(OverlayError::Timeout("overlay mesh search"))
+            }
+        }
+    }
+
+    async fn search_inner(
+        &mut self,
+        request: &MeshSearchRequestMessage,
+    ) -> Result<MeshSearchResponseMessage, OverlayError> {
+        self.framer.write(request).await?;
+        let mut unmatched_frames = 0;
+        let mut control_frames = 0;
+        while unmatched_frames < MAX_UNMATCHED_SERVICE_FRAMES
+            && control_frames < MAX_SERVICE_CONTROL_FRAMES
+        {
+            let payload = self.framer.read_raw().await?;
+            let message_type = message_type(&payload)?;
+            match message_type.as_str() {
+                "mesh_search_resp" => {
+                    let response: MeshSearchResponseMessage = serde_json::from_slice(&payload)?;
+                    response.validate()?;
+                    if response.request_id == request.request_id {
+                        return Ok(response);
                     }
                     unmatched_frames += 1;
                 }
@@ -827,6 +1057,8 @@ pub enum OverlayError {
     InvalidServiceField(&'static str),
     #[error("remote overlay does not advertise mesh_service")]
     MeshServiceUnsupported,
+    #[error("remote overlay does not advertise mesh_search")]
+    MeshSearchUnsupported,
     #[error("overlay peer disconnected")]
     Disconnected,
     #[error("matching overlay service reply was not received")]
@@ -837,8 +1069,14 @@ pub enum OverlayError {
     InvalidTime,
     #[error("overlay control timestamp is invalid")]
     InvalidControlTimestamp,
+    #[error("overlay disconnect reason is invalid")]
+    InvalidDisconnectReason,
     #[error("overlay base64 payload is invalid")]
     InvalidBase64,
+    #[error("mesh search request field {0} is invalid")]
+    InvalidMeshSearchRequest(&'static str),
+    #[error("mesh search response field {0} is invalid")]
+    InvalidMeshSearchResponse(&'static str),
     #[error("overlay {0} timed out")]
     Timeout(&'static str),
     #[error("overlay TLS failed: {0}")]

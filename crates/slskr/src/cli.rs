@@ -44,7 +44,7 @@ use std::{
 };
 use tokio::time::{self, Instant};
 use tokio::{
-    io::{duplex, AsyncWriteExt},
+    io::{duplex, AsyncRead, AsyncWriteExt},
     net::{TcpListener, TcpStream},
 };
 
@@ -1813,38 +1813,114 @@ async fn distributed_peer_probe() -> Result<(), String> {
     let server_address =
         std::env::var("SLSK_SERVER").unwrap_or_else(|_| DEFAULT_SERVER_ADDRESS.to_owned());
     let timeout = env_duration_secs("SLSK_DISTRIBUTED_PROBE_TIMEOUT_SECONDS", 15, false)?;
+    let attempts = env_usize("SLSK_DISTRIBUTED_PEER_ADDRESS_ATTEMPTS", 3)?.max(1);
+    let retry_delay = env_duration_secs("SLSK_DISTRIBUTED_PROBE_RETRY_SECONDS", 1, true)?;
 
     let ctx = ProbeContext::new("distributed-peer").with_peer(&peer_username);
 
-    let address = resolve_peer_address(
-        &username,
-        &password,
-        &peer_username,
-        &server_address,
-        timeout,
-    )
-    .await?;
-    let port = peer_regular_port(&address)?;
-    let host =
-        optional_env("SLSK_DISTRIBUTED_HOST_OVERRIDE").unwrap_or_else(|| address.ip.to_string());
-    let stream = time::timeout(timeout, TcpStream::connect((host.as_str(), port)))
-        .await
-        .map_err(|_| "distributed peer connect timed out".to_owned())?
-        .map_err(|error| format!("distributed peer connect failed: {error}"))?;
-    let stream = send_peer_init(stream, &username, ConnectionKind::Distributed)
-        .await
-        .map_err(|error| format!("distributed peer init failed: {error}"))?;
-    let mut distributed = DistributedConnection::new(stream);
+    let mut last_error = None;
+    for attempt in 1..=attempts {
+        let result = async {
+            let address = resolve_peer_address(
+                &username,
+                &password,
+                &peer_username,
+                &server_address,
+                timeout,
+            )
+            .await?;
+            let port = match optional_env("SLSK_DISTRIBUTED_PORT_OVERRIDE") {
+                Some(value) => value
+                    .parse::<u16>()
+                    .map_err(|error| format!("invalid SLSK_DISTRIBUTED_PORT_OVERRIDE: {error}"))?,
+                None => peer_regular_port(&address)?,
+            };
+            let host = optional_env("SLSK_DISTRIBUTED_HOST_OVERRIDE")
+                .unwrap_or_else(|| address.ip.to_string());
+            let stream = time::timeout(timeout, TcpStream::connect((host.as_str(), port)))
+                .await
+                .map_err(|_| "distributed peer connect timed out".to_owned())?
+                .map_err(|error| format!("distributed peer connect failed: {error}"))?;
+            let stream = send_peer_init(stream, &username, ConnectionKind::Distributed)
+                .await
+                .map_err(|error| format!("distributed peer init failed: {error}"))?;
+            let mut distributed = DistributedConnection::new(stream);
 
-    distributed
-        .send(&DistributedMessage::Ping)
-        .await
-        .map_err(|error| format!("distributed ping send failed: {error}"))?;
+            distributed
+                .send(&DistributedMessage::Ping)
+                .await
+                .map_err(|error| format!("distributed ping send failed: {error}"))?;
+            receive_distributed_ping(&mut distributed, timeout).await
+        }
+        .await;
 
-    emit_and_result(ctx.ok(format!(
-        "distributed peer probe completed; host_override={}",
-        optional_env("SLSK_DISTRIBUTED_HOST_OVERRIDE").is_some()
-    )))
+        match result {
+            Ok((received_branch_level, received_branch_root)) => {
+                return emit_and_result(ctx.ok(format!(
+                    "distributed peer probe completed; attempt={attempt}; ping=received; branch_metadata={}; host_override={}",
+                    if received_branch_level && received_branch_root {
+                        "level+root"
+                    } else if received_branch_level {
+                        "level"
+                    } else if received_branch_root {
+                        "root"
+                    } else {
+                        "none"
+                    },
+                    optional_env("SLSK_DISTRIBUTED_HOST_OVERRIDE").is_some()
+                )));
+            }
+            Err(error) => {
+                last_error = Some(error);
+                if attempt < attempts && !retry_delay.is_zero() {
+                    time::sleep(retry_delay).await;
+                }
+            }
+        }
+    }
+
+    Err(format!(
+        "distributed peer probe failed after {attempts} attempts: {}",
+        last_error.unwrap_or_else(|| "unknown error".to_owned())
+    ))
+}
+
+async fn receive_distributed_ping<S>(
+    distributed: &mut DistributedConnection<S>,
+    timeout: Duration,
+) -> Result<(bool, bool), String>
+where
+    S: AsyncRead + Unpin,
+{
+    let response_deadline = Instant::now() + timeout;
+    let mut received_branch_level = false;
+    let mut received_branch_root = false;
+
+    loop {
+        let remaining = response_deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err("distributed peer response timed out".to_owned());
+        }
+
+        match time::timeout(remaining, distributed.receive()).await {
+            Ok(Ok(DistributedMessage::Ping | DistributedMessage::PingResponse { .. })) => {
+                return Ok((received_branch_level, received_branch_root));
+            }
+            Ok(Ok(DistributedMessage::BranchLevel { .. })) => {
+                received_branch_level = true;
+            }
+            Ok(Ok(DistributedMessage::BranchRoot { .. })) => {
+                received_branch_root = true;
+            }
+            Ok(Ok(message)) => {
+                return Err(format!(
+                    "distributed peer returned unexpected response: {message:?}"
+                ));
+            }
+            Ok(Err(error)) => return Err(format!("distributed peer receive failed: {error}")),
+            Err(_) => return Err("distributed peer response timed out".to_owned()),
+        }
+    }
 }
 
 async fn file_transfer_peer_probe() -> Result<(), String> {
@@ -2217,10 +2293,19 @@ async fn distributed_tree_smoke() -> Result<(), String> {
         if message != DistributedMessage::Ping {
             return Err("distributed listener did not receive Ping".to_owned());
         }
-        connection
-            .send(&DistributedMessage::Ping)
-            .await
-            .map_err(|error| format!("distributed listener response failed: {error}"))
+        for response in [
+            DistributedMessage::BranchLevel { level: 1 },
+            DistributedMessage::BranchRoot {
+                username: "distributed-fixture-root".to_owned(),
+            },
+            DistributedMessage::PingResponse { token: 1 },
+        ] {
+            connection
+                .send(&response)
+                .await
+                .map_err(|error| format!("distributed listener response failed: {error}"))?;
+        }
+        Ok(())
     });
 
     let stream = TcpStream::connect(address)
@@ -2238,12 +2323,12 @@ async fn distributed_tree_smoke() -> Result<(), String> {
         .send(&DistributedMessage::Ping)
         .await
         .map_err(|error| format!("distributed fixture ping failed: {error}"))?;
-    let response = time::timeout(timeout, connection.receive())
-        .await
-        .map_err(|_| "distributed fixture response timed out".to_owned())?
-        .map_err(|error| format!("distributed fixture response failed: {error}"))?;
-    if response != DistributedMessage::Ping {
-        return Err("distributed fixture returned a non-Ping response".to_owned());
+    let (received_branch_level, received_branch_root) =
+        receive_distributed_ping(&mut connection, timeout)
+            .await
+            .map_err(|error| format!("distributed fixture response failed: {error}"))?;
+    if !received_branch_level || !received_branch_root {
+        return Err("distributed fixture did not send complete branch metadata".to_owned());
     }
     time::timeout(timeout, server_task)
         .await
@@ -4505,7 +4590,7 @@ async fn handle_plain_soak_incoming(incoming: IncomingConnection<TcpStream>) -> 
                 .map_err(|error| format!("distributed receive failed: {error}"))?;
             if message == DistributedMessage::Ping {
                 distributed
-                    .send(&DistributedMessage::Ping)
+                    .send(&DistributedMessage::PingResponse { token: 1 })
                     .await
                     .map_err(|error| format!("distributed ping response failed: {error}"))?;
             }
@@ -4696,6 +4781,8 @@ fn server_message_name(message: &ServerMessage) -> &'static str {
         ServerMessage::FileSearchIncoming { .. } => "file_search_incoming",
         ServerMessage::JoinRoom { .. } => "join_room",
         ServerMessage::JoinedRoom(_) => "joined_room",
+        ServerMessage::UserJoinedRoom { .. } => "user_joined_room",
+        ServerMessage::UserLeftRoom { .. } => "user_left_room",
         ServerMessage::LeaveRoom { .. } => "leave_room",
         ServerMessage::SetStatus { .. } => "set_status",
         ServerMessage::ServerPing => "server_ping",
@@ -4706,25 +4793,62 @@ fn server_message_name(message: &ServerMessage) -> &'static str {
         ServerMessage::UserInterests(_) => "user_interests",
         ServerMessage::Relogged => "relogged",
         ServerMessage::UserSearch(_) => "user_search",
+        ServerMessage::RecommendationsRequest { .. } => "recommendations_request",
+        ServerMessage::RecommendationsResponse { .. } => "recommendations_response",
         ServerMessage::AddThingILike { .. } => "add_thing_i_like",
         ServerMessage::RemoveThingILike { .. } => "remove_thing_i_like",
+        ServerMessage::GlobalAdminMessage { .. } => "global_admin_message",
         ServerMessage::RoomListRequest => "room_list_request",
         ServerMessage::RoomList(_) => "room_list",
+        ServerMessage::AddPrivilegedUser { .. } => "add_privileged_user",
         ServerMessage::PrivilegedUsers(_) => "privileged_users",
         ServerMessage::HaveNoParent { .. } => "have_no_parent",
         ServerMessage::ParentMinSpeed { .. } => "parent_min_speed",
         ServerMessage::ParentSpeedRatio { .. } => "parent_speed_ratio",
+        ServerMessage::ParentInactivityTimeout { .. } => "parent_inactivity_timeout",
+        ServerMessage::SearchInactivityTimeout { .. } => "search_inactivity_timeout",
+        ServerMessage::MinParentsInCache { .. } => "min_parents_in_cache",
+        ServerMessage::DistribPingInterval { .. } => "distributed_ping_interval",
+        ServerMessage::ParentIp { .. } => "parent_ip",
         ServerMessage::CheckPrivilegesRequest => "check_privileges_request",
         ServerMessage::CheckPrivilegesResponse { .. } => "check_privileges_response",
         ServerMessage::AcceptChildren { .. } => "accept_children",
+        ServerMessage::EmbeddedMessage { .. } => "embedded_message",
         ServerMessage::PossibleParents(_) => "possible_parents",
         ServerMessage::WishlistSearch(_) => "wishlist_search",
         ServerMessage::WishlistInterval { .. } => "wishlist_interval",
+        ServerMessage::SimilarUsersRequest => "similar_users_request",
+        ServerMessage::SimilarUsers(_) => "similar_users",
+        ServerMessage::ItemRecommendationsRequest { .. } => "item_recommendations_request",
+        ServerMessage::ItemRecommendations(_) => "item_recommendations",
+        ServerMessage::ItemSimilarUsersRequest { .. } => "item_similar_users_request",
+        ServerMessage::ItemSimilarUsers(_) => "item_similar_users",
+        ServerMessage::RoomTickers { .. } => "room_tickers",
+        ServerMessage::RoomTickerAdded { .. } => "room_ticker_added",
+        ServerMessage::RoomTickerRemoved { .. } => "room_ticker_removed",
         ServerMessage::RoomSearch(_) => "room_search",
         ServerMessage::SendUploadSpeed { .. } => "send_upload_speed",
+        ServerMessage::UserPrivilegesRequest { .. } => "user_privileges_request",
+        ServerMessage::UserPrivilege { .. } => "user_privilege",
+        ServerMessage::GivePrivileges { .. } => "give_privileges",
         ServerMessage::BranchLevel { .. } => "branch_level",
         ServerMessage::BranchRoot { .. } => "branch_root",
+        ServerMessage::ChildDepth { .. } => "child_depth",
         ServerMessage::ResetDistributed => "reset_distributed",
+        ServerMessage::PrivateRoomUsers { .. } => "private_room_users",
+        ServerMessage::PrivateRoomAddUser { .. } => "private_room_add_user",
+        ServerMessage::PrivateRoomRemoveUser { .. } => "private_room_remove_user",
+        ServerMessage::PrivateRoomDropMembership { .. } => "private_room_drop_membership",
+        ServerMessage::PrivateRoomDropOwnership { .. } => "private_room_drop_ownership",
+        ServerMessage::PrivateRoomAdded { .. } => "private_room_added",
+        ServerMessage::PrivateRoomRemoved { .. } => "private_room_removed",
+        ServerMessage::PrivateRoomToggle { .. } => "private_room_toggle",
+        ServerMessage::ChangePassword { .. } => "change_password",
+        ServerMessage::PrivateRoomAddOperator { .. } => "private_room_add_operator",
+        ServerMessage::PrivateRoomRemoveOperator { .. } => "private_room_remove_operator",
+        ServerMessage::PrivateRoomOperatorAdded { .. } => "private_room_operator_added",
+        ServerMessage::PrivateRoomOperatorRemoved { .. } => "private_room_operator_removed",
+        ServerMessage::PrivateRoomOwned { .. } => "private_room_owned",
         ServerMessage::MessageUsers { .. } => "message_users",
         ServerMessage::JoinGlobalRoom => "join_global_room",
         ServerMessage::LeaveGlobalRoom => "leave_global_room",

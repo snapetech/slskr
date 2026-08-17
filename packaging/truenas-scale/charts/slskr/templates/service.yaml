@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-slskr
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    app: slskr
+  ports:
+    - name: http
+      port: 5030
+      targetPort: http

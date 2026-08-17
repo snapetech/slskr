@@ -64,7 +64,7 @@ Scope: current `slskR` checkout, including Rust daemon/API, Rust WASM UI, React 
 | Medium | Webhook secrets | Webhook creation accepted caller-supplied signing secrets without minimum strength checks. | Fixed by requiring supplied secrets to be at least 32 bytes, printable, and have basic character variety on public/admin creation routes while preserving generated secrets by default. |
 | Medium | Frontend auth passthrough | `session.authHeaders()` emitted `Authorization: Bearer n/a` in passthrough mode. | Fixed by omitting Authorization for passthrough tokens and adding regression coverage. |
 | Medium | Vite Less alias traversal | The Less alias file manager resolved `~` imports without checking that the result stayed under `node_modules`. | Fixed by rejecting absolute and escaping alias imports before reading. |
-| Medium | Web build script failure masking | `SLSKR_BUILD_WEB` logged npm build failures but allowed cargo builds to continue. | Fixed by failing the build script on requested web build failures and including stdout/stderr. |
+| Medium | Web build script failure masking | `SLSKR_BUILD_WEB` logged npm build failures but allowed Rust builds to continue. | Fixed by failing the build script on requested web build failures and including stdout/stderr. |
 | Low | Service worker cache scope | Service worker activation deleted every cache key on the origin. | Fixed by deleting only cache names with the `slskr-` prefix and adding activation coverage. |
 | Medium | TypeScript client path escaping | The TypeScript client interpolated IDs, usernames, and room names directly into URL paths. | Fixed by encoding all client-composed dynamic path segments with `encodeURIComponent`. |
 | Medium | Python client path escaping | The Python client interpolated path segments and used `urljoin`, allowing caller-controlled path rewriting. | Fixed by encoding dynamic path segments with `quote(..., safe="")` and joining against the configured base URL directly. |
@@ -110,7 +110,7 @@ Scope: current `slskR` checkout, including Rust daemon/API, Rust WASM UI, React 
 | Medium | Release version metadata | Workspace crates are intentionally internal/unpublished at `0.0.0` while release artifacts derive a separate version label from tags or workflow input. | Fixed by documenting the crate-version policy, requiring `release-v<semver>` / `SLSKR_RELEASE_VERSION` as the artifact version source, and adding `scripts/check-release-version-metadata.sh`. |
 | Medium | Secret scanning gate | Local `.env`, `web/.env.local`, and `.secrets/` are ignored, but tracked files lacked a reproducible committed-secret guard. | Fixed by adding `scripts/check-secret-scanning.sh` to verify ignored local secret paths and scan tracked files for private-key blocks and high-entropy secret-like assignments. |
 | Medium | Python client | Python client had no lint/test/dependency gate beyond compile/import coverage. | Fixed by adding `scripts/check-python-client-quality.sh`, pytest smoke tests for the client helpers, and SDK-gate execution of dev install, pytest, import, and `pip check`. |
-| Medium | Audit tooling availability | Local audit attempts showed optional cargo subcommands were absent and dependency inventory was not gate-provisioned. | Fixed by adding `scripts/check-audit-tooling.sh` with reproducible `cargo metadata --format-version 1 --no-deps` and `cargo tree -d` checks plus audit-tool registry coverage. |
+| Medium | Audit tooling availability | Local audit attempts showed optional Cargo subcommands were absent and dependency inventory was not gate-provisioned. | Fixed by adding `scripts/check-audit-tooling.sh` with reproducible metadata/tree checks plus audit-tool registry coverage. |
 | Low | Transfer event growth | Transfer event history appended indefinitely and was recreated only when absent. | Fixed by rotating oversized `transfer-events.tsv` files at a 16 MiB byte cap, recreating the header, preserving the prior file as `.old`, and adding regression/gate coverage. |
 | Low | Docs drift | General docs still contained stale `http_api_*` config names, mutable `slskr:latest` image guidance, and obsolete WebSocket unsupported text. | Fixed by updating the docs and adding `scripts/check-docs-freshness.sh` to block those stale patterns and wildcard CORS examples from returning. |
 | Medium | Council loop | The audit council could run broad scans but still promote only one small confirmed batch, leaving remaining candidate classes invisible and unclassified. | Fixed by adding `docs/dev/council-scan-inventory.md`, `scripts/run-council-scan.sh`, and `scripts/check-council-loop.sh`; BUG-031 now requires the remaining candidate classes and active section to stay visible. |
@@ -180,7 +180,7 @@ Scope: current `slskR` checkout, including Rust daemon/API, Rust WASM UI, React 
 | Severity | Area | Finding | Proposed fix |
 | --- | --- | --- | --- |
 | Medium | OpenAPI drift | Runtime `/api/openapi.json` and checked-in `docs/openapi.json` could drift because they were generated through separate paths. | Fixed by serving the checked-in OpenAPI spec at runtime, packaging an identical crate-local OpenAPI copy, adding an equality regression test, and strengthening the OpenAPI drift gate. |
-| Medium | Rust dependency hygiene | `cargo tree -d -p slskr` shows reviewed transitive duplicate roots for digest-family crypto crates plus `getrandom` and `hashbrown` in the release graph. | Fixed by documenting the current duplicate-root set and adding a remediation gate that fails when new duplicate roots enter the release binary graph without review. |
+| Medium | Rust dependency hygiene | `scripts/with-build-guard.sh cargo tree -d -p slskr` shows reviewed transitive duplicate roots for digest-family crypto crates plus `getrandom` and `hashbrown` in the release graph. | Fixed by documenting the current duplicate-root set and adding a remediation gate that fails when new duplicate roots enter the release binary graph without review. |
 | Medium | GitHub Actions supply chain | CI/release workflows used mutable action tags such as `actions/checkout@v4`, `actions/setup-node@v4`, and `softprops/action-gh-release@v2`. | Fixed by pinning first-party and third-party workflow actions to reviewed commit SHAs, documenting the update ledger in `docs/dev/github-actions-pin-policy.md`, and gating future workflow edits with `scripts/check-workflow-release-policy.sh`. |
 | Low | Rust module hygiene | Broad crate/module-level `#![allow(dead_code)]` previously hid unused backend compatibility surfaces from compiler review. | Fixed by removing broad allowances from backend Rust modules, keeping only narrow item-level exceptions, and gating against broad suppressions with `scripts/check-rust-module-hygiene.sh`. |
 | Low | Deprecated npm transitive deps | Web install warns on deprecated `lodash.get`, old core-js, and Babel proposal packages. | Upgrade or replace transitive owners where practical. |
@@ -188,15 +188,15 @@ Scope: current `slskR` checkout, including Rust daemon/API, Rust WASM UI, React 
 
 ## Scans Run
 
-- `cargo audit`
+- `scripts/with-build-guard.sh cargo audit`
 - `npm --prefix web audit --audit-level=high`
 - `npm --prefix dashboard audit --audit-level=high`
 - `npm --prefix client-ts audit --audit-level=high`
 - `npm --prefix web audit --audit-level=moderate`
 - `npm --prefix dashboard audit --audit-level=moderate`
 - `npm --prefix client-ts audit --audit-level=moderate`
-- `cargo metadata --format-version 1 --no-deps`
-- `cargo tree -d`
+- `scripts/with-build-guard.sh cargo metadata --format-version 1 --no-deps`
+- `scripts/with-build-guard.sh cargo tree -d`
 - `scripts/check-release-version-metadata.sh`
 - `scripts/check-secret-scanning.sh`
 - `scripts/check-python-client-quality.sh`
@@ -205,13 +205,13 @@ Scope: current `slskR` checkout, including Rust daemon/API, Rust WASM UI, React 
 - `scripts/check-docs-freshness.sh`
 - `scripts/run-council-scan.sh`
 - `scripts/check-council-loop.sh`
-- `cargo outdated --workspace` was attempted but blocked because `cargo-outdated` is not installed in this environment.
-- `cargo +stable udeps --workspace --all-targets` was attempted but blocked because `cargo-udeps` is not installed in this environment.
+- `scripts/with-build-guard.sh cargo outdated --workspace` was attempted but blocked because `cargo-outdated` is not installed in this environment.
+- `scripts/with-build-guard.sh cargo +stable udeps --workspace --all-targets` was attempted but blocked because `cargo-udeps` is not installed in this environment.
 - `npm --prefix web outdated --json`
 - `npm --prefix dashboard outdated --json`
 - `npm --prefix client-ts outdated --json`
-- `cargo fmt --all --check`
-- `cargo clippy --workspace --all-targets -- -D warnings`
+- `scripts/with-build-guard.sh cargo fmt --all --check`
+- `scripts/with-build-guard.sh cargo clippy --workspace --all-targets -- -D warnings`
 - `python3 -m compileall -q client-python`
 - `npm --prefix web run lint`
 - `npm --prefix web test`
@@ -229,6 +229,6 @@ Scope: current `slskR` checkout, including Rust daemon/API, Rust WASM UI, React 
 - `scripts/diff-webui-endpoints.sh` was rerun and reported 287/291 implemented; the four reported misses are now tracked as endpoint tooling/manifest drift because conversation routes are present in the router and tests.
 - Source grep passes for secrets, auth/CORS/CSRF, process execution, path handling, URL fetches, docs/deployment exposure, and frontend storage/navigation sinks.
 - Focused Rust tests, formatting, clippy, shell syntax checks, and diff whitespace checks passed after the latest fixes.
-- `cargo test -p slskr config_file_reader_`
+- `scripts/with-build-guard.sh cargo test -p slskr config_file_reader_`
 - `git check-ignore -v .env web/.env.local .secrets`
 - `go test ./...` was attempted in `client-go` but blocked because `go` is not installed in this environment.

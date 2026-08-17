@@ -1,8 +1,8 @@
 //! Rate limiting middleware for HTTP API
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::net::{IpAddr, SocketAddr};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 
@@ -422,6 +422,148 @@ pub struct RateLimitHeaders {
     pub limit: String,
     pub remaining: String,
     pub reset: String,
+}
+
+/// Soulseek-specific sliding-window caps from the frozen slskdN safety
+/// limiter.  These buckets are deliberately separate from the HTTP request
+/// limiter: a caller can have an authenticated API request while still
+/// exhausting the network-operation budget.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SoulseekSafetyConfig {
+    pub enabled: bool,
+    pub max_searches_per_minute: usize,
+    pub max_browses_per_minute: usize,
+}
+
+impl Default for SoulseekSafetyConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            max_searches_per_minute: 10,
+            max_browses_per_minute: 5,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct SoulseekSafetyMetrics {
+    pub enabled: bool,
+    pub max_searches_per_minute: usize,
+    pub max_browses_per_minute: usize,
+    pub searches_last_minute: usize,
+    pub browses_last_minute: usize,
+    pub searches_by_source: HashMap<String, usize>,
+    pub browses_by_source: HashMap<String, usize>,
+}
+
+#[derive(Debug)]
+pub struct SoulseekSafetyLimiter {
+    config: SoulseekSafetyConfig,
+    search_windows: Mutex<HashMap<String, VecDeque<Instant>>>,
+    browse_windows: Mutex<HashMap<String, VecDeque<Instant>>>,
+}
+
+impl SoulseekSafetyLimiter {
+    const WINDOW: Duration = Duration::from_secs(60);
+
+    pub fn new(config: SoulseekSafetyConfig) -> Self {
+        Self {
+            config,
+            search_windows: Mutex::new(HashMap::new()),
+            browse_windows: Mutex::new(HashMap::new()),
+        }
+    }
+
+    pub fn try_consume_search(&self, source: &str) -> bool {
+        self.try_consume(
+            &self.search_windows,
+            source,
+            self.config.max_searches_per_minute,
+        )
+    }
+
+    pub fn try_consume_browse(&self, source: &str) -> bool {
+        self.try_consume(
+            &self.browse_windows,
+            source,
+            self.config.max_browses_per_minute,
+        )
+    }
+
+    fn try_consume(
+        &self,
+        windows: &Mutex<HashMap<String, VecDeque<Instant>>>,
+        source: &str,
+        maximum: usize,
+    ) -> bool {
+        if !self.config.enabled || maximum == 0 {
+            return true;
+        }
+        let now = Instant::now();
+        let mut windows = windows.lock().expect("Soulseek safety limiter lock");
+        let window = windows.entry(source.to_owned()).or_default();
+        Self::prune(window, now);
+        if window.len() >= maximum {
+            return false;
+        }
+        window.push_back(now);
+        true
+    }
+
+    pub fn metrics(&self) -> SoulseekSafetyMetrics {
+        let now = Instant::now();
+        let mut searches = self
+            .search_windows
+            .lock()
+            .expect("Soulseek search limiter lock");
+        let mut browses = self
+            .browse_windows
+            .lock()
+            .expect("Soulseek browse limiter lock");
+        for window in searches.values_mut() {
+            Self::prune(window, now);
+        }
+        for window in browses.values_mut() {
+            Self::prune(window, now);
+        }
+        let searches_by_source = searches
+            .iter()
+            .map(|(source, window)| (source.clone(), window.len()))
+            .collect::<HashMap<_, _>>();
+        let browses_by_source = browses
+            .iter()
+            .map(|(source, window)| (source.clone(), window.len()))
+            .collect::<HashMap<_, _>>();
+        SoulseekSafetyMetrics {
+            enabled: self.config.enabled,
+            max_searches_per_minute: self.config.max_searches_per_minute,
+            max_browses_per_minute: self.config.max_browses_per_minute,
+            searches_last_minute: searches_by_source.values().sum(),
+            browses_last_minute: browses_by_source.values().sum(),
+            searches_by_source,
+            browses_by_source,
+        }
+    }
+
+    pub fn reset(&self) {
+        self.search_windows
+            .lock()
+            .expect("Soulseek search limiter lock")
+            .clear();
+        self.browse_windows
+            .lock()
+            .expect("Soulseek browse limiter lock")
+            .clear();
+    }
+
+    fn prune(window: &mut VecDeque<Instant>, now: Instant) {
+        while window
+            .front()
+            .is_some_and(|timestamp| now.duration_since(*timestamp) >= Self::WINDOW)
+        {
+            window.pop_front();
+        }
+    }
 }
 
 impl RateLimitHeaders {

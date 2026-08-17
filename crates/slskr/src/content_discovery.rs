@@ -344,6 +344,42 @@ impl ContentDiscoveryStore {
         &self.hash_entries
     }
 
+    /// Rehydrates the in-memory projection from the durable HashDb table.
+    /// Persisted sequence/timestamp values are retained; this path must not
+    /// allocate new sequence IDs merely because the process restarted.
+    pub fn restore_hash_entries(
+        &mut self,
+        entries: Vec<HashDbEntry>,
+        latest_seq: u64,
+    ) -> Result<(), String> {
+        if entries.len() > MAX_HASH_ENTRIES {
+            return Err("content discovery state exceeds bounded record capacity".to_owned());
+        }
+        let now = crate::unix_timestamp();
+        let mut normalized = Vec::with_capacity(entries.len());
+        for entry in entries {
+            let first_seen_at = entry.first_seen_at;
+            let last_updated_at = entry.last_updated_at;
+            let mut entry = normalize_hash_entry(entry, now)?;
+            if first_seen_at != 0 {
+                entry.first_seen_at = first_seen_at;
+            }
+            if last_updated_at != 0 {
+                entry.last_updated_at = last_updated_at;
+            }
+            normalized.push(entry);
+        }
+        dedupe_hash_entries(&mut normalized)?;
+        let max_entry_seq = normalized
+            .iter()
+            .map(|entry| entry.seq_id)
+            .max()
+            .unwrap_or(0);
+        self.hash_entries = normalized;
+        self.latest_seq = latest_seq.max(max_entry_seq);
+        self.persist()
+    }
+
     /// Returns the ordered hash delta after `since_seq`, together with the
     /// target-style continuation flag.  The slskdN mesh controller asks the
     /// HashDb for at most `max_entries + 1` rows ordered by sequence ID so it
@@ -576,6 +612,22 @@ impl ContentDiscoveryStore {
         &mut self,
         entries: Vec<HashDbEntry>,
     ) -> Result<(usize, usize), String> {
+        self.merge_hash_entries_from_mesh(entries)
+    }
+
+    /// Merge entries using the frozen mesh service's idempotent semantics.
+    ///
+    /// The general hashdb merge above is intentionally an upsert: local
+    /// metadata enrichment can replace an existing row and increments its
+    /// use count. MeshSyncService.MergeEntriesFromMeshAsync is different:
+    /// an existing key/hash is skipped and reports zero newly merged rows;
+    /// a conflicting existing key is retained without replacing it. Keep
+    /// that behavior isolated to mesh callers so local/library ingestion
+    /// retains its existing upsert contract.
+    pub fn merge_hash_entries_from_mesh(
+        &mut self,
+        entries: Vec<HashDbEntry>,
+    ) -> Result<(usize, usize), String> {
         let now = crate::unix_timestamp();
         let mut valid = Vec::with_capacity(entries.len());
         let mut skipped = 0;
@@ -588,7 +640,27 @@ impl ContentDiscoveryStore {
         if valid.is_empty() {
             return Ok((0, skipped));
         }
-        let merged = self.merge_hash_entries(valid)?;
+        let mut candidates = Vec::with_capacity(valid.len());
+        for incoming in valid {
+            let existing = self.hash_entries.iter().any(|entry| {
+                (entry.flac_key.eq_ignore_ascii_case(&incoming.flac_key)
+                    && entry.size == incoming.size)
+                    || (same_hash_identity(entry, &incoming)
+                        && !hash_metadata_conflicts(entry, &incoming))
+            }) || candidates.iter().any(|entry: &HashDbEntry| {
+                (entry.flac_key.eq_ignore_ascii_case(&incoming.flac_key)
+                    && entry.size == incoming.size)
+                    || (same_hash_identity(entry, &incoming)
+                        && !hash_metadata_conflicts(entry, &incoming))
+            });
+            if !existing {
+                candidates.push(incoming);
+            }
+        }
+        if candidates.is_empty() {
+            return Ok((0, skipped));
+        }
+        let merged = self.merge_hash_entries(candidates)?;
         Ok((merged, skipped))
     }
 

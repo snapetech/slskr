@@ -1,0 +1,31 @@
+image:
+  repository: ghcr.io/snapetech/slskr
+  tag: "0.2.15"
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+service:
+  type: ClusterIP
+  port: 5030
+
+persistence:
+  config:
+    enabled: true
+    hostPath: /mnt/tank/apps/slskr/config
+  downloads:
+    enabled: true
+    hostPath: /mnt/tank/apps/slskr/downloads
+  incomplete:
+    enabled: true
+    hostPath: /mnt/tank/apps/slskr/incomplete
+  shares:
+    enabled: true
+    hostPath: /mnt/tank/apps/slskr/shares
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  allowPrivilegeEscalation: false
+
+resources: {}

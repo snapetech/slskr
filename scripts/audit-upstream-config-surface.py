@@ -1013,6 +1013,7 @@ ADVANCED_NETWORKING_SECURITY_CONFIG_PATHS = {
     "overlay_data.allowed_relay_destinations",
     "overlay_data.enable",
     "overlay_data.listen_port",
+    "overlay_data.max_concurrent_streams",
     "overlay_data.max_concurrent_relays",
     "overlay_data.max_relay_bytes_per_direction",
     "overlay_data.max_relay_duration_seconds",

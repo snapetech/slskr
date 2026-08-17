@@ -198,6 +198,34 @@
   {
     "method": "GET",
     "route": "/api/v0/options",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/options/debug",
+    "access": "administrator",
+    "scheme": "jwt",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/options/startup",
+    "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/options/yaml",
+    "access": "administrator",
+    "scheme": "jwt",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/options/yaml/location",
     "access": "administrator",
     "scheme": "jwt",
     "scopes": []
@@ -276,6 +304,13 @@
     "method": "GET",
     "route": "/api/v0/session",
     "access": "authenticated",
+    "scheme": "any",
+    "scopes": []
+  },
+  {
+    "method": "GET",
+    "route": "/api/v0/session/enabled",
+    "access": "anonymous",
     "scheme": "any",
     "scopes": []
   },
@@ -498,7 +533,7 @@
   },
   {
     "method": "POST",
-    "route": "/api/v0/options",
+    "route": "/api/v0/options/yaml/validate",
     "access": "authenticated",
     "scheme": "any",
     "scopes": []
@@ -603,7 +638,7 @@
   },
   {
     "method": "PUT",
-    "route": "/api/v0/options",
+    "route": "/api/v0/options/yaml",
     "access": "administrator",
     "scheme": "jwt",
     "scopes": []

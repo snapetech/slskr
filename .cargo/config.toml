@@ -1,3 +1,14 @@
+[build]
+# Cargo itself must never fan out multiple rustc processes in this repository.
+jobs = 1
+# Direct Cargo invocations still pass every compiler process through the same
+# lock and virtual-memory ceiling.
+rustc-wrapper = "scripts/with-build-guard.sh"
+
+[env]
+# Test harness fan-out is part of the memory budget and cannot be overridden.
+RUST_TEST_THREADS = { value = "1", force = true }
+
 [profile.release]
 opt-level = 3
 lto = true

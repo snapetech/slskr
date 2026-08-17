@@ -1,0 +1,4 @@
+#!/bin/sh
+. "$(dirname "$0")/common"
+rm -f "/usr/local/etc/rc.d/${PACKAGE_NAME}.sh"
+log_step "slskR removed; user data was preserved"

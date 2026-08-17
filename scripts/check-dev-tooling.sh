@@ -25,14 +25,15 @@ note_optional_command() {
 note_optional_cargo_subcommand() {
   local subcommand_name="$1"
   local purpose="$2"
-  if ! cargo "$subcommand_name" --version >/dev/null 2>&1; then
-    printf 'dev tooling check note: optional cargo subcommand missing for %s: cargo %s\n' "$purpose" "$subcommand_name"
+  if ! "$repo_root/scripts/with-build-guard.sh" cargo "$subcommand_name" --version >/dev/null 2>&1; then
+    printf 'dev tooling check note: optional Cargo subcommand missing for %s: %s\n' "$purpose" "$subcommand_name"
   fi
 }
 
-for command_name in bash cargo node npm python3 rg git; do
+for command_name in bash node npm python3 rg git; do
   require_command "$command_name"
 done
+require_command cargo
 
 if ! command -v go >/dev/null 2>&1 && ! command -v docker >/dev/null 2>&1; then
   printf 'dev tooling check failed: Go client tests require go or docker fallback\n' >&2

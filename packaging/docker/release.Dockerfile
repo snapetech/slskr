@@ -38,7 +38,7 @@ LABEL org.opencontainers.image.title="slskr" \
       org.opencontainers.image.licenses="AGPL-3.0-only"
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates \
+    && apt-get install -y --no-install-recommends ca-certificates curl \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --system --home-dir /var/lib/slskr --create-home --shell /usr/sbin/nologin slskr \
     && mkdir -p /usr/share/slskr/web /etc/slskr /var/lib/slskr \
@@ -54,5 +54,10 @@ ENV SLSKR_HTTP_BIND=0.0.0.0:5030 \
     SLSKR_STATE_DIR=/var/lib/slskr \
     SLSKR_WEB_BUILD_DIR=/usr/share/slskr/web/build
 
+HEALTHCHECK --interval=60s --timeout=5s --start-period=60s --retries=3 \
+  CMD curl -fsS http://localhost:5030/health || exit 1
+
+# Keep the daemon's shutdown handler in control of container termination.
+STOPSIGNAL SIGTERM
 ENTRYPOINT ["slskr"]
 CMD ["serve"]

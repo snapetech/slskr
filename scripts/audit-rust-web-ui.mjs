@@ -12,6 +12,14 @@ const { chromium } = require('../web/node_modules/playwright');
 const repoRoot = resolve(new URL('..', import.meta.url).pathname);
 const distDir = resolve(repoRoot, process.env.SLSKR_RUST_WEB_DIST || 'target/slskr-web');
 const auditDir = resolve(repoRoot, process.env.SLSKR_RUST_WEB_AUDIT_DIR || 'target/ux-audit');
+const liveBackendUrl = (process.env.SLSKR_RUST_WEB_AUDIT_BACKEND_URL || '').replace(/\/$/, '');
+const liveBackendAuth = process.env.SLSKR_RUST_WEB_AUDIT_AUTH_HEADER || '';
+const requireRows = process.env.SLSKR_RUST_WEB_AUDIT_REQUIRE_ROWS === '1';
+const clickRowActions = process.env.SLSKR_RUST_WEB_AUDIT_CLICK_ROW_ACTION !== '0';
+const settleMs = Math.min(
+  2000,
+  Math.max(0, Number.parseInt(process.env.SLSKR_RUST_WEB_AUDIT_SETTLE_MS || '500', 10) || 0),
+);
 
 const routes = [
   ['/searches', 'Search', 'searches'],
@@ -130,10 +138,13 @@ await mkdir(auditDir, { recursive: true });
 const { port } = server.address();
 const browser = await chromium.launch({ headless: process.env.HEADLESS !== 'false' });
 const audit = {
+  apiResponses: [],
+  evidenceMode: liveBackendUrl ? 'live' : 'mock',
   errors: [],
   generatedAt: new Date().toISOString(),
   routes: [],
 };
+const observedLiveErrors = new Set();
 
 try {
   for (const [path, title, slug] of routes) {
@@ -149,8 +160,58 @@ try {
           pageErrors.push(message.text());
         }
       });
-      await page.route('**/api/v0/**', async (route) => route.fulfill(json(mockBody(new URL(route.request().url()).pathname))));
-      await page.goto(`http://127.0.0.1:${port}${path}`, { waitUntil: 'networkidle' });
+      await page.route('**/api/**', async (route) => {
+        if (!liveBackendUrl) {
+          return route.fulfill(json(mockBody(new URL(route.request().url()).pathname)));
+        }
+
+        const request = route.request();
+        const requestedUrl = new URL(request.url());
+        const targetUrl = `${liveBackendUrl}${requestedUrl.pathname}${requestedUrl.search}`;
+        const headers = Object.fromEntries(
+          Object.entries(request.headers()).filter(
+            ([name]) => !['host', 'content-length', 'content-encoding', 'transfer-encoding'].includes(name),
+          ),
+        );
+        if (liveBackendAuth) headers.authorization = liveBackendAuth;
+        try {
+          const response = await fetch(targetUrl, {
+            method: request.method(),
+            headers,
+            body: ['GET', 'HEAD'].includes(request.method()) ? undefined : request.postDataBuffer() || undefined,
+          });
+          audit.apiResponses.push({
+            method: request.method(),
+            path: `${requestedUrl.pathname}${requestedUrl.search}`,
+            status: response.status,
+          });
+          if (response.status >= 400 && process.env.SLSKR_RUST_WEB_AUDIT_ALLOW_LIVE_ERRORS !== '1') {
+            const errorKey = `${request.method()} ${requestedUrl.pathname}${requestedUrl.search} -> ${response.status}`;
+            if (!observedLiveErrors.has(errorKey)) {
+              observedLiveErrors.add(errorKey);
+              audit.errors.push(`unexpected live backend response: ${errorKey}`);
+            }
+          }
+          const responseHeaders = Object.fromEntries(
+            [...response.headers].filter(
+              ([name]) => !['content-encoding', 'content-length', 'transfer-encoding'].includes(name),
+            ),
+          );
+          return route.fulfill({
+            body: Buffer.from(await response.arrayBuffer()),
+            headers: responseHeaders,
+            status: response.status,
+          });
+        } catch (error) {
+          audit.errors.push(`${requestedUrl.pathname}: live backend proxy failed: ${error.message}`);
+          return route.abort('failed');
+        }
+      });
+      await page.goto(`http://127.0.0.1:${port}${path}`, {
+        timeout: 15000,
+        waitUntil: 'domcontentloaded',
+      });
+      if (settleMs > 0) await page.waitForTimeout(settleMs);
       await page.screenshot({ fullPage: true, path: join(auditDir, `${slug}-${viewport.name}.png`) });
 
       const heading = await page.locator('.slskr-page-header h2').innerText();
@@ -170,7 +231,7 @@ try {
         selectedTitle = await page.locator('[data-slskr-native-inspector-title]').first().innerText();
         selectedStatus = await page.locator('#slskr-action-status').innerText();
         const rowAction = page.locator('.slskr-native-row-actions button, [data-slskr-native-preview-action]').first();
-        if (await rowAction.count()) {
+        if (clickRowActions && await rowAction.count()) {
           await rowAction.click();
           toastText = await page.locator('#slskr-toast-region').innerText().catch(() => '');
           confirmationVisible = await page.locator('.slskr-modal-backdrop').isVisible().catch(() => false);
@@ -214,7 +275,9 @@ try {
       if (primaryActionCount < 1) audit.errors.push(`${path} ${viewport.name}: no primary workflow action`);
       if (nativeWorkspaceCount < 1) audit.errors.push(`${path} ${viewport.name}: missing native workspace`);
       if (inspectorCount < 1) audit.errors.push(`${path} ${viewport.name}: missing inspector/detail surface`);
-      if (rowCount < 1) audit.errors.push(`${path} ${viewport.name}: no selectable workflow rows from mocked daemon data`);
+      if (rowCount < 1 && requireRows) {
+        audit.errors.push(`${path} ${viewport.name}: no selectable workflow rows from daemon data`);
+      }
       if (rowCount > 0 && (!selectedTitle || selectedTitle === 'Nothing selected')) {
         audit.errors.push(`${path} ${viewport.name}: row selection did not update inspector`);
       }

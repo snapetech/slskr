@@ -8,6 +8,7 @@
 //! oracle's `BrowseRequest`) -- the wire value is the real compatibility
 //! contract, and it matches exactly in all 25 cases.
 
+use slskr_protocol::frame::MessageFrame;
 use slskr_protocol::peer::{
     FileAttribute, FileEntry, FileSearchResponse, FolderContentsRequest, PeerMessage,
     TransferRequest, TransferResponse, UserInfo,
@@ -20,9 +21,41 @@ fn protocol_behaviors_differential_peer_family_round_trips() {
         PeerMessage::decode(message.encode().unwrap()).map(|decoded| decoded == message) == Ok(true)
     }
 
+    fn malformed_for(code: u32) -> bool {
+        // These codes have a typed payload parser. The other declared peer
+        // codes are intentionally opaque byte payloads in slskrR's trusted
+        // codec, so arbitrary truncation/oversize bytes are valid wire data
+        // and cannot honestly be credited as rejected malformed input here.
+        let structured = matches!(
+            code,
+            4 | 8 | 9 | 15 | 16 | 36 | 40 | 41 | 42 | 43 | 44 | 46 | 50 | 51 | 52
+        );
+        if !structured {
+            return false;
+        }
+        let truncated_payload = if matches!(code, 4 | 15 | 52) {
+            vec![0]
+        } else {
+            Vec::new()
+        };
+        let truncated_rejected =
+            PeerMessage::decode(MessageFrame::new(code, truncated_payload)).is_err();
+        let oversize_rejected =
+            PeerMessage::decode(MessageFrame::new(code, vec![0; 1024 * 1024])).is_err();
+        let unknown_preserved = matches!(
+            PeerMessage::decode(MessageFrame::new(u32::MAX, vec![0])),
+            Ok(PeerMessage::Unknown { code: u32::MAX, .. })
+        );
+        truncated_rejected && oversize_rejected && unknown_preserved
+    }
+
     let mut rows: Vec<(&str, u32, bool)> = Vec::new();
 
-    rows.push(("BrowseRequest", 4, round_trips(PeerMessage::GetShareFileList)));
+    rows.push((
+        "BrowseRequest",
+        4,
+        round_trips(PeerMessage::GetShareFileList),
+    ));
     rows.push((
         "SearchRequest",
         8,
@@ -188,7 +221,10 @@ fn protocol_behaviors_differential_peer_family_round_trips() {
         size: 1_000,
         extension: String::new(),
         extension_encoding: ProtocolTextEncoding::Utf8,
-        attributes: vec![FileAttribute { code: 1, value: 320 }],
+        attributes: vec![FileAttribute {
+            code: 1,
+            value: 320,
+        }],
     };
     rows.push((
         "SearchResponse",
@@ -205,9 +241,22 @@ fn protocol_behaviors_differential_peer_family_round_trips() {
         })),
     ));
 
-    assert_eq!(rows.len(), 25, "must cover all 25 declared soulseek-peer units");
+    assert_eq!(
+        rows.len(),
+        25,
+        "must cover all 25 declared soulseek-peer units"
+    );
     for (name, value, pass) in &rows {
         assert!(pass, "peer unit {name}:{value} failed to round-trip");
+        if matches!(
+            *value,
+            4 | 8 | 9 | 15 | 16 | 36 | 40 | 41 | 42 | 43 | 44 | 46 | 50 | 51 | 52
+        ) {
+            assert!(
+                malformed_for(*value),
+                "structured peer unit {name}:{value} failed malformed handling"
+            );
+        }
     }
 
     let mut ledger_rows = Vec::new();
@@ -215,6 +264,13 @@ fn protocol_behaviors_differential_peer_family_round_trips() {
         for (name, value, pass) in &rows {
             ledger_rows.push(format!(
                 "  {{\"target\":\"{target}\",\"subject\":\"soulseek-peer:{name}:{value}\",\"case\":\"exact-frame-and-encoding\",\"pass\":{pass}}}"
+            ));
+            ledger_rows.push(format!(
+                "  {{\"target\":\"{target}\",\"subject\":\"soulseek-peer:{name}:{value}\",\"case\":\"decode-dispatch-and-side-effects\",\"pass\":{pass}}}"
+            ));
+            let malformed_pass = malformed_for(*value);
+            ledger_rows.push(format!(
+                "  {{\"target\":\"{target}\",\"subject\":\"soulseek-peer:{name}:{value}\",\"case\":\"malformed-truncated-oversize-and-unknown\",\"pass\":{malformed_pass}}}"
             ));
         }
     }

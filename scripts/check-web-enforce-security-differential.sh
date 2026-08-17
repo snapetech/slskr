@@ -338,7 +338,7 @@ PY
 }
 
 [[ -f "$dll" ]] || { printf 'missing frozen slskdN binary: %s\n' "$dll" >&2; exit 1; }
-cargo build -p slskr --manifest-path "$repo_root/Cargo.toml" >/dev/null
+scripts/with-build-guard.sh cargo build -p slskr --manifest-path "$repo_root/Cargo.toml" >/dev/null
 for implementation in upstream slskr; do
   for mode in default environment yaml-over-environment cli-over-yaml; do
     run_precedence "$implementation" "$mode"

@@ -8,3 +8,7 @@ post_upgrade() {
   systemd-sysusers slskr.conf
   systemd-tmpfiles --create slskr.conf
 }
+
+post_remove() {
+  systemctl daemon-reload >/dev/null 2>&1 || true
+}

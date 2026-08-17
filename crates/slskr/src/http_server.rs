@@ -28,6 +28,7 @@ impl HttpRequest {
 }
 
 pub const BODY_SIZE_LIMIT: usize = 1024 * 1024; // 1 MiB
+pub const RELAY_UPLOAD_BODY_SIZE_LIMIT: usize = 1024 * 1024 * 1024; // 1 GiB, matching frozen relay controllers
 pub const REQUEST_LINE_LIMIT: usize = 8 * 1024;
 pub const HEADER_LINE_LIMIT: usize = 8 * 1024;
 pub const MAX_API_TOKEN_BYTES: usize = HEADER_LINE_LIMIT - b"X-API-Key: \r\n".len();
@@ -54,6 +55,8 @@ pub struct HttpHeaders {
     pub x_slskdn_api_key: Option<String>,
     pub x_slskdn_csrf: Option<String>,
     pub x_share_token: Option<String>,
+    pub x_relay_agent: Option<String>,
+    pub x_relay_credential: Option<String>,
     /// ActivityPub HTTP Signature verification (RFC draft "Signing HTTP
     /// Messages"): `Date`, `Digest`, and `Signature` headers on inbound
     /// federation requests.
@@ -110,6 +113,8 @@ impl HttpHeaders {
                     "x-slskdn-apikey" => headers.x_slskdn_api_key = Some(value.to_string()),
                     "x-slskdn-csrf" => headers.x_slskdn_csrf = Some(value.to_string()),
                     "x-share-token" => headers.x_share_token = Some(value.to_string()),
+                    "x-relay-agent" => headers.x_relay_agent = Some(value.to_string()),
+                    "x-relay-credential" => headers.x_relay_credential = Some(value.to_string()),
                     "date" => headers.date = Some(value.to_string()),
                     "digest" => headers.digest = Some(value.to_string()),
                     "signature" => headers.signature = Some(value.to_string()),
@@ -347,6 +352,14 @@ async fn read_http_request_inner<R: AsyncBufRead + Unpin>(
                 reject_duplicate_singleton(&mut singleton_headers, &name)?;
                 headers.x_share_token = Some(value.to_string());
             }
+            "x-relay-agent" => {
+                reject_duplicate_singleton(&mut singleton_headers, &name)?;
+                headers.x_relay_agent = Some(value.to_string());
+            }
+            "x-relay-credential" => {
+                reject_duplicate_singleton(&mut singleton_headers, &name)?;
+                headers.x_relay_credential = Some(value.to_string());
+            }
             "range" => {
                 reject_duplicate_singleton(&mut singleton_headers, &name)?;
                 headers.range = Some(value.to_string());
@@ -416,11 +429,22 @@ async fn read_http_request_inner<R: AsyncBufRead + Unpin>(
         return Err("invalid Host header authority".to_owned());
     }
 
+    // Relay share/file uploads have an endpoint-specific 1 GiB limit in both
+    // frozen controllers, even when the general Web request limit is lower.
+    let effective_body_size_limit = if method == "POST"
+        && (path.starts_with("/api/v0/relay/controller/files/")
+            || path.starts_with("/api/v0/relay/controller/shares/"))
+    {
+        body_size_limit.max(RELAY_UPLOAD_BODY_SIZE_LIMIT)
+    } else {
+        body_size_limit
+    };
+
     // Reject oversized bodies before reading
-    if content_length > body_size_limit {
+    if content_length > effective_body_size_limit {
         return Err(format!(
             "request body too large: {} bytes (limit {})",
-            content_length, body_size_limit
+            content_length, effective_body_size_limit
         ));
     }
 
@@ -1262,6 +1286,23 @@ mod tests {
             .await
             .expect_err("configured limit must reject oversized content length");
         assert!(error.contains("9 bytes (limit 8)"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn relay_upload_uses_endpoint_specific_gibibyte_limit() {
+        let (mut client, server) = tokio::io::duplex(4096);
+        client
+            .write_all(
+                b"POST /api/v0/relay/controller/shares/token HTTP/1.1\r\nHost: localhost\r\nContent-Length: 9\r\n\r\n123456789",
+            )
+            .await
+            .unwrap();
+        let mut reader = BufReader::new(server);
+        let (request, _) = read_http_request_with_body_limit(&mut reader, 8)
+            .await
+            .expect("relay-specific limit should override the general limit")
+            .expect("relay request");
+        assert_eq!(request.body, b"123456789");
     }
 
     #[tokio::test]

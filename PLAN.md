@@ -105,7 +105,7 @@ After init, message connections are tagged by a single character: `P` peer-messa
 - Git repo with dual-push remote (GitHub primary, gitlab.home mirror).
 - Workspace skeleton.
 - Empty `slskr-protocol` and `slskr-client` crates.
-- CI: `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`.
+- CI: `scripts/with-build-guard.sh cargo fmt --check`, `scripts/with-build-guard.sh cargo clippy -D warnings`, `scripts/with-build-guard.sh cargo test`.
 
 ### Phase 1 — Protocol primitives *(done)*
 - Reader/writer for `u8`, `u32 LE`, `u64 LE`, length-prefixed UTF-8/Latin-1 strings, IPv4, bool. *(done)*
@@ -180,13 +180,13 @@ After init, message connections are tagged by a single character: `P` peer-messa
 ## Current verification
 
 - `scripts/check-public-posture.sh`
-- `cargo fmt --all --check`
-- `cargo clippy --workspace --all-targets -- -D warnings`
-- `cargo test --workspace`
-- `SLSK_SOULFIND_DOCKER=1 cargo test -p slskr-client --test soulfind_contract`
-- `cargo package --workspace --allow-dirty --no-verify`
-- `SLSKR_INDIRECT_HOST_OVERRIDE=127.0.0.1 cargo run -p slskr -- smoke local-peer`
-- `cargo run -p slskr -- soak live` with a bounded 10 second window
+- `scripts/with-build-guard.sh cargo fmt --all --check`
+- `scripts/with-build-guard.sh cargo clippy --workspace --all-targets -- -D warnings`
+- `scripts/with-build-guard.sh cargo test --workspace`
+- `SLSK_SOULFIND_DOCKER=1 scripts/with-build-guard.sh cargo test -p slskr-client --test soulfind_contract`
+- `scripts/with-build-guard.sh cargo package --workspace --allow-dirty --no-verify`
+- `SLSKR_INDIRECT_HOST_OVERRIDE=127.0.0.1 scripts/with-build-guard.sh cargo run -p slskr -- smoke local-peer`
+- `scripts/with-build-guard.sh cargo run -p slskr -- soak live` with a bounded 10 second window
 - `scripts/run-proton-public-matrix.sh` for public multi-endpoint metadata/plain/obfuscated peer probing
 - `SLSKR_MATRIX_ADVERTISE_REGULAR_LOCAL=0 SLSKR_MATRIX_INDIRECT_SEND_PEER_ADDRESS=1 scripts/run-proton-public-matrix.sh ...` for public regular-port reachability
 - `SLSKR_MATRIX_ADVERTISE_REGULAR_LOCAL=1 SLSKR_MATRIX_INDIRECT_SEND_PEER_ADDRESS=1 scripts/run-proton-public-matrix.sh ...` for obfuscated-only reachability

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">
+  <metadata>
+    <id>slskr</id>
+    <version>0.2.15</version>
+    <title>slskR</title>
+    <authors>snapetech</authors>
+    <projectUrl>https://github.com/snapetech/slskr</projectUrl>
+    <licenseUrl>https://github.com/snapetech/slskr/blob/main/LICENSE</licenseUrl>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <tags>slskr soulseek p2p daemon</tags>
+    <summary>Rust Soulseek daemon with bundled Web UI</summary>
+    <description>slskR is a Rust Soulseek daemon with an HTTP API and bundled Web UI.</description>
+  </metadata>
+  <files>
+    <file src="tools\**" target="tools" />
+  </files>
+</package>

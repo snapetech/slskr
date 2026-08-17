@@ -119,6 +119,30 @@ impl PodChannelStore {
         stats
     }
 
+    pub fn validate_storage(&self) -> Result<(), String> {
+        let metadata = match fs::symlink_metadata(&self.state_path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(format!("pod channel state metadata failed: {error}")),
+        };
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err("pod channel state path must be a regular file".to_owned());
+        }
+        Ok(())
+    }
+
+    pub fn rebuild_search_index(&mut self) -> Result<bool, String> {
+        self.validate_storage()?;
+        write_state(&self.state_path, &self.messages)?;
+        Ok(true)
+    }
+
+    pub fn vacuum(&mut self) -> Result<bool, String> {
+        self.validate_storage()?;
+        write_state(&self.state_path, &self.messages)?;
+        Ok(true)
+    }
+
     pub fn append(
         &mut self,
         pod_id: String,

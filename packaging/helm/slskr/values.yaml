@@ -1,0 +1,37 @@
+image:
+  repository: ghcr.io/snapetech/slskr
+  tag: "0.2.15"
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+service:
+  type: ClusterIP
+  port: 5030
+
+env:
+  SLSKR_CONFIG: /app/config/config.toml
+  SLSKR_HTTP_PORT: "5030"
+
+persistence:
+  config:
+    enabled: true
+    size: 1Gi
+  downloads:
+    enabled: true
+    size: 10Gi
+  incomplete:
+    enabled: true
+    size: 5Gi
+  shares:
+    enabled: true
+    size: 10Gi
+    readOnly: true
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+
+resources: {}

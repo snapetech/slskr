@@ -1,0 +1,214 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+STATE_DIR="${SLSKR_VPN_STATE_DIR:-/var/lib/slskr-vpn}"
+STATIC_FORWARD_DIR="${SLSKR_VPN_STATIC_FORWARD_DIR:-/etc/slskr-vpn/static-forwards}"
+DAEMON_URL="${SLSKR_URL:-http://127.0.0.1:5030}"
+API_HOST="${SLSKR_VPN_API_HOST:-127.0.0.1}"
+API_PORT="${SLSKR_VPN_API_PORT:-8010}"
+VPN_IFACE="${SLSKR_VPN_IFACE:-slskr-vpn}"
+VPN_TABLE="${SLSKR_VPN_TABLE:-51820}"
+SERVICE_USER="${SLSKR_SERVICE_USER:-slskr}"
+WATCHDOG_THRESHOLD="${SLSKR_VPN_WATCHDOG_THRESHOLD:-3}"
+
+mkdir_state() {
+  install -d -m 0750 "$STATE_DIR"
+}
+
+read_state() {
+  local file="$1" key="$2"
+  [ -f "$file" ] || return 0
+  awk -F= -v key="$key" '$1 == key { sub(/^[^=]*=/, ""); print; exit }' "$file"
+}
+
+write_state() {
+  local slot="$1" local_port="$2" target_port="$3" proto="$4" public_port="$5" public_ip="$6"
+  mkdir_state
+  cat > "${STATE_DIR}/pf${slot}.env" <<STATE
+slot=${slot}
+local_port=${local_port}
+target_port=${target_port}
+proto=${proto}
+public_port=${public_port}
+public_ip=${public_ip}
+namespace=
+STATE
+}
+
+curl_daemon() {
+  local -a args=(--fail --silent --show-error --max-time "${SLSKR_VPN_TIMEOUT:-10}")
+  if [ -n "${SLSKR_API_KEY:-}" ]; then
+    args+=(--header "X-API-Key: ${SLSKR_API_KEY}")
+  fi
+  curl "${args[@]}" "$@"
+}
+
+api() {
+  mkdir_state
+  exec python3 - "$STATE_DIR" "$API_HOST" "$API_PORT" <<'PY'
+import glob
+import json
+import pathlib
+import sys
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+state_dir = pathlib.Path(sys.argv[1])
+host = sys.argv[2]
+port = int(sys.argv[3])
+
+def read_env(path):
+    values = {}
+    try:
+        for line in pathlib.Path(path).read_text(encoding="utf-8").splitlines():
+            if "=" in line:
+                key, value = line.split("=", 1)
+                values[key] = value
+    except OSError:
+        pass
+    return values
+
+def forwards():
+    result = []
+    for path in sorted(glob.glob(str(state_dir / "pf*.env"))):
+        values = read_env(path)
+        try:
+            slot = int(values.get("slot", pathlib.Path(path).stem[2:]))
+            local_port = int(values["local_port"])
+            target_port = int(values["target_port"])
+            public_port = int(values["public_port"])
+        except (KeyError, ValueError):
+            continue
+        result.append({
+            "slot": slot,
+            "localPort": local_port,
+            "targetPort": target_port,
+            "proto": values.get("proto", "tcp"),
+            "publicPort": public_port,
+            "publicIPAddress": values.get("public_ip", "") or None,
+            "namespace": values.get("namespace", ""),
+        })
+    return result
+
+class Handler(BaseHTTPRequestHandler):
+    def log_message(self, *_args):
+        return
+
+    def send_json(self, status, payload):
+        body = json.dumps(payload, separators=(",", ":")).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self):
+        current = forwards()
+        first = current[0] if current else {}
+        if self.path in ("/v1/portforward", "/v1/openvpn/portforwarded"):
+            self.send_json(200, {"port": first.get("publicPort", 0)})
+        elif self.path == "/v1/publicip/ip":
+            ip = first.get("publicIPAddress") or ""
+            self.send_json(200 if ip else 503, {"public_ip": ip, "country": "", "city": ""})
+        elif self.path in ("/v1/openvpn/status", "/v1/wireguard/status", "/v1/vpn/status"):
+            self.send_json(200, {"status": "running" if current else "stopped"})
+        elif self.path in ("/v1/slskr/portforwards", "/v1/slskdN/portforwards"):
+            self.send_json(200, {"mode": "static", "claimed": len(current), "forwards": current})
+        else:
+            self.send_json(404, {"error": "not found"})
+
+ThreadingHTTPServer((host, port), Handler).serve_forever()
+PY
+}
+
+ingress() {
+  mkdir_state
+  local source="${STATIC_FORWARD_DIR}/pf0.env"
+  if [ -s "$source" ]; then
+    local local_port target_port proto public_port public_ip
+    local_port="$(read_state "$source" local_port)"
+    target_port="$(read_state "$source" target_port)"
+    proto="$(read_state "$source" proto)"
+    public_port="$(read_state "$source" public_port)"
+    public_ip="$(read_state "$source" public_ip)"
+    [ -n "$local_port" ] && [ -n "$target_port" ] && [ -n "$public_port" ] \
+      || { echo "static forward must define local_port, target_port, and public_port" >&2; return 1; }
+    write_state 0 "$local_port" "$target_port" "${proto:-tcp}" "$public_port" "$public_ip"
+  elif [ -n "${SLSKR_API_KEY:-}" ]; then
+    local application forwarded listen
+    application="$(curl_daemon "${DAEMON_URL%/}/api/v0/application")"
+    forwarded="$(jq -r '.vpn.forwardedPort // .vpn.forwarded_port // empty' <<<"$application")"
+    listen="$(jq -r '.options.soulseek.listenPort // .soulseek.listenPort // 0' <<<"$application")"
+    if [ -n "$forwarded" ] && [ "$forwarded" != "null" ] && [ "${listen:-0}" -gt 0 ]; then
+      write_state 0 "$listen" "$listen" tcp "$forwarded" "$(jq -r '.vpn.publicIPAddress // empty' <<<"$application")"
+    fi
+  fi
+  cat > "${STATE_DIR}/summary.env" <<SUMMARY
+mode=static
+claimed=$(find "$STATE_DIR" -maxdepth 1 -name 'pf*.env' -type f | wc -l)
+SUMMARY
+}
+
+cleanup_ingress() {
+  mkdir_state
+  rm -f "${STATE_DIR}"/pf*.env "${STATE_DIR}/summary.env"
+}
+
+split() {
+  [ "$(id -u)" -eq 0 ] || { echo "split requires root" >&2; return 1; }
+  command -v ip >/dev/null || { echo "ip command is required" >&2; return 2; }
+  local uid
+  uid="$(id -u "$SERVICE_USER")"
+  ip route replace blackhole default table "$VPN_TABLE"
+  ip rule replace uidrange "${uid}-${uid}" lookup "$VPN_TABLE" priority 10000
+  if ip link show "$VPN_IFACE" >/dev/null 2>&1; then
+    ip route replace default dev "$VPN_IFACE" table "$VPN_TABLE"
+  fi
+}
+
+platform_split() {
+  case "$(uname -s)" in
+    Linux) split ;;
+    *) echo "platform-native fail-closed routing is not implemented for $(uname -s)" >&2; return 2 ;;
+  esac
+}
+
+verify() {
+  command -v curl >/dev/null || { echo "curl command is required" >&2; return 2; }
+  curl_daemon "${DAEMON_URL%/}/api/v0/health" >/dev/null
+  local public_port
+  public_port="$(read_state "${STATE_DIR}/pf0.env" public_port)"
+  [ -n "$public_port" ] || { echo "no forwarded port state" >&2; return 1; }
+  printf 'OK: slskR VPN integration; forwarded port %s\n' "$public_port"
+}
+
+watchdog() {
+  mkdir_state
+  local failures=0
+  failures="$(cat "${STATE_DIR}/watchdog.failures" 2>/dev/null || printf '0')"
+  if verify; then
+    printf '0\n' > "${STATE_DIR}/watchdog.failures"
+    return 0
+  fi
+  failures=$((failures + 1))
+  printf '%s\n' "$failures" > "${STATE_DIR}/watchdog.failures"
+  logger -t slskr-vpn-watchdog "VPN verification failed (${failures}/${WATCHDOG_THRESHOLD})" 2>/dev/null || true
+  if [ "$failures" -ge "$WATCHDOG_THRESHOLD" ]; then
+    systemctl restart slskr-vpn-ingress.service 2>/dev/null || true
+    printf '0\n' > "${STATE_DIR}/watchdog.failures"
+  fi
+  return 1
+}
+
+case "${1:-}" in
+  api) api ;;
+  ingress) ingress ;;
+  cleanup-ingress) cleanup_ingress ;;
+  split) split ;;
+  platform-split) platform_split ;;
+  verify|status) verify ;;
+  watchdog) watchdog ;;
+  *)
+    echo "Usage: slskr-vpn-agent {api|ingress|cleanup-ingress|split|platform-split|verify|status|watchdog}" >&2
+    exit 64
+    ;;
+esac

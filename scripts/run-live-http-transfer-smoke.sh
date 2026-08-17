@@ -149,7 +149,7 @@ echo "source_user=$(redact "$source_username") target_user=$(redact "$target_use
   export SLSKR_ADVERTISED_PORT="$source_listen_port"
   export SLSKR_TEST_USER_ENDPOINT_OVERRIDES="$target_username=127.0.0.1:$target_listen_port"
   export SLSKR_PEER_RESPONSE_TIMEOUT_SECONDS=10
-  exec cargo run -q -p slskr -- serve
+  exec scripts/with-build-guard.sh cargo run -q -p slskr -- serve
 ) >"$source_log" 2>&1 &
 source_pid="$!"
 
@@ -168,7 +168,7 @@ source_pid="$!"
   export SLSKR_PEER_HOST_OVERRIDE=127.0.0.1
   export SLSKR_TEST_USER_ENDPOINT_OVERRIDES="$source_username=127.0.0.1:$source_listen_port"
   export SLSKR_PEER_RESPONSE_TIMEOUT_SECONDS=10
-  exec cargo run -q -p slskr -- serve
+  exec scripts/with-build-guard.sh cargo run -q -p slskr -- serve
 ) >"$target_log" 2>&1 &
 target_pid="$!"
 
@@ -250,7 +250,7 @@ wait_peer_address() {
       export SLSK_USERNAME="$probe_username"
       export SLSK_PASSWORD="$probe_password"
       export SLSK_PEER_USERNAME="$source_username"
-      exec cargo run -q -p slskr -- probe peer-address
+      exec scripts/with-build-guard.sh cargo run -q -p slskr -- probe peer-address
     ) >"$stdout_file" 2>"$stderr_file"; then
       if rg -q 'port=[1-9][0-9]*' "$stdout_file"; then
         echo "source peer address advertised"

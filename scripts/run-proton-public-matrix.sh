@@ -135,7 +135,7 @@ run_probe() {
                 SLSK_OBFUSCATED_PROBE_TIMEOUT_SECONDS=15 \
                 SLSK_PLAIN_PEER_INIT_TOKEN="${SLSKR_MATRIX_PLAIN_PEER_INIT_TOKEN:-0}" \
                 SLSK_OBFUSCATED_PEER_INIT_TOKEN="${SLSKR_MATRIX_OBFUSCATED_PEER_INIT_TOKEN:-0}" \
-                cargo run -q -p slskr -- "${command[@]}" 2>&1
+                scripts/with-build-guard.sh cargo run -q -p slskr -- "${command[@]}" 2>&1
     )"
     status=$?
     set -e
@@ -186,7 +186,7 @@ run_indirect_probe() {
                     renew &
                     renew_pid=$!
                     trap "kill \"$renew_pid\" 2>/dev/null || true" EXIT
-                    SLSK_INDIRECT_ADVERTISED_PORT="$public_port" cargo run -q -p slskr -- probe indirect-peer
+                    SLSK_INDIRECT_ADVERTISED_PORT="$public_port" scripts/with-build-guard.sh cargo run -q -p slskr -- probe indirect-peer
                 ' 2>&1
     )"
     status=$?

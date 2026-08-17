@@ -29,6 +29,10 @@ const fallbackOnly = args.includes('--fallback-only');
 const failOnUnmatched = args.includes('--fail-on-unmatched');
 const failOnFallback = args.includes('--fail-on-fallback');
 const includeResponse = args.includes('--include-response');
+const requestedConcurrency = Number.parseInt(option('--concurrency') ?? '8', 10);
+const probeConcurrency = Number.isInteger(requestedConcurrency) && requestedConcurrency > 0
+  ? requestedConcurrency
+  : 8;
 
 function controllerFiles() {
   return execFileSync('rg', ['--files', controllerRoot, '-g', '*Controller.cs'], {
@@ -97,9 +101,17 @@ function extractRoutes(file) {
   for (const methodMatch of classBody.matchAll(methodPattern)) {
     const attributes = methodMatch[1];
     const httpPattern = /\[Http(Get|Post|Put|Patch|Delete)(?:\("([^"]*)"\))?[^\]]*\]/g;
+    const routePattern = /\[Route\(\s*"([^"]*)"[^\]]*\)\]/g;
+    const methodRoutes = [...attributes.matchAll(routePattern)].map((match) => match[1]);
     for (const httpMatch of attributes.matchAll(httpPattern)) {
       for (const baseRoute of baseRoutes) {
-        const suffix = httpMatch[2] ?? '';
+        // ASP.NET permits the action template to live on a separate
+        // [Route("...")] attribute.  When that happens, the previous
+        // scanner silently collapsed the action onto the controller route
+        // (and, for a POST validation action, invented POST /options).
+        // An explicit template on [Http*] takes precedence, matching the
+        // framework's conventional attribute-routing form.
+        const suffix = httpMatch[2] ?? methodRoutes.at(-1) ?? '';
         routes.push({
           method: httpMatch[1].toUpperCase(),
           route: normalizeRoute(`${baseRoute}/${suffix}`, controllerName),
@@ -226,7 +238,7 @@ async function probeAll(input, concurrency = 8) {
   return output;
 }
 
-const output = probeBase ? await probeAll(rows) : rows;
+const output = probeBase ? await probeAll(rows, probeConcurrency) : rows;
 const displayed = unmatchedOnly
   ? output.filter((row) => ['generic_404', 'html_fallback'].includes(row.result))
   : fallbackOnly
@@ -249,12 +261,15 @@ const htmlFallbacks = output.filter((row) => row.result === 'html_fallback').len
 const compatibilityFallbacks = output.filter(
   (row) => row.result === 'compatibility_fallback',
 ).length;
+const probeErrors = output.filter(
+  (row) => !['handled', 'generic_404', 'html_fallback', 'compatibility_fallback'].includes(row.result),
+).length;
 process.stderr.write(
   `slskdN controller inventory: ${rows.length} routes${
     probeBase
-      ? `; ${generic404} generic slskR 404 responses; ${htmlFallbacks} HTML fallbacks; ${compatibilityFallbacks} compatibility fallbacks`
+      ? `; ${generic404} generic slskR 404 responses; ${htmlFallbacks} HTML fallbacks; ${compatibilityFallbacks} compatibility fallbacks; ${probeErrors} probe errors`
       : ''
   }\n`,
 );
-if (failOnUnmatched && generic404 + htmlFallbacks > 0) process.exitCode = 1;
+if (failOnUnmatched && generic404 + htmlFallbacks + probeErrors > 0) process.exitCode = 1;
 if (failOnFallback && compatibilityFallbacks > 0) process.exitCode = 1;

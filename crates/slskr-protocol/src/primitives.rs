@@ -75,6 +75,11 @@ impl<'a> Reader<'a> {
         Ok(u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
     }
 
+    pub fn read_i32_le(&mut self) -> Result<i32, DecodeError> {
+        let bytes = self.read_exact("i32", 4)?;
+        Ok(i32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
+    }
+
     pub fn read_u16_le(&mut self) -> Result<u16, DecodeError> {
         let bytes = self.read_exact("u16", 2)?;
         Ok(u16::from_le_bytes([bytes[0], bytes[1]]))
@@ -217,6 +222,10 @@ impl Writer {
     }
 
     pub fn write_u32_le(&mut self, value: u32) {
+        self.output.extend_from_slice(&value.to_le_bytes());
+    }
+
+    pub fn write_i32_le(&mut self, value: i32) {
         self.output.extend_from_slice(&value.to_le_bytes());
     }
 

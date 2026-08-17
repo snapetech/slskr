@@ -32,6 +32,13 @@ PY
 cleanup() {
   if [[ -n "$daemon_pid" ]] && kill -0 "$daemon_pid" 2>/dev/null; then
     kill "$daemon_pid" 2>/dev/null || true
+    for _ in $(seq 1 20); do
+      kill -0 "$daemon_pid" 2>/dev/null || break
+      sleep 0.1
+    done
+    if kill -0 "$daemon_pid" 2>/dev/null; then
+      kill -KILL "$daemon_pid" 2>/dev/null || true
+    fi
     wait "$daemon_pid" 2>/dev/null || true
   fi
   if [[ "$keep_artifacts" != "1" ]]; then
@@ -53,7 +60,7 @@ node scripts/check-slskdn-controller-auth-registry.mjs \
 node scripts/check-slskdn-controller-auth-registry.mjs \
   --target slskdn \
   --slskdn-root "$slskdn_root"
-cargo build -q -p slskr
+scripts/with-build-guard.sh cargo build -q -p slskr
 
 (
   export SLSKR_HTTP_BIND="127.0.0.1:$http_port"
@@ -93,6 +100,7 @@ if ! node scripts/audit-slskdn-controller-routes.mjs \
   --materialize \
   --include-response \
   --probe-base "$base_url" \
+  --concurrency 1 \
   --fail-on-unmatched \
   --fail-on-fallback \
   --json >"$report_file"; then
@@ -107,6 +115,7 @@ if ! node scripts/audit-slskdn-controller-routes.mjs \
   --materialize \
   --include-response \
   --probe-base "$base_url" \
+  --concurrency 1 \
   --fail-on-unmatched \
   --fail-on-fallback \
   --json >"$slskd_report_file"; then
@@ -130,7 +139,7 @@ elif [[ -n "$reference_base" ]]; then
     --candidate-json "$report_file"
 fi
 
-printf 'slskd + slskdN controller parity check passed: all 91 + 678 materialized controller routes are handled without compatibility fallback\n'
+printf 'slskd + slskdN controller parity check passed: all materialized controller routes are handled without compatibility fallback\n'
 if [[ "$keep_artifacts" == "1" ]]; then
   printf 'controller parity artifacts retained at %s\n' "$work_dir"
 fi

@@ -304,7 +304,7 @@ run_hardening_rejection() {
 }
 
 [[ -f "$dll" ]] || { printf 'missing frozen slskdN binary: %s\n' "$dll" >&2; exit 1; }
-cargo build -p slskr --manifest-path "$repo_root/Cargo.toml" >/dev/null
+scripts/with-build-guard.sh cargo build -p slskr --manifest-path "$repo_root/Cargo.toml" >/dev/null
 for mode in disabled-with-matching-cidr enabled-mismatch enabled-match enabled-invalid; do
   run_mode upstream "$mode"
   run_mode slskr "$mode"

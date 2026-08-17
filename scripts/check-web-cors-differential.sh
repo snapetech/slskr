@@ -390,7 +390,7 @@ PY
 }
 
 [[ -f "$dll" ]] || { printf 'missing frozen slskdN binary: %s\n' "$dll" >&2; exit 1; }
-cargo build -p slskr --manifest-path "$repo_root/Cargo.toml" >/dev/null
+scripts/with-build-guard.sh cargo build -p slskr --manifest-path "$repo_root/Cargo.toml" >/dev/null
 for mode in disabled explicit wildcard credentials enforced-credentials; do
   run_mode upstream "$mode"
   request_auth_header="X-API-Key: $api_key"

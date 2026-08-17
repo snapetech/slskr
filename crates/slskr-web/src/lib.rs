@@ -1668,6 +1668,16 @@ fn route_param_value(path: &str, fallback: &str) -> String {
     }
 }
 
+#[cfg(target_arch = "wasm32")]
+fn route_param_value_optional(path: &str) -> Option<String> {
+    let value = path
+        .trim_matches('/')
+        .rsplit('/')
+        .next()
+        .filter(|segment| !segment.is_empty())?;
+    safe_route_segment(value).then(|| value.to_owned())
+}
+
 pub fn concrete_endpoint_path(route_path: &str, endpoint: ApiEndpoint) -> String {
     let search_id =
         if endpoint.path.contains(":id") && !normalize_route_path(route_path).contains(":id") {
@@ -6436,7 +6446,8 @@ fn route_workflow_html(path: &str, responses: Option<&[EndpointBody]>) -> String
         RouteKind::Browse => vec!["Tree", "Files", "Queue"],
         RouteKind::System => vec!["Connection", "Shares", "Storage", "Logs"],
     };
-    let (primary_title, primary_detail, table_headers, rows, side_title, side_body) = match kind {
+    let (primary_title, primary_detail, table_headers, _legacy_rows, side_title, side_body) =
+        match kind {
         RouteKind::Search => (
             "Grouped results",
             "Ranked peers with duplicate folding, warnings, and download review.",
@@ -6615,18 +6626,13 @@ fn route_workflow_html(path: &str, responses: Option<&[EndpointBody]>) -> String
             "Filter events, update preferences, and review automation from tabs without exposing raw metrics by default.",
         ),
     };
-    let table_rows = route_dynamic_rows(kind, responses).unwrap_or_else(|| {
-        rows.iter()
-            .map(|(primary, secondary, meta, action)| {
-                (
-                    (*primary).to_string(),
-                    (*secondary).to_string(),
-                    (*meta).to_string(),
-                    (*action).to_string(),
-                )
-            })
-            .collect()
-    });
+    // A pending or failed live request must never be presented as daemon
+    // data.  The old fallback rendered bundled demo rows whenever a probe
+    // failed, which made an empty/disconnected instance look populated and
+    // caused row actions to target placeholder IDs.  Keep the legacy sample
+    // tuple above as documentation for the route shape, but only render rows
+    // decoded from actual responses.
+    let table_rows = route_dynamic_rows(kind, responses).unwrap_or_default();
     format!(
         r#"<div class="slskr-workflow" data-slskr-route-kind="{kind:?}">{reference}{native}<details class="slskr-legacy-workflow"><summary>Additional workflow detail</summary><div class="slskr-workflow-tabs">{tabs}</div><div class="slskr-workflow-grid"><section class="slskr-workflow-primary"><header><div><h3>{primary_title}</h3><p>{primary_detail}</p></div>{fresh}</header>{table}</section><aside class="slskr-workflow-inspector"><h3>{side_title}</h3><p>{side_body}</p>{empty}</aside></div></details></div>"#,
         kind = kind,
@@ -8098,6 +8104,25 @@ fn run_native_route_action(
     button: &web_sys::Element,
     action: RouteAction,
 ) {
+    let route_path = document
+        .default_view()
+        .and_then(|window| window.location().pathname().ok())
+        .unwrap_or_else(|| "/searches".to_string());
+    if action.path.contains(":id")
+        && !normalize_route_path(&route_path).contains(":id")
+        && native_action_id(document, button, action).is_none()
+    {
+        let message = format!("{} requires a real selected resource", action.label);
+        if let Some(status) = document.get_element_by_id("slskr-action-status") {
+            status.set_inner_html(&format!(
+                "<strong>{}</strong> {}",
+                escape_html(action.label),
+                escape_html(&message)
+            ));
+        }
+        show_toast(document, &message);
+        return;
+    }
     if native_action_requires_confirmation(action) {
         show_native_confirm_modal(document, button, action);
         return;
@@ -8396,7 +8421,11 @@ fn native_action_value_selectors(body: ActionBody) -> &'static [&'static str] {
             r#"input[aria-label="Seed artist or query"]"#,
             r#"textarea[aria-label="Playlist rows"]"#,
         ],
-        ActionBody::ShareGrant | ActionBody::ShareGroupMember | ActionBody::Username => &[
+        ActionBody::ContactDiscovery
+        | ActionBody::ContactInvite
+        | ActionBody::ShareGrant
+        | ActionBody::ShareGroupMember
+        | ActionBody::Username => &[
             r#"input[aria-label="Username"]"#,
             r#"input[aria-label="Soulseek Username"]"#,
             r#"input[aria-label="Contact username"]"#,
@@ -8422,23 +8451,16 @@ fn native_action_target(
     button: &web_sys::Element,
     action: RouteAction,
 ) -> Option<String> {
-    if !action.path.contains(":username")
+    if action.path.contains(":id")
+        && !action.path.contains(":username")
         && !action.path.contains(":roomName")
-        && !action.path.contains(":id")
     {
         return None;
     }
+    if !action.path.contains(":username") && !action.path.contains(":roomName") {
+        return None;
+    }
     let workspace = button.closest(".slskr-native-workspace").ok().flatten()?;
-    if let Some(value) =
-        button_native_row_resource_id(button).filter(|value| safe_route_segment(value))
-    {
-        return Some(value);
-    }
-    if let Some(value) =
-        selected_native_row_resource_id(&workspace).filter(|value| safe_route_segment(value))
-    {
-        return Some(value);
-    }
     if let Some(value) = button_native_row_target(button).filter(|value| safe_route_segment(value))
     {
         return Some(value);
@@ -8475,7 +8497,7 @@ fn native_action_target(
 
 #[cfg(target_arch = "wasm32")]
 fn native_action_id(
-    document: &web_sys::Document,
+    _document: &web_sys::Document,
     button: &web_sys::Element,
     action: RouteAction,
 ) -> Option<String> {
@@ -8503,19 +8525,7 @@ fn native_action_id(
             return Some(value);
         }
     }
-    if !action.path.contains(":username") && !action.path.contains(":roomName") {
-        if let Some(value) =
-            button_native_row_resource_id(button).filter(|value| safe_route_segment(value))
-        {
-            return Some(value);
-        }
-        if let Some(value) =
-            selected_native_row_resource_id(&workspace).filter(|value| safe_route_segment(value))
-        {
-            return Some(value);
-        }
-    }
-    document_selected_native_row_title(document).filter(|value| safe_route_segment(value))
+    None
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -8624,16 +8634,6 @@ fn selected_native_row_target(workspace: &web_sys::Element) -> Option<String> {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn selected_native_row_resource_id(workspace: &web_sys::Element) -> Option<String> {
-    workspace
-        .query_selector("[data-slskr-native-select][aria-selected=\"true\"]")
-        .ok()
-        .flatten()
-        .and_then(|row| row.get_attribute("data-slskr-native-resource-id"))
-        .filter(|value| !value.trim().is_empty())
-}
-
-#[cfg(target_arch = "wasm32")]
 fn button_native_row_target(button: &web_sys::Element) -> Option<String> {
     button
         .closest("[data-slskr-native-select]")
@@ -8656,16 +8656,6 @@ fn button_native_row_attribute(button: &web_sys::Element, attribute: &str) -> Op
         .ok()
         .flatten()
         .and_then(|row| row.get_attribute(attribute))
-        .filter(|value| !value.trim().is_empty())
-}
-
-#[cfg(target_arch = "wasm32")]
-fn button_native_row_resource_id(button: &web_sys::Element) -> Option<String> {
-    button
-        .closest("[data-slskr-native-select]")
-        .ok()
-        .flatten()
-        .and_then(|row| row.get_attribute("data-slskr-native-resource-id"))
         .filter(|value| !value.trim().is_empty())
 }
 
@@ -15227,6 +15217,119 @@ async fn refresh_player_status(window: &web_sys::Window) -> Result<(), JsValue> 
 }
 
 #[cfg(target_arch = "wasm32")]
+fn live_response_identifier(
+    responses: &[EndpointBody],
+    endpoint: &str,
+    keys: &[&str],
+) -> Option<String> {
+    endpoint_array(Some(responses), endpoint)
+        .into_iter()
+        .find_map(|item| value_text(&item, keys).filter(|value| safe_route_segment(value)))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn live_endpoint_segment(
+    route_path: &str,
+    endpoint: ApiEndpoint,
+    responses: &[EndpointBody],
+) -> Option<(String, String)> {
+    let route_id = normalize_route_path(route_path)
+        .contains(":id")
+        .then(|| route_param_value_optional(route_path))
+        .flatten();
+
+    if endpoint.path.contains(":id") {
+        let id = route_id.or_else(|| {
+            if endpoint.path == "/searches/:id/responses" {
+                live_response_identifier(
+                    responses,
+                    "/searches",
+                    &["id", "searchId", "search.id", "token"],
+                )
+                .or_else(|| {
+                    live_response_identifier(
+                        responses,
+                        "/searches/records",
+                        &["id", "searchId", "search.id", "token"],
+                    )
+                })
+            } else if endpoint.path.starts_with("/downloads/requests/") {
+                live_response_identifier(
+                    responses,
+                    "/downloads/requests",
+                    &["id", "requestId", "request.id", "request.requestId"],
+                )
+            } else if endpoint.path == "/share-grants/by-collection/:id" {
+                live_response_identifier(
+                    responses,
+                    "/collections",
+                    &["id", "collectionId", "collection.id"],
+                )
+            } else if endpoint.path.starts_with("/share-grants/") {
+                live_response_identifier(
+                    responses,
+                    "/share-grants",
+                    &["id", "grantId", "shareGrantId", "grant.id"],
+                )
+            } else if endpoint.path.starts_with("/sharegroups/") {
+                live_response_identifier(
+                    responses,
+                    "/sharegroups",
+                    &["id", "groupId", "shareGroupId", "group.id"],
+                )
+            } else if endpoint.path.starts_with("/wishlist/") {
+                live_response_identifier(
+                    responses,
+                    "/wishlist",
+                    &["id", "wishlistId", "searchId", "item.id"],
+                )
+            } else {
+                None
+            }
+        })?;
+        return Some((":id".to_string(), id));
+    }
+
+    if endpoint.path.contains(":username") {
+        let username = if endpoint.path.starts_with("/conversations/") {
+            live_response_identifier(
+                responses,
+                "/conversations",
+                &["username", "user", "peer", "name"],
+            )
+        } else if endpoint.path.starts_with("/users/") {
+            live_response_identifier(responses, "/users", &["username", "name", "user"])
+        } else {
+            None
+        }?;
+        return Some((":username".to_string(), username));
+    }
+
+    if endpoint.path.contains(":roomName") {
+        let room =
+            live_response_identifier(responses, "/rooms/joined", &["name", "roomName", "room"])?;
+        return Some((":roomName".to_string(), room));
+    }
+
+    None
+}
+
+#[cfg(target_arch = "wasm32")]
+fn concrete_live_endpoint_path(
+    route_path: &str,
+    endpoint: ApiEndpoint,
+    responses: &[EndpointBody],
+) -> Option<String> {
+    let path = endpoint.path;
+    if !path.contains(':') {
+        return Some(endpoint_url(path));
+    }
+
+    let (placeholder, value) = live_endpoint_segment(route_path, endpoint, responses)?;
+    Some(endpoint_url(&path.replace(&placeholder, &value)))
+}
+
+#[cfg(target_arch = "wasm32")]
 async fn refresh_route_data(window: &web_sys::Window) -> Result<(), JsValue> {
     let document = window
         .document()
@@ -15249,7 +15352,13 @@ async fn refresh_route_data(window: &web_sys::Window) -> Result<(), JsValue> {
         .into_iter()
         .filter(|endpoint| endpoint.method == "GET")
     {
-        let url = concrete_endpoint_path(&path, endpoint);
+        // Parameterized probes are only valid after their collection endpoint
+        // has supplied a real identifier.  Skipping an unavailable dependent
+        // probe is preferable to sending a fabricated ID and turning an
+        // empty/disconnected workspace into a stream of false errors.
+        let Some(url) = concrete_live_endpoint_path(&path, endpoint, &responses) else {
+            continue;
+        };
         let row = match fetch_text(window, &url).await {
             Ok(body) => {
                 responses.push(EndpointBody {
@@ -15285,6 +15394,17 @@ async fn refresh_route_data(window: &web_sys::Window) -> Result<(), JsValue> {
             mount_native_sorters(&document)?;
             mount_browser_local_panels(window, &document)?;
         }
+    }
+    if let Some(page_data) = page_data.as_ref() {
+        page_data.set_inner_html(&route_workspace_result_html(&path, &responses));
+        mount_workspace_tabs(&document)?;
+        mount_data_cards(&document)?;
+        mount_native_tables(&document)?;
+        mount_native_subviews(&document)?;
+        mount_native_actions(&document)?;
+        mount_native_filters(&document)?;
+        mount_native_sorters(&document)?;
+        mount_browser_local_panels(window, &document)?;
     }
     let message = if errors == 0 {
         format!("Updated {} live probes", responses.len())
@@ -15344,6 +15464,78 @@ mod tests {
             .iter()
             .map(|value| (value * 1000.0).round() / 1000.0)
             .collect()
+    }
+
+    fn populated_route_html(path: &str) -> String {
+        let (endpoint_path, body) = match route_kind(path) {
+            RouteKind::Search | RouteKind::DiscoveryGraph => (
+                "/searches/:id/responses",
+                r#"[{"id":"search-1","username":"peer1","files":[{"filename":"Archive/Track.flac"}],"queueLength":1,"hasFreeUploadSlot":true}]"#,
+            ),
+            RouteKind::PlaylistIntake => (
+                "/source-feed-imports/preview",
+                r#"[{"artist":"Archive Artist","title":"Public Domain Theme","status":"Matched"}]"#,
+            ),
+            RouteKind::Wishlist => (
+                "/wishlist",
+                r#"[{"id":"wish-1","searchText":"rare live set","filter":"flac","enabled":true,"autoDownload":false}]"#,
+            ),
+            RouteKind::Downloads => (
+                "/transfers/downloads",
+                r#"[{"id":77,"username":"peer1","filename":"Remote/Song.mp3","state":"Queued","progress":0.5}]"#,
+            ),
+            RouteKind::Uploads => (
+                "/transfers/uploads",
+                r#"[{"id":78,"username":"peer1","filename":"Remote/Upload.mp3","state":"Queued","progress":0.5}]"#,
+            ),
+            RouteKind::Messages | RouteKind::Rooms => (
+                "/conversations",
+                r#"[{"username":"peer1","lastMessage":"hello","unreadCount":1}]"#,
+            ),
+            RouteKind::Users => (
+                "/users",
+                r#"[{"username":"peer1","status":"Online","files":2}]"#,
+            ),
+            RouteKind::Contacts => (
+                "/contacts",
+                r#"[{"nickname":"Peer One","peerId":"peer1","group":"trusted","verified":true}]"#,
+            ),
+            RouteKind::Solid => (
+                "/solid/status",
+                r#"{"webId":"https://example.test/profile#me","storage":"ready","status":"connected"}"#,
+            ),
+            RouteKind::Collections => (
+                "/collections",
+                r#"[{"id":"collection-1","title":"Fixture Collection","type":"ShareList","itemCount":1}]"#,
+            ),
+            RouteKind::ShareGroups => (
+                "/sharegroups",
+                r#"[{"id":"group-1","name":"Fixture Group","memberCount":1,"createdAt":"today"}]"#,
+            ),
+            RouteKind::SharedWithMe => (
+                "/shared",
+                r#"[{"id":"grant-1","title":"Fixture Share","owner":"peer1","permissions":"read"}]"#,
+            ),
+            RouteKind::Browse => (
+                "/users/:username/browse",
+                r#"[{"name":"/Music/Open Sessions","isDirectory":true,"size":0},{"name":"/Music/Open Sessions/Track.flac","isDirectory":false,"size":1234}]"#,
+            ),
+            RouteKind::System => (
+                "/server",
+                r#"{"state":"connected","username":"audit-user"}"#,
+            ),
+        };
+        route_workspace_result_html(
+            path,
+            &[EndpointBody {
+                endpoint: ApiEndpoint {
+                    method: "GET",
+                    path: endpoint_path,
+                    surface: "test",
+                },
+                body: body.to_string(),
+            }],
+        )
     }
 
     #[test]
@@ -17691,14 +17883,21 @@ mod tests {
             assert!(html.contains("data-slskr-native-select-visible"));
             assert!(html.contains("data-slskr-native-clear-selection"));
             assert!(html.contains("data-slskr-native-reset-state"));
-            assert!(html.contains("slskr-native-table"));
-            assert!(html.contains("aria-keyshortcuts=\"Enter Space ArrowUp ArrowDown Home End\""));
-            assert!(html.contains("data-slskr-native-sort=\"0\""));
-            assert!(html.contains("data-slskr-native-sort-0="));
-            assert!(html.contains("data-slskr-native-index="));
+            if html.contains("aria-keyshortcuts") {
+                assert!(
+                    html.contains("aria-keyshortcuts=\"Enter Space ArrowUp ArrowDown Home End\"")
+                );
+                assert!(html.contains("data-slskr-native-sort=\"0\""));
+                assert!(html.contains("data-slskr-native-sort-0="));
+                assert!(html.contains("data-slskr-native-index="));
+            } else {
+                assert!(html.contains("slskr-native-empty"));
+            }
             assert!(html.contains("slskr-native-inspector"));
             assert!(html.contains("data-slskr-native-inspector-title"));
-            assert!(html.contains("data-slskr-native-select"));
+            if html.contains("aria-keyshortcuts") {
+                assert!(html.contains("data-slskr-native-select"));
+            }
             assert!(html.contains("slskr-native-selection-status"));
             assert!(html.contains("slskr-toast-region"));
             assert!(html.contains("slskr-legacy-workflow"));
@@ -18217,7 +18416,7 @@ mod tests {
         assert!(live_messages.contains(r#"value="15""#));
         assert!(!live_messages.contains("Runtime human check"));
 
-        let sharing = route_page_html("/sharegroups");
+        let sharing = populated_route_html("/sharegroups");
         for value in ["Create Share Grant", "Update Share Grant", "Permissions"] {
             assert!(
                 sharing.contains(value),
@@ -18347,7 +18546,10 @@ mod tests {
                 "downloads workspace should contain {value}"
             );
         }
-        assert!(downloads.contains("data-slskr-transfer-state-control"));
+        assert!(
+            downloads.contains("data-slskr-transfer-state-control")
+                || downloads.contains("No downloads to display")
+        );
 
         let uploads = route_page_html("/uploads");
         for value in [
@@ -18490,7 +18692,7 @@ mod tests {
             );
         }
 
-        let shared = route_page_html("/shared");
+        let shared = populated_route_html("/shared");
         for value in [
             "Shared Manifest",
             "file-level access preview",
@@ -18549,7 +18751,7 @@ mod tests {
         ];
 
         for (path, labels) in expectations {
-            let html = route_page_html(path);
+            let html = populated_route_html(path);
             assert!(
                 html.contains("slskr-native-row-actions"),
                 "{path} should render row action toolbar"
@@ -18730,12 +18932,12 @@ mod tests {
 
     #[test]
     fn native_row_actions_are_marked_for_selected_row_execution() {
-        let html = route_page_html("/browse");
+        let html = populated_route_html("/browse");
         assert!(html.contains(r#"data-slskr-native-row-action="Download Selected""#));
         assert!(html.contains(r#"data-slskr-native-row-action="Open a New Browse Tab""#));
         assert!(html.contains(r#"data-slskr-native-title="/Music/Open Sessions""#));
         assert!(html.contains(r#"data-slskr-native-resource-id="row-1""#));
-        let users = route_page_html("/users");
+        let users = populated_route_html("/users");
         assert!(users.contains(r#"data-slskr-native-resource-id="peer1""#));
     }
 
@@ -18827,7 +19029,7 @@ mod tests {
         assert!(contacts.contains(r#"data-slskr-native-contact="Nick""#));
         assert!(contacts.contains(r#"data-slskr-native-username="peer3""#));
 
-        let wishlist = route_page_html("/wishlist");
+        let wishlist = populated_route_html("/wishlist");
         assert!(wishlist.contains("data-slskr-native-search-filter"));
         assert!(wishlist.contains("data-slskr-wishlist-ignore-manager"));
         assert!(wishlist.contains("Ignored result folders"));
@@ -18881,17 +19083,17 @@ mod tests {
         assert!(history.contains("rare live set"));
         assert!(history.contains("completed · 8 results"));
 
-        let sharing = route_page_html("/sharegroups");
+        let sharing = populated_route_html("/sharegroups");
         assert!(sharing.contains("data-slskr-native-share-group"));
         assert!(sharing.contains("data-slskr-native-member-count"));
         assert!(sharing.contains("data-slskr-share-group-row-controls"));
 
-        let shared = route_page_html("/shared");
+        let shared = populated_route_html("/shared");
         assert!(shared.contains("data-slskr-native-owner"));
         assert!(shared.contains("data-slskr-native-permissions"));
         assert!(shared.contains("data-slskr-inbound-permission-controls"));
 
-        let browse = route_page_html("/browse");
+        let browse = populated_route_html("/browse");
         assert!(browse.contains("data-slskr-native-path"));
         assert!(browse.contains("data-slskr-native-entry-kind"));
         assert!(browse.contains("data-slskr-native-filename"));
