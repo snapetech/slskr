@@ -7,6 +7,37 @@ on:
         description: "Release tag to publish, for example release-v0.2.15"
         required: true
         type: string
+    secrets:
+      AUR_SSH_KEY:
+        required: false
+      COPR_LOGIN:
+        required: false
+      COPR_TOKEN:
+        required: false
+      COPR_KERBEROS_PRINCIPAL:
+        required: false
+      COPR_KERBEROS_KEYTAB_B64:
+        required: false
+      COPR_FEDORA_USERNAME:
+        required: false
+      COPR_FEDORA_PASSWORD:
+        required: false
+      COPR_FEDORA_OTP_SECRET:
+        required: false
+      GPG_PRIVATE_KEY:
+        required: false
+      LAUNCHPAD_SFTP_KEY:
+        required: false
+      LAUNCHPAD_SFTP_USER:
+        required: false
+      DOCKERHUB_USERNAME:
+        required: false
+      DOCKERHUB_TOKEN:
+        required: false
+      TAP_GITHUB_TOKEN:
+        required: false
+      WINGETCREATE_GITHUB_TOKEN:
+        required: false
   workflow_dispatch:
     inputs:
       tag:
@@ -54,7 +85,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
       - name: Download release assets
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
@@ -148,7 +179,7 @@ jobs:
           path: packaging
       - name: Download Linux asset
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           . packaging/scripts/release-assets.sh
@@ -320,7 +351,7 @@ jobs:
       - name: Build source package
         env:
           GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           [[ -n "${GPG_PRIVATE_KEY:-}" ]] || exit 0
@@ -492,12 +523,12 @@ jobs:
           ref: main
       - uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # docker/setup-qemu-action@v4.2.0
       - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # docker/setup-buildx-action@v4.2.0
-      - uses: docker/login-action@abd2ef45e78c5afb21d64d4ca52ee8550d9572c7 # docker/login-action@v4.5.1
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # docker/login-action@v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/login-action@abd2ef45e78c5afb21d64d4ca52ee8550d9572c7 # docker/login-action@v4.5.1
+          password: ${{ github.token }}
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # docker/login-action@v4.6.0
         if: env.HAS_DOCKERHUB == 'true'
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}

@@ -1,6 +1,6 @@
 use std::{
     collections::BTreeSet,
-    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
+    net::{Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket},
     sync::{
         atomic::{AtomicU16, Ordering},
         Arc,
@@ -27,6 +27,9 @@ const LOOKUP_TIMEOUT: Duration = Duration::from_secs(30);
 #[derive(Debug)]
 pub struct Rendezvous {
     client: AsyncDht,
+    dht_backend: Option<SocketAddr>,
+    shared_udp_socket: Option<Arc<UdpSocket>>,
+    shared_public_port: Option<u16>,
     overlay_port: AtomicU16,
     allow_special_use_peers: bool,
     lan_only: bool,
@@ -52,6 +55,18 @@ struct Status {
 
 impl Rendezvous {
     pub fn new(settings: &crate::config::DhtSettings) -> Result<Self, String> {
+        Self::new_with_shared_udp(settings, false)
+    }
+
+    /// Build the rendezvous node with an internal UDP endpoint when the
+    /// public DHT port is shared with overlay traffic.  The gateway owns the
+    /// public socket and forwards only DHT-shaped datagrams to this endpoint;
+    /// the normal standalone configuration continues to bind the configured
+    /// port directly.
+    pub fn new_with_shared_udp(
+        settings: &crate::config::DhtSettings,
+        shared_udp: bool,
+    ) -> Result<Self, String> {
         let bootstrap = settings
             .bootstrap_routers
             .iter()
@@ -73,6 +88,7 @@ impl Rendezvous {
                 .bootstrap_timeout
                 .max(settings.cold_bootstrap_timeout),
             settings.min_neighbors,
+            shared_udp,
         )
     }
 
@@ -90,6 +106,7 @@ impl Rendezvous {
             Duration::from_secs(15 * 60),
             LOOKUP_TIMEOUT,
             3,
+            false,
         )
     }
 
@@ -101,19 +118,49 @@ impl Rendezvous {
         refresh_interval: Duration,
         lookup_timeout: Duration,
         min_neighbors: usize,
+        shared_udp: bool,
     ) -> Result<Self, String> {
+        let shared_udp_socket = if shared_udp {
+            let socket = UdpSocket::bind(SocketAddr::new(
+                std::net::IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                port,
+            ))
+            .map_err(|error| format!("shared DHT UDP bind failed: {error}"))?;
+            socket
+                .set_nonblocking(true)
+                .map_err(|error| format!("shared DHT UDP nonblocking setup failed: {error}"))?;
+            Some(Arc::new(socket))
+        } else {
+            None
+        };
         let mut builder = Dht::builder();
-        builder.bind_address(Ipv4Addr::UNSPECIFIED).port(port);
+        builder
+            .bind_address(Ipv4Addr::UNSPECIFIED)
+            // mainline owns this endpoint.  A zero port lets the public
+            // gateway demuxer retain the configured DHT port for QUIC and
+            // overlay traffic without competing for the same UDP socket.
+            .port(if shared_udp { 0 } else { port });
+        if let Some(socket) = shared_udp_socket.as_ref() {
+            builder.outbound_socket(Arc::clone(socket));
+        }
         if let Some(bootstrap) = bootstrap {
             builder.bootstrap(bootstrap);
         }
-        let client = builder
+        #[allow(deprecated)]
+        let dht = builder
             .build()
-            .map_err(|error| format!("DHT bind failed: {error}"))?
-            .as_async();
+            .map_err(|error| format!("DHT bind failed: {error}"))?;
+        #[allow(deprecated)]
+        let dht_backend = shared_udp.then(|| SocketAddr::V4(dht.info().local_addr()));
+        let shared_public_port = shared_udp_socket
+            .as_ref()
+            .and_then(|socket| socket.local_addr().ok())
+            .map(|address| address.port());
+        let client = dht.as_async();
         Ok(Self {
             client,
             overlay_port: AtomicU16::new(overlay_port.unwrap_or(0)),
+            shared_public_port,
             allow_special_use_peers: lan_only || bootstrap.is_some(),
             lan_only,
             refresh_interval,
@@ -121,6 +168,8 @@ impl Rendezvous {
             min_neighbors,
             peers: RwLock::new(BTreeSet::new()),
             status: RwLock::new(Status::default()),
+            dht_backend,
+            shared_udp_socket,
         })
     }
 
@@ -172,11 +221,15 @@ impl Rendezvous {
         let info = self.client.info().await;
         let routing_nodes = self.client.to_bootstrap().await.len();
         let now = crate::unix_timestamp();
+        let public_address = info.public_address().map(|address| {
+            self.shared_public_port
+                .map_or(address, |port| SocketAddrV4::new(*address.ip(), port))
+        });
         *self.status.write().await = Status {
             bootstrapped,
             routing_nodes,
             dht_size_estimate: info.dht_size_estimate().0,
-            public_address: info.public_address(),
+            public_address,
             firewalled: info.firewalled(),
             server_mode: info.server_mode(),
             last_refresh: Some(now),
@@ -212,6 +265,21 @@ impl Rendezvous {
             .copied()
             .map(SocketAddr::V4)
             .collect()
+    }
+
+    /// Return the internal mainline endpoint that receives DHT datagrams
+    /// from the public shared-port demuxer, when shared UDP mode is active.
+    #[must_use]
+    pub fn shared_udp_backend(&self) -> Option<SocketAddr> {
+        self.dht_backend
+    }
+
+    /// Return the public UDP socket used for outbound DHT traffic in shared
+    /// mode. The overlay gateway takes a Tokio clone of this socket so both
+    /// protocols retain the configured public source port.
+    #[must_use]
+    pub fn shared_udp_socket(&self) -> Option<Arc<UdpSocket>> {
+        self.shared_udp_socket.as_ref().map(Arc::clone)
     }
 
     #[cfg(test)]
@@ -308,6 +376,46 @@ mod tests {
             assert!(!valid_peer(address.parse().unwrap(), false), "{address}");
         }
         assert!(valid_peer("127.0.0.1:50305".parse().unwrap(), true));
+    }
+
+    #[test]
+    fn shared_udp_mode_moves_mainline_to_a_bounded_internal_endpoint() {
+        let rendezvous = Rendezvous::with_runtime_builder(
+            50_300,
+            Some(50_305),
+            Some(&[]),
+            true,
+            Duration::from_secs(900),
+            LOOKUP_TIMEOUT,
+            3,
+            true,
+        )
+        .unwrap();
+        let backend = rendezvous
+            .shared_udp_backend()
+            .expect("shared mode has a mainline backend");
+        assert_ne!(backend.port(), 50_300);
+        assert_ne!(backend.port(), 0);
+    }
+
+    #[test]
+    fn shared_udp_mode_exposes_the_public_socket_port() {
+        let rendezvous = Rendezvous::with_runtime_builder(
+            50_301,
+            Some(50_305),
+            Some(&[]),
+            true,
+            Duration::from_secs(900),
+            LOOKUP_TIMEOUT,
+            3,
+            true,
+        )
+        .unwrap();
+        let public_socket = rendezvous
+            .shared_udp_socket()
+            .expect("shared mode has a public socket");
+        assert_eq!(public_socket.local_addr().unwrap().port(), 50_301);
+        assert_ne!(rendezvous.shared_udp_backend().unwrap().port(), 50_301);
     }
 
     #[tokio::test]

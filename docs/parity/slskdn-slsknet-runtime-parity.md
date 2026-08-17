@@ -18,6 +18,16 @@ visible behavior, protocol semantics, security posture, API shapes, UI
 workflows, and operator guarantees match unless an entry is explicitly marked
 as a compatibility acknowledgement or intentionally Rust-native.
 
+The current shared-UDP implementation owns the configured public DHT port in
+the gateway when the frozen sharing predicate is active. It forwards only
+DHT-shaped datagrams to a bounded internal mainline endpoint and returns
+validated DHT-shaped responses through the public socket while leaving overlay
+and QUIC traffic in the gateway classifier. A localhost runtime probe and a
+socket-level regression confirm the public bind, internal endpoint, response
+source port, and public-port status projection; mainline outbound source-port
+routing and live cross-client DHT/QUIC receiver interoperability remain
+unproven.
+
 ## Baseline
 
 - `slskR` scaffold baseline: `f01cdc30`, 2026-04-30.
@@ -149,10 +159,11 @@ routes explicitly pinned, non-shared-port Pod control peers through QUIC.
 The separate `slskdn-overlay-data` ALPN now has a bounded Rust client/server,
 exact-byte tests, daemon receive wiring, and the frozen authenticated
 `RELAY_TCP` framing with allowlist, byte, duration, and concurrency limits.
-Shared DHT/UDP demultiplexing, public-port QUIC proxying, application-level
-data delivery, and live cross-runtime QUIC receiver proof remain open; the
-default shared-port path therefore retains its UDP fallback until those pieces
-are implemented.
+Shared DHT/UDP demultiplexing and public-port QUIC proxying now have bounded
+request/response routing proof, but mainline outbound source-port routing,
+application-level QUIC data delivery, and live cross-runtime QUIC receiver
+proof remain open; the default shared-port path therefore retains its UDP
+fallback until those pieces are implemented.
 
 The executable configuration ledger currently reports **436 complete, 0
 partial, and 0 missing** leaves out of the 436-path frozen union.
@@ -672,7 +683,7 @@ Required classification values:
 | --- | --- | --- |
 | Runtime signed capabilities | Frozen binary canonical bytes, Ed25519 sign/verify, lower-case base32 peer ID, observation-keyed bounded registry | Exact frozen unsigned bytes plus valid, forged, expired-local-metadata, malformed, blank, case-insensitive lookup, and registry-bound tests pass. |
 | Capability exchange | Frozen `KSDN` custom peer-message envelope with fail-closed parsing and ack behavior | Live cross-runtime proof passes: a signed slskR hello produced an exact-nonce slskdN acknowledgement, both descriptors verified, and both live registries retained the authenticated peer observation. |
-| Mesh rendezvous/overlay | BitTorrent-DHT discovery, TLS 1.3 `SLSKDNM1` framing, authenticated peer registry, JSON service calls, and slskdN signed MessagePack UDP control envelopes | Live cross-runtime proof passes for slskR's pinned outbound client and slskdN's server: exact DER certificate pinning, TLS 1.3, nonce handshake, correlated frozen service framing, System.Text.Json byte arrays, `dht.Ping`, and an Ed25519-signed `dht.Store` retained by slskdN all completed. The slskdN `ControlEnvelope` wire codec, canonical signing, bounded UDP sender, PodCore route emission, bounded QUIC data streams, reusable data streams, and bounded public-proxy admission now have hermetic proof. Shared DHT/UDP demultiplexing, shared-port proxy wiring, and end-to-end UDP receiver interoperability remain open. Exact rendezvous keys also announce/discover on a local Mainline testnet. |
+| Mesh rendezvous/overlay | BitTorrent-DHT discovery, TLS 1.3 `SLSKDNM1` framing, authenticated peer registry, JSON service calls, and slskdN signed MessagePack UDP control envelopes | Live cross-runtime proof passes for slskR's pinned outbound client and slskdN's server: exact DER certificate pinning, TLS 1.3, nonce handshake, correlated frozen service framing, System.Text.Json byte arrays, `dht.Ping`, and an Ed25519-signed `dht.Store` retained by slskdN all completed. The slskdN `ControlEnvelope` wire codec, canonical signing, bounded UDP sender, PodCore route emission, bounded QUIC data streams, reusable data streams, and bounded public-proxy admission now have hermetic proof. Shared DHT/UDP request/response demultiplexing has bounded proof; mainline outbound source-port routing and end-to-end UDP receiver interoperability remain open. Exact rendezvous keys also announce/discover on a local Mainline testnet. |
 | Private-gateway client | Pinned outbound TLS overlay plus OpenTunnel/TunnelData/GetTunnelData/CloseTunnel local TCP mapping | Live cross-runtime proof passes: slskr joined a gateway Pod hosted by slskdN, opened a policy-authorized private TCP tunnel through the pinned overlay, sent and received the exact echo bytes, and closed the tunnel. Hermetic tests retain the negative policy/member/quota/replay coverage. |
 | Wishlist scheduling | Server-interval-aware scheduler with positive guardrails | Interval guard, term replacement, daemon term extraction, and scheduled search record tests are implemented. Phase C live certification received the public server interval and sent `WishlistSearch` on the authenticated connection. |
 | Room failures | `CantCreateRoom`/reconnect state reaches API/UI instead of timing out silently | `CantCreateRoom` projection clears optimistic joins and records `last_error`; disconnected/reconnecting joins return HTTP `503`. |

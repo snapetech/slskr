@@ -869,10 +869,9 @@ async fn controller_api_differential_slskd_file_transfer_room_residuals() {
 
 #[test]
 fn folder_contents_response_parser_accepts_slskd_wire_shape() {
-    let entries = crate::config::parse_share_entries(
-        "open-commons-fixtures/commons-click-track.ogg=168370",
-    )
-    .expect("fixture share entry");
+    let entries =
+        crate::config::parse_share_entries("open-commons-fixtures/commons-click-track.ogg=168370")
+            .expect("fixture share entry");
     let payload = super::build_folder_contents_payload(
         &entries,
         7,
@@ -887,7 +886,10 @@ fn folder_contents_response_parser_accepts_slskd_wire_shape() {
     )
     .expect("parse folder response");
     assert_eq!(parsed.len(), 1);
-    assert_eq!(parsed[0].filename, "open-commons-fixtures/commons-click-track.ogg");
+    assert_eq!(
+        parsed[0].filename,
+        "open-commons-fixtures/commons-click-track.ogg"
+    );
     assert_eq!(parsed[0].size, 168370);
 }
 

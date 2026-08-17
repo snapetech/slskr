@@ -2,7 +2,7 @@ use std::{
     collections::{BTreeMap, HashMap, VecDeque},
     fmt, fs,
     io::{Read as _, Seek as _, SeekFrom},
-    net::{IpAddr, SocketAddr},
+    net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket as StdUdpSocket},
     path::Path,
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -127,6 +127,8 @@ pub struct Gateway {
     certificate_sha256: [u8; 32],
     listener: Mutex<Option<TcpListener>>,
     udp_listener: Mutex<Option<UdpSocket>>,
+    dht_forward_socket: Option<Arc<UdpSocket>>,
+    dht_forward_target: Option<SocketAddr>,
     quic_listener: Mutex<Option<QuicControlServer>>,
     quic_data_listener: Mutex<Option<QuicDataServer>>,
     quic_proxy_backend: Option<SocketAddr>,
@@ -203,6 +205,92 @@ impl Gateway {
         quic_data_policy: Option<QuicDataPolicy>,
         max_concurrent_streams: usize,
     ) -> Result<Self, String> {
+        Self::load_or_create_with_quic_and_data_policy_and_proxy_inner(
+            bind,
+            state_dir,
+            quic_bind,
+            quic_data_bind,
+            quic_proxy_bind,
+            None,
+            None,
+            None,
+            quic_data_policy,
+            max_concurrent_streams,
+        )
+        .await
+    }
+
+    /// Construct a gateway whose public UDP listener also owns a configured
+    /// DHT port. DHT-shaped datagrams are forwarded to mainline's internal
+    /// endpoint; overlay and QUIC traffic remains handled by this gateway.
+    pub async fn load_or_create_with_quic_and_data_policy_and_proxy_and_dht(
+        bind: SocketAddr,
+        state_dir: &Path,
+        quic_bind: Option<SocketAddr>,
+        quic_data_bind: Option<SocketAddr>,
+        quic_proxy_bind: Option<SocketAddr>,
+        shared_udp_bind: Option<SocketAddr>,
+        dht_backend: Option<SocketAddr>,
+        quic_data_policy: Option<QuicDataPolicy>,
+        max_concurrent_streams: usize,
+    ) -> Result<Self, String> {
+        Self::load_or_create_with_quic_and_data_policy_and_proxy_inner(
+            bind,
+            state_dir,
+            quic_bind,
+            quic_data_bind,
+            quic_proxy_bind,
+            shared_udp_bind,
+            None,
+            dht_backend,
+            quic_data_policy,
+            max_concurrent_streams,
+        )
+        .await
+    }
+
+    /// Construct a gateway using a socket already bound by the shared DHT
+    /// runtime. Mainline uses another clone for outbound packets, while the
+    /// gateway owns the Tokio receive/send half for overlay demultiplexing.
+    pub async fn load_or_create_with_quic_and_data_policy_and_proxy_and_dht_socket(
+        bind: SocketAddr,
+        state_dir: &Path,
+        quic_bind: Option<SocketAddr>,
+        quic_data_bind: Option<SocketAddr>,
+        quic_proxy_bind: Option<SocketAddr>,
+        shared_udp_bind: Option<SocketAddr>,
+        shared_udp_socket: Option<Arc<StdUdpSocket>>,
+        dht_backend: Option<SocketAddr>,
+        quic_data_policy: Option<QuicDataPolicy>,
+        max_concurrent_streams: usize,
+    ) -> Result<Self, String> {
+        Self::load_or_create_with_quic_and_data_policy_and_proxy_inner(
+            bind,
+            state_dir,
+            quic_bind,
+            quic_data_bind,
+            quic_proxy_bind,
+            shared_udp_bind,
+            shared_udp_socket,
+            dht_backend,
+            quic_data_policy,
+            max_concurrent_streams,
+        )
+        .await
+    }
+
+    async fn load_or_create_with_quic_and_data_policy_and_proxy_inner(
+        bind: SocketAddr,
+        state_dir: &Path,
+        quic_bind: Option<SocketAddr>,
+        quic_data_bind: Option<SocketAddr>,
+        quic_proxy_bind: Option<SocketAddr>,
+        shared_udp_bind: Option<SocketAddr>,
+        shared_udp_socket: Option<Arc<StdUdpSocket>>,
+        dht_backend: Option<SocketAddr>,
+        quic_data_policy: Option<QuicDataPolicy>,
+        max_concurrent_streams: usize,
+    ) -> Result<Self, String> {
         let (certificate, private_key) = load_or_create_certificate(state_dir)?;
         let certificate_sha256 = Sha256::digest(certificate.as_ref()).into();
         let config =
@@ -241,16 +329,37 @@ impl Gateway {
             .local_addr()
             .map_err(|error| format!("overlay listener address failed: {error}"))?;
         // slskdN's UDP control plane normally shares its public socket with
-        // DHT.  The local DHT owns that socket when enabled, so this optional
-        // listener is deliberately best-effort; standalone/test gateways can
-        // still accept exact ControlEnvelope datagrams.
-        let udp_bind = quic_proxy_bind.unwrap_or(bind);
-        let udp_listener = match UdpSocket::bind(udp_bind).await {
-            Ok(socket) => Some(socket),
-            Err(error) => {
-                tracing::debug!(%error, ?udp_bind, "overlay UDP control listener unavailable");
-                None
+        // DHT.  The public gateway owns that socket in shared mode and sends
+        // only DHT-shaped datagrams to mainline's internal endpoint.
+        let udp_listener = if let Some(shared_socket) = shared_udp_socket {
+            let socket = shared_socket
+                .try_clone()
+                .map_err(|error| format!("shared UDP socket clone failed: {error}"))?;
+            socket
+                .set_nonblocking(true)
+                .map_err(|error| format!("shared UDP socket nonblocking setup failed: {error}"))?;
+            Some(
+                UdpSocket::from_std(socket)
+                    .map_err(|error| format!("shared UDP Tokio socket setup failed: {error}"))?,
+            )
+        } else {
+            let udp_bind = shared_udp_bind.or(quic_proxy_bind).unwrap_or(bind);
+            match UdpSocket::bind(udp_bind).await {
+                Ok(socket) => Some(socket),
+                Err(error) => {
+                    tracing::debug!(%error, ?udp_bind, "overlay UDP control listener unavailable");
+                    None
+                }
             }
+        };
+        let dht_forward_socket = if dht_backend.is_some() {
+            Some(Arc::new(
+                UdpSocket::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0))
+                    .await
+                    .map_err(|error| format!("DHT forwarding socket bind failed: {error}"))?,
+            ))
+        } else {
+            None
         };
         Ok(Self {
             bind,
@@ -258,6 +367,8 @@ impl Gateway {
             certificate_sha256,
             listener: Mutex::new(Some(listener)),
             udp_listener: Mutex::new(udp_listener),
+            dht_forward_socket,
+            dht_forward_target: dht_backend,
             quic_listener: Mutex::new(quic_listener),
             quic_data_listener: Mutex::new(quic_data_listener),
             quic_proxy_backend: quic_proxy_bind.and(quic_bind),
@@ -426,6 +537,12 @@ impl Gateway {
         let public_socket = Arc::new(socket);
         let mut quic_sessions = HashMap::new();
         let quic_admission = QuicProxyAdmissionGate::default();
+        if let Some(forward_socket) = self.dht_forward_socket.as_ref() {
+            tokio::spawn(forward_dht_responses(
+                Arc::clone(forward_socket),
+                Arc::clone(&public_socket),
+            ));
+        }
         let mut buffer = [0_u8; 65_536];
         loop {
             prune_quic_proxy_sessions(&mut quic_sessions);
@@ -451,9 +568,19 @@ impl Gateway {
                 continue;
             }
             if is_dht_packet(&buffer[..received.0]) {
-                // The mainline DHT owns this packet class when the shared
-                // public socket is available. A standalone gateway cannot
-                // answer DHT RPCs, so never misroute it to the overlay.
+                if let (Some(forward_socket), Some(forward_target)) =
+                    (&self.dht_forward_socket, self.dht_forward_target)
+                {
+                    if let Err(error) = forward_socket
+                        .send_to(&buffer[..received.0], forward_target)
+                        .await
+                    {
+                        tracing::debug!(%error, ?forward_target, "shared DHT datagram forwarding failed");
+                    }
+                }
+                // DHT traffic is never handed to the overlay decoder. In
+                // standalone mode there is no forward target, so it is
+                // intentionally ignored just as before.
                 continue;
             }
             if received.0 > CONTROL_MAX_DATAGRAM_BYTES {
@@ -873,6 +1000,29 @@ fn prune_quic_proxy_sessions(sessions: &mut HashMap<SocketAddr, QuicProxySession
 
 fn is_dht_packet(buffer: &[u8]) -> bool {
     buffer.first().copied() == Some(b'd')
+}
+
+/// Return DHT responses from mainline's internal socket through the public
+/// shared UDP socket. The source address observed by the backend is the DHT
+/// peer that sent the request, so the public socket can send the response to
+/// that peer while retaining the configured public source port.
+async fn forward_dht_responses(forward_socket: Arc<UdpSocket>, public_socket: Arc<UdpSocket>) {
+    let mut buffer = [0_u8; 65_536];
+    loop {
+        let (received, peer) = match forward_socket.recv_from(&mut buffer).await {
+            Ok(received) => received,
+            Err(error) => {
+                tracing::debug!(%error, "shared DHT response forwarder stopped");
+                return;
+            }
+        };
+        if !is_dht_packet(&buffer[..received]) {
+            continue;
+        }
+        if let Err(error) = public_socket.send_to(&buffer[..received], peer).await {
+            tracing::debug!(%error, ?peer, "shared DHT response forwarding failed");
+        }
+    }
 }
 
 fn is_quic_initial_packet(buffer: &[u8]) -> bool {
@@ -2473,10 +2623,10 @@ mod tests {
     fn quic_proxy_admission_matches_frozen_global_and_prefix_limits() {
         let gate = QuicProxyAdmissionGate::default();
         let first_prefix = [
-            "198.51.100.1:50_305",
-            "198.51.100.2:50_305",
-            "198.51.100.3:50_305",
-            "198.51.100.4:50_305",
+            "198.51.100.1:50305",
+            "198.51.100.2:50305",
+            "198.51.100.3:50305",
+            "198.51.100.4:50305",
         ];
         let leases = first_prefix
             .into_iter()
@@ -2484,7 +2634,7 @@ mod tests {
             .collect::<Option<Vec<_>>>();
         assert!(leases.is_some());
         assert!(gate
-            .try_acquire("198.51.100.5:50_305".parse().unwrap())
+            .try_acquire("198.51.100.5:50305".parse().unwrap())
             .is_none());
         drop(leases);
 
@@ -2499,7 +2649,7 @@ mod tests {
             );
         }
         assert!(global_gate
-            .try_acquire("203.0.64.1:50_305".parse().unwrap())
+            .try_acquire("203.0.64.1:50305".parse().unwrap())
             .is_none());
     }
 
@@ -2516,6 +2666,34 @@ mod tests {
         assert!(!is_quic_initial_packet(&packet));
         assert!(is_dht_packet(b"d1:ad2:id20:01234567890123456789ee"));
         assert!(!is_dht_packet(b"\xc0"));
+    }
+
+    #[tokio::test]
+    async fn shared_dht_response_forwarder_returns_packets_from_public_source() {
+        let public_socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
+        let forward_socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
+        let backend_peer = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let public_address = public_socket.local_addr().unwrap();
+        let forward_address = forward_socket.local_addr().unwrap();
+        let forwarder = tokio::spawn(forward_dht_responses(
+            Arc::clone(&forward_socket),
+            Arc::clone(&public_socket),
+        ));
+
+        let packet = b"d1:ad2:id20:01234567890123456789ee";
+        backend_peer.send_to(packet, forward_address).await.unwrap();
+        let mut received = [0_u8; 128];
+        let (size, source) = tokio::time::timeout(
+            Duration::from_secs(1),
+            backend_peer.recv_from(&mut received),
+        )
+        .await
+        .expect("DHT response should be forwarded")
+        .unwrap();
+        assert_eq!(&received[..size], packet);
+        assert_eq!(source, public_address);
+
+        forwarder.abort();
     }
 
     #[test]

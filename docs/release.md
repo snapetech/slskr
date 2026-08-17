@@ -16,7 +16,7 @@ audit, and subpath smoke checks.
 
 All compile-capable Cargo commands in this repository must use
 `scripts/with-build-guard.sh`. The wrapper serializes Rust commands, forces one
-Cargo job, and caps virtual memory at 12 GiB by default (16 GiB maximum):
+Cargo job, and caps virtual memory at 12 GiB:
 
 ```sh
 scripts/with-build-guard.sh cargo build --release -p slskr

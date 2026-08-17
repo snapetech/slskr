@@ -131,7 +131,7 @@ done
 
 for expected in \
   'uses: ./.github/workflows/release-publish.yml' \
-  'secrets: inherit' \
+  'AUR_SSH_KEY: ${{ secrets.AUR_SSH_KEY }}' \
   'needs: [release]' \
   'packages: write'; do
   if ! rg -n -F -- "$expected" .github/workflows/release.yml >/dev/null; then

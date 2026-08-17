@@ -25,6 +25,22 @@ if ! rg -q 'export RUST_TEST_THREADS=1' scripts/with-build-guard.sh; then
   printf 'Rust build guard check failed: the wrapper must force one test thread\n' >&2
   status=1
 fi
+if ! rg -q 'export CARGO_PROFILE_DEV_DEBUG=' scripts/with-build-guard.sh; then
+  printf 'Rust build guard check failed: the wrapper must disable dev debug info by default\n' >&2
+  status=1
+fi
+if ! rg -q 'export CARGO_INCREMENTAL=' scripts/with-build-guard.sh; then
+  printf 'Rust build guard check failed: the wrapper must disable incremental compilation by default\n' >&2
+  status=1
+fi
+if ! rg -q '^max_virtual_memory_kib=12582912$' scripts/with-build-guard.sh; then
+  printf 'Rust build guard check failed: the wrapper hard ceiling must be 12 GiB\n' >&2
+  status=1
+fi
+if ! rg -q '^ulimit -v "\$interop_virtual_memory_kib"$' scripts/run-live-interop-matrix.sh; then
+  printf 'Rust build guard check failed: the live interop launcher must enforce the 12 GiB ceiling before reuse or build\n' >&2
+  status=1
+fi
 while IFS= read -r -d '' file; do
   while IFS= read -r match; do
     [[ "$match" == *"with-build-guard.sh"* ]] && continue

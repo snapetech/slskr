@@ -348,7 +348,8 @@ slskr_config="$work_dir/slskr.toml"
 slskr_share="$work_dir/slskr-share"
 slskdn_app="$work_dir/slskdn-app"
 slskdn_share="$slskdn_app/shares"
-mkdir -p "$slskr_state" "$slskr_share" "$slskdn_app/config" "$slskdn_app/downloads" "$slskdn_app/incomplete" "$slskdn_share"
+slskdn_web="$slskdn_app/web"
+mkdir -p "$slskr_state" "$slskr_share" "$slskdn_app/config" "$slskdn_app/downloads" "$slskdn_app/incomplete" "$slskdn_share" "$slskdn_web"
 
 cat >"$slskr_config" <<'TOML'
 [mesh]
@@ -418,6 +419,7 @@ debug: true
 web:
   port: $slskdn_http_port
   address: 127.0.0.1
+  content_path: .
   https:
     disabled: true
     force: false
@@ -488,7 +490,8 @@ slskr_pid="$!"
 (
   export APP_DIR="$slskdn_app"
   export SLSKDN_TEST_USER_ENDPOINT_OVERRIDES="$slskr_username=127.0.0.1:$slskr_listen_port;$upstream_username=127.0.0.1:$slskr_listen_port"
-  exec "$slskdn_binary" --config "$slskdn_app/config/slskd.yml" --app-dir "$slskdn_app"
+  cd "$slskdn_app"
+  exec "$slskdn_binary" --config config/slskd.yml --app-dir "$slskdn_app"
 ) >"$slskdn_log" 2>&1 &
 slskdn_pid="$!"
 

@@ -43,6 +43,35 @@ EXPECTED = {
 
 UNMATERIALIZED_WORKSTREAMS: list[dict[str, str]] = []
 
+UNIVERSAL_BIDIRECTIONAL_TRANSPORTS = (
+    "soulseek-peer-bidirectional",
+    "obfuscated-peer-bidirectional",
+    "distributed-dht-bidirectional",
+    "overlay-udp-bidirectional",
+    "overlay-quic-control-bidirectional",
+    "quic-data-bidirectional",
+    "relay-gateway-bidirectional",
+    "mesh-sync-bidirectional",
+    "virtualsoulfind-bidirectional",
+    "file-stream-transfer-bidirectional",
+)
+UNIVERSAL_LIFECYCLE_CHECK = "failure-restart-lifecycle-matrix"
+UNIVERSAL_LIFECYCLE_SCENARIOS = frozenset(
+    {
+        "restart",
+        "corrupt-state",
+        "cancel",
+        "timeout",
+        "retry",
+        "resume",
+        "concurrent-mutation",
+        "upgrade",
+        "rollback",
+        "permissions",
+        "uninstall",
+    }
+)
+
 
 def run_json(command: list[str], cwd: Path) -> Any:
     command = guarded_cargo_command(command, cwd)
@@ -4299,12 +4328,84 @@ def live_interop_entries(
     return entries
 
 
+def universal_transport_failures(path: Path) -> list[str]:
+    """Validate the fresh live evidence required by the universal gate.
+
+    The ordinary parity manifest can prove local protocol/controller behavior,
+    but it cannot infer that a transport worked across a frozen runtime. Keep
+    those claims in an explicit artifact so a green local differential cannot
+    accidentally certify a missing QUIC, DHT, relay, or reconnect path.
+    """
+    failures: list[str] = []
+    if not path.is_file():
+        return [f"transport evidence does not exist: {path}"]
+    try:
+        evidence = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        return [f"transport evidence is not valid JSON: {error}"]
+
+    if evidence.get("evidenceMode") != "live":
+        failures.append(
+            "transport evidence must declare evidenceMode=live; local-only evidence cannot close the universal gate"
+        )
+    if not isinstance(evidence.get("generatedAt"), str) or not evidence["generatedAt"].strip():
+        failures.append("transport evidence must include a non-empty generatedAt timestamp")
+    records = evidence.get("checks")
+    if not isinstance(records, list):
+        return failures + ["transport evidence must contain a checks array"]
+
+    by_id: dict[str, dict[str, Any]] = {}
+    for index, record in enumerate(records):
+        if not isinstance(record, dict) or not isinstance(record.get("id"), str):
+            failures.append(f"transport evidence check {index} must be an object with a string id")
+            continue
+        check_id = record["id"]
+        if check_id in by_id:
+            failures.append(f"transport evidence contains duplicate check: {check_id}")
+        else:
+            by_id[check_id] = record
+
+    required_targets = {"slskd", "slskdn"}
+    required_directions = {"slskr-to-target", "target-to-slskr"}
+    for check_id in UNIVERSAL_BIDIRECTIONAL_TRANSPORTS:
+        record = by_id.get(check_id)
+        if record is None:
+            failures.append(f"transport evidence is missing {check_id}")
+            continue
+        if record.get("status") != "pass":
+            failures.append(f"transport evidence check {check_id} is not pass")
+        if not required_targets.issubset(set(record.get("targets", []))):
+            failures.append(f"transport evidence check {check_id} must cover slskd and slskdn")
+        if not required_directions.issubset(set(record.get("directions", []))):
+            failures.append(f"transport evidence check {check_id} must cover both directions")
+
+    lifecycle = by_id.get(UNIVERSAL_LIFECYCLE_CHECK)
+    if lifecycle is None:
+        failures.append(f"transport evidence is missing {UNIVERSAL_LIFECYCLE_CHECK}")
+    else:
+        if lifecycle.get("status") != "pass":
+            failures.append(f"transport evidence check {UNIVERSAL_LIFECYCLE_CHECK} is not pass")
+        if not required_targets.issubset(set(lifecycle.get("targets", []))):
+            failures.append(
+                f"transport evidence check {UNIVERSAL_LIFECYCLE_CHECK} must cover slskd and slskdn"
+            )
+        scenarios = set(lifecycle.get("scenarios", []))
+        missing_scenarios = sorted(UNIVERSAL_LIFECYCLE_SCENARIOS - scenarios)
+        if missing_scenarios:
+            failures.append(
+                f"transport evidence check {UNIVERSAL_LIFECYCLE_CHECK} is missing scenarios: "
+                + ", ".join(missing_scenarios)
+            )
+    return failures
+
+
 def strict_universal_failures(
     entries: list[dict[str, Any]],
     *,
     reuse_evidence: bool,
     live_interop_evidence: list[Path] | None,
     operator_evidence: Path | None,
+    transport_evidence: Path | None,
     react_ui_evidence: Path | None,
     rust_ui_evidence: Path | None,
 ) -> list[str]:
@@ -4330,6 +4431,12 @@ def strict_universal_failures(
         failures.append(
             "universal replacement requires explicit operator-packaging evidence"
         )
+    if transport_evidence is None:
+        failures.append(
+            "universal replacement requires fresh live bidirectional transport and lifecycle evidence"
+        )
+    else:
+        failures.extend(universal_transport_failures(transport_evidence))
     if react_ui_evidence is None:
         failures.append(
             "universal replacement requires a live-backend React UI audit JSON"
@@ -4496,6 +4603,15 @@ def main() -> None:
         help=(
             "Opt in to explicit operator-packaging artifact evidence. Only "
             "exact target/family/case rows with pass=true are promoted."
+        ),
+    )
+    parser.add_argument(
+        "--transport-evidence",
+        type=Path,
+        help=(
+            "Explicit fresh live JSON for --strict-universal. It must prove "
+            "every supported transport in both directions and the full "
+            "lifecycle matrix."
         ),
     )
     parser.add_argument(
@@ -4762,6 +4878,7 @@ def main() -> None:
             "evidenceMode": "reused" if args.reuse_evidence else "fresh",
             "liveInteropEvidence": [str(path) for path in args.live_interop_evidence or []],
             "operatorEvidence": str(args.operator_evidence) if args.operator_evidence else None,
+            "transportEvidence": str(args.transport_evidence) if args.transport_evidence else None,
             "reactUiEvidence": str(args.react_ui_evidence) if args.react_ui_evidence else None,
             "rustUiEvidence": str(args.rust_ui_evidence) if args.rust_ui_evidence else None,
         },
@@ -4781,6 +4898,7 @@ def main() -> None:
             reuse_evidence=args.reuse_evidence,
             live_interop_evidence=args.live_interop_evidence,
             operator_evidence=args.operator_evidence,
+            transport_evidence=args.transport_evidence,
             react_ui_evidence=args.react_ui_evidence,
             rust_ui_evidence=args.rust_ui_evidence,
         )

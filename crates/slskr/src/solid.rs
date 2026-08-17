@@ -1,7 +1,7 @@
 //! Solid profile parsing shared by the HTTP compatibility route.
 
-use oxrdf::{NamedOrBlankNode, Term};
-use oxrdfio::{RdfFormat, RdfParser};
+use oxixml_io::{RdfFormat, RdfParser};
+use oxixml_model::{NamedOrBlankNode, Term};
 
 const SOLID_OIDC_ISSUER: &str = "http://www.w3.org/ns/solid/terms#oidcIssuer";
 const MAX_PROFILE_QUADS: usize = 16_384;
@@ -41,10 +41,84 @@ pub(crate) fn extract_oidc_issuers(
             continue;
         }
         if let Term::NamedNode(issuer) = quad.object {
-            issuers.push(issuer.into_string());
+            issuers.push(issuer.into_string().into());
         }
     }
+    if matches!(format, RdfFormat::JsonLd { .. }) {
+        preserve_json_ld_issuer_multiplicity(body, web_id, &mut issuers);
+    }
     Ok(issuers)
+}
+
+/// JSON-LD's RDF graph model is set-like, while the frozen slskdN resolver
+/// preserves repeated values in an explicit issuer array. Restore that narrow
+/// compatibility detail after the standards-compliant parser has validated and
+/// expanded the document.
+fn preserve_json_ld_issuer_multiplicity(body: &[u8], web_id: &str, issuers: &mut Vec<String>) {
+    let Ok(document) = serde_json::from_slice::<serde_json::Value>(body) else {
+        return;
+    };
+    let mut raw_issuers = Vec::new();
+    collect_json_ld_issuer_values(&document, web_id, &mut raw_issuers);
+    if raw_issuers.len() <= issuers.len()
+        || raw_issuers
+            .iter()
+            .any(|issuer| !issuers.iter().any(|value| value == issuer))
+    {
+        return;
+    }
+    let parsed = issuers.clone();
+    issuers.clear();
+    for issuer in raw_issuers {
+        issuers.push(issuer);
+    }
+    for issuer in parsed {
+        if !issuers.iter().any(|value| value == &issuer) {
+            issuers.push(issuer);
+        }
+    }
+}
+
+fn collect_json_ld_issuer_values(
+    value: &serde_json::Value,
+    web_id: &str,
+    issuers: &mut Vec<String>,
+) {
+    match value {
+        serde_json::Value::Array(values) => {
+            for value in values {
+                collect_json_ld_issuer_values(value, web_id, issuers);
+            }
+        }
+        serde_json::Value::Object(object) => {
+            if object.get("@id").and_then(serde_json::Value::as_str) == Some(web_id) {
+                for key in ["solid:oidcIssuer", SOLID_OIDC_ISSUER] {
+                    let Some(value) = object.get(key) else {
+                        continue;
+                    };
+                    let values = match value {
+                        serde_json::Value::Array(values) => values.as_slice(),
+                        value => std::slice::from_ref(value),
+                    };
+                    for value in values {
+                        if let Some(issuer) = value
+                            .as_object()
+                            .and_then(|object| object.get("@id"))
+                            .and_then(serde_json::Value::as_str)
+                        {
+                            issuers.push(issuer.to_owned());
+                        }
+                    }
+                }
+            }
+            for key in ["@graph", "@included"] {
+                if let Some(value) = object.get(key) {
+                    collect_json_ld_issuer_values(value, web_id, issuers);
+                }
+            }
+        }
+        _ => {}
+    }
 }
 
 #[cfg(test)]

@@ -40021,14 +40021,9 @@ fn controller_yaml_target_validation_error(
                 Ok(username) => username,
                 Err(error) => return Some(error),
             };
-            let default_password = if target == ControllerCompatibilityTarget::Slskd {
-                "slskd"
-            } else {
-                ""
-            };
             let password = match scalar_string(
                 authentication.and_then(|authentication| authentication.get("password")),
-                default_password,
+                "",
             ) {
                 Ok(password) => password,
                 Err(error) => return Some(error),
@@ -69175,9 +69170,25 @@ async fn serve(invocation: ServeInvocation) -> Result<(), String> {
     let backfill_state = BackfillState::load(&config.state_dir)?;
     let pod_channel_store = pod_channels::PodChannelStore::load(&config.state_dir)?;
     let pod_store = pods::PodStore::load(&config.state_dir)?;
+    let shared_dht_udp_bind = config.overlay_bind.and_then(|bind| {
+        let dht = &config.advanced_networking.dht;
+        let overlay = &config.advanced_networking.overlay;
+        let mesh = &config.advanced_networking.mesh;
+        let shares_public_udp = config.dht_enabled
+            && mesh.enabled
+            && mesh.enable_dht
+            && mesh.enable_overlay
+            && overlay.enable
+            && (overlay.listen_port == dht.dht_port
+                || (overlay.enable_quic
+                    && overlay.share_quic_with_dht_port
+                    && overlay.quic_listen_port == dht.dht_port));
+        shares_public_udp.then_some(SocketAddr::new(bind.ip(), dht.dht_port))
+    });
     let dht = if config.dht_enabled && config.advanced_networking.mesh.enable_dht {
-        Some(Arc::new(dht::Rendezvous::new(
+        Some(Arc::new(dht::Rendezvous::new_with_shared_udp(
             &config.advanced_networking.dht,
+            shared_dht_udp_bind.is_some(),
         )?))
     } else {
         None
@@ -69186,14 +69197,18 @@ async fn serve(invocation: ServeInvocation) -> Result<(), String> {
         && config.advanced_networking.mesh.enable_overlay
     {
         if let Some(bind) = config.overlay_bind {
+            let overlay = &config.advanced_networking.overlay;
+            let quic_shared_with_dht = overlay.enable_quic
+                && overlay.share_quic_with_dht_port
+                && shared_dht_udp_bind.is_some()
+                && overlay.quic_listen_port == config.advanced_networking.dht.dht_port;
             let quic_bind = config.advanced_networking.overlay.enable_quic.then(|| {
-                let overlay = &config.advanced_networking.overlay;
-                let address = if overlay.share_quic_with_dht_port {
+                let address = if quic_shared_with_dht {
                     IpAddr::V4(Ipv4Addr::LOCALHOST)
                 } else {
                     bind.ip()
                 };
-                let port = if overlay.share_quic_with_dht_port {
+                let port = if quic_shared_with_dht {
                     overlay.quic_backend_listen_port
                 } else {
                     overlay.quic_listen_port
@@ -69206,21 +69221,11 @@ async fn serve(invocation: ServeInvocation) -> Result<(), String> {
                     config.advanced_networking.overlay_data.listen_port,
                 )
             });
-            let quic_proxy_bind = if config.advanced_networking.overlay.enable_quic
-                && config.advanced_networking.overlay.share_quic_with_dht_port
-            {
-                Some(SocketAddr::new(
-                    bind.ip(),
-                    config.advanced_networking.overlay.quic_listen_port,
-                ))
-            } else {
-                None
-            };
-            let quic_data_policy = config
-                .advanced_networking
-                .overlay_data
-                .enable
-                .then(|| private_gateway::QuicDataPolicy {
+            let quic_proxy_bind = quic_shared_with_dht.then(|| {
+                shared_dht_udp_bind.expect("QUIC shared mode requires a shared DHT UDP bind")
+            });
+            let quic_data_policy = config.advanced_networking.overlay_data.enable.then(|| {
+                private_gateway::QuicDataPolicy {
                     relay_authentication_token: config
                         .advanced_networking
                         .overlay_data
@@ -69239,18 +69244,21 @@ async fn serve(invocation: ServeInvocation) -> Result<(), String> {
                         .advanced_networking
                         .overlay_data
                         .max_relay_bytes_per_direction,
-                    max_relay_duration: config
-                        .advanced_networking
-                        .overlay_data
-                        .max_relay_duration,
-                });
+                    max_relay_duration: config.advanced_networking.overlay_data.max_relay_duration,
+                }
+            });
             Some(Arc::new(
-                private_gateway::Gateway::load_or_create_with_quic_and_data_policy_and_proxy(
+                private_gateway::Gateway::load_or_create_with_quic_and_data_policy_and_proxy_and_dht_socket(
                     bind,
                     &config.state_dir,
                     quic_bind,
                     quic_data_bind,
                     quic_proxy_bind,
+                    shared_dht_udp_bind,
+                    dht.as_ref()
+                        .and_then(|rendezvous| rendezvous.shared_udp_socket()),
+                    dht.as_ref()
+                        .and_then(|rendezvous| rendezvous.shared_udp_backend()),
                     quic_data_policy,
                     config
                         .advanced_networking
@@ -72620,16 +72628,11 @@ async fn handle_plain_peer_message_once(
         .await;
         return Ok(true);
     }
-    handle_peer_message(
-        state,
-        message,
-        peer_username,
-        |response| async move {
-            peer.send(&response)
-                .await
-                .map_err(|error| format!("peer response send failed: {error}"))
-        },
-    )
+    handle_peer_message(state, message, peer_username, |response| async move {
+        peer.send(&response)
+            .await
+            .map_err(|error| format!("peer response send failed: {error}"))
+    })
     .await?;
     Ok(false)
 }
@@ -87188,13 +87191,8 @@ mod tests {
             vec![0; 12]
         );
 
-        let folder = super::build_folder_contents_payload(
-            &[],
-            124,
-            "share",
-            Default::default(),
-        )
-        .expect("empty folder payload");
+        let folder = super::build_folder_contents_payload(&[], 124, "share", Default::default())
+            .expect("empty folder payload");
         let decoded = super::decompress_zlib_payload(&folder).unwrap();
         let mut reader = slskr_client::protocol::Reader::new(&decoded);
         assert_eq!(reader.read_u32_le().unwrap(), 124);
@@ -127953,7 +127951,7 @@ mod tests {
         let (state, _receiver) = test_state_with_env(
             MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd"),
         );
-        let secret = "0123456789abcdef";
+        let secret = "test-token-0123456789";
         {
             let mut advanced = state.advanced_networking.write().await;
             advanced.relay.enabled = true;
@@ -127999,7 +127997,7 @@ mod tests {
     #[tokio::test]
     async fn slskdn_relay_credential_profile_authenticates_agent() {
         let (state, _receiver) = test_state_with_env(MapEnv::default());
-        let secret = "0123456789abcdef";
+        let secret = "test-token-0123456789";
         {
             let mut advanced = state.advanced_networking.write().await;
             advanced.relay.enabled = true;
@@ -129500,13 +129498,9 @@ mod tests {
             "Remote/Album/Song.flac=321;Remote/Other/Skip.flac=9;Loose.mp3=7",
         )
         .expect("entries");
-        let payload = super::build_folder_contents_payload(
-            &entries,
-            321,
-            "Remote/Album",
-            Default::default(),
-        )
-        .expect("folder payload");
+        let payload =
+            super::build_folder_contents_payload(&entries, 321, "Remote/Album", Default::default())
+                .expect("folder payload");
         let decoded = super::decompress_zlib_payload(&payload).expect("decoded folder payload");
         let mut reader = super::Reader::new(&decoded);
 
@@ -197787,7 +197781,9 @@ mod tests {
             .with("SLSKR_PERSISTENCE_ENABLED", "true")
             .with("SLSKR_REMOTE_CONFIGURATION", "true")
             .with("SLSKR_DEBUG", "true")
-            .with("SLSKR_NO_CONFIG_WATCH", "true");
+            .with("SLSKR_NO_CONFIG_WATCH", "true")
+            .with("SLSKD_USERNAME", "slskd")
+            .with("SLSKD_PASSWORD", "runtime-login-secret");
         let (state, _receiver) =
             test_state_with_env_parts(env, super::SearchStore::new(), Some(db.clone()));
 
@@ -198140,7 +198136,7 @@ mod tests {
             "POST",
             "/api/v0/session",
             None,
-            r#"{"username":"slskd","password":"slskd"}"#,
+            r#"{"username":"slskd","password":"runtime-login-secret"}"#,
             &state,
         )
         .await
@@ -225167,7 +225163,7 @@ mod tests {
                     .with("SLSKD_ALLOW_REMOTE_NO_AUTH", "true")
                     .with("SLSKD_PASSTHROUGH_ALLOWED_CIDRS", "127.0.0.1/32"),
             );
-            let secret = "0123456789abcdef".to_owned();
+            let secret = "test-token-0123456789".to_owned();
             {
                 let mut advanced = state.advanced_networking.write().await;
                 advanced.relay.enabled = true;

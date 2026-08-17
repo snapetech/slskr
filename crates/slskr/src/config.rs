@@ -911,6 +911,7 @@ impl AppConfig {
             yaml: controller_yaml,
         };
         let env = &layered_env;
+        let auth_disabled = resolve_auth_disabled(env, file_config.auth.disabled.unwrap_or(false))?;
         let advanced_networking = AdvancedNetworkingSettings::from_layers(
             &file_config,
             env,
@@ -951,6 +952,7 @@ impl AppConfig {
         } = resolve_controller_web_auth(
             env,
             controller_compatibility_target,
+            !auth_disabled,
             file_config.metrics.enabled,
             file_config.metrics.url,
             file_config.metrics.authentication.disabled,
@@ -9548,6 +9550,7 @@ struct ControllerWebAuthSettings {
 fn resolve_controller_web_auth<E: ConfigEnv>(
     env: &E,
     controller_compatibility_target: ControllerCompatibilityTarget,
+    auth_required: bool,
     metrics_enabled: Option<bool>,
     metrics_url: Option<String>,
     metrics_auth_disabled: Option<bool>,
@@ -9576,25 +9579,18 @@ fn resolve_controller_web_auth<E: ConfigEnv>(
     let controller_metrics_password = env
         .var("SLSKD_METRICS_PASSWORD")
         .or(metrics_password)
-        .unwrap_or_else(|| {
-            if controller_compatibility_target == ControllerCompatibilityTarget::Slskd {
-                "slskd".to_owned()
-            } else {
-                String::new()
-            }
-        });
+        .unwrap_or_default();
     let controller_web_auth_username = env
         .var("SLSKD_USERNAME")
         .or(web_auth_username)
         .unwrap_or_else(|| "slskd".to_owned());
-    let controller_web_auth_password = env
-        .var("SLSKD_PASSWORD")
-        .or(web_auth_password)
-        .unwrap_or_else(|| "slskd".to_owned());
-    for (field, value) in [
-        ("username", controller_web_auth_username.as_str()),
-        ("password", controller_web_auth_password.as_str()),
-    ] {
+    let configured_web_auth_password = env.var("SLSKD_PASSWORD").or(web_auth_password);
+    let controller_web_auth_password = configured_web_auth_password.clone().unwrap_or_default();
+    let mut web_auth_fields = vec![("username", controller_web_auth_username.as_str())];
+    if auth_required && configured_web_auth_password.is_some() {
+        web_auth_fields.push(("password", controller_web_auth_password.as_str()));
+    }
+    for (field, value) in web_auth_fields {
         let length = value.encode_utf16().count();
         if !(1..=255).contains(&length) {
             return Err(format!(
@@ -9625,9 +9621,8 @@ fn resolve_controller_web_auth<E: ConfigEnv>(
     if controller_web_jwt_ttl_millis < 3_600 {
         return Err("web authentication JWT TTL must be at least 3600 milliseconds".to_owned());
     }
-    let metrics_auth_requires_credentials = controller_compatibility_target
-        == ControllerCompatibilityTarget::Slskd
-        || (controller_metrics_enabled && !controller_metrics_auth_disabled);
+    let metrics_auth_requires_credentials =
+        controller_metrics_enabled && !controller_metrics_auth_disabled;
     if metrics_auth_requires_credentials {
         for (field, value) in [
             ("username", controller_metrics_username.as_str()),
@@ -10370,11 +10365,7 @@ fn resolve_api_and_web_hardening<E: ConfigEnv>(
     if token_count != unique_token_count {
         return Err("API tokens for different roles must be distinct".to_owned());
     }
-    let auth_disabled = env_bool_any_layer(
-        env,
-        &["SLSKR_AUTH_DISABLED", "SLSKD_NO_AUTH"],
-        auth_disabled.unwrap_or(false),
-    )?;
+    let auth_disabled = resolve_auth_disabled(env, auth_disabled.unwrap_or(false))?;
     let auth_required = !auth_disabled;
     let api_cookie_auth_enabled = env_bool_layer(
         env,
@@ -10643,6 +10634,10 @@ fn env_bool_any_layer<E: ConfigEnv>(
         "0" | "false" | "no" | "off" => Ok(false),
         _ => Err(format!("invalid {name}: expected boolean")),
     }
+}
+
+fn resolve_auth_disabled<E: ConfigEnv>(env: &E, configured: bool) -> Result<bool, String> {
+    env_bool_any_layer(env, &["SLSKR_AUTH_DISABLED", "SLSKD_NO_AUTH"], configured)
 }
 
 pub fn redact_username(username: &str) -> String {
@@ -12482,9 +12477,12 @@ mod tests {
 
     #[test]
     fn controller_compatibility_target_is_explicit_bounded_and_projected() {
-        let default =
-            super::AppConfig::from_layers(None, super::FileConfig::default(), &MapEnv::default())
-                .expect("default controller compatibility target");
+        let default = super::AppConfig::from_layers(
+            None,
+            super::FileConfig::default(),
+            &MapEnv::default().with("SLSKR_AUTH_DISABLED", "true"),
+        )
+        .expect("default controller compatibility target");
         assert_eq!(
             default.controller_compatibility_target,
             super::ControllerCompatibilityTarget::Slskdn
@@ -12958,7 +12956,7 @@ mod tests {
         assert!(!slskd.controller_metrics_enabled);
         assert_eq!(slskd.controller_metrics_url, "/metrics");
         assert_eq!(slskd.controller_metrics_username, "slskd");
-        assert_eq!(slskd.controller_metrics_password, "slskd");
+        assert!(slskd.controller_metrics_password.is_empty());
 
         let slskdn = super::AppConfig::from_layers(
             None,
@@ -12997,6 +12995,39 @@ mod tests {
         assert_eq!(configured.controller_metrics_url, "prometheus");
         assert_eq!(configured.controller_metrics_username, "metrics-user");
         assert_eq!(configured.controller_metrics_password, "metrics-pass");
+    }
+
+    #[test]
+    fn controller_web_auth_requires_an_explicit_password_when_enabled() {
+        let missing_password = super::AppConfig::from_layers(
+            None,
+            super::FileConfig::default(),
+            &MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+        )
+        .expect("missing web password must not create a built-in credential");
+        assert!(missing_password.controller_web_auth_password.is_empty());
+
+        let disabled = super::AppConfig::from_layers(
+            None,
+            super::FileConfig::default(),
+            &MapEnv::default()
+                .with("SLSKR_AUTH_DISABLED", "true")
+                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+        )
+        .expect("disabled web authentication does not need credentials");
+        assert!(disabled.controller_web_auth_password.is_empty());
+
+        let configured = super::AppConfig::from_layers(
+            None,
+            super::FileConfig::default(),
+            &MapEnv::default()
+                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn")
+                .with("SLSKD_USERNAME", "admin")
+                .with("SLSKD_PASSWORD", "configured-secret"),
+        )
+        .expect("explicit web credentials");
+        assert_eq!(configured.controller_web_auth_username, "admin");
+        assert_eq!(configured.controller_web_auth_password, "configured-secret");
     }
 
     #[test]

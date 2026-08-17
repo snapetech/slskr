@@ -8,6 +8,20 @@ pool_file="${SLSKR_PROTON_CREDENTIAL_POOL_FILE:-$repo_root/.secrets/proton-crede
 output_dir="${SLSKR_INTEROP_OUTPUT_DIR:-$repo_root/target/live-interop}"
 mkdir -p "$output_dir"
 
+# Keep the live runner bounded even when it reuses an already-built binary.
+# Preserve a stricter limit inherited from a parent guard.
+interop_virtual_memory_kib="${SLSKR_INTEROP_VIRTUAL_MEMORY_KIB:-12582912}"
+if [[ ! "$interop_virtual_memory_kib" =~ ^[1-9][0-9]{0,7}$ || "$interop_virtual_memory_kib" -gt 12582912 ]]; then
+  echo "SLSKR_INTEROP_VIRTUAL_MEMORY_KIB must be between 1 and 12582912" >&2
+  exit 2
+fi
+parent_virtual_memory_kib="$(ulimit -v)"
+if [[ "$parent_virtual_memory_kib" =~ ^[0-9]+$ && "$parent_virtual_memory_kib" -lt "$interop_virtual_memory_kib" ]]; then
+  interop_virtual_memory_kib="$parent_virtual_memory_kib"
+fi
+ulimit -v "$interop_virtual_memory_kib"
+export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=1024}"
+
 if [[ ! -f "$env_file" ]]; then
   echo "missing live credential file: $env_file" >&2
   exit 1
@@ -57,7 +71,6 @@ done
 
 slskr_binary="$repo_root/target/debug/slskr"
 if [[ ! -x "$slskr_binary" ]]; then
-  ulimit -v "${SLSKR_RUST_VIRTUAL_MEMORY_KIB:-16777216}"
   export CARGO_BUILD_JOBS=1
   export RUST_MIN_STACK="${RUST_MIN_STACK:-16777216}"
   export CARGO_NET_OFFLINE="${CARGO_NET_OFFLINE:-true}"

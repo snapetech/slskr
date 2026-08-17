@@ -18,7 +18,7 @@ fi
 lock_wait_seconds="${SLSKR_BUILD_LOCK_WAIT_SECONDS:-0}"
 virtual_memory_kib="${SLSKR_RUST_VIRTUAL_MEMORY_KIB:-12582912}"
 build_jobs="${SLSKR_RUST_BUILD_JOBS:-1}"
-max_virtual_memory_kib=16777216
+max_virtual_memory_kib=12582912
 
 if [[ ! "$lock_wait_seconds" =~ ^[0-9]{1,5}$ ]]; then
   printf 'SLSKR_BUILD_LOCK_WAIT_SECONDS must be a non-negative integer (seconds)\n' >&2
@@ -90,6 +90,12 @@ printf '\n' >&2
 (
   ulimit -v "$virtual_memory_kib"
   export CARGO_BUILD_JOBS=1
+  # The large slskr binary can make LLVM retain several gigabytes of debug
+  # metadata and incremental state even with one rustc process. Keep those
+  # defaults disabled inside the guard so a build stays below the repository
+  # ceiling instead of exhausting the host while LLVM is linking.
+  export CARGO_PROFILE_DEV_DEBUG="${CARGO_PROFILE_DEV_DEBUG:-0}"
+  export CARGO_INCREMENTAL="${CARGO_INCREMENTAL:-0}"
   export RUST_TEST_THREADS=1
   export RUST_MIN_STACK="${RUST_MIN_STACK:-16777216}"
   export SLSKR_BUILD_GUARD_HELD=1

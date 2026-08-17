@@ -7,6 +7,12 @@ members = [
 ]
 resolver = "2"
 
+[patch.crates-io]
+# mainline 8.0.0 still constrains lru to the vulnerable 0.16 line. Keep the
+# upstream source local while resolving its cache dependency to the patched
+# 0.18.2 release until mainline publishes that update.
+mainline = { path = "vendor/mainline" }
+
 [workspace.package]
 edition = "2021"
 license = "AGPL-3.0-only"

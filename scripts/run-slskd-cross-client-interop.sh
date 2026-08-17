@@ -229,6 +229,7 @@ SLSK_PASSWORD="$slskr_password" \
 SLSKR_AUTO_CONNECT=true \
 SLSKR_RECONNECT=true \
 SLSKR_AUTH_DISABLED=false \
+SLSKD_PASSWORD="${SLSKR_CROSS_CLIENT_WEB_PASSWORD:-slskr-cross-client-web-password}" \
 SLSKR_SLSK_DIAG_LEVEL=debug \
 SLSKR_SLSK_DNET_LOGGING=true \
 SLSKR_API_TOKEN="$api_token" \

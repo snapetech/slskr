@@ -97,8 +97,8 @@ url = "/metrics"
 [metrics.authentication]
 disabled = false
 username = "slskd"
-# Frozen slskd defaults this to "slskd"; frozen slskdN requires an explicit
-# non-empty password whenever metrics are enabled with authentication.
+# No built-in password is used. Set this whenever metrics are enabled with
+# authentication; use a secret manager or SLSKD_METRICS_PASSWORD in production.
 password = "replace-with-a-secret"
 
 [timeouts]
@@ -185,7 +185,11 @@ no_config_watch = false
 [auth]
 # Loopback-only binds default to no API auth unless api_token is configured.
 # Non-loopback binds require an API token unless auth is explicitly disabled.
+# There is no compatibility fallback password. Configure SLSKD_USERNAME and
+# SLSKD_PASSWORD (or the corresponding config values) to enable browser login.
 disabled = false
+username = "replace-with-username"
+password = "replace-with-a-random-password"
 api_token = "replace-with-a-random-token"
 # Optional distinct least-privilege credentials. Never reuse a token value
 # across roles.
