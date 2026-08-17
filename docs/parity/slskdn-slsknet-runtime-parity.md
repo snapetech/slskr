@@ -20,13 +20,13 @@ as a compatibility acknowledgement or intentionally Rust-native.
 
 The current shared-UDP implementation owns the configured public DHT port in
 the gateway when the frozen sharing predicate is active. It forwards only
-DHT-shaped datagrams to a bounded internal mainline endpoint and returns
-validated DHT-shaped responses through the public socket while leaving overlay
-and QUIC traffic in the gateway classifier. A localhost runtime probe and a
-socket-level regression confirm the public bind, internal endpoint, response
-source port, and public-port status projection; mainline outbound source-port
-routing and live cross-client DHT/QUIC receiver interoperability remain
-unproven.
+DHT-shaped datagrams to a bounded internal mainline endpoint, gives mainline a
+clone of that same public socket for outbound requests/responses, and leaves
+overlay and QUIC traffic in the gateway classifier. A localhost runtime probe,
+dependency-level source-port regression, and socket-level forwarding
+regression confirm the public bind, internal endpoint, outbound/response
+source port, and public-port status projection. Live cross-client DHT/QUIC
+receiver interoperability remains unproven.
 
 ## Baseline
 

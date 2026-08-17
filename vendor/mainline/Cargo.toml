@@ -9,6 +9,10 @@
 # will likely look very different (and much more reasonable).
 # See Cargo.toml.orig for the original contents.
 
+# Keep the vendored dependency independently testable without making it a
+# workspace member; the application controls its feature graph explicitly.
+[workspace]
+
 [package]
 edition = "2021"
 rust-version = "1.85"

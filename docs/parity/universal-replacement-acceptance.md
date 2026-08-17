@@ -51,7 +51,7 @@ These are open until fresh evidence or implementation closes them:
 | Area | Evidence of the gap |
 | --- | --- |
 | React and Rust UI | Both UI auditors now support live-backend evidence; fresh React proof must cover all 41 routes at both viewports and fresh Rust proof must cover all 15 routes at both viewports. Workflow actions, populated/empty/error/reconnect states, and target-profile differences remain open until those cases are run. |
-| QUIC and DHT | The bounded `slskdn-overlay-data` transport, reusable stream client, daemon receiver, bounded public-QUIC proxy admission, and public shared-DHT/UDP request/response demux now exist with bounded proof; mainline outbound source-port/routing semantics through the proxy and live receiver interoperability remain open. |
+| QUIC and DHT | The bounded `slskdn-overlay-data` transport, reusable stream client, daemon receiver, bounded public-QUIC proxy admission, and public shared-DHT/UDP request/response demux now exist with bounded proof; shared-mode mainline outbound source-port routing is now wired and regression-tested, while live receiver interoperability and QUIC application-level proof remain open. |
 | Relay | The local relay data plane exists, but live cross-client certification remains open. |
 | Mesh sync | Exact codec/runtime evidence exists, but frozen-target live interoperability and reconnect/retry proof remain open. |
 | VirtualSoulfind | Dispatcher and nominal runtime evidence exist, but timeout, reconnect, and live interop cases remain open. |
