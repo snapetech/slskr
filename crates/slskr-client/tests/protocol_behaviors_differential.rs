@@ -38,6 +38,15 @@ fn fixed_now() -> SystemTime {
     UNIX_EPOCH + Duration::from_secs(1_700_000_000)
 }
 
+fn test_nonce() -> String {
+    rand::random::<u128>().to_string()
+}
+
+fn test_signing_key() -> SigningKey {
+    let bytes = rand::random::<[u8; 32]>();
+    SigningKey::from_bytes(&bytes)
+}
+
 fn signed_descriptor(username: &str, signing_key: &SigningKey) -> PeerCapabilityDescriptor {
     PeerCapabilityDescriptor::unsigned(
         username,
@@ -169,7 +178,7 @@ async fn raw_init_frame_bidirectional(code: u8) -> bool {
 
 async fn peer_capability_live_exchange() -> bool {
     let (client_stream, server_stream) = tokio::io::duplex(64 * 1024);
-    let server_key = SigningKey::from_bytes(&[41; 32]);
+    let server_key = test_signing_key();
     let server_descriptor = signed_descriptor("capability-server", &server_key);
     let server = tokio::spawn(async move {
         let mut connection = PeerMessageConnection::new(server_stream);
@@ -199,10 +208,11 @@ async fn peer_capability_live_exchange() -> bool {
         connection.send(&response).await.is_ok()
     });
 
-    let client_key = SigningKey::from_bytes(&[43; 32]);
+    let client_key = test_signing_key();
+    let nonce = test_nonce();
     let hello = PeerCapabilityEnvelope::new(
         PeerCapabilityMessageType::Hello,
-        "live-capability-nonce",
+        nonce.clone(),
         signed_descriptor("capability-client", &client_key),
     );
     let message = match peer_capability_message(&hello) {
@@ -221,7 +231,7 @@ async fn peer_capability_live_exchange() -> bool {
     };
     let client_pass = acknowledgement.is_some_and(|acknowledgement| {
         acknowledgement.message_type == PeerCapabilityMessageType::Acknowledge
-            && acknowledgement.nonce == "live-capability-nonce"
+            && acknowledgement.nonce == nonce
             && acknowledgement.descriptor.signature.is_some()
     });
     let server_pass = server.await.is_ok_and(|result| result);
@@ -229,10 +239,11 @@ async fn peer_capability_live_exchange() -> bool {
 }
 
 async fn peer_capability_timeout_and_reconnect() -> bool {
-    let client_key = SigningKey::from_bytes(&[47; 32]);
+    let client_key = test_signing_key();
+    let nonce = test_nonce();
     let hello = PeerCapabilityEnvelope::new(
         PeerCapabilityMessageType::Hello,
-        "timeout-capability-nonce",
+        nonce.clone(),
         signed_descriptor("timeout-capability-client", &client_key),
     );
     let message = match peer_capability_message(&hello) {
@@ -270,7 +281,7 @@ async fn peer_capability_timeout_and_reconnect() -> bool {
     let _ = first_server.await;
 
     let (client_stream, server_stream) = tokio::io::duplex(64 * 1024);
-    let server_key = SigningKey::from_bytes(&[49; 32]);
+    let server_key = test_signing_key();
     let server_descriptor = signed_descriptor("reconnected-capability-server", &server_key);
     let second_server = tokio::spawn(async move {
         let mut connection = PeerMessageConnection::new(server_stream);
@@ -303,7 +314,7 @@ async fn peer_capability_timeout_and_reconnect() -> bool {
                 .flatten()
                 .is_some_and(|acknowledgement| {
                     acknowledgement.message_type == PeerCapabilityMessageType::Acknowledge
-                        && acknowledgement.nonce == "timeout-capability-nonce"
+                        && acknowledgement.nonce == nonce
                 }),
             Err(_) => false,
         }
@@ -398,7 +409,7 @@ async fn overlay_handshake_timeout_and_reconnect() -> bool {
         vec![slskr_client::overlay::FEATURE_MESH_SERVICE.to_owned()],
         None,
         None,
-        "timeout-overlay-nonce",
+        test_nonce(),
     ) {
         Ok(hello) => hello,
         Err(_) => return false,
@@ -525,7 +536,7 @@ async fn overlay_search_exchange() -> bool {
         vec![FEATURE_MESH_SEARCH.to_owned()],
         None,
         None,
-        "search-nonce",
+        test_nonce(),
     )
     .expect("build search hello");
     let mut client = OverlayClient::handshake(client_stream, hello)
@@ -622,7 +633,7 @@ async fn overlay_service_exchange(service_name: &str) -> bool {
         vec![slskr_client::overlay::FEATURE_MESH_SERVICE.to_owned()],
         None,
         None,
-        "service-nonce",
+        test_nonce(),
     ) {
         Ok(hello) => hello,
         Err(_) => return false,
@@ -690,7 +701,7 @@ async fn overlay_disconnect_exchange() -> bool {
         vec![slskr_client::overlay::FEATURE_MESH_SERVICE.to_owned()],
         None,
         None,
-        "disconnect-nonce",
+        test_nonce(),
     ) {
         Ok(hello) => hello,
         Err(_) => return false,
@@ -770,7 +781,7 @@ async fn overlay_service_timeout_and_reuse(service_name: &str) -> bool {
         vec![slskr_client::overlay::FEATURE_MESH_SERVICE.to_owned()],
         None,
         None,
-        "timeout-service-nonce",
+        test_nonce(),
     )
     .expect("build timeout service hello");
     let mut client = OverlayClient::handshake(client_stream, hello)
@@ -827,7 +838,7 @@ async fn overlay_search_timeout_and_reuse() -> bool {
         vec![FEATURE_MESH_SEARCH.to_owned()],
         None,
         None,
-        "timeout-search-nonce",
+        test_nonce(),
     )
     .expect("build timeout search hello");
     let mut client = OverlayClient::handshake(client_stream, hello)
@@ -1065,7 +1076,7 @@ fn mesh_sync_round_trip(message: MeshSyncMessage) -> bool {
 }
 
 fn mesh_sync_signed_round_trip(message: &MeshSyncMessage) -> bool {
-    let signing_key = SigningKey::from_bytes(&[47; 32]);
+    let signing_key = test_signing_key();
     let timestamp = 1_700_000_000_000;
     let mut signed = message.clone();
     signed
@@ -1464,6 +1475,7 @@ async fn protocol_behaviors_differential_client_extension_and_overlay_round_trip
     // The rendezvous overlay's six message types already have typed,
     // validated slskR representations. Disconnect is intentionally tested
     // as the small base envelope because it carries no application state.
+    let nonce = test_nonce();
     let hello = MeshHello::new(
         "local",
         vec!["mesh_service".to_owned()],
@@ -1472,7 +1484,7 @@ async fn protocol_behaviors_differential_client_extension_and_overlay_round_trip
             file: 2235,
         }),
         Some(50305),
-        "nonce",
+        nonce.clone(),
     )
     .expect("mesh hello");
     let hello_ack = MeshHelloAck {
@@ -1483,7 +1495,7 @@ async fn protocol_behaviors_differential_client_extension_and_overlay_round_trip
         features: vec!["mesh_service".to_owned()],
         soulseek_ports: None,
         overlay_port: Some(50306),
-        nonce_echo: Some("nonce".to_owned()),
+        nonce_echo: Some(nonce),
     };
     let ping = Ping {
         magic: OVERLAY_MAGIC.to_owned(),
@@ -1656,7 +1668,7 @@ async fn protocol_behaviors_differential_client_extension_and_overlay_round_trip
     // control type. The application dispatcher intentionally only consumes
     // its separate `pod_message` type, so this slice credits the wire codec
     // only; it does not claim per-control dispatch behavior.
-    let signing_key = SigningKey::from_bytes(&[23; 32]);
+    let signing_key = test_signing_key();
     for (name, value) in [
         ("Ping", "ping"),
         ("Pong", "pong"),
@@ -1766,7 +1778,7 @@ async fn protocol_behaviors_differential_client_extension_and_overlay_round_trip
     // Peer capability Hello/Acknowledge are carried as an intentionally
     // unknown Soulseek peer code, but have a complete signed binary envelope
     // codec and registry side effects in slskR.
-    let remote_key = SigningKey::from_bytes(&[31; 32]);
+    let remote_key = test_signing_key();
     let remote_descriptor = signed_descriptor("remote", &remote_key);
     let capability_live = peer_capability_live_exchange().await;
     let capability_timeout = peer_capability_timeout_and_reconnect().await;
@@ -1774,11 +1786,8 @@ async fn protocol_behaviors_differential_client_extension_and_overlay_round_trip
         PeerCapabilityMessageType::Hello,
         PeerCapabilityMessageType::Acknowledge,
     ] {
-        let envelope = PeerCapabilityEnvelope::new(
-            message_type,
-            format!("nonce-{message_type:?}"),
-            remote_descriptor.clone(),
-        );
+        let envelope =
+            PeerCapabilityEnvelope::new(message_type, test_nonce(), remote_descriptor.clone());
         let payload = envelope.encode().expect("encode capability envelope");
         let decoded = PeerCapabilityEnvelope::decode(&payload).expect("decode capability envelope");
         let subject = match message_type {
@@ -1793,7 +1802,7 @@ async fn protocol_behaviors_differential_client_extension_and_overlay_round_trip
 
         let message = peer_capability_message(&envelope).expect("build capability message");
         let dispatch_pass = if message_type == PeerCapabilityMessageType::Hello {
-            let local_key = SigningKey::from_bytes(&[37; 32]);
+            let local_key = test_signing_key();
             let local_descriptor = signed_descriptor("local", &local_key);
             let mut registry = PeerCapabilityRegistry::new();
             let response = handle_peer_capability_message(

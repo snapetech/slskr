@@ -44,6 +44,12 @@ class ReleaseNotesTests(unittest.TestCase):
         self.assertTrue(note["errors"])
         self.assertIn("placeholder", "\n".join(note["errors"]))
 
+        html_comment = release_notes.parse_release_note(
+            "release-notes/html-comment.md",
+            VALID_NOTE.replace("action: none", "action: safe --!> action"),
+        )
+        self.assertIn("HTML comment", "\n".join(html_comment["errors"]))
+
     def test_range_discovery_assembly_and_append_only_guard(self) -> None:
         repository = Path(tempfile.mkdtemp(prefix="slskr-release-notes-"))
         try:
