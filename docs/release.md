@@ -29,6 +29,11 @@ requested with `--features full-controller-tests` or `--all-features`, because
 that profile previously exceeded the safe LLVM memory envelope. It is not part
 of the memory-safe workspace test path.
 
+Browser and frontend Node subprocesses in the parity and release gates use
+`scripts/with-process-memory-guard.sh`. That guard applies a hard 4 GiB
+resident-memory cgroup limit when a user systemd manager is available and a
+4 GiB virtual-memory limit otherwise.
+
 The live slskd automation-client compatibility smoke is opt-in because it starts
 a local daemon and may install the Python `slskd-api` package:
 

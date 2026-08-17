@@ -49,6 +49,8 @@ materialize_reference "$SLSKR_SLSKDN_ROOT" "$slskdn_ref" created_slskdn
 GATES=(
   scripts/check-rust-build-guard.sh
   scripts/test-rust-build-guard.sh
+  scripts/check-process-memory-guard.sh
+  scripts/test-process-memory-guard.sh
   scripts/check-endpoint-parity-drift.sh
   scripts/check-slskdn-controller-parity.sh
   scripts/check-controller-auth-profiles.sh

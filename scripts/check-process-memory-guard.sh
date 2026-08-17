@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "$BASH_SOURCE")/.." && pwd)"
+cd "$repo_root"
+
+status=0
+guard=scripts/with-process-memory-guard.sh
+if [[ ! -x "$guard" ]]; then
+  printf 'Process memory guard check failed: %s is missing or not executable\n' "$guard" >&2
+  status=1
+fi
+if ! rg -q '^hard_memory_kib=4194304$' "$guard"; then
+  printf 'Process memory guard check failed: hard resident/virtual ceiling must be 4 GiB\n' >&2
+  status=1
+fi
+if ! rg -q 'MemoryMax=' "$guard"; then
+  printf 'Process memory guard check failed: systemd cgroup memory ceiling is missing\n' >&2
+  status=1
+fi
+if ! rg -q 'ulimit -v' "$guard"; then
+  printf 'Process memory guard check failed: portable virtual-memory fallback is missing\n' >&2
+  status=1
+fi
+if ! rg -q 'with-process-memory-guard\.sh' scripts/audit-parity-manifest.py; then
+  printf 'Process memory guard check failed: parity manifest browser/build subprocesses are unguarded\n' >&2
+  status=1
+fi
+
+if [[ "$status" -ne 0 ]]; then
+  exit "$status"
+fi
+
+printf 'Process memory guard static check passed\n'

@@ -118,6 +118,13 @@ def guarded_cargo_command(command: list[str], cwd: Path) -> list[str]:
     return [str(cwd / "scripts" / "with-build-guard.sh"), *command]
 
 
+def guarded_process_command(command: list[str], cwd: Path) -> list[str]:
+    """Bound browser and frontend subprocesses before they can allocate."""
+    if not command or command[0] not in {"node", "npm", "npx"}:
+        return command
+    return [str(cwd / "scripts" / "with-process-memory-guard.sh"), *command]
+
+
 def feature_family(subject: str) -> str:
     value = subject.split(" ", 1)[-1].strip("/")
     parts = [part for part in value.split("/") if part]
@@ -407,7 +414,7 @@ def webui_workflow_ledger(
     audit_dir = root / "target" / "react-webui-audit"
     if not reuse_evidence:
         subprocess.run(
-            ["npm", "run", "build", "--prefix", "web"],
+            guarded_process_command(["npm", "run", "build", "--prefix", "web"], root),
             cwd=root,
             check=True,
             stdout=subprocess.PIPE,
@@ -508,7 +515,7 @@ def webui_workflow_ledger(
                 }
             )
         subprocess.run(
-            ["node", "web/scripts/audit-react-webui.mjs"],
+            guarded_process_command(["node", "web/scripts/audit-react-webui.mjs"], root),
             cwd=root,
             check=True,
             env=environment,

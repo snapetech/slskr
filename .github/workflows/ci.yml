@@ -60,6 +60,8 @@ jobs:
         run: scripts/with-build-guard.sh cargo install cargo-audit --version "$CARGO_AUDIT_VERSION" --locked
       - run: scripts/check-rust-build-guard.sh
       - run: scripts/test-rust-build-guard.sh
+      - run: scripts/check-process-memory-guard.sh
+      - run: scripts/test-process-memory-guard.sh
       - run: scripts/check-public-posture.sh
       - run: scripts/validate-changelog.sh
       - run: python3 scripts/test_release_notes.py

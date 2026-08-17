@@ -15,7 +15,14 @@ run_step() {
   printf '+'
   printf ' %q' "$@"
   printf '\n'
-  "$@"
+  case "${1##*/}" in
+    node|nodejs|npm|npx)
+      scripts/with-process-memory-guard.sh "$@"
+      ;;
+    *)
+      "$@"
+      ;;
+  esac
 }
 
 run_optional_step() {

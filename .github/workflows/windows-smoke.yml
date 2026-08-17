@@ -50,6 +50,14 @@ jobs:
         shell: bash
         run: scripts/test-rust-build-guard.sh
 
+      - name: Process memory guard
+        shell: bash
+        run: scripts/check-process-memory-guard.sh
+
+      - name: Process memory guard regression
+        shell: bash
+        run: scripts/test-process-memory-guard.sh
+
       - name: Rust fmt
         shell: bash
         run: scripts/with-build-guard.sh cargo fmt --all --check
