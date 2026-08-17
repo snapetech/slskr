@@ -1184,6 +1184,10 @@ LOCAL_EXTENSION_CONFIG_PATHS = {
     "mesh.enable_dht",
     "mesh.enable_overlay",
     "mesh.enable_stun",
+    # slskR exposes this explicit resource bound for its QUIC data listener;
+    # the frozen target sources contain the corresponding hard-coded option,
+    # but do not expose it as a documented configuration leaf.
+    "overlay_data.max_concurrent_streams",
     "signalSystem.btExtensionChannel.enabled",
     "signalSystem.enabled",
     "signalSystem.meshChannel.enabled",
