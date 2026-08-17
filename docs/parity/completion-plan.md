@@ -287,9 +287,9 @@ close the live/UI gaps listed in
 [`universal-replacement-acceptance.md`](universal-replacement-acceptance.md).
 
 **2026-08-17 universal replacement goal active**: the stronger target is now
-100% identical end-user behavior and a universal drop-in replacement for both
-frozen targets. The prior **19,216 / 19,216 = 100.00%** figure must not be used
-as completion for this goal. Fresh live-backend UI evidence, all transport
+complete end-user behavioral equivalence across both frozen targets. The prior
+**19,216 / 19,216 = 100.00%** figure must not be used as completion for this
+goal. Fresh live-backend UI evidence, all transport
 directions and failure/reconnect paths, shared DHT/UDP and QUIC data paths,
 relay certification, and the remaining target-specific workflow validations
 are still required. Parity is **not achieved** under the universal
