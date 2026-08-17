@@ -44,12 +44,22 @@ if [[ "${SLSKR_PROCESS_MEMORY_GUARD_DISABLE_SYSTEMD:-0}" != "1" ]] \
   && command -v systemd-run >/dev/null 2>&1 \
   && command -v systemctl >/dev/null 2>&1 \
   && systemctl --user show-environment >/dev/null 2>&1; then
-  exec systemd-run --user --wait --pipe --collect \
+  unit_name="slskr-process-memory-guard-${BASHPID}-${RANDOM}.service"
+  cleanup_unit() {
+    local status="$?"
+    trap - EXIT INT TERM
+    systemctl --user stop "$unit_name" >/dev/null 2>&1 || true
+    exit "$status"
+  }
+  trap cleanup_unit EXIT INT TERM
+  systemd-run --user --wait --pipe --collect \
+    --unit="$unit_name" \
     --working-directory="$repo_root" \
     --property="MemoryMax=${memory_kib}K" \
     --property="TasksMax=${tasks_max}" \
     --setenv=SLSKR_PROCESS_MEMORY_GUARD_HELD=1 \
     "$@"
+  exit "$?"
 fi
 
 # Portable fallback for environments without a user systemd manager (including
