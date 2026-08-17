@@ -16,6 +16,8 @@ const liveBackendUrl = (process.env.SLSKR_RUST_WEB_AUDIT_BACKEND_URL || '').repl
 const liveBackendAuth = process.env.SLSKR_RUST_WEB_AUDIT_AUTH_HEADER || '';
 const requireRows = process.env.SLSKR_RUST_WEB_AUDIT_REQUIRE_ROWS === '1';
 const clickRowActions = process.env.SLSKR_RUST_WEB_AUDIT_CLICK_ROW_ACTION !== '0';
+const auditScenario = process.env.SLSKR_RUST_WEB_AUDIT_SCENARIO || 'success';
+const scenarioAttempts = new Map();
 const settleMs = Math.min(
   2000,
   Math.max(0, Number.parseInt(process.env.SLSKR_RUST_WEB_AUDIT_SETTLE_MS || '500', 10) || 0),
@@ -47,11 +49,53 @@ const contentTypes = new Map([
   ['.wasm', 'application/wasm'],
 ]);
 
-const json = (body) => ({
-  body: JSON.stringify(body),
+const emptyPayload = (value) => {
+  if (Array.isArray(value)) return [];
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, emptyPayload(child)]));
+  }
+  if (typeof value === 'boolean') return false;
+  if (typeof value === 'number') return 0;
+  if (typeof value === 'string') return '';
+  return value;
+};
+
+const json = (body, status = 200) => ({
+  body: JSON.stringify(auditScenario === 'rendered-loading-and-empty' ? emptyPayload(body) : body),
   contentType: 'application/json',
-  status: 200,
+  status: auditScenario === 'rendered-validation-and-server-error' ? 422 : status,
 });
+
+const liveScenarioResponse = async (response, method, path) => {
+  let status = response.status;
+  let body = Buffer.from(await response.arrayBuffer());
+  const contentType = response.headers.get('content-type') || '';
+  if (auditScenario === 'authorization-reconnect-and-restart') {
+    const key = `${method} ${path}`;
+    const attempt = (scenarioAttempts.get(key) || 0) + 1;
+    scenarioAttempts.set(key, attempt);
+    if (attempt === 1) {
+      status = 401;
+      body = Buffer.from(JSON.stringify({ error: 'audit authorization expired' }));
+    }
+  } else if (contentType.includes('json')) {
+    try {
+      const parsed = JSON.parse(body.toString('utf8'));
+      if (auditScenario === 'rendered-loading-and-empty') {
+        body = Buffer.from(JSON.stringify(emptyPayload(parsed)));
+      } else if (auditScenario === 'rendered-validation-and-server-error') {
+        status = 422;
+        body = Buffer.from(JSON.stringify({ error: 'audit validation failure' }));
+      }
+    } catch {
+      if (auditScenario === 'rendered-validation-and-server-error') {
+        status = 422;
+        body = Buffer.from(JSON.stringify({ error: 'audit validation failure' }));
+      }
+    }
+  }
+  return { body, status };
+};
 
 const mockBody = (path) => {
   if (path.includes('/health')) return { service: 'slskr', status: 'ok' };
@@ -147,6 +191,7 @@ const audit = {
   errors: [],
   generatedAt: new Date().toISOString(),
   routes: [],
+  scenario: auditScenario,
 };
 const observedLiveErrors = new Set();
 
@@ -166,7 +211,17 @@ try {
       });
       await page.route('**/api/**', async (route) => {
         if (!liveBackendUrl) {
-          return route.fulfill(json(mockBody(new URL(route.request().url()).pathname)));
+          const request = route.request();
+          const requestedUrl = new URL(request.url());
+          const key = `${request.method()} ${requestedUrl.pathname}`;
+          if (auditScenario === 'authorization-reconnect-and-restart') {
+            const attempt = (scenarioAttempts.get(key) || 0) + 1;
+            scenarioAttempts.set(key, attempt);
+            if (attempt === 1) {
+              return route.fulfill(json({ error: 'audit authorization expired' }, 401));
+            }
+          }
+          return route.fulfill(json(mockBody(requestedUrl.pathname)));
         }
 
         const request = route.request();
@@ -184,13 +239,22 @@ try {
             headers,
             body: ['GET', 'HEAD'].includes(request.method()) ? undefined : request.postDataBuffer() || undefined,
           });
+          const scenarioResponse = await liveScenarioResponse(
+            response,
+            request.method(),
+            requestedUrl.pathname,
+          );
           audit.apiResponses.push({
             method: request.method(),
             path: `${requestedUrl.pathname}${requestedUrl.search}`,
-            status: response.status,
+            status: scenarioResponse.status,
           });
-          if (response.status >= 400 && process.env.SLSKR_RUST_WEB_AUDIT_ALLOW_LIVE_ERRORS !== '1') {
-            const errorKey = `${request.method()} ${requestedUrl.pathname}${requestedUrl.search} -> ${response.status}`;
+          if (
+            scenarioResponse.status >= 400
+            && auditScenario === 'success'
+            && process.env.SLSKR_RUST_WEB_AUDIT_ALLOW_LIVE_ERRORS !== '1'
+          ) {
+            const errorKey = `${request.method()} ${requestedUrl.pathname}${requestedUrl.search} -> ${scenarioResponse.status}`;
             if (!observedLiveErrors.has(errorKey)) {
               observedLiveErrors.add(errorKey);
               audit.errors.push(`unexpected live backend response: ${errorKey}`);
@@ -202,9 +266,9 @@ try {
             ),
           );
           return route.fulfill({
-            body: Buffer.from(await response.arrayBuffer()),
+            body: scenarioResponse.body,
             headers: responseHeaders,
-            status: response.status,
+            status: scenarioResponse.status,
           });
         } catch (error) {
           audit.errors.push(`${requestedUrl.pathname}: live backend proxy failed: ${error.message}`);

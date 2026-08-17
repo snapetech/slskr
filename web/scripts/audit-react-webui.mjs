@@ -363,6 +363,37 @@ const json = (data, status = 200) => ({
   status: auditScenario === 'rendered-validation-and-server-error' ? 422 : status,
 });
 
+const liveScenarioResponse = async (response, method, pathName) => {
+  let status = response.status;
+  let body = Buffer.from(await response.arrayBuffer());
+  const contentType = response.headers.get('content-type') || '';
+  if (auditScenario === 'authorization-reconnect-and-restart') {
+    const key = `${method} ${pathName}`;
+    const attempt = (scenarioAttempts.get(key) || 0) + 1;
+    scenarioAttempts.set(key, attempt);
+    if (attempt === 1) {
+      status = 401;
+      body = Buffer.from(JSON.stringify({ error: 'audit authorization expired' }));
+    }
+  } else if (contentType.includes('json')) {
+    try {
+      const parsed = JSON.parse(body.toString('utf8'));
+      if (auditScenario === 'rendered-loading-and-empty') {
+        body = Buffer.from(JSON.stringify(emptyPayload(parsed)));
+      } else if (auditScenario === 'rendered-validation-and-server-error') {
+        status = 422;
+        body = Buffer.from(JSON.stringify({ error: 'audit validation failure' }));
+      }
+    } catch {
+      if (auditScenario === 'rendered-validation-and-server-error') {
+        status = 422;
+        body = Buffer.from(JSON.stringify({ error: 'audit validation failure' }));
+      }
+    }
+  }
+  return { body, status };
+};
+
 const normalizeApiPath = (url) =>
   new URL(url).pathname.replace(/^\/api\/v0/, '').replace(/^\/api/, '');
 
@@ -686,11 +717,17 @@ const installMocks = async (page, { activeUser, browseTabs, onApiResponse } = {}
         headers,
         body: ['GET', 'HEAD'].includes(request.method()) ? undefined : request.postDataBuffer() || undefined,
       });
+      const scenarioResponse = await liveScenarioResponse(
+        response,
+        request.method(),
+        requestedUrl.pathname,
+      );
       const responseRecord = {
-        allowed: isAllowedLiveStatus(response.status, request.method(), requestedUrl.pathname),
+        allowed: auditScenario !== 'success'
+          || isAllowedLiveStatus(scenarioResponse.status, request.method(), requestedUrl.pathname),
         method: request.method(),
         path: `${requestedUrl.pathname}${requestedUrl.search}`,
-        status: response.status,
+        status: scenarioResponse.status,
       };
       onApiResponse?.(responseRecord);
       const responseHeaders = Object.fromEntries(
@@ -699,9 +736,9 @@ const installMocks = async (page, { activeUser, browseTabs, onApiResponse } = {}
         ),
       );
       return route.fulfill({
-        body: Buffer.from(await response.arrayBuffer()),
+        body: scenarioResponse.body,
         headers: responseHeaders,
-        status: response.status,
+        status: scenarioResponse.status,
       });
     } catch (error) {
       onApiResponse?.({

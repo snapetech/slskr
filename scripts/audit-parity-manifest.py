@@ -71,6 +71,14 @@ UNIVERSAL_LIFECYCLE_SCENARIOS = frozenset(
         "uninstall",
     }
 )
+UNIVERSAL_UI_SCENARIOS = frozenset(
+    {
+        "success",
+        "rendered-loading-and-empty",
+        "rendered-validation-and-server-error",
+        "authorization-reconnect-and-restart",
+    }
+)
 
 
 def run_json(command: list[str], cwd: Path) -> Any:
@@ -4408,6 +4416,57 @@ def universal_transport_failures(path: Path) -> list[str]:
     return failures
 
 
+def universal_ui_scenario_failures(
+    paths: list[Path] | None,
+    *,
+    label: str,
+    expected_routes: int,
+) -> list[str]:
+    """Require live evidence for every user-visible UI state scenario."""
+    failures: list[str] = []
+    if not paths:
+        return [
+            f"universal replacement requires fresh live {label} UI scenario evidence"
+        ]
+
+    scenarios: set[str] = set()
+    for path in paths:
+        if not path.is_file():
+            failures.append(f"{label} UI scenario evidence does not exist: {path}")
+            continue
+        try:
+            evidence = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            failures.append(f"{label} UI scenario evidence is not valid JSON: {error}")
+            continue
+
+        scenario = evidence.get("scenario")
+        if not isinstance(scenario, str) or not scenario.strip():
+            failures.append(f"{label} UI scenario evidence must include a scenario: {path}")
+            continue
+        if scenario in scenarios:
+            failures.append(f"{label} UI scenario evidence contains duplicate scenario: {scenario}")
+        scenarios.add(scenario)
+        if evidence.get("evidenceMode") != "live":
+            failures.append(
+                f"{label} UI scenario {scenario} must declare evidenceMode=live; mock-only evidence cannot close the goal"
+            )
+        if evidence.get("errors"):
+            failures.append(f"{label} UI scenario {scenario} contains errors")
+        routes = evidence.get("routes")
+        if not isinstance(routes, list) or len(routes) != expected_routes:
+            failures.append(
+                f"{label} UI scenario {scenario} must cover {expected_routes} route/viewport cases"
+            )
+
+    missing = sorted(UNIVERSAL_UI_SCENARIOS - scenarios)
+    if missing:
+        failures.append(
+            f"{label} UI scenario evidence is missing: " + ", ".join(missing)
+        )
+    return failures
+
+
 def strict_universal_failures(
     entries: list[dict[str, Any]],
     *,
@@ -4417,6 +4476,8 @@ def strict_universal_failures(
     transport_evidence: Path | None,
     react_ui_evidence: Path | None,
     rust_ui_evidence: Path | None,
+    react_ui_scenario_evidence: list[Path] | None,
+    rust_ui_scenario_evidence: list[Path] | None,
 ) -> list[str]:
     """Apply the stronger universal-replacement contract.
 
@@ -4534,6 +4595,23 @@ def strict_universal_failures(
                 failures.append(
                     "Rust UI live evidence must cover all 15 routes at desktop and mobile viewports"
                 )
+
+    failures.extend(
+        universal_ui_scenario_failures(
+            ([react_ui_evidence] if react_ui_evidence else [])
+            + (react_ui_scenario_evidence or []),
+            label="React",
+            expected_routes=82,
+        )
+    )
+    failures.extend(
+        universal_ui_scenario_failures(
+            ([rust_ui_evidence] if rust_ui_evidence else [])
+            + (rust_ui_scenario_evidence or []),
+            label="Rust",
+            expected_routes=30,
+        )
+    )
 
     for entry in entries:
         if entry["status"] != "complete":
@@ -4705,6 +4783,24 @@ def main() -> None:
         help=(
             "Explicit React UI audit JSON for --strict-universal. It must be a "
             "fresh live-backend audit covering all 41 routes at both viewports."
+        ),
+    )
+    parser.add_argument(
+        "--react-ui-scenario-evidence",
+        type=Path,
+        action="append",
+        help=(
+            "Additional fresh live React UI scenario JSON artifacts. Together "
+            "with --react-ui-evidence they must cover every required state."
+        ),
+    )
+    parser.add_argument(
+        "--rust-ui-scenario-evidence",
+        type=Path,
+        action="append",
+        help=(
+            "Additional fresh live Rust UI scenario JSON artifacts. Together "
+            "with --rust-ui-evidence they must cover every required state."
         ),
     )
     parser.add_argument(
@@ -4910,6 +5006,8 @@ def main() -> None:
             transport_evidence=args.transport_evidence,
             react_ui_evidence=args.react_ui_evidence,
             rust_ui_evidence=args.rust_ui_evidence,
+            react_ui_scenario_evidence=args.react_ui_scenario_evidence,
+            rust_ui_scenario_evidence=args.rust_ui_scenario_evidence,
         )
         if strict_failures:
             print(
