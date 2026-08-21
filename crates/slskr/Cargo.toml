@@ -30,8 +30,8 @@ sqlx-sqlite = { version = "0.9", default-features = false, features = ["bundled"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "multipart", "rustls-tls", "stream"] }
-aes = "0.8"
-cbc = { version = "0.1", features = ["alloc"] }
+aes = "0.9"
+cbc = { version = "0.2", features = ["alloc"] }
 oxixml-io = "0.1.2"
 oxixml-model = "0.1.2"
 futures-util = "0.3"
