@@ -14,6 +14,13 @@ memory_kib="${SLSKR_PROCESS_MEMORY_MAX_KIB:-$hard_memory_kib}"
 tasks_max="${SLSKR_PROCESS_TASKS_MAX:-512}"
 host_platform="$(uname -s 2>/dev/null || printf 'unknown')"
 virtual_memory_limit_supported=1
+defer_to_rust_build_guard=0
+if [[ "$(basename "$1")" == "build-release-archive.sh" ]]; then
+  # The archive runner builds Rust after its web build. On runners without a
+  # systemd user manager, defer the virtual-memory ceiling to the nested Rust
+  # guard instead of trapping Cargo inside the smaller process ceiling.
+  defer_to_rust_build_guard=1
+fi
 if [[ "$host_platform" == "Darwin" ]]; then
   # Darwin's shell does not expose a settable RLIMIT_AS through `ulimit -v`.
   # Keep Node's managed-heap cap and the process-guard nesting marker while
@@ -101,7 +108,9 @@ fi
 # Git Bash and minimal containers). A virtual-memory ceiling is fail-closed: a
 # browser that cannot operate within it exits instead of growing unbounded.
 (
-  if [[ "$virtual_memory_limit_supported" -eq 1 ]]; then
+  if [[ "$defer_to_rust_build_guard" -eq 1 ]]; then
+    printf '[process-memory-guard] deferring virtual-memory ceiling to nested Rust guard for release archive\n' >&2
+  elif [[ "$virtual_memory_limit_supported" -eq 1 ]]; then
     if ! ulimit -v "$memory_kib"; then
       printf '[process-memory-guard] unable to apply virtual-memory ceiling on %s\n' "$host_platform" >&2
       exit 1
