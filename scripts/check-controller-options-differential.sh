@@ -2670,12 +2670,14 @@ start_no_connect_daemon() {
       (
         export SLSKD_APP_DIR="$state" SLSKD_NO_AUTH=true
         export SLSKD_HTTP_IP_ADDRESS=127.0.0.1 SLSKD_HTTP_PORT="$http_port" SLSKD_HTTPS_PORT="$https_port"
+        [[ -n "$listen_port" ]] && export SLSKD_SLSK_LISTEN_PORT="$listen_port"
         exec dotnet "$dll"
       ) >>"$log" 2>&1 &
     else
       (
         export SLSKD_APP_DIR="$state" SLSKD_NO_AUTH=true
         export SLSKD_HTTP_IP_ADDRESS=127.0.0.1 SLSKD_HTTP_PORT="$http_port" SLSKD_HTTPS_PORT="$https_port"
+        [[ -n "$listen_port" ]] && export SLSKD_SLSK_LISTEN_PORT="$listen_port"
         exec dotnet "$dll"
       ) >"$log" 2>&1 &
     fi
