@@ -23,7 +23,7 @@ for _ in {1..60}; do
   if [[ "$state" != "running" ]]; then
     break
   fi
-  if docker logs "$container_name" 2>&1 | rg -q 'listening on http://'; then
+  if docker logs "$container_name" 2>&1 | grep -Fq 'listening on http://'; then
     ready=1
     break
   fi
@@ -59,7 +59,7 @@ if [[ "$exit_code" != "0" ]]; then
   exit 1
 fi
 
-if ! docker logs "$container_name" 2>&1 | rg -q 'shutdown signal received'; then
+if ! docker logs "$container_name" 2>&1 | grep -Fq 'shutdown signal received'; then
   echo "container stopped without recording graceful signal handling: $image" >&2
   docker logs "$container_name" 2>&1 || true
   exit 1
