@@ -15,16 +15,17 @@ makes failure/restart cases deterministic and keeps the memory footprint low.
 from __future__ import annotations
 
 import hashlib
+import http.client
 import json
 import os
 import shutil
 import signal
 import socket
+import stat
 import subprocess
 import sys
 import time
-import urllib.error
-import urllib.request
+import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
@@ -335,34 +336,40 @@ class Daemon:
         if payload is not None:
             body = json_text(payload).encode("utf-8")
             headers["Content-Type"] = "application/json"
-        request = urllib.request.Request(
-            f"{self.base_url}{path}", method=method, data=body, headers=headers
+        parsed_base_url = urllib.parse.urlsplit(self.base_url)
+        if parsed_base_url.scheme not in {"http", "https"} or parsed_base_url.hostname is None:
+            raise ValueError(f"unsupported lifecycle endpoint: {self.base_url}")
+        connection_type = (
+            http.client.HTTPSConnection
+            if parsed_base_url.scheme == "https"
+            else http.client.HTTPConnection
         )
+        connection = connection_type(
+            parsed_base_url.hostname,
+            parsed_base_url.port,
+            timeout=timeout,
+        )
+        request_path = path if path.startswith("/") else f"/{path}"
         started = time.monotonic()
         try:
-            with urllib.request.urlopen(request, timeout=timeout) as response:
-                raw = response.read(256 * 1024)
-                return {
-                    "status": response.status,
-                    "statusClass": status_class(response.status),
-                    "body": raw.decode("utf-8", errors="replace"),
-                    "durationMs": round((time.monotonic() - started) * 1000, 2),
-                }
-        except urllib.error.HTTPError as error:
-            raw = error.read(256 * 1024)
+            connection.request(method, request_path, body=body, headers=headers)
+            response = connection.getresponse()
+            raw = response.read(256 * 1024)
             return {
-                "status": error.code,
-                "statusClass": status_class(error.code),
+                "status": response.status,
+                "statusClass": status_class(response.status),
                 "body": raw.decode("utf-8", errors="replace"),
                 "durationMs": round((time.monotonic() - started) * 1000, 2),
             }
-        except (urllib.error.URLError, TimeoutError, OSError) as error:
+        except (http.client.HTTPException, TimeoutError, OSError) as error:
             return {
                 "status": None,
                 "statusClass": "transport-error",
                 "error": str(error),
                 "durationMs": round((time.monotonic() - started) * 1000, 2),
             }
+        finally:
+            connection.close()
 
     def snapshot(self) -> dict[str, Any]:
         paths = {
@@ -644,7 +651,10 @@ def run_scenario(profile: str, scenario: str, case_directory: Path, target_binar
             for daemon in (target, replacement):
                 os.chmod(daemon.root, 0o500)
                 permission_results[daemon.name] = start_failure_observation(daemon)
-                os.chmod(daemon.root, 0o700)
+                os.chmod(
+                    daemon.root,
+                    stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR,
+                )
             observations["permissions"] = permission_results
             parity = permission_results["target"].get("started") == permission_results["replacement"].get("started")
         elif scenario == "uninstall":

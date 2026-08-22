@@ -306,6 +306,8 @@ jobs:
         shell: bash
         env:
           RELEASE_VERSION: ${{ needs.version.outputs.version }}
+          RELEASE_REPOSITORY: ${{ github.repository }}
+          RELEASE_REF_NAME: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           # The assembler inserts the ### User-facing changes section from release-notes/.
@@ -325,10 +327,10 @@ jobs:
 
           ## Proof and detailed notes
 
-          - [Parity and live-interop evidence](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/docs/parity/universal-replacement-acceptance.md) records certified surfaces and explicit remaining boundaries.
-          - [Live interop matrix](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/docs/live-interop-test-matrix.md) records cross-client transactions and configuration-gated cases.
-          - [Release runbook](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/docs/release.md) documents the local gates and artifact contract.
-          - [Full structured release-note fragments](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/RELEASE_NOTES_FULL.md) contain the machine-validated detailed change record without making this summary a wall of text.
+          - [Parity and live-interop evidence](https://github.com/${RELEASE_REPOSITORY}/blob/${RELEASE_REF_NAME}/docs/parity/universal-replacement-acceptance.md) records certified surfaces and explicit remaining boundaries.
+          - [Live interop matrix](https://github.com/${RELEASE_REPOSITORY}/blob/${RELEASE_REF_NAME}/docs/live-interop-test-matrix.md) records cross-client transactions and configuration-gated cases.
+          - [Release runbook](https://github.com/${RELEASE_REPOSITORY}/blob/${RELEASE_REF_NAME}/docs/release.md) documents the local gates and artifact contract.
+          - [Full structured release-note fragments](https://github.com/${RELEASE_REPOSITORY}/releases/download/${RELEASE_REF_NAME}/RELEASE_NOTES_FULL.md) contain the machine-validated detailed change record without making this summary a wall of text.
           EOF
           previous_tag="$(git describe --tags --match 'release-v*' --abbrev=0 "${GITHUB_SHA}^" 2>/dev/null || true)"
           release_notes_base="${previous_tag:-$(git hash-object -t tree /dev/null)}"
