@@ -39,9 +39,14 @@ proptest! {
 }
 
 fn hex_bytes(input: &str) -> Vec<u8> {
-    input
-        .as_bytes()
-        .chunks_exact(2)
+    let (pairs, remainder) = input.as_bytes().as_chunks::<2>();
+    assert!(
+        remainder.is_empty(),
+        "hex input must contain complete bytes"
+    );
+
+    pairs
+        .iter()
         .map(|pair| {
             let value = std::str::from_utf8(pair).unwrap();
             u8::from_str_radix(value, 16).unwrap()
