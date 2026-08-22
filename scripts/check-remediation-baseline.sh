@@ -74,6 +74,7 @@ GATES=(
   scripts/check-transfer-event-growth.sh
   scripts/check-workflow-release-policy.sh
   scripts/check-package-artifact-matrix.sh
+  scripts/check-aur-packaging-checksums.sh
   scripts/check-rust-dependency-hygiene.sh
   scripts/check-release-version-metadata.sh
   scripts/check-secret-scanning.sh

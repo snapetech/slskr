@@ -1,0 +1,129 @@
+.compatibility-dashboard .compatibility-search-segment {
+  align-items: center;
+  display: flex;
+  gap: 1em;
+}
+
+.compatibility-dashboard .compatibility-search-input {
+  flex: 1;
+}
+
+.compatibility-dashboard .compatibility-history-heading {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 1em;
+}
+
+.compatibility-dashboard .compatibility-history-heading h4 {
+  margin: 0;
+}
+
+.compatibility-dashboard .compatibility-history-heading .button-group {
+  margin-left: 1em;
+}
+
+.compatibility-dashboard .compatibility-graph {
+  margin: 1.5em 0;
+  position: relative;
+}
+
+.compatibility-dashboard .compatibility-graph-frame {
+  min-height: 240px;
+  position: relative;
+}
+
+.compatibility-dashboard .compatibility-graph svg {
+  display: block;
+  height: 240px;
+  overflow: visible;
+  width: 100%;
+}
+
+.compatibility-dashboard .compatibility-graph-axis {
+  stroke: rgba(128, 128, 128, 0.55);
+  stroke-width: 1;
+}
+
+.compatibility-dashboard .compatibility-graph-line {
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
+.compatibility-dashboard .compatibility-graph-hover {
+  stroke: rgba(128, 128, 128, 0.75);
+  stroke-dasharray: 3 3;
+  stroke-width: 1;
+}
+
+.compatibility-dashboard .compatibility-graph-tooltip {
+  background: var(--slskd-panel, #fff);
+  border: 1px solid rgba(128, 128, 128, 0.45);
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  display: flex;
+  flex-direction: column;
+  font-size: 0.85em;
+  gap: 0.25em;
+  max-width: min(320px, 80%);
+  padding: 0.6em 0.75em;
+  pointer-events: none;
+  position: absolute;
+  right: 0.5em;
+  top: 0.5em;
+  z-index: 2;
+}
+
+.compatibility-dashboard .compatibility-graph-tooltip i,
+.compatibility-dashboard .compatibility-graph-legend i {
+  border-radius: 50%;
+  display: inline-block;
+  flex: 0 0 auto;
+  height: 0.7em;
+  margin-right: 0.35em;
+  width: 0.7em;
+}
+
+.compatibility-dashboard .compatibility-graph-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45em 1em;
+  justify-content: center;
+}
+
+.compatibility-dashboard .compatibility-graph-legend button {
+  align-items: center;
+  background: none;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 0.85em;
+  opacity: 1;
+  padding: 0.15em;
+}
+
+.compatibility-dashboard .compatibility-graph-legend button.is-hidden {
+  opacity: 0.35;
+}
+
+.compatibility-dashboard .compatibility-graph-empty {
+  opacity: 0.6;
+  text-align: center;
+}
+
+.compatibility-dashboard .statistic small {
+  color: #999;
+  font-size: 0.5em;
+  margin-left: 0.15em;
+}
+
+.dark .compatibility-dashboard .compatibility-graph-tooltip {
+  background: #161b22;
+  border-color: #30363d;
+}
+
+.dark .compatibility-dashboard .compatibility-graph-legend button {
+  color: var(--slskd-color, #c9d1d9);
+}

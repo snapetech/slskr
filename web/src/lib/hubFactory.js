@@ -18,10 +18,16 @@ const topicAliases = {
 
 const eventAliases = {
   application: {
+    STATE: 'state',
+    OPTIONS: 'options',
     'session.updated': 'state',
     'config.updated': 'options',
   },
   search: {
+    LIST: 'list',
+    CREATE: 'create',
+    UPDATE: 'update',
+    DELETE: 'delete',
     'search.created': 'create',
     'search.started': 'create',
     'search.updated': 'update',
@@ -30,12 +36,17 @@ const eventAliases = {
     'search.list': 'list',
   },
   transfers: {
+    ACTIVITY: 'activity',
+    PROGRESS: 'activity',
+    REMOVED: 'activity',
     'transfer.started': 'activity',
     'transfer.progress': 'activity',
     'transfer.completed': 'activity',
     'transfer.failed': 'activity',
   },
   logs: {
+    BUFFER: 'buffer',
+    LOG: 'log',
     'log.buffer': 'buffer',
     'log.created': 'log',
   },

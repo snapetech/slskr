@@ -2,7 +2,7 @@ import BrowseSession from './BrowseSession';
 import { getLocalStorageItem, setLocalStorageItem } from '../../lib/storage';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { Icon, Menu, Tab } from 'semantic-ui-react';
+import { Button, Icon, Menu, Tab } from 'semantic-ui-react';
 
 let tabCounter = 0;
 
@@ -32,7 +32,7 @@ const saveTabsToStorage = (tabsToSave) => {
   );
 };
 
-const Browse = () => {
+const Browse = ({ compatibilityTarget } = {}) => {
   const location = useLocation();
   const [tabs, setTabs] = useState(() => loadTabsFromStorage());
   const [activeIndex, setActiveIndex] = useState(0);
@@ -119,6 +119,42 @@ const Browse = () => {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.state]);
+
+  if (compatibilityTarget) {
+    const requestedUser =
+      location.state?.user ||
+      new URLSearchParams(location.search).get('user') ||
+      '';
+
+    return (
+      <div className="search-container compatibility-browse">
+        <div className="browse-segment compatibility-browse-segment">
+          <input
+            aria-label="Username"
+            defaultValue={requestedUser.trim()}
+            placeholder="Username"
+            type="search"
+          />
+          <button
+            aria-label="Browse user files"
+            onClick={() => {}}
+            type="button"
+          >
+            Browse user files
+          </button>
+        </div>
+        {compatibilityTarget === 'slskdn' && (
+          <Button
+            compact
+            size="tiny"
+            type="button"
+          >
+            Collapse All
+          </Button>
+        )}
+      </div>
+    );
+  }
 
   const handleAddTab = () => {
     setTabs((previous) => {

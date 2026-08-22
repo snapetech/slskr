@@ -453,12 +453,14 @@ const SoulseekDiscoveryPanel = ({ disabled, onSearch }) => {
         <Message
           content={error}
           error
+          style={{ clear: 'both' }}
         />
       )}
       {status && (
         <Message
           content={status}
           positive={!error}
+          style={{ clear: 'both' }}
         />
       )}
 

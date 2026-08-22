@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# This differential launches reference web hosts. Keep direct invocation
+# within the repository process-memory ceiling.
+runner_repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [[ "${SLSKR_PROCESS_MEMORY_GUARD_HELD:-0}" != "1" ]]; then
+  exec "$runner_repo_root/scripts/with-process-memory-guard.sh" "${BASH_SOURCE[0]}" "$@"
+fi
+
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 slskdn_root="${SLSKR_SLSKDN_ROOT:-/tmp/slskr-parity-slskdn-frozen}"
 dll="$slskdn_root/src/slskd/bin/Release/net10.0/linux-x64/slskd.dll"
@@ -85,10 +92,14 @@ start_daemon() {
       exec dotnet "$dll"
     ) >"$log" 2>&1 &
   else
+    local overlay_port
+    overlay_port="$(pick_free_port)"
     (
       export SLSKR_AUTH_DISABLED=false SLSKR_API_TOKEN=differential-controller-token-32
       export SLSKR_CONTROLLER_COMPATIBILITY_TARGET=slskdn
       export SLSKR_REMOTE_CONFIGURATION=true
+      export SLSKD_HTTPS_PORT="$https_port"
+      export SLSKR_OVERLAY_BIND="127.0.0.1:$overlay_port"
       exec "$repo_root/target/debug/slskr" serve --app-dir "$state" \
         --http-ip-address 127.0.0.1 --http-port "$port" \
         --slsk-listen-port "$listen_port" --no-connect

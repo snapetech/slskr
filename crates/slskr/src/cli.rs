@@ -16,10 +16,13 @@ use slskr_client::{
     io::read_init_frame_with_first_len_byte,
     listener::{IncomingConnection, Listener},
     overlay::{connect_tls_overlay, MeshHello, MeshServiceCall, FEATURE_MESH_SERVICE},
+    overlay_control::{send_udp_control, ControlEnvelope},
     peer_connect::{
         send_obfuscated_peer_init, send_obfuscated_peer_init_with_token, send_peer_init,
         send_peer_init_with_token, send_pierce_firewall, IndirectPeerRequest,
     },
+    quic_control::{discover_certificate_public_key_pin, send_quic_control, QUIC_CONTROL_ALPN},
+    quic_data::{send_quic_data, QUIC_DATA_ALPN},
     server::{LoginCredentials, ServerSession},
     share_payload::{compress_zlib_payload, decompress_peer_share_payload},
     stream::{
@@ -72,6 +75,9 @@ where
         Some("negative-indirect-probe") => negative_indirect_probe().await,
         Some("peer-address-probe") => peer_address_probe().await,
         Some("overlay-service-probe") => overlay_service_probe().await,
+        Some("overlay-udp-probe") => overlay_udp_probe().await,
+        Some("overlay-quic-control-probe") => overlay_quic_control_probe().await,
+        Some("quic-data-probe") => quic_data_probe().await,
         Some("dht-store-probe") => dht_store_probe().await,
         Some("fixture-peer-smoke") => fixture_peer_smoke().await,
         Some("distributed-tree-smoke") => distributed_tree_smoke().await,
@@ -153,6 +159,9 @@ where
         "probe" => match args.get(1).map(String::as_str) {
             Some("peer-address") => vec!["peer-address-probe"],
             Some("overlay-service") => vec!["overlay-service-probe"],
+            Some("overlay-udp") => vec!["overlay-udp-probe"],
+            Some("overlay-quic-control") => vec!["overlay-quic-control-probe"],
+            Some("quic-data") => vec!["quic-data-probe"],
             Some("dht-store") => vec!["dht-store-probe"],
             Some("plain-peer") => vec!["plain-peer-probe"],
             Some("browse-peer") => vec!["browse-peer-probe"],
@@ -191,6 +200,9 @@ fn usage() -> &'static str {
   SLSK_USERNAME=<user> SLSK_PASSWORD=<pass> slskr soak live
   SLSK_USERNAME=<user> SLSK_PASSWORD=<pass> SLSK_PEER_USERNAME=<peer> slskr probe peer-address
   SLSKR_OVERLAY_ENDPOINT=<ip:port> SLSKR_OVERLAY_CERTIFICATE_SHA256=<hex> SLSK_USERNAME=<user> SLSK_PEER_USERNAME=<peer> slskr probe overlay-service
+  SLSKR_OVERLAY_ENDPOINT=<ip:port> slskr probe overlay-udp
+  SLSKR_OVERLAY_ENDPOINT=<ip:port> slskr probe overlay-quic-control
+  SLSKR_OVERLAY_ENDPOINT=<ip:port> slskr probe quic-data
   SLSKR_OVERLAY_ENDPOINT=<ip:port> SLSKR_OVERLAY_CERTIFICATE_SHA256=<hex> SLSK_USERNAME=<user> SLSK_PEER_USERNAME=<peer> slskr probe dht-store
   SLSK_USERNAME=<user> SLSK_PASSWORD=<pass> SLSK_PEER_USERNAME=<peer> slskr probe plain-peer
   SLSK_USERNAME=<user> SLSK_PASSWORD=<pass> SLSK_PEER_USERNAME=<peer> slskr probe browse-peer
@@ -304,6 +316,65 @@ async fn overlay_service_probe() -> Result<(), String> {
         println!("{response}");
     }
     emit_and_result(ctx.ok(format!("{service_name}.{method} succeeded")))
+}
+
+fn direct_overlay_probe_endpoint() -> Result<SocketAddr, String> {
+    required_env_any(&["SLSKR_OVERLAY_ENDPOINT"])?
+        .parse::<SocketAddr>()
+        .map_err(|error| format!("invalid SLSKR_OVERLAY_ENDPOINT: {error}"))
+}
+
+fn direct_overlay_probe_envelope() -> Result<ControlEnvelope, String> {
+    ControlEnvelope::new_signed(
+        "probe",
+        b"slskr-direct-transport-probe".to_vec(),
+        &SigningKey::from_bytes(&[0x71_u8; 32]),
+    )
+    .map_err(|error| format!("direct overlay probe envelope failed: {error}"))
+}
+
+async fn overlay_udp_probe() -> Result<(), String> {
+    let endpoint = direct_overlay_probe_endpoint()?;
+    let envelope = direct_overlay_probe_envelope()?;
+    let sent = send_udp_control(endpoint, &envelope)
+        .await
+        .map_err(|error| format!("UDP overlay probe failed: {error}"))?;
+    emit_and_result(
+        ProbeContext::new("overlay-udp")
+            .ok(format!("endpoint={endpoint} bytes={sent} envelope=probe")),
+    )
+}
+
+async fn overlay_quic_control_probe() -> Result<(), String> {
+    let endpoint = direct_overlay_probe_endpoint()?;
+    let envelope = direct_overlay_probe_envelope()?;
+    let certificate_pin =
+        discover_certificate_public_key_pin(endpoint, QUIC_CONTROL_ALPN, "slskdn-overlay")
+            .await
+            .map_err(|error| format!("QUIC control certificate discovery failed: {error}"))?;
+    send_quic_control(endpoint, &envelope, certificate_pin)
+        .await
+        .map_err(|error| format!("QUIC control probe failed: {error}"))?;
+    emit_and_result(ProbeContext::new("overlay-quic-control").ok(format!(
+        "endpoint={endpoint} envelope=probe certificate_pin=discovered-for-frozen-target"
+    )))
+}
+
+async fn quic_data_probe() -> Result<(), String> {
+    let endpoint = direct_overlay_probe_endpoint()?;
+    let payload = b"slskr-direct-quic-data-probe";
+    let certificate_pin =
+        discover_certificate_public_key_pin(endpoint, QUIC_DATA_ALPN, "slskdn-overlay-data")
+            .await
+            .map_err(|error| format!("QUIC data certificate discovery failed: {error}"))?;
+    let sent = send_quic_data(endpoint, payload, certificate_pin)
+        .await
+        .map_err(|error| format!("QUIC data probe failed: {error}"))?;
+    emit_and_result(
+        ProbeContext::new("quic-data")
+            .with_bytes(sent as u64)
+            .ok(format!("endpoint={endpoint} bytes={sent} payload=raw")),
+    )
 }
 
 async fn dht_store_probe() -> Result<(), String> {
@@ -430,6 +501,16 @@ async fn obfuscated_peer_probe() -> Result<(), String> {
     let server_address =
         std::env::var("SLSK_SERVER").unwrap_or_else(|_| DEFAULT_SERVER_ADDRESS.to_owned());
     let timeout = env_duration_secs("SLSK_OBFUSCATED_PROBE_TIMEOUT_SECONDS", 15, false)?;
+    let obfuscated_port_override = optional_env("SLSK_OBFUSCATED_PORT_OVERRIDE")
+        .map(|value| {
+            value
+                .parse::<u16>()
+                .map_err(|error| format!("invalid SLSK_OBFUSCATED_PORT_OVERRIDE: {error}"))
+        })
+        .transpose()?;
+    if let Some(port) = obfuscated_port_override {
+        validated_obfuscated_port(ROTATED_OBFUSCATION_TYPE, port)?;
+    }
 
     let attempts = env_usize("SLSK_OBFUSCATED_PEER_ADDRESS_ATTEMPTS", 5)?;
     let mut last_error = None;
@@ -445,11 +526,12 @@ async fn obfuscated_peer_probe() -> Result<(), String> {
         .await
         {
             Ok(candidate)
-                if validated_obfuscated_port(
-                    candidate.obfuscation_type,
-                    candidate.obfuscated_port,
-                )
-                .is_ok() =>
+                if obfuscated_port_override.is_some()
+                    || validated_obfuscated_port(
+                        candidate.obfuscation_type,
+                        candidate.obfuscated_port,
+                    )
+                    .is_ok() =>
             {
                 address = Some(candidate);
                 break;
@@ -467,8 +549,10 @@ async fn obfuscated_peer_probe() -> Result<(), String> {
     let address = address.ok_or_else(|| {
         last_error.unwrap_or_else(|| "peer did not advertise rotated obfuscation".to_owned())
     })?;
-    let obfuscated_port =
-        validated_obfuscated_port(address.obfuscation_type, address.obfuscated_port)?;
+    let obfuscated_port = match obfuscated_port_override {
+        Some(port) => port,
+        None => validated_obfuscated_port(address.obfuscation_type, address.obfuscated_port)?,
+    };
 
     let host =
         optional_env("SLSK_OBFUSCATED_HOST_OVERRIDE").unwrap_or_else(|| address.ip.to_string());
@@ -497,7 +581,7 @@ async fn obfuscated_peer_probe() -> Result<(), String> {
             &username,
             &peer_username,
             &host,
-            address.obfuscated_port,
+            obfuscated_port,
             init_token,
             timeout,
             init_settle_millis,
@@ -510,7 +594,7 @@ async fn obfuscated_peer_probe() -> Result<(), String> {
         Err(primary_error) if env_bool("SLSK_OBFUSCATED_ALLOW_PLAIN_RESPONSE", true)? => {
             let stream = time::timeout(
                 timeout,
-                TcpStream::connect((host.as_str(), address.obfuscated_port)),
+                TcpStream::connect((host.as_str(), obfuscated_port)),
             )
             .await
             .map_err(|_| "obfuscated peer fallback connect timed out".to_owned())?

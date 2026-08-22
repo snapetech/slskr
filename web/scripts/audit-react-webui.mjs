@@ -34,6 +34,7 @@ const clickActions = liveBackendUrl
 
 const routes = [
   '/',
+  '/lidarr',
   '/searches',
   '/searches/commons-example-sound',
   '/discovery-graph',

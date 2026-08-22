@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# This differential launches reference web hosts. Keep direct invocation
+# within the repository process-memory ceiling.
+runner_repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [[ "${SLSKR_PROCESS_MEMORY_GUARD_HELD:-0}" != "1" ]]; then
+  "$runner_repo_root/scripts/with-build-guard.sh" cargo build -p slskr --manifest-path "$runner_repo_root/Cargo.toml" >/dev/null
+  exec "$runner_repo_root/scripts/with-process-memory-guard.sh" "${BASH_SOURCE[0]}" "$@"
+fi
+
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 slskdn_root="${SLSKR_SLSKDN_ROOT:-/tmp/slskr-parity-slskdn-frozen}"
 dll="$slskdn_root/src/slskd/bin/Release/net10.0/linux-x64/slskd.dll"
@@ -93,8 +101,12 @@ start_daemon() {
       exec dotnet "$dll" "${args[@]}"
     ) >"$log" 2>&1 &
   else
+    local overlay_port
+    overlay_port="$(pick_free_port)"
     (
       export SLSKR_CONTROLLER_COMPATIBILITY_TARGET=slskdn SLSKR_REMOTE_CONFIGURATION=true
+      export SLSKD_HTTPS_PORT="$https_port"
+      export SLSKR_OVERLAY_BIND="127.0.0.1:$overlay_port"
       if [[ "$environment_enforce" != __unset__ ]]; then
         export SLSKD_ENFORCE_SECURITY="$environment_enforce"
       else
@@ -338,7 +350,6 @@ PY
 }
 
 [[ -f "$dll" ]] || { printf 'missing frozen slskdN binary: %s\n' "$dll" >&2; exit 1; }
-scripts/with-build-guard.sh cargo build -p slskr --manifest-path "$repo_root/Cargo.toml" >/dev/null
 for implementation in upstream slskr; do
   for mode in default environment yaml-over-environment cli-over-yaml; do
     run_precedence "$implementation" "$mode"

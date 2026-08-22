@@ -43,7 +43,7 @@ const saveTabsToStorage = (tabsToSave) => {
   );
 };
 
-const Chat = ({ state }) => {
+const Chat = ({ compatibilityTarget, state }) => {
   const location = useLocation();
   const [tabs, setTabs] = useState(() => loadTabsFromStorage());
   const [activeIndex, setActiveIndex] = useState(0);
@@ -251,6 +251,20 @@ const Chat = ({ state }) => {
       </Tab.Pane>
     ),
   }));
+
+  if (compatibilityTarget === 'slskd') {
+    return (
+      <div className="chats compatibility-chat">
+        <button
+          aria-label="Open a new chat tab"
+          onClick={() => handleAddTab()}
+          type="button"
+        >
+          Open a new chat tab
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="chats">

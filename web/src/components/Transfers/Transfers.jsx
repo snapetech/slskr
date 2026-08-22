@@ -33,7 +33,34 @@ const OPTIMISTIC_HIDE_MS = 15_000;
 const QUEUE_POSITION_REFRESH_MS = 30_000;
 const MAX_QUEUE_POSITION_LOOKUPS_PER_FETCH = 5;
 
-const Transfers = ({ direction, server }) => {
+const groupFlatTransfers = (records) => {
+  const groups = new Map();
+
+  records.forEach((record) => {
+    const username = record?.username || record?.user || 'Unknown';
+    const directory = record?.directory || record?.directoryName || '';
+    let user = groups.get(username);
+
+    if (!user) {
+      user = { directories: [], username };
+      groups.set(username, user);
+    }
+
+    let directoryGroup = user.directories.find(
+      (candidate) => candidate.directory === directory,
+    );
+    if (!directoryGroup) {
+      directoryGroup = { directory, files: [] };
+      user.directories.push(directoryGroup);
+    }
+
+    directoryGroup.files.push(record);
+  });
+
+  return Array.from(groups.values());
+};
+
+const Transfers = ({ compatibilityTarget, direction, server }) => {
   const testId = direction === 'download' ? 'downloads-root' : 'uploads-root';
   const [connecting, setConnecting] = useState(true);
   const [transfers, setTransfers] = useState([]);
@@ -257,7 +284,10 @@ const Transfers = ({ direction, server }) => {
     latestFetchIdRef.current = fetchId;
 
     try {
-      const response = await transfersLibrary.getAll({ direction });
+      const response =
+        compatibilityTarget === 'slskdn'
+          ? groupFlatTransfers((await transfersLibrary.getChanges()).transfers)
+          : await transfersLibrary.getAll({ direction });
 
       await refreshQueuePositions(response);
 
@@ -284,7 +314,7 @@ const Transfers = ({ direction, server }) => {
     return () => {
       clearInterval(interval);
     };
-  }, [direction]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [compatibilityTarget, direction]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useMemo(() => {
     setConnecting(true);
@@ -459,7 +489,7 @@ const Transfers = ({ direction, server }) => {
 
   useEffect(() => {
     const fetchDownloadModeStatus = async () => {
-      if (direction !== 'download') {
+      if (direction !== 'download' || compatibilityTarget === 'slskd') {
         return;
       }
 
@@ -476,7 +506,7 @@ const Transfers = ({ direction, server }) => {
     };
 
     fetchDownloadModeStatus();
-  }, [direction]);
+  }, [compatibilityTarget, direction]);
 
   const handleAutoReplaceChange = async (enabled) => {
     try {

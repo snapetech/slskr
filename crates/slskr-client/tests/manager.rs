@@ -343,6 +343,7 @@ async fn complete_inbound_peer_messages_inserts_cache_entry() {
                 kind: ConnectionKind::PeerMessages,
                 token: 42,
                 stream,
+                obfuscated: false,
             },
         )
         .await
@@ -368,6 +369,7 @@ fn complete_inbound_distributed_returns_typed_connection() {
                 kind: ConnectionKind::Distributed,
                 token: 42,
                 stream,
+                obfuscated: false,
             },
         )
         .unwrap();
@@ -392,6 +394,7 @@ fn complete_inbound_file_transfer_returns_typed_connection() {
                 kind: ConnectionKind::FileTransfer,
                 token: 42,
                 stream,
+                obfuscated: false,
             },
         )
         .unwrap();

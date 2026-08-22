@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# The release gate includes dependency installs, browser audits, Rust builds,
+# and package builds. Keep the non-Rust steps inside the process-memory guard,
+# while allowing Cargo steps to use their separate Rust virtual-memory guard.
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 

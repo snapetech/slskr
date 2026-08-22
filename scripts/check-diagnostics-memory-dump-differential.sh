@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# The diagnostic differential hosts a reference daemon and exercises dump
+# endpoints. Bound the full process tree even when called directly.
+runner_repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [[ "${SLSKR_PROCESS_MEMORY_GUARD_HELD:-0}" != "1" ]]; then
+  "$runner_repo_root/scripts/with-build-guard.sh" cargo build -p slskr --manifest-path "$runner_repo_root/Cargo.toml" >/dev/null
+  exec "$runner_repo_root/scripts/with-process-memory-guard.sh" "${BASH_SOURCE[0]}" "$@"
+fi
+
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 slskdn_root="${SLSKR_SLSKDN_ROOT:-/tmp/slskr-parity-slskdn-frozen}"
 dll="$slskdn_root/src/slskd/bin/Release/net10.0/linux-x64/slskd.dll"
@@ -26,6 +34,15 @@ PY
 stop_daemon() {
   if [[ -n "$daemon_pid" ]] && kill -0 "$daemon_pid" 2>/dev/null; then
     kill "$daemon_pid" 2>/dev/null || true
+    for _ in $(seq 1 100); do
+      if ! kill -0 "$daemon_pid" 2>/dev/null; then
+        wait "$daemon_pid" 2>/dev/null || true
+        daemon_pid=""
+        return
+      fi
+      sleep 0.05
+    done
+    kill -KILL "$daemon_pid" 2>/dev/null || true
     wait "$daemon_pid" 2>/dev/null || true
   fi
   daemon_pid=""
@@ -73,6 +90,8 @@ start_daemon() {
   local https_port="$4"
   local listen_port="$5"
   local log="$6"
+  local overlay_port
+  overlay_port="$(pick_free_port)"
   if [[ "$implementation" == upstream ]]; then
     (
       export SLSKD_APP_DIR="$state" SLSKD_NO_CONNECT=true SLSKD_REMOTE_CONFIGURATION=true
@@ -84,6 +103,8 @@ start_daemon() {
     (
       export SLSKR_CONTROLLER_COMPATIBILITY_TARGET=slskdn SLSKR_REMOTE_CONFIGURATION=true
       export SLSKR_CONTROLLER_AUDIT_MODE=1
+      export SLSKR_OVERLAY_BIND="127.0.0.1:$overlay_port"
+      export SLSKD_HTTPS_PORT="$https_port"
       exec "$repo_root/target/debug/slskr" serve --app-dir "$state" \
         --http-address 0.0.0.0 --http-port "$port" \
         --slsk-listen-port "$listen_port" --no-connect
@@ -298,7 +319,6 @@ run_hardening_rejection() {
 }
 
 [[ -f "$dll" ]] || { printf 'missing frozen slskdN binary: %s\n' "$dll" >&2; exit 1; }
-scripts/with-build-guard.sh cargo build -p slskr --manifest-path "$repo_root/Cargo.toml" >/dev/null
 for implementation in upstream slskr; do
   run_static_modes "$implementation"
   run_watch_restart "$implementation" memory

@@ -34,7 +34,7 @@ if ! rg -n 'BUG-008 .*Verified' docs/dev/bug-burndown-ledger.md >/dev/null; then
 fi
 
 if ! rg -n --fixed-strings -- 'authenticated_rate_limit_user_key' crates/slskr/src/main.rs >/dev/null ||
-   ! rg -n --fixed-strings -- 'if !is_authorized(config, authorization, cookie)' crates/slskr/src/main.rs >/dev/null ||
+   ! rg -n --fixed-strings -- 'if !utils::is_authorized_from(config, authorization, cookie, remote_addr)' crates/slskr/src/main.rs >/dev/null ||
    ! rg -n --fixed-strings -- '.map(|token| rate_limit_user_key(&token))' crates/slskr/src/main.rs >/dev/null ||
    ! rg -n --fixed-strings -- 'authenticated_rate_limit_key_uses_verified_credential_identity' crates/slskr/src/main.rs >/dev/null; then
   printf 'rate-limit proxy policy check failed: verified authenticated rate-limit identity is missing\n' >&2

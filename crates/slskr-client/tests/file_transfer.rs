@@ -57,3 +57,18 @@ async fn token_offset_then_chunk_preserve_order() {
     assert_eq!(b.receive_offset().await.unwrap(), 10);
     assert_eq!(b.read_chunk(3).await.unwrap(), vec![7, 8, 9]);
 }
+
+#[tokio::test]
+async fn obfuscated_token_offset_then_chunk_preserve_framing() {
+    let (a, b) = duplex(256);
+    let mut a = FileTransferConnection::new_obfuscated(a);
+    let mut b = FileTransferConnection::new_obfuscated(b);
+
+    a.send_token(99).await.unwrap();
+    a.send_offset(10).await.unwrap();
+    a.write_chunk(&[7, 8, 9]).await.unwrap();
+
+    assert_eq!(b.receive_token().await.unwrap(), 99);
+    assert_eq!(b.receive_offset().await.unwrap(), 10);
+    assert_eq!(b.read_chunk(3).await.unwrap(), vec![7, 8, 9]);
+}

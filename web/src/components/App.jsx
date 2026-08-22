@@ -2,9 +2,11 @@ import 'react-toastify/dist/ReactToastify.css';
 import './App.css';
 import * as chat from '../lib/chat';
 import { createApplicationHubConnection } from '../lib/hubFactory';
+import { getState as getApplicationState } from '../lib/application';
+import { getCurrent as getApplicationOptions } from '../lib/options';
 import * as relayAPI from '../lib/relay';
 import * as rooms from '../lib/rooms';
-import { connect, disconnect, getState as getServerState } from '../lib/server';
+import { connect, disconnect } from '../lib/server';
 import * as session from '../lib/session';
 import { getLocalStorageItem, setLocalStorageItem } from '../lib/storage';
 import { isPassthroughEnabled } from '../lib/token';
@@ -44,12 +46,15 @@ const ROOM_ACTIVITY_SEEN_STORAGE_KEY = 'slskr.rooms.lastSeenActivity';
 const NAV_ACTIVITY_POLL_INTERVAL_MS = 10_000;
 
 const Browse = lazy(() => import('./Browse/Browse'));
+const Chat = lazy(() => import('./Chat/Chat'));
 const Collections = lazy(() => import('./Collections/Collections'));
 const Contacts = lazy(() => import('./Contacts/Contacts'));
+const CompatibilityDashboard = lazy(() => import('./CompatibilityDashboard'));
 const DiscoveryGraphAtlasPage = lazy(() =>
   import('./Search/DiscoveryGraphAtlasPage'));
 const Messaging = lazy(() => import('./Messaging/Messaging'));
 const PlaylistIntake = lazy(() => import('./PlaylistIntake/PlaylistIntake'));
+const Rooms = lazy(() => import('./Rooms/Rooms'));
 const Searches = lazy(() => import('./Search/Searches'));
 const ShareGroups = lazy(() => import('./ShareGroups/ShareGroups'));
 const SharedWithMe = lazy(() => import('./Shares/SharedWithMe'));
@@ -238,7 +243,15 @@ const storeRoomActivity = (activity) => {
 };
 
 const getMessageTimestamp = (message) => {
-  const timestamp = Date.parse(message?.timestamp);
+  const rawTimestamp = message?.timestamp;
+  const numericTimestamp = Number(rawTimestamp);
+  if (Number.isFinite(numericTimestamp) && numericTimestamp > 0) {
+    return numericTimestamp < 10_000_000_000
+      ? numericTimestamp * 1_000
+      : numericTimestamp;
+  }
+
+  const timestamp = Date.parse(rawTimestamp);
   return Number.isFinite(timestamp) ? timestamp : 0;
 };
 
@@ -451,7 +464,19 @@ const initialState = {
   themeMenuOpen: false,
 };
 
+const getCompatibilityTargetHint = () => {
+  if (typeof document === 'undefined') {
+    return undefined;
+  }
+
+  const target = document
+    .querySelector('meta[name="slskr-compatibility-target"]')
+    ?.getAttribute('content');
+  return ['slskd', 'slskdn'].includes(target) ? target : undefined;
+};
+
 const ModeSpecificConnectButton = ({
+  compatibilityTarget,
   connectionWatchdog,
   controller = {},
   mode,
@@ -460,6 +485,8 @@ const ModeSpecificConnectButton = ({
   onConnect,
   user,
 }) => {
+  const compatibilityRole = compatibilityTarget ? 'presentation' : undefined;
+
   if (mode === 'Agent') {
     const isConnected = controller?.state === 'Connected';
     const isTransitioning = ['Connecting', 'Reconnecting'].includes(
@@ -471,6 +498,7 @@ const ModeSpecificConnectButton = ({
         onClick={() =>
           isConnected ? relayAPI.disconnect() : relayAPI.connect()
         }
+        role={compatibilityRole}
       >
         <Icon.Group className="menu-icon-group">
           <Icon
@@ -507,6 +535,7 @@ const ModeSpecificConnectButton = ({
               });
             }
           }}
+          role={compatibilityRole}
         >
           <Icon.Group className="menu-icon-group">
             <Icon
@@ -566,6 +595,7 @@ const ModeSpecificConnectButton = ({
             onConnect?.(server) ?? connect();
           }
         }}
+        role={compatibilityRole}
         title={server?.lastError || undefined}
       >
         <Icon.Group className="menu-icon-group">
@@ -627,7 +657,13 @@ class App extends Component {
   constructor(props) {
     super(props);
 
-    this.state = initialState;
+    this.compatibilityTargetHint = getCompatibilityTargetHint();
+    this.state = {
+      ...initialState,
+      applicationState: this.compatibilityTargetHint
+        ? { compatibilityTarget: this.compatibilityTargetHint }
+        : initialState.applicationState,
+    };
     this.applicationHub = undefined;
     this.navigationActivityInterval = undefined;
     this.navigationResizeObserver = undefined;
@@ -754,6 +790,16 @@ class App extends Component {
   };
 
   refreshNavigationActivity = async () => {
+    if (['slskd', 'slskdn'].includes(this.compatibilityTargetHint)) {
+      this.setState({
+        navActivity: {
+          chat: false,
+          rooms: false,
+        },
+      });
+      return;
+    }
+
     if (!this.isAuthenticated()) {
       this.setState({
         navActivity: {
@@ -858,9 +904,23 @@ class App extends Component {
             session.enablePassthrough();
           }
 
-          if (await session.check()) {
-            const server = await getServerState();
-            this.updateServerState(server);
+          const sessionValid =
+            !securityEnabled && this.compatibilityTargetHint === 'slskdn'
+              ? true
+              : await session.check();
+
+          if (sessionValid) {
+            const [initialApplicationState, initialOptions] =
+              await Promise.all([
+                getApplicationState(),
+                getApplicationOptions(),
+              ]);
+            this.setState({
+              applicationOptions: initialOptions || {},
+              applicationState: {
+                ...(initialApplicationState || {}),
+              },
+            });
             this.startApplicationHub();
           }
 
@@ -1130,6 +1190,13 @@ class App extends Component {
     const previousNetworkEndpointSnapshot = getStoredNetworkEndpointSnapshot();
 
     const { controller, mode } = relay;
+    const compatibilityTarget = ['slskd', 'slskdn'].includes(
+      applicationState.compatibilityTarget,
+    )
+      ? applicationState.compatibilityTarget
+      : undefined;
+    const isSlskdProfile = compatibilityTarget === 'slskd';
+    const isSlskdnProfile = compatibilityTarget === 'slskdn';
 
     if (!initialized) {
       return (
@@ -1170,7 +1237,7 @@ class App extends Component {
     }
 
     const isAgent = mode === 'Agent';
-    document.title = 'slskr';
+    document.title = 'slskR';
 
     document.documentElement.classList.remove(
       'classic-dark',
@@ -1274,6 +1341,7 @@ class App extends Component {
           <Sidebar.Pushable
             as={Segment}
             className="app"
+            data-compatibility-target={compatibilityTarget || 'unknown'}
           >
             <Sidebar
               animation="overlay"
@@ -1302,6 +1370,165 @@ class App extends Component {
                   Agent Mode
                 </Menu.Item>
               ) : (
+                isSlskdProfile ? (
+                <>
+                  <NavLink to="/dashboard">
+                    <Menu.Item data-testid="nav-dashboard">
+                      <Icon name="chart bar" />
+                      Dashboard
+                    </Menu.Item>
+                  </NavLink>
+                  <NavLink to="/searches">
+                    <Menu.Item data-testid="nav-search">
+                      <Icon name="search" />
+                      Search
+                    </Menu.Item>
+                  </NavLink>
+                  <NavLink to="/downloads">
+                    <Menu.Item data-testid="nav-downloads">
+                      <Icon name="download" />
+                      Downloads
+                    </Menu.Item>
+                  </NavLink>
+                  <NavLink to="/uploads">
+                    <Menu.Item data-testid="nav-uploads">
+                      <Icon name="upload" />
+                      Uploads
+                    </Menu.Item>
+                  </NavLink>
+                  <NavLink to="/rooms">
+                    <Menu.Item data-testid="nav-rooms">
+                      <NavigationIcon
+                        alert={navActivity.rooms}
+                        alertTestId="nav-rooms-alert"
+                        name="comments"
+                      />
+                      Rooms
+                    </Menu.Item>
+                  </NavLink>
+                  <NavLink to="/chat">
+                    <Menu.Item data-testid="nav-chat">
+                      <NavigationIcon
+                        alert={navActivity.chat}
+                        alertTestId="nav-chat-alert"
+                        name="comment"
+                      />
+                      Chat
+                    </Menu.Item>
+                  </NavLink>
+                  <NavLink to="/users">
+                    <Menu.Item data-testid="nav-users">
+                      <Icon name="users" />
+                      Users
+                    </Menu.Item>
+                  </NavLink>
+                  <NavLink to="/browse">
+                    <Menu.Item data-testid="nav-browse">
+                      <Icon name="folder open" />
+                      Browse
+                    </Menu.Item>
+                  </NavLink>
+                </>
+                ) : isSlskdnProfile ? (
+                <>
+                  <NavLink to="/searches">
+                    <Menu.Item data-testid="nav-search">
+                      <Icon name="search" />
+                      Search
+                    </Menu.Item>
+                  </NavLink>
+                  <NavLink to="/discovery-graph">
+                    <Menu.Item data-testid="nav-discovery-graph">
+                      <Icon name="crosshairs" />
+                      Discovery Graph
+                    </Menu.Item>
+                  </NavLink>
+                  <NavLink to="/playlist-intake">
+                    <Menu.Item data-testid="nav-playlist-intake">
+                      <Icon name="list alternate outline" />
+                      Playlist Intake
+                    </Menu.Item>
+                  </NavLink>
+                  <NavLink to="/wishlist">
+                    <Menu.Item data-testid="nav-wishlist">
+                      <Icon name="star" />
+                      Wishlist
+                    </Menu.Item>
+                  </NavLink>
+                  <NavLink to="/lidarr">
+                    <Menu.Item data-testid="nav-lidarr">
+                      <Icon name="music" />
+                      Lidarr
+                    </Menu.Item>
+                  </NavLink>
+                  <NavLink to="/downloads">
+                    <Menu.Item data-testid="nav-downloads">
+                      <Icon name="download" />
+                      Downloads
+                    </Menu.Item>
+                  </NavLink>
+                  <NavLink to="/uploads">
+                    <Menu.Item data-testid="nav-uploads">
+                      <Icon name="upload" />
+                      Uploads
+                    </Menu.Item>
+                  </NavLink>
+                  <NavLink to="/messages">
+                    <Menu.Item data-testid="nav-messages">
+                      <NavigationIcon
+                        alert={navActivity.rooms || navActivity.chat}
+                        alertTestId={
+                          navActivity.chat ? 'nav-chat-alert' : 'nav-rooms-alert'
+                        }
+                        name="comments"
+                      />
+                      Messages
+                    </Menu.Item>
+                  </NavLink>
+                  <NavLink to="/users">
+                    <Menu.Item data-testid="nav-users">
+                      <Icon name="users" />
+                      Users
+                    </Menu.Item>
+                  </NavLink>
+                  <NavLink to="/contacts">
+                    <Menu.Item data-testid="nav-contacts">
+                      <Icon name="address book" />
+                      Contacts
+                    </Menu.Item>
+                  </NavLink>
+                  <NavLink to="/solid">
+                    <Menu.Item data-testid="nav-solid">
+                      <Icon name="key" />
+                      Solid
+                    </Menu.Item>
+                  </NavLink>
+                  <NavLink to="/collections">
+                    <Menu.Item data-testid="nav-collections">
+                      <Icon name="list" />
+                      Collections
+                    </Menu.Item>
+                  </NavLink>
+                  <NavLink to="/sharegroups">
+                    <Menu.Item data-testid="nav-groups">
+                      <Icon name="users" />
+                      Share Groups
+                    </Menu.Item>
+                  </NavLink>
+                  <NavLink to="/shared">
+                    <Menu.Item data-testid="nav-shared-with-me">
+                      <Icon name="share" />
+                      Shared with Me
+                    </Menu.Item>
+                  </NavLink>
+                  <NavLink to="/browse">
+                    <Menu.Item data-testid="nav-browse">
+                      <Icon name="folder open" />
+                      Browse
+                    </Menu.Item>
+                  </NavLink>
+                </>
+                ) : (
                 <>
                   <NavLink to="/searches">
                     <Menu.Item data-testid="nav-search">
@@ -1417,6 +1644,7 @@ class App extends Component {
                     </Dropdown.Menu>
                   </Dropdown>
                 </>
+                )
               )}
             </div>
             <Menu
@@ -1424,6 +1652,7 @@ class App extends Component {
               inverted
             >
               <ModeSpecificConnectButton
+                compatibilityTarget={compatibilityTarget}
                 connectionWatchdog={connectionWatchdog}
                 controller={controller}
                 mode={mode}
@@ -1445,6 +1674,7 @@ class App extends Component {
                   <Menu.Item
                     className={`theme-menu ${themeMenuOpen ? 'visible' : ''}`}
                     data-testid="theme-menu"
+                    role={compatibilityTarget ? 'presentation' : undefined}
                     title="Choose the web UI color theme"
                   >
                     <Icon name="paint brush" />
@@ -1615,7 +1845,31 @@ class App extends Component {
                   <Routes>
                   <Route
                     path="/"
-                    element={<Navigate replace to="/searches" />}
+                    element={
+                      <Navigate
+                        replace
+                        to={isSlskdProfile ? '/dashboard' : '/searches'}
+                      />
+                    }
+                  />
+                  <Route
+                    path="/dashboard"
+                    element={
+                      isSlskdProfile ? (
+                        this.withTokenCheck(
+                          <CompatibilityDashboard
+                            compatibilityTarget={compatibilityTarget}
+                            server={applicationState.server}
+                          />,
+                        )
+                      ) : (
+                        <Navigate replace to="/searches" />
+                      )
+                    }
+                  />
+                  <Route
+                    path="/lidarr"
+                    element={<Navigate replace to="/system/integrations" />}
                   />
                   <Route
                     path="/collections"
@@ -1690,7 +1944,10 @@ class App extends Component {
                     element={
                       this.withTokenCheck(
                         <div className="view">
-                          <Searches server={applicationState.server} />
+                          <Searches
+                            compatibilityTarget={compatibilityTarget}
+                            server={applicationState.server}
+                          />
                         </div>,
                       )
                     }
@@ -1700,7 +1957,10 @@ class App extends Component {
                     element={
                       this.withTokenCheck(
                         <div className="view">
-                          <Searches server={applicationState.server} />
+                          <Searches
+                            compatibilityTarget={compatibilityTarget}
+                            server={applicationState.server}
+                          />
                         </div>,
                       )
                     }
@@ -1717,7 +1977,9 @@ class App extends Component {
                   />
                   <Route
                     path="/browse"
-                    element={this.withTokenCheck(<Browse />)}
+                    element={this.withTokenCheck(
+                      <Browse compatibilityTarget={compatibilityTarget} />,
+                    )}
                   />
                   <Route
                     path="/users"
@@ -1751,10 +2013,17 @@ class App extends Component {
                     path="/chat"
                     element={
                       this.withTokenCheck(
-                        <Messaging
-                          initialKind="chat"
-                          state={applicationState}
-                        />,
+                        isSlskdProfile ? (
+                          <Chat
+                            compatibilityTarget={compatibilityTarget}
+                            state={applicationState}
+                          />
+                        ) : (
+                          <Messaging
+                            initialKind="chat"
+                            state={applicationState}
+                          />
+                        ),
                       )
                     }
                   />
@@ -1762,8 +2031,9 @@ class App extends Component {
                     path="/pods"
                     element={
                       this.withTokenCheck(
-                        <Messaging
-                          initialKind="pod"
+                          <Messaging
+                            compatibilityTarget={compatibilityTarget}
+                            initialKind="pod"
                           state={applicationState}
                         />,
                       )
@@ -1781,18 +2051,26 @@ class App extends Component {
                     path="/rooms"
                     element={
                       this.withTokenCheck(
-                        <Messaging
-                          initialKind="room"
-                          state={applicationState}
-                        />,
+                        isSlskdProfile ? (
+                          <Rooms compatibilityTarget={compatibilityTarget} />
+                        ) : (
+                          <Messaging
+                            compatibilityTarget={compatibilityTarget}
+                            initialKind="room"
+                            state={applicationState}
+                          />
+                        ),
                       )
                     }
                   />
                   <Route
                     path="/messages"
                     element={
-                      this.withTokenCheck(
+                      isSlskdProfile ? (
+                        <Navigate replace to="/chat" />
+                      ) : this.withTokenCheck(
                         <Messaging
+                          compatibilityTarget={compatibilityTarget}
                           initialKind="mixed"
                           state={applicationState}
                         />,
@@ -1805,6 +2083,7 @@ class App extends Component {
                       this.withTokenCheck(
                         <div className="view">
                           <Transfers
+                            compatibilityTarget={compatibilityTarget}
                             direction="upload"
                           />
                         </div>,
@@ -1817,6 +2096,7 @@ class App extends Component {
                       this.withTokenCheck(
                         <div className="view">
                           <Transfers
+                            compatibilityTarget={compatibilityTarget}
                             direction="download"
                             server={applicationState.server}
                           />
@@ -1829,6 +2109,7 @@ class App extends Component {
                     element={
                       this.withTokenCheck(
                         <System
+                          compatibilityTarget={compatibilityTarget}
                           options={applicationOptions}
                           state={applicationState}
                           theme={semanticTheme}
@@ -1841,6 +2122,7 @@ class App extends Component {
                     element={
                       this.withTokenCheck(
                         <System
+                          compatibilityTarget={compatibilityTarget}
                           options={applicationOptions}
                           state={applicationState}
                           theme={semanticTheme}
@@ -1858,7 +2140,9 @@ class App extends Component {
               </AppContext.Provider>
             </Sidebar.Pusher>
           </Sidebar.Pushable>
-          <PlayerBar />
+          {!isSlskdProfile && (
+            <PlayerBar compatibilityTarget={compatibilityTarget} />
+          )}
         </PlayerProvider>
         <ToastContainer
           autoClose={5_000}
@@ -1871,7 +2155,7 @@ class App extends Component {
           position="bottom-center"
           rtl={false}
         />
-        <Footer />
+        <Footer compatibilityTarget={compatibilityTarget} />
       </>
     );
   }

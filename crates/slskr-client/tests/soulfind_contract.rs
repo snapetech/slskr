@@ -199,6 +199,7 @@ async fn soulfind_routes_local_direct_and_indirect_peer_connections_without_over
         kind,
         token,
         stream,
+        obfuscated,
     } = incoming
     else {
         panic!("expected direct PeerInit");
@@ -206,6 +207,7 @@ async fn soulfind_routes_local_direct_and_indirect_peer_connections_without_over
     assert_eq!(username, requester_username);
     assert_eq!(kind, ConnectionKind::PeerMessages);
     assert_eq!(token, 0);
+    assert!(!obfuscated);
     let mut inbound = PeerMessageConnection::new(stream);
     round_trip_user_info(&mut outbound, &mut inbound).await;
 

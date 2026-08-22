@@ -47,7 +47,7 @@ struct IndexedEntry {
 }
 
 impl Store {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "bounded-differential"))]
     pub fn in_memory() -> Self {
         Self::with_identity(DEFAULT_REALM_ID, [DEFAULT_GOVERNANCE_ROOT])
     }

@@ -17,7 +17,7 @@ import {
   Statistic,
 } from 'semantic-ui-react';
 
-const Mesh = () => {
+const Mesh = ({ compatibilityTarget } = {}) => {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -531,7 +531,7 @@ const Mesh = () => {
         </Grid.Column>
 
         <Grid.Column width={16}>
-          <MeshEvidencePolicy />
+          <MeshEvidencePolicy compatibilityTarget={compatibilityTarget} />
         </Grid.Column>
 
         <Grid.Column width={16}>

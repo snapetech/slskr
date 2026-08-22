@@ -674,7 +674,12 @@ fn normalize_values(
     Ok(output)
 }
 
-fn peer_id_for_public_key(public_key: &[u8; 32]) -> String {
+/// Derive the self-certifying peer identity used by signed mesh records.
+///
+/// The frozen slskdN DHT verifier derives the overlay identity from the
+/// Ed25519 public key rather than from the Soulseek account name.  Keeping the
+/// derivation here gives capability and DHT callers one canonical rule.
+pub fn peer_id_for_public_key(public_key: &[u8; 32]) -> String {
     let digest = Sha256::digest(public_key);
     base32_lower(&digest[..20])
 }
@@ -760,6 +765,18 @@ mod tests {
             .peer_id
             .bytes()
             .all(|byte| byte.is_ascii_lowercase() || (b'2'..=b'7').contains(&byte)));
+    }
+
+    #[test]
+    fn peer_id_is_self_certifying_from_the_ed25519_public_key() {
+        let signing_key = SigningKey::from_bytes(&[7; 32]);
+        let public_key = signing_key.verifying_key().to_bytes();
+
+        assert_eq!(
+            peer_id_for_public_key(&public_key),
+            "72asyextvngonlc5w2nmguxza3frwepp"
+        );
+        assert_eq!(peer_id_for_public_key(&public_key).len(), 32);
     }
 
     #[test]

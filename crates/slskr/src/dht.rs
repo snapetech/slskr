@@ -285,7 +285,7 @@ impl Rendezvous {
         self.shared_udp_socket.as_ref().map(Arc::clone)
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "bounded-differential"))]
     #[allow(dead_code)]
     pub async fn insert_test_peer(&self, peer: SocketAddrV4) {
         self.peers.write().await.insert(peer);

@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# This differential launches reference web hosts. Keep direct invocation
+# within the repository process-memory ceiling.
+runner_repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [[ "${SLSKR_PROCESS_MEMORY_GUARD_HELD:-0}" != "1" ]]; then
+  "$runner_repo_root/scripts/with-build-guard.sh" cargo build -q -p slskr
+  exec "$runner_repo_root/scripts/with-process-memory-guard.sh" "${BASH_SOURCE[0]}" "$@"
+fi
+
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 slskd_root="${SLSKR_SLSKD_ROOT:-/tmp/slskr-parity-slskd}"
 slskdn_root="${SLSKR_SLSKDN_ROOT:-/tmp/slskr-parity-slskdn-frozen}"
@@ -23,6 +31,15 @@ pick_free_port() {
   python3 - <<'PY'
 import socket
 with socket.socket() as sock:
+    sock.bind(("127.0.0.1", 0))
+    print(sock.getsockname()[1])
+PY
+}
+
+pick_free_udp_port() {
+  python3 - <<'PY'
+import socket
+with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
     sock.bind(("127.0.0.1", 0))
     print(sock.getsockname()[1])
 PY
@@ -78,6 +95,9 @@ start_daemon() {
   else
     (
       export SLSKR_CONTROLLER_COMPATIBILITY_TARGET="$target"
+      export SLSKD_HTTPS_PORT="$https_port"
+      export SLSKR_DHT_PORT="$(pick_free_udp_port)"
+      export SLSKR_OVERLAY_BIND="127.0.0.1:$(pick_free_port)"
       exec "$repo_root/target/debug/slskr" serve --app-dir "$state" \
         --http-ip-address 127.0.0.1 --http-port "$port" \
         --slsk-listen-port "$listen_port" --no-connect --remote-configuration "$@"
@@ -253,7 +273,6 @@ PY
 }
 
 cd "$repo_root"
-scripts/with-build-guard.sh cargo build -q -p slskr
 
 for target in slskd slskdn; do
   for implementation in upstream slskr; do

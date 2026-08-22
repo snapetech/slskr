@@ -128,7 +128,12 @@ pub fn is_gold_star_club(pod_id: &str) -> bool {
 }
 
 pub fn gold_star_club_opted_in_value(value: Option<&str>) -> bool {
-    value.is_some_and(|value| value.trim().eq_ignore_ascii_case("true"))
+    !value.is_some_and(|value| {
+        matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "false" | "0" | "no"
+        )
+    })
 }
 
 pub fn gold_star_club_opted_in() -> bool {
@@ -215,7 +220,7 @@ impl PodStore {
         Ok(Self { pods, state_path })
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "bounded-differential"))]
     pub fn empty(state_dir: &Path) -> Self {
         Self {
             pods: BTreeMap::new(),
@@ -321,7 +326,7 @@ impl PodStore {
     pub fn ensure_gold_star_club(&mut self) -> Result<PodRecord, String> {
         if !gold_star_club_available(self.state_path.parent().unwrap_or_else(|| Path::new("."))) {
             return Err(format!(
-                "Gold Star Club requires {GOLD_STAR_CLUB_AUTOJOIN_ENV}=true and no local revocation"
+                "Gold Star Club is disabled by {GOLD_STAR_CLUB_AUTOJOIN_ENV}=false or local revocation"
             ));
         }
         if let Some(existing) = self.pods.get(GOLD_STAR_CLUB_POD_ID) {
@@ -1436,12 +1441,15 @@ mod tests {
     };
 
     #[test]
-    fn gold_star_club_uses_exact_positive_opt_in_and_reserved_shape() {
+    fn gold_star_club_defaults_on_and_honors_explicit_opt_out() {
         assert!(gold_star_club_opted_in_value(Some(" true ")));
         assert!(gold_star_club_opted_in_value(Some("TRUE")));
-        assert!(!gold_star_club_opted_in_value(Some("1")));
-        assert!(!gold_star_club_opted_in_value(Some("yes")));
-        assert!(!gold_star_club_opted_in_value(None));
+        assert!(gold_star_club_opted_in_value(Some("1")));
+        assert!(gold_star_club_opted_in_value(Some("yes")));
+        assert!(gold_star_club_opted_in_value(None));
+        assert!(!gold_star_club_opted_in_value(Some(" false ")));
+        assert!(!gold_star_club_opted_in_value(Some("0")));
+        assert!(!gold_star_club_opted_in_value(Some("NO")));
 
         let pod = gold_star_club_pod();
         assert_eq!(pod.pod_id, GOLD_STAR_CLUB_POD_ID);

@@ -18,6 +18,21 @@ visible behavior, protocol semantics, security posture, API shapes, UI
 workflows, and operator guarantees match unless an entry is explicitly marked
 as a compatibility acknowledgement or intentionally Rust-native.
 
+## 2026-08-20 authoritative closure update
+
+The pinned frozen-boundary gate is closed. The fresh auditor reports
+19,216/19,216 materialized proof cases complete, and the strict transport
+artifact reports 11/11 complete after adding the source-pinned mesh
+reconnect/retry target-negative contract. The WebUI gate passes all 2,085
+workflow cases, including the independent profile comparison artifact. The
+exact live transport matrix and focused fresh mesh lifecycle supplement are
+listed in [`universal-replacement-acceptance.md`](universal-replacement-acceptance.md).
+
+Sections below retain dated implementation notes and historical checkpoints;
+older counts or phrases such as “open” describe their checkpoint, not the
+current frozen-boundary status. A newer upstream revision requires a new
+comparison pin and certification run.
+
 The current shared-UDP implementation owns the configured public DHT port in
 the gateway when the frozen sharing predicate is active. It forwards only
 DHT-shaped datagrams to a bounded internal mainline endpoint, gives mainline a
@@ -131,10 +146,9 @@ direct mesh transport is disabled here regardless of code correctness. Treated
 as an environment gap, not a parity gap; needs re-verification in an
 environment with `libmsquic` installed.
 
-## Current Status (as of 2026-07-17, superseded by the review above for
-## overall counts -- kept for detailed narrative)
+## Historical status (as of 2026-07-17, superseded for current closure)
 
-Overall closure: **NOT ACHIEVED**. Route presence, compatibility projections,
+Historical overall closure at that checkpoint: **NOT ACHIEVED**. Route presence, compatibility projections,
 and selected live paths are evidence inputs, not proof of literal 1:1 parity.
 The remaining exhaustive API, configuration, persistence/restart, UI,
 operator, failure-path, and bidirectional interoperability matrices must reach

@@ -8,7 +8,9 @@ use slskr_client::{
     peer_cache::MAX_PEER_USERNAME_BYTES,
     ClientError,
 };
-use slskr_protocol::{distributed::DistributedMessage, init::InitMessage, peer::PeerMessage};
+use slskr_protocol::{
+    distributed::DistributedMessage, init::InitMessage, peer::PeerMessage, InitFrame,
+};
 use tokio::io::duplex;
 use tokio::net::TcpStream;
 use tokio::time::Duration;
@@ -79,6 +81,7 @@ async fn demuxes_peer_init_and_leaves_stream_after_init_frame() {
         kind,
         token,
         stream,
+        obfuscated,
     } = incoming
     else {
         panic!("expected peer init");
@@ -86,6 +89,7 @@ async fn demuxes_peer_init_and_leaves_stream_after_init_frame() {
     assert_eq!(username, "peer");
     assert_eq!(kind, ConnectionKind::PeerMessages);
     assert_eq!(token, 0);
+    assert!(!obfuscated);
 
     let mut peer = slskr_client::stream::PeerMessageConnection::new(stream);
     assert_eq!(peer.receive().await.unwrap(), message);
@@ -176,7 +180,7 @@ async fn demuxes_obfuscated_distributed_peer_init_and_preserves_stream() {
     write_obfuscated_init_frame(&mut client, &init.encode().unwrap())
         .await
         .unwrap();
-    slskr_client::stream::DistributedConnection::new(client)
+    slskr_client::stream::DistributedConnection::new_obfuscated(client)
         .send(&DistributedMessage::Ping)
         .await
         .unwrap();
@@ -187,6 +191,7 @@ async fn demuxes_obfuscated_distributed_peer_init_and_preserves_stream() {
         kind,
         token,
         stream,
+        obfuscated,
     } = incoming
     else {
         panic!("expected distributed peer init");
@@ -194,8 +199,9 @@ async fn demuxes_obfuscated_distributed_peer_init_and_preserves_stream() {
     assert_eq!(username, "peer");
     assert_eq!(kind, ConnectionKind::Distributed);
     assert_eq!(token, 0);
+    assert!(obfuscated);
 
-    let mut distributed = slskr_client::stream::DistributedConnection::new(stream);
+    let mut distributed = slskr_client::stream::DistributedConnection::new_obfuscated(stream);
     assert_eq!(
         distributed.receive().await.unwrap(),
         DistributedMessage::Ping
@@ -213,7 +219,7 @@ async fn demuxes_obfuscated_file_transfer_peer_init_and_preserves_stream() {
     write_obfuscated_init_frame(&mut client, &init.encode().unwrap())
         .await
         .unwrap();
-    slskr_client::file_transfer::FileTransferConnection::new(client)
+    slskr_client::file_transfer::FileTransferConnection::new_obfuscated(client)
         .send_token(123)
         .await
         .unwrap();
@@ -224,6 +230,7 @@ async fn demuxes_obfuscated_file_transfer_peer_init_and_preserves_stream() {
         kind,
         token,
         stream,
+        obfuscated,
     } = incoming
     else {
         panic!("expected file-transfer peer init");
@@ -231,8 +238,47 @@ async fn demuxes_obfuscated_file_transfer_peer_init_and_preserves_stream() {
     assert_eq!(username, "peer");
     assert_eq!(kind, ConnectionKind::FileTransfer);
     assert_eq!(token, 0);
+    assert!(obfuscated);
 
-    let mut file = slskr_client::file_transfer::FileTransferConnection::new(stream);
+    let mut file = slskr_client::file_transfer::FileTransferConnection::new_obfuscated(stream);
+    assert_eq!(file.receive_token().await.unwrap(), 123);
+}
+
+#[tokio::test]
+async fn demuxes_slskdn_nested_obfuscated_file_transfer_init() {
+    let (mut client, server) = duplex(512);
+    let init = InitMessage::PeerInit {
+        username: "peer".to_owned(),
+        connection_type: "F".to_owned(),
+        token: 0,
+    };
+    let encoded_init = init.encode().unwrap().encode().unwrap();
+    let nested = InitFrame::new(encoded_init[0], encoded_init[1..].to_vec());
+    write_obfuscated_init_frame(&mut client, &nested)
+        .await
+        .unwrap();
+    slskr_client::file_transfer::FileTransferConnection::new_obfuscated(client)
+        .send_token(123)
+        .await
+        .unwrap();
+
+    let incoming = demux_obfuscated_incoming(server).await.unwrap();
+    let IncomingConnection::PeerInit {
+        username,
+        kind,
+        token,
+        stream,
+        obfuscated,
+    } = incoming
+    else {
+        panic!("expected nested file-transfer peer init");
+    };
+    assert_eq!(username, "peer");
+    assert_eq!(kind, ConnectionKind::FileTransfer);
+    assert_eq!(token, 0);
+    assert!(obfuscated);
+
+    let mut file = slskr_client::file_transfer::FileTransferConnection::new_obfuscated(stream);
     assert_eq!(file.receive_token().await.unwrap(), 123);
 }
 

@@ -12,9 +12,9 @@ use tokio::{
 
 use crate::{
     io::{
-        read_init_frame, read_message_frame, read_obfuscated_init_frame,
-        read_obfuscated_message_frame, write_init_frame, write_message_frame,
-        write_obfuscated_init_frame, write_obfuscated_message_frame,
+        read_init_frame, read_message_frame, read_message_frame_buffered,
+        read_obfuscated_init_frame, read_obfuscated_message_frame, write_init_frame,
+        write_message_frame, write_obfuscated_init_frame, write_obfuscated_message_frame,
     },
     ClientError,
 };
@@ -24,6 +24,7 @@ pub const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 #[derive(Debug)]
 pub struct ServerConnection<S> {
     stream: S,
+    read_buffer: Vec<u8>,
 }
 
 impl ServerConnection<TcpStream> {
@@ -54,7 +55,10 @@ impl ServerConnection<TcpStream> {
 impl<S> ServerConnection<S> {
     #[must_use]
     pub const fn new(stream: S) -> Self {
-        Self { stream }
+        Self {
+            stream,
+            read_buffer: Vec::new(),
+        }
     }
 
     pub fn into_inner(self) -> S {
@@ -88,7 +92,12 @@ where
         &mut self,
         direction: Direction,
     ) -> Result<ServerMessage, ClientError> {
-        let frame = read_message_frame(&mut self.stream).await?;
+        let frame = read_message_frame_buffered(
+            &mut self.stream,
+            &mut self.read_buffer,
+            crate::io::DEFAULT_MAX_FRAME_LEN,
+        )
+        .await?;
         Ok(ServerMessage::decode(frame, direction)?)
     }
 }
@@ -126,12 +135,33 @@ where
 #[derive(Debug)]
 pub struct ObfuscatedPeerMessageConnection<S> {
     stream: S,
+    peer_username: Option<String>,
 }
 
 impl<S> ObfuscatedPeerMessageConnection<S> {
     #[must_use]
     pub const fn new(stream: S) -> Self {
-        Self { stream }
+        Self {
+            stream,
+            peer_username: None,
+        }
+    }
+
+    #[must_use]
+    pub fn with_peer_username(stream: S, peer_username: Option<String>) -> Self {
+        Self {
+            stream,
+            peer_username,
+        }
+    }
+
+    #[must_use]
+    pub fn peer_username(&self) -> Option<&str> {
+        self.peer_username.as_deref()
+    }
+
+    pub fn into_parts(self) -> (S, Option<String>) {
+        (self.stream, self.peer_username)
     }
 
     pub fn into_inner(self) -> S {
@@ -156,16 +186,37 @@ where
 #[derive(Debug)]
 pub struct DistributedConnection<S> {
     stream: S,
+    obfuscated: bool,
 }
 
 impl<S> DistributedConnection<S> {
     #[must_use]
     pub const fn new(stream: S) -> Self {
-        Self { stream }
+        Self {
+            stream,
+            obfuscated: false,
+        }
+    }
+
+    #[must_use]
+    pub const fn new_obfuscated(stream: S) -> Self {
+        Self {
+            stream,
+            obfuscated: true,
+        }
+    }
+
+    #[must_use]
+    pub const fn is_obfuscated(&self) -> bool {
+        self.obfuscated
     }
 
     pub fn into_inner(self) -> S {
         self.stream
+    }
+
+    pub fn into_parts(self) -> (S, bool) {
+        (self.stream, self.obfuscated)
     }
 }
 
@@ -174,7 +225,12 @@ where
     S: AsyncWrite + Unpin,
 {
     pub async fn send(&mut self, message: &DistributedMessage) -> Result<(), ClientError> {
-        write_init_frame(&mut self.stream, &message.encode()?).await
+        let frame = message.encode()?;
+        if self.obfuscated {
+            write_obfuscated_init_frame(&mut self.stream, &frame).await
+        } else {
+            write_init_frame(&mut self.stream, &frame).await
+        }
     }
 }
 
@@ -183,7 +239,11 @@ where
     S: AsyncRead + Unpin,
 {
     pub async fn receive(&mut self) -> Result<DistributedMessage, ClientError> {
-        let frame = read_init_frame(&mut self.stream).await?;
+        let frame = if self.obfuscated {
+            read_obfuscated_init_frame(&mut self.stream).await?
+        } else {
+            read_init_frame(&mut self.stream).await?
+        };
         Ok(DistributedMessage::decode(frame)?)
     }
 }

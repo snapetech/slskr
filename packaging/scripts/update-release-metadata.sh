@@ -39,18 +39,17 @@ win_x64_sha="$(sha_for "$win_x64")"
 svc_sha="$(slskr_sha256 packaging/aur/slskr.service)"
 sys_sha="$(slskr_sha256 packaging/aur/slskr.sysusers)"
 tmp_sha="$(slskr_sha256 packaging/aur/slskr.tmpfiles)"
-install_sha="$(slskr_sha256 packaging/aur/slskr.install)"
 
 sed -i \
   -e "s/^pkgver=.*/pkgver=${pkgver}/" \
-  -e "s/^sha256sums=.*/sha256sums=('${svc_sha}' '${sys_sha}' '${tmp_sha}' '${install_sha}')/" \
+  -e "s/^sha256sums=.*/sha256sums=('${svc_sha}' '${sys_sha}' '${tmp_sha}')/" \
   -e "s/^sha256sums_x86_64=.*/sha256sums_x86_64=('${linux_x64_sha}')/" \
   -e "s/^sha256sums_aarch64=.*/sha256sums_aarch64=('${linux_arm64_sha}')/" \
   packaging/aur/PKGBUILD-bin
 
 sed -i \
   -e "s/^pkgver=.*/pkgver=${pkgver}/" \
-  -e "s/^sha256sums=.*/sha256sums=('SKIP' '${svc_sha}' '${sys_sha}' '${tmp_sha}' '${install_sha}')/" \
+  -e "s/^sha256sums=.*/sha256sums=('SKIP' '${svc_sha}' '${sys_sha}' '${tmp_sha}')/" \
   packaging/aur/PKGBUILD
 
 sed -i \

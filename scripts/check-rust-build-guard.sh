@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-repo_root="$(cd "$(dirname "$BASH_SOURCE")/.." && pwd)"
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
 status=0
@@ -29,6 +29,10 @@ if ! rg -q 'export CARGO_PROFILE_DEV_DEBUG=' scripts/with-build-guard.sh; then
   printf 'Rust build guard check failed: the wrapper must disable dev debug info by default\n' >&2
   status=1
 fi
+if ! rg -q 'export CARGO_PROFILE_DEV_CODEGEN_UNITS=' scripts/with-build-guard.sh; then
+  printf 'Rust build guard check failed: the wrapper must bound production codegen units by default\n' >&2
+  status=1
+fi
 if ! rg -q 'export CARGO_PROFILE_TEST_DEBUG=' scripts/with-build-guard.sh; then
   printf 'Rust build guard check failed: the wrapper must disable test debug info by default\n' >&2
   status=1
@@ -53,8 +57,17 @@ if ! rg -q 'full-controller-tests is rejected under the 12 GiB memory-safe profi
   printf 'Rust build guard check failed: the known monolithic controller test profile must be rejected\n' >&2
   status=1
 fi
+if ! rg -q 'legacy-route-dispatch is rejected' scripts/with-build-guard.sh; then
+  printf 'Rust build guard check failed: the monolithic legacy route dispatcher must be rejected\n' >&2
+  status=1
+fi
 if ! rg -q -- '--all-features' scripts/with-build-guard.sh; then
   printf 'Rust build guard check failed: all-features test requests must be covered by the monolithic-profile rejection\n' >&2
+  status=1
+fi
+if ! rg -q 'SLSKR_ALLOW_FULL_CONTROLLER_TESTS' scripts/with-build-guard.sh \
+  || ! rg -q 'SLSKR_PROCESS_MEMORY_GUARD_HELD' scripts/with-build-guard.sh; then
+  printf 'Rust build guard check failed: full-controller-tests opt-in must require the process-memory guard\n' >&2
   status=1
 fi
 if ! rg -q '^ulimit -v "\$interop_virtual_memory_kib"$' scripts/run-live-interop-matrix.sh; then
@@ -76,6 +89,17 @@ done < <(
   printf '%s\0' PLAN.md README.md COMPLIANCE.md REMEDIATION.md
   find web/scripts -type f \( -name '*.js' -o -name '*.mjs' \) -print0
 )
+
+# Adding the bounded differential binary means the slskr Cargo runner is no
+# longer self-selecting. Keep every production invocation explicit so a
+# proof-runner addition cannot silently break certification, smoke, or daemon
+# launch scripts.
+if rg -n --pcre2 \
+  'cargo[[:space:]]+run([[:space:]]+-q)?[[:space:]]+-p[[:space:]]+slskr[[:space:]]+--(?!bin[[:space:]]+slskr([[:space:]]|$))' \
+  .github scripts docs README.md PLAN.md crates/slskr-web/README.md 2>/dev/null; then
+  printf 'Rust build guard check failed: production slskr invocations must select --bin slskr explicitly\n' >&2
+  status=1
+fi
 
 # Catch direct child-process Cargo launches in Node/Python helpers, including
 # multi-line subprocess argument lists in shell here-docs. These bypass the

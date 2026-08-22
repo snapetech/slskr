@@ -152,6 +152,28 @@ impl fmt::Debug for Gateway {
     }
 }
 
+fn overlay_service_enabled(
+    service_name: &str,
+    features: &crate::config::FeatureGateSettings,
+    target: crate::config::ControllerCompatibilityTarget,
+) -> bool {
+    // The frozen slskdN application only registers DHT, hole-punch, and
+    // MeshContent services with its remote mesh router.  Its local pods and
+    // VirtualSoulfind HTTP controllers still exist, but remote calls to the
+    // corresponding overlay services return the router's not-found contract.
+    if target == crate::config::ControllerCompatibilityTarget::Slskdn
+        && matches!(service_name, "pods" | "private-gateway" | "shadow-index")
+    {
+        return false;
+    }
+    match service_name {
+        "private-gateway" | "MeshContent" => features.mesh,
+        "pods" => features.pods,
+        "shadow-index" => features.virtual_soulfind,
+        _ => true,
+    }
+}
+
 #[allow(dead_code, clippy::too_many_arguments)]
 impl Gateway {
     pub async fn load_or_create_with_quic(
@@ -1465,7 +1487,17 @@ impl Gateway {
         connection_id: &str,
         state: &super::AppState,
     ) -> MeshServiceReply {
-        let result = if call.magic != OVERLAY_MAGIC
+        let service_enabled = {
+            let media_services = state.media_services.read().await;
+            overlay_service_enabled(
+                call.service_name.as_str(),
+                &media_services.features,
+                state.config.controller_compatibility_target,
+            )
+        };
+        let result = if !service_enabled {
+            Err((2, format!("Service '{}' not found", call.service_name)))
+        } else if call.magic != OVERLAY_MAGIC
             || call.message_type != "mesh_service_call"
             || call.version != OVERLAY_VERSION
             || call.correlation_id.trim().is_empty()
@@ -2621,6 +2653,81 @@ mod tests {
         assert!(!relay_authentication_valid(
             "AUTH not-base64",
             "relay-token"
+        ));
+    }
+
+    #[test]
+    fn overlay_services_follow_selected_profile_feature_gates() {
+        let mut features = crate::config::FeatureGateSettings::default();
+        assert!(!overlay_service_enabled(
+            "private-gateway",
+            &features,
+            crate::config::ControllerCompatibilityTarget::Slskd
+        ));
+        assert!(!overlay_service_enabled(
+            "MeshContent",
+            &features,
+            crate::config::ControllerCompatibilityTarget::Slskd
+        ));
+        assert!(!overlay_service_enabled(
+            "pods",
+            &features,
+            crate::config::ControllerCompatibilityTarget::Slskd
+        ));
+        assert!(!overlay_service_enabled(
+            "shadow-index",
+            &features,
+            crate::config::ControllerCompatibilityTarget::Slskd
+        ));
+        assert!(overlay_service_enabled(
+            "dht",
+            &features,
+            crate::config::ControllerCompatibilityTarget::Slskd
+        ));
+
+        features.mesh = true;
+        features.pods = true;
+        features.virtual_soulfind = true;
+        assert!(overlay_service_enabled(
+            "private-gateway",
+            &features,
+            crate::config::ControllerCompatibilityTarget::Slskd
+        ));
+        assert!(overlay_service_enabled(
+            "MeshContent",
+            &features,
+            crate::config::ControllerCompatibilityTarget::Slskd
+        ));
+        assert!(overlay_service_enabled(
+            "pods",
+            &features,
+            crate::config::ControllerCompatibilityTarget::Slskd
+        ));
+        assert!(overlay_service_enabled(
+            "shadow-index",
+            &features,
+            crate::config::ControllerCompatibilityTarget::Slskd
+        ));
+
+        assert!(!overlay_service_enabled(
+            "private-gateway",
+            &features,
+            crate::config::ControllerCompatibilityTarget::Slskdn
+        ));
+        assert!(!overlay_service_enabled(
+            "pods",
+            &features,
+            crate::config::ControllerCompatibilityTarget::Slskdn
+        ));
+        assert!(!overlay_service_enabled(
+            "shadow-index",
+            &features,
+            crate::config::ControllerCompatibilityTarget::Slskdn
+        ));
+        assert!(overlay_service_enabled(
+            "MeshContent",
+            &features,
+            crate::config::ControllerCompatibilityTarget::Slskdn
         ));
     }
 

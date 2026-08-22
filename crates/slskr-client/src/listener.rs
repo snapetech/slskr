@@ -1,4 +1,4 @@
-use slskr_protocol::init::InitMessage;
+use slskr_protocol::{frame::InitFrame, init::InitMessage};
 use std::net::SocketAddr;
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite},
@@ -28,6 +28,7 @@ pub enum IncomingConnection<S> {
         kind: ConnectionKind,
         token: u32,
         stream: S,
+        obfuscated: bool,
     },
     PierceFirewall {
         token: u32,
@@ -116,7 +117,7 @@ pub async fn demux_obfuscated_incoming<S>(
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
-    match InitMessage::decode(read_obfuscated_init_frame(&mut stream).await?)? {
+    match decode_obfuscated_init_message(read_obfuscated_init_frame(&mut stream).await?)? {
         InitMessage::PeerInit {
             username,
             connection_type,
@@ -126,7 +127,7 @@ where
             let kind = ConnectionKind::try_from_connection_type(&connection_type)?;
             if kind == ConnectionKind::PeerMessages {
                 Ok(IncomingConnection::ObfuscatedPeerMessages(
-                    ObfuscatedPeerMessageConnection::new(stream),
+                    ObfuscatedPeerMessageConnection::with_peer_username(stream, Some(username)),
                 ))
             } else {
                 Ok(IncomingConnection::PeerInit {
@@ -134,6 +135,7 @@ where
                     kind,
                     token,
                     stream,
+                    obfuscated: true,
                 })
             }
         }
@@ -145,6 +147,39 @@ where
             payload,
             stream,
         }),
+    }
+}
+
+const MAX_NESTED_OBFUSCATED_INIT_FRAME_LEN: usize = 1024;
+
+fn decode_obfuscated_init_message(frame: InitFrame) -> Result<InitMessage, ClientError> {
+    match InitMessage::decode(frame)? {
+        known @ (InitMessage::PeerInit { .. } | InitMessage::PierceFirewall { .. }) => Ok(known),
+        InitMessage::Unknown { code, payload } => {
+            // slskdN's obfuscated transfer writer wraps the already framed
+            // PeerInit in one additional type-1 transfer frame.  The target
+            // listener expects the unwrapped form, while its transfer reader
+            // expects subsequent tokens and data to remain transfer-framed.
+            // Reconstruct only small candidate init frames; never duplicate a
+            // large arbitrary payload while probing this compatibility path.
+            let nested_len = payload.len().saturating_add(1);
+            if nested_len > MAX_NESTED_OBFUSCATED_INIT_FRAME_LEN {
+                return Ok(InitMessage::Unknown { code, payload });
+            }
+
+            let mut nested = Vec::with_capacity(nested_len);
+            nested.push(code);
+            nested.extend_from_slice(&payload);
+            let Ok(nested_frame) = InitFrame::decode(&nested) else {
+                return Ok(InitMessage::Unknown { code, payload });
+            };
+            match InitMessage::decode(nested_frame) {
+                Ok(known @ (InitMessage::PeerInit { .. } | InitMessage::PierceFirewall { .. })) => {
+                    Ok(known)
+                }
+                Ok(_) | Err(_) => Ok(InitMessage::Unknown { code, payload }),
+            }
+        }
     }
 }
 
@@ -186,6 +221,7 @@ where
                 kind: ConnectionKind::try_from_connection_type(&connection_type)?,
                 token,
                 stream,
+                obfuscated: false,
             })
         }
         InitMessage::PierceFirewall { token } => {

@@ -8,7 +8,10 @@ use slskr_protocol::{
     peer::PeerMessage,
     server::{Direction, LoginRequest, ServerMessage},
 };
-use tokio::io::duplex;
+use tokio::{
+    io::{duplex, AsyncWriteExt},
+    time::{timeout, Duration},
+};
 
 #[tokio::test]
 async fn server_connection_sends_typed_messages() {
@@ -29,6 +32,25 @@ async fn server_connection_sends_typed_messages() {
         .await
         .unwrap();
     assert_eq!(received, message);
+}
+
+#[tokio::test]
+async fn server_connection_preserves_partial_frame_after_receive_timeout() {
+    let (client, mut server) = duplex(256);
+    let mut client = ServerConnection::new(client);
+    let encoded = ServerMessage::ServerPing
+        .encode()
+        .unwrap()
+        .encode()
+        .unwrap();
+
+    server.write_all(&encoded[..2]).await.unwrap();
+    assert!(timeout(Duration::from_millis(20), client.receive())
+        .await
+        .is_err());
+
+    server.write_all(&encoded[2..]).await.unwrap();
+    assert_eq!(client.receive().await.unwrap(), ServerMessage::ServerPing);
 }
 
 #[tokio::test]

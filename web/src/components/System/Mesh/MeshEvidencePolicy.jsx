@@ -66,7 +66,7 @@ const sampleEvidence = JSON.stringify(
   2,
 );
 
-const MeshEvidencePolicy = () => {
+const MeshEvidencePolicy = ({ compatibilityTarget } = {}) => {
   const [policy, setPolicy] = useState(getMeshEvidencePolicy);
   const [reviewError, setReviewError] = useState('');
   const [reviewInput, setReviewInput] = useState('');
@@ -161,14 +161,20 @@ const MeshEvidencePolicy = () => {
       <div className="mesh-evidence-policy-grid">
         <Segment>
           <Header as="h4">Inbound Trust Gate</Header>
-          <Dropdown
-            aria-label="Mesh evidence inbound trust tier"
-            fluid
-            onChange={setInboundTier}
-            options={inboundOptions}
-            selection
-            value={policy.inboundTrustTier}
-          />
+          {compatibilityTarget === 'slskdn' ? (
+            <div aria-label="Mesh evidence inbound trust tier">
+              Disabled
+            </div>
+          ) : (
+            <Dropdown
+              aria-label="Mesh evidence inbound trust tier"
+              fluid
+              onChange={setInboundTier}
+              options={inboundOptions}
+              selection
+              value={policy.inboundTrustTier}
+            />
+          )}
           <p className="mesh-evidence-policy-help">
             {summary.inboundTier.description}
           </p>

@@ -3,6 +3,12 @@
 *******************************/
 @bodyTextColor: var(--smui-site-body-text-color, @textColor);
 
+// Keep the deployed UI self-contained. The default Semantic UI theme imports
+// Lato from Google Fonts, which turns every page load into an external request
+// and fails under the app's strict/offline deployment profile. The declared
+// Lato fallback stack remains available when it is installed locally.
+@importGoogleFonts: false;
+
 @linkHoverUnderline: var(--smui-site-link-hover-underline, none);
 
 @inputBackground: var(--smui-input-background, @white);

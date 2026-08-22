@@ -4,7 +4,11 @@
 //! envelope.  The stream contains the same MessagePack `ControlEnvelope` as
 //! the UDP path; QUIC adds reliable delivery and the `slskdn-overlay` ALPN.
 
-use std::{net::SocketAddr, sync::Arc, time::Duration};
+use std::{
+    net::SocketAddr,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 use quinn::crypto::rustls::QuicClientConfig;
 use sha2::Digest;
@@ -133,6 +137,133 @@ impl ServerCertVerifier for PublicKeyPinVerifier {
     fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
         self.signature_algorithms.supported_schemes()
     }
+}
+
+#[derive(Debug)]
+struct CertificatePinCaptureVerifier {
+    signature_algorithms: WebPkiSupportedAlgorithms,
+    captured_public_key_sha256: Arc<Mutex<Option<[u8; 32]>>>,
+}
+
+impl ServerCertVerifier for CertificatePinCaptureVerifier {
+    fn verify_server_cert(
+        &self,
+        end_entity: &CertificateDer<'_>,
+        intermediates: &[CertificateDer<'_>],
+        _server_name: &ServerName<'_>,
+        _ocsp_response: &[u8],
+        now: UnixTime,
+    ) -> Result<ServerCertVerified, rustls::Error> {
+        let actual = certificate_public_key_pin(end_entity.as_ref()).map_err(|error| {
+            rustls::Error::General(format!("QUIC certificate pin parse failed: {error}"))
+        })?;
+        let mut captured = self.captured_public_key_sha256.lock().map_err(|_| {
+            rustls::Error::General("QUIC certificate pin capture lock poisoned".to_owned())
+        })?;
+        *captured = Some(actual);
+        drop(captured);
+
+        // The frozen target creates a self-signed certificate for every
+        // process. This bounded discovery handshake trusts only that one
+        // certificate long enough to capture its exact SPKI pin, while still
+        // requiring the certificate to be a valid self-signed certificate.
+        let mut roots = RootCertStore::empty();
+        roots.add(end_entity.clone())?;
+        let parsed = ParsedCertificate::try_from(end_entity)?;
+        rustls::client::verify_server_cert_signed_by_trust_anchor(
+            &parsed,
+            &roots,
+            intermediates,
+            now,
+            self.signature_algorithms.all,
+        )?;
+        Ok(ServerCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        certificate: &CertificateDer<'_>,
+        signature: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        rustls::crypto::verify_tls12_signature(
+            message,
+            certificate,
+            signature,
+            &self.signature_algorithms,
+        )
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        certificate: &CertificateDer<'_>,
+        signature: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        rustls::crypto::verify_tls13_signature(
+            message,
+            certificate,
+            signature,
+            &self.signature_algorithms,
+        )
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+        self.signature_algorithms.supported_schemes()
+    }
+}
+
+/// Discover the public-key pin of a bounded, self-signed slskdN QUIC
+/// endpoint. This is intended for the interop probe against the frozen target,
+/// whose QUIC servers generate a new certificate at process start and do not
+/// publish that certificate through its HTTP API. Production peer connections
+/// must continue to use a preconfigured pin with [`send_quic_control`].
+pub async fn discover_certificate_public_key_pin(
+    endpoint: SocketAddr,
+    alpn: &[u8],
+    server_name: &str,
+) -> Result<[u8; 32], QuicControlError> {
+    let captured_public_key_sha256 = Arc::new(Mutex::new(None));
+    let provider = rustls::crypto::ring::default_provider();
+    let verifier = CertificatePinCaptureVerifier {
+        signature_algorithms: provider.signature_verification_algorithms,
+        captured_public_key_sha256: Arc::clone(&captured_public_key_sha256),
+    };
+    let mut client_crypto = rustls::ClientConfig::builder_with_provider(Arc::new(provider))
+        .with_protocol_versions(&[&rustls::version::TLS13])
+        .map_err(|error| QuicControlError::Transport(error.to_string()))?
+        .dangerous()
+        .with_custom_certificate_verifier(Arc::new(verifier))
+        .with_no_client_auth();
+    client_crypto.alpn_protocols = vec![alpn.to_vec()];
+
+    let client_config = quinn::ClientConfig::new(Arc::new(
+        QuicClientConfig::try_from(client_crypto)
+            .map_err(|error| QuicControlError::Transport(error.to_string()))?,
+    ));
+    let mut endpoint_client = quinn::Endpoint::client("[::]:0".parse().map_err(|error| {
+        QuicControlError::Transport(format!("QUIC pin-discovery bind address failed: {error}"))
+    })?)
+    .map_err(|error| QuicControlError::Transport(error.to_string()))?;
+    endpoint_client.set_default_client_config(client_config);
+
+    let connecting = endpoint_client
+        .connect(endpoint, server_name)
+        .map_err(|error| QuicControlError::Transport(error.to_string()))?;
+    let connection = timeout(QUIC_CONNECT_TIMEOUT, connecting)
+        .await
+        .map_err(|_| QuicControlError::Timeout("QUIC certificate pin discovery"))?
+        .map_err(|error| QuicControlError::Transport(error.to_string()))?;
+    connection.close(0_u32.into(), b"certificate pin discovered");
+    endpoint_client.wait_idle().await;
+
+    let captured = captured_public_key_sha256
+        .lock()
+        .map_err(|_| QuicControlError::Transport("QUIC pin capture lock poisoned".to_owned()))?
+        .to_owned();
+    captured.ok_or_else(|| {
+        QuicControlError::Transport("QUIC handshake did not expose a server certificate".to_owned())
+    })
 }
 
 /// A bounded QUIC control-plane listener using the frozen slskdN ALPN and

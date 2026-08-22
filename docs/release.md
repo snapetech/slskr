@@ -26,13 +26,20 @@ scripts/with-build-guard.sh cargo test --workspace
 The `slskr` package defaults to its bounded focused controller-test target.
 The historical monolithic controller suite is rejected by the guard when
 requested with `--features full-controller-tests` or `--all-features`, because
-that profile previously exceeded the safe LLVM memory envelope. It is not part
-of the memory-safe workspace test path.
+that profile previously exceeded the safe LLVM memory envelope. An explicit
+`SLSKR_ALLOW_FULL_CONTROLLER_TESTS=1` opt-in is accepted only inside
+`scripts/with-process-memory-guard.sh`, which adds the hard 4 GiB process cap;
+direct or unguarded requests remain rejected. The default focused controller
+test target remains the normal workspace test path.
 
 Browser and frontend Node subprocesses in the parity and release gates use
 `scripts/with-process-memory-guard.sh`. That guard applies a hard 4 GiB
-resident-memory cgroup limit when a user systemd manager is available and a
-4 GiB virtual-memory limit otherwise.
+resident-memory cgroup limit with swap disabled when a user systemd manager is
+available and a 4 GiB virtual-memory limit otherwise. The release gate applies
+that guard to each non-Rust step; its Cargo steps use the separate 12 GiB Rust
+virtual-memory ceiling above, so a Rust formatter or compiler cannot inherit
+the browser/Node process cap. This keeps browser, Node, and other heavy
+non-Rust processes bounded without imposing their smaller limit on LLVM.
 
 The live slskd automation-client compatibility smoke is opt-in because it starts
 a local daemon and may install the Python `slskd-api` package:
@@ -90,13 +97,15 @@ Preview the grouped release text locally with:
 python3 scripts/release_notes.py preview --base <base> --head <head>
 ```
 
-The tag workflow assembles the fragments into `release/RELEASE_NOTES.md`, uses
-that exact body for the GitHub Release, and sends the same curated body in the
-Discord embed. The pull-request job exposes a separate capture-metadata table
-so the source fragment fields remain auditable. Keep `CHANGELOG.md` append-only
-at the release-section level and move shipped `## [Unreleased]` bullets into a
-dated section when preparing a release; the CI and tag workflows reject a
-missing or placeholder section.
+The tag workflow publishes a concise curated body as `release/RELEASE_NOTES.md`
+and sends that same summary in the Discord embed. It also uploads the complete
+machine-validated fragment assembly as `release/RELEASE_NOTES_FULL.md`, keeping
+the release page readable without discarding detailed change history. The
+pull-request job exposes a separate capture-metadata table so the source
+fragment fields remain auditable. Keep `CHANGELOG.md` append-only at the
+release-section level and move shipped `## [Unreleased]` bullets into a dated
+section when preparing a release; the CI and tag workflows reject a missing or
+placeholder section.
 
 ## CI Matrix
 

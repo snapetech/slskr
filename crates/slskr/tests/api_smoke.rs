@@ -95,7 +95,7 @@ async fn daemon_http_api_smoke() {
         .unwrap();
     assert_eq!(missing_auth.status(), StatusCode::UNAUTHORIZED);
 
-    let bad_csrf = client
+    let disconnected_search = client
         .post(format!("{base_url}/api/v0/searches"))
         .bearer_auth("smoke-token")
         .header("Origin", "http://evil.invalid")
@@ -103,10 +103,10 @@ async fn daemon_http_api_smoke() {
         .send()
         .await
         .unwrap();
-    assert_eq!(bad_csrf.status(), StatusCode::OK);
+    assert_eq!(disconnected_search.status(), StatusCode::CONFLICT);
 
-    let created_body = bad_csrf.text().await.unwrap();
-    assert!(created_body.contains("\"query\":\"test flac\""));
+    let search_failure_body = disconnected_search.text().await.unwrap();
+    assert!(search_failure_body.contains("server connection must be connected"));
 
     let searches = client
         .get(format!("{base_url}/api/v0/searches"))

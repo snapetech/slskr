@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# The live adapter launches .NET, Rust, and Node helpers. Keep the entire
+# harness inside the repository resident-memory ceiling even when invoked
+# directly. The held marker prevents recursion after the guard re-executes it.
+runner_repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [[ "${SLSKR_PROCESS_MEMORY_GUARD_HELD:-0}" != "1" ]]; then
+  exec "$runner_repo_root/scripts/with-process-memory-guard.sh" "${BASH_SOURCE[0]}" "$@"
+fi
+
 # The live adapter launches .NET, Rust, and short-lived Node helpers. Keep the
 # entire harness bounded even when it is invoked directly instead of through a
 # parent guard. The lower parent limit, if any, remains authoritative.

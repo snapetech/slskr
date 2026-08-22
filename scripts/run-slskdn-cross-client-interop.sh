@@ -1,8 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Keep every live interop child bounded when this runner is invoked directly.
-# A stricter parent limit is preserved rather than raised.
+# Enter the repository-wide resident-memory guard even when this runner is
+# invoked directly.  The held marker prevents recursion when the guard
+# re-executes this script.
+runner_repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [[ "${SLSKR_PROCESS_MEMORY_GUARD_HELD:-0}" != "1" ]]; then
+  exec "$runner_repo_root/scripts/with-process-memory-guard.sh" "${BASH_SOURCE[0]}" "$@"
+fi
+
+# Keep every live interop child bounded by the stricter virtual-memory ceiling
+# as well.  A stricter parent limit is preserved rather than raised.
 interop_virtual_memory_kib="${SLSKR_INTEROP_VIRTUAL_MEMORY_KIB:-12582912}"
 if [[ ! "$interop_virtual_memory_kib" =~ ^[1-9][0-9]{0,7}$ || "$interop_virtual_memory_kib" -gt 12582912 ]]; then
   echo "SLSKR_INTEROP_VIRTUAL_MEMORY_KIB must be between 1 and 12582912" >&2
@@ -150,6 +158,16 @@ auth_post_json() {
   fi
 }
 
+auth_post_json_with_status() {
+  local url="$1"
+  local payload="$2"
+  if [[ "$url" == "http://127.0.0.1:$slskdn_http_port/"* ]]; then
+    curl -sS -H "Content-Type: application/json" -d "$payload" -w $'\n%{http_code}' "$url"
+  else
+    curl -sS -H "Authorization: Bearer $api_token" -H "Content-Type: application/json" -d "$payload" -w $'\n%{http_code}' "$url"
+  fi
+}
+
 auth_put_empty() {
   local url="$1"
   if [[ "$url" == "http://127.0.0.1:$slskdn_http_port/"* ]]; then
@@ -229,6 +247,26 @@ wait_raw_contains() {
     sleep 2
   done
   record_check "$label" fail "timeout waiting for $needle last=${body:-none}"
+  return 1
+}
+
+target_log_count() {
+  local needle="$1"
+  grep -cF -- "$needle" "$slskdn_log" 2>/dev/null || true
+}
+
+wait_target_log_delta() {
+  local needle="$1"
+  local before="$2"
+  local deadline=$((SECONDS + timeout_seconds))
+  local after
+  while ((SECONDS < deadline)); do
+    after="$(target_log_count "$needle")"
+    if [[ "$before" =~ ^[0-9]+$ && "$after" =~ ^[0-9]+$ ]] && ((after > before)); then
+      return 0
+    fi
+    sleep 1
+  done
   return 1
 }
 
@@ -352,9 +390,17 @@ fi
 
 slskr_http_port="$(pick_port)"
 slskr_listen_port="${SLSKR_CROSS_CLIENT_SLSKR_LISTEN_PORT:-$(pick_port)}"
+slskr_obfuscated_listen_port="${SLSKR_CROSS_CLIENT_SLSKR_OBFUSCATED_LISTEN_PORT:-$(pick_port)}"
 slskdn_http_port="$(pick_port)"
 slskdn_listen_port="${SLSKR_CROSS_CLIENT_SLSKDN_LISTEN_PORT:-$(pick_port)}"
+slskdn_obfuscated_port="${SLSKR_CROSS_CLIENT_SLSKDN_OBFUSCATED_LISTEN_PORT:-$(pick_port)}"
 slskdn_overlay_port="${SLSKR_CROSS_CLIENT_SLSKDN_OVERLAY_PORT:-$(pick_port)}"
+slskdn_overlay_endpoint_port="$slskdn_overlay_port"
+slskdn_quic_backend_port="${SLSKR_CROSS_CLIENT_SLSKDN_QUIC_BACKEND_PORT:-$(pick_port)}"
+slskdn_quic_data_port="${SLSKR_CROSS_CLIENT_SLSKDN_QUIC_DATA_PORT:-$(pick_port)}"
+slskr_overlay_port="${SLSKR_CROSS_CLIENT_SLSKR_OVERLAY_PORT:-$(pick_port)}"
+slskr_quic_backend_port="${SLSKR_CROSS_CLIENT_SLSKR_QUIC_BACKEND_PORT:-$(pick_port)}"
+slskr_quic_data_port="${SLSKR_CROSS_CLIENT_SLSKR_QUIC_DATA_PORT:-$(pick_port)}"
 gateway_echo_port="$(pick_port)"
 gateway_echo_host="$(ip -4 route get 1.1.1.1 | awk '{ for (i = 1; i <= NF; i++) if ($i == "src") { print $(i + 1); exit } }')"
 
@@ -365,6 +411,17 @@ slskdn_app="$work_dir/slskdn-app"
 slskdn_share="$slskdn_app/shares"
 slskdn_web="$slskdn_app/web"
 mkdir -p "$slskr_state" "$slskr_share" "$slskdn_app/config" "$slskdn_app/downloads" "$slskdn_app/incomplete" "$slskdn_share" "$slskdn_web"
+
+if [[ "${SLSKR_CROSS_CLIENT_TARGET_OBFUSCATED_LOOPBACK_OVERRIDE:-0}" == "1" ]]; then
+  # Test-only route forcing: make the target's regular replacement dial fail
+  # while the temporary target hook translates its selected obfuscated dial to
+  # the replacement's loopback obfuscated listener.
+  target_endpoint_overrides="$slskr_username=127.0.0.1:1;$upstream_username=127.0.0.1:$slskr_listen_port"
+elif [[ "${SLSKR_CROSS_CLIENT_OMIT_REPLACEMENT_ENDPOINT_OVERRIDE:-0}" == "1" ]]; then
+  target_endpoint_overrides="$upstream_username=127.0.0.1:$slskr_listen_port"
+else
+  target_endpoint_overrides="${SLSKR_CROSS_CLIENT_TARGET_ENDPOINT_OVERRIDES:-$slskr_username=127.0.0.1:$slskr_listen_port;$upstream_username=127.0.0.1:$slskr_listen_port}"
+fi
 
 cat >"$slskr_config" <<'TOML'
 [mesh]
@@ -424,6 +481,19 @@ cleanup() {
     # implementation regressions after the child daemons are cleaned up.
     failed_result_file="$output_dir/slskr-slskdn-cross-client-interop.failed-$$.tsv"
     cp -- "$result_file" "$failed_result_file"
+    mesh_lifecycle_supplement_file="$output_dir/slskr-slskdn-cross-client-interop.mesh-lifecycle-supplement-$$.tsv"
+    mesh_lifecycle_detail_token='expected-target-negative status=400 body={"error":"Failed to sync with peer"}'
+    if ! awk -F '\t' -v check='protocol-ksdn-mesh-sync-reconnect-retry' -v token="$mesh_lifecycle_detail_token" '
+      NR == 1 { header = $0; next }
+      $2 == check && $3 == "fail" && index($4, token) > 0 { row = $0 }
+      END {
+        if (row == "") exit 1
+        print header
+        print row
+      }
+    ' "$result_file" >"$mesh_lifecycle_supplement_file"; then
+      rm -f -- "$mesh_lifecycle_supplement_file"
+    fi
     rm -f -- "$result_file"
   fi
 }
@@ -466,6 +536,12 @@ soulseek:
   password: "$slskdn_password"
   listen_ip_address: 0.0.0.0
   listen_port: $slskdn_listen_port
+  obfuscation:
+    enabled: true
+    mode: prefer
+    listen_port: $slskdn_obfuscated_port
+    advertise_regular_port: true
+    prefer_outbound: true
 dht:
   enabled: true
   lan_only: true
@@ -475,7 +551,13 @@ dht:
 overlay:
   enable: true
   listen_port: $slskdn_overlay_port
+  enable_quic: true
   quic_listen_port: $slskdn_overlay_port
+  share_quic_with_dht_port: true
+  quic_backend_listen_port: $slskdn_quic_backend_port
+overlay_data:
+  enable: true
+  listen_port: $slskdn_quic_data_port
 flags:
   no_connect: false
 YAML
@@ -483,6 +565,10 @@ YAML
 (
   export SLSK_SERVER="$server_endpoint"
   export SLSKR_HTTP_BIND="127.0.0.1:$slskr_http_port"
+  # The matrix uses the plain local controller endpoint.  Disable the unused
+  # HTTPS listener so the default 5031 port cannot collide with another local
+  # slskR instance.
+  export SLSKD_NO_HTTPS=true
   export SLSKR_CONFIG="$slskr_config"
   export SLSKR_STATE_DIR="$slskr_state"
   export SLSK_USERNAME="$slskr_username"
@@ -493,18 +579,42 @@ YAML
   export SLSKR_API_TOKEN="$api_token"
   export SLSKR_SHARE_DIRS="$slskr_share"
   export SLSKR_LISTENER_BIND="0.0.0.0:$slskr_listen_port"
+  export SLSKR_OVERLAY_BIND="0.0.0.0:$slskr_overlay_port"
+  export SLSKR_ADVANCED_NETWORKING_JSON="{\"dht\":{\"enabled\":true,\"dht_port\":$slskr_overlay_port,\"overlay_port\":$slskr_overlay_port,\"advertised_overlay_port\":$slskr_overlay_port,\"lan_only\":true},\"overlay\":{\"enable\":true,\"listen_port\":$slskr_overlay_port,\"enable_quic\":true,\"quic_listen_port\":$slskr_overlay_port,\"share_quic_with_dht_port\":true,\"quic_backend_listen_port\":$slskr_quic_backend_port},\"overlay_data\":{\"enable\":true,\"listen_port\":$slskr_quic_data_port}}"
+  export SLSKR_OBFUSCATED_LISTENER_BIND="0.0.0.0:$slskr_obfuscated_listen_port"
   export SLSK_LISTEN_PORT="$slskr_listen_port"
   export SLSKR_ADVERTISED_PORT="$slskr_listen_port"
+  export SLSKR_OBFUSCATED_ADVERTISED_PORT="$slskr_obfuscated_listen_port"
+  export SLSKD_SLSK_OBFUSCATION_LISTEN_PORT="$slskr_obfuscated_listen_port"
+  export SLSK_OBFUSCATION=true
+  export SLSK_OBFUSCATION_MODE=prefer
+  export SLSK_OBFUSCATION_PREFER_OUTBOUND=true
   export SLSKR_PEER_HOST_OVERRIDE=127.0.0.1
+  # Keep a real distributed link alive so the target-originated branch
+  # metadata is observable on the replacement daemon.  The disposable probe
+  # below still covers the direct ping transaction; this override covers the
+  # reverse direction on the daemon's long-lived distributed connection.
+  export SLSKR_DISTRIBUTED_PARENT_OVERRIDE="127.0.0.1:$slskdn_listen_port"
   export SLSKR_TEST_USER_ENDPOINT_OVERRIDES="$slskdn_username=127.0.0.1:$slskdn_listen_port;$upstream_username=127.0.0.1:$slskdn_listen_port"
   export SLSKR_PEER_RESPONSE_TIMEOUT_SECONDS=60
+  distributed_parent_wait_deadline=$((SECONDS + ${SLSKR_CROSS_CLIENT_DISTRIBUTED_PARENT_WAIT_SECONDS:-120}))
+  while ((SECONDS < distributed_parent_wait_deadline)); do
+    distributed_parent_target_state="$(curl -sS "http://127.0.0.1:$slskdn_http_port/api/v0/application" 2>/dev/null || true)"
+    if [[ "$distributed_parent_target_state" == *'"canAcceptChildren":true'* ]]; then
+      break
+    fi
+    sleep 1
+  done
   exec "$slskr_binary" serve
 ) >"$slskr_log" 2>&1 &
 slskr_pid="$!"
 
 (
   export APP_DIR="$slskdn_app"
-  export SLSKDN_TEST_USER_ENDPOINT_OVERRIDES="$slskr_username=127.0.0.1:$slskr_listen_port;$upstream_username=127.0.0.1:$slskr_listen_port"
+  export SLSKDN_TEST_USER_ENDPOINT_OVERRIDES="$target_endpoint_overrides"
+  if [[ "${SLSKR_CROSS_CLIENT_TARGET_OBFUSCATED_LOOPBACK_OVERRIDE:-0}" == "1" ]]; then
+    export SLSKDN_TEST_OBFUSCATED_ENDPOINT_OVERRIDES="$slskr_username=127.0.0.1:$slskr_obfuscated_listen_port"
+  fi
   cd "$slskdn_app"
   exec "$slskdn_binary" --config config/slskd.yml --app-dir "$slskdn_app"
 ) >"$slskdn_log" 2>&1 &
@@ -512,9 +622,12 @@ slskdn_pid="$!"
 
 {
   printf 'server_endpoint=%s\n' "$server_endpoint"
-  printf 'slskr_http=127.0.0.1:%s slskr_listen=127.0.0.1:%s\n' "$slskr_http_port" "$slskr_listen_port"
-  printf 'slskdn_http=127.0.0.1:%s slskdn_listen=127.0.0.1:%s\n' "$slskdn_http_port" "$slskdn_listen_port"
+  printf 'slskr_http=127.0.0.1:%s slskr_listen=127.0.0.1:%s slskr_obfuscated=127.0.0.1:%s\n' "$slskr_http_port" "$slskr_listen_port" "$slskr_obfuscated_listen_port"
+  printf 'slskdn_http=127.0.0.1:%s slskdn_listen=127.0.0.1:%s slskdn_obfuscated=127.0.0.1:%s\n' "$slskdn_http_port" "$slskdn_listen_port" "$slskdn_obfuscated_port"
+  printf 'slskr_overlay=127.0.0.1:%s\n' "$slskr_overlay_port"
   printf 'slskdn_overlay=127.0.0.1:%s\n' "$slskdn_overlay_port"
+  printf 'slskdn_quic_backend=127.0.0.1:%s slskdn_quic_data=127.0.0.1:%s\n' "$slskdn_quic_backend_port" "$slskdn_quic_data_port"
+  printf 'slskr_quic_backend=127.0.0.1:%s slskr_quic_data=127.0.0.1:%s\n' "$slskr_quic_backend_port" "$slskr_quic_data_port"
   printf 'slskr_endpoint_override=%s=127.0.0.1:%s\n' "$slskdn_username" "$slskdn_listen_port"
   printf 'slskr_upstream_endpoint_override=%s=127.0.0.1:%s\n' "$upstream_username" "$slskdn_listen_port"
   printf 'slskdn_endpoint_override=%s=127.0.0.1:%s\n' "$slskr_username" "$slskr_listen_port"
@@ -565,6 +678,8 @@ wait_slskdn_connected
   auth_get "http://127.0.0.1:$slskr_http_port/api/v0/listeners" || true
   printf '\n[slskdn-application]\n'
   auth_get "http://127.0.0.1:$slskdn_http_port/api/v0/application" || true
+  printf '\n[slskdn-options]\n'
+  auth_get "http://127.0.0.1:$slskdn_http_port/api/v0/options" || true
   printf '\n[slskdn-endpoint:slskr]\n'
   auth_get "http://127.0.0.1:$slskdn_http_port/api/v0/users/$slskr_username/endpoint" || true
 } >>"$diag_file" 2>&1
@@ -651,7 +766,18 @@ run_runtime_protocol_checks() {
   escaped_slskr="$(url_escape "$slskr_username")"
   escaped_slskdn="$(url_escape "$slskdn_username")"
   endpoint="$(auth_get "http://127.0.0.1:$slskdn_http_port/api/v0/users/$escaped_slskr/endpoint")"
-  if [[ "$endpoint" == *"$slskr_listen_port"* ]]; then
+  local expected_slskr_endpoint_port="$slskr_listen_port"
+  if [[ "${SLSKR_CROSS_CLIENT_TARGET_OBFUSCATED_LOOPBACK_OVERRIDE:-0}" == "1" ]]; then
+    expected_slskr_endpoint_port=1
+  fi
+  if [[ "${SLSKR_CROSS_CLIENT_OMIT_REPLACEMENT_ENDPOINT_OVERRIDE:-0}" == "1" ]]; then
+    if [[ "$endpoint" == *":$expected_slskr_endpoint_port"* && "$endpoint" != *'"address":"127.0.0.1"'* ]]; then
+      record_check network-slskdn-resolves-slskr ok "public-endpoint=$endpoint"
+    else
+      record_check network-slskdn-resolves-slskr fail "$endpoint"
+      return 1
+    fi
+  elif [[ "$endpoint" == *":$expected_slskr_endpoint_port"* ]]; then
     record_check network-slskdn-resolves-slskr ok "endpoint=$endpoint"
   else
     record_check network-slskdn-resolves-slskr fail "$endpoint"
@@ -668,7 +794,7 @@ run_runtime_protocol_checks() {
 }
 
 run_virtual_soulfind_v2_checks() {
-  local label port base_url track_id track_payload created intent_id pending plan release_created release_id status intent stats
+  local label port base_url track_id track_payload response response_body response_status
   for label in slskr slskdn; do
     if [[ "$label" == "slskr" ]]; then
       port="$slskr_http_port"
@@ -681,67 +807,79 @@ run_virtual_soulfind_v2_checks() {
 const trackId = process.argv[1];
 process.stdout.write(JSON.stringify({ domain: "Music", trackId, priority: "High" }));
 ' "$track_id")"
-    if ! created="$(auth_post_json "$base_url/intents/tracks?api-version=1" "$track_payload")" \
-      || ! intent_id="$(printf '%s' "$created" | json_get desiredTrackId)" \
-      || [[ -z "$intent_id" ]] \
-      || [[ "$(printf '%s' "$created" | json_get status)" != "Pending" ]]; then
-      record_check "runtime-$label-virtualsoulfind-v2-create" fail "${created:-request failed}"
+    if ! response="$(auth_post_json_with_status \
+      "$base_url/intents/tracks?api-version=1" "$track_payload")"; then
+      record_check "runtime-$label-virtualsoulfind-v2-create" fail "request failed: ${response:-no response}"
       return 1
     fi
-    record_check "runtime-$label-virtualsoulfind-v2-create" ok "intent=$intent_id"
-
-    pending="$(auth_get "$base_url/intents/tracks/pending?api-version=1&limit=10")"
-    if [[ "$pending" != *"$intent_id"* ]]; then
-      record_check "runtime-$label-virtualsoulfind-v2-pending" fail "$pending"
+    response_status="$(printf '%s\n' "$response" | tail -n 1)"
+    response_body="$(printf '%s\n' "$response" | sed '$d')"
+    if [[ "$response_status" != "503" ]] \
+      || [[ "$response_body" != '"VirtualSoulfind v2 is disabled"' ]]; then
+      record_check "runtime-$label-virtualsoulfind-v2-create" fail \
+        "status=$response_status body=$response_body"
       return 1
     fi
-    record_check "runtime-$label-virtualsoulfind-v2-pending" ok "pending intent listed"
-
-    plan="$(auth_post_json "$base_url/plans?api-version=1" "$track_payload")"
-    if [[ "$plan" != *"$track_id"* || "$plan" != *'"steps":[]'* ]]; then
-      record_check "runtime-$label-virtualsoulfind-v2-plan" fail "$plan"
-      return 1
-    fi
-    record_check "runtime-$label-virtualsoulfind-v2-plan" ok "empty plan returned for unknown catalogue track"
-
-    release_created="$(auth_post_json \
-      "$base_url/intents/releases?api-version=1" \
-      '{"releaseId":"release:interop","priority":"Normal","mode":"Wanted","notes":"interop"}')"
-    release_id="$(printf '%s' "$release_created" | json_get desiredReleaseId 2>/dev/null || true)"
-    if [[ -z "$release_id" || "$release_created" != *'"status":"Pending"'* ]]; then
-      record_check "runtime-$label-virtualsoulfind-v2-release" fail "$release_created"
-      return 1
-    fi
-    record_check "runtime-$label-virtualsoulfind-v2-release" ok "release intent=$release_id"
-
-    auth_post_json \
-      "$base_url/intents/tracks/$intent_id/process?api-version=1" \
-      '{}' >/dev/null
-    status=""
-    for _ in $(seq 1 20); do
-      intent="$(auth_get "$base_url/intents/tracks/$intent_id?api-version=1")"
-      status="$(printf '%s' "$intent" | json_get status 2>/dev/null || true)"
-      [[ "$status" == "Failed" ]] && break
-      sleep 0.1
-    done
-    stats="$(auth_get "$base_url/stats?api-version=1")"
-    if [[ "$status" != "Failed" ]] \
-      || [[ "$(printf '%s' "$stats" | json_get totalProcessed 2>/dev/null || true)" != "1" ]] \
-      || [[ "$(printf '%s' "$stats" | json_get failureCount 2>/dev/null || true)" != "1" ]]; then
-      record_check "runtime-$label-virtualsoulfind-v2-process" fail "intent=$intent stats=$stats"
-      return 1
-    fi
-    record_check "runtime-$label-virtualsoulfind-v2-process" ok "atomic claim processed unknown track once"
+    record_check "runtime-$label-virtualsoulfind-v2-create" ok \
+      "status=503 body=VirtualSoulfind v2 is disabled"
   done
 }
 
+run_obfuscated_peer_interop_checks() {
+  local obfuscated_allow_plain_response obfuscated_peer_log obfuscated_peer_output obfuscated_response_contract
+  obfuscated_peer_log="$work_dir/slskr-obfuscated-peer.log"
+  obfuscated_allow_plain_response="${SLSKR_CROSS_CLIENT_OBFUSCATED_ALLOW_PLAIN_RESPONSE:-true}"
+  if [[ -z "$upstream_username" || -z "$upstream_password" ]]; then
+    record_check protocol-slskr-obfuscated-peer-slskdn fail "upstream probe credentials are required"
+    return 1
+  fi
+
+  if obfuscated_peer_output="$(
+    SLSK_SERVER="$server_endpoint" \
+    SLSK_USERNAME="$upstream_username" \
+    SLSK_PASSWORD="$upstream_password" \
+    SLSK_OBFUSCATED_PEER_USERNAME="$slskdn_username" \
+    SLSK_OBFUSCATED_HOST_OVERRIDE=127.0.0.1 \
+    SLSK_OBFUSCATED_PORT_OVERRIDE="$slskdn_obfuscated_port" \
+    SLSK_OBFUSCATED_ALLOW_PLAIN_RESPONSE="$obfuscated_allow_plain_response" \
+    SLSK_OBFUSCATED_PEER_ADDRESS_ATTEMPTS=3 \
+    SLSK_OBFUSCATED_PROBE_TIMEOUT_SECONDS=20 \
+      timeout 90 "$slskr_binary" probe obfuscated-peer 2>&1
+  )"; then
+    printf '%s\n' "$obfuscated_peer_output" >"$obfuscated_peer_log"
+    if [[ "$obfuscated_peer_output" == *"plain-response fallback"* ]]; then
+      obfuscated_response_contract="plain-fallback"
+    else
+      obfuscated_response_contract="obfuscated"
+    fi
+    record_check protocol-slskr-obfuscated-peer-slskdn ok \
+      "peer=$slskdn_username port=$slskdn_obfuscated_port probe_contract=obfuscated-peer-v1 response_contract=$obfuscated_response_contract"
+  else
+    printf '%s\n' "${obfuscated_peer_output:-no response}" >"$obfuscated_peer_log"
+    record_check protocol-slskr-obfuscated-peer-slskdn fail \
+      "detail=$(tail -n 6 "$obfuscated_peer_log" 2>/dev/null | tr '\n\t' ' ')"
+    return 1
+  fi
+}
+
 run_browse_interop_checks() {
-  local escaped_slskr escaped_slskdn body
+  local escaped_slskr body before_listeners after_listeners
+  local before_obfuscated_accepts before_obfuscated_messages after_obfuscated_accepts
+  local after_obfuscated_messages expect_reverse_obfuscated
   escaped_slskr="$(url_escape "$slskr_username")"
-  escaped_slskdn="$(url_escape "$slskdn_username")"
+  expect_reverse_obfuscated="${SLSKR_CROSS_CLIENT_EXPECT_REVERSE_OBFUSCATED:-0}"
+  if [[ "${SLSKR_CROSS_CLIENT_TARGET_OBFUSCATED_LOOPBACK_OVERRIDE:-0}" == "1" ]]; then
+    expect_reverse_obfuscated=1
+  fi
 
   wait_slskr_connected
   wait_slskdn_connected
+
+  if [[ "$expect_reverse_obfuscated" == "1" ]]; then
+    before_listeners="$(auth_get "http://127.0.0.1:$slskr_http_port/api/v0/listeners")"
+    before_obfuscated_accepts="$(printf '%s' "$before_listeners" | json_get obfuscated_accepts 2>/dev/null || true)"
+    before_obfuscated_messages="$(printf '%s' "$before_listeners" | json_get obfuscated_peer_messages 2>/dev/null || true)"
+  fi
 
   body="$(auth_get "http://127.0.0.1:$slskdn_http_port/api/v0/users/$escaped_slskr/browse")"
   if printf '%s' "$body" | json_find_string "$slskr_fixture_name" 2>/dev/null; then
@@ -750,6 +888,31 @@ run_browse_interop_checks() {
     record_check protocol-slskdn-browses-slskr fail "$body"
     return 1
   fi
+
+  if [[ "$expect_reverse_obfuscated" == "1" ]]; then
+    after_listeners="$(auth_get "http://127.0.0.1:$slskr_http_port/api/v0/listeners")"
+    after_obfuscated_accepts="$(printf '%s' "$after_listeners" | json_get obfuscated_accepts 2>/dev/null || true)"
+    after_obfuscated_messages="$(printf '%s' "$after_listeners" | json_get obfuscated_peer_messages 2>/dev/null || true)"
+    if [[ "$before_obfuscated_accepts" =~ ^[0-9]+$ ]] \
+      && [[ "$before_obfuscated_messages" =~ ^[0-9]+$ ]] \
+      && [[ "$after_obfuscated_accepts" =~ ^[0-9]+$ ]] \
+      && [[ "$after_obfuscated_messages" =~ ^[0-9]+$ ]] \
+      && ((after_obfuscated_accepts > before_obfuscated_accepts)) \
+      && ((after_obfuscated_messages > before_obfuscated_messages)); then
+      record_check protocol-slskdn-obfuscated-peer-slskr ok \
+        "transport=type1-obfuscated request=browse accepts=${before_obfuscated_accepts}->${after_obfuscated_accepts} messages=${before_obfuscated_messages}->${after_obfuscated_messages}"
+    else
+      record_check protocol-slskdn-obfuscated-peer-slskr fail \
+        "transport=type1-obfuscated counters did not advance before=${before_obfuscated_accepts}/${before_obfuscated_messages} after=${after_obfuscated_accepts}/${after_obfuscated_messages}"
+      return 1
+    fi
+  fi
+
+}
+
+run_reverse_browse_interop_check() {
+  local escaped_slskdn
+  escaped_slskdn="$(url_escape "$slskdn_username")"
 
   wait_slskr_connected
   wait_slskdn_connected
@@ -864,7 +1027,10 @@ run_room_interop_checks() {
 }
 
 run_mesh_runtime_checks() {
-  local escaped_slskr escaped_slskdn capability_probe slskr_capabilities slskdn_capabilities overlay_pin overlay_output health stats transport ticket
+  local escaped_slskr escaped_slskdn capability_probe slskr_capabilities slskdn_capabilities overlay_pin overlay_output health stats transport ticket mesh_status=0
+  local mesh_sync_target_first mesh_sync_target_second mesh_sync_replacement_first mesh_sync_replacement_second
+  local mesh_sync_target_first_status mesh_sync_target_second_status mesh_sync_replacement_first_status mesh_sync_replacement_second_status
+  local mesh_sync_target_first_body mesh_sync_target_second_body mesh_sync_replacement_first_body mesh_sync_replacement_second_body
   escaped_slskr="$(url_escape "$slskr_username")"
   escaped_slskdn="$(url_escape "$slskdn_username")"
 
@@ -894,6 +1060,43 @@ run_mesh_runtime_checks() {
     return 1
   fi
   record_check protocol-ksdn-slskdn-persists-slskr-descriptor ok "runtime capability record persisted"
+
+  # The exact frozen slskdN build exposes the mesh-sync controller, but its
+  # outbound MeshSyncService transport is intentionally unavailable.  The
+  # replacement's slskdn compatibility profile preserves that observable
+  # target contract at the versioned route.  Exercise two attempts against
+  # each live daemon so a retry cannot turn the target's stable failure into a
+  # false positive or silently mutate state.
+  mesh_sync_target_first="$(auth_post_json_with_status \
+    "http://127.0.0.1:$slskdn_http_port/api/v0/mesh/sync/$escaped_slskr" '{}' 2>/dev/null || true)"
+  mesh_sync_target_second="$(auth_post_json_with_status \
+    "http://127.0.0.1:$slskdn_http_port/api/v0/mesh/sync/$escaped_slskr" '{}' 2>/dev/null || true)"
+  mesh_sync_replacement_first="$(auth_post_json_with_status \
+    "http://127.0.0.1:$slskr_http_port/api/v0/mesh/sync/$escaped_slskdn" '{}' 2>/dev/null || true)"
+  mesh_sync_replacement_second="$(auth_post_json_with_status \
+    "http://127.0.0.1:$slskr_http_port/api/v0/mesh/sync/$escaped_slskdn" '{}' 2>/dev/null || true)"
+  mesh_sync_target_first_status="${mesh_sync_target_first##*$'\n'}"
+  mesh_sync_target_second_status="${mesh_sync_target_second##*$'\n'}"
+  mesh_sync_replacement_first_status="${mesh_sync_replacement_first##*$'\n'}"
+  mesh_sync_replacement_second_status="${mesh_sync_replacement_second##*$'\n'}"
+  mesh_sync_target_first_body="${mesh_sync_target_first%$'\n'*}"
+  mesh_sync_target_second_body="${mesh_sync_target_second%$'\n'*}"
+  mesh_sync_replacement_first_body="${mesh_sync_replacement_first%$'\n'*}"
+  mesh_sync_replacement_second_body="${mesh_sync_replacement_second%$'\n'*}"
+  if [[ "$mesh_sync_target_first_status" == "400" \
+    && "$mesh_sync_target_second_status" == "400" \
+    && "$mesh_sync_replacement_first_status" == "400" \
+    && "$mesh_sync_replacement_second_status" == "400" \
+    && "$mesh_sync_target_first_body" == '{"error":"Failed to sync with peer"}' \
+    && "$mesh_sync_target_second_body" == "$mesh_sync_target_first_body" \
+    && "$mesh_sync_replacement_first_body" == "$mesh_sync_target_first_body" \
+    && "$mesh_sync_replacement_second_body" == "$mesh_sync_target_first_body" ]]; then
+    record_check protocol-ksdn-mesh-sync-reconnect-retry fail \
+      'expected-target-negative status=400 body={"error":"Failed to sync with peer"} target_attempts=400,400 replacement_attempts=400,400'
+  else
+    record_check protocol-ksdn-mesh-sync-reconnect-retry fail \
+      "mesh-sync retry contract mismatch target=${mesh_sync_target_first_status}/${mesh_sync_target_second_status} replacement=${mesh_sync_replacement_first_status}/${mesh_sync_replacement_second_status}"
+  fi
 
   if [[ ! -s "$slskdn_app/overlay_cert.pfx" ]]; then
     node -e "const net=require('net'); const s=net.createConnection({host:'127.0.0.1',port:Number(process.argv[1])},()=>s.destroy()); s.on('error',()=>process.exit(1)); setTimeout(()=>process.exit(1),5000);" \
@@ -955,7 +1158,7 @@ process.stdout.write(JSON.stringify({
     local expected="$3"
     local service="${4:-pods}"
     local expected_sha256="${5:-}"
-    SLSKR_OVERLAY_ENDPOINT="127.0.0.1:$slskdn_overlay_port" \
+    SLSKR_OVERLAY_ENDPOINT="127.0.0.1:$slskdn_overlay_endpoint_port" \
     SLSKR_OVERLAY_CERTIFICATE_SHA256="$overlay_pin" \
     SLSKR_OVERLAY_SERVICE="$service" \
     SLSKR_OVERLAY_METHOD="$method" \
@@ -967,22 +1170,45 @@ process.stdout.write(JSON.stringify({
       "$slskr_binary" probe overlay-service 2>&1
   }
 
-  if overlay_output="$(
-    SLSKR_OVERLAY_ENDPOINT="127.0.0.1:$slskdn_overlay_port" \
-    SLSKR_OVERLAY_CERTIFICATE_SHA256="$overlay_pin" \
-    SLSKR_OVERLAY_SERVICE=dht \
-    SLSKR_OVERLAY_METHOD=Ping \
-    SLSKR_OVERLAY_PAYLOAD='{"RequesterId":"AAAAAAAAAAAAAAAAAAAAAAAAAAA="}' \
-    SLSKR_OVERLAY_EXPECTED=Timestamp \
-    SLSK_USERNAME="$slskr_username" \
-    SLSK_PEER_USERNAME="$slskdn_username" \
-      "$slskr_binary" probe overlay-service 2>&1
-  )"; then
+  probe_overlay_endpoint() {
+    local candidate output last_output=""
+    local candidates=("$slskdn_overlay_port")
+    if [[ "$slskdn_listen_port" != "$slskdn_overlay_port" ]]; then
+      # Recent slskdN builds demultiplex TLS mesh overlay connections on the
+      # Soulseek TCP listener instead of opening a second TCP port. Older
+      # builds retain a standalone overlay listener on dht.overlay_port.
+      candidates+=("$slskdn_listen_port")
+    fi
+    for candidate in "${candidates[@]}"; do
+      if output="$(
+        SLSKR_OVERLAY_ENDPOINT="127.0.0.1:$candidate" \
+        SLSKR_OVERLAY_CERTIFICATE_SHA256="$overlay_pin" \
+        SLSKR_OVERLAY_SERVICE=dht \
+        SLSKR_OVERLAY_METHOD=Ping \
+        SLSKR_OVERLAY_PAYLOAD='{"RequesterId":"AAAAAAAAAAAAAAAAAAAAAAAAAAA="}' \
+        SLSKR_OVERLAY_EXPECTED=Timestamp \
+        SLSK_USERNAME="$slskr_username" \
+        SLSK_PEER_USERNAME="$slskdn_username" \
+          "$slskr_binary" probe overlay-service 2>&1
+      )"; then
+        slskdn_overlay_endpoint_port="$candidate"
+        overlay_probe_output="$output"
+        return 0
+      fi
+      last_output="endpoint=$candidate $output"
+    done
+    overlay_probe_output="$last_output"
+    return 1
+  }
+
+  overlay_probe_output=""
+  if probe_overlay_endpoint; then
+    overlay_output="$overlay_probe_output"
     printf '\n[pinned-overlay-service]\n%s\n' "$overlay_output" >>"$diag_file"
-    record_check protocol-pinned-overlay-service ok "dht.Ping returned a timestamp"
+    record_check protocol-pinned-overlay-service ok "endpoint=127.0.0.1:$slskdn_overlay_endpoint_port dht.Ping returned a timestamp"
   else
-    printf '\n[pinned-overlay-service-failed]\n%s\n' "$overlay_output" >>"$diag_file"
-    record_check protocol-pinned-overlay-service fail "$overlay_output"
+    printf '\n[pinned-overlay-service-failed]\n%s\n' "$overlay_probe_output" >>"$diag_file"
+    record_check protocol-pinned-overlay-service fail "$overlay_probe_output"
     return 1
   fi
 
@@ -1022,7 +1248,7 @@ process.stdout.write(JSON.stringify({ contentId, range: { offset: 0, length: Num
   else
     printf '\n[pods-list-failed]\n%s\n' "$pod_list_output" >>"$diag_file"
     record_check protocol-slskr-pods-list-slskdn fail "$pod_list_output"
-    return 1
+    mesh_status=1
   fi
 
   if pod_get_output="$(overlay_service_call Get "{\"PodId\":\"$pod_id\"}" "$pod_id")"; then
@@ -1031,7 +1257,7 @@ process.stdout.write(JSON.stringify({ contentId, range: { offset: 0, length: Num
   else
     printf '\n[pods-get-failed]\n%s\n' "$pod_get_output" >>"$diag_file"
     record_check protocol-slskr-pods-get-slskdn fail "$pod_get_output"
-    return 1
+    mesh_status=1
   fi
 
   if pod_join_output="$(overlay_service_call Join "{\"PodId\":\"$pod_id\",\"Role\":\"member\"}" '"Success":true')"; then
@@ -1040,7 +1266,7 @@ process.stdout.write(JSON.stringify({ contentId, range: { offset: 0, length: Num
   else
     printf '\n[pods-join-failed]\n%s\n' "$pod_join_output" >>"$diag_file"
     record_check protocol-slskr-pods-join-slskdn fail "$pod_join_output"
-    return 1
+    mesh_status=1
   fi
 
   if pod_post_output="$(overlay_service_call PostMessage "{\"PodId\":\"$pod_id\",\"ChannelId\":\"general\",\"Body\":\"$pod_message\"}" '"Success":true')"; then
@@ -1049,7 +1275,7 @@ process.stdout.write(JSON.stringify({ contentId, range: { offset: 0, length: Num
   else
     printf '\n[pods-post-message-failed]\n%s\n' "$pod_post_output" >>"$diag_file"
     record_check protocol-slskr-pods-post-slskdn fail "$pod_post_output"
-    return 1
+    mesh_status=1
   fi
 
   if pod_messages_output="$(overlay_service_call GetMessages "{\"PodId\":\"$pod_id\",\"ChannelId\":\"general\"}" "$pod_message")"; then
@@ -1058,7 +1284,7 @@ process.stdout.write(JSON.stringify({ contentId, range: { offset: 0, length: Num
   else
     printf '\n[pods-get-messages-failed]\n%s\n' "$pod_messages_output" >>"$diag_file"
     record_check protocol-slskr-pods-messages-slskdn fail "$pod_messages_output"
-    return 1
+    mesh_status=1
   fi
 
   if pod_leave_output="$(overlay_service_call Leave "{\"PodId\":\"$pod_id\"}" '"Success":true')"; then
@@ -1067,7 +1293,7 @@ process.stdout.write(JSON.stringify({ contentId, range: { offset: 0, length: Num
   else
     printf '\n[pods-leave-failed]\n%s\n' "$pod_leave_output" >>"$diag_file"
     record_check protocol-slskr-pods-leave-slskdn fail "$pod_leave_output"
-    return 1
+    mesh_status=1
   fi
 
   if ! local_profile="$(auth_get "http://127.0.0.1:$slskdn_http_port/api/v0/profile/me")" \
@@ -1111,7 +1337,7 @@ process.stdout.write(JSON.stringify({
       maxFrameSize: 8192
     }
   },
-  requestingPeerId: "ignored"
+  requestingPeerId: gatewayPeerId
 }));
 ' "$gateway_pod_id" "$gateway_peer_id" "$gateway_echo_host" "$gateway_echo_port")"
   if gateway_pod_create="$(auth_post_json "http://127.0.0.1:$slskdn_http_port/api/v0/pods" "$gateway_pod_payload")" \
@@ -1119,7 +1345,7 @@ process.stdout.write(JSON.stringify({
     record_check runtime-slskdn-gateway-pod-create ok "pod=$gateway_pod_id"
   else
     record_check runtime-slskdn-gateway-pod-create fail "${gateway_pod_create:-request failed}"
-    return 1
+    mesh_status=1
   fi
 
   if gateway_join_output="$(overlay_service_call Join "{\"PodId\":\"$gateway_pod_id\",\"Role\":\"member\"}" '"Success":true')"; then
@@ -1128,7 +1354,7 @@ process.stdout.write(JSON.stringify({
   else
     printf '\n[gateway-pod-join-failed]\n%s\n' "$gateway_join_output" >>"$diag_file"
     record_check protocol-slskr-gateway-pod-join-slskdn fail "$gateway_join_output"
-    return 1
+    mesh_status=1
   fi
 
   gateway_nonce="$(openssl rand -hex 16)"
@@ -1151,49 +1377,62 @@ process.stdout.write(JSON.stringify({
   else
     printf '\n[gateway-open-tunnel-failed]\n%s\n' "${gateway_open_output:-no response}" >>"$diag_file"
     record_check protocol-slskr-gateway-open-slskdn fail "${gateway_open_output:-tunnel id unavailable}"
-    return 1
+    mesh_status=1
+    gateway_tunnel_id=""
   fi
 
   gateway_echo_message="slskr-private-gateway-$(date +%s%N)"
   gateway_echo_base64="$(printf '%s' "$gateway_echo_message" | base64 -w0)"
-  if gateway_send_output="$(overlay_service_call TunnelData "{\"TunnelId\":\"$gateway_tunnel_id\",\"Data\":\"$gateway_echo_base64\"}" '"Sent":' private-gateway)"; then
+  if [[ -z "${gateway_tunnel_id:-}" ]]; then
+    gateway_send_output="gateway tunnel was not opened"
+    record_check protocol-slskr-gateway-send-slskdn fail "$gateway_send_output"
+    mesh_status=1
+  elif gateway_send_output="$(overlay_service_call TunnelData "{\"TunnelId\":\"$gateway_tunnel_id\",\"Data\":\"$gateway_echo_base64\"}" '"Sent":' private-gateway)"; then
     printf '\n[gateway-tunnel-data]\n%s\n' "$gateway_send_output" >>"$diag_file"
     record_check protocol-slskr-gateway-send-slskdn ok "tunnel payload accepted"
   else
     printf '\n[gateway-tunnel-data-failed]\n%s\n' "$gateway_send_output" >>"$diag_file"
     record_check protocol-slskr-gateway-send-slskdn fail "$gateway_send_output"
-    return 1
+    mesh_status=1
   fi
 
   gateway_receive_output=""
   gateway_received=0
-  for _ in $(seq 1 20); do
-    if gateway_receive_output="$(overlay_service_call GetTunnelData "{\"TunnelId\":\"$gateway_tunnel_id\"}" "$gateway_echo_base64" private-gateway)"; then
-      gateway_received=1
-      break
-    fi
-    sleep 0.25
-  done
+  if [[ -n "${gateway_tunnel_id:-}" ]]; then
+    for _ in $(seq 1 20); do
+      if gateway_receive_output="$(overlay_service_call GetTunnelData "{\"TunnelId\":\"$gateway_tunnel_id\"}" "$gateway_echo_base64" private-gateway)"; then
+        gateway_received=1
+        break
+      fi
+      sleep 0.25
+    done
+  else
+    gateway_receive_output="gateway tunnel was not opened"
+  fi
   if [[ "$gateway_received" == "1" ]]; then
     printf '\n[gateway-get-tunnel-data]\n%s\n' "$gateway_receive_output" >>"$diag_file"
     record_check protocol-slskr-gateway-receive-slskdn ok "exact echo payload returned"
   else
     printf '\n[gateway-get-tunnel-data-failed]\n%s\n' "$gateway_receive_output" >>"$diag_file"
     record_check protocol-slskr-gateway-receive-slskdn fail "echo payload unavailable"
-    return 1
+    mesh_status=1
   fi
 
-  if gateway_close_output="$(overlay_service_call CloseTunnel "{\"TunnelId\":\"$gateway_tunnel_id\"}" '"Closed":true' private-gateway)"; then
+  if [[ -z "${gateway_tunnel_id:-}" ]]; then
+    gateway_close_output="gateway tunnel was not opened"
+    record_check protocol-slskr-gateway-close-slskdn fail "$gateway_close_output"
+    mesh_status=1
+  elif gateway_close_output="$(overlay_service_call CloseTunnel "{\"TunnelId\":\"$gateway_tunnel_id\"}" '"Closed":true' private-gateway)"; then
     printf '\n[gateway-close-tunnel]\n%s\n' "$gateway_close_output" >>"$diag_file"
     record_check protocol-slskr-gateway-close-slskdn ok "private TCP tunnel closed"
   else
     printf '\n[gateway-close-tunnel-failed]\n%s\n' "$gateway_close_output" >>"$diag_file"
     record_check protocol-slskr-gateway-close-slskdn fail "$gateway_close_output"
-    return 1
+    mesh_status=1
   fi
 
   if dht_store_output="$(
-    SLSKR_OVERLAY_ENDPOINT="127.0.0.1:$slskdn_overlay_port" \
+    SLSKR_OVERLAY_ENDPOINT="127.0.0.1:$slskdn_overlay_endpoint_port" \
     SLSKR_OVERLAY_CERTIFICATE_SHA256="$overlay_pin" \
     SLSK_USERNAME="$slskr_username" \
     SLSK_PEER_USERNAME="$slskdn_username" \
@@ -1204,36 +1443,39 @@ process.stdout.write(JSON.stringify({
   else
     printf '\n[signed-dht-store-failed]\n%s\n' "$dht_store_output" >>"$diag_file"
     record_check protocol-slskr-dht-store-slskdn fail "$dht_store_output"
-    return 1
+    mesh_status=1
   fi
 
   if ! health="$(auth_get "http://127.0.0.1:$slskdn_http_port/api/v0/mesh/health?api-version=1.0")" \
     || ! printf '%s' "$health" | json_get routingNodes >/dev/null 2>&1; then
     record_check runtime-slskdn-mesh-health fail "${health:-request failed}"
-    return 1
+    mesh_status=1
+  else
+    record_check runtime-slskdn-mesh-health ok "$(printf '%s' "$health" | tr '\n\t' '  ')"
   fi
-  record_check runtime-slskdn-mesh-health ok "$(printf '%s' "$health" | tr '\n\t' '  ')"
 
   if ! stats="$(auth_get "http://127.0.0.1:$slskdn_http_port/api/v0/mesh/stats")" \
     || ! printf '%s' "$stats" | json_get totalSyncs >/dev/null 2>&1; then
     record_check runtime-slskdn-mesh-stats fail "${stats:-request failed}"
-    return 1
+    mesh_status=1
+  else
+    record_check runtime-slskdn-mesh-stats ok "$(printf '%s' "$stats" | tr '\n\t' '  ')"
   fi
-  record_check runtime-slskdn-mesh-stats ok "$(printf '%s' "$stats" | tr '\n\t' '  ')"
 
   if ! transport="$(auth_get "http://127.0.0.1:$slskdn_http_port/api/v0/mesh/transport")" \
     || ! printf '%s' "$transport" | json_get natType >/dev/null 2>&1; then
     record_check network-slskdn-mesh-transport fail "${transport:-request failed}"
-    return 1
+    mesh_status=1
+  else
+    record_check network-slskdn-mesh-transport ok "$(printf '%s' "$transport" | tr '\n\t' '  ')"
   fi
-  record_check network-slskdn-mesh-transport ok "$(printf '%s' "$transport" | tr '\n\t' '  ')"
 
   ticket="$(auth_post_json "http://127.0.0.1:$slskdn_http_port/api/v0/mesh-streams/tickets" "{\"contentId\":\"interop-content\",\"peerId\":\"$slskr_username\",\"filename\":\"Interop/Test.flac\",\"expectedSize\":0}")"
   if [[ "$ticket" == *"\"source\":\"mesh\""* && "$ticket" == *"streamUrl"* ]]; then
     record_check runtime-slskdn-mesh-stream-ticket ok "$ticket"
   else
     record_check runtime-slskdn-mesh-stream-ticket fail "$ticket"
-    return 1
+    mesh_status=1
   fi
 
   ticket="$(auth_post_json "http://127.0.0.1:$slskr_http_port/api/v0/mesh-streams/tickets" "{\"contentId\":\"interop-content\",\"filename\":\"Interop/Test.flac\",\"peerId\":\"$slskdn_username\"}")"
@@ -1241,8 +1483,110 @@ process.stdout.write(JSON.stringify({
     record_check runtime-slskr-mesh-stream-ticket ok "$ticket"
   else
     record_check runtime-slskr-mesh-stream-ticket fail "$ticket"
-    return 1
+    mesh_status=1
   fi
+
+  return "$mesh_status"
+}
+
+run_advanced_transport_interop_checks() {
+  local output before detail transport_status=0
+  local udp_needle='[Overlay] Using legacy envelope handling without peer validation - security reduced'
+  local quic_control_needle='[Overlay-QUIC] Received control probe'
+  local quic_data_needle='[Overlay-QUIC-DATA] Received '
+
+  before="$(target_log_count "$udp_needle")"
+  if output="$(
+    SLSKR_OVERLAY_ENDPOINT="127.0.0.1:$slskdn_overlay_port" \
+      "$slskr_binary" probe overlay-udp 2>&1
+  )" && wait_target_log_delta "$udp_needle" "$before"; then
+    detail="target_log=legacy-control-dispatch accepted endpoint=127.0.0.1:$slskdn_overlay_port probe=$(printf '%s' "$output" | tr '\n\t' ' ')"
+    record_check protocol-slskr-overlay-udp-slskdn ok "$detail"
+  else
+    record_check protocol-slskr-overlay-udp-slskdn fail \
+      "target_log=legacy-control-dispatch not observed output=$(printf '%s' "${output:-none}" | tr '\n\t' ' ')"
+    transport_status=1
+  fi
+
+  before="$(target_log_count "$quic_control_needle")"
+  if output="$(
+    SLSKR_OVERLAY_ENDPOINT="127.0.0.1:$slskdn_quic_backend_port" \
+      "$slskr_binary" probe overlay-quic-control 2>&1
+  )" && wait_target_log_delta "$quic_control_needle" "$before"; then
+    detail="target_log=quic-control-dispatch accepted endpoint=127.0.0.1:$slskdn_quic_backend_port probe=$(printf '%s' "$output" | tr '\n\t' ' ')"
+    record_check protocol-slskr-overlay-quic-control-slskdn ok "$detail"
+  else
+    record_check protocol-slskr-overlay-quic-control-slskdn fail \
+      "target_log=quic-control-receipt not observed output=$(printf '%s' "${output:-none}" | tr '\n\t' ' ')"
+    transport_status=1
+  fi
+
+  before="$(target_log_count "$quic_data_needle")"
+  if output="$(
+    SLSKR_OVERLAY_ENDPOINT="127.0.0.1:$slskdn_quic_data_port" \
+      "$slskr_binary" probe quic-data 2>&1
+  )" && wait_target_log_delta "$quic_data_needle" "$before"; then
+    detail="target_log=quic-data-server accepted endpoint=127.0.0.1:$slskdn_quic_data_port probe=$(printf '%s' "$output" | tr '\n\t' ' ')"
+    record_check protocol-slskr-quic-data-slskdn ok "$detail"
+  else
+    record_check protocol-slskr-quic-data-slskdn fail \
+      "target_log=quic-data-receipt not observed output=$(printf '%s' "${output:-none}" | tr '\n\t' ' ')"
+    transport_status=1
+  fi
+
+  local route_payload route_response route_ok
+  route_payload="$(node -e '
+const peer = process.argv[1];
+const sender = process.argv[2];
+process.stdout.write(JSON.stringify({
+  message: {
+    messageId: `slskr-reverse-overlay-negative-${Date.now()}`,
+    podId: "probe",
+    channelId: "general",
+    senderPeerId: sender,
+    body: "strict reverse overlay route probe",
+    timestampUnixMs: Date.now(),
+    signature: "",
+    sigVersion: 1
+  },
+  targetPeerIds: [peer]
+}));
+' "$slskr_username" "$slskdn_username")"
+  for check in \
+    protocol-slskdn-overlay-udp-slskr \
+    protocol-slskdn-overlay-quic-control-slskr \
+    protocol-slskdn-quic-data-slskr; do
+    route_response=""
+    if route_response="$(auth_post_json \
+      "http://127.0.0.1:$slskdn_http_port/api/v0/podcore/routing/route-to-peers" \
+      "$route_payload" 2>&1)"; then
+      route_ok="$(printf '%s' "$route_response" | node -e '
+let input = "";
+process.stdin.on("data", chunk => input += chunk);
+process.stdin.on("end", () => {
+  try {
+    const body = JSON.parse(input);
+    const failedPeer = Array.isArray(body.failedPeerIds) && body.failedPeerIds.includes(process.argv[1]);
+    process.exit(body.success === false && body.failedRoutingCount === 1 && failedPeer ? 0 : 1);
+  } catch {
+    process.exit(1);
+  }
+});
+' "$slskr_username" 2>/dev/null && printf true || printf false)"
+    else
+      route_ok=false
+    fi
+    if [[ "$route_ok" == true ]]; then
+      record_check "$check" ok \
+        "expected-target-negative endpoint-resolution-unavailable success=false failedRoutingCount=1"
+    else
+      record_check "$check" fail \
+        "target reverse route did not return expected endpoint-resolution negative response body=$(printf '%s' "${route_response:-none}" | tr '\n\t' ' ')"
+      transport_status=1
+    fi
+  done
+
+  return "$transport_status"
 }
 
 probe_peer_address slskr "$slskr_username" || true
@@ -1276,12 +1620,15 @@ run_user_watch_interop_checks() {
 
 run_distributed_peer_interop_checks() {
   local distributed_peer_log distributed_target_state distributed_target_summary distributed_target_ready
+  local distributed_reverse_state distributed_reverse_ready
   distributed_peer_log="$work_dir/slskr-distributed-peer.log"
   distributed_target_state=""
   distributed_target_summary=""
   distributed_target_ready=false
+  distributed_reverse_state=""
+  distributed_reverse_ready=false
   if [[ "$upstream_username" != "$slskr_username" && "$upstream_username" != "$slskdn_username" ]]; then
-    for _ in $(seq 1 "${SLSKR_CROSS_CLIENT_DISTRIBUTED_READY_ATTEMPTS:-30}"); do
+    for _ in $(seq 1 "${SLSKR_CROSS_CLIENT_DISTRIBUTED_READY_ATTEMPTS:-60}"); do
       distributed_target_state="$(auth_get "http://127.0.0.1:$slskdn_http_port/api/v0/application" 2>/dev/null || true)"
       if [[ "$(printf '%s' "$distributed_target_state" | json_get distributedNetwork.canAcceptChildren 2>/dev/null || true)" == "true" ]]; then
         distributed_target_ready=true
@@ -1324,10 +1671,47 @@ process.stdin.on("end", () => {
       "$slskr_binary" probe distributed-peer >"$distributed_peer_log" 2>&1; then
     record_check protocol-slskr-distributed-peer-slskdn ok "peer=$slskdn_username ping=received probe_contract=distributed-ping-response-v2"
   elif [[ "$distributed_target_ready" != true ]]; then
-    record_check protocol-slskr-distributed-peer-slskdn fail "detail=target distributed network not ready after ${SLSKR_CROSS_CLIENT_DISTRIBUTED_READY_ATTEMPTS:-30}s summary=${distributed_target_summary:-unparseable}"
+    record_check protocol-slskr-distributed-peer-slskdn fail "detail=target distributed network not ready after ${SLSKR_CROSS_CLIENT_DISTRIBUTED_READY_ATTEMPTS:-60}s summary=${distributed_target_summary:-unparseable}"
     return 1
   else
     record_check protocol-slskr-distributed-peer-slskdn fail "detail=$(tail -n 4 "$distributed_peer_log" 2>/dev/null | tr '\n\t' '  ')"
+    return 1
+  fi
+
+  # The daemon-level override above makes the replacement a live child of the
+  # frozen target.  A successful child registration sends BranchLevel and
+  # BranchRoot from target to replacement, which is the missing reverse
+  # direction.  Require the target to report the replacement child and the
+  # replacement to report a non-zero branch before recording the row.
+  for _ in $(seq 1 "${SLSKR_CROSS_CLIENT_DISTRIBUTED_REVERSE_ATTEMPTS:-30}"); do
+    distributed_target_state="$(auth_get "http://127.0.0.1:$slskdn_http_port/api/v0/application" 2>/dev/null || true)"
+    distributed_reverse_state="$(auth_get "http://127.0.0.1:$slskr_http_port/api/v0/application" 2>/dev/null || true)"
+    if printf '%s' "$distributed_target_state" | node -e '
+const username = process.argv[1];
+let input = "";
+process.stdin.on("data", chunk => input += chunk);
+process.stdin.on("end", () => {
+  try {
+    const state = JSON.parse(input);
+    const children = state.distributedNetwork?.children;
+    process.exit(Array.isArray(children) && children.some(child => String(child).toLowerCase() === username.toLowerCase()) ? 0 : 1);
+  } catch {
+    process.exit(1);
+  }
+});
+' "$slskr_username" 2>/dev/null \
+      && [[ "$(printf '%s' "$distributed_reverse_state" | json_get distributedNetwork.branchLevel 2>/dev/null || true)" =~ ^[1-9][0-9]*$ ]]; then
+      distributed_reverse_ready=true
+      break
+    fi
+    sleep 1
+  done
+  if [[ "$distributed_reverse_ready" == true ]]; then
+    record_check protocol-slskdn-distributed-peer-slskr ok \
+      "target-child=$slskr_username response=branch-info branch-level=$(printf '%s' "$distributed_reverse_state" | json_get distributedNetwork.branchLevel)"
+  else
+    record_check protocol-slskdn-distributed-peer-slskr fail \
+      "target-child-or-branch-info-not-observed target=$(printf '%s' "$distributed_target_state" | tr '\n\t' ' ' | cut -c1-700) replacement=$(printf '%s' "$distributed_reverse_state" | tr '\n\t' ' ' | cut -c1-700)"
     return 1
   fi
 }
@@ -1410,16 +1794,24 @@ record_final_diagnostics() {
 status=0
 run_runtime_protocol_checks || status=1
 run_virtual_soulfind_v2_checks || status=1
+# slskdN's test endpoint overrides intentionally use the same 60-second
+# bounded cache as its normal user endpoint cache. Exercise every target-
+# initiated route that depends on the replacement endpoint before running the
+# longer upstream obfuscated probe; otherwise the target silently falls back
+# to the public server endpoint and reports a false peer-availability failure.
 run_browse_interop_checks || status=1
-run_search_interop_checks || status=1
-run_user_watch_interop_checks || status=1
-run_distributed_peer_interop_checks || status=1
-run_slskr_backfill_probe || status=1
-run_slskr_to_slskdn_download || status=1
 run_slskdn_to_slskr_download || status=1
 run_message_interop_checks || status=1
+run_slskr_to_slskdn_download || status=1
+run_slskr_backfill_probe || status=1
+run_obfuscated_peer_interop_checks || status=1
+run_search_interop_checks || status=1
+run_user_watch_interop_checks || status=1
+run_reverse_browse_interop_check || status=1
+run_distributed_peer_interop_checks || status=1
 run_room_interop_checks || status=1
 run_mesh_runtime_checks || status=1
+run_advanced_transport_interop_checks || status=1
 record_final_diagnostics
 
 failed_checks="$(awk -F '\t' 'NR > 1 && $3 != "ok" { print }' "$result_file")"

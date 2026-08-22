@@ -403,11 +403,16 @@ async fn controller_api_differential_slskd_file_transfer_room_residuals() {
         let repeated = super::route_http_request("DELETE", &request_path, None, "", &state)
             .await
             .expect("repeat delete storage path");
+        let expected_repeated_status = if resource == "files" {
+            "204 No Content"
+        } else {
+            "404 Not Found"
+        };
         record!(
             "DELETE",
             route,
             "concurrency-and-idempotency",
-            repeated.status == "404 Not Found"
+            repeated.status == expected_repeated_status
         );
     }
 
@@ -438,7 +443,7 @@ async fn controller_api_differential_slskd_file_transfer_room_residuals() {
             "DELETE",
             route,
             "missing-empty-or-conflict-state",
-            response.status == "404 Not Found"
+            response.status == "204 No Content"
         );
     }
     let traversal = super::route_http_request(
@@ -509,7 +514,12 @@ async fn controller_api_differential_slskd_file_transfer_room_residuals() {
             "DELETE",
             route,
             "restart-persistence-or-reset",
-            response.status == "404 Not Found"
+            response.status
+                == if resource == "files" {
+                    "204 No Content"
+                } else {
+                    "404 Not Found"
+                }
         );
     }
 
@@ -949,7 +959,7 @@ async fn file_lifecycle_differential_slskd_file_service_existing_missing_overwri
     .await
     .expect("delete missing managed file");
     let pass = deleted.status == "204 No Content"
-        && missing.status == "404 Not Found"
+        && missing.status == "204 No Content"
         && !managed_file.exists();
     assert!(
         pass,
@@ -967,4 +977,358 @@ async fn file_lifecycle_differential_slskd_file_service_existing_missing_overwri
             "pass": pass,
         })],
     );
+}
+
+#[test]
+fn security_authorization_matrix_matches_declared_policy_for_every_frozen_route() {
+    #[derive(serde::Deserialize)]
+    struct AuthPolicyRow {
+        method: String,
+        route: String,
+        access: String,
+        scheme: String,
+        scopes: Vec<String>,
+    }
+
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    enum Outcome {
+        Allowed,
+        Unauthorized,
+        Forbidden,
+    }
+
+    #[derive(Clone, Copy)]
+    struct Profile {
+        name: &'static str,
+        header: Option<&'static str>,
+        credential: Option<(u8, &'static str, bool)>,
+    }
+
+    const PROFILES: [Profile; 10] = [
+        Profile {
+            name: "anonymous",
+            header: None,
+            credential: None,
+        },
+        Profile {
+            name: "basic-readonly",
+            header: Some("ApiKey read-token"),
+            credential: Some((0, "api_key", false)),
+        },
+        Profile {
+            name: "basic-readwrite",
+            header: Some("ApiKey write-token"),
+            credential: Some((1, "api_key", false)),
+        },
+        Profile {
+            name: "basic-administrator",
+            header: Some("ApiKey admin-token"),
+            credential: Some((2, "api_key", false)),
+        },
+        Profile {
+            name: "bearer-readonly",
+            header: Some("Bearer read-token"),
+            credential: Some((0, "jwt", false)),
+        },
+        Profile {
+            name: "bearer-readwrite",
+            header: Some("Bearer write-token"),
+            credential: Some((1, "jwt", false)),
+        },
+        Profile {
+            name: "bearer-administrator",
+            header: Some("Bearer admin-token"),
+            credential: Some((2, "jwt", false)),
+        },
+        Profile {
+            name: "invalid-or-expired-credential",
+            header: Some("Bearer not-a-real-differential-token"),
+            credential: None,
+        },
+        Profile {
+            name: "missing-required-scope",
+            header: Some("ApiKey nowplaying-token"),
+            credential: Some((1, "api_key", true)),
+        },
+        Profile {
+            name: "wrong-authentication-scheme",
+            header: None,
+            credential: None,
+        },
+    ];
+
+    fn required_access_rank(access: &str) -> Option<u8> {
+        match access {
+            "anonymous" | "delegated" => None,
+            "administrator" => Some(2),
+            "read_write" => Some(1),
+            _ => Some(0),
+        }
+    }
+
+    fn expected_outcome(rule: &AuthPolicyRow, profile: Profile) -> Outcome {
+        let Some(required) = required_access_rank(&rule.access) else {
+            return Outcome::Allowed;
+        };
+        let Some((credential_rank, credential_scheme, nowplaying_only)) = profile.credential else {
+            return Outcome::Unauthorized;
+        };
+        if credential_rank < required {
+            return Outcome::Forbidden;
+        }
+        if rule.scheme != "any" && credential_scheme != rule.scheme {
+            return Outcome::Forbidden;
+        }
+        let requires_nowplaying = rule.scopes.iter().any(|scope| scope == "nowplaying");
+        if nowplaying_only && !requires_nowplaying {
+            return Outcome::Forbidden;
+        }
+        Outcome::Allowed
+    }
+
+    fn placeholder_path(route: &str) -> String {
+        let mut segments: Vec<String> = route
+            .trim_matches('/')
+            .split('/')
+            .map(|segment| {
+                if segment.starts_with('{') && segment.ends_with('}') {
+                    "differential-fixture-value".to_owned()
+                } else {
+                    segment.to_owned()
+                }
+            })
+            .collect();
+        if route.contains("{*") {
+            segments.push("differential-fixture-tail".to_owned());
+        }
+        format!("/{}", segments.join("/"))
+    }
+
+    let headers = super::RequestSecurityHeaders::default();
+    let mut ledger = Vec::new();
+    let mut mismatches = Vec::new();
+
+    for (target, source) in [
+        (
+            "slskd",
+            include_str!("../data/slskd-controller-auth-policy.json"),
+        ),
+        (
+            "slskdn",
+            include_str!("../data/slskdn-controller-auth-policy.json"),
+        ),
+    ] {
+        let rules: Vec<AuthPolicyRow> =
+            serde_json::from_str(source).expect("checked controller auth policy registry");
+        let state_dir = std::env::temp_dir().join(format!(
+            "slskr-focused-security-auth-{target}-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let config = super::AppConfig::from_layers(
+            None,
+            FileConfig::default(),
+            &MapEnv::default()
+                .with("SLSKR_STATE_DIR", state_dir.to_str().expect("state path"))
+                .with("SLSKR_AUTH_DISABLED", "false")
+                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                .with("SLSKR_API_TOKEN", "admin-token")
+                .with("SLSKR_API_READ_WRITE_TOKEN", "write-token")
+                .with("SLSKR_API_READ_ONLY_TOKEN", "read-token")
+                .with("SLSKR_API_NOWPLAYING_TOKEN", "nowplaying-token"),
+        )
+        .expect("hermetic auth-policy differential config");
+
+        for rule in &rules {
+            let path = placeholder_path(&rule.route);
+            for profile in PROFILES {
+                let (header, expected) = if profile.name == "wrong-authentication-scheme" {
+                    if rule.scheme == "jwt" {
+                        (Some("ApiKey admin-token"), Outcome::Forbidden)
+                    } else if rule.scheme == "api_key" {
+                        (Some("Bearer admin-token"), Outcome::Forbidden)
+                    } else {
+                        let any_scheme_profile = Profile {
+                            header: Some("Bearer admin-token"),
+                            credential: Some((2, "jwt", false)),
+                            ..profile
+                        };
+                        (
+                            any_scheme_profile.header,
+                            expected_outcome(rule, any_scheme_profile),
+                        )
+                    }
+                } else {
+                    (profile.header, expected_outcome(rule, profile))
+                };
+                let actual = match super::routing::check_route_auth(
+                    &config,
+                    &rule.method,
+                    &path,
+                    header,
+                    &headers,
+                ) {
+                    Ok(()) => Outcome::Allowed,
+                    Err("unauthorized") => Outcome::Unauthorized,
+                    Err("forbidden") => Outcome::Forbidden,
+                    Err(other) => panic!(
+                        "unexpected auth-gate outcome {other:?} for {target} {} {}",
+                        rule.method, rule.route
+                    ),
+                };
+                let pass = actual == expected;
+                if !pass {
+                    mismatches.push(format!(
+                        "{target} {} {} [{}]: expected {expected:?}, got {actual:?}",
+                        rule.method, rule.route, profile.name
+                    ));
+                }
+                ledger.push(serde_json::json!({
+                    "target": target,
+                    "method": rule.method,
+                    "route": rule.route,
+                    "case": profile.name,
+                    "pass": pass,
+                    "expected": format!("{expected:?}"),
+                    "actual": format!("{actual:?}"),
+                }));
+            }
+        }
+        let _ = fs::remove_dir_all(&state_dir);
+    }
+
+    let evidence_dir = std::env::temp_dir().join("slskr-parity-evidence");
+    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+    fs::write(
+        evidence_dir.join("security-authorization.json"),
+        serde_json::to_string_pretty(&ledger).expect("serialize security-authorization ledger"),
+    )
+    .expect("write security-authorization ledger");
+
+    assert!(
+        mismatches.is_empty(),
+        "{} security-authorization mismatches:\n{}",
+        mismatches.len(),
+        mismatches.join("\n")
+    );
+}
+
+#[tokio::test]
+async fn application_projection_exposes_selected_compatibility_target() {
+    for target in ["slskd", "slskdn"] {
+        let (state, _receiver) = test_state_with_env(
+            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+        );
+        let response = super::route_http_request("GET", "/api/v0/application", None, "", &state)
+            .await
+            .expect("application projection");
+        let body = serde_json::from_str::<serde_json::Value>(&response.body)
+            .expect("application projection JSON");
+
+        assert_eq!(response.status, "200 OK");
+        assert_eq!(body["compatibilityTarget"], target);
+    }
+}
+
+#[tokio::test]
+async fn watched_obfuscation_changes_mark_reconnect_once_while_connected() {
+    let (state, _receiver) = test_state_with_env(
+        MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+    );
+    state.session.write().await.state = "connected";
+    let yaml = "soulseek:\n  obfuscation:\n    enabled: false\n    mode: prefer\n    listen_port: 50302\n    advertise_regular_port: false\n    prefer_outbound: false\n";
+    fs::write(state.config.state_dir.join("slskd.yml"), yaml).unwrap();
+
+    super::apply_watched_controller_configuration(
+        &state,
+        Some(yaml),
+        &state.controller_cli_environment,
+    )
+    .await;
+
+    assert!(state.runtime.read().await.application_reconnect_pending);
+    state.runtime.write().await.set_reconnect_pending(false);
+
+    super::apply_watched_controller_configuration(
+        &state,
+        Some(yaml),
+        &state.controller_cli_environment,
+    )
+    .await;
+
+    assert!(!state.runtime.read().await.application_reconnect_pending);
+}
+
+#[tokio::test]
+async fn slskd_debug_view_projects_frozen_default_authentication_values() {
+    let (state, _receiver) = test_state_with_env(
+        MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd"),
+    );
+    let overlay = state.options_overlay.read().await;
+    let debug = super::slskd_options_debug_view(&state, &overlay);
+
+    assert!(state.config.controller_metrics_password.is_empty());
+    assert!(state
+        .controller_web_auth_password
+        .read()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .is_empty());
+    assert_eq!(
+        debug
+            .matches("password=slskd (DefaultValueConfigurationProvider)")
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn profile_static_roots_serve_the_selected_spa_on_dashboard() {
+    let root = std::env::temp_dir().join(format!(
+        "slskr-profile-static-test-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0)
+    ));
+    fs::create_dir_all(root.join("slskd")).expect("create slskd profile root");
+    fs::create_dir_all(root.join("slskdn")).expect("create slskdn profile root");
+    fs::write(root.join("slskd/index.html"), "slskd-ui").expect("write slskd index");
+    fs::write(root.join("slskdn/index.html"), "slskdn-ui").expect("write slskdn index");
+
+    let (slskd_root, slskd_index, _) = super::web_static_file_for_request(
+        "/dashboard",
+        Some(&root),
+        Some(super::ControllerCompatibilityTarget::Slskd),
+    )
+    .expect("slskd dashboard SPA root");
+    let (slskdn_root, slskdn_index, _) = super::web_static_file_for_request(
+        "/dashboard",
+        Some(&root),
+        Some(super::ControllerCompatibilityTarget::Slskdn),
+    )
+    .expect("slskdn dashboard SPA root");
+
+    assert!(slskd_root.ends_with("slskd"));
+    assert!(slskd_index.ends_with("slskd/index.html"));
+    assert!(slskdn_root.ends_with("slskdn"));
+    assert!(slskdn_index.ends_with("slskdn/index.html"));
+    assert!(super::web_static_file_for_request(
+        "/health",
+        Some(&root),
+        Some(super::ControllerCompatibilityTarget::Slskd),
+    )
+    .is_none());
+    assert!(super::web_static_file_for_request(
+        "/health/mesh",
+        Some(&root),
+        Some(super::ControllerCompatibilityTarget::Slskdn),
+    )
+    .is_none());
+    assert!(super::web_static_file_for_request(
+        "/health?probe=1",
+        Some(&root),
+        Some(super::ControllerCompatibilityTarget::Slskd),
+    )
+    .is_none());
+    let _ = fs::remove_dir_all(root);
 }

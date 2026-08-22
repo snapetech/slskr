@@ -989,6 +989,21 @@ export const Modal = React.forwardRef((props, ref) => {
     ...rest
   } = props;
 
+  React.useEffect(() => {
+    if (!open || !onClose) {
+      return undefined;
+    }
+
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape' && !event.defaultPrevented) {
+        onClose(event);
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [onClose, open]);
+
   const triggerElement = trigger
     ? cloneTrigger(trigger, {
       onClick: (event) => {
@@ -1002,7 +1017,10 @@ export const Modal = React.forwardRef((props, ref) => {
   }
 
   const modal = (
-    <div className="ui active visible dimmer modals page transition">
+    <div
+      className="ui active visible dimmer modals page transition"
+      style={{ zIndex: 2000 }}
+    >
       <div
         {...cleanProps(rest)}
         className={cx('ui active visible modal', commonClasses(props), className)}
@@ -1013,6 +1031,12 @@ export const Modal = React.forwardRef((props, ref) => {
             aria-label="Close"
             className="close icon"
             onClick={(event) => onClose && onClose(event, props)}
+            style={{
+              position: 'absolute',
+              right: '0.5rem',
+              top: '0.5rem',
+              zIndex: 20,
+            }}
             type="button"
           />
         ) : null}
@@ -1021,10 +1045,13 @@ export const Modal = React.forwardRef((props, ref) => {
     </div>
   );
 
+  const modalPortal =
+    typeof document !== 'undefined' ? createPortal(modal, document.body) : modal;
+
   return (
     <>
       {triggerElement}
-      {modal}
+      {modalPortal}
     </>
   );
 });

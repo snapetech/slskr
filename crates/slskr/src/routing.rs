@@ -189,6 +189,18 @@ pub fn service_unavailable_response(message: &str) -> HttpResponse {
     }
 }
 
+/// Return the ASP.NET string-result shape used by frozen controllers that
+/// pass a plain string as the response value.  System.Text.Json serializes
+/// that value as a JSON string when the request accepts JSON; wrapping it in
+/// an error object changes the public contract.
+pub fn service_unavailable_string_response(message: &str) -> HttpResponse {
+    HttpResponse {
+        status: "503 Service Unavailable",
+        content_type: "application/json",
+        body: serde_json::to_string(message).unwrap_or_else(|_| "\"\"".to_owned()),
+    }
+}
+
 pub fn internal_server_error_response(message: &str) -> HttpResponse {
     HttpResponse {
         status: "500 Internal Server Error",

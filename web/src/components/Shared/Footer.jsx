@@ -148,6 +148,10 @@ class Footer extends Component {
   };
 
   fetchBuildInfo = async () => {
+    if (this.props.compatibilityTarget === 'slskd') {
+      return;
+    }
+
     try {
       const buildInfo = await application.getBuild({ checkForUpdates: true });
       this.setState({ buildInfo });
@@ -157,6 +161,25 @@ class Footer extends Component {
   };
 
   render() {
+    if (this.props.compatibilityTarget === 'slskd') {
+      return (
+        <footer
+          className="slskr-footer"
+          ref={this.footerRef}
+        >
+          <div className="slskr-footer-content">
+            <a
+              href="https://github.com/slskd/slskd"
+              rel="noopener noreferrer"
+              target="_blank"
+            >
+              slskd 0.0.0 AGPLv3
+            </a>
+          </div>
+        </footer>
+      );
+    }
+
     const year = new Date().getFullYear();
     const { buildInfo, slskrStats, speeds, stats } = this.state;
     const isLoggedIn = session.isLoggedIn();

@@ -1857,24 +1857,28 @@ const PlayerLauncher = ({ compact = false, onPlayItem }) => {
 
 const PlayerVisualTile = ({
   audioElement,
+  compatibilityTarget,
   current,
   mode,
   onModeChange,
   onTileModeChange,
   tileMode,
 }) => {
+  const compatibilitySlskdn = compatibilityTarget === 'slskdn';
   const tileModes = ['art', 'rustymilk-webgl2', 'rustymilk-webgpu', 'spectrum', 'scope'];
   const visualizerTileModes = ['rustymilk-webgl2', 'rustymilk-webgpu'];
   const tileModeLabels = {
     art: 'album art',
-    'rustymilk-webgl2': 'RustyMilk WebGL2',
-    'rustymilk-webgpu': 'RustyMilk WebGPU',
+    'rustymilk-webgl2': compatibilitySlskdn ? 'MilkDrop3 WebGL2' : 'RustyMilk WebGL2',
+    'rustymilk-webgpu': compatibilitySlskdn ? 'MilkDrop3 WebGPU' : 'RustyMilk WebGPU',
+    butterchurn: 'Butterchurn',
     scope: 'signal scope',
     spectrum: 'spectrum bars',
   };
   const tileModeIcons = {
     'rustymilk-webgl2': 'microchip',
     'rustymilk-webgpu': 'bolt',
+    butterchurn: 'magic',
     scope: 'signal',
     spectrum: 'chart bar',
   };
@@ -1893,16 +1897,17 @@ const PlayerVisualTile = ({
   const normalizedTileMode = tileModes.includes(tileMode) ? tileMode : 'art';
   const showingVisualizer = visualizerTileModes.includes(normalizedTileMode);
   const showingAnalyzer = ['spectrum', 'scope'].includes(normalizedTileMode);
-  const nextTileMode = tileModes[
-    (tileModes.indexOf(normalizedTileMode) + 1) % tileModes.length
-  ];
+  const nextTileMode = compatibilitySlskdn && normalizedTileMode === 'art'
+    ? 'butterchurn'
+    : tileModes[(tileModes.indexOf(normalizedTileMode) + 1) % tileModes.length];
   const visualizerDisplayMode = mode === 'off' ? 'inline' : mode;
   const setTileMode = (nextMode) => {
-    onTileModeChange(nextMode);
-    if (visualizerTileModes.includes(nextMode) && mode === 'off') {
+    const effectiveMode = nextMode === 'butterchurn' ? 'rustymilk-webgl2' : nextMode;
+    onTileModeChange(effectiveMode);
+    if (visualizerTileModes.includes(effectiveMode) && mode === 'off') {
       onModeChange('inline');
     }
-    if (visualizerTileModes.includes(nextMode)) {
+    if (visualizerTileModes.includes(effectiveMode)) {
       setVisualizerRevision((revision) => revision + 1);
     }
   };
@@ -1992,7 +1997,10 @@ const PlayerVisualTile = ({
         }
       />
       <div className="player-visual-tile-controls" onClick={(event) => event.stopPropagation()}>
-        {['spectrum', 'scope', 'rustymilk-webgl2', 'rustymilk-webgpu'].map((option) => (
+        {(compatibilitySlskdn
+          ? ['spectrum', 'scope', 'butterchurn', 'rustymilk-webgl2', 'rustymilk-webgpu']
+          : ['spectrum', 'scope', 'rustymilk-webgl2', 'rustymilk-webgpu']
+        ).map((option) => (
           <Popup
             content={`Show ${tileModeLabels[option]}.`}
             key={option}
@@ -2084,7 +2092,7 @@ const PlayerAnalyzerTile = ({ audioElement, mode, onModeChange }) => {
   );
 };
 
-const PlayerBar = () => {
+const PlayerBar = ({ compatibilityTarget } = {}) => {
   const navigate = useNavigate();
   const audioRef = useRef(null);
   const fadeAudioRef = useRef(null);
@@ -2602,6 +2610,7 @@ const PlayerBar = () => {
         <div className="player-display">
           <PlayerVisualTile
             audioElement={playerAudioElement}
+            compatibilityTarget={compatibilityTarget}
             current={current}
             mode={visualizerMode}
             onModeChange={setVisualizerMode}
@@ -2741,13 +2750,13 @@ const PlayerBar = () => {
               active={visualizerMode !== 'off'}
               content={
                 visualizerMode === 'off'
-                  ? 'Show the RustyMilk visualizer.'
-                  : 'Hide the RustyMilk visualizer.'
+                  ? `Show the ${compatibilityTarget === 'slskdn' ? 'MilkDrop3' : 'RustyMilk'} visualizer.`
+                  : `Hide the ${compatibilityTarget === 'slskdn' ? 'MilkDrop3' : 'RustyMilk'} visualizer.`
               }
               aria-label={
                 visualizerMode === 'off'
-                  ? 'Show RustyMilk visualizer'
-                  : 'Hide RustyMilk visualizer'
+                  ? `Show ${compatibilityTarget === 'slskdn' ? 'MilkDrop3' : 'RustyMilk'} visualizer`
+                  : `Hide ${compatibilityTarget === 'slskdn' ? 'MilkDrop3' : 'RustyMilk'} visualizer`
               }
               data-testid="player-toggle-visualizer"
               icon="eye"

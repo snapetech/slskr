@@ -1,4 +1,5 @@
 import { fetchAlbumCompletion } from '../../lib/musicBrainz';
+import { toDisplayError } from '../../lib/errors';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Button,
@@ -38,11 +39,7 @@ const AlbumCompletionPanel = ({ disabled }) => {
       setAlbums(response.data?.albums ?? []);
     } catch (loadError) {
       console.error(loadError);
-      setError(
-        loadError?.response?.data ??
-          loadError?.message ??
-          'Unable to load album completion data',
-      );
+      setError(toDisplayError(loadError, 'Unable to load album completion data'));
     } finally {
       setLoading(false);
     }
@@ -87,7 +84,7 @@ const AlbumCompletionPanel = ({ disabled }) => {
       </Header>
       {error && (
         <Message
-          content={error}
+          content={String(error)}
           negative
         />
       )}

@@ -5,8 +5,9 @@ use ed25519_dalek::{Signer, SigningKey};
 use serde::{Deserialize, Serialize};
 use sha1::{Digest as Sha1Digest, Sha1};
 use sha2::Sha256;
-use slskr_client::overlay::{
-    connect_tls_overlay, MeshHello, MeshServiceCall, FEATURE_MESH_SERVICE,
+use slskr_client::{
+    capabilities::peer_id_for_public_key,
+    overlay::{connect_tls_overlay, MeshHello, MeshServiceCall, FEATURE_MESH_SERVICE},
 };
 
 use crate::config::TrustedMeshPeer;
@@ -111,12 +112,18 @@ pub async fn publish(
 
 pub async fn probe_store(
     peer: &TrustedMeshPeer,
-    local_username: &str,
+    _local_username: &str,
     signing_key: &SigningKey,
 ) -> Result<(), String> {
     let key = derive_key("slskr:interop:dht-store-v1");
+    // DHT STORE signatures are self-certifying.  Older slskdN targets bind
+    // the authenticated overlay identity to the Ed25519-derived peer ID,
+    // rather than to the Soulseek account name used by other mesh calls.
+    // Announce the signing identity for this DHT-only session so both target
+    // generations accept the same signed request.
+    let overlay_identity = dht_overlay_identity(signing_key);
     let mut hello = MeshHello::new(
-        local_username,
+        overlay_identity,
         vec![FEATURE_MESH_SERVICE.to_owned()],
         None,
         None,
@@ -170,13 +177,14 @@ pub async fn probe_store(
 
 async fn publish_to_peer<'a>(
     peer: &TrustedMeshPeer,
-    local_username: &str,
+    _local_username: &str,
     signing_key: &SigningKey,
     publications: impl Iterator<Item = &'a Publication>,
 ) -> PublishReport {
     let mut report = PublishReport::default();
+    let overlay_identity = dht_overlay_identity(signing_key);
     let mut hello = match MeshHello::new(
-        local_username,
+        overlay_identity,
         vec![FEATURE_MESH_SERVICE.to_owned()],
         None,
         None,
@@ -320,27 +328,11 @@ pub fn derive_key(namespace: &str) -> [u8; 20] {
 }
 
 pub fn peer_id(signing_key: &SigningKey) -> String {
-    let digest = Sha256::digest(signing_key.verifying_key().to_bytes());
-    base32_lower(&digest[..20])
+    peer_id_for_public_key(&signing_key.verifying_key().to_bytes())
 }
 
-fn base32_lower(bytes: &[u8]) -> String {
-    const ALPHABET: &[u8; 32] = b"abcdefghijklmnopqrstuvwxyz234567";
-    let mut output = String::with_capacity(bytes.len().div_ceil(5) * 8);
-    let mut bits = 0_u16;
-    let mut bit_count = 0_u8;
-    for byte in bytes {
-        bits = (bits << 8) | u16::from(*byte);
-        bit_count += 8;
-        while bit_count >= 5 {
-            bit_count -= 5;
-            output.push(ALPHABET[((bits >> bit_count) & 31) as usize] as char);
-        }
-    }
-    if bit_count > 0 {
-        output.push(ALPHABET[((bits << (5 - bit_count)) & 31) as usize] as char);
-    }
-    output
+fn dht_overlay_identity(signing_key: &SigningKey) -> String {
+    peer_id(signing_key)
 }
 
 fn signed_store_request(
@@ -487,6 +479,22 @@ fn unix_millis() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dht_overlay_identity_is_self_certifying_peer_id() {
+        let key = SigningKey::from_bytes(&[7; 32]);
+        let hello = MeshHello::new(
+            dht_overlay_identity(&key),
+            vec![FEATURE_MESH_SERVICE.to_owned()],
+            None,
+            None,
+            "dht-test-nonce",
+        )
+        .unwrap();
+
+        assert_eq!(hello.username, peer_id(&key));
+        assert_eq!(hello.username.len(), 32);
+    }
 
     #[test]
     fn namespaced_key_matches_slskdn_vector() {

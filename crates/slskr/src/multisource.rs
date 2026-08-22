@@ -819,7 +819,7 @@ fn open_private_file(path: &Path) -> std::io::Result<fs::File> {
 }
 
 fn blocked_source_ip(ip: IpAddr) -> bool {
-    if cfg!(test) && ip.is_loopback() {
+    if (cfg!(test) || cfg!(feature = "bounded-differential")) && ip.is_loopback() {
         return false;
     }
     match ip {

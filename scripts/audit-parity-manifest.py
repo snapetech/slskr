@@ -18,6 +18,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote
@@ -55,6 +56,22 @@ UNIVERSAL_BIDIRECTIONAL_TRANSPORTS = (
     "virtualsoulfind-bidirectional",
     "file-stream-transfer-bidirectional",
 )
+UNIVERSAL_TRANSPORT_TARGETS = frozenset({"slskd", "slskdn"})
+UNIVERSAL_BIDIRECTIONAL_TRANSPORT_TARGETS: dict[str, frozenset[str]] = {
+    # Soulseek P/D/F behavior is shared by both frozen profiles.
+    "soulseek-peer-bidirectional": frozenset({"slskd", "slskdn"}),
+    "distributed-dht-bidirectional": frozenset({"slskd", "slskdn"}),
+    "file-stream-transfer-bidirectional": frozenset({"slskd", "slskdn"}),
+    # The remaining transports are slskdN-only in the frozen source. The
+    # slskd profile must hide them rather than claim support it does not have.
+    "obfuscated-peer-bidirectional": frozenset({"slskdn"}),
+    "overlay-udp-bidirectional": frozenset({"slskdn"}),
+    "overlay-quic-control-bidirectional": frozenset({"slskdn"}),
+    "quic-data-bidirectional": frozenset({"slskdn"}),
+    "relay-gateway-bidirectional": frozenset({"slskdn"}),
+    "mesh-sync-bidirectional": frozenset({"slskdn"}),
+    "virtualsoulfind-bidirectional": frozenset({"slskdn"}),
+}
 UNIVERSAL_LIFECYCLE_CHECK = "failure-restart-lifecycle-matrix"
 UNIVERSAL_LIFECYCLE_SCENARIOS = frozenset(
     {
@@ -71,12 +88,39 @@ UNIVERSAL_LIFECYCLE_SCENARIOS = frozenset(
         "uninstall",
     }
 )
+UNIVERSAL_TRANSPORT_LIFECYCLE_REQUIREMENTS: dict[str, dict[str, dict[str, tuple[str, ...]]]] = {
+    "mesh-sync-bidirectional": {
+        "slskdn": {
+            "reconnect-retry-and-failure": (
+                "protocol-ksdn-mesh-sync-reconnect-retry",
+            )
+        }
+    }
+}
+UNIVERSAL_TRANSPORT_LIFECYCLE_DETAIL_TOKENS = {
+    "protocol-ksdn-mesh-sync-reconnect-retry": (
+        'expected-target-negative status=400 body={"error":"Failed to sync with peer"}'
+    )
+}
 UNIVERSAL_UI_SCENARIOS = frozenset(
     {
         "success",
         "rendered-loading-and-empty",
         "rendered-validation-and-server-error",
         "authorization-reconnect-and-restart",
+    }
+)
+UNIVERSAL_UI_WORKFLOWS = frozenset(
+    {
+        "search",
+        "browse",
+        "transfers",
+        "messages",
+        "rooms",
+        "shares",
+        "settings",
+        "player",
+        "mesh",
     }
 )
 
@@ -122,7 +166,13 @@ def run_logged(command: list[str], cwd: Path, env: dict[str, str] | None = None)
 
 
 def guarded_cargo_command(command: list[str], cwd: Path) -> list[str]:
-    """Route every Cargo proof command through the repository resource guard."""
+    """Route every Cargo proof command through the Rust resource guard.
+
+    The process guard is for Node/browser and long-lived application trees. A
+    Cargo command has its separate 12 GiB Rust profile; nesting it in the
+    process guard's 4 GiB cgroup makes rustfmt/rustc fail before the host is
+    under pressure.
+    """
     if not command or command[0] != "cargo":
         return command
     return [str(cwd / "scripts" / "with-build-guard.sh"), *command]
@@ -133,6 +183,49 @@ def guarded_process_command(command: list[str], cwd: Path) -> list[str]:
     if not command or Path(command[0]).name not in {"node", "nodejs", "npm", "npx"}:
         return command
     return [str(cwd / "scripts" / "with-process-memory-guard.sh"), *command]
+
+
+def bounded_slskr_test_command(feature: str, selector: str | list[str]) -> list[str]:
+    """Run one linked differential workstream without a Cargo test harness.
+
+    The historical ``slskr`` test module is linked into a tiny feature-specific
+    runner binary. ``selector`` remains part of this helper's call contract so
+    the ledger functions continue to name the proof family they own; the Rust
+    runner dispatches that family from its Cargo feature and does not pass the
+    selector through to an all-tests harness.
+    """
+    del selector
+    command = [
+        "cargo",
+        "run",
+        "-p",
+        "slskr",
+        "--bin",
+        "slskr-bounded-differential",
+        "--no-default-features",
+        "--features",
+        feature,
+    ]
+    return command
+
+
+def fresh_json_evidence_paths(evidence_dir: Path, started_ns: int) -> list[Path]:
+    """Return only ledgers written or replaced by the current proof run.
+
+    Retained evidence is explicitly supported only by ``--reuse-evidence``.
+    A fresh run must not promote yesterday's JSON merely because the focused
+    Cargo profile did not execute the optional monolithic test module.
+    """
+    if not evidence_dir.is_dir():
+        return []
+    paths = []
+    for path in sorted(evidence_dir.glob("*.json")):
+        try:
+            if path.stat().st_mtime_ns >= started_ns:
+                paths.append(path)
+        except FileNotFoundError:
+            continue
+    return paths
 
 
 def feature_family(subject: str) -> str:
@@ -170,7 +263,7 @@ def config_entries(report: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 SECURITY_AUTHORIZATION_TEST = (
-    "tests::security_authorization_matrix_matches_declared_policy_for_every_frozen_route"
+    "focused_controller_tests::security_authorization_matrix_matches_declared_policy_for_every_frozen_route"
 )
 
 
@@ -187,21 +280,21 @@ def security_authorization_ledger(
     fail manifest generation, not silently look like unlinked evidence.
     """
     ledger_path = Path(tempfile.gettempdir()) / "slskr-parity-evidence" / "security-authorization.json"
+    evidence_started_ns: int | None = None
     if not reuse_evidence:
+        evidence_started_ns = time.time_ns()
         run_logged(
-            [
-                "cargo",
-                "test",
-                "-p",
-                "slskr",
-                "--bin",
-                "slskr",
-                "--",
-                "--exact",
-                SECURITY_AUTHORIZATION_TEST,
-            ],
+            bounded_slskr_test_command(
+                "bounded-security-authorization-tests",
+                ["--exact", SECURITY_AUTHORIZATION_TEST],
+            ),
             cwd=root,
         )
+        if not ledger_path.is_file() or ledger_path.stat().st_mtime_ns < evidence_started_ns:
+            raise RuntimeError(
+                "fresh security evidence is missing or predates the current differential run: "
+                f"{ledger_path}"
+            )
     if not ledger_path.is_file():
         raise RuntimeError(f"reusable security evidence is missing: {ledger_path}")
     rows = json.loads(ledger_path.read_text(encoding="utf-8"))
@@ -212,6 +305,12 @@ def security_authorization_ledger(
 
 
 CONTROLLER_API_DIFFERENTIAL_TEST_PREFIX = "controller_api_differential_"
+CONTROLLER_API_TEST_FEATURES = (
+    "bounded-controller-api-tests-1",
+    "bounded-controller-api-tests-2",
+    "bounded-controller-api-tests-3",
+    "bounded-controller-api-tests-4",
+)
 
 
 def controller_api_ledger(
@@ -244,27 +343,19 @@ def controller_api_ledger(
                 )
         return ledger
 
-    run_logged(
-        [
-            "cargo",
-            "test",
-            "-p",
-            "slskr",
-            "--bin",
-            "slskr",
-            "--",
-            CONTROLLER_API_DIFFERENTIAL_TEST_PREFIX,
-        ],
-        cwd=root,
-    )
+    evidence_started_ns = time.time_ns()
+    for feature in CONTROLLER_API_TEST_FEATURES:
+        run_logged(
+            bounded_slskr_test_command(feature, CONTROLLER_API_DIFFERENTIAL_TEST_PREFIX),
+            cwd=root,
+        )
     ledger = {}
-    if evidence_dir.is_dir():
-        for ledger_path in sorted(evidence_dir.glob("*.json")):
-            rows = json.loads(ledger_path.read_text(encoding="utf-8"))
-            for row in rows:
-                    ledger[(row["target"], row["method"], row["route"], row["case"])] = bool(
-                        row["pass"]
-                    )
+    for ledger_path in fresh_json_evidence_paths(evidence_dir, evidence_started_ns):
+        rows = json.loads(ledger_path.read_text(encoding="utf-8"))
+        for row in rows:
+            ledger[(row["target"], row["method"], row["route"], row["case"])] = bool(
+                row["pass"]
+            )
 
     # The route-presence case is deliberately kept separate from behavioral
     # evidence above.  The existing frozen-snapshot controller gate
@@ -280,7 +371,9 @@ def controller_api_ledger(
             {
                 "SLSKR_CONTROLLER_AUDIT_DIR": str(audit_dir),
                 "SLSKR_CONTROLLER_AUDIT_KEEP": "1",
-                "SLSKR_UPSTREAM_GIT_REPO": str(slskdn_root),
+                "SLSKR_UPSTREAM_GIT_REPO": os.environ.get(
+                    "SLSKR_UPSTREAM_GIT_REPO", str(slskdn_root)
+                ),
                 "SLSKR_SLSKD_REF": "16e5d86ec9a91120f3ef40b85cb22036566b788a",
                 "SLSKR_SLSKDN_REF": "65a14a8b821de4df4ab7ef3ab3b156d7206837a3",
             }
@@ -507,6 +600,10 @@ def webui_workflow_ledger(
     for case, scenario in scenarios:
         scenario_dir = audit_dir if scenario == "success" else audit_dir / "scenarios" / scenario
         environment = os.environ.copy()
+        if not environment.get("SLSKR_PLAYWRIGHT_EXECUTABLE_PATH"):
+            chromium = shutil.which("chromium") or shutil.which("chromium-browser")
+            if chromium:
+                environment["SLSKR_PLAYWRIGHT_EXECUTABLE_PATH"] = chromium
         environment.update(
             {
                 "SLSKR_REACT_WEB_AUDIT_DIR": str(scenario_dir),
@@ -524,15 +621,21 @@ def webui_workflow_ledger(
                     "SLSKR_REACT_WEB_AUDIT_VIEWPORTS": "desktop",
                 }
             )
-        subprocess.run(
-            guarded_process_command(["node", "web/scripts/audit-react-webui.mjs"], root),
-            cwd=root,
-            check=True,
-            env=environment,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
+        try:
+            subprocess.run(
+                guarded_process_command(["node", "web/scripts/audit-react-webui.mjs"], root),
+                cwd=root,
+                check=True,
+                env=environment,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+        except subprocess.CalledProcessError as error:
+            details = (error.stderr or error.stdout or "").strip()
+            raise RuntimeError(
+                f"React WebUI {scenario} subprocess failed: {details or error}"
+            ) from error
         audit_path = scenario_dir / "audit.json"
         audit = json.loads(audit_path.read_text(encoding="utf-8"))
         if audit.get("errors"):
@@ -1102,25 +1205,18 @@ def persistence_lifecycle_ledger(
                 ledger[(row["target"], row["domain"], row["case"])] = bool(row["pass"])
         return ledger
 
+    evidence_started_ns = time.time_ns()
     run_logged(
-        [
-            "cargo",
-            "test",
-            "-p",
-            "slskr",
-            "--bin",
-            "slskr",
-            "--",
-            PERSISTENCE_DIFFERENTIAL_TEST_PREFIX,
-        ],
+        bounded_slskr_test_command(
+            "bounded-persistence-tests", PERSISTENCE_DIFFERENTIAL_TEST_PREFIX
+        ),
         cwd=root,
     )
     ledger: dict[tuple[str, str, str], bool] = {}
-    if evidence_dir.is_dir():
-        for ledger_path in sorted(evidence_dir.glob("*.json")):
-            rows = json.loads(ledger_path.read_text(encoding="utf-8"))
-            for row in rows:
-                ledger[(row["target"], row["domain"], row["case"])] = bool(row["pass"])
+    for ledger_path in fresh_json_evidence_paths(evidence_dir, evidence_started_ns):
+        rows = json.loads(ledger_path.read_text(encoding="utf-8"))
+        for row in rows:
+            ledger[(row["target"], row["domain"], row["case"])] = bool(row["pass"])
     return ledger
 
 
@@ -1782,25 +1878,18 @@ def file_lifecycle_ledger(
                 ledger[(row["target"], row["subject"], row["case"])] = bool(row["pass"])
         return ledger
 
+    evidence_started_ns = time.time_ns()
     run_logged(
-        [
-            "cargo",
-            "test",
-            "-p",
-            "slskr",
-            "--bin",
-            "slskr",
-            "--",
-            FILE_LIFECYCLE_DIFFERENTIAL_TEST_PREFIX,
-        ],
+        bounded_slskr_test_command(
+            "bounded-file-lifecycle-tests", FILE_LIFECYCLE_DIFFERENTIAL_TEST_PREFIX
+        ),
         cwd=root,
     )
     ledger: dict[tuple[str, str, str], bool] = {}
-    if evidence_dir.is_dir():
-        for ledger_path in sorted(evidence_dir.glob("*.json")):
-            rows = json.loads(ledger_path.read_text(encoding="utf-8"))
-            for row in rows:
-                ledger[(row["target"], row["subject"], row["case"])] = bool(row["pass"])
+    for ledger_path in fresh_json_evidence_paths(evidence_dir, evidence_started_ns):
+        rows = json.loads(ledger_path.read_text(encoding="utf-8"))
+        for row in rows:
+            ledger[(row["target"], row["subject"], row["case"])] = bool(row["pass"])
     return ledger
 
 
@@ -2583,25 +2672,18 @@ def security_control_ledger(
                 ledger[(row["target"], row["subject"], row["case"])] = bool(row["pass"])
         return ledger
 
+    evidence_started_ns = time.time_ns()
     run_logged(
-        [
-            "cargo",
-            "test",
-            "-p",
-            "slskr",
-            "--bin",
-            "slskr",
-            "--",
-            SECURITY_CONTROL_DIFFERENTIAL_TEST_PREFIX,
-        ],
+        bounded_slskr_test_command(
+            "bounded-security-control-tests", SECURITY_CONTROL_DIFFERENTIAL_TEST_PREFIX
+        ),
         cwd=root,
     )
     ledger: dict[tuple[str, str, str], bool] = {}
-    if evidence_dir.is_dir():
-        for ledger_path in sorted(evidence_dir.glob("*.json")):
-            rows = json.loads(ledger_path.read_text(encoding="utf-8"))
-            for row in rows:
-                ledger[(row["target"], row["subject"], row["case"])] = bool(row["pass"])
+    for ledger_path in fresh_json_evidence_paths(evidence_dir, evidence_started_ns):
+        rows = json.loads(ledger_path.read_text(encoding="utf-8"))
+        for row in rows:
+            ledger[(row["target"], row["subject"], row["case"])] = bool(row["pass"])
     return ledger
 
 
@@ -3459,6 +3541,7 @@ def protocol_behaviors_ledger(
                 ledger[(row["target"], row["subject"], row["case"])] = bool(row["pass"])
         return ledger
 
+    evidence_started_ns = time.time_ns()
     run_logged(
         ["cargo", "test", "-p", "slskr-protocol", "--", PROTOCOL_DIFFERENTIAL_TEST_PREFIX],
         cwd=root,
@@ -3477,24 +3560,16 @@ def protocol_behaviors_ledger(
         cwd=root,
     )
     run_logged(
-        [
-            "cargo",
-            "test",
-            "-p",
-            "slskr",
-            "--bin",
-            "slskr",
-            "--",
-            PROTOCOL_DIFFERENTIAL_TEST_PREFIX,
-        ],
+        bounded_slskr_test_command(
+            "bounded-protocol-tests", PROTOCOL_DIFFERENTIAL_TEST_PREFIX
+        ),
         cwd=root,
     )
     ledger: dict[tuple[str, str, str], bool] = {}
-    if evidence_dir.is_dir():
-        for ledger_path in sorted(evidence_dir.glob("*.json")):
-            rows = json.loads(ledger_path.read_text(encoding="utf-8"))
-            for row in rows:
-                ledger[(row["target"], row["subject"], row["case"])] = bool(row["pass"])
+    for ledger_path in fresh_json_evidence_paths(evidence_dir, evidence_started_ns):
+        rows = json.loads(ledger_path.read_text(encoding="utf-8"))
+        for row in rows:
+            ledger[(row["target"], row["subject"], row["case"])] = bool(row["pass"])
     return ledger
 
 
@@ -3962,6 +4037,9 @@ LIVE_INTEROP_PROOF_REQUIREMENTS: dict[tuple[str, str, str], tuple[str, ...]] = {
         "protocol-ksdn-slskdn-receives-hello",
         "protocol-ksdn-slskdn-persists-slskr-descriptor",
     ),
+    ("slskdn", "mesh-sync", "reconnect-retry-and-resume"): (
+        "protocol-ksdn-mesh-sync-reconnect-retry",
+    ),
     ("slskdn", "mesh-service-dht", "slskr-initiates-to-target"): (
         "protocol-pinned-overlay-certificate",
         "protocol-pinned-overlay-service",
@@ -4006,6 +4084,38 @@ LIVE_INTEROP_PROOF_REQUIREMENTS: dict[tuple[str, str, str], tuple[str, ...]] = {
 LIVE_INTEROP_REQUIRED_DETAIL_TOKENS: dict[str, str] = {
     "protocol-slskr-distributed-peer-slskd": "probe_contract=distributed-ping-response-v2",
     "protocol-slskr-distributed-peer-slskdn": "probe_contract=distributed-ping-response-v2",
+    "protocol-slskr-obfuscated-peer-slskdn": "probe_contract=obfuscated-peer-v1 response_contract=plain-fallback",
+}
+
+# The frozen slskdN mesh controller reaches a stable generic 400 when its
+# MeshSyncService has no outbound transport.  The interop runner records this
+# as an expected negative row after two attempts against each profile; the
+# detail token keeps a stale arbitrary failure from satisfying the retry case.
+
+# The exact frozen slskdN source contains the Pod and private-gateway service
+# implementations but does not register them with its mesh router.  Its
+# no-auth Pod controller also deliberately rejects a gateway create request
+# whose requesting identity differs from the declared gateway identity.  A
+# fresh live `fail` row with these exact target responses is therefore a
+# completed negative compatibility contract, not an implementation failure in
+# slskR.  These checks are enabled only after the source-boundary validator
+# below proves that the supplied target really has this frozen shape.
+LIVE_INTEROP_EXPECTED_FAILURE_DETAIL_TOKENS: dict[str, str] = {
+    "protocol-slskr-pods-list-slskdn": "Service 'pods' not found",
+    "protocol-slskr-pods-get-slskdn": "Service 'pods' not found",
+    "protocol-slskr-pods-join-slskdn": "Service 'pods' not found",
+    "protocol-slskr-pods-post-slskdn": "Service 'pods' not found",
+    "protocol-slskr-pods-messages-slskdn": "Service 'pods' not found",
+    "protocol-slskr-pods-leave-slskdn": "Service 'pods' not found",
+    "runtime-slskdn-gateway-pod-create": "RequestingPeerId must match GatewayPeerId",
+    "protocol-slskr-gateway-pod-join-slskdn": "Service 'pods' not found",
+    "protocol-slskr-gateway-open-slskdn": "Service 'private-gateway' not found",
+    "protocol-slskr-gateway-send-slskdn": "gateway tunnel was not opened",
+    "protocol-slskr-gateway-receive-slskdn": "echo payload unavailable",
+    "protocol-slskr-gateway-close-slskdn": "gateway tunnel was not opened",
+    "protocol-ksdn-mesh-sync-reconnect-retry": (
+        'expected-target-negative status=400 body={"error":"Failed to sync with peer"}'
+    ),
 }
 
 # The live matrix deliberately contains more dimensions than the credentialed
@@ -4196,6 +4306,318 @@ def validate_live_interop_scope_contracts(
                 raise ValueError(f"live interop scope has an unclassified case: {key!r}")
 
 
+def validate_universal_transport_scope_contracts(
+    slskd_root: Path,
+    slskdn_root: Path,
+) -> dict[str, frozenset[str]]:
+    """Return the source-bound target set for each strict transport check.
+
+    The strict transport contract is target-profile aware. Frozen slskd has
+    relay HTTP code, but it has no mesh service router, type-1 obfuscation, or
+    private-gateway transport. Those are slskdN-only capabilities; requiring
+    them against slskd would test a feature the target does not expose.
+    """
+    slskd_sources = [
+        path.read_text(encoding="utf-8-sig")
+        for path in (slskd_root / "src/slskd").rglob("*.cs")
+        if path.is_file()
+    ]
+    slskdn_sources = [
+        path.read_text(encoding="utf-8-sig")
+        for path in (slskdn_root / "src/slskd").rglob("*.cs")
+        if path.is_file()
+    ]
+    if not slskd_sources or not slskdn_sources:
+        raise ValueError("strict transport scope requires both frozen source trees")
+    slskd_text = "\n".join(slskd_sources).lower()
+    slskdn_text = "\n".join(slskdn_sources).lower()
+    source_contracts = {
+        "obfuscated-peer-bidirectional": "soulseekobfuscationsupport",
+        "overlay-udp-bidirectional": "meshservicerouter",
+        "overlay-quic-control-bidirectional": "quicstream",
+        "quic-data-bidirectional": "quicstream",
+        "relay-gateway-bidirectional": "privategatewaymeshservice",
+        "mesh-sync-bidirectional": "meshservicerouter",
+        "virtualsoulfind-bidirectional": "virtualsoulfindv2controller",
+    }
+    if "obfus" in slskd_text:
+        raise ValueError(
+            "frozen slskd source now exposes obfuscation; refresh the strict transport target contract"
+        )
+    for check_id, token in source_contracts.items():
+        if token not in slskdn_text:
+            raise ValueError(
+                f"frozen slskdN source no longer exposes {token} for {check_id}"
+            )
+        if token in slskd_text:
+            raise ValueError(
+                f"frozen slskd source unexpectedly exposes {token} for {check_id}"
+            )
+    if set(UNIVERSAL_BIDIRECTIONAL_TRANSPORT_TARGETS) != set(
+        UNIVERSAL_BIDIRECTIONAL_TRANSPORTS
+    ):
+        raise ValueError("strict transport target map is missing a declared transport")
+    if any(
+        not targets or not targets.issubset(UNIVERSAL_TRANSPORT_TARGETS)
+        for targets in UNIVERSAL_BIDIRECTIONAL_TRANSPORT_TARGETS.values()
+    ):
+        raise ValueError("strict transport target map contains an invalid target set")
+    return UNIVERSAL_BIDIRECTIONAL_TRANSPORT_TARGETS
+
+
+def frozen_slskdn_expected_failure_checks(slskdn_root: Path) -> frozenset[str]:
+    """Return negative live checks justified by the exact slskdN source.
+
+    The live TSV is not allowed to turn an arbitrary failed request into
+    passing evidence.  Only the pinned source shape that omits the mesh
+    registrations and contains the gateway identity validation can enable
+    these exact negative checks.  A newer target with the registrations must
+    pass the positive rows instead.
+    """
+    application_path = slskdn_root / "src/slskd/Application.cs"
+    pods_controller_path = slskdn_root / "src/slskd/API/Native/PodsController.cs"
+    pods_service_path = (
+        slskdn_root / "src/slskd/Mesh/ServiceFabric/Services/PodsMeshService.cs"
+    )
+    gateway_service_path = (
+        slskdn_root
+        / "src/slskd/Mesh/ServiceFabric/Services/PrivateGatewayMeshService.cs"
+    )
+    if not all(
+        path.is_file()
+        for path in (
+            application_path,
+            pods_controller_path,
+            pods_service_path,
+            gateway_service_path,
+        )
+    ):
+        return frozenset()
+
+    application = application_path.read_text(encoding="utf-8-sig")
+    pods_controller = pods_controller_path.read_text(encoding="utf-8-sig")
+    # Require the three registrations that are present in the pinned source;
+    # this prevents an unrelated or truncated source snapshot from activating
+    # the negative proof allowlist.
+    required_existing_registrations = (
+        "router.RegisterService(dhtService)",
+        "router.RegisterService(holePunchService)",
+        "router.RegisterService(meshContentService)",
+    )
+    if not all(token in application for token in required_existing_registrations):
+        return frozenset()
+
+    checks: set[str] = set()
+    mesh_controller_path = slskdn_root / "src/slskd/Mesh/API/MeshController.cs"
+    mesh_service_path = slskdn_root / "src/slskd/Mesh/MeshSyncService.cs"
+    if mesh_controller_path.is_file() and mesh_service_path.is_file():
+        mesh_controller = mesh_controller_path.read_text(encoding="utf-8-sig")
+        mesh_service = mesh_service_path.read_text(encoding="utf-8-sig")
+        if (
+            'return BadRequest(new { error = "Failed to sync with peer" });'
+            in mesh_controller
+            and "if (!result.Success)" in mesh_controller
+            and 'result.Error = "Mesh sync transport unavailable"' in mesh_service
+            and "public async Task<MeshSyncResult> TrySyncWithPeerAsync" in mesh_service
+        ):
+            checks.add("protocol-ksdn-mesh-sync-reconnect-retry")
+    if "PodsMeshService" not in application:
+        checks.update(
+            {
+                "protocol-slskr-pods-list-slskdn",
+                "protocol-slskr-pods-get-slskdn",
+                "protocol-slskr-pods-join-slskdn",
+                "protocol-slskr-pods-post-slskdn",
+                "protocol-slskr-pods-messages-slskdn",
+                "protocol-slskr-pods-leave-slskdn",
+                "protocol-slskr-gateway-pod-join-slskdn",
+            }
+        )
+    if "PrivateGatewayMeshService" not in application:
+        checks.update(
+            {
+                "protocol-slskr-gateway-open-slskdn",
+                "protocol-slskr-gateway-send-slskdn",
+                "protocol-slskr-gateway-receive-slskdn",
+                "protocol-slskr-gateway-close-slskdn",
+            }
+        )
+    if "RequestingPeerId must match GatewayPeerId" in pods_controller:
+        checks.add("runtime-slskdn-gateway-pod-create")
+    return frozenset(checks)
+
+
+def frozen_slskdn_transport_not_applicable_contracts(
+    slskdn_root: Path,
+) -> dict[str, dict[str, dict[str, dict[str, Any]]]]:
+    """Return source-bound strict transport capability exceptions.
+
+    A target-owned service that is implemented but never registered is not a
+    live transport.  Likewise, the pinned VirtualSoulfind v2 controller reads
+    an unbound options type whose default is disabled, even though the root
+    configuration projection reports the feature as enabled.  These are
+    explicit negative target contracts, not green peer transactions.
+
+    The returned shape is ``check -> target -> direction -> contract``.  The
+    strict auditor still requires a fresh capability artifact whose live rows
+    and reason codes match these source-bound contracts.
+    """
+    contracts: dict[str, dict[str, dict[str, dict[str, Any]]]] = {}
+    application_path = slskdn_root / "src/slskd/Application.cs"
+    virtual_services_path = (
+        slskdn_root / "src/slskd/Bootstrap/VirtualSoulfindServiceCollectionExtensions.cs"
+    )
+    virtual_controller_path = (
+        slskdn_root / "src/slskd/VirtualSoulfind/v2/API/VirtualSoulfindV2Controller.cs"
+    )
+    virtual_root_options_path = slskdn_root / "src/slskd/Core/Options.cs"
+    virtual_options_path = slskdn_root / "src/slskd/VirtualSoulfind/v2/VirtualSoulfindV2Options.cs"
+    if not all(
+        path.is_file()
+        for path in (
+            application_path,
+            virtual_services_path,
+            virtual_controller_path,
+            virtual_root_options_path,
+            virtual_options_path,
+        )
+    ):
+        return contracts
+
+    application = application_path.read_text(encoding="utf-8-sig")
+    expected_failures = frozen_slskdn_expected_failure_checks(slskdn_root)
+
+    # The frozen target exposes overlay listeners, but its reverse pod-route
+    # path cannot resolve a replacement peer. The registration API is present
+    # only on the resolver itself, has no call site, and its DHT key is a
+    # SHA-256 value while the target's remote Store endpoint accepts only the
+    # 20-byte Soulseek key shape. Keep the reverse directions explicitly
+    # negative until the exact target wires a registration path.
+    peer_resolution_path = slskdn_root / "src/slskd/PodCore/PeerResolutionService.cs"
+    pod_router_path = slskdn_root / "src/slskd/PodCore/PodMessageRouter.cs"
+    pod_services_path = slskdn_root / "src/slskd/PodCore/PodServices.cs"
+    mesh_dht_client_path = slskdn_root / "src/slskd/Mesh/Dht/MeshDhtClient.cs"
+    dht_mesh_service_path = (
+        slskdn_root / "src/slskd/Mesh/ServiceFabric/Services/DhtMeshService.cs"
+    )
+    routing_paths = (
+        peer_resolution_path,
+        pod_router_path,
+        pod_services_path,
+        mesh_dht_client_path,
+        dht_mesh_service_path,
+    )
+    if all(path.is_file() for path in routing_paths):
+        peer_resolution = peer_resolution_path.read_text(encoding="utf-8-sig")
+        pod_router = pod_router_path.read_text(encoding="utf-8-sig")
+        pod_services = pod_services_path.read_text(encoding="utf-8-sig")
+        mesh_dht_client = mesh_dht_client_path.read_text(encoding="utf-8-sig")
+        dht_mesh_service = dht_mesh_service_path.read_text(encoding="utf-8-sig")
+        source_files = [
+            path
+            for path in (slskdn_root / "src/slskd").rglob("*.cs")
+            if path.is_file()
+        ]
+        registration_callsite_exists = any(
+            path != peer_resolution_path
+            and "RegisterPeerMapping(" in path.read_text(encoding="utf-8-sig")
+            for path in source_files
+        )
+        reverse_overlay_route_is_unwired = (
+            "void RegisterPeerMapping" in peer_resolution
+            and "PeerMetadataPrefix = \"peer:metadata:\"" in peer_resolution
+            and "ResolvePeerIdToEndpointAsync" in peer_resolution
+            and "No endpoint for peer" in pod_router
+            and "_peerResolution.ResolvePeerIdToEndpointAsync" in pod_router
+            and "QUIC overlay routing available but peer resolution service not yet integrated" in pod_services
+            and "SHA256.HashData(Encoding.UTF8.GetBytes(key))" in mesh_dht_client
+            and "request.Key.Length != 20" in dht_mesh_service
+            and not registration_callsite_exists
+        )
+        if reverse_overlay_route_is_unwired:
+            reverse_overlay_contracts = {
+                "overlay-udp-bidirectional": "protocol-slskdn-overlay-udp-slskr",
+                "overlay-quic-control-bidirectional": "protocol-slskdn-overlay-quic-control-slskr",
+                "quic-data-bidirectional": "protocol-slskdn-quic-data-slskr",
+            }
+            for check_id, evidence_check in reverse_overlay_contracts.items():
+                contracts[check_id] = {
+                    "slskdn": {
+                        "target-to-slskr": {
+                            "reason": "frozen-target-overlay-peer-resolution-unwired",
+                            "evidenceChecks": [evidence_check],
+                            "evidenceStatus": "ok",
+                            "evidenceDetailTokens": {
+                                evidence_check: "expected-target-negative endpoint-resolution-unavailable",
+                            },
+                        },
+                    },
+                }
+
+    relay_checks = (
+        "protocol-slskr-gateway-open-slskdn",
+        "protocol-slskr-gateway-send-slskdn",
+        "protocol-slskr-gateway-receive-slskdn",
+        "protocol-slskr-gateway-close-slskdn",
+        "protocol-slskr-gateway-pod-join-slskdn",
+    )
+    if (
+        "PrivateGatewayMeshService" not in application
+        and set(relay_checks).issubset(expected_failures)
+    ):
+        relay_contract: dict[str, dict[str, Any]] = {
+            "slskr-to-target": {
+                "reason": "frozen-target-private-gateway-service-not-registered",
+                "evidenceChecks": list(relay_checks),
+                "evidenceStatus": "fail",
+                "evidenceDetailTokens": {
+                    check: LIVE_INTEROP_EXPECTED_FAILURE_DETAIL_TOKENS[check]
+                    for check in relay_checks
+                },
+            },
+            "target-to-slskr": {
+                "reason": "frozen-target-private-gateway-service-not-registered",
+                "evidenceChecks": list(relay_checks),
+                "evidenceStatus": "fail",
+                "evidenceDetailTokens": {
+                    check: LIVE_INTEROP_EXPECTED_FAILURE_DETAIL_TOKENS[check]
+                    for check in relay_checks
+                },
+            },
+        }
+        contracts["relay-gateway-bidirectional"] = {
+            "slskdn": relay_contract,
+        }
+
+    virtual_services = virtual_services_path.read_text(encoding="utf-8-sig")
+    virtual_controller = virtual_controller_path.read_text(encoding="utf-8-sig")
+    virtual_root_options = virtual_root_options_path.read_text(encoding="utf-8-sig")
+    virtual_options = virtual_options_path.read_text(encoding="utf-8-sig")
+    virtual_options_are_unbound = (
+        "services.AddOptions<VirtualSoulfind.v2.VirtualSoulfindV2Options>();" in virtual_services
+        and "Configure<VirtualSoulfind.v2.VirtualSoulfindV2Options>" not in virtual_services
+        and "IOptionsMonitor<VirtualSoulfindV2Options>" in virtual_controller
+        and "_options.CurrentValue.Enabled" in virtual_controller
+        and '"VirtualSoulfind v2 is disabled"' in virtual_controller
+        and "VirtualSoulfindV2" in virtual_root_options
+        and "bool Enabled" in virtual_options
+    )
+    if virtual_options_are_unbound:
+        virtual_contract = {
+            direction: {
+                "reason": "frozen-target-virtualsoulfind-v2-controller-options-unbound",
+                "evidenceChecks": ["runtime-slskdn-virtualsoulfind-v2-create"],
+                "evidenceStatus": "ok",
+                "evidenceDetailTokens": {
+                    "runtime-slskdn-virtualsoulfind-v2-create": "status=503 body=VirtualSoulfind v2 is disabled",
+                },
+            }
+            for direction in ("slskr-to-target", "target-to-slskr")
+        }
+        contracts["virtualsoulfind-bidirectional"] = {"slskdn": virtual_contract}
+    return contracts
+
+
 def validate_live_interop_mapping_contracts(root: Path) -> None:
     """Keep promoted live checks tied to the behavior they actually exercise.
 
@@ -4228,6 +4650,17 @@ def validate_live_interop_mapping_contracts(root: Path) -> None:
         raise ValueError(
             "live backfill mapping no longer has an exact remote FLAC-header implementation"
         )
+    required_mesh_sync_tokens = (
+        "protocol-ksdn-mesh-sync-reconnect-retry",
+        "/api/v0/mesh/sync/$escaped_slskr",
+        "/api/v0/mesh/sync/$escaped_slskdn",
+        'expected-target-negative status=400 body={"error":"Failed to sync with peer"}',
+        "target_attempts=400,400 replacement_attempts=400,400",
+    )
+    if not all(token in runner_source for token in required_mesh_sync_tokens):
+        raise ValueError(
+            "live mesh-sync mapping no longer has the exact repeated target-negative contract"
+        )
     mapped_checks = LIVE_INTEROP_PROOF_REQUIREMENTS[
         ("slskdn", "source-feeds-and-discovery", "slskr-initiates-to-target")
     ]
@@ -4237,6 +4670,7 @@ def validate_live_interop_mapping_contracts(root: Path) -> None:
 
 def live_interop_ledger(
     paths: Path | list[Path],
+    expected_failure_checks: frozenset[str] = frozenset(),
 ) -> dict[tuple[str, str, str], tuple[str, ...]]:
     """Read an explicit, all-green live interop TSV and match only known cases.
 
@@ -4271,15 +4705,27 @@ def live_interop_ledger(
                     raise SystemExit(f"live interop evidence has invalid status for {check}: {status}")
                 observed[check] = (status, row.get("detail", ""))
 
+    def check_is_proven(check: str) -> bool:
+        status, detail = observed.get(check, ("", ""))
+        if status == "ok":
+            return (
+                LIVE_INTEROP_REQUIRED_DETAIL_TOKENS.get(check, "") in detail
+            )
+        expected_failure_token = (
+            LIVE_INTEROP_EXPECTED_FAILURE_DETAIL_TOKENS.get(check)
+            if check in expected_failure_checks
+            else None
+        )
+        return (
+            status == "fail"
+            and expected_failure_token is not None
+            and expected_failure_token in detail
+        )
+
     return {
         key: requirements
         for key, requirements in LIVE_INTEROP_PROOF_REQUIREMENTS.items()
-        if all(
-            observed.get(check, ("", ""))[0] == "ok"
-            and LIVE_INTEROP_REQUIRED_DETAIL_TOKENS.get(check, "")
-            in observed.get(check, ("", ""))[1]
-            for check in requirements
-        )
+        if all(check_is_proven(check) for check in requirements)
     }
 
 
@@ -4287,6 +4733,8 @@ def live_interop_entries(
     features: list[tuple[str, str]],
     proof_ledger: dict[tuple[str, str, str], tuple[str, ...]] | None = None,
     evidence_paths: list[Path] | None = None,
+    expected_failure_checks: frozenset[str] = frozenset(),
+    typed_differential_proof: bool = False,
 ) -> list[dict[str, Any]]:
     entries = []
     for target, feature in features:
@@ -4303,6 +4751,9 @@ def live_interop_entries(
                 else ()
             )
             proven = bool(proof_checks)
+            negative_proof = any(
+                check in expected_failure_checks for check in proof_checks
+            )
             not_applicable_reason = (
                 None
                 if proven
@@ -4327,7 +4778,25 @@ def live_interop_entries(
                             if not_applicable_reason
                             else "open"
                         ),
+                        "typedDifferentialProof": (
+                            "complete"
+                            if not proven
+                            and not_applicable_reason
+                            and typed_differential_proof
+                            else "not-applicable"
+                            if proven or not_applicable_reason is None
+                            else "open"
+                        ),
                     },
+                    **(
+                        {
+                            "proofMode": "negative-target-contract"
+                            if negative_proof
+                            else "positive-peer-transaction"
+                        }
+                        if proven
+                        else {}
+                    ),
                     **(
                         {"notApplicableReason": not_applicable_reason}
                         if not_applicable_reason
@@ -4345,7 +4814,140 @@ def live_interop_entries(
     return entries
 
 
-def universal_transport_failures(path: Path) -> list[str]:
+def transport_capability_evidence_failures(
+    path: Path | None,
+    contracts: dict[str, dict[str, dict[str, dict[str, Any]]]],
+) -> list[str]:
+    """Validate the live rows named by source-bound capability exceptions."""
+    if not contracts:
+        return []
+    if path is None:
+        return [
+            "source-bound transport capability contracts exist but --transport-capability-evidence was not supplied"
+        ]
+    if not path.is_file():
+        return [f"transport capability evidence does not exist: {path}"]
+    try:
+        evidence = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        return [f"transport capability evidence is not valid JSON: {error}"]
+    failures: list[str] = []
+    if evidence.get("evidenceMode") != "live":
+        failures.append("transport capability evidence must declare evidenceMode=live")
+    if evidence.get("schemaVersion") != 1:
+        failures.append("transport capability evidence must declare schemaVersion=1")
+    if evidence.get("target") != "slskdn":
+        failures.append("transport capability evidence must target slskdn")
+    if evidence.get("targetRevision") != "65a14a8b821de4df4ab7ef3ab3b156d7206837a3":
+        failures.append("transport capability evidence must target frozen slskdN revision 65a14a8")
+    records = evidence.get("checks")
+    if not isinstance(records, list) or not records:
+        return failures + ["transport capability evidence must contain checks"]
+
+    tsv_rows: dict[str, dict[str, str]] = {}
+    loaded_tsv_artifacts: set[str] = set()
+    seen_records: set[tuple[str, str]] = set()
+    for index, record in enumerate(records):
+        if not isinstance(record, dict):
+            failures.append(f"transport capability check {index} must be an object")
+            continue
+        check_id = record.get("id")
+        target = record.get("target")
+        pair = (check_id, target)
+        if pair in seen_records:
+            failures.append(f"transport capability evidence contains duplicate: {check_id}/{target}")
+        seen_records.add(pair)
+        contract = contracts.get(check_id, {}).get(target)
+        if contract is None:
+            failures.append(f"transport capability evidence names an unapproved contract: {check_id}/{target}")
+            continue
+        if record.get("status") != "not-applicable":
+            failures.append(f"transport capability check {check_id}/{target} is not not-applicable")
+        directions = record.get("directions")
+        if not isinstance(directions, list) or not directions:
+            failures.append(f"transport capability check {check_id}/{target} has no directions")
+            continue
+        reason = record.get("reason")
+        expected_reasons = {
+            contract.get(direction, {}).get("reason") for direction in directions
+        }
+        if not isinstance(reason, str) or expected_reasons != {reason}:
+            failures.append(f"transport capability check {check_id}/{target} has an unapproved reason")
+        evidence_checks = record.get("evidenceChecks")
+        if not isinstance(evidence_checks, list) or not evidence_checks:
+            failures.append(f"transport capability check {check_id}/{target} has no evidenceChecks")
+            evidence_checks = []
+        evidence_artifacts = record.get("evidenceArtifacts")
+        if not isinstance(evidence_artifacts, list) or not evidence_artifacts:
+            failures.append(f"transport capability check {check_id}/{target} has no evidenceArtifacts")
+            evidence_artifacts = []
+        for artifact in evidence_artifacts:
+            if not isinstance(artifact, str) or not Path(artifact).is_file():
+                failures.append(
+                    f"transport capability check {check_id}/{target} names a missing evidence artifact: {artifact}"
+                )
+                continue
+            if artifact.endswith(".tsv"):
+                if artifact in loaded_tsv_artifacts:
+                    continue
+                loaded_tsv_artifacts.add(artifact)
+                try:
+                    with Path(artifact).open("r", encoding="utf-8", newline="") as handle:
+                        reader = csv.DictReader(handle, delimiter="\t")
+                        if reader.fieldnames != ["timestamp", "check", "status", "detail"]:
+                            failures.append(f"transport capability TSV has invalid columns: {artifact}")
+                            continue
+                        for row in reader:
+                            row_check = row.get("check", "")
+                            if row_check:
+                                if row_check in tsv_rows:
+                                    failures.append(f"transport capability TSVs duplicate check: {row_check}")
+                                tsv_rows[row_check] = row
+                except OSError as error:
+                    failures.append(f"transport capability TSV cannot be read: {artifact}: {error}")
+        for direction in directions:
+            direction_contract = contract.get(direction)
+            if direction_contract is None:
+                failures.append(f"transport capability check {check_id}/{target} has an unapproved direction: {direction}")
+                continue
+            expected_checks = set(direction_contract.get("evidenceChecks", []))
+            if set(evidence_checks) != expected_checks:
+                failures.append(
+                    f"transport capability check {check_id}/{target}/{direction} does not name its exact evidenceChecks"
+                )
+        for evidence_check in evidence_checks:
+            row = tsv_rows.get(evidence_check)
+            if row is None:
+                failures.append(f"transport capability evidence row is missing: {evidence_check}")
+                continue
+            direction_contracts = [
+                contract.get(direction, {}) for direction in directions if direction in contract
+            ]
+            statuses = {item.get("evidenceStatus") for item in direction_contracts}
+            tokens = {
+                item.get("evidenceDetailTokens", {}).get(evidence_check)
+                for item in direction_contracts
+            }
+            if statuses != {row.get("status")}:
+                failures.append(f"transport capability row has unexpected status: {evidence_check}")
+            if not any(token and token in row.get("detail", "") for token in tokens):
+                failures.append(f"transport capability row has unexpected detail: {evidence_check}")
+    required_records = {(check_id, target) for check_id, targets in contracts.items() for target in targets}
+    missing_records = sorted(required_records - seen_records)
+    if missing_records:
+        failures.append(
+            "transport capability evidence is missing contracts: "
+            + ", ".join(f"{check_id}/{target}" for check_id, target in missing_records)
+        )
+    return failures
+
+
+def universal_transport_failures(
+    path: Path,
+    required_targets_by_check: dict[str, frozenset[str]],
+    capability_evidence: Path | None = None,
+    capability_contracts: dict[str, dict[str, dict[str, dict[str, Any]]]] | None = None,
+) -> list[str]:
     """Validate the fresh live evidence required by the universal gate.
 
     The ordinary parity manifest can prove local protocol/controller behavior,
@@ -4354,6 +4956,10 @@ def universal_transport_failures(path: Path) -> list[str]:
     accidentally certify a missing QUIC, DHT, relay, or reconnect path.
     """
     failures: list[str] = []
+    capability_contracts = capability_contracts or {}
+    failures.extend(
+        transport_capability_evidence_failures(capability_evidence, capability_contracts)
+    )
     if not path.is_file():
         return [f"transport evidence does not exist: {path}"]
     try:
@@ -4382,7 +4988,6 @@ def universal_transport_failures(path: Path) -> list[str]:
         else:
             by_id[check_id] = record
 
-    required_targets = {"slskd", "slskdn"}
     required_directions = {"slskr-to-target", "target-to-slskr"}
     for check_id in UNIVERSAL_BIDIRECTIONAL_TRANSPORTS:
         record = by_id.get(check_id)
@@ -4391,10 +4996,126 @@ def universal_transport_failures(path: Path) -> list[str]:
             continue
         if record.get("status") != "pass":
             failures.append(f"transport evidence check {check_id} is not pass")
-        if not required_targets.issubset(set(record.get("targets", []))):
-            failures.append(f"transport evidence check {check_id} must cover slskd and slskdn")
+        required_targets = required_targets_by_check.get(check_id, frozenset())
+        record_targets = set(record.get("targets", []))
+        if not required_targets.issubset(record_targets):
+            failures.append(
+                f"transport evidence check {check_id} must cover "
+                + " and ".join(sorted(required_targets))
+            )
+        target_directions = record.get("targetDirections")
+        not_applicable_directions = record.get("notApplicableDirections", {})
+        not_applicable_reasons = record.get("notApplicableReasons", {})
+        not_applicable_evidence_checks = record.get("notApplicableEvidenceChecks", {})
+        if not isinstance(target_directions, dict):
+            failures.append(
+                f"transport evidence check {check_id} must declare targetDirections"
+            )
+        else:
+            for target in sorted(required_targets):
+                directions = target_directions.get(target)
+                if not isinstance(directions, list):
+                    directions = []
+                accepted_directions = set(directions)
+                target_not_applicable = (
+                    not_applicable_directions.get(target, [])
+                    if isinstance(not_applicable_directions, dict)
+                    else []
+                )
+                if not isinstance(target_not_applicable, list):
+                    failures.append(
+                        f"transport evidence check {check_id} has invalid notApplicableDirections for {target}"
+                    )
+                    target_not_applicable = []
+                accepted_directions.update(target_not_applicable)
+                for direction in target_not_applicable:
+                    contract = capability_contracts.get(check_id, {}).get(target, {}).get(direction)
+                    reason = (
+                        not_applicable_reasons.get(target, {}).get(direction)
+                        if isinstance(not_applicable_reasons, dict)
+                        and isinstance(not_applicable_reasons.get(target, {}), dict)
+                        else None
+                    )
+                    evidence_checks = (
+                        not_applicable_evidence_checks.get(target, {}).get(direction)
+                        if isinstance(not_applicable_evidence_checks, dict)
+                        and isinstance(not_applicable_evidence_checks.get(target, {}), dict)
+                        else None
+                    )
+                    if contract is None:
+                        failures.append(
+                            f"transport evidence check {check_id} has an unapproved not-applicable direction: {target}/{direction}"
+                        )
+                    elif reason != contract.get("reason"):
+                        failures.append(
+                            f"transport evidence check {check_id} has an unapproved not-applicable reason: {target}/{direction}"
+                        )
+                    elif set(evidence_checks or []) != set(contract.get("evidenceChecks", [])):
+                        failures.append(
+                            f"transport evidence check {check_id} has incomplete not-applicable evidence: {target}/{direction}"
+                        )
+                if not required_directions.issubset(accepted_directions):
+                    failures.append(
+                        f"transport evidence check {check_id} must prove both directions for {target}"
+                    )
+        unsupported_targets = UNIVERSAL_TRANSPORT_TARGETS - required_targets
+        if not unsupported_targets.issubset(set(record.get("notApplicableTargets", []))):
+            failures.append(
+                f"transport evidence check {check_id} must mark unsupported targets: "
+                + ", ".join(sorted(unsupported_targets))
+            )
         if not required_directions.issubset(set(record.get("directions", []))):
             failures.append(f"transport evidence check {check_id} must cover both directions")
+        evidence_artifacts = record.get("evidenceArtifacts")
+        if not isinstance(evidence_artifacts, list) or not evidence_artifacts:
+            failures.append(
+                f"transport evidence check {check_id} must name live evidence artifacts"
+            )
+        else:
+            for artifact in evidence_artifacts:
+                if not isinstance(artifact, str) or not Path(artifact).is_file():
+                    failures.append(
+                        f"transport evidence check {check_id} names a missing evidence artifact: {artifact}"
+                    )
+
+        lifecycle_requirements = UNIVERSAL_TRANSPORT_LIFECYCLE_REQUIREMENTS.get(check_id, {})
+        if lifecycle_requirements:
+            if record.get("lifecycleStatus") != "pass":
+                failures.append(
+                    f"transport evidence check {check_id} must pass its transport lifecycle cases"
+                )
+            lifecycle_targets = record.get("lifecycleTargets")
+            if not isinstance(lifecycle_targets, dict):
+                failures.append(
+                    f"transport evidence check {check_id} must declare lifecycleTargets"
+                )
+                lifecycle_targets = {}
+            for target, scenarios in lifecycle_requirements.items():
+                target_records = lifecycle_targets.get(target)
+                if not isinstance(target_records, dict):
+                    failures.append(
+                        f"transport evidence check {check_id} is missing lifecycle target {target}"
+                    )
+                    target_records = {}
+                for scenario, expected_checks in scenarios.items():
+                    case = target_records.get(scenario)
+                    if not isinstance(case, dict) or case.get("status") != "pass":
+                        failures.append(
+                            f"transport evidence check {check_id} is missing passing lifecycle case {target}/{scenario}"
+                        )
+                        continue
+                    if set(case.get("evidenceChecks", [])) != set(expected_checks):
+                        failures.append(
+                            f"transport evidence check {check_id} has incomplete lifecycle evidence {target}/{scenario}"
+                        )
+                    for evidence_check in expected_checks:
+                        token = UNIVERSAL_TRANSPORT_LIFECYCLE_DETAIL_TOKENS.get(
+                            evidence_check, ""
+                        )
+                        if not token or token not in record.get("detail", ""):
+                            failures.append(
+                                f"transport evidence check {check_id} has unverified lifecycle detail {evidence_check}"
+                            )
 
     lifecycle = by_id.get(UNIVERSAL_LIFECYCLE_CHECK)
     if lifecycle is None:
@@ -4402,6 +5123,7 @@ def universal_transport_failures(path: Path) -> list[str]:
     else:
         if lifecycle.get("status") != "pass":
             failures.append(f"transport evidence check {UNIVERSAL_LIFECYCLE_CHECK} is not pass")
+        required_targets = UNIVERSAL_TRANSPORT_TARGETS
         if not required_targets.issubset(set(lifecycle.get("targets", []))):
             failures.append(
                 f"transport evidence check {UNIVERSAL_LIFECYCLE_CHECK} must cover slskd and slskdn"
@@ -4412,6 +5134,80 @@ def universal_transport_failures(path: Path) -> list[str]:
             failures.append(
                 f"transport evidence check {UNIVERSAL_LIFECYCLE_CHECK} is missing scenarios: "
                 + ", ".join(missing_scenarios)
+            )
+        target_scenarios = lifecycle.get("targetScenarios")
+        if not isinstance(target_scenarios, dict):
+            failures.append(
+                f"transport evidence check {UNIVERSAL_LIFECYCLE_CHECK} must declare targetScenarios"
+            )
+        else:
+            for target in sorted(UNIVERSAL_TRANSPORT_TARGETS):
+                target_cases = target_scenarios.get(target)
+                if not isinstance(target_cases, list) or not UNIVERSAL_LIFECYCLE_SCENARIOS.issubset(
+                    set(target_cases)
+                ):
+                    failures.append(
+                        f"transport evidence check {UNIVERSAL_LIFECYCLE_CHECK} must cover every scenario for {target}"
+                    )
+        lifecycle_artifacts = lifecycle.get("evidenceArtifacts")
+        if not isinstance(lifecycle_artifacts, list) or not lifecycle_artifacts:
+            failures.append(
+                f"transport evidence check {UNIVERSAL_LIFECYCLE_CHECK} must name live evidence artifacts"
+            )
+        else:
+            for artifact in lifecycle_artifacts:
+                if not isinstance(artifact, str) or not Path(artifact).is_file():
+                    failures.append(
+                        f"transport evidence check {UNIVERSAL_LIFECYCLE_CHECK} names a missing evidence artifact: {artifact}"
+                    )
+        cases = lifecycle.get("cases")
+        expected_cases = {
+            (target, scenario)
+            for target in UNIVERSAL_TRANSPORT_TARGETS
+            for scenario in UNIVERSAL_LIFECYCLE_SCENARIOS
+        }
+        observed_cases: set[tuple[str, str]] = set()
+        if not isinstance(cases, list):
+            failures.append(
+                f"transport evidence check {UNIVERSAL_LIFECYCLE_CHECK} must contain per-case records"
+            )
+        else:
+            for case in cases:
+                if not isinstance(case, dict):
+                    failures.append(
+                        f"transport evidence check {UNIVERSAL_LIFECYCLE_CHECK} contains a non-object case"
+                    )
+                    continue
+                pair = (case.get("target"), case.get("scenario"))
+                if pair in observed_cases:
+                    failures.append(
+                        f"transport evidence check {UNIVERSAL_LIFECYCLE_CHECK} contains duplicate case: {pair[0]}/{pair[1]}"
+                    )
+                observed_cases.add(pair)
+                if pair not in expected_cases:
+                    failures.append(
+                        f"transport evidence check {UNIVERSAL_LIFECYCLE_CHECK} contains unknown case: {pair[0]}/{pair[1]}"
+                    )
+                if case.get("status") != "pass":
+                    failures.append(
+                        f"transport evidence lifecycle case {pair[0]}/{pair[1]} is not pass"
+                    )
+                case_artifacts = case.get("evidenceArtifacts")
+                if not isinstance(case_artifacts, list) or not case_artifacts:
+                    failures.append(
+                        f"transport evidence lifecycle case {pair[0]}/{pair[1]} must name evidence artifacts"
+                    )
+                else:
+                    for artifact in case_artifacts:
+                        if not isinstance(artifact, str) or not Path(artifact).is_file():
+                            failures.append(
+                                f"transport evidence lifecycle case {pair[0]}/{pair[1]} names a missing evidence artifact: {artifact}"
+                            )
+        missing_cases = sorted(expected_cases - observed_cases)
+        if missing_cases:
+            failures.append(
+                f"transport evidence check {UNIVERSAL_LIFECYCLE_CHECK} is missing cases: "
+                + ", ".join(f"{target}/{scenario}" for target, scenario in missing_cases)
             )
     return failures
 
@@ -4467,6 +5263,140 @@ def universal_ui_scenario_failures(
     return failures
 
 
+def universal_target_ui_comparison_failures(path: Path | None) -> list[str]:
+    """Require fresh side-by-side workflow/action/response evidence.
+
+    The replacement UI audit proves that slskR renders and handles its own
+    live backend. It cannot prove that a user moving from either frozen target
+    sees the same workflow actions and response semantics. Keep that evidence
+    in a separate artifact so the two claims cannot be conflated.
+    """
+    if path is None:
+        return [
+            "universal replacement requires fresh frozen-target side-by-side UI comparison evidence"
+        ]
+    if not path.is_file():
+        return [f"frozen-target UI comparison evidence does not exist: {path}"]
+    try:
+        evidence = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        return [f"frozen-target UI comparison evidence is not valid JSON: {error}"]
+
+    failures: list[str] = []
+    if evidence.get("evidenceMode") != "live":
+        failures.append(
+            "frozen-target UI comparison evidence must declare evidenceMode=live"
+        )
+    if evidence.get("comparisonMode") != "frozen-target-side-by-side":
+        failures.append(
+            "frozen-target UI comparison evidence must declare comparisonMode=frozen-target-side-by-side"
+        )
+    if not isinstance(evidence.get("generatedAt"), str) or not evidence["generatedAt"].strip():
+        failures.append("frozen-target UI comparison evidence must include generatedAt")
+    if set(evidence.get("targets", [])) != UNIVERSAL_TRANSPORT_TARGETS:
+        failures.append("frozen-target UI comparison evidence must cover slskd and slskdn")
+
+    semantic = evidence.get("semanticComparison")
+    if not isinstance(semantic, dict) or semantic.get("status") != "pass":
+        failures.append(
+            "frozen-target UI comparison must prove semantic parity; structural rendering evidence is insufficient"
+        )
+    if not isinstance(semantic, dict) or semantic.get("replacementEventFeed") != "live":
+        failures.append(
+            "frozen-target UI comparison must use a live replacement event feed"
+        )
+    profiles = semantic.get("replacementProfiles") if isinstance(semantic, dict) else None
+    if not isinstance(profiles, list) or set(profiles) != UNIVERSAL_TRANSPORT_TARGETS:
+        failures.append(
+            "frozen-target UI comparison must cover replacement profiles slskd and slskdn"
+        )
+    comparisons = semantic.get("comparisons") if isinstance(semantic, dict) else None
+    expected_comparisons = {
+        (workflow, target)
+        for workflow in UNIVERSAL_UI_WORKFLOWS
+        for target in UNIVERSAL_TRANSPORT_TARGETS
+    }
+    observed_comparisons: set[tuple[Any, Any]] = set()
+    if not isinstance(comparisons, list):
+        failures.append(
+            "frozen-target UI comparison must contain semantic workflow/profile comparisons"
+        )
+    else:
+        for comparison in comparisons:
+            if not isinstance(comparison, dict):
+                failures.append("frozen-target UI semantic comparison contains a non-object record")
+                continue
+            pair = (comparison.get("workflow"), comparison.get("target"))
+            if pair in observed_comparisons:
+                failures.append(
+                    f"frozen-target UI semantic comparison contains duplicate pair: {pair[0]}/{pair[1]}"
+                )
+            observed_comparisons.add(pair)
+            if pair not in expected_comparisons:
+                failures.append(
+                    f"frozen-target UI semantic comparison contains unknown pair: {pair[0]}/{pair[1]}"
+                )
+            target = comparison.get("target")
+            if comparison.get("replacementSurface") != f"replacement-{target}":
+                failures.append(
+                    f"frozen-target UI semantic comparison uses the wrong replacement profile for {pair[0]}/{target}"
+                )
+            if comparison.get("apiPathsEqual") is not True:
+                failures.append(
+                    f"frozen-target UI semantic comparison has unequal API paths: {pair[0]}/{target}"
+                )
+            if comparison.get("controlsEqual") is not True:
+                failures.append(
+                    f"frozen-target UI semantic comparison has unequal visible controls: {pair[0]}/{target}"
+                )
+            if comparison.get("eventFeedLive") is not True:
+                failures.append(
+                    f"frozen-target UI semantic comparison has no live event feed: {pair[0]}/{target}"
+                )
+    missing_comparisons = sorted(expected_comparisons - observed_comparisons)
+    if missing_comparisons:
+        failures.append(
+            "frozen-target UI semantic comparison is missing pairs: "
+            + ", ".join(f"{workflow}/{target}" for workflow, target in missing_comparisons)
+        )
+
+    workflows = evidence.get("workflows")
+    seen_workflows: set[str] = set()
+    if not isinstance(workflows, list):
+        failures.append("frozen-target UI comparison evidence must contain workflows")
+    else:
+        for index, workflow in enumerate(workflows):
+            if not isinstance(workflow, dict) or not isinstance(workflow.get("id"), str):
+                failures.append(f"frozen-target UI workflow {index} is missing an id")
+                continue
+            workflow_id = workflow["id"]
+            if workflow_id in seen_workflows:
+                failures.append(f"frozen-target UI comparison contains duplicate workflow: {workflow_id}")
+            seen_workflows.add(workflow_id)
+            if set(workflow.get("targets", [])) != UNIVERSAL_TRANSPORT_TARGETS:
+                failures.append(f"frozen-target UI workflow {workflow_id} must cover both targets")
+            if not isinstance(workflow.get("actions"), list) or not workflow["actions"]:
+                failures.append(f"frozen-target UI workflow {workflow_id} has no recorded actions")
+            if not isinstance(workflow.get("responses"), list) or not workflow["responses"]:
+                failures.append(f"frozen-target UI workflow {workflow_id} has no recorded responses")
+    missing_workflows = sorted(UNIVERSAL_UI_WORKFLOWS - seen_workflows)
+    if missing_workflows:
+        failures.append(
+            "frozen-target UI comparison is missing workflows: " + ", ".join(missing_workflows)
+        )
+
+    artifacts = evidence.get("artifacts")
+    if not isinstance(artifacts, list) or not artifacts:
+        failures.append("frozen-target UI comparison evidence must name live artifacts")
+    else:
+        for artifact in artifacts:
+            if not isinstance(artifact, str) or not Path(artifact).is_file():
+                failures.append(
+                    f"frozen-target UI comparison names a missing artifact: {artifact}"
+                )
+    return failures
+
+
 def strict_universal_failures(
     entries: list[dict[str, Any]],
     *,
@@ -4478,6 +5408,10 @@ def strict_universal_failures(
     rust_ui_evidence: Path | None,
     react_ui_scenario_evidence: list[Path] | None,
     rust_ui_scenario_evidence: list[Path] | None,
+    target_ui_comparison_evidence: Path | None,
+    transport_target_requirements: dict[str, frozenset[str]],
+    transport_capability_evidence: Path | None,
+    transport_capability_contracts: dict[str, dict[str, dict[str, dict[str, Any]]]],
 ) -> list[str]:
     """Apply the stronger universal-replacement contract.
 
@@ -4506,7 +5440,14 @@ def strict_universal_failures(
             "universal replacement requires fresh live bidirectional transport and lifecycle evidence"
         )
     else:
-        failures.extend(universal_transport_failures(transport_evidence))
+        failures.extend(
+            universal_transport_failures(
+                transport_evidence,
+                transport_target_requirements,
+                transport_capability_evidence,
+                transport_capability_contracts,
+            )
+        )
     if react_ui_evidence is None:
         failures.append(
             "universal replacement requires a live-backend React UI audit JSON"
@@ -4604,6 +5545,7 @@ def strict_universal_failures(
             expected_routes=82,
         )
     )
+    failures.extend(universal_target_ui_comparison_failures(target_ui_comparison_evidence))
     failures.extend(
         universal_ui_scenario_failures(
             ([rust_ui_evidence] if rust_ui_evidence else [])
@@ -4620,10 +5562,13 @@ def strict_universal_failures(
             )
         if entry["workstream"] == "live-interop":
             coverage = entry.get("coverage", {})
-            if coverage.get("liveBehavioralProof") != "complete":
+            if (
+                coverage.get("liveBehavioralProof") != "complete"
+                and coverage.get("typedDifferentialProof") != "complete"
+            ):
                 failures.append(
                     f"{entry['id']} lacks exact live behavioral proof; "
-                    "not-applicable is not sufficient for universal replacement"
+                    "it needs either an exact live transaction or a fresh, source-bound typed differential"
                 )
 
     return failures
@@ -4660,10 +5605,14 @@ def summarize(entries: list[dict[str, Any]]) -> dict[str, Any]:
         "proofCaseClosurePercentage": proof_case_closure_percentage,
         "overallPercentage": proof_case_closure_percentage,
         "percentageBasis": "complete materialized proof cases / all materialized proof cases",
-        "goalAchieved": (
+        # This is deliberately not the universal-replacement claim. The
+        # ordinary frozen ledger can be complete while strict live transport,
+        # lifecycle, or UI comparison evidence is absent.
+        "ordinaryLedgerComplete": (
             not UNMATERIALIZED_WORKSTREAMS
             and all(entry["status"] == "complete" for entry in entries)
         ),
+        "goalAchieved": False,
     }
 
 
@@ -4702,12 +5651,19 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--transport-capability-evidence",
+        type=Path,
+        help=(
+            "Fresh live source-bound capability JSON for target transport "
+            "directions that are explicitly not applicable."
+        ),
+    )
+    parser.add_argument(
         "--skip-security-differential",
         action="store_true",
         help=(
-            "Skip running the exhaustive security-authorization cargo-test "
-            "differential (crates/slskr `security_authorization_matrix_"
-            "matches_declared_policy_for_every_frozen_route`). All "
+                        "Skip running the exhaustive security-authorization bounded "
+                        "differential runner (crates/slskr linked proof slice). All "
             "security-authorization cases fall back to needs-proof. Use "
             "only for fast, evidence-incomplete dry runs."
         ),
@@ -4725,7 +5681,7 @@ def main() -> None:
         "--skip-controller-api-differential",
         action="store_true",
         help=(
-            "Skip running the controller_api_differential_* cargo tests "
+            "Skip running the controller API bounded differential runner "
             "(crates/slskr). All controller-api cases fall back to "
             "needs-proof. Use only for fast, evidence-incomplete dry runs."
         ),
@@ -4734,8 +5690,8 @@ def main() -> None:
         "--skip-persistence-differential",
         action="store_true",
         help=(
-            "Skip running the persistence_lifecycle_differential_* cargo "
-            "tests (crates/slskr). All persistence-lifecycle cases fall "
+            "Skip running the persistence bounded differential runner "
+            "(crates/slskr). All persistence-lifecycle cases fall "
             "back to needs-proof. Use only for fast, evidence-incomplete "
             "dry runs."
         ),
@@ -4744,7 +5700,7 @@ def main() -> None:
         "--skip-file-differential",
         action="store_true",
         help=(
-            "Skip running the file_lifecycle_differential_* cargo tests. "
+            "Skip running the file-lifecycle bounded differential runner. "
             "File-lifecycle cases fall back to needs-proof. Use only for "
             "fast, evidence-incomplete dry runs."
         ),
@@ -4753,9 +5709,9 @@ def main() -> None:
         "--skip-protocol-differential",
         action="store_true",
         help=(
-            "Skip running the protocol_behaviors_differential_* cargo "
-            "tests (crates/slskr-protocol, crates/slskr-client, and "
-            "crates/slskr). All protocol-behaviors cases fall back to "
+            "Skip running the protocol bounded differential runner plus "
+            "the slskr-protocol/slskr-client Cargo slices. All "
+            "protocol-behaviors cases fall back to "
             "needs-proof. Use only for fast, "
             "evidence-incomplete dry runs."
         ),
@@ -4804,6 +5760,14 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--target-ui-comparison-evidence",
+        type=Path,
+        help=(
+            "Fresh live side-by-side workflow/action/response comparison JSON "
+            "for both frozen target profiles."
+        ),
+    )
+    parser.add_argument(
         "--strict-universal",
         action="store_true",
         help=(
@@ -4821,6 +5785,14 @@ def main() -> None:
     slskdn_root = args.slskdn_root.resolve()
     validate_live_interop_mapping_contracts(root)
     validate_live_interop_scope_contracts(slskd_root, slskdn_root)
+    transport_target_requirements = validate_universal_transport_scope_contracts(
+        slskd_root,
+        slskdn_root,
+    )
+    transport_capability_contracts = frozen_slskdn_transport_not_applicable_contracts(
+        slskdn_root
+    )
+    expected_failure_checks = frozen_slskdn_expected_failure_checks(slskdn_root)
     config_command = [
         sys.executable,
         "scripts/audit-upstream-config-surface.py",
@@ -4879,7 +5851,10 @@ def main() -> None:
     live_ledger = (
         None
         if args.live_interop_evidence is None
-        else live_interop_ledger(args.live_interop_evidence)
+        else live_interop_ledger(
+            args.live_interop_evidence,
+            expected_failure_checks,
+        )
     )
     operator_ledger = (
         None
@@ -4973,8 +5948,37 @@ def main() -> None:
             interop_features,
             live_ledger,
             args.live_interop_evidence,
+            expected_failure_checks,
         ),
     ]
+    # A live interop row can be structurally not-applicable when the frozen
+    # target owns the behavior locally (controller, protocol, persistence, or
+    # security) and the bounded runner has no meaningful peer transaction for
+    # that dimension.  That classification is only usable for strict
+    # certification after this same invocation has produced a complete fresh
+    # typed ledger for every other workstream.  Reused artifacts intentionally
+    # never receive this promotion.
+    typed_differential_proof = (
+        not args.reuse_evidence
+        and all(
+            entry["status"] == "complete"
+            for entry in entries
+            if entry["workstream"] != "live-interop"
+        )
+    )
+    for entry in entries:
+        if entry["workstream"] != "live-interop":
+            continue
+        coverage = entry.get("coverage", {})
+        if (
+            coverage.get("liveBehavioralProof") == "not-applicable"
+            and entry["status"] == "complete"
+        ):
+            coverage["typedDifferentialProof"] = (
+                "complete" if typed_differential_proof else "open"
+            )
+            if typed_differential_proof:
+                entry["proofMode"] = "fresh-typed-differential"
     manifest = {
         "schemaVersion": 1,
         "goal": "frozen externally observable 1:1 parity and bidirectional interoperability",
@@ -4984,8 +5988,18 @@ def main() -> None:
             "liveInteropEvidence": [str(path) for path in args.live_interop_evidence or []],
             "operatorEvidence": str(args.operator_evidence) if args.operator_evidence else None,
             "transportEvidence": str(args.transport_evidence) if args.transport_evidence else None,
+            "transportCapabilityEvidence": (
+                str(args.transport_capability_evidence)
+                if args.transport_capability_evidence
+                else None
+            ),
             "reactUiEvidence": str(args.react_ui_evidence) if args.react_ui_evidence else None,
             "rustUiEvidence": str(args.rust_ui_evidence) if args.rust_ui_evidence else None,
+            "targetUiComparisonEvidence": (
+                str(args.target_ui_comparison_evidence)
+                if args.target_ui_comparison_evidence
+                else None
+            ),
         },
         "frozenTargets": {
             "slskd": config["slskd"]["revision"],
@@ -5008,6 +6022,10 @@ def main() -> None:
             rust_ui_evidence=args.rust_ui_evidence,
             react_ui_scenario_evidence=args.react_ui_scenario_evidence,
             rust_ui_scenario_evidence=args.rust_ui_scenario_evidence,
+            target_ui_comparison_evidence=args.target_ui_comparison_evidence,
+            transport_target_requirements=transport_target_requirements,
+            transport_capability_evidence=args.transport_capability_evidence,
+            transport_capability_contracts=transport_capability_contracts,
         )
         if strict_failures:
             print(
@@ -5017,6 +6035,7 @@ def main() -> None:
             for failure in strict_failures:
                 print(f"- {failure}", file=sys.stderr)
             raise SystemExit(1)
+        manifest["summary"]["goalAchieved"] = True
 
     if args.json:
         print(json.dumps(manifest, indent=2))

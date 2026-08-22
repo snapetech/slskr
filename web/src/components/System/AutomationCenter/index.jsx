@@ -12,6 +12,7 @@ import {
   setAutomationRecipeExecution,
 } from '../../../lib/automationRecipes';
 import { getRunnableWishlistRequests } from '../../../lib/acquisitionRequests';
+import { executeAutomationAction } from '../../../lib/automationActions';
 import * as libraryHealthAPI from '../../../lib/libraryHealth';
 import * as wishlistAPI from '../../../lib/wishlist';
 import React, { useMemo, useState } from 'react';
@@ -127,9 +128,17 @@ const AutomationCenter = () => {
     toast.info(status);
   };
 
+  const executeReadOnlyRecipe = async (recipe) => {
+    const result = await executeAutomationAction(recipe.id);
+    const report = buildAutomationExecutionReport(recipe, result);
+    setRecipeState(setAutomationRecipeExecution(recipe.id, report, report.generatedAt));
+    setCopyStatus(`${recipe.title}: ${result.summary}`);
+    toast.info(`${recipe.title} completed`);
+  };
+
   const executeRecipe = async (recipe) => {
     if (!isAutomationRecipeExecutable(recipe)) {
-      setCopyStatus(`${recipe.title} does not have a live backend action wired yet.`);
+      setCopyStatus(`${recipe.title} is preview-only because its backend action is unavailable.`);
       return;
     }
 
@@ -140,6 +149,9 @@ const AutomationCenter = () => {
       }
       if (recipe.id === 'library-health-scan') {
         await executeLibraryHealthScan(recipe);
+      }
+      if (['dashboard-refresh', 'local-diagnostics', 'stale-cache-reminders'].includes(recipe.id)) {
+        await executeReadOnlyRecipe(recipe);
       }
     } finally {
       setExecutingRecipe('');
@@ -172,7 +184,7 @@ const AutomationCenter = () => {
         <Header.Content>
           Automation Center
           <Header.Subheader>
-            Every automation is visible here. Enable recipes when their dry-run output and impact fit your node.
+            Every automation is visible here. Enable recipes when their impact fits your node; execution is manual and requires the real backend action to be available.
           </Header.Subheader>
         </Header.Content>
       </Header>
@@ -355,7 +367,7 @@ const AutomationCenter = () => {
                     </Label>
                   )}
                   <Popup
-                    content={`Record a dry run checkpoint for ${recipe.title}. This shell does not execute network or file actions yet.`}
+                    content={`Record a dry run checkpoint for ${recipe.title}. This records the plan without executing the action.`}
                     position="top center"
                     trigger={
                       <Button
@@ -374,7 +386,7 @@ const AutomationCenter = () => {
                     content={
                       executable
                         ? `Execute ${recipe.title} now through its real backend action. Wishlist Retry runs up to three enabled searches; Library Health starts the configured read-only scan.`
-                        : `No live backend action is wired for ${recipe.title} yet. Use dry run to track readiness.`
+                        : `No live backend action is available for ${recipe.title}. This recipe remains a policy preview until its backend contract exists.`
                     }
                     position="top center"
                     trigger={

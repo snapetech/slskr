@@ -145,6 +145,7 @@ fn indirect_request_accepts_matching_peer_init() {
         kind: ConnectionKind::PeerMessages,
         token: 42,
         stream,
+        obfuscated: false,
     });
 
     assert!(completed.is_ok());
@@ -160,6 +161,7 @@ fn indirect_request_accepts_matching_peer_init_with_different_username_casing() 
         kind: ConnectionKind::PeerMessages,
         token: 42,
         stream,
+        obfuscated: false,
     });
 
     assert!(completed.is_ok());
@@ -218,6 +220,7 @@ fn indirect_request_rejects_wrong_username() {
             kind: ConnectionKind::PeerMessages,
             token: 42,
             stream,
+            obfuscated: false,
         })
         .unwrap_err();
 
@@ -237,6 +240,7 @@ fn indirect_request_rejects_wrong_connection_kind() {
         kind: ConnectionKind::PeerMessages,
         token: 42,
         stream,
+        obfuscated: false,
     };
 
     let error = request.complete(incoming).unwrap_err();

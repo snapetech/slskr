@@ -2,6 +2,7 @@ import {
   fetchDiscographyCoverage,
   promoteDiscographyCoverageToWishlist,
 } from '../../lib/musicBrainz';
+import { toDisplayError } from '../../lib/errors';
 import React, { useMemo, useState } from 'react';
 import { toast } from 'react-toastify';
 import {
@@ -50,6 +51,27 @@ const statusText = (status) => {
   }
 };
 
+export const normalizeDiscographyCoverage = (payload) => {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return null;
+  }
+
+  return {
+    ...payload,
+    releases: (Array.isArray(payload.releases) ? payload.releases : [])
+      .filter((release) =>
+        release && typeof release === 'object' && !Array.isArray(release),
+      )
+      .map((release) => ({
+        ...release,
+        tracks: (Array.isArray(release.tracks) ? release.tracks : [])
+          .filter((track) =>
+            track && typeof track === 'object' && !Array.isArray(track),
+          ),
+      })),
+  };
+};
+
 const DiscographyCoveragePanel = ({ disabled }) => {
   const [artistId, setArtistId] = useState('');
   const [coverage, setCoverage] = useState(null);
@@ -64,7 +86,7 @@ const DiscographyCoveragePanel = ({ disabled }) => {
       return 0;
     }
 
-    return coverage.releases
+    return (normalizeDiscographyCoverage(coverage)?.releases || [])
       .flatMap((release) => release.tracks || [])
       .filter((track) => track.status === 'Absent').length;
   }, [coverage]);
@@ -85,14 +107,10 @@ const DiscographyCoveragePanel = ({ disabled }) => {
         forceRefresh,
         profile,
       });
-      setCoverage(response.data);
+      setCoverage(normalizeDiscographyCoverage(response.data));
     } catch (loadError) {
       console.error(loadError);
-      setError(
-        loadError?.response?.data ??
-          loadError?.message ??
-          'Unable to load discography coverage',
-      );
+      setError(toDisplayError(loadError, 'Unable to load discography coverage'));
     } finally {
       setLoading(false);
     }
@@ -117,11 +135,7 @@ const DiscographyCoveragePanel = ({ disabled }) => {
       await loadCoverage();
     } catch (promoteError) {
       console.error(promoteError);
-      toast.error(
-        promoteError?.response?.data ??
-          promoteError?.message ??
-          'Unable to add missing tracks to Wishlist',
-      );
+      toast.error(toDisplayError(promoteError, 'Unable to add missing tracks to Wishlist'));
     } finally {
       setPromoting(false);
     }
@@ -220,7 +234,7 @@ const DiscographyCoveragePanel = ({ disabled }) => {
       </Form>
       {error && (
         <Message
-          content={error}
+          content={String(error)}
           negative
         />
       )}
@@ -246,7 +260,7 @@ const DiscographyCoveragePanel = ({ disabled }) => {
             size="tiny"
           />
           <div className="discography-release-list">
-            {(coverage.releases || []).map((release) => (
+            {(normalizeDiscographyCoverage(coverage)?.releases || []).map((release) => (
               <Segment
                 className="discography-release-card"
                 key={release.releaseId}

@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Public matrices start long-lived listeners and probe helpers. Keep direct
+# invocation inside the same hard process-memory ceiling as certification.
+runner_repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [[ "${SLSKR_PROCESS_MEMORY_GUARD_HELD:-0}" != "1" ]]; then
+    exec "$runner_repo_root/scripts/with-process-memory-guard.sh" "${BASH_SOURCE[0]}" "$@"
+fi
+
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 pool_file="${SLSKR_PROTON_CREDENTIAL_POOL_FILE:-$repo_root/.secrets/proton-credential-pool.env}"
 if [[ -f "$pool_file" ]]; then
@@ -135,7 +142,7 @@ run_probe() {
                 SLSK_OBFUSCATED_PROBE_TIMEOUT_SECONDS=15 \
                 SLSK_PLAIN_PEER_INIT_TOKEN="${SLSKR_MATRIX_PLAIN_PEER_INIT_TOKEN:-0}" \
                 SLSK_OBFUSCATED_PEER_INIT_TOKEN="${SLSKR_MATRIX_OBFUSCATED_PEER_INIT_TOKEN:-0}" \
-                scripts/with-build-guard.sh cargo run -q -p slskr -- "${command[@]}" 2>&1
+                scripts/with-build-guard.sh cargo run -q -p slskr --bin slskr -- "${command[@]}" 2>&1
     )"
     status=$?
     set -e
@@ -186,7 +193,7 @@ run_indirect_probe() {
                     renew &
                     renew_pid=$!
                     trap "kill \"$renew_pid\" 2>/dev/null || true" EXIT
-                    SLSK_INDIRECT_ADVERTISED_PORT="$public_port" scripts/with-build-guard.sh cargo run -q -p slskr -- probe indirect-peer
+                    SLSK_INDIRECT_ADVERTISED_PORT="$public_port" scripts/with-build-guard.sh cargo run -q -p slskr --bin slskr -- probe indirect-peer
                 ' 2>&1
     )"
     status=$?

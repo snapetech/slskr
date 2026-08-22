@@ -1,4 +1,5 @@
 import * as sourceProvidersApi from '../../../lib/sourceProviders';
+import { toDisplayError } from '../../../lib/errors';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Button,
@@ -87,12 +88,10 @@ const SourceProviders = () => {
     try {
       setCatalog(await sourceProvidersApi.getSourceProviders());
     } catch (loadError) {
-      setError(
-        loadError?.response?.data ||
-          loadError?.response?.statusText ||
-          loadError?.message ||
-          'Unable to load source providers',
-      );
+      setError(toDisplayError(
+        loadError,
+        loadError?.response?.statusText || 'Unable to load source providers',
+      ));
     } finally {
       setLoading(false);
     }

@@ -9,11 +9,12 @@ const {
   check,
   connectServer,
   createApplicationHubConnection,
+  getApplicationOptions,
+  getApplicationState,
   getSecurityEnabled,
   getConversations,
   getJoinedRooms,
   getRoomMessages,
-  getServerState,
   isLoggedIn,
 } = vi.hoisted(() => ({
   check: vi.fn(),
@@ -21,9 +22,10 @@ const {
   createApplicationHubConnection: vi.fn(),
   getConversations: vi.fn(),
   getSecurityEnabled: vi.fn(),
+  getApplicationOptions: vi.fn(),
+  getApplicationState: vi.fn(),
   getJoinedRooms: vi.fn(),
   getRoomMessages: vi.fn(),
-  getServerState: vi.fn(),
   isLoggedIn: vi.fn(),
 }));
 
@@ -33,6 +35,14 @@ vi.mock('../lib/chat', () => ({
 
 vi.mock('../lib/hubFactory', () => ({
   createApplicationHubConnection,
+}));
+
+vi.mock('../lib/application', () => ({
+  getState: getApplicationState,
+}));
+
+vi.mock('../lib/options', () => ({
+  getCurrent: getApplicationOptions,
 }));
 
 vi.mock('../lib/rooms', () => ({
@@ -60,7 +70,6 @@ vi.mock('../lib/relay', () => ({
 vi.mock('../lib/server', () => ({
   connect: connectServer,
   disconnect: vi.fn(),
-  getState: getServerState,
 }));
 
 vi.mock('./Browse/Browse', () => ({ default: () => <div>Browse</div> }));
@@ -120,13 +129,10 @@ describe('App', () => {
     getSecurityEnabled.mockResolvedValue(true);
     check.mockResolvedValue(true);
     getConversations.mockResolvedValue([]);
+    getApplicationOptions.mockResolvedValue({});
+    getApplicationState.mockResolvedValue({});
     getJoinedRooms.mockResolvedValue([]);
     getRoomMessages.mockResolvedValue([]);
-    getServerState.mockResolvedValue({
-      credentialsConfigured: true,
-      isConnected: false,
-      state: 'Disconnected',
-    });
     isLoggedIn.mockReturnValue(true);
     connectServer.mockResolvedValue({
       data: {
@@ -188,11 +194,13 @@ describe('App', () => {
   });
 
   it('renders an already-connected Soulseek session from the initial server snapshot', async () => {
-    getServerState.mockResolvedValue({
-      credentialsConfigured: true,
-      isConnected: true,
-      isLoggedIn: true,
-      state: 'Connected, LoggedIn',
+    getApplicationState.mockResolvedValue({
+      server: {
+        credentialsConfigured: true,
+        isConnected: true,
+        isLoggedIn: true,
+        state: 'Connected, LoggedIn',
+      },
     });
 
     render(
@@ -202,7 +210,7 @@ describe('App', () => {
     );
 
     expect(await screen.findByText('Connected')).toBeInTheDocument();
-    expect(getServerState).toHaveBeenCalledTimes(1);
+    expect(getApplicationState).toHaveBeenCalledTimes(1);
   });
 
   it('opens the theme menu and applies the selected theme', async () => {
@@ -222,7 +230,7 @@ describe('App', () => {
     });
   });
 
-  it('keeps the browser tab title focused on slskr branding', async () => {
+  it('keeps the browser tab title focused on slskR branding', async () => {
     render(
       <MemoryRouter>
         <App />
@@ -233,7 +241,7 @@ describe('App', () => {
       expect(screen.getByText('Searches')).toBeInTheDocument();
     });
 
-    expect(document.title).toBe('slskr');
+    expect(document.title).toBe('slskR');
   });
 
   it('groups secondary routes under the More navigation menu', async () => {
@@ -245,6 +253,29 @@ describe('App', () => {
 
     expect(await screen.findByTestId('nav-search')).toBeInTheDocument();
     expect(screen.getByTestId('nav-more')).toBeInTheDocument();
+  });
+
+  it('keeps slskR branding when the backend selects a compatibility profile', async () => {
+    render(
+      <MemoryRouter initialEntries={['/searches']}>
+        <App />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('nav-search')).toBeInTheDocument();
+    });
+
+    hubHandlers.state({
+      compatibilityTarget: 'slskd',
+      server: { isConnected: false },
+    });
+
+    expect(await screen.findByTestId('nav-dashboard')).toBeInTheDocument();
+    expect(screen.getByTestId('nav-chat')).toBeInTheDocument();
+    expect(screen.getByTestId('nav-browse')).toBeInTheDocument();
+    expect(screen.queryByTestId('nav-more')).not.toBeInTheDocument();
+    expect(document.title).toBe('slskR');
   });
 
   it('shows chat activity in the header when conversations have unread messages', async () => {

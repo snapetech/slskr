@@ -33,7 +33,7 @@ scripts/build-rust-web.sh
 Serve the Rust build through the daemon with:
 
 ```bash
-SLSKR_WEB_BUILD_DIR=target/slskr-web scripts/with-build-guard.sh cargo run -p slskr -- serve
+SLSKR_WEB_BUILD_DIR=target/slskr-web scripts/with-build-guard.sh cargo run -p slskr --bin slskr -- serve
 ```
 
 ## Migration Rules

@@ -6,7 +6,13 @@ import {
 
 const storageKey = 'slskr.automationRecipeState';
 const inputStorageKey = 'slskr.automationRecipeInputs';
-const executableRecipeIds = new Set(['wishlist-retry', 'library-health-scan']);
+const executableRecipeIds = new Set([
+  'dashboard-refresh',
+  'library-health-scan',
+  'local-diagnostics',
+  'stale-cache-reminders',
+  'wishlist-retry',
+]);
 
 export const automationRecipes = [
   {

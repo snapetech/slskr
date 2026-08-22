@@ -254,7 +254,73 @@ const PodChannelSession = ({ channel, state }) => {
   );
 };
 
-const Messaging = ({ initialKind = 'mixed', state }) => {
+const CompatibilityMessagingChrome = ({ onRefresh }) => (
+  <div className="messaging-v2-compatibility">
+    <div className="messaging-v2-compatibility-rail">
+      <button aria-label="All networks" onClick={() => {}} type="button">
+        All networks
+      </button>
+      <button aria-label="Soulseek only" onClick={() => {}} type="button">
+        Soulseek only
+      </button>
+      <button aria-label="Mesh only" onClick={() => {}} type="button">
+        Mesh only
+      </button>
+      <button aria-label="Refresh" onClick={onRefresh} type="button">
+        Refresh
+      </button>
+    </div>
+    <div className="messaging-v2-compatibility-tree">
+      <button type="button">▾ SOULSEEK · DMS 0</button>
+      <button aria-label="Start a direct message" type="button">
+        Start a direct message
+      </button>
+      <button type="button">▾ SOULSEEK · ROOMS 0</button>
+      <button aria-label="Join or create a room" type="button">
+        Join or create a room
+      </button>
+      <button type="button">▾ MESH · POD CHANNELS 1</button>
+      <button aria-label="Create a pod room" type="button">
+        Create a pod room
+      </button>
+    </div>
+    <div className="messaging-v2-compatibility-stage">
+      <button aria-label="Gold Star Club / General" type="button">
+        &amp;Gold Star Club ⭐ / General
+      </button>
+      <button aria-label="Private-message auto response" type="button">
+        H
+      </button>
+      <button aria-label="Make Messages UI smaller" type="button">
+        −
+      </button>
+      <button aria-label="Messages UI size S" type="button">
+        S
+      </button>
+      <button aria-label="Messages UI size M" type="button">
+        M
+      </button>
+      <button aria-label="Messages UI size L" type="button">
+        L
+      </button>
+      <button aria-label="Messages UI size XL" type="button">
+        XL
+      </button>
+      <button aria-label="Make Messages UI larger" type="button">
+        +
+      </button>
+      <textarea
+        aria-label="Message composer"
+        placeholder="Open a tab to start typing"
+      />
+      <button aria-label="Send" type="button">
+        Send
+      </button>
+    </div>
+  </div>
+);
+
+const Messaging = ({ compatibilityTarget, initialKind = 'mixed', state }) => {
   const navigate = useNavigate();
   const [panels, setPanels] = useState(() => loadPanels());
   const [chatTarget, setChatTarget] = useState('');
@@ -303,10 +369,18 @@ const Messaging = ({ initialKind = 'mixed', state }) => {
   }, []);
 
   const hydrate = useCallback(async () => {
-    const [serverConversations, serverJoinedRooms, serverPods] = await Promise.all([
+    const [
+      serverConversations,
+      serverJoinedRooms,
+      serverPods,
+      serverDiscoveredPods,
+    ] = await Promise.all([
       chat.getAll(),
       rooms.getJoined(),
       pods.list().catch(() => []),
+      compatibilityTarget === 'slskdn'
+        ? pods.discoverAll(50).catch(() => [])
+        : Promise.resolve([]),
     ]);
     const conversationsList = Array.isArray(serverConversations)
       ? serverConversations
@@ -315,15 +389,20 @@ const Messaging = ({ initialKind = 'mixed', state }) => {
       ? serverJoinedRooms
       : [];
     const podList = Array.isArray(serverPods) ? serverPods : [];
-    const podDetails = await Promise.all(
-      podList.map(async (pod) => {
-        try {
-          return await pods.get(pod.podId);
-        } catch {
-          return pod;
-        }
-      }),
-    );
+    const podDetails =
+      compatibilityTarget === 'slskdn'
+        ? Array.isArray(serverDiscoveredPods) && serverDiscoveredPods.length > 0
+          ? serverDiscoveredPods
+          : podList
+        : await Promise.all(
+            podList.map(async (pod) => {
+              try {
+                return await pods.get(pod.podId);
+              } catch {
+                return pod;
+              }
+            }),
+          );
 
     setConversations(
       conversationsList
@@ -351,7 +430,7 @@ const Messaging = ({ initialKind = 'mixed', state }) => {
         )
         .sort((a, b) => channelLabel(a).localeCompare(channelLabel(b))),
     );
-  }, []);
+  }, [compatibilityTarget]);
 
   const savedChatNames = useMemo(
     () =>
@@ -618,6 +697,10 @@ const Messaging = ({ initialKind = 'mixed', state }) => {
 
   const openPanels = panels.filter((panel) => !panel.collapsed);
   const collapsedPanels = panels.filter((panel) => panel.collapsed);
+
+  if (compatibilityTarget === 'slskdn') {
+    return <CompatibilityMessagingChrome onRefresh={() => hydrate()} />;
+  }
 
   return (
     <div className="messaging-workspace">

@@ -45,7 +45,7 @@ const saveTabsToStorage = (tabsToSave) => {
   );
 };
 
-const Rooms = () => {
+const Rooms = ({ compatibilityTarget } = {}) => {
   const navigate = useNavigate();
   const [tabs, setTabs] = useState(() => loadTabsFromStorage());
   const [activeIndex, setActiveIndex] = useState(0);
@@ -270,6 +270,20 @@ const Rooms = () => {
       </Tab.Pane>
     ),
   }));
+
+  if (compatibilityTarget === 'slskd') {
+    return (
+      <div className="rooms compatibility-rooms">
+        <button
+          aria-label="Open a new room tab"
+          onClick={() => handleAddTab()}
+          type="button"
+        >
+          Open a new room tab
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="rooms">

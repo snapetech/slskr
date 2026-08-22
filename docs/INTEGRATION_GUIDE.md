@@ -231,7 +231,7 @@ The CLI tool already has full async/HTTP implementation using `reqwest`. Just en
 
 ```bash
 # Terminal 1: API Server
-scripts/with-build-guard.sh cargo run --release
+scripts/with-build-guard.sh cargo run -p slskr --bin slskr --release
 
 # Terminal 2: Dashboard
 cd dashboard && npm run dev  # http://localhost:5173

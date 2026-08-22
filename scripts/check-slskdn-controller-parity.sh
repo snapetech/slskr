@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Route discovery, Node audits, and the replacement daemon through the hard
+# process guard when this controller check is launched directly.
+runner_repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [[ "${SLSKR_PROCESS_MEMORY_GUARD_HELD:-0}" != "1" ]]; then
+  "$runner_repo_root/scripts/with-build-guard.sh" cargo build -q -p slskr
+  exec "$runner_repo_root/scripts/with-process-memory-guard.sh" "${BASH_SOURCE[0]}" "$@"
+fi
+
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
@@ -53,6 +61,7 @@ git -C "$upstream_repo" archive "$slskd_ref" src/slskd | tar -x -C "$slskd_root"
 git -C "$upstream_repo" archive "$slskdn_ref" src/slskd | tar -x -C "$slskdn_root"
 http_port="${SLSKR_CONTROLLER_AUDIT_PORT:-$(pick_free_port)}"
 base_url="http://127.0.0.1:$http_port"
+overlay_bind="${SLSKR_CONTROLLER_AUDIT_OVERLAY_BIND:-127.0.0.1:$(pick_free_port)}"
 
 node scripts/check-slskdn-controller-auth-registry.mjs \
   --target slskd \
@@ -60,8 +69,6 @@ node scripts/check-slskdn-controller-auth-registry.mjs \
 node scripts/check-slskdn-controller-auth-registry.mjs \
   --target slskdn \
   --slskdn-root "$slskdn_root"
-scripts/with-build-guard.sh cargo build -q -p slskr
-
 (
   export SLSKR_HTTP_BIND="127.0.0.1:$http_port"
   export SLSKR_STATE_DIR="$state_dir"
@@ -71,6 +78,8 @@ scripts/with-build-guard.sh cargo build -q -p slskr
   # Route materialization does not exercise DHT I/O. Keep this gate isolated
   # from another slskdN-compatible process using the frozen default port 50305.
   export SLSKR_DHT_ENABLED=false
+  export SLSKR_OVERLAY_BIND="$overlay_bind"
+  export SLSKD_NO_HTTPS=true
   export SLSKR_API_RATE_LIMIT_ANONYMOUS=10000
   export SLSKR_CONTROLLER_AUDIT_MODE=1
   exec target/debug/slskr serve

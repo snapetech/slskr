@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# npm audit can load a large dependency graph. Bound direct invocations too.
+runner_repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [[ "${SLSKR_PROCESS_MEMORY_GUARD_HELD:-0}" != "1" ]]; then
+  exec "$runner_repo_root/scripts/with-process-memory-guard.sh" "${BASH_SOURCE[0]}" "$@"
+fi
+
 # React Router's current advisory applies only to its RSC/server-action
 # adapters. slskR uses BrowserRouter exclusively and ships no RSC runtime.
 # Keep the finding visible while failing on every vulnerability outside this

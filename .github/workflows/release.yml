@@ -318,7 +318,17 @@ jobs:
 
           ## Highlights
 
-          - Published verified binary archives and dependency manifests for all supported release targets.
+          - Compatibility-profile routing, authentication boundaries, Soulseek transport, transfer, messaging, discovery, and mesh contracts were expanded and exercised against the frozen controller surfaces.
+          - The React Web UI now has live MusicBrainz, SongID, discovery-graph, Discography, MediaCore, Soulseek, system, and Automation workflows, with headless route, viewport, error-state, and reconnect coverage.
+          - Rust and release tooling now enforce bounded memory, serialized Cargo execution, reproducible multi-platform archives, dependency manifests, checksums, and build provenance.
+          - Session stability was improved for fragmented Soulseek frames, SQLite event contention, optional distributed-parent failures, CSP-protected CodeMirror, and modal keyboard/stacking behavior.
+
+          ## Proof and detailed notes
+
+          - [Parity and live-interop evidence](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/docs/parity/universal-replacement-acceptance.md) records certified surfaces and explicit remaining boundaries.
+          - [Live interop matrix](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/docs/live-interop-test-matrix.md) records cross-client transactions and configuration-gated cases.
+          - [Release runbook](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/docs/release.md) documents the local gates and artifact contract.
+          - [Full structured release-note fragments](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/RELEASE_NOTES_FULL.md) contain the machine-validated detailed change record without making this summary a wall of text.
           EOF
           previous_tag="$(git describe --tags --match 'release-v*' --abbrev=0 "${GITHUB_SHA}^" 2>/dev/null || true)"
           release_notes_base="${previous_tag:-$(git hash-object -t tree /dev/null)}"
@@ -326,9 +336,10 @@ jobs:
             --base "$release_notes_base" \
             --head "$GITHUB_SHA" \
             --input release/RELEASE_NOTES.md \
-            --output release/RELEASE_NOTES.md
+            --output release/RELEASE_NOTES_FULL.md
           scripts/validate-changelog.sh "$RELEASE_VERSION"
           scripts/validate-release-notes.sh "$RELEASE_VERSION" release/RELEASE_NOTES.md
+          scripts/validate-release-notes.sh "$RELEASE_VERSION" release/RELEASE_NOTES_FULL.md
           cat release/RELEASE_NOTES.md
       - uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # softprops/action-gh-release@v3
         with:

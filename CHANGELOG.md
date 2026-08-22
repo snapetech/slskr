@@ -18,5 +18,14 @@ the release is prepared. Do not rewrite audited release history.
 
 ## [Unreleased]
 
-- Release validation now captures structured release details and publishes the
-  same curated summary in GitHub releases and Discord announcements.
+## [0.2.32] — 2026-08-21
+
+- Added bounded release, parity, interop, and browser-audit workflows with
+  structured release-note assembly and multi-platform archive publication.
+- Fixed compatibility-profile routing, protocol/session stability, persistence
+  contention handling, and the React Web UI's error, CSP, modal, and automation
+  surfaces.
+- Added live MusicBrainz, discovery, MediaCore, Soulseek, transfer, messaging,
+  and system-surface coverage to the acceptance evidence.
+- Published release pages now use a concise proof-linked summary while retaining
+  the complete structured fragment assembly as a downloadable release asset.

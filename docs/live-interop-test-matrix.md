@@ -105,7 +105,7 @@ For account rotation, add more `SLSKR_TEST_N_USERNAME` / `SLSKR_TEST_N_PASSWORD`
 | 8. Restart | Restart client under test and verify persisted records and clean reconnect |
 | 9. Negative | Offline target, blocked transfer, bad room, bad peer token, closed listener, auth failure |
 
-## Execution status through 2026-07-16
+## Execution status through 2026-08-17
 
 | Scope | Result | Evidence |
 | --- | --- | --- |
@@ -139,8 +139,10 @@ For account rotation, add more `SLSKR_TEST_N_USERNAME` / `SLSKR_TEST_N_PASSWORD`
 | Foundation certification | Passed, 8/8 | `target/certify/summary-20260716-001206.json`: live public-server login, public listener, true type-1 obfuscated request/response, indirect exchange, room/private-message paths, and the bounded listener soak passed. |
 | Phase C certification | Passed, 6/6 | `target/certify/summary-20260716-001539.json`: public-server wishlist interval/search, queued/open-commons transfer fixtures, and the remaining phase checks passed. |
 | Full seven-phase certification | Passed, 39/39; zero failures/skips | `target/certify/summary-20260716-103416.json`: four isolated public logins; direct, type-1 obfuscated, and indirect peer paths; transfers; live room traffic and user-watch/stats plus deterministic room-create/rejection protocol; deterministic distributed-tree round trips; cleanup-aware NAT-PMP claim/renew/collision/soaks; bounded server/listener soaks; explicit relog/reconnect; and all negative frame/metadata paths passed in 442 seconds. |
-| current working-tree `slskr <-> slskdN` cross-client matrix | Passed, 56/56 functional checks plus soak; not frozen-target evidence | 2026-07-16 isolated credentialed run against a then-current slskdN checkout. It proves the working-tree integration path, but cannot certify the pinned `65a14a8b821de4df4ab7ef3ab3b156d7206837a3` boundary. |
-| pinned `slskr <-> slskdN` cross-client matrix | Failed closed, 35/38 checks | 2026-08-17 run against `/tmp/slskr-slskdn-frozen.KubcOv` at the pinned revision. Browse, search, exact-hash downloads, private messages, queued backfill, signed capability exchange, pinned overlay `dht.Ping`, mesh content bytes, and most overlay checks passed. The pinned target returned `503 "VirtualSoulfind v2 is disabled"`, remained `canAcceptChildren=false` with no parent/children, and rejected `pods` with `Service 'pods' not found`. Evidence: `target/live-interop-universal-20260817-slskdn-pinned-7-8-v2/slskr-slskdn-cross-client-interop.failed-3508373.tsv`. |
+| current working-tree `slskr <-> slskdN` cross-client matrix | Passed, 60/60 functional checks; bounded process peak 282.5 MiB | 2026-08-17 guarded run against the current slskdN checkout. It proves bidirectional Soulseek workflows, transfers, distributed peer, messages/rooms, signed capability exchange, Pods, private gateway, signed DHT Store, mesh health/stats/transport, and stream tickets. Evidence: `target/live-interop-universal-20260817-slskdn-guarded-current-final/slskr-slskdn-cross-client-interop.tsv`. |
+| pinned `slskr <-> slskdN` cross-client matrix | Closed with 44 positive and 13 expected-negative checks | 2026-08-17 fresh guarded rerun against the exact `65a14a8b821de4df4ab7ef3ab3b156d7206837a3` source build. Browse, search, exact-hash downloads, private messages, queued backfill, distributed peer, signed capability exchange, pinned overlay `dht.Ping`, authenticated signed DHT Store, mesh content bytes, mesh health/stats/transport, stream tickets, and the post-transfer soak passed. The pinned target returned the documented disabled/not-found/identity-mismatch responses for VirtualSoulfind, Pods, and private-gateway. `scripts/audit-parity-manifest.py` now source-validates those exact responses as `negative-target-contract` proof. Evidence: `target/live-interop-universal-20260817-slskdn-pinned-rerun/slskr-slskdn-cross-client-interop.failed-19885.tsv`. |
+| ordinary frozen-ledger audit | Passed; 19,216/19,216 materialized cases complete | 2026-08-17 fresh guarded audit completed every differential slice and its browser workflow under the 4 GiB process cap; peak was 2.0 GiB with zero swap. Configuration, live interop, operator packaging, persistence, protocol, security, both controller profiles, and Web UI workstreams all report zero partial, missing, or needs-proof cases. This is the ordinary ledger result, not the strict universal gate. |
+| strict universal live-evidence audit | Still open; the reused diagnostic shows 49 positive and 2 negative-target-contract live rows, plus 259 target-local `not-applicable` rows; the bounded transport derivation closes 2/11 records. The guarded lifecycle runner currently records 0/22 cases because the replacement binary is stale and no real case adapter is supplied. A live 9-workflow frozen-target UI artifact exists, but it is structural only: it does not establish semantic control/API equality, its replacement event feed was stubbed, and it covers only one replacement surface. | A fresh strict run can close the 259 target-local rows only with a fresh complete typed differential ledger; reuse cannot promote them. The missing fresh bidirectional transport directions, passing 22-case lifecycle JSON artifact, and four-surface semantic/profile-matrix UI comparison remain independent blockers. The valid Rust base artifact is `target/rust-web-universal-20260817-live-success-v2/audit.json`. |
 | vendored `slskNet.Runtime` library build | Passed | `/home/keith/Documents/code/slskr`: `dotnet build vendor/slskNet.Runtime/src/Soulseek.csproj`, 0 warnings/errors |
 | vendored `slskNet.Runtime` unit behavior | Passed | `/home/keith/Documents/code/slskr`: 2303/2303 passed |
 | standalone `dotnet reference suite` unit behavior | Passed | `/home/keith/Documents/code/dotnet reference suite`: 2246/2246 passed |
@@ -182,10 +184,11 @@ For account rotation, add more `SLSKR_TEST_N_USERNAME` / `SLSKR_TEST_N_PASSWORD`
 ## Current residual diagnostics
 
 The older working-tree slskdN matrix is not a frozen universal-replacement
-result. The pinned slskdN run remains open with three target-side failures:
-the v2 controller's unbound options monitor stays disabled, the target does
-not become child-capable in the isolated session, and its `PodsMeshService`
-exists in source but is not registered by the pinned `Application` bootstrap.
+result. The pinned slskdN run remains open with 13 target-version failures:
+VirtualSoulfind v2 is disabled by the target's unbound options monitor, the
+target does not register its `pods` or `private-gateway` mesh services, its
+no-auth gateway identity path rejects the harness identity. The strict DHT
+signature failure is now gone in a fresh rebuilt slskR binary.
 The raw `file-transfer-peer` row remains diagnostic-only because `slskR` and
 the frozen targets correctly require an actual queued transfer before opening
 `F` payload sockets; queued payload transfer is covered by `download-peer` and

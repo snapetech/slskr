@@ -47,6 +47,49 @@ where
     Ok(MessageFrame::decode(&encoded)?)
 }
 
+/// Reads a message frame while retaining bytes received before a cancelled
+/// read. Tokio's `read_exact` is not cancellation-safe: cancelling it after
+/// it has consumed only part of a frame loses those bytes and desynchronizes
+/// the next frame boundary. Long-lived connections use this variant because
+/// their receive future is periodically cancelled by the session loop.
+pub async fn read_message_frame_buffered<R>(
+    reader: &mut R,
+    buffer: &mut Vec<u8>,
+    max_len: usize,
+) -> Result<MessageFrame, ClientError>
+where
+    R: AsyncRead + Unpin,
+{
+    loop {
+        if buffer.len() >= 4 {
+            let length = u32::from_le_bytes([buffer[0], buffer[1], buffer[2], buffer[3]]) as usize;
+            if length > max_len {
+                return Err(ClientError::FrameTooLarge {
+                    length,
+                    max: max_len,
+                });
+            }
+
+            let encoded_len = prefixed_frame_len(length, 4, max_len)?;
+            if buffer.len() >= encoded_len {
+                let encoded = buffer.drain(..encoded_len).collect::<Vec<_>>();
+                return Ok(MessageFrame::decode(&encoded)?);
+            }
+        }
+
+        let mut chunk = [0_u8; 8192];
+        let read = reader.read(&mut chunk).await?;
+        if read == 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "connection closed while reading a message frame",
+            )
+            .into());
+        }
+        buffer.extend_from_slice(&chunk[..read]);
+    }
+}
+
 pub async fn write_message_frame<W>(writer: &mut W, frame: &MessageFrame) -> Result<(), ClientError>
 where
     W: AsyncWrite + Unpin,

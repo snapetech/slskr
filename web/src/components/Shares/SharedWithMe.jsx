@@ -1,4 +1,5 @@
 import * as collectionsAPI from '../../lib/collections';
+import { toDisplayError } from '../../lib/errors';
 import * as identityAPI from '../../lib/identity';
 import * as streaming from '../../lib/streaming';
 import ErrorSegment from '../Shared/ErrorSegment';
@@ -90,7 +91,7 @@ export default class SharedWithMe extends Component {
       this.setState({
         error: isAuthOrFeatureError
           ? null
-          : error.response?.data || error.message,
+          : toDisplayError(error),
         loading: false,
       });
     }
@@ -135,7 +136,7 @@ export default class SharedWithMe extends Component {
       this.setState({ manifest: manifestRes.data, manifestLoading: false });
     } catch (error) {
       this.setState({
-        error: error.response?.data || error.message,
+        error: toDisplayError(error),
         manifestLoading: false,
       });
     }
@@ -155,11 +156,7 @@ export default class SharedWithMe extends Component {
       }
       safeOpenBlank(streaming.buildDirectStreamUrl(contentId));
     } catch (error) {
-      const message =
-        error.response?.data?.message ||
-        error.response?.data?.error ||
-        error.message ||
-        'Failed to start stream';
+      const message = toDisplayError(error, 'Failed to start stream');
       this.setState({ error: message });
       toast.error(message);
     }
@@ -185,11 +182,7 @@ export default class SharedWithMe extends Component {
         );
       }
     } catch (error) {
-      const errorMessage =
-        error.response?.data?.message ||
-        error.response?.data ||
-        error.message ||
-        'Failed to start backfill';
+      const errorMessage = toDisplayError(error, 'Failed to start backfill');
       this.setState({
         backfilling: false,
         backfillResult: null,

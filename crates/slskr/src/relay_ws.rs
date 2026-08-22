@@ -22,7 +22,7 @@ const MAX_SIGNALR_MESSAGE_BYTES: usize = 256 * 1024;
 const MAX_WEBSOCKET_FRAME_BYTES: u64 = 4 * 1024 * 1024;
 
 #[derive(Debug)]
-enum WebSocketFrame {
+pub(crate) enum WebSocketFrame {
     Text(String),
     Ping(Vec<u8>),
     Pong,
@@ -327,7 +327,7 @@ where
     write_signalr_json(writer, &completion).await
 }
 
-fn signalr_messages(text: &str) -> Result<Vec<String>, String> {
+pub(crate) fn signalr_messages(text: &str) -> Result<Vec<String>, String> {
     if text.len() > MAX_SIGNALR_MESSAGE_BYTES {
         return Err("relay SignalR message is too large".to_owned());
     }
@@ -342,14 +342,14 @@ fn signalr_messages(text: &str) -> Result<Vec<String>, String> {
     Ok(messages)
 }
 
-async fn write_signalr_json<W>(writer: &mut W, value: &Value) -> Result<(), String>
+pub(crate) async fn write_signalr_json<W>(writer: &mut W, value: &Value) -> Result<(), String>
 where
     W: AsyncWrite + Unpin,
 {
     write_signalr_text(writer, &value.to_string()).await
 }
 
-async fn write_signalr_text<W>(writer: &mut W, text: &str) -> Result<(), String>
+pub(crate) async fn write_signalr_text<W>(writer: &mut W, text: &str) -> Result<(), String>
 where
     W: AsyncWrite + Unpin,
 {
@@ -358,7 +358,11 @@ where
     write_ws_frame(writer, 0x81, &payload).await
 }
 
-async fn write_ws_frame<W>(writer: &mut W, opcode: u8, payload: &[u8]) -> Result<(), String>
+pub(crate) async fn write_ws_frame<W>(
+    writer: &mut W,
+    opcode: u8,
+    payload: &[u8],
+) -> Result<(), String>
 where
     W: AsyncWrite + Unpin,
 {
@@ -389,7 +393,7 @@ where
     writer.flush().await.map_err(|error| error.to_string())
 }
 
-async fn read_ws_frame<R>(reader: &mut R) -> Result<WebSocketFrame, String>
+pub(crate) async fn read_ws_frame<R>(reader: &mut R) -> Result<WebSocketFrame, String>
 where
     R: AsyncRead + Unpin,
 {

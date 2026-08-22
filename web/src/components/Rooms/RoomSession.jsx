@@ -138,7 +138,18 @@ class RoomSession extends Component {
   };
 
   formatTimestamp = (timestamp) => {
-    const date = new Date(timestamp);
+    const numericTimestamp = Number(timestamp);
+    const date = new Date(
+      Number.isFinite(numericTimestamp) && numericTimestamp > 0
+        ? numericTimestamp < 10_000_000_000
+          ? numericTimestamp * 1_000
+          : numericTimestamp
+        : timestamp,
+    );
+    if (Number.isNaN(date.getTime())) {
+      return 'Unknown time';
+    }
+
     const dtfUS = new Intl.DateTimeFormat('en', {
       day: 'numeric',
       hour: 'numeric',

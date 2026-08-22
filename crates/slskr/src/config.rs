@@ -1401,11 +1401,19 @@ impl AppConfig {
                 .unwrap_or_else(|| "off".to_owned())
                 .as_str(),
         )?;
-        let virtual_soulfind_v2_enabled = env_bool_layer(
+        let requested_virtual_soulfind_v2_enabled = env_bool_layer(
             env,
             "SLSKR_VIRTUAL_SOULFIND_V2_ENABLED",
             file_config.virtual_soulfind_v2.enabled.unwrap_or(true),
         )?;
+        // Neither frozen compatibility target exposes an enabled v2
+        // VirtualSoulfind surface: slskd has no v2 controller, while the
+        // pinned slskdN runtime's controller is permanently disabled because
+        // its separate options registration is not configuration-bound.
+        // Preserve parsing/validation of the request, but project the
+        // target-compatible runtime boundary here.
+        let _ = requested_virtual_soulfind_v2_enabled;
+        let virtual_soulfind_v2_enabled = false;
         let mut integrations = IntegrationSettings::from_layers(file_config.integrations, env)?;
         integrations.external_visualizer = media_services.external_visualizer.clone();
 
@@ -1784,7 +1792,7 @@ pub enum ControllerCompatibilityTarget {
 }
 
 impl ControllerCompatibilityTarget {
-    fn parse(value: &str) -> Result<Self, String> {
+    pub(crate) fn parse(value: &str) -> Result<Self, String> {
         match value.trim().to_ascii_lowercase().as_str() {
             "slskd" => Ok(Self::Slskd),
             "slskdn" => Ok(Self::Slskdn),
@@ -2248,7 +2256,7 @@ pub struct MediaAdvancedServiceSettings {
     pub virtual_soulfind: VirtualSoulfindSettings,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct FeatureGateSettings {
     pub collections_sharing: bool,
     pub streaming: bool,
@@ -9585,7 +9593,16 @@ fn resolve_controller_web_auth<E: ConfigEnv>(
         .or(web_auth_username)
         .unwrap_or_else(|| "slskd".to_owned());
     let configured_web_auth_password = env.var("SLSKD_PASSWORD").or(web_auth_password);
-    let controller_web_auth_password = configured_web_auth_password.clone().unwrap_or_default();
+    let controller_web_auth_password = configured_web_auth_password.clone().unwrap_or_else(|| {
+        if auth_required {
+            // Both frozen profiles authenticate with the generated-config
+            // default when no password layer overrides it. No-auth mode
+            // keeps the credential empty because it is not used.
+            "slskd".to_owned()
+        } else {
+            String::new()
+        }
+    });
     let mut web_auth_fields = vec![("username", controller_web_auth_username.as_str())];
     if auth_required && configured_web_auth_password.is_some() {
         web_auth_fields.push(("password", controller_web_auth_password.as_str()));
@@ -9993,49 +10010,61 @@ fn resolve_listener_and_obfuscation<E: ConfigEnv>(
         listeners_advertised_port,
         listen_port,
     )?;
-    let upstream_obfuscated_port =
-        env_parse_any_option(env, &["SLSKD_SLSK_OBFUSCATION_LISTEN_PORT"])?;
-    let obfuscated_listener_bind = env
-        .var("SLSKR_OBFUSCATED_LISTENER_BIND")
-        .or_else(|| {
-            upstream_obfuscated_port
-                .filter(|port| *port != 0)
-                .map(|port| {
-                    let host = listener_bind
-                        .as_deref()
-                        .and_then(|value| value.parse::<SocketAddr>().ok())
-                        .map_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED), |bind| bind.ip());
-                    SocketAddr::new(host, port).to_string()
-                })
-        })
-        .or(listeners_obfuscated_bind)
-        .or_else(|| {
-            (controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
-                && listen_port < 65_535)
-                .then(|| {
+    // Frozen slskd has no Soulseek type-1 obfuscation option or listener. The
+    // fields are accepted by the shared configuration model because they are
+    // part of the slskdN profile, but they must not silently turn the slskd
+    // replacement into a different network endpoint. Ignore those
+    // slskdN-only layers for the slskd profile and keep the runtime projection
+    // disabled below.
+    let supports_soulseek_obfuscation =
+        controller_compatibility_target == ControllerCompatibilityTarget::Slskdn;
+    let upstream_obfuscated_port = if supports_soulseek_obfuscation {
+        env_parse_any_option(env, &["SLSKD_SLSK_OBFUSCATION_LISTEN_PORT"])?
+    } else {
+        None
+    };
+    let obfuscated_listener_bind = if supports_soulseek_obfuscation {
+        env.var("SLSKR_OBFUSCATED_LISTENER_BIND")
+            .or_else(|| {
+                upstream_obfuscated_port
+                    .filter(|port| *port != 0)
+                    .map(|port| {
+                        let host = listener_bind
+                            .as_deref()
+                            .and_then(|value| value.parse::<SocketAddr>().ok())
+                            .map_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED), |bind| bind.ip());
+                        SocketAddr::new(host, port).to_string()
+                    })
+            })
+            .or(listeners_obfuscated_bind)
+            .or_else(|| {
+                (listen_port < 65_535).then(|| {
                     let host = listener_bind
                         .as_deref()
                         .and_then(|value| value.parse::<SocketAddr>().ok())
                         .map_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED), |bind| bind.ip());
                     SocketAddr::new(host, (listen_port + 1) as u16).to_string()
                 })
-        });
-    let obfuscated_advertised_port = if env.var("SLSKR_OBFUSCATED_ADVERTISED_PORT").is_some() {
-        env_parse_option_layer(
-            env,
-            "SLSKR_OBFUSCATED_ADVERTISED_PORT",
-            listeners_obfuscated_advertised_port,
-        )?
-    } else {
-        upstream_obfuscated_port
-            .filter(|port| *port != 0)
-            .map(u32::from)
-            .or(listeners_obfuscated_advertised_port)
-            .or_else(|| {
-                (controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
-                    && listen_port < 65_535)
-                    .then_some(listen_port + 1)
             })
+    } else {
+        None
+    };
+    let obfuscated_advertised_port = if supports_soulseek_obfuscation {
+        if env.var("SLSKR_OBFUSCATED_ADVERTISED_PORT").is_some() {
+            env_parse_option_layer(
+                env,
+                "SLSKR_OBFUSCATED_ADVERTISED_PORT",
+                listeners_obfuscated_advertised_port,
+            )?
+        } else {
+            upstream_obfuscated_port
+                .filter(|port| *port != 0)
+                .map(u32::from)
+                .or(listeners_obfuscated_advertised_port)
+                .or_else(|| (listen_port < 65_535).then_some(listen_port + 1))
+        }
+    } else {
+        None
     };
     let overlay_bind = env
         .var("SLSKR_OVERLAY_BIND")
@@ -10062,37 +10091,59 @@ fn resolve_listener_and_obfuscation<E: ConfigEnv>(
     let dht_port = advanced_networking.dht.dht_port;
     let trusted_mesh_peers =
         trusted_mesh_peers_from_layers(env.var("SLSKR_TRUSTED_MESH_PEERS"), mesh_trusted_peers)?;
-    let obfuscation_enabled = env_bool_any_layer(
-        env,
-        &["SLSK_OBFUSCATION", "SLSKD_SLSK_OBFUSCATION"],
-        obfuscation_enabled_file.unwrap_or(true),
-    )?;
-    let obfuscation_mode = SoulseekObfuscationMode::parse(
-        optional_env_any(
+    let (
+        obfuscation_enabled,
+        obfuscation_mode,
+        obfuscation_listen_port,
+        obfuscation_advertise_regular_port,
+        obfuscation_prefer_outbound,
+    ) = if supports_soulseek_obfuscation {
+        let enabled = env_bool_any_layer(
             env,
-            &["SLSK_OBFUSCATION_MODE", "SLSKD_SLSK_OBFUSCATION_MODE"],
+            &["SLSK_OBFUSCATION", "SLSKD_SLSK_OBFUSCATION"],
+            obfuscation_enabled_file.unwrap_or(true),
+        )?;
+        let mode = SoulseekObfuscationMode::parse(
+            optional_env_any(
+                env,
+                &["SLSK_OBFUSCATION_MODE", "SLSKD_SLSK_OBFUSCATION_MODE"],
+            )
+            .or(obfuscation_mode_file)
+            .as_deref()
+            .unwrap_or("compatibility"),
+        )?;
+        let advertise_regular_port = env_bool_any_layer(
+            env,
+            &[
+                "SLSK_OBFUSCATION_ADVERTISE_REGULAR_PORT",
+                "SLSKD_SLSK_OBFUSCATION_ADVERTISE_REGULAR_PORT",
+            ],
+            obfuscation_advertise_regular_port_file.unwrap_or(true),
+        )?;
+        let prefer_outbound = env_bool_any_layer(
+            env,
+            &[
+                "SLSK_OBFUSCATION_PREFER_OUTBOUND",
+                "SLSKD_SLSK_OBFUSCATION_PREFER_OUTBOUND",
+            ],
+            obfuscation_prefer_outbound_file.unwrap_or(true),
+        )?;
+        (
+            enabled,
+            mode,
+            u32::from(upstream_obfuscated_port.unwrap_or_default()),
+            advertise_regular_port,
+            prefer_outbound,
         )
-        .or(obfuscation_mode_file)
-        .as_deref()
-        .unwrap_or("compatibility"),
-    )?;
-    let obfuscation_listen_port = u32::from(upstream_obfuscated_port.unwrap_or_default());
-    let obfuscation_advertise_regular_port = env_bool_any_layer(
-        env,
-        &[
-            "SLSK_OBFUSCATION_ADVERTISE_REGULAR_PORT",
-            "SLSKD_SLSK_OBFUSCATION_ADVERTISE_REGULAR_PORT",
-        ],
-        obfuscation_advertise_regular_port_file.unwrap_or(true),
-    )?;
-    let obfuscation_prefer_outbound = env_bool_any_layer(
-        env,
-        &[
-            "SLSK_OBFUSCATION_PREFER_OUTBOUND",
-            "SLSKD_SLSK_OBFUSCATION_PREFER_OUTBOUND",
-        ],
-        obfuscation_prefer_outbound_file.unwrap_or(true),
-    )?;
+    } else {
+        (
+            false,
+            SoulseekObfuscationMode::Compatibility,
+            0,
+            true,
+            false,
+        )
+    };
     Ok(ListenerAndObfuscationResolution {
         listener_bind,
         advertised_port,
@@ -11566,11 +11617,6 @@ mod tests {
             .with("SLSKD_SLSK_LISTEN_IP_ADDRESS", "0.0.0.0")
             .with("SLSKD_SLSK_LISTEN_PORT", "55031")
             .with("SLSKD_SLSK_DESCRIPTION", "upstream description")
-            .with("SLSKD_SLSK_OBFUSCATION", "true")
-            .with("SLSKD_SLSK_OBFUSCATION_MODE", "prefer")
-            .with("SLSKD_SLSK_OBFUSCATION_LISTEN_PORT", "55032")
-            .with("SLSKD_SLSK_OBFUSCATION_ADVERTISE_REGULAR_PORT", "true")
-            .with("SLSKD_SLSK_OBFUSCATION_PREFER_OUTBOUND", "false")
             .with(
                 "SLSKD_DOWNLOAD_COMPLETED_PATH_TEMPLATE",
                 "{uploader}/{remote_folder}",
@@ -11592,16 +11638,14 @@ mod tests {
         assert_eq!(config.password.as_deref(), Some("upstream-password"));
         assert_eq!(config.listen_port, 55031);
         assert_eq!(config.listener_bind.as_deref(), Some("0.0.0.0:55031"));
-        assert_eq!(
-            config.obfuscated_listener_bind.as_deref(),
-            Some("0.0.0.0:55032")
-        );
-        assert_eq!(config.obfuscated_advertised_port, Some(55032));
-        assert_eq!(config.obfuscation_listen_port, 55032);
+        assert!(!config.obfuscation_enabled);
+        assert!(config.obfuscated_listener_bind.is_none());
+        assert!(config.obfuscated_advertised_port.is_none());
+        assert_eq!(config.obfuscation_listen_port, 0);
         assert!(config.obfuscation_advertise_regular_port);
         assert_eq!(
             config.obfuscation_mode,
-            super::SoulseekObfuscationMode::Prefer
+            super::SoulseekObfuscationMode::Compatibility
         );
         assert!(!config.obfuscation_prefer_outbound);
         assert_eq!(
@@ -11940,18 +11984,20 @@ mod tests {
         assert_eq!(config.user_info_description, "yaml description");
         assert_eq!(config.listen_port, 55100);
         assert_eq!(config.listener_bind.as_deref(), Some("0.0.0.0:55100"));
-        assert_eq!(
-            config.obfuscated_listener_bind.as_deref(),
-            Some("0.0.0.0:55101")
-        );
+        // The frozen slskd profile does not expose the slskdN-only Soulseek
+        // type-1 obfuscation listener or parse its obfuscation settings, so
+        // the YAML `soulseek.obfuscation` block above is ignored for this
+        // target. See release-notes/20260817-slskd-obfuscation-profile.md
+        // and slskd_profile_does_not_expose_slskdn_type1_obfuscation_layers.
+        assert!(config.obfuscated_listener_bind.is_none());
         assert_eq!(config.http_bind, "127.0.0.3:55102".parse().unwrap());
         assert!(!config.dht_enabled);
         assert_eq!(config.dht_port, 55200);
         assert_eq!(
             config.obfuscation_mode,
-            super::SoulseekObfuscationMode::Prefer
+            super::SoulseekObfuscationMode::Compatibility
         );
-        assert_eq!(config.obfuscation_listen_port, 55101);
+        assert_eq!(config.obfuscation_listen_port, 0);
         assert!(config.obfuscation_advertise_regular_port);
         assert!(!config.obfuscation_prefer_outbound);
         assert_eq!(
@@ -12998,14 +13044,22 @@ mod tests {
     }
 
     #[test]
-    fn controller_web_auth_requires_an_explicit_password_when_enabled() {
-        let missing_password = super::AppConfig::from_layers(
+    fn controller_web_auth_defaults_match_frozen_profiles() {
+        let slskd_default = super::AppConfig::from_layers(
+            None,
+            super::FileConfig::default(),
+            &MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd"),
+        )
+        .expect("slskd compatibility default authentication");
+        assert_eq!(slskd_default.controller_web_auth_password, "slskd");
+
+        let slskdn_default = super::AppConfig::from_layers(
             None,
             super::FileConfig::default(),
             &MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
         )
-        .expect("missing web password must not create a built-in credential");
-        assert!(missing_password.controller_web_auth_password.is_empty());
+        .expect("slskdN compatibility default authentication");
+        assert_eq!(slskdn_default.controller_web_auth_password, "slskd");
 
         let disabled = super::AppConfig::from_layers(
             None,
@@ -13191,6 +13245,35 @@ mod tests {
     }
 
     #[test]
+    fn slskd_profile_does_not_expose_slskdn_type1_obfuscation_layers() {
+        let slskd = super::AppConfig::from_layers(
+            None,
+            super::FileConfig::default(),
+            &MapEnv::default()
+                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd")
+                // These are deliberately malformed slskdN-only layers. The
+                // frozen slskd profile does not parse or expose them.
+                .with("SLSKD_SLSK_OBFUSCATION", "not-a-boolean")
+                .with("SLSKD_SLSK_OBFUSCATION_MODE", "not-a-mode")
+                .with("SLSKD_SLSK_OBFUSCATION_LISTEN_PORT", "not-a-port")
+                .with("SLSKR_OBFUSCATED_LISTENER_BIND", "127.0.0.1:50101")
+                .with("SLSKR_OBFUSCATED_ADVERTISED_PORT", "not-a-port"),
+        )
+        .expect("slskd-only profile must ignore slskdN obfuscation layers");
+
+        assert!(!slskd.obfuscation_enabled);
+        assert_eq!(
+            slskd.obfuscation_mode,
+            super::SoulseekObfuscationMode::Compatibility
+        );
+        assert_eq!(slskd.obfuscation_listen_port, 0);
+        assert!(slskd.obfuscation_advertise_regular_port);
+        assert!(!slskd.obfuscation_prefer_outbound);
+        assert!(slskd.obfuscated_listener_bind.is_none());
+        assert!(slskd.obfuscated_advertised_port.is_none());
+    }
+
+    #[test]
     fn pod_join_signature_modes_are_validated() {
         let default =
             super::AppConfig::from_layers(None, super::FileConfig::default(), &MapEnv::default())
@@ -13223,11 +13306,14 @@ mod tests {
     }
 
     #[test]
-    fn virtual_soulfind_v2_defaults_enabled_and_honors_file_and_env_layers() {
-        let default =
-            super::AppConfig::from_layers(None, super::FileConfig::default(), &MapEnv::default())
-                .expect("default VirtualSoulfind v2 config");
-        assert!(default.virtual_soulfind_v2_enabled);
+    fn virtual_soulfind_v2_is_unavailable_in_both_target_profiles() {
+        let default = super::AppConfig::from_layers(
+            None,
+            super::FileConfig::default(),
+            &MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+        )
+        .expect("default slskdN VirtualSoulfind v2 config");
+        assert!(!default.virtual_soulfind_v2_enabled);
 
         let file_disabled = super::AppConfig::from_layers(
             None,
@@ -13237,7 +13323,7 @@ mod tests {
                 },
                 ..super::FileConfig::default()
             },
-            &MapEnv::default(),
+            &MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd"),
         )
         .expect("file-disabled VirtualSoulfind v2 config");
         assert!(!file_disabled.virtual_soulfind_v2_enabled);
@@ -13250,13 +13336,15 @@ mod tests {
                 },
                 ..super::FileConfig::default()
             },
-            &MapEnv::default().with("SLSKR_VIRTUAL_SOULFIND_V2_ENABLED", "true"),
+            &MapEnv::default()
+                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn")
+                .with("SLSKR_VIRTUAL_SOULFIND_V2_ENABLED", "true"),
         )
         .expect("environment-enabled VirtualSoulfind v2 config");
-        assert!(env_enabled.virtual_soulfind_v2_enabled);
+        assert!(!env_enabled.virtual_soulfind_v2_enabled);
         assert!(env_enabled
             .sanitized_json()
-            .contains("\"virtual_soulfind_v2_enabled\":true"));
+            .contains("\"virtual_soulfind_v2_enabled\":false"));
     }
 
     #[test]

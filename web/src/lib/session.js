@@ -1,6 +1,11 @@
 import { tokenPassthroughValue } from '../config';
 import api, { getCsrfTokenFromCookieString } from './api';
-import { clearToken, getToken, setToken } from './token';
+import {
+  clearToken,
+  getToken,
+  isPassthroughEnabled,
+  setToken,
+} from './token';
 
 export const getSecurityEnabled = async () => {
   return (await api.get('/session/enabled')).data;
@@ -42,7 +47,7 @@ export const logout = () => {
 };
 
 export const check = async () => {
-  if (!isLoggedIn()) {
+  if (!isLoggedIn() && !isPassthroughEnabled()) {
     return false;
   }
 

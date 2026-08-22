@@ -1,5 +1,6 @@
 import * as discoveryGraph from '../../lib/discoveryGraph';
 import * as searches from '../../lib/searches';
+import { toDisplayError } from '../../lib/errors';
 import { resolveTarget } from '../../lib/musicBrainz';
 import React, { useMemo, useState } from 'react';
 import { toast } from 'react-toastify';
@@ -13,6 +14,25 @@ import {
   Segment,
 } from 'semantic-ui-react';
 import DiscoveryGraphModal from './DiscoveryGraphModal';
+
+const isObject = (value) =>
+  value !== null && typeof value === 'object' && !Array.isArray(value);
+
+const normalizeResolvedTarget = (data) => {
+  if (!isObject(data)) {
+    return null;
+  }
+
+  if (isObject(data.album)) {
+    return { album: data.album };
+  }
+
+  if (isObject(data.track)) {
+    return { track: data.track };
+  }
+
+  return null;
+};
 
 const MusicBrainzLookup = ({ disabled }) => {
   const [releaseInput, setReleaseInput] = useState('');
@@ -35,9 +55,7 @@ const MusicBrainzLookup = ({ disabled }) => {
       setGraphData(graph);
     } catch (error) {
       console.error(error);
-      toast.error(
-        error?.response?.data ?? error?.message ?? 'Failed to build discovery graph',
-      );
+      toast.error(toDisplayError(error, 'Failed to build discovery graph'));
       setGraphOpen(false);
     } finally {
       setGraphLoading(false);
@@ -60,18 +78,21 @@ const MusicBrainzLookup = ({ disabled }) => {
       };
 
       const response = await resolveTarget(payload);
-      setTarget(response.data);
+      const resolvedTarget = normalizeResolvedTarget(response.data);
+      if (!resolvedTarget) {
+        throw new Error('MusicBrainz target response did not include a target');
+      }
+
+      setTarget(resolvedTarget);
 
       toast.success(
-        response.data.album
-          ? `Loaded album ${response.data.album.title}`
-          : `Loaded track ${response.data.track?.title}`,
+        resolvedTarget.album
+          ? `Loaded album ${resolvedTarget.album.title}`
+          : `Loaded track ${resolvedTarget.track?.title}`,
       );
     } catch (error) {
       console.error(error);
-      toast.error(
-        error?.response?.data ?? error?.message ?? 'Failed to resolve target',
-      );
+      toast.error(toDisplayError(error, 'Failed to resolve target'));
     } finally {
       setLoading(false);
     }
@@ -186,9 +207,7 @@ const MusicBrainzLookup = ({ disabled }) => {
       toast.success(`Started ${count} nearby graph searches`);
     } catch (error) {
       console.error(error);
-      toast.error(
-        error?.response?.data ?? error?.message ?? 'Failed to queue nearby searches',
-      );
+      toast.error(toDisplayError(error, 'Failed to queue nearby searches'));
     }
   };
 

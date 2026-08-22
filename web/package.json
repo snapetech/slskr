@@ -78,14 +78,14 @@
     "pretest:e2e": "npm run build",
     "pretest:e2e:ci": "npm run build",
     "start": "vite",
-    "test": "vitest run",
+    "test": "vitest run --maxWorkers=1",
     "test:build-output": "node ./scripts/verify-build-output.mjs",
     "test:e2e": "playwright test",
     "test:e2e:ci": "playwright test --reporter=line",
     "test:rustymilk-compatibility": "node ./scripts/report-rustymilk-compatibility.mjs",
     "test:rustymilk-performance": "node ./scripts/measure-rustymilk-performance.mjs",
     "test:rustymilk-smoke": "node ./scripts/smoke-rustymilk.mjs",
-    "test-unattended": "vitest run"
+    "test-unattended": "vitest run --maxWorkers=1"
   },
   "version": "0.1.0"
 }

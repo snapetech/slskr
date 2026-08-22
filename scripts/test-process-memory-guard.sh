@@ -22,6 +22,15 @@ if [[ "$fallback_limit" != "262144" ]]; then
   exit 1
 fi
 
+fallback_marker="$(
+  SLSKR_PROCESS_MEMORY_GUARD_DISABLE_SYSTEMD=1 \
+    "$guard" bash -c 'printf "%s" "$SLSKR_PROCESS_MEMORY_GUARD_HELD"'
+)"
+if [[ "$fallback_marker" != "1" ]]; then
+  printf 'Process memory guard test failed: fallback nesting marker was %s\n' "$fallback_marker" >&2
+  exit 1
+fi
+
 node_options="$(
   SLSKR_PROCESS_MEMORY_GUARD_DISABLE_SYSTEMD=1 \
     "$guard" node -e 'process.stdout.write(process.env.NODE_OPTIONS || "")'

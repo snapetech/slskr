@@ -36,6 +36,7 @@ stop_daemon() {
 start_daemon() {
   local target="$1"
   local port="$2"
+  local overlay_port="${SLSKR_AUTH_PROFILES_OVERLAY_PORT:-$(pick_free_port)}"
   local state_dir="$work_dir/$target-state"
   mkdir -p "$state_dir"
   (
@@ -48,6 +49,9 @@ start_daemon() {
     export SLSKR_API_READ_ONLY_TOKEN=read-token
     export SLSKR_AUTO_CONNECT=false
     export SLSKR_RECONNECT=false
+    export SLSKR_DHT_ENABLED=false
+    export SLSKR_OVERLAY_BIND="127.0.0.1:$overlay_port"
+    export SLSKD_NO_HTTPS=true
     exec target/debug/slskr serve
   ) >"$work_dir/$target.log" 2>&1 &
   daemon_pid="$!"

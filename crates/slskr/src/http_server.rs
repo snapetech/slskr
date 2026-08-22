@@ -950,10 +950,18 @@ pub async fn write_file_response<W: AsyncWrite + Unpin>(
 fn body_with_content_security_policy(response: &HttpResponse) -> Result<(String, String), String> {
     if response.content_type.starts_with("text/html") {
         let nonce = csp_nonce()?;
-        let body = response
+        let mut body = response
             .body
             .replace("<script>", &format!(r#"<script nonce="{nonce}">"#))
             .replace("<style>", &format!(r#"<style nonce="{nonce}">"#));
+        let nonce_meta = format!(r#"<meta name="csp-nonce" content="{nonce}">"#);
+        if body.contains("</head>") {
+            body = body.replace("</head>", &format!("{nonce_meta}</head>"));
+        } else if body.contains("<body") {
+            body = body.replace("<body", &format!("{nonce_meta}<body"));
+        } else {
+            body.insert_str(0, &nonce_meta);
+        }
         let header = format!(
             "Content-Security-Policy: default-src 'self'; base-uri 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self' 'nonce-{nonce}'; style-src 'self' 'nonce-{nonce}'; img-src 'self' data:; connect-src 'self' ws: wss:\r\n"
         );
@@ -1681,6 +1689,7 @@ mod tests {
         assert!(raw.contains("'nonce-"));
         assert!(raw.contains("<style nonce=\""));
         assert!(raw.contains("<script nonce=\""));
+        assert!(raw.contains("<meta name=\"csp-nonce\" content=\""));
         assert!(!raw.contains("'unsafe-inline'"));
         assert!(!raw.contains("wasm-unsafe-eval"));
     }

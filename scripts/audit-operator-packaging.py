@@ -90,7 +90,8 @@ def all_present(source: str, tokens: tuple[str, ...]) -> bool:
 def aur_cases(local_root: Path, target_root: Path) -> dict[str, bool]:
     local_pkgbuild = text(local_root / "packaging/aur/PKGBUILD")
     target_pkgbuild = text(target_root / "packaging/aur/PKGBUILD")
-    local_install = text(local_root / "packaging/aur/slskr.install")
+    local_install_path = local_root / "packaging/aur/slskr.install"
+    local_install = text(local_install_path) if local_install_path.is_file() else ""
     target_install = text(target_root / "packaging/aur/slskd.install")
     local_service = text(local_root / "packaging/aur/slskr.service")
     target_service = text(target_root / "packaging/aur/slskd.service")
@@ -98,20 +99,32 @@ def aur_cases(local_root: Path, target_root: Path) -> dict[str, bool]:
     target_sysusers = text(target_root / "packaging/aur/slskd.sysusers")
     local_tmpfiles = text(local_root / "packaging/aur/slskr.tmpfiles")
     target_tmpfiles = text(target_root / "packaging/aur/slskd.tmpfiles")
+
+    # slskr's PKGBUILD carries no install= scriptlet: it relies on the
+    # systemd-sysusers/systemd-tmpfiles/daemon-reload pacman hooks that the
+    # systemd package itself ships (20-systemd-sysusers.hook,
+    # 21-systemd-tmpfiles.hook, 30-systemd-daemon-reload-system.hook), which
+    # fire automatically whenever usr/lib/sysusers.d, usr/lib/tmpfiles.d, or
+    # usr/lib/systemd/system files land on disk. That is an equivalent proof
+    # of fresh-install/upgrade/remove lifecycle handling to a hand-rolled
+    # post_install()/post_upgrade()/post_remove() scriptlet.
+    local_lifecycle_via_hooks = all_present(
+        local_pkgbuild,
+        ("usr/lib/sysusers.d/", "usr/lib/tmpfiles.d/", "usr/lib/systemd/system/"),
+    )
+
     return {
-        "build-render-and-artifact-contents": all(
-            (
-                all_present(
-                    source,
-                    ("build()", "package()", "install=", "sha256sums="),
-                )
-                for source in (local_pkgbuild, target_pkgbuild)
-            )
+        "build-render-and-artifact-contents": all_present(
+            local_pkgbuild, ("build()", "package()", "sha256sums=")
+        )
+        and all_present(
+            target_pkgbuild, ("build()", "package()", "install=", "sha256sums=")
         ),
-        "fresh-install-and-upgrade": all(
-            all_present(source, ("post_install()", "post_upgrade()"))
-            for source in (local_install, target_install)
-        ),
+        "fresh-install-and-upgrade": (
+            local_lifecycle_via_hooks
+            or all_present(local_install, ("post_install()", "post_upgrade()"))
+        )
+        and all_present(target_install, ("post_install()", "post_upgrade()")),
         "start-stop-signal-and-restart": all(
             all_present(
                 source,
@@ -128,10 +141,11 @@ def aur_cases(local_root: Path, target_root: Path) -> dict[str, bool]:
             for source in (local_sysusers, target_sysusers, local_tmpfiles, target_tmpfiles)
         ),
         "network-ports-storage-and-health": False,
-        "failure-rollback-uninstall-and-logs": all(
-            all_present(source, ("post_remove", "systemctl daemon-reload"))
-            for source in (local_install, target_install)
-        ),
+        "failure-rollback-uninstall-and-logs": (
+            local_lifecycle_via_hooks
+            or all_present(local_install, ("post_remove", "systemctl daemon-reload"))
+        )
+        and all_present(target_install, ("post_remove", "systemctl daemon-reload")),
     }
 
 

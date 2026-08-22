@@ -62,7 +62,7 @@ impl PodChannelStore {
         })
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "bounded-differential"))]
     pub fn empty(state_dir: &Path) -> Self {
         Self {
             messages: Vec::new(),

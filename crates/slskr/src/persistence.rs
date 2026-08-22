@@ -11,7 +11,7 @@ use sqlx_sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions, SqliteRow
 use std::fs::OpenOptions;
 #[cfg(unix)]
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[cfg(unix)]
 fn prepare_private_database_file(db_path: &str) -> std::io::Result<()> {
@@ -1016,7 +1016,7 @@ impl std::fmt::Debug for DatabaseManager {
 }
 
 impl DatabaseManager {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "bounded-differential"))]
     pub async fn close_for_test(&self) {
         self.pool.close().await;
     }
@@ -1026,7 +1026,7 @@ impl DatabaseManager {
     /// (values a normal insert path could never produce, thanks to
     /// SQLite's weak column typing) so a differential test can prove the
     /// real rehydration path fails cleanly instead of panicking.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "bounded-differential"))]
     pub async fn execute_raw_for_test(&self, sql: &str) -> Result<(), Box<dyn std::error::Error>> {
         // sqlx's `query()` ties its statement cache key to a `'static`
         // str; leaking a small owned copy here is fine for a test-only
@@ -1036,7 +1036,7 @@ impl DatabaseManager {
         Ok(())
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "bounded-differential"))]
     pub async fn fail_oauth_delete_for_test(&self) -> Result<(), Box<dyn std::error::Error>> {
         query(
             r#"
@@ -1059,10 +1059,18 @@ impl DatabaseManager {
 
         let connect_options = SqliteConnectOptions::new()
             .filename(db_path)
-            .create_if_missing(true);
+            .create_if_missing(true)
+            // SQLite has a single-writer lock.  The controller records HTTP,
+            // daemon, and protocol events concurrently, so let SQLite wait
+            // briefly for the writer instead of surfacing transient lock
+            // errors as a false session failure.
+            .busy_timeout(Duration::from_secs(30));
 
         let pool = SqlitePoolOptions::new()
-            .max_connections(5)
+            // A single connection makes file-backed writes obey SQLite's
+            // single-writer model and keeps event journaling deterministic
+            // under concurrent Web UI/API traffic.
+            .max_connections(1)
             .connect_with(connect_options)
             .await?;
 

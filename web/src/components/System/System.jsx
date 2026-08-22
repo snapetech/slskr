@@ -26,7 +26,7 @@ import React, { useEffect, useRef } from 'react';
 import { Navigate, useNavigate, useParams } from 'react-router-dom';
 import { Icon, Menu, Segment, Tab } from 'semantic-ui-react';
 
-const System = ({ options = {}, state = {}, theme }) => {
+const System = ({ compatibilityTarget, options = {}, state = {}, theme }) => {
   const navigate = useNavigate();
   const { tab } = useParams();
   const systemRef = useRef(null);
@@ -54,6 +54,7 @@ const System = ({ options = {}, state = {}, theme }) => {
       render: () => (
         <Tab.Pane>
           <Info
+            compatibilityTarget={compatibilityTarget}
             options={options}
             state={state}
             theme={theme}
@@ -91,7 +92,7 @@ const System = ({ options = {}, state = {}, theme }) => {
       },
       render: () => (
         <Tab.Pane>
-          <Mesh />
+          <Mesh compatibilityTarget={compatibilityTarget} />
         </Tab.Pane>
       ),
       route: 'mesh',
@@ -378,6 +379,16 @@ const System = ({ options = {}, state = {}, theme }) => {
     activeItem?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
   }, [activeIndex]);
 
+  useEffect(() => {
+    if (!compatibilityTarget) {
+      return;
+    }
+
+    systemRef.current
+      ?.querySelectorAll('.ui.tabular.menu [role="button"]')
+      .forEach((item) => item.setAttribute('role', 'tab'));
+  }, [activeIndex, compatibilityTarget]);
+
   const onTabChange = (_event, { activeIndex: newActiveIndex }) => {
     navigate(`/system/${panes[newActiveIndex].route}`);
   };
@@ -389,11 +400,12 @@ const System = ({ options = {}, state = {}, theme }) => {
   return (
     <div className="system" ref={systemRef}>
       <Segment raised>
-        <Tab
-          activeIndex={activeIndex > -1 ? activeIndex : 0}
-          onTabChange={onTabChange}
-          panes={panes}
-        />
+          <Tab
+            activeIndex={activeIndex > -1 ? activeIndex : 0}
+            onTabChange={onTabChange}
+            panes={panes}
+            renderActiveOnly={Boolean(compatibilityTarget)}
+          />
       </Segment>
     </div>
   );

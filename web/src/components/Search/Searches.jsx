@@ -112,7 +112,7 @@ const CollapsibleSection = ({
   );
 };
 
-const Searches = ({ server } = {}) => {
+const Searches = ({ compatibilityTarget, server } = {}) => {
   const normalizedServer = server ?? { isConnected: false };
   const [connecting, setConnecting] = useState(true);
   const [error, setError] = useState(undefined);
@@ -203,6 +203,10 @@ const Searches = ({ server } = {}) => {
     let mounted = true;
 
     const loadSearches = async () => {
+      if (compatibilityTarget) {
+        return;
+      }
+
       try {
         const records = await library.getAll();
         if (!mounted) {
@@ -291,10 +295,18 @@ const Searches = ({ server } = {}) => {
       try {
         onConnecting();
         await searchHub.start();
-        await loadSearches();
+        if (compatibilityTarget) {
+          onConnected();
+        } else {
+          await loadSearches();
+        }
       } catch (connectionError) {
         toast.error(connectionError?.message ?? 'Failed to connect to search updates');
-        await loadSearches();
+        if (compatibilityTarget) {
+          onConnected();
+        } else {
+          await loadSearches();
+        }
       }
     };
 
@@ -303,6 +315,10 @@ const Searches = ({ server } = {}) => {
     // Scene ↔ Pod Bridging is opt-in. Do not infer it from generic capabilities,
     // otherwise ordinary searches silently leave the proven Soulseek path.
     const checkFeatureFlag = async () => {
+      if (compatibilityTarget === 'slskd') {
+        return;
+      }
+
       try {
         const capabilities = await getCapabilities();
         const enabled =
@@ -324,7 +340,7 @@ const Searches = ({ server } = {}) => {
       mounted = false;
       searchHub.stop();
     };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [compatibilityTarget]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // create a new search, and optionally navigate to it to display the details
   // we do this if the user clicks the search icon, or repeats an existing search
@@ -460,6 +476,69 @@ const Searches = ({ server } = {}) => {
     routerNavigate('/searches', { replace: true });
   }
 
+  if (compatibilityTarget === 'slskd') {
+    inputRef?.current?.inputRef?.current.focus();
+
+    return (
+      <>
+        <Segment className="search-segment">
+          <div className="search-segment-icon">
+            <Icon
+              name="search"
+              size="big"
+            />
+          </div>
+          <Input
+            action={
+              <>
+                <Button
+                  disabled={creating || !normalizedServer.isConnected}
+                  icon="plus"
+                  onClick={create}
+                />
+                <Button
+                  disabled={creating || !normalizedServer.isConnected}
+                  icon="search"
+                  onClick={() => create({ navigate: true })}
+                />
+              </>
+            }
+            className="search-input"
+            disabled={creating || !normalizedServer.isConnected}
+            input={
+              <input
+                data-lpignore="true"
+                placeholder="Connect to server to perform a search"
+                type="search"
+              />
+            }
+            loading={creating}
+            onKeyUp={(keyUpEvent) =>
+              keyUpEvent.key === 'Enter' ? create() : ''
+            }
+            placeholder="Search phrase"
+            ref={inputRef}
+            size="big"
+          />
+        </Segment>
+        {Object.keys(searches).length === 0 ? (
+          <PlaceholderSegment
+            caption="No searches to display"
+            icon="search"
+          />
+        ) : (
+          <SearchList
+            connecting={connecting}
+            error={error}
+            onRemove={remove}
+            onStop={stop}
+            searches={searches}
+          />
+        )}
+      </>
+    );
+  }
+
   inputRef?.current?.inputRef?.current.focus();
 
   return (
@@ -591,21 +670,23 @@ const Searches = ({ server } = {}) => {
               <Icon name={acquisitionProfile.icon} />
               Acquisition Profile
             </div>
-            <Popup
-              content={`${acquisitionProfile.label}: ${acquisitionProfile.description}`}
-              position="top center"
-              trigger={
-                <Dropdown
-                  aria-label="Acquisition profile"
-                  className="search-acquisition-profile-dropdown"
-                  data-testid="acquisition-profile-select"
-                  onChange={updateAcquisitionProfile}
-                  options={acquisitionProfileOptions}
-                  selection
-                  value={acquisitionProfile.id}
-                />
-              }
-            />
+            {compatibilityTarget !== 'slskdn' && (
+              <Popup
+                content={`${acquisitionProfile.label}: ${acquisitionProfile.description}`}
+                position="top center"
+                trigger={
+                  <Dropdown
+                    aria-label="Acquisition profile"
+                    className="search-acquisition-profile-dropdown"
+                    data-testid="acquisition-profile-select"
+                    onChange={updateAcquisitionProfile}
+                    options={acquisitionProfileOptions}
+                    selection
+                    value={acquisitionProfile.id}
+                  />
+                }
+              />
+            )}
             <span className="search-acquisition-profile-summary">
               {acquisitionProfile.summary}
             </span>

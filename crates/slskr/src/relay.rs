@@ -789,7 +789,7 @@ impl RuntimeState {
         Some(token)
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "bounded-differential"))]
     #[allow(dead_code)]
     pub(crate) fn issue_file_upload_token(
         &mut self,
@@ -1163,7 +1163,7 @@ impl RuntimeState {
             .map(|(name, _)| name)
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "bounded-differential"))]
     #[allow(dead_code)]
     pub(crate) fn registered_agent_remote_ip(&self, agent_name: &str) -> Option<IpAddr> {
         self.registered_agents
@@ -1304,7 +1304,7 @@ fn verify_credential(
     credential_for_with_scheme(scheme, secret, agent_name, token) == credential
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "bounded-differential"))]
 pub(crate) fn credential_for_test(secret: &str, agent_name: &str, token: &str) -> String {
     credential_for_aes(secret, agent_name, token)
 }

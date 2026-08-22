@@ -15,6 +15,17 @@ each target rather than choosing one compromise behavior.
 
 ## Current position
 
+**Closed 2026-08-20 for the pinned frozen boundary.** The fresh universal gate
+reports 19,216/19,216 materialized cases complete, with zero partial, missing,
+needs-proof, or denominator-missing cases. The strict live transport/lifecycle
+artifact passes 11/11, the current UI comparison artifact passes all 9 workflow
+health cases and 18 target/profile comparisons, and the exact live interop
+ledger is closed with the fresh mesh retry/failure supplement. The detailed
+checkpoint narrative below is retained as historical evidence; its older
+percentages and open-work statements are not the current closure status.
+
+### Historical checkpoint narrative
+
 **Updated 2026-08-16**: re-ran the bounded controller evidence workflow
 against the frozen slskd/slskdN pins (worktrees at the commits below). The
 configuration workstream remains fully closed at 436/436 complete, 0 missing.
@@ -692,7 +703,7 @@ complete cases.
 | Security authorization | 7,790 credential-profile proof cases | 7,790 complete via exhaustive live-dispatch differential | **Closed** (2026-08-16) |
 | Security controls | 798 proof cases | 798 complete via exact frozen-component evidence | **Closed** (2026-08-16) |
 | Packaging and operator behavior | 240 proof cases | 240 complete via exact frozen artifact evidence and explicit scope | **Closed** (2026-08-16) |
-| Bidirectional interoperability | 310 frozen proof cases | 310 retained ledger rows; universal live matrix remains open | **Open** |
+| Bidirectional interoperability | 310 frozen proof cases | 310 retained ledger rows; strict 11/11 transport/lifecycle artifact passes, including the fresh source-bound mesh retry/failure supplement | **Closed** (2026-08-20) |
 
 ### Known implementation-gap queue
 

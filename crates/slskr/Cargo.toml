@@ -1,5 +1,6 @@
 [package]
 name = "slskr"
+default-run = "slskr"
 version = "0.0.0"
 description = "Self-hosted Rust app for the Soulseek network with daemon, web UI, HTTP API, transfers, search, and observability"
 keywords = ["slsk", "soulseek", "client", "server", "rust"]
@@ -17,6 +18,23 @@ focused-controller-tests = []
 # module. Keep it opt-in so ordinary workspace tests stay within the repository
 # memory budget; the guarded CI path deliberately exercises the bounded suite.
 full-controller-tests = []
+# The pre-split dispatcher is retained only as an opt-in diagnostic oracle.
+# Production builds use the bounded route-group dispatcher by default.
+legacy-route-dispatch = []
+# Compile only one differential workstream at a time. These features select
+# test items inside the historical module; they are intentionally independent
+# so Cargo never asks one rustc process to codegen the entire proof suite.
+bounded-differential = []
+bounded-controller-api-tests = ["bounded-differential"]
+bounded-controller-api-tests-1 = ["bounded-differential"]
+bounded-controller-api-tests-2 = ["bounded-differential"]
+bounded-controller-api-tests-3 = ["bounded-differential"]
+bounded-controller-api-tests-4 = ["bounded-differential"]
+bounded-persistence-tests = ["bounded-differential"]
+bounded-file-lifecycle-tests = ["bounded-differential"]
+bounded-protocol-tests = ["bounded-differential"]
+bounded-security-control-tests = ["bounded-differential"]
+bounded-security-authorization-tests = ["bounded-differential"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }

@@ -91,4 +91,12 @@ describe('session', () => {
     await expect(session.check()).rejects.toThrow('network down');
     expect(sessionStorage.getItem('slskr-token')).toBe('jwt-token');
   });
+
+  it('checks the session when authentication is disabled', async () => {
+    session.enablePassthrough();
+    api.get.mockResolvedValue({ data: { state: 'disconnected' } });
+
+    await expect(session.check()).resolves.toBe(true);
+    expect(api.get).toHaveBeenCalledWith('/session');
+  });
 });

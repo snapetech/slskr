@@ -278,9 +278,9 @@ Common settings:
 | `SLSKR_SHARE_DIRS` | Semicolon-separated share roots. |
 | `SLSKR_LISTENER_BIND` | Regular peer listener bind address. |
 | `SLSKR_ADVERTISED_PORT` | Public regular peer port advertised to the network. |
-| `SLSKR_OBFUSCATED_LISTENER_BIND` | Optional obfuscated peer listener bind address. |
-| `SLSKR_OBFUSCATED_ADVERTISED_PORT` | Public obfuscated peer port. |
-| `SLSK_OBFUSCATION_MODE` | Outbound dial posture: regular-first `compatibility` (default) or obfuscated-first `prefer`. |
+| `SLSKR_OBFUSCATED_LISTENER_BIND` | slskdN profile only: optional type-1 obfuscated peer listener bind address. |
+| `SLSKR_OBFUSCATED_ADVERTISED_PORT` | slskdN profile only: public type-1 obfuscated peer port. |
+| `SLSK_OBFUSCATION_MODE` | slskdN profile only: outbound dial posture, regular-first `compatibility` (default) or obfuscated-first `prefer`. |
 | `SLSKR_TRANSFER_MAX_ACTIVE` | Maximum active transfers. |
 | `SLSKR_TRANSFER_ALLOW_INBOUND` | Enable inbound shared-file serving. |
 | `SLSKR_TRANSFER_ALLOW_OUTBOUND` | Enable outbound downloads. |
@@ -409,7 +409,7 @@ SLSKR_A_PASSWORD=<pass-a> \
 SLSKR_B_USERNAME=<user-b> \
 SLSKR_B_PASSWORD=<pass-b> \
 SLSKR_INDIRECT_HOST_OVERRIDE=127.0.0.1 \
-scripts/with-build-guard.sh cargo run -p slskr -- smoke local-peer
+scripts/with-build-guard.sh cargo run -p slskr --bin slskr -- smoke local-peer
 ```
 
 Live interop and soak scripts are under [scripts](./scripts). They use real

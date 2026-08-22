@@ -27,6 +27,14 @@ if [[ "${SLSKR_PROCESS_MEMORY_GUARD_HELD:-0}" == "1" ]]; then
   exec "$@"
 fi
 
+# Cargo has a separate Rust build guard with a larger, serialized profile.
+# Do not create the 4 GiB application/browser cgroup around that guard; doing
+# so would make the Rust limit ineffective and can kill rustfmt or rustc even
+# when the host has ample available memory.
+if [[ "$(basename "$1")" == "with-build-guard.sh" && "${2:-}" == "cargo" ]]; then
+  exec "$@"
+fi
+
 # Keep Node's managed heap below the process cap. Chromium's native mappings
 # remain bounded by the cgroup or virtual-memory ceiling below.
 case "$(basename "$1")" in
@@ -45,28 +53,37 @@ if [[ "${SLSKR_PROCESS_MEMORY_GUARD_DISABLE_SYSTEMD:-0}" != "1" ]] \
   && command -v systemctl >/dev/null 2>&1 \
   && systemctl --user show-environment >/dev/null 2>&1; then
   unit_name="slskr-process-memory-guard-${BASHPID}-${RANDOM}.service"
-  systemd_environment_args=()
+  environment_file=""
+  cleanup_unit() {
+    local status="$?"
+    trap - EXIT INT TERM
+    systemctl --user stop "$unit_name" >/dev/null 2>&1 || true
+    if [[ -n "$environment_file" ]]; then
+      rm -f -- "$environment_file"
+    fi
+    exit "$status"
+  }
+  trap cleanup_unit EXIT INT TERM
+  environment_file="$(mktemp "${TMPDIR:-/tmp}/slskr-process-memory-guard-environment.XXXXXX")"
+  chmod 600 "$environment_file"
   while IFS= read -r -d '' environment_entry; do
     case "$environment_entry" in
       SLSKR_PROCESS_MEMORY_GUARD_HELD=*)
         continue
         ;;
     esac
-    systemd_environment_args+=("--setenv=$environment_entry")
+    environment_name="${environment_entry%%=*}"
+    environment_value="${environment_entry#*=}"
+    printf -v escaped_environment_value '%q' "$environment_value"
+    printf '%s=%s\n' "$environment_name" "$escaped_environment_value" >> "$environment_file"
   done < <(env -0)
-  cleanup_unit() {
-    local status="$?"
-    trap - EXIT INT TERM
-    systemctl --user stop "$unit_name" >/dev/null 2>&1 || true
-    exit "$status"
-  }
-  trap cleanup_unit EXIT INT TERM
   systemd-run --user --wait --pipe --collect \
     --unit="$unit_name" \
     --working-directory="$repo_root" \
     --property="MemoryMax=${memory_kib}K" \
+    --property="MemorySwapMax=0" \
     --property="TasksMax=${tasks_max}" \
-    "${systemd_environment_args[@]}" \
+    --property="EnvironmentFile=$environment_file" \
     --setenv=SLSKR_PROCESS_MEMORY_GUARD_HELD=1 \
     "$@"
   exit "$?"
@@ -77,5 +94,6 @@ fi
 # browser that cannot operate within it exits instead of growing unbounded.
 (
   ulimit -v "$memory_kib"
+  export SLSKR_PROCESS_MEMORY_GUARD_HELD=1
   exec "$@"
 )

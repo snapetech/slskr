@@ -53,6 +53,7 @@ impl IndirectPeerRequest {
                 kind,
                 token,
                 stream,
+                ..
             } => {
                 self.validate_token(token)?;
                 self.validate_username(username)?;
