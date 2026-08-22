@@ -1,6 +1,6 @@
 # slskr
 
-[![Discord](https://img.shields.io/badge/Discord-join%20community-5865F2?logo=discord&logoColor=white)](https://discord.gg/hyG8Pf6KGA)
+[![Discord](https://img.shields.io/badge/Discord-join%20community-5865F2?logo=discord&logoColor=white)](https://discord.gg/5PyXBfvS6T)
 
 Support slskr development through [PayPal](https://www.paypal.com/donate/?business=donations%40snape.tech) or [Ko-fi](https://ko-fi.com/snapetech).
 
@@ -529,7 +529,7 @@ https://github.com/snapetech/slskr
 ## Support
 
 Community support and migration discussion can be found on Discord:
-[discord.gg/hyG8Pf6KGA](https://discord.gg/hyG8Pf6KGA).
+[discord.gg/5PyXBfvS6T](https://discord.gg/5PyXBfvS6T).
 
 Development and infrastructure tips are accepted through
 [PayPal](https://www.paypal.com/donate/?business=donations%40snape.tech) and
