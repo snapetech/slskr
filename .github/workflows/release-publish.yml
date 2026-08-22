@@ -148,7 +148,7 @@ jobs:
           [[ -n "${AUR_SSH_KEY:-}" ]] || exit 0
           bash packaging/scripts/checkout-aur-repo.sh slskr-bin aur-slskr-bin
           cp packaging/aur/PKGBUILD-bin aur-slskr-bin/PKGBUILD
-          cp packaging/aur/slskr.{service,sysusers,tmpfiles,install} aur-slskr-bin/
+          cp packaging/aur/slskr.{service,sysusers,tmpfiles} aur-slskr-bin/
           bash packaging/scripts/generate-aur-srcinfo.sh aur-slskr-bin/PKGBUILD > aur-slskr-bin/.SRCINFO
           (cd aur-slskr-bin && git add -A)
           bash packaging/scripts/push-aur-repo.sh aur-slskr-bin slskr-bin "Update to ${{ needs.metadata.outputs.tag }}"
@@ -160,7 +160,7 @@ jobs:
           [[ -n "${AUR_SSH_KEY:-}" ]] || exit 0
           bash packaging/scripts/checkout-aur-repo.sh slskr aur-slskr
           cp packaging/aur/PKGBUILD aur-slskr/PKGBUILD
-          cp packaging/aur/slskr.{service,sysusers,tmpfiles,install} aur-slskr/
+          cp packaging/aur/slskr.{service,sysusers,tmpfiles} aur-slskr/
           bash packaging/scripts/generate-aur-srcinfo.sh aur-slskr/PKGBUILD > aur-slskr/.SRCINFO
           (cd aur-slskr && git add -A)
           bash packaging/scripts/push-aur-repo.sh aur-slskr slskr "Update to ${{ needs.metadata.outputs.tag }}"
