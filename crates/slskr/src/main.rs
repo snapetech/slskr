@@ -67136,6 +67136,19 @@ fn target_storage_directory_json(json: String, target: ControllerCompatibilityTa
     value.to_string()
 }
 
+#[cfg(not(unix))]
+fn slskd_empty_directory_json(name: &str) -> serde_json::Value {
+    serde_json::json!({
+        "name": name,
+        "fullName": name,
+        "attributes": "",
+        "createdAt": "",
+        "modifiedAt": "",
+        "files": [],
+        "directories": [],
+    })
+}
+
 fn slskd_filesystem_timestamp(metadata: &fs::Metadata, created: bool) -> String {
     let time = if created {
         metadata.created().or_else(|_| metadata.modified())
