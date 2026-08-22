@@ -20,6 +20,17 @@ fn main() {
     };
     let web_root = repo_root.join("web");
 
+    // The workspace carries a small local mainline extension for preserving
+    // the public source port of shared DHT traffic. Cargo package archives
+    // resolve the published mainline API instead, so expose a compile-time
+    // capability only when that workspace source is actually present.
+    println!("cargo:rustc-check-cfg=cfg(slskr_mainline_outbound_socket)");
+    let mainline_extension = repo_root.join("vendor/mainline/src/dht.rs");
+    if mainline_extension.exists() {
+        println!("cargo:rustc-cfg=slskr_mainline_outbound_socket");
+        println!("cargo:rerun-if-changed={}", mainline_extension.display());
+    }
+
     if web_root.exists() {
         // Rebuild if any src file changes
         println!("cargo:rerun-if-changed={}/src", web_root.display());

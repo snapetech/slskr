@@ -143,6 +143,7 @@ impl Rendezvous {
             // gateway demuxer retain the configured DHT port for QUIC and
             // overlay traffic without competing for the same UDP socket.
             .port(if shared_udp { 0 } else { port });
+        #[cfg(slskr_mainline_outbound_socket)]
         if let Some(socket) = shared_udp_socket.as_ref() {
             builder.outbound_socket(Arc::clone(socket));
         }
