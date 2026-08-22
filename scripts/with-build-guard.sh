@@ -19,6 +19,14 @@ lock_wait_seconds="${SLSKR_BUILD_LOCK_WAIT_SECONDS:-0}"
 virtual_memory_kib="${SLSKR_RUST_VIRTUAL_MEMORY_KIB:-12582912}"
 build_jobs="${SLSKR_RUST_BUILD_JOBS:-1}"
 max_virtual_memory_kib=12582912
+host_platform="$(uname -s 2>/dev/null || printf 'unknown')"
+virtual_memory_limit_supported=1
+if [[ "$host_platform" == "Darwin" ]]; then
+  # Darwin's shell does not expose a settable RLIMIT_AS through `ulimit -v`.
+  # Keep the exclusive Rust lock and reduced compiler profile, but do not make
+  # every macOS Cargo command fail before Cargo starts.
+  virtual_memory_limit_supported=0
+fi
 
 if [[ ! "$lock_wait_seconds" =~ ^[0-9]{1,5}$ ]]; then
   printf 'SLSKR_BUILD_LOCK_WAIT_SECONDS must be a non-negative integer (seconds)\n' >&2
@@ -241,7 +249,10 @@ fi
 # kernel to kill an arbitrary compiler process at the smaller application
 # limit. The direct nested-guard test uses a non-Cargo command and remains
 # covered by the inherited-limit behavior.
-inherited_virtual_memory_kib="$(ulimit -v)"
+inherited_virtual_memory_kib="unlimited"
+if [[ "$virtual_memory_limit_supported" -eq 1 ]]; then
+  inherited_virtual_memory_kib="$(ulimit -v)"
+fi
 if [[ "$1" == "cargo" \
   && "${SLSKR_PROCESS_MEMORY_GUARD_HELD:-0}" == "1" \
   && "$inherited_virtual_memory_kib" =~ ^[0-9]+$ \
@@ -252,15 +263,22 @@ if [[ "$1" == "cargo" \
 fi
 
 (
-  current_virtual_memory_kib="$(ulimit -v)"
-  # A portable outer process guard uses a lower virtual-memory ceiling than
-  # the Rust ceiling. Never try to raise that inherited hard limit: keep the
-  # stricter parent bound while retaining the 12 GiB default for unbounded
-  # direct Rust invocations and for the systemd resident-memory path.
-  if [[ "$current_virtual_memory_kib" == "unlimited" ]] \
-    || { [[ "$current_virtual_memory_kib" =~ ^[0-9]+$ ]] \
-      && ((current_virtual_memory_kib > virtual_memory_kib)); }; then
-    ulimit -v "$virtual_memory_kib"
+  if [[ "$virtual_memory_limit_supported" -eq 1 ]]; then
+    current_virtual_memory_kib="$(ulimit -v)"
+    # A portable outer process guard uses a lower virtual-memory ceiling than
+    # the Rust ceiling. Never try to raise that inherited hard limit: keep the
+    # stricter parent bound while retaining the 12 GiB default for unbounded
+    # direct Rust invocations and for the systemd resident-memory path.
+    if [[ "$current_virtual_memory_kib" == "unlimited" ]] \
+      || { [[ "$current_virtual_memory_kib" =~ ^[0-9]+$ ]] \
+        && ((current_virtual_memory_kib > virtual_memory_kib)); }; then
+      if ! ulimit -v "$virtual_memory_kib"; then
+        printf '[rust-build-guard] unable to apply virtual-memory ceiling on %s\n' "$host_platform" >&2
+        exit 1
+      fi
+    fi
+  else
+    printf '[rust-build-guard] virtual-memory ceiling unavailable on %s; retaining serialized jobs and reduced compiler profile\n' "$host_platform" >&2
   fi
   # The large slskr binary can make LLVM retain several gigabytes of debug
   # metadata and incremental state even with one rustc process. Keep those

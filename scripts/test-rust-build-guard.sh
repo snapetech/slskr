@@ -4,6 +4,11 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
+expected_virtual_memory="12582912"
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  expected_virtual_memory="unlimited"
+fi
+
 holder_pid=''
 test_lock_path="$(mktemp "${TMPDIR:-/tmp}/slskr-build-guard-lock.XXXXXX")"
 holder_log="$(mktemp "${TMPDIR:-/tmp}/slskr-build-guard-test.XXXXXX")"
@@ -40,7 +45,7 @@ guard_limits="$({
   SLSKR_RUST_BUILD_JOBS=1 \
   RUST_TEST_THREADS=16 scripts/with-build-guard.sh bash -c 'printf "%s %s %s %s %s %s %s %s %s %s" "$(ulimit -v)" "$CARGO_BUILD_JOBS" "$RUST_TEST_THREADS" "$RUST_MIN_STACK" "$CARGO_PROFILE_DEV_DEBUG" "$CARGO_PROFILE_DEV_CODEGEN_UNITS" "$CARGO_PROFILE_TEST_DEBUG" "$CARGO_PROFILE_TEST_CODEGEN_UNITS" "$CARGO_PROFILE_TEST_LTO" "$CARGO_INCREMENTAL"'
 } 2>/dev/null)"
-if [[ "$guard_limits" != "12582912 1 1 16777216 0 1024 0 256 false 0" ]]; then
+if [[ "$guard_limits" != "$expected_virtual_memory 1 1 16777216 0 1024 0 256 false 0" ]]; then
   printf 'Rust build guard test failed: unexpected inherited limits: %s\n' "$guard_limits" >&2
   exit 1
 fi
@@ -51,7 +56,11 @@ nested_guard_limit="$(
   SLSKR_BUILD_LOCK_PATH="$test_lock_path" \
     scripts/with-process-memory-guard.sh scripts/with-build-guard.sh bash -c 'ulimit -v' 2>/dev/null
 )"
-if [[ "$nested_guard_limit" != "262144" ]]; then
+expected_nested_guard_limit="262144"
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  expected_nested_guard_limit="unlimited"
+fi
+if [[ "$nested_guard_limit" != "$expected_nested_guard_limit" ]]; then
   printf 'Rust build guard test failed: nested process limit was raised or lost: %s\n' "$nested_guard_limit" >&2
   exit 1
 fi

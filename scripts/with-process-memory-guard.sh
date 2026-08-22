@@ -12,6 +12,14 @@ fi
 hard_memory_kib=4194304
 memory_kib="${SLSKR_PROCESS_MEMORY_MAX_KIB:-$hard_memory_kib}"
 tasks_max="${SLSKR_PROCESS_TASKS_MAX:-512}"
+host_platform="$(uname -s 2>/dev/null || printf 'unknown')"
+virtual_memory_limit_supported=1
+if [[ "$host_platform" == "Darwin" ]]; then
+  # Darwin's shell does not expose a settable RLIMIT_AS through `ulimit -v`.
+  # Keep Node's managed-heap cap and the process-guard nesting marker while
+  # allowing macOS release artifacts to reach their compiler commands.
+  virtual_memory_limit_supported=0
+fi
 
 if [[ ! "$memory_kib" =~ ^[1-9][0-9]{0,7}$ || "$memory_kib" -gt "$hard_memory_kib" ]]; then
   printf 'SLSKR_PROCESS_MEMORY_MAX_KIB must be between 1 and %s KiB\n' "$hard_memory_kib" >&2
@@ -93,7 +101,14 @@ fi
 # Git Bash and minimal containers). A virtual-memory ceiling is fail-closed: a
 # browser that cannot operate within it exits instead of growing unbounded.
 (
-  ulimit -v "$memory_kib"
+  if [[ "$virtual_memory_limit_supported" -eq 1 ]]; then
+    if ! ulimit -v "$memory_kib"; then
+      printf '[process-memory-guard] unable to apply virtual-memory ceiling on %s\n' "$host_platform" >&2
+      exit 1
+    fi
+  else
+    printf '[process-memory-guard] virtual-memory ceiling unavailable on %s; retaining managed-heap cap\n' "$host_platform" >&2
+  fi
   export SLSKR_PROCESS_MEMORY_GUARD_HELD=1
   exec "$@"
 )

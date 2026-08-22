@@ -4,6 +4,11 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
+expected_fallback_limit="262144"
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  expected_fallback_limit="unlimited"
+fi
+
 guard=scripts/with-process-memory-guard.sh
 
 if SLSKR_PROCESS_MEMORY_MAX_KIB=4194305 \
@@ -17,7 +22,7 @@ fallback_limit="$(
   SLSKR_PROCESS_MEMORY_MAX_KIB=262144 \
     "$guard" bash -c 'ulimit -v'
 )"
-if [[ "$fallback_limit" != "262144" ]]; then
+if [[ "$fallback_limit" != "$expected_fallback_limit" ]]; then
   printf 'Process memory guard test failed: fallback limit was %s\n' "$fallback_limit" >&2
   exit 1
 fi
