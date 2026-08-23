@@ -395,9 +395,7 @@ impl PodStore {
 
     pub fn ensure_gold_star_club(&mut self) -> Result<PodRecord, String> {
         if !self.gold_star_club_available() {
-            return Err(format!(
-                "Gold Star Club is disabled by configuration or local revocation"
-            ));
+            return Err("Gold Star Club is disabled by configuration or local revocation".to_owned());
         }
         if let Some(existing) = self.pods.get(GOLD_STAR_CLUB_POD_ID) {
             return Ok(public_pod(existing, false));
