@@ -546,6 +546,9 @@ for path in source.iterdir():
             "private_message_responses": value["private_message_responses"],
             "injected_private_message_ids": value["injected_private_message_ids"],
         }
+        for response in value["private_message_responses"]:
+            if response.get("message") in default_identity_values:
+                response["message"] = "<DEFAULT_PRODUCT_IDENTITY>"
     elif path.name.startswith("auto-validation-"):
         if isinstance(value, dict) and "traceId" in value:
             value["traceId"] = "<TRACE_ID>"
@@ -5288,6 +5291,10 @@ run_private_message_auto_response_scenario() {
     local fixture_status="$work_dir/slskdn-auto-response-$implementation-fixture.json"
     local fixture_log="$work_dir/slskdn-auto-response-$implementation-fixture.log"
     local injection="$work_dir/slskdn-auto-response-$implementation-injection.json"
+    local runtime_default_message="Hi, I'm human and testing a slskdN client. Shares may be temporarily unavailable while I validate the client."
+    if [[ "$implementation" == slskr ]]; then
+      runtime_default_message="Hi, I'm human and testing an slskR client. Shares may be temporarily unavailable while I validate the client."
+    fi
     mkdir -p "$state" "$suite"
 
     write_private_message_auto_response_yaml "$state/slskd.yml" true "$server_port" "$listen_port" true 'yaml response' 15
@@ -5339,9 +5346,11 @@ run_private_message_auto_response_scenario() {
     capture_private_message_auto_response_stage "$base_url" "$suite" lifecycle-blank "$fixture_status"
 
     write_private_message_auto_response_yaml "$state/slskd.yml" false "$server_port" "$listen_port" true __NULL__ 20
+    # The compatibility API projection keeps the frozen slskdN default, while
+    # the native runtime sends its own product identity in the response.
     wait_for_private_message_auto_response_options "$base_url" true "Hi, I'm human and testing a slskdN client. Shares may be temporarily unavailable while I validate the client." 20 "$log"
     printf '[{"id":1,"username":"FixtureOne","message":"Please prove you are human"},{"id":2,"username":"FixtureOne","message":"Human verification challenge"},{"id":3,"username":"FixtureTwo","message":"Human verification challenge"},{"id":4,"username":"FixtureThree","message":"Are you human?"},{"id":5,"username":"FixtureFour","message":"Please prove you are not a bot"}]\n' >"$injection"
-    wait_for_private_message_fixture "$fixture_status" 5 3 "Hi, I'm human and testing a slskdN client. Shares may be temporarily unavailable while I validate the client." "$log"
+    wait_for_private_message_fixture "$fixture_status" 5 3 "$runtime_default_message" "$log"
     capture_private_message_auto_response_stage "$base_url" "$suite" lifecycle-null "$fixture_status"
 
     write_private_message_auto_response_yaml "$state/slskd.yml" false "$server_port" "$listen_port" false 'disabled response' 25
