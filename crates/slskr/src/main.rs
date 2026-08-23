@@ -1030,9 +1030,9 @@ struct ShareScanOptions {
     probe_media_attributes: bool,
 }
 
-const MAX_SHARE_SCAN_ENTRIES: usize = 65_536;
+const MAX_SHARE_SCAN_ENTRIES: usize = 131_072;
 #[cfg(unix)]
-const MAX_SHARE_SCAN_PENDING_DIRECTORIES: usize = 256;
+const MAX_SHARE_SCAN_PENDING_DIRECTORIES: usize = 8192;
 const SHARE_SCAN_ENTRY_LIMIT_ERROR: &str = "share scan stopped at aggregate directory entry limit";
 #[cfg(unix)]
 const SHARE_SCAN_PENDING_DIRECTORY_LIMIT_ERROR: &str =
@@ -38887,15 +38887,11 @@ fn apply_watched_controller_configuration<'a>(
                         state.config.controller_compatibility_target,
                     )
                 });
-                if text.is_some()
-                    && parsed.is_none()
-                    && state.config.controller_compatibility_target
-                        == ControllerCompatibilityTarget::Slskd
-                {
-                    // The frozen controller clears the current options projection
-                    // when the watched YAML is syntactically invalid, while
-                    // retaining the already-loaded runtime/share index until the
-                    // next valid reload.  Do not leave the previous watched
+                if text.is_some() && parsed.is_none() && !state.config.current_upstream_behavior {
+                    // Frozen profiles clear the current options projection when
+                    // watched YAML is syntactically invalid, while retaining
+                    // the already-loaded runtime/share index until the next
+                    // valid reload. Do not leave the previous watched
                     // projection visible during that interval.
                     let mut overlay = state.options_overlay.write().await;
                     overlay.watched_yaml_effective = Some(serde_json::Value::Null);

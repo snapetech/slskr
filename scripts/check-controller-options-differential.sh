@@ -383,6 +383,35 @@ def normalize_debug_runtime_ports(value):
         value,
     )
 
+default_identity_values = (
+    "A slskd user. https://github.com/slskd/slskd",
+    "A slskdN user. Unofficial fork of slskd: https://github.com/snapetech/slskdn",
+    "A slskR user. https://github.com/snapetech/slskr",
+    "slskd/0.0.0 (https://github.com/slskd/slskd)",
+    "slskd/0.0.0 (https://github.com/snapetech/slskdn)",
+    "slskR/0.0.0 (https://github.com/snapetech/slskr)",
+    "From slskd:",
+    "From slskdN:",
+    "From slskR:",
+    "Hi, I'm human and testing a slskd client. Shares may be temporarily unavailable while I validate the client.",
+    "Hi, I'm human and testing a slskdN client. Shares may be temporarily unavailable while I validate the client.",
+    "Hi, I'm human and testing an slskR client. Shares may be temporarily unavailable while I validate the client.",
+)
+
+def normalize_default_identity_text(value):
+    for candidate in default_identity_values:
+        value = value.replace(candidate, "<DEFAULT_PRODUCT_IDENTITY>")
+    value = re.sub(
+        r"(?m)^(\s*notificationprefix=)(?:slskd|slskdN|slskR)( \(DefaultValueConfigurationProvider\))?$",
+        r"\1<DEFAULT_PRODUCT_IDENTITY>\2",
+        value,
+    )
+    return re.sub(
+        r"(?m)^    download:\n      exclude=\[\] \(DefaultValueConfigurationProvider\)\n",
+        "",
+        value,
+    )
+
 for path in source.iterdir():
     output = destination / path.name
     if path.suffix == ".meta":
@@ -433,6 +462,7 @@ for path in source.iterdir():
             value,
         )
         value = normalize_debug_runtime_ports(value)
+        value = normalize_default_identity_text(value)
     elif path.name.startswith("debug-options-") or path.name.startswith("debug-startup-"):
         value = {"debug": value["debug"]}
     elif path.name.startswith("debug-application-"):
@@ -449,6 +479,7 @@ for path in source.iterdir():
             value,
         )
         value = normalize_debug_runtime_ports(value)
+        value = normalize_default_identity_text(value)
     elif path.name.startswith("blacklist-options-") or path.name.startswith("blacklist-startup-"):
         blacklist = value["blacklist"]
         configured_file = blacklist.get("file", "")
@@ -685,6 +716,53 @@ if isinstance(value.get("dhtRendezvous"), dict):
     for key in ("dhtPort", "overlayPort", "effectiveOverlayPort"):
         if key in value["dhtRendezvous"]:
             value["dhtRendezvous"][key] = "<OVERLAY_PORT>"
+# Native slskR identifies itself in the default Soulseek user description.
+# The frozen controller profiles use different product identities, while the
+# description field itself is covered by the dedicated watched/restart
+# scenario below. Keep the default identity out of this structural comparison
+# without weakening comparisons for configured descriptions.
+default_descriptions = {
+    "A slskd user. https://github.com/slskd/slskd",
+    "A slskdN user. Unofficial fork of slskd: https://github.com/snapetech/slskdn",
+    "A slskR user. https://github.com/snapetech/slskr",
+}
+if value.get("soulseek", {}).get("description") in default_descriptions:
+    value["soulseek"]["description"] = "<DEFAULT_USER_DESCRIPTION>"
+
+default_identity_values = {
+    "slskd/0.0.0 (https://github.com/slskd/slskd)",
+    "slskd/0.0.0 (https://github.com/snapetech/slskdn)",
+    "slskR/0.0.0 (https://github.com/snapetech/slskr)",
+    "slskd",
+    "slskdN",
+    "slskR",
+    "From slskd:",
+    "From slskdN:",
+    "From slskR:",
+    "Hi, I'm human and testing a slskd client. Shares may be temporarily unavailable while I validate the client.",
+    "Hi, I'm human and testing a slskdN client. Shares may be temporarily unavailable while I validate the client.",
+    "Hi, I'm human and testing an slskR client. Shares may be temporarily unavailable while I validate the client.",
+}
+identity_keys = {"userAgent", "notificationPrefix", "message"}
+
+def normalize_default_identity(node):
+    if isinstance(node, dict):
+        for key, child in node.items():
+            if key in identity_keys and child in default_identity_values:
+                node[key] = "<DEFAULT_PRODUCT_IDENTITY>"
+            else:
+                normalize_default_identity(child)
+    elif isinstance(node, list):
+        for child in node:
+            normalize_default_identity(child)
+
+normalize_default_identity(value)
+# The native options projection includes an explicit empty download-filter
+# collection. Frozen profiles omit that empty compatibility-only shape; once
+# configured, non-empty exclusions remain part of the strict comparison.
+download_filter = value.get("filters", {}).get("download")
+if isinstance(download_filter, dict) and download_filter.get("exclude") == [] and set(download_filter) == {"exclude"}:
+    value["filters"].pop("download")
 with open(sys.argv[2], "w", encoding="utf-8") as handle:
     json.dump(value, handle, indent=2, sort_keys=True)
     handle.write("\n")
@@ -989,6 +1067,11 @@ run_share_watch_scenario() {
   (
     export SLSKR_AUTH_DISABLED=true
     export SLSKR_CONTROLLER_COMPATIBILITY_TARGET="$target"
+    # The frozen slskdN profile enables its controller rate limiter by
+    # default, but the reference fixture does not. This scenario intentionally
+    # polls rapidly while waiting for watcher transitions; disable only the
+    # slskR fixture's limiter so throttling cannot mask share-watch behavior.
+    export SLSKD_WEB_RATE_LIMITING=false
     slskr_exec serve \
       --app-dir "$slskr_state" \
       --http-ip-address 127.0.0.1 \

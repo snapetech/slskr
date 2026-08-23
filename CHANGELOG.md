@@ -18,6 +18,19 @@ the release is prepared. Do not rewrite audited release history.
 
 ## [Unreleased]
 
+## [0.2.33] — 2026-08-23
+
+- Fixed share scanning for large libraries with thousands of top-level
+  directories while retaining bounded resource use and symlink safety.
+- Matched frozen-profile configuration-watch behavior for malformed YAML by
+  clearing the transient options projection while retaining the live share
+  index until a valid reload.
+- Improved VPN-scoped live validation for listener metadata, browse, API
+  authentication, queued transfers, hash verification, and session soak.
+- Expanded public Soulseek acceptance across the available credential pool,
+  including plain, obfuscated, distributed, indirect, messaging, and transfer
+  paths.
+
 ## [0.2.32] — 2026-08-21
 
 - Added bounded release, parity, interop, and browser-audit workflows with

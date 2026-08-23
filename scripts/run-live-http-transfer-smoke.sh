@@ -12,6 +12,22 @@ fi
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
+live_binary="${SLSKR_LIVE_HTTP_BINARY:-}"
+if [[ -n "$live_binary" && "$live_binary" != /* ]]; then
+  live_binary="$repo_root/${live_binary#./}"
+fi
+if [[ -n "$live_binary" && ! -x "$live_binary" ]]; then
+  echo "SLSKR_LIVE_HTTP_BINARY is not executable: $live_binary" >&2
+  exit 2
+fi
+
+serve_slskr() {
+  if [[ -n "$live_binary" ]]; then
+    exec "$live_binary" serve
+  fi
+  exec scripts/with-build-guard.sh cargo run -q -p slskr --bin slskr -- serve
+}
+
 if [[ -f .env ]]; then
   set -a
   # shellcheck disable=SC1091
@@ -52,6 +68,9 @@ fi
 soak_seconds="${SLSKR_LIVE_HTTP_SOAK_SECONDS:-60}"
 timeout_seconds="${SLSKR_LIVE_HTTP_TIMEOUT_SECONDS:-180}"
 work_dir="${SLSKR_LIVE_HTTP_WORK_DIR:-$(mktemp -d "${TMPDIR:-/tmp}/slskr-live-http-transfer.XXXXXX")}"
+if [[ "$work_dir" != /* ]]; then
+  work_dir="$repo_root/${work_dir#./}"
+fi
 
 pick_free_port() {
   node -e "const net=require('net'); const s=net.createServer(); s.listen(0,'127.0.0.1',()=>{console.log(s.address().port); s.close();});"
@@ -99,6 +118,12 @@ source_http_port="$(pick_port)"
 target_http_port="$(pick_port)"
 source_listen_port="${SLSKR_LIVE_SOURCE_LISTEN_PORT:-46102}"
 target_listen_port="${SLSKR_LIVE_TARGET_LISTEN_PORT:-46104}"
+source_dht_port="${SLSKR_LIVE_SOURCE_DHT_PORT:-50306}"
+target_dht_port="${SLSKR_LIVE_TARGET_DHT_PORT:-50307}"
+source_overlay_bind="${SLSKR_LIVE_SOURCE_OVERLAY_BIND:-0.0.0.0:50308}"
+target_overlay_bind="${SLSKR_LIVE_TARGET_OVERLAY_BIND:-0.0.0.0:50309}"
+source_obfuscated_bind="${SLSKR_LIVE_SOURCE_OBFUSCATED_BIND:-0.0.0.0:46103}"
+target_obfuscated_bind="${SLSKR_LIVE_TARGET_OBFUSCATED_BIND:-0.0.0.0:46105}"
 
 ensure_port_free() {
   local port="$1"
@@ -144,6 +169,7 @@ echo "source_user=$(redact "$source_username") target_user=$(redact "$target_use
 
 (
   export SLSKR_HTTP_BIND="127.0.0.1:$source_http_port"
+  export SLSKD_NO_HTTPS=true
   export SLSKR_STATE_DIR="$source_state"
   export SLSK_USERNAME="$source_username"
   export SLSK_PASSWORD="$source_password"
@@ -152,17 +178,26 @@ echo "source_user=$(redact "$source_username") target_user=$(redact "$target_use
   export SLSKR_AUTH_DISABLED=false
   export SLSKR_API_TOKEN="$api_token"
   export SLSKR_SHARE_DIRS="$share_dir"
-  export SLSKR_LISTENER_BIND="127.0.0.1:$source_listen_port"
+  # The Soulseek client rejects loopback listener binds while connected to
+  # the server. The whole smoke runs inside one isolated namespace, so bind
+  # on all namespace interfaces and keep the explicit peer override below
+  # for the local source/target exchange.
+  export SLSKR_LISTENER_BIND="0.0.0.0:$source_listen_port"
   export SLSK_LISTEN_PORT="$source_listen_port"
   export SLSKR_ADVERTISED_PORT="$source_listen_port"
+  export SLSKR_DHT_PORT="$source_dht_port"
+  export SLSKR_OVERLAY_BIND="$source_overlay_bind"
+  export SLSKR_OBFUSCATED_LISTENER_BIND="$source_obfuscated_bind"
+  export SLSKR_OBFUSCATED_ADVERTISED_PORT="${source_obfuscated_bind##*:}"
   export SLSKR_TEST_USER_ENDPOINT_OVERRIDES="$target_username=127.0.0.1:$target_listen_port"
   export SLSKR_PEER_RESPONSE_TIMEOUT_SECONDS=10
-  exec scripts/with-build-guard.sh cargo run -q -p slskr --bin slskr -- serve
+  serve_slskr
 ) >"$source_log" 2>&1 &
 source_pid="$!"
 
 (
   export SLSKR_HTTP_BIND="127.0.0.1:$target_http_port"
+  export SLSKD_NO_HTTPS=true
   export SLSKR_STATE_DIR="$target_state"
   export SLSK_USERNAME="$target_username"
   export SLSK_PASSWORD="$target_password"
@@ -170,13 +205,17 @@ source_pid="$!"
   export SLSKR_RECONNECT=false
   export SLSKR_AUTH_DISABLED=false
   export SLSKR_API_TOKEN="$api_token"
-  export SLSKR_LISTENER_BIND="127.0.0.1:$target_listen_port"
+  export SLSKR_LISTENER_BIND="0.0.0.0:$target_listen_port"
   export SLSK_LISTEN_PORT="$target_listen_port"
   export SLSKR_ADVERTISED_PORT="$target_listen_port"
+  export SLSKR_DHT_PORT="$target_dht_port"
+  export SLSKR_OVERLAY_BIND="$target_overlay_bind"
+  export SLSKR_OBFUSCATED_LISTENER_BIND="$target_obfuscated_bind"
+  export SLSKR_OBFUSCATED_ADVERTISED_PORT="${target_obfuscated_bind##*:}"
   export SLSKR_PEER_HOST_OVERRIDE=127.0.0.1
   export SLSKR_TEST_USER_ENDPOINT_OVERRIDES="$source_username=127.0.0.1:$source_listen_port"
   export SLSKR_PEER_RESPONSE_TIMEOUT_SECONDS=10
-  exec scripts/with-build-guard.sh cargo run -q -p slskr --bin slskr -- serve
+  serve_slskr
 ) >"$target_log" 2>&1 &
 target_pid="$!"
 
@@ -228,10 +267,14 @@ wait_listener_ready() {
   local port="$2"
   local expected="$3"
   local deadline=$((SECONDS + timeout_seconds))
-  local listeners
+  local listeners regular_local_addr
   while ((SECONDS < deadline)); do
     if listeners="$(auth_get "http://127.0.0.1:$port/api/v0/listeners" 2>/dev/null)"; then
-      if [[ "$listeners" == *"127.0.0.1:$expected"* && "$listeners" == *'"errors":0'* ]]; then
+      # The accept loop records handshake timeouts as listener errors while
+      # idle. Readiness is therefore the successfully bound local address,
+      # not an errors counter that can grow before the first peer connects.
+      regular_local_addr="$(printf '%s' "$listeners" | json_field regular_local_addr 2>/dev/null || true)"
+      if [[ "$regular_local_addr" == "127.0.0.1:$expected" || "$regular_local_addr" == "0.0.0.0:$expected" ]]; then
         echo "$name listener ready port=$expected"
         return 0
       fi
@@ -258,6 +301,9 @@ wait_peer_address() {
       export SLSK_USERNAME="$probe_username"
       export SLSK_PASSWORD="$probe_password"
       export SLSK_PEER_USERNAME="$source_username"
+      if [[ -n "$live_binary" ]]; then
+        exec "$live_binary" probe peer-address
+      fi
       exec scripts/with-build-guard.sh cargo run -q -p slskr --bin slskr -- probe peer-address
     ) >"$stdout_file" 2>"$stderr_file"; then
       if rg -q 'port=[1-9][0-9]*' "$stdout_file"; then
@@ -283,7 +329,12 @@ wait_target_browse() {
       if browse_json="$(auth_get "http://127.0.0.1:$target_http_port/api/v0/users/$source_username/browse" 2>/dev/null)"; then
         status="$(printf '%s' "$browse_json" | json_field status 2>/dev/null || true)"
         count="$(printf '%s' "$browse_json" | json_field count 2>/dev/null || true)"
-        if [[ "$status" == "ready" && "${count:-0}" -gt 0 ]]; then
+        if [[ -z "$count" ]]; then
+          count="$(printf '%s' "$browse_json" | json_field fileCount 2>/dev/null || true)"
+        fi
+        # Current browse responses return the populated directory payload
+        # directly; older compatibility responses wrapped it in status/count.
+        if [[ ( "$status" == "ready" || -z "$status" ) && "${count:-0}" -gt 0 ]]; then
           echo "target browse path ready files=$count"
           return 0
         fi
