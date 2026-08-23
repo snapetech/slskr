@@ -103,6 +103,10 @@ pub struct AppConfig {
     pub pod_join_signature_mode: PodSignatureMode,
     pub virtual_soulfind_v2_enabled: bool,
     pub controller_compatibility_target: ControllerCompatibilityTarget,
+    /// Native launches follow current upstream behavior by default.  An
+    /// explicitly selected compatibility target retains its frozen behavior
+    /// unless `SLSKR_PARITY_PROFILE=current` overrides it.
+    pub current_upstream_behavior: bool,
     pub controller_headless: bool,
     pub remote_configuration: bool,
     pub remote_file_management: bool,
@@ -115,6 +119,7 @@ pub struct AppConfig {
     pub controller_hash_from_audio_file_enabled: bool,
     pub controller_case_sensitive_regex: bool,
     pub controller_search_request_filters: Vec<String>,
+    pub download_filter: DownloadFilterSettings,
     pub controller_no_share_scan: bool,
     pub controller_force_share_scan: bool,
     pub controller_swagger: bool,
@@ -770,6 +775,58 @@ pub struct TransferDownloadSettings {
     pub auto_replace_stuck: bool,
     pub auto_replace_threshold_percent: f64,
     pub auto_replace_interval: Duration,
+    pub auto_replace_max_retries: Option<usize>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct DownloadFilterSettings {
+    pub exclude: Vec<String>,
+}
+
+impl DownloadFilterSettings {
+    fn from_layers<E: ConfigEnv>(
+        file: &DownloadFiltersFileConfig,
+        env: &E,
+        current_upstream_behavior: bool,
+    ) -> Result<Self, String> {
+        const MAX_EXCLUSIONS: usize = 100;
+        const MAX_EXCLUSION_LENGTH: usize = 256;
+
+        let exclude_names = if current_upstream_behavior {
+            vec![
+                "SLSKR_DOWNLOAD_FILTER_EXCLUDE",
+                "DOWNLOAD_FILTER_EXCLUDE",
+                "SLSKD_DOWNLOAD_FILTER_EXCLUDE",
+            ]
+        } else {
+            vec!["SLSKD_DOWNLOAD_FILTER_EXCLUDE"]
+        };
+        let exclude = string_array_any_layer(env, &exclude_names, file.exclude.clone());
+        if exclude.len() > MAX_EXCLUSIONS {
+            return Err(format!(
+                "filters.download.exclude supports at most {MAX_EXCLUSIONS} exclusions"
+            ));
+        }
+        for (index, value) in exclude.iter().enumerate() {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                return Err(format!(
+                    "filters.download.exclude entry {index} must not be blank"
+                ));
+            }
+            if trimmed.len() > MAX_EXCLUSION_LENGTH {
+                return Err(format!(
+                    "filters.download.exclude entry {index} exceeds {MAX_EXCLUSION_LENGTH} characters"
+                ));
+            }
+        }
+        Ok(Self {
+            exclude: exclude
+                .into_iter()
+                .map(|value| value.trim().to_owned())
+                .collect(),
+        })
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -902,6 +959,22 @@ impl AppConfig {
                 .as_deref()
                 .unwrap_or("slskdn"),
         )?;
+        let current_upstream_behavior = match base_env
+            .var("SLSKR_PARITY_PROFILE")
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            Some("current") => true,
+            Some("frozen") => false,
+            Some(_) => return Err("SLSKR_PARITY_PROFILE must be current or frozen".to_owned()),
+            None => {
+                base_env
+                    .var("SLSKR_CONTROLLER_COMPATIBILITY_TARGET")
+                    .is_none()
+                    && file_config.compatibility.controller_target.is_none()
+            }
+        };
         let controller_yaml = controller_yaml_environment(
             &state_dir.join("slskd.yml"),
             controller_compatibility_target,
@@ -916,6 +989,7 @@ impl AppConfig {
             &file_config,
             env,
             controller_compatibility_target,
+            current_upstream_behavior,
             &state_dir,
         )?;
         let mesh_gateway = MeshGatewaySettings::from_layers(&file_config.mesh_gateway, env)?;
@@ -1127,6 +1201,7 @@ impl AppConfig {
         } = resolve_listener_and_obfuscation(
             env,
             controller_compatibility_target,
+            current_upstream_behavior,
             &advanced_networking,
             listen_port,
             auto_connect,
@@ -1150,7 +1225,6 @@ impl AppConfig {
             soulseek_diagnostic_level,
         } = resolve_peer_profile(
             env,
-            controller_compatibility_target,
             file_config.profile.user_info_description,
             file_config.profile.user_info_picture,
             file_config.profile.soulseek_diagnostic_level,
@@ -1237,6 +1311,11 @@ impl AppConfig {
                 format!("Search request filter '{filter}' is not a valid regular expression")
             })?;
         }
+        let download_filter = DownloadFilterSettings::from_layers(
+            &file_config.filters.download,
+            env,
+            current_upstream_behavior,
+        )?;
         let canonical_groups = file_config.transfers.groups.clone();
         let compatibility_groups = file_config.groups.clone();
         let user_blacklist_file_config = match env.var("SLSKR_FROZEN_TRANSFER_GROUPS_JSON") {
@@ -1278,8 +1357,10 @@ impl AppConfig {
             TransferUploadSettings::from_layers(file_config.transfers.upload, env)?;
         let transfer_download = TransferDownloadSettings::from_layers(
             file_config.transfers.download,
+            file_config.auto_replace,
             env,
             controller_compatibility_target,
+            current_upstream_behavior,
         )?;
         let transfer_groups = TransferGroupsSettings::from_layers(
             canonical_groups,
@@ -1317,11 +1398,7 @@ impl AppConfig {
         let private_message_auto_response = PrivateMessageAutoResponseSettings::from_layers(
             file_config.network.private_message_auto_response,
             env,
-            if controller_compatibility_target == ControllerCompatibilityTarget::Slskdn {
-                "Hi, I'm human and testing a slskdN client. Shares may be temporarily unavailable while I validate the client."
-            } else {
-                "Hi, I'm human and testing a slskd client. Shares may be temporarily unavailable while I validate the client."
-            },
+            "Hi, I'm human and testing an slskR client. Shares may be temporarily unavailable while I validate the client.",
         )?;
         let MiscControllerFlags {
             remote_configuration,
@@ -1406,15 +1483,15 @@ impl AppConfig {
             "SLSKR_VIRTUAL_SOULFIND_V2_ENABLED",
             file_config.virtual_soulfind_v2.enabled.unwrap_or(true),
         )?;
-        // Neither frozen compatibility target exposes an enabled v2
-        // VirtualSoulfind surface: slskd has no v2 controller, while the
-        // pinned slskdN runtime's controller is permanently disabled because
-        // its separate options registration is not configuration-bound.
-        // Preserve parsing/validation of the request, but project the
-        // target-compatible runtime boundary here.
-        let _ = requested_virtual_soulfind_v2_enabled;
-        let virtual_soulfind_v2_enabled = false;
-        let mut integrations = IntegrationSettings::from_layers(file_config.integrations, env)?;
+        // The current slskdN runtime exposes the v2 controller when its
+        // feature and v2 options are enabled.  Keep the setting live instead
+        // of projecting the old frozen-target negative contract.
+        let virtual_soulfind_v2_enabled = requested_virtual_soulfind_v2_enabled;
+        let mut integrations = IntegrationSettings::from_layers(
+            file_config.integrations,
+            env,
+            current_upstream_behavior,
+        )?;
         integrations.external_visualizer = media_services.external_visualizer.clone();
 
         Ok(Self {
@@ -1490,6 +1567,7 @@ impl AppConfig {
             pod_join_signature_mode,
             virtual_soulfind_v2_enabled,
             controller_compatibility_target,
+            current_upstream_behavior,
             controller_headless,
             remote_configuration,
             remote_file_management,
@@ -1502,6 +1580,7 @@ impl AppConfig {
             controller_hash_from_audio_file_enabled,
             controller_case_sensitive_regex,
             controller_search_request_filters,
+            download_filter,
             controller_no_share_scan,
             controller_force_share_scan,
             controller_swagger,
@@ -1630,7 +1709,7 @@ impl AppConfig {
 
     pub fn sanitized_json(&self) -> String {
         format!(
-            "{{\"config_file\":{},\"http_bind\":\"{}\",\"state_dir\":\"{}\",\"server_address\":\"{}\",\"listen_port\":{},\"advertised_port\":{},\"listener_bind\":{},\"obfuscated_listener_bind\":{},\"obfuscated_advertised_port\":{},\"overlay_bind\":{},\"dht_enabled\":{},\"dht_port\":{},\"trusted_mesh_peers\":{},\"obfuscation\":{},\"peer_host_override\":{},\"test_user_endpoint_overrides\":{},\"username\":{},\"credentials_configured\":{},\"credential_store\":\"{}\",\"credential_file\":\"{}\",\"auto_connect\":{},\"reconnect\":{},\"reconnect_seconds\":{},\"ping_seconds\":{},\"log_level\":\"{}\",\"peer_response_timeout_seconds\":{},\"share_roots\":{},\"share_follow_symlinks\":{},\"share_include_hidden\":{},\"share_scan_max_files\":{},\"share_cache_tsv_enabled\":{},\"transfer_history_limit\":{},\"transfer_max_active\":{},\"transfer_allow_inbound\":{},\"transfer_allow_outbound\":{},\"transfer_auto_retry\":{},\"transfer_rescue\":{},\"download_completed_path_template_configured\":{},\"private_message_auto_response\":{},\"pod_join_signature_mode\":\"{}\",\"virtual_soulfind_v2_enabled\":{},\"controller_compatibility_target\":\"{}\",\"remote_configuration\":{},\"auth_required\":{},\"api_token_configured\":{},\"api_read_write_token_configured\":{},\"api_read_only_token_configured\":{},\"api_nowplaying_token_configured\":{},\"api_cookie_auth_enabled\":{},\"trusted_proxy_cidrs\":{},\"persistence_enabled\":{},\"integrations\":{}}}",
+            "{{\"config_file\":{},\"http_bind\":\"{}\",\"state_dir\":\"{}\",\"server_address\":\"{}\",\"listen_port\":{},\"advertised_port\":{},\"listener_bind\":{},\"obfuscated_listener_bind\":{},\"obfuscated_advertised_port\":{},\"overlay_bind\":{},\"dht_enabled\":{},\"dht_port\":{},\"trusted_mesh_peers\":{},\"obfuscation\":{},\"peer_host_override\":{},\"test_user_endpoint_overrides\":{},\"username\":{},\"credentials_configured\":{},\"credential_store\":\"{}\",\"credential_file\":\"{}\",\"auto_connect\":{},\"reconnect\":{},\"reconnect_seconds\":{},\"ping_seconds\":{},\"log_level\":\"{}\",\"peer_response_timeout_seconds\":{},\"share_roots\":{},\"share_follow_symlinks\":{},\"share_include_hidden\":{},\"share_scan_max_files\":{},\"share_cache_tsv_enabled\":{},\"transfer_history_limit\":{},\"transfer_max_active\":{},\"transfer_allow_inbound\":{},\"transfer_allow_outbound\":{},\"transfer_auto_retry\":{},\"transfer_rescue\":{},\"download_completed_path_template_configured\":{},\"private_message_auto_response\":{},\"pod_join_signature_mode\":\"{}\",\"virtual_soulfind_v2_enabled\":{},\"controller_compatibility_target\":\"{}\",\"parity_profile\":\"{}\",\"remote_configuration\":{},\"auth_required\":{},\"api_token_configured\":{},\"api_read_write_token_configured\":{},\"api_read_only_token_configured\":{},\"api_nowplaying_token_configured\":{},\"api_cookie_auth_enabled\":{},\"trusted_proxy_cidrs\":{},\"persistence_enabled\":{},\"integrations\":{}}}",
             json_option(
                 self.config_file
                     .as_ref()
@@ -1686,6 +1765,7 @@ impl AppConfig {
             self.pod_join_signature_mode.as_str(),
             self.virtual_soulfind_v2_enabled,
             self.controller_compatibility_target.as_str(),
+            if self.current_upstream_behavior { "current" } else { "frozen" },
             self.remote_configuration,
             self.auth_required,
             self.api_token.is_some(),
@@ -1861,6 +1941,7 @@ pub struct AdvancedNetworkingSettings {
     pub mesh_sync_security: MeshSyncSecuritySettings,
     pub pod_join_signature_mode: PodSignatureMode,
     pub pod_security_signature_mode: PodSignatureMode,
+    pub gold_star_club_autojoin: bool,
     pub overlay: OverlaySettings,
     pub overlay_data: OverlayDataSettings,
     pub relay: RelaySettings,
@@ -2154,6 +2235,8 @@ pub struct OverlaySettings {
 pub struct OverlayDataSettings {
     pub enable: bool,
     pub listen_port: u16,
+    pub share_with_dht_port: bool,
+    pub backend_listen_port: u16,
     pub max_concurrent_streams: usize,
     pub relay_authentication_token: String,
     pub allowed_relay_destinations: Vec<String>,
@@ -3262,6 +3345,7 @@ impl IntegrationSettings {
     pub fn from_layers<E: ConfigEnv>(
         file_config: IntegrationsFileConfig,
         env: &E,
+        current_upstream_behavior: bool,
     ) -> Result<Self, String> {
         Ok(Self {
             spotify: Box::new(SpotifyIntegrationSettings::from_layers(
@@ -3271,6 +3355,7 @@ impl IntegrationSettings {
             lidarr: Box::new(LidarrIntegrationSettings::from_layers(
                 file_config.lidarr,
                 env,
+                current_upstream_behavior,
             )?),
             chromaprint: ChromaprintIntegrationSettings::from_layers(
                 file_config.chromaprint,
@@ -3523,7 +3608,7 @@ impl MusicBrainzIntegrationSettings {
             user_agent: env
                 .var("SLSKD_MUSICBRAINZ_USER_AGENT")
                 .or(file_config.user_agent)
-                .unwrap_or_else(|| "slskd/0.0.0 (https://github.com/snapetech/slskdn)".to_owned())
+                .unwrap_or_else(|| "slskR/0.0.0 (https://github.com/snapetech/slskr)".to_owned())
                 .trim()
                 .to_owned(),
             timeout_seconds: env_parse_layer(
@@ -3571,7 +3656,7 @@ impl Default for MusicBrainzIntegrationSettings {
     fn default() -> Self {
         Self {
             base_url: "https://musicbrainz.org/ws/2".to_owned(),
-            user_agent: "slskd/0.0.0 (https://github.com/snapetech/slskdn)".to_owned(),
+            user_agent: "slskR/0.0.0 (https://github.com/snapetech/slskr)".to_owned(),
             timeout_seconds: 20.0,
             retry_attempts: 2,
         }
@@ -3681,7 +3766,7 @@ impl NtfyIntegrationSettings {
             notification_prefix: env
                 .var("SLSKD_NTFY_NOTIFICATION_PREFIX")
                 .or(file.notification_prefix)
-                .unwrap_or_else(|| "slskdN".to_owned()),
+                .unwrap_or_else(|| "slskR".to_owned()),
             notify_on_private_message: env_bool_layer(
                 env,
                 "SLSKD_NTFY_NOTIFY_ON_PRIVATE_MESSAGE",
@@ -3712,7 +3797,7 @@ impl Default for NtfyIntegrationSettings {
             enabled: false,
             url: String::new(),
             access_token: String::new(),
-            notification_prefix: "slskdN".to_owned(),
+            notification_prefix: "slskR".to_owned(),
             notify_on_private_message: true,
             notify_on_room_mention: true,
         }
@@ -3744,7 +3829,7 @@ impl PushoverIntegrationSettings {
             notification_prefix: env
                 .var("SLSKD_PUSHOVER_NOTIFICATION_PREFIX")
                 .or(file.notification_prefix)
-                .unwrap_or_else(|| "slskdN".to_owned()),
+                .unwrap_or_else(|| "slskR".to_owned()),
             notify_on_private_message: env_bool_layer(
                 env,
                 "SLSKD_PUSHOVER_NOTIFY_ON_PRIVATE_MESSAGE",
@@ -3782,7 +3867,7 @@ impl Default for PushoverIntegrationSettings {
             enabled: false,
             user_key: String::new(),
             token: String::new(),
-            notification_prefix: "slskdN".to_owned(),
+            notification_prefix: "slskR".to_owned(),
             notify_on_private_message: true,
             notify_on_room_mention: true,
         }
@@ -3811,7 +3896,7 @@ impl PushbulletIntegrationSettings {
             notification_prefix: env
                 .var("SLSKD_PUSHBULLET_NOTIFICATION_PREFIX")
                 .or(file.notification_prefix)
-                .unwrap_or_else(|| "From slskdN:".to_owned()),
+                .unwrap_or_else(|| "From slskR:".to_owned()),
             notify_on_private_message: env_bool_layer(
                 env,
                 "SLSKD_PUSHBULLET_NOTIFY_ON_PRIVATE_MESSAGE",
@@ -3855,7 +3940,7 @@ impl Default for PushbulletIntegrationSettings {
         Self {
             enabled: false,
             access_token: String::new(),
-            notification_prefix: "From slskdN:".to_owned(),
+            notification_prefix: "From slskR:".to_owned(),
             notify_on_private_message: true,
             notify_on_room_mention: true,
             retry_attempts: 3,
@@ -4340,18 +4425,35 @@ pub struct LidarrIntegrationSettings {
     pub wishlist_filter: String,
     pub wishlist_max_results: u64,
     pub auto_import_completed: bool,
+    pub import_delay_seconds: u64,
+    pub import_retry_max_attempts: u32,
+    pub import_retry_delay_seconds: u64,
     pub import_path_from: String,
     pub import_path_to: String,
     pub import_mode: String,
     pub import_replace_existing_files: bool,
+    pub skip_already_owned_albums: bool,
     pub delete_rejected_downloads: bool,
     pub blacklist_rejected_downloads: bool,
+    pub edition_match_mode: String,
 }
 
 impl LidarrIntegrationSettings {
-    fn from_layers<E: ConfigEnv>(file_config: LidarrFileConfig, env: &E) -> Result<Self, String> {
-        let url =
-            optional_env_any(env, &["SLSKR_LIDARR_URL", "SLSKD_LIDARR_URL"]).or(file_config.url);
+    fn from_layers<E: ConfigEnv>(
+        file_config: LidarrFileConfig,
+        env: &E,
+        current_upstream_behavior: bool,
+    ) -> Result<Self, String> {
+        let url = optional_env_any(
+            env,
+            &profile_env_names(
+                current_upstream_behavior,
+                "SLSKR_LIDARR_URL",
+                "LIDARR_URL",
+                "SLSKD_LIDARR_URL",
+            ),
+        )
+        .or(file_config.url);
         if let Some(url) = url.as_deref().filter(|value| !value.trim().is_empty()) {
             let parsed = reqwest::Url::parse(url)
                 .map_err(|error| format!("Lidarr URL is invalid: {error}"))?;
@@ -4371,112 +4473,239 @@ impl LidarrIntegrationSettings {
         let settings = Self {
             enabled: env_bool_any_layer(
                 env,
-                &["SLSKR_LIDARR_ENABLED", "SLSKD_LIDARR"],
+                &profile_env_names(
+                    current_upstream_behavior,
+                    "SLSKR_LIDARR_ENABLED",
+                    "LIDARR",
+                    "SLSKD_LIDARR",
+                ),
                 file_config.enabled.unwrap_or(false),
             )?,
             url,
-            api_key: optional_env_any(env, &["SLSKR_LIDARR_API_KEY", "SLSKD_LIDARR_API_KEY"])
-                .or(file_config.api_key),
+            api_key: optional_env_any(
+                env,
+                &profile_env_names(
+                    current_upstream_behavior,
+                    "SLSKR_LIDARR_API_KEY",
+                    "LIDARR_API_KEY",
+                    "SLSKD_LIDARR_API_KEY",
+                ),
+            )
+            .or(file_config.api_key),
             timeout_seconds: env_parse_any_layer(
                 env,
-                &["SLSKR_LIDARR_TIMEOUT_SECONDS", "SLSKD_LIDARR_TIMEOUT"],
+                &profile_env_names(
+                    current_upstream_behavior,
+                    "SLSKR_LIDARR_TIMEOUT_SECONDS",
+                    "LIDARR_TIMEOUT",
+                    "SLSKD_LIDARR_TIMEOUT",
+                ),
                 file_config.timeout_seconds,
                 20_u64,
             )?,
             sync_wanted_to_wishlist: env_bool_any_layer(
                 env,
-                &["SLSKR_LIDARR_SYNC_WANTED", "SLSKD_LIDARR_SYNC_WANTED"],
+                &profile_env_names(
+                    current_upstream_behavior,
+                    "SLSKR_LIDARR_SYNC_WANTED",
+                    "LIDARR_SYNC_WANTED",
+                    "SLSKD_LIDARR_SYNC_WANTED",
+                ),
                 file_config.sync_wanted_to_wishlist.unwrap_or(false),
             )?,
             sync_interval_seconds: env_parse_any_layer(
                 env,
-                &["SLSKR_LIDARR_SYNC_INTERVAL", "SLSKD_LIDARR_SYNC_INTERVAL"],
+                &profile_env_names(
+                    current_upstream_behavior,
+                    "SLSKR_LIDARR_SYNC_INTERVAL",
+                    "LIDARR_SYNC_INTERVAL",
+                    "SLSKD_LIDARR_SYNC_INTERVAL",
+                ),
                 file_config.sync_interval_seconds,
                 3_600_u64,
             )?,
             max_items_per_sync: env_parse_any_layer(
                 env,
-                &["SLSKR_LIDARR_SYNC_MAX_ITEMS", "SLSKD_LIDARR_SYNC_MAX_ITEMS"],
+                &profile_env_names(
+                    current_upstream_behavior,
+                    "SLSKR_LIDARR_SYNC_MAX_ITEMS",
+                    "LIDARR_SYNC_MAX_ITEMS",
+                    "SLSKD_LIDARR_SYNC_MAX_ITEMS",
+                ),
                 file_config.max_items_per_sync,
                 100_u64,
             )?,
             auto_download: env_bool_any_layer(
                 env,
-                &["SLSKR_LIDARR_AUTO_DOWNLOAD", "SLSKD_LIDARR_AUTO_DOWNLOAD"],
+                &profile_env_names(
+                    current_upstream_behavior,
+                    "SLSKR_LIDARR_AUTO_DOWNLOAD",
+                    "LIDARR_AUTO_DOWNLOAD",
+                    "SLSKD_LIDARR_AUTO_DOWNLOAD",
+                ),
                 file_config.auto_download.unwrap_or(false),
             )?,
             wishlist_filter: optional_env_any(
                 env,
-                &[
+                &profile_env_names(
+                    current_upstream_behavior,
                     "SLSKR_LIDARR_WISHLIST_FILTER",
+                    "LIDARR_WISHLIST_FILTER",
                     "SLSKD_LIDARR_WISHLIST_FILTER",
-                ],
+                ),
             )
             .or(file_config.wishlist_filter)
             .unwrap_or_default(),
             wishlist_max_results: env_parse_any_layer(
                 env,
-                &[
+                &profile_env_names(
+                    current_upstream_behavior,
                     "SLSKR_LIDARR_WISHLIST_MAX_RESULTS",
+                    "LIDARR_WISHLIST_MAX_RESULTS",
                     "SLSKD_LIDARR_WISHLIST_MAX_RESULTS",
-                ],
+                ),
                 file_config.wishlist_max_results,
                 100_u64,
             )?,
             auto_import_completed: env_bool_any_layer(
                 env,
-                &[
+                &profile_env_names(
+                    current_upstream_behavior,
                     "SLSKR_LIDARR_AUTO_IMPORT_COMPLETED",
+                    "LIDARR_AUTO_IMPORT_COMPLETED",
                     "SLSKD_LIDARR_AUTO_IMPORT_COMPLETED",
-                ],
+                ),
                 file_config.auto_import_completed.unwrap_or(false),
+            )?,
+            import_delay_seconds: env_parse_any_layer(
+                env,
+                &profile_env_names(
+                    current_upstream_behavior,
+                    "SLSKR_LIDARR_IMPORT_DELAY",
+                    "LIDARR_IMPORT_DELAY",
+                    "SLSKD_LIDARR_IMPORT_DELAY",
+                ),
+                file_config.import_delay_seconds,
+                0_u64,
+            )?,
+            import_retry_max_attempts: env_parse_any_layer(
+                env,
+                &profile_env_names(
+                    current_upstream_behavior,
+                    "SLSKR_LIDARR_IMPORT_RETRY_MAX_ATTEMPTS",
+                    "LIDARR_IMPORT_RETRY_MAX_ATTEMPTS",
+                    "SLSKD_LIDARR_IMPORT_RETRY_MAX_ATTEMPTS",
+                ),
+                file_config.import_retry_max_attempts,
+                2_u32,
+            )?,
+            import_retry_delay_seconds: env_parse_any_layer(
+                env,
+                &profile_env_names(
+                    current_upstream_behavior,
+                    "SLSKR_LIDARR_IMPORT_RETRY_DELAY",
+                    "LIDARR_IMPORT_RETRY_DELAY",
+                    "SLSKD_LIDARR_IMPORT_RETRY_DELAY",
+                ),
+                file_config.import_retry_delay_seconds,
+                30_u64,
             )?,
             import_path_from: optional_env_any(
                 env,
-                &[
+                &profile_env_names(
+                    current_upstream_behavior,
                     "SLSKR_LIDARR_IMPORT_PATH_FROM",
+                    "LIDARR_IMPORT_PATH_FROM",
                     "SLSKD_LIDARR_IMPORT_PATH_FROM",
-                ],
+                ),
             )
             .or(file_config.import_path_from)
             .unwrap_or_default(),
             import_path_to: optional_env_any(
                 env,
-                &["SLSKR_LIDARR_IMPORT_PATH_TO", "SLSKD_LIDARR_IMPORT_PATH_TO"],
+                &profile_env_names(
+                    current_upstream_behavior,
+                    "SLSKR_LIDARR_IMPORT_PATH_TO",
+                    "LIDARR_IMPORT_PATH_TO",
+                    "SLSKD_LIDARR_IMPORT_PATH_TO",
+                ),
             )
             .or(file_config.import_path_to)
             .unwrap_or_default(),
             import_mode: optional_env_any(
                 env,
-                &["SLSKR_LIDARR_IMPORT_MODE", "SLSKD_LIDARR_IMPORT_MODE"],
+                &profile_env_names(
+                    current_upstream_behavior,
+                    "SLSKR_LIDARR_IMPORT_MODE",
+                    "LIDARR_IMPORT_MODE",
+                    "SLSKD_LIDARR_IMPORT_MODE",
+                ),
             )
             .or(file_config.import_mode)
             .unwrap_or_else(|| "move".to_owned()),
             import_replace_existing_files: env_bool_any_layer(
                 env,
-                &[
+                &profile_env_names(
+                    current_upstream_behavior,
                     "SLSKR_LIDARR_IMPORT_REPLACE_EXISTING",
+                    "LIDARR_IMPORT_REPLACE_EXISTING",
                     "SLSKD_LIDARR_IMPORT_REPLACE_EXISTING",
-                ],
+                ),
                 file_config.import_replace_existing_files.unwrap_or(false),
+            )?,
+            skip_already_owned_albums: env_bool_any_layer(
+                env,
+                &profile_env_names(
+                    current_upstream_behavior,
+                    "SLSKR_LIDARR_SKIP_ALREADY_OWNED_ALBUMS",
+                    "LIDARR_SKIP_ALREADY_OWNED_ALBUMS",
+                    "SLSKD_LIDARR_SKIP_ALREADY_OWNED_ALBUMS",
+                ),
+                file_config.skip_already_owned_albums.unwrap_or(true),
             )?,
             delete_rejected_downloads: env_bool_any_layer(
                 env,
-                &[
+                &profile_env_names(
+                    current_upstream_behavior,
                     "SLSKR_LIDARR_DELETE_REJECTED_DOWNLOADS",
+                    "LIDARR_DELETE_REJECTED_DOWNLOADS",
                     "SLSKD_LIDARR_DELETE_REJECTED_DOWNLOADS",
-                ],
+                ),
                 file_config.delete_rejected_downloads.unwrap_or(false),
             )?,
             blacklist_rejected_downloads: env_bool_any_layer(
                 env,
-                &[
+                &profile_env_names(
+                    current_upstream_behavior,
                     "SLSKR_LIDARR_BLACKLIST_REJECTED_DOWNLOADS",
+                    "LIDARR_BLACKLIST_REJECTED_DOWNLOADS",
                     "SLSKD_LIDARR_BLACKLIST_REJECTED_DOWNLOADS",
-                ],
+                ),
                 file_config.blacklist_rejected_downloads.unwrap_or(false),
             )?,
+            edition_match_mode: optional_env_any(
+                env,
+                &profile_env_names(
+                    current_upstream_behavior,
+                    "SLSKR_LIDARR_EDITION_MATCH_MODE",
+                    "LIDARR_EDITION_MATCH_MODE",
+                    "SLSKD_LIDARR_EDITION_MATCH_MODE",
+                ),
+            )
+            .or(file_config.edition_match_mode)
+            .unwrap_or_else(|| "exclude".to_owned())
+            .trim()
+            .to_ascii_lowercase(),
         };
+        if settings.import_delay_seconds > 600 {
+            return Err("Lidarr import delay must be between 0 and 600 seconds".to_owned());
+        }
+        if settings.import_retry_max_attempts > 10 {
+            return Err("Lidarr import retry attempts must be between 0 and 10".to_owned());
+        }
+        if !(1..=3_600).contains(&settings.import_retry_delay_seconds) {
+            return Err("Lidarr import retry delay must be between 1 and 3600 seconds".to_owned());
+        }
         if !(1..=120).contains(&settings.timeout_seconds) {
             return Err("Lidarr timeout must be between 1 and 120 seconds".to_owned());
         }
@@ -4523,6 +4752,14 @@ impl LidarrIntegrationSettings {
             ) {
                 return Err("Lidarr import_mode must be 'move' or 'copy'.".to_owned());
             }
+            if !matches!(
+                settings.edition_match_mode.as_str(),
+                "exclude" | "prefer" | "off"
+            ) {
+                return Err(
+                    "Lidarr edition_match_mode must be 'exclude', 'prefer', or 'off'.".to_owned(),
+                );
+            }
         }
         Ok(settings)
     }
@@ -4541,7 +4778,7 @@ impl LidarrIntegrationSettings {
 
     pub fn sanitized_json(&self) -> String {
         format!(
-            "{{\"enabled\":{},\"url\":null,\"url_configured\":{},\"api_key_configured\":{},\"timeout_seconds\":{},\"sync_wanted_to_wishlist\":{},\"sync_interval_seconds\":{},\"max_items_per_sync\":{},\"auto_download\":{},\"wishlist_filter\":\"{}\",\"wishlist_max_results\":{},\"auto_import_completed\":{},\"import_path_from\":\"{}\",\"import_path_to\":\"{}\",\"import_mode\":\"{}\",\"import_replace_existing_files\":{},\"delete_rejected_downloads\":{},\"blacklist_rejected_downloads\":{}}}",
+            "{{\"enabled\":{},\"url\":null,\"url_configured\":{},\"api_key_configured\":{},\"timeout_seconds\":{},\"sync_wanted_to_wishlist\":{},\"sync_interval_seconds\":{},\"max_items_per_sync\":{},\"auto_download\":{},\"wishlist_filter\":\"{}\",\"wishlist_max_results\":{},\"auto_import_completed\":{},\"import_delay_seconds\":{},\"import_retry_max_attempts\":{},\"import_retry_delay_seconds\":{},\"import_path_from\":\"{}\",\"import_path_to\":\"{}\",\"import_mode\":\"{}\",\"import_replace_existing_files\":{},\"skip_already_owned_albums\":{},\"delete_rejected_downloads\":{},\"blacklist_rejected_downloads\":{},\"edition_match_mode\":\"{}\"}}",
             self.enabled,
             self.url.is_some(),
             self.api_key.is_some(),
@@ -4553,12 +4790,17 @@ impl LidarrIntegrationSettings {
             json_escape(&self.wishlist_filter),
             self.wishlist_max_results,
             self.auto_import_completed,
+            self.import_delay_seconds,
+            self.import_retry_max_attempts,
+            self.import_retry_delay_seconds,
             json_escape(&self.import_path_from),
             json_escape(&self.import_path_to),
             json_escape(&self.import_mode),
             self.import_replace_existing_files,
+            self.skip_already_owned_albums,
             self.delete_rejected_downloads,
             self.blacklist_rejected_downloads,
+            json_escape(&self.edition_match_mode),
         )
     }
 }
@@ -4802,8 +5044,10 @@ impl ShareSettings {
             .var("SLSKR_SHARE_FIXTURE")
             .or(file_config.fixture)
             .unwrap_or_default();
-        let raw_directories = match optional_env_any(env, &["SLSKR_SHARE_DIRS", "SLSKD_SHARED_DIR"])
-        {
+        let raw_directories = match optional_env_any(
+            env,
+            &["SLSKR_SHARE_DIRS", "SLSKR_SHARED_DIR", "SLSKD_SHARED_DIR"],
+        ) {
             Some(value) => value,
             None => file_config.dirs.join(";"),
         };
@@ -4902,9 +5146,13 @@ impl ShareSettings {
             cache_workers,
             cache_retention: cache_retention_minutes
                 .map(|minutes| Duration::from_secs(minutes.saturating_mul(60))),
-            probe_media_attributes: env_bool_layer(
+            probe_media_attributes: env_bool_any_layer(
                 env,
-                "SLSKD_SHARES_PROBE_MEDIA_ATTRIBUTES",
+                &[
+                    "SLSKR_SHARES_PROBE_MEDIA_ATTRIBUTES",
+                    "SHARES_PROBE_MEDIA_ATTRIBUTES",
+                    "SLSKD_SHARES_PROBE_MEDIA_ATTRIBUTES",
+                ],
                 file_config.probe_media_attributes.unwrap_or(true),
             )?,
             filters,
@@ -4949,6 +5197,7 @@ pub struct FileConfig {
     network: NetworkFileConfig,
     listeners: ListenerFileConfig,
     dht: DhtFileConfig,
+    auto_replace: AutoReplaceFileConfig,
     #[serde(rename = "Mesh")]
     mesh_sync: MeshSyncRootFileConfig,
     mesh: MeshFileConfig,
@@ -5321,6 +5570,7 @@ pub struct FileRetentionFileConfig {
 pub struct FiltersFileConfig {
     search: SearchFiltersFileConfig,
     search_retention: SearchRetentionFileConfig,
+    download: DownloadFiltersFileConfig,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -5335,6 +5585,12 @@ pub struct SearchRetentionFileConfig {
     max_age_days: Option<u64>,
     max_count: Option<usize>,
     cleanup_interval_seconds: Option<u64>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct DownloadFiltersFileConfig {
+    exclude: Vec<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -5951,6 +6207,8 @@ pub struct OverlayFileConfig {
 pub struct OverlayDataFileConfig {
     enable: Option<bool>,
     listen_port: Option<u16>,
+    share_with_dht_port: Option<bool>,
+    backend_listen_port: Option<u16>,
     max_concurrent_streams: Option<usize>,
     relay_authentication_token: Option<String>,
     allowed_relay_destinations: Vec<String>,
@@ -6141,6 +6399,12 @@ pub struct PodCoreFileConfig {
     join: PodJoinFileConfig,
     #[serde(alias = "Security")]
     security: PodSecurityFileConfig,
+    #[serde(
+        rename = "GoldStarClub",
+        alias = "goldStarClub",
+        alias = "gold_star_club"
+    )]
+    gold_star_club: GoldStarClubFileConfig,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -6157,11 +6421,19 @@ pub struct PodSecurityFileConfig {
     signature_mode: Option<String>,
 }
 
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct GoldStarClubFileConfig {
+    #[serde(alias = "AutoJoin", alias = "autoJoin", alias = "auto_join")]
+    autojoin: Option<bool>,
+}
+
 impl AdvancedNetworkingSettings {
     fn from_layers<E: ConfigEnv>(
         file: &FileConfig,
         env: &E,
         target: ControllerCompatibilityTarget,
+        current_upstream_behavior: bool,
         _state_dir: &Path,
     ) -> Result<Self, String> {
         let slskdn = target == ControllerCompatibilityTarget::Slskdn;
@@ -6387,6 +6659,8 @@ impl AdvancedNetworkingSettings {
         let overlay_data = OverlayDataSettings {
             enable: overlay_data_file.enable.unwrap_or(false),
             listen_port: overlay_data_file.listen_port.unwrap_or(50_401),
+            share_with_dht_port: overlay_data_file.share_with_dht_port.unwrap_or(true),
+            backend_listen_port: overlay_data_file.backend_listen_port.unwrap_or(55_401),
             max_concurrent_streams: overlay_data_file.max_concurrent_streams.unwrap_or(8),
             relay_authentication_token: overlay_data_file
                 .relay_authentication_token
@@ -6404,6 +6678,7 @@ impl AdvancedNetworkingSettings {
             trusted_certificate_pins: overlay_data_file.trusted_certificate_pins.clone(),
         };
         if overlay_data.listen_port == 0
+            || (overlay_data.share_with_dht_port && overlay_data.backend_listen_port == 0)
             || overlay_data.max_concurrent_streams == 0
             || overlay_data.max_concurrent_relays == 0
             || overlay_data.max_relay_bytes_per_direction == 0
@@ -6637,6 +6912,14 @@ impl AdvancedNetworkingSettings {
                     .signature_mode
                     .as_deref()
                     .unwrap_or("off"),
+            )?,
+            gold_star_club_autojoin: env_bool_layer(
+                env,
+                "SLSKDN_POD_GOLD_STAR_CLUB_AUTOJOIN",
+                podcore_file
+                    .gold_star_club
+                    .autojoin
+                    .unwrap_or(!current_upstream_behavior),
             )?,
             overlay,
             overlay_data,
@@ -7029,6 +7312,14 @@ pub struct TransferFileConfig {
     upload: TransferUploadFileConfig,
     download: TransferDownloadFileConfig,
     groups: GroupsFileConfig,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct AutoReplaceFileConfig {
+    interval_seconds: Option<u64>,
+    size_threshold_percent: Option<f64>,
+    max_retries: Option<usize>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -7560,8 +7851,10 @@ impl TransferUploadSettings {
 impl TransferDownloadSettings {
     fn from_layers<E: ConfigEnv>(
         mut file: TransferDownloadFileConfig,
+        auto_replace: AutoReplaceFileConfig,
         env: &E,
         target: ControllerCompatibilityTarget,
+        current_upstream_behavior: bool,
     ) -> Result<Self, String> {
         if let Some(json) = env.var("SLSKR_FROZEN_TRANSFER_DOWNLOAD_JSON") {
             file = serde_json::from_str::<TransferDownloadFileConfig>(&json)
@@ -7682,33 +7975,95 @@ impl TransferDownloadSettings {
             .or(file.completed_layout)
             .unwrap_or_else(|| "remote_folder".to_owned())
             .to_ascii_lowercase();
-        let auto_replace_stuck = env_bool_layer(
+        let auto_replace_stuck_names: &[&str] = if current_upstream_behavior {
+            &[
+                "SLSKR_AUTO_REPLACE_STUCK",
+                "AUTO_REPLACE_STUCK",
+                "SLSKD_AUTO_REPLACE_STUCK",
+            ]
+        } else {
+            &["SLSKD_AUTO_REPLACE_STUCK"]
+        };
+        let auto_replace_stuck = env_bool_any_layer(
             env,
-            "SLSKD_AUTO_REPLACE_STUCK",
+            auto_replace_stuck_names,
             file.auto_replace_stuck.unwrap_or(false),
         )?;
-        let auto_replace_threshold_percent = bounded_config_value(
-            "SLSKD_AUTO_REPLACE_THRESHOLD",
-            env_parse_layer(
-                env,
+        let auto_replace_threshold_default = if current_upstream_behavior { 0.0 } else { 5.0 };
+        let auto_replace_threshold_names: &[&str] = if current_upstream_behavior {
+            &[
+                "SLSKR_AUTO_REPLACE_THRESHOLD",
+                "AUTO_REPLACE_THRESHOLD",
                 "SLSKD_AUTO_REPLACE_THRESHOLD",
-                file.auto_replace_threshold,
-                5.0_f64,
+            ]
+        } else {
+            &["SLSKD_AUTO_REPLACE_THRESHOLD"]
+        };
+        let auto_replace_threshold_percent = bounded_config_value(
+            "AUTO_REPLACE_THRESHOLD",
+            env_parse_any_layer(
+                env,
+                auto_replace_threshold_names,
+                current_upstream_behavior
+                    .then_some(auto_replace.size_threshold_percent)
+                    .flatten()
+                    .or(file.auto_replace_threshold),
+                auto_replace_threshold_default,
             )?,
-            0.1,
+            if current_upstream_behavior { 0.0 } else { 0.1 },
             50.0,
         )?;
-        let auto_replace_interval_seconds = bounded_config_value(
-            "SLSKD_AUTO_REPLACE_INTERVAL",
-            env_parse_layer(
-                env,
+        let auto_replace_interval_default = if current_upstream_behavior { 300 } else { 60 };
+        let auto_replace_interval_names: &[&str] = if current_upstream_behavior {
+            &[
+                "SLSKR_AUTO_REPLACE_INTERVAL",
+                "AUTO_REPLACE_INTERVAL",
                 "SLSKD_AUTO_REPLACE_INTERVAL",
-                file.auto_replace_interval,
-                60_u64,
+            ]
+        } else {
+            &["SLSKD_AUTO_REPLACE_INTERVAL"]
+        };
+        let auto_replace_interval_seconds = bounded_config_value(
+            "AUTO_REPLACE_INTERVAL",
+            env_parse_any_layer(
+                env,
+                auto_replace_interval_names,
+                current_upstream_behavior
+                    .then_some(auto_replace.interval_seconds)
+                    .flatten()
+                    .or(file.auto_replace_interval),
+                auto_replace_interval_default,
             )?,
-            10,
+            if current_upstream_behavior { 60 } else { 10 },
             3_600,
         )?;
+        let auto_replace_max_retries_names: &[&str] = if current_upstream_behavior {
+            &[
+                "SLSKR_AUTO_REPLACE_MAX_RETRIES",
+                "AUTO_REPLACE_MAX_RETRIES",
+                "SLSKD_AUTO_REPLACE_MAX_RETRIES",
+            ]
+        } else {
+            &[]
+        };
+        let max_retries_configured = current_upstream_behavior
+            && (auto_replace.max_retries.is_some()
+                || optional_env_any(env, auto_replace_max_retries_names).is_some());
+        let auto_replace_max_retries = if current_upstream_behavior || max_retries_configured {
+            Some(bounded_config_value(
+                "AUTO_REPLACE_MAX_RETRIES",
+                env_parse_any_layer(
+                    env,
+                    auto_replace_max_retries_names,
+                    auto_replace.max_retries,
+                    3_usize,
+                )?,
+                0,
+                100,
+            )?)
+        } else {
+            None
+        };
 
         Ok(Self {
             slots,
@@ -7728,6 +8083,7 @@ impl TransferDownloadSettings {
             auto_replace_stuck,
             auto_replace_threshold_percent,
             auto_replace_interval: Duration::from_secs(auto_replace_interval_seconds),
+            auto_replace_max_retries,
         })
     }
 }
@@ -7975,12 +8331,17 @@ pub struct LidarrFileConfig {
     wishlist_filter: Option<String>,
     wishlist_max_results: Option<u64>,
     auto_import_completed: Option<bool>,
+    import_delay_seconds: Option<u64>,
+    import_retry_max_attempts: Option<u32>,
+    import_retry_delay_seconds: Option<u64>,
     import_path_from: Option<String>,
     import_path_to: Option<String>,
     import_mode: Option<String>,
     import_replace_existing_files: Option<bool>,
+    skip_already_owned_albums: Option<bool>,
     delete_rejected_downloads: Option<bool>,
     blacklist_rejected_downloads: Option<bool>,
+    edition_match_mode: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -8458,6 +8819,13 @@ const CONTROLLER_YAML_CORE_MAPPINGS: &[(&str, &str)] = &[
     ("shares.directories", "SLSKD_SHARED_DIR"),
     ("shares.filters", "SLSKD_SHARE_FILTER"),
     ("filters.search.request", "SLSKD_SEARCH_REQUEST_FILTER"),
+    ("filters.download.exclude", "SLSKR_DOWNLOAD_FILTER_EXCLUDE"),
+    ("auto_replace.interval_seconds", "AUTO_REPLACE_INTERVAL"),
+    (
+        "auto_replace.size_threshold_percent",
+        "AUTO_REPLACE_THRESHOLD",
+    ),
+    ("auto_replace.max_retries", "AUTO_REPLACE_MAX_RETRIES"),
     (
         "transfers.groups.blacklisted.members",
         "SLSKD_BLACKLISTED_MEMBERS",
@@ -8616,6 +8984,22 @@ const CONTROLLER_YAML_CORE_MAPPINGS: &[(&str, &str)] = &[
     (
         "integrations.lidarr.import_replace_existing_files",
         "SLSKD_LIDARR_IMPORT_REPLACE_EXISTING",
+    ),
+    (
+        "integrations.lidarr.import_delay_seconds",
+        "SLSKR_LIDARR_IMPORT_DELAY",
+    ),
+    (
+        "integrations.lidarr.import_retry_max_attempts",
+        "SLSKR_LIDARR_IMPORT_RETRY_MAX_ATTEMPTS",
+    ),
+    (
+        "integrations.lidarr.import_retry_delay_seconds",
+        "SLSKR_LIDARR_IMPORT_RETRY_DELAY",
+    ),
+    (
+        "integrations.lidarr.skip_already_owned_albums",
+        "SLSKR_LIDARR_SKIP_ALREADY_OWNED_ALBUMS",
     ),
     (
         "integrations.lidarr.delete_rejected_downloads",
@@ -8974,7 +9358,7 @@ fn controller_yaml_environment(
             "controller YAML is too large: max is {MAX_CONFIG_FILE_BYTES} bytes"
         ));
     }
-    let root = serde_yaml::from_str::<serde_yaml::Value>(&body)
+    let mut root = serde_yaml::from_str::<serde_yaml::Value>(&body)
         .map_err(|_| "invalid controller YAML".to_owned())?;
     let mut nodes = 0;
     validate_controller_yaml_shape(&root, 0, &mut nodes)?;
@@ -8984,6 +9368,9 @@ fn controller_yaml_environment(
     ) {
         return Err("controller YAML root must be a mapping".to_owned());
     }
+    normalize_controller_yaml(&mut root);
+    let mut normalized_nodes = 0;
+    validate_controller_yaml_shape(&root, 0, &mut normalized_nodes)?;
 
     let mut values = BTreeMap::new();
     if target == ControllerCompatibilityTarget::Slskdn {
@@ -9029,6 +9416,7 @@ fn controller_yaml_environment(
                     "SLSKD_SHARED_DIR"
                         | "SLSKD_SHARE_FILTER"
                         | "SLSKD_SEARCH_REQUEST_FILTER"
+                        | "SLSKR_DOWNLOAD_FILTER_EXCLUDE"
                         | "SLSKD_BLACKLISTED_MEMBERS"
                         | "SLSKD_BLACKLISTED_PATTERNS"
                         | "SLSKD_BLACKLISTED_CIDRS"
@@ -9097,11 +9485,11 @@ fn controller_yaml_environment(
             .map_err(|_| "invalid integrations.scripts configuration".to_owned())?;
         values.insert("SLSKR_FROZEN_SCRIPTS_JSON".to_owned(), json);
     }
-    let groups = controller_yaml_value(&root, "transfers.groups").or_else(|| {
-        (target == ControllerCompatibilityTarget::Slskdn)
-            .then(|| controller_yaml_value(&root, "groups"))
-            .flatten()
-    });
+    let groups = match target {
+        ControllerCompatibilityTarget::Slskd => controller_yaml_value(&root, "transfers.groups"),
+        ControllerCompatibilityTarget::Slskdn => controller_yaml_value(&root, "groups")
+            .or_else(|| controller_yaml_value(&root, "transfers.groups")),
+    };
     if let Some(groups) = groups {
         let json = serde_json::to_string(groups)
             .map_err(|_| "invalid transfers.groups configuration".to_owned())?;
@@ -9127,7 +9515,12 @@ fn controller_yaml_value<'a>(
     let mut current = root;
     for key in path.split('.') {
         let mapping = current.as_mapping()?;
-        current = mapping.get(serde_yaml::Value::String(key.to_owned()))?;
+        current = mapping.iter().find_map(|(candidate, value)| {
+            candidate
+                .as_str()
+                .filter(|candidate| normalize_yaml_key(candidate) == normalize_yaml_key(key))
+                .map(|_| value)
+        })?;
     }
     Some(current)
 }
@@ -9142,11 +9535,131 @@ fn controller_yaml_value_case_insensitive<'a>(
         current = mapping.iter().find_map(|(candidate, value)| {
             candidate
                 .as_str()
-                .filter(|candidate| candidate.eq_ignore_ascii_case(key))
+                .filter(|candidate| normalize_yaml_key(candidate) == normalize_yaml_key(key))
                 .map(|_| value)
         })?;
     }
     Some(current)
+}
+
+fn normalize_yaml_key(value: &str) -> String {
+    value
+        .chars()
+        .filter(|character| !matches!(character, '_' | '-'))
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
+fn yaml_mapping_key(mapping: &serde_yaml::Mapping, name: &str) -> Option<serde_yaml::Value> {
+    let normalized = normalize_yaml_key(name);
+    mapping.keys().find_map(|key| {
+        key.as_str()
+            .filter(|candidate| normalize_yaml_key(candidate) == normalized)
+            .map(|_| key.clone())
+    })
+}
+
+fn yaml_mapping_value_mut<'a>(
+    mapping: &'a mut serde_yaml::Mapping,
+    name: &str,
+) -> Option<&'a mut serde_yaml::Value> {
+    let key = yaml_mapping_key(mapping, name)?;
+    mapping.get_mut(&key)
+}
+
+fn yaml_take_mapping_value(
+    mapping: &mut serde_yaml::Mapping,
+    name: &str,
+) -> Option<serde_yaml::Value> {
+    let key = yaml_mapping_key(mapping, name)?;
+    mapping.remove(&key)
+}
+
+fn merge_missing_yaml_values(target: &mut serde_yaml::Mapping, source: serde_yaml::Mapping) {
+    for (key, value) in source {
+        let Some(name) = key.as_str() else {
+            continue;
+        };
+        if let Some(existing) = yaml_mapping_value_mut(target, name) {
+            if let (serde_yaml::Value::Mapping(existing), serde_yaml::Value::Mapping(source)) =
+                (existing, value)
+            {
+                merge_missing_yaml_values(existing, source);
+            }
+        } else {
+            target.insert(key, value);
+        }
+    }
+}
+
+fn normalize_top_level_yaml_alias(
+    root: &mut serde_yaml::Mapping,
+    legacy_name: &str,
+    canonical_name: &str,
+) {
+    let Some(legacy_value) = yaml_take_mapping_value(root, legacy_name) else {
+        return;
+    };
+    if let Some(canonical) = yaml_mapping_value_mut(root, canonical_name) {
+        if let (serde_yaml::Value::Mapping(canonical), serde_yaml::Value::Mapping(legacy)) =
+            (canonical, legacy_value)
+        {
+            merge_missing_yaml_values(canonical, legacy);
+        }
+    } else {
+        root.insert(
+            serde_yaml::Value::String(canonical_name.to_owned()),
+            legacy_value,
+        );
+    }
+}
+
+fn normalize_controller_yaml(root: &mut serde_yaml::Value) {
+    let Some(root) = root.as_mapping_mut() else {
+        return;
+    };
+
+    normalize_top_level_yaml_alias(root, "global", "transfers");
+    normalize_top_level_yaml_alias(root, "integration", "integrations");
+
+    if let Some(shares) = yaml_mapping_value_mut(root, "shares") {
+        if let serde_yaml::Value::Sequence(directories) = shares {
+            let directories = std::mem::take(directories);
+            let mut normalized = serde_yaml::Mapping::new();
+            normalized.insert(
+                serde_yaml::Value::String("directories".to_owned()),
+                serde_yaml::Value::Sequence(directories),
+            );
+            *shares = serde_yaml::Value::Mapping(normalized);
+        }
+    }
+
+    let upload_limits = {
+        yaml_mapping_value_mut(root, "transfers")
+            .and_then(serde_yaml::Value::as_mapping_mut)
+            .and_then(|transfers| yaml_mapping_value_mut(transfers, "upload"))
+            .and_then(serde_yaml::Value::as_mapping_mut)
+            .and_then(|upload| yaml_mapping_value_mut(upload, "limits"))
+            .cloned()
+    };
+    if let Some(upload_limits) = upload_limits {
+        if let Some(transfers) =
+            yaml_mapping_value_mut(root, "transfers").and_then(serde_yaml::Value::as_mapping_mut)
+        {
+            if let Some(existing_limits) = yaml_mapping_value_mut(transfers, "limits") {
+                if let (serde_yaml::Value::Mapping(existing), serde_yaml::Value::Mapping(upload)) =
+                    (existing_limits, upload_limits)
+                {
+                    merge_missing_yaml_values(existing, upload);
+                }
+            } else {
+                transfers.insert(
+                    serde_yaml::Value::String("limits".to_owned()),
+                    upload_limits,
+                );
+            }
+        }
+    }
 }
 
 fn validate_controller_yaml_shape(
@@ -9182,6 +9695,19 @@ fn validate_controller_yaml_shape(
 
 pub fn optional_env_any(env: &dyn ConfigEnv, names: &[&str]) -> Option<String> {
     names.iter().find_map(|name| env.var(name))
+}
+
+fn profile_env_names(
+    current_upstream_behavior: bool,
+    native_name: &'static str,
+    canonical_name: &'static str,
+    compatibility_name: &'static str,
+) -> Vec<&'static str> {
+    if current_upstream_behavior {
+        vec![native_name, canonical_name, compatibility_name]
+    } else {
+        vec![native_name, compatibility_name]
+    }
 }
 
 fn controller_string_array_layer<E: ConfigEnv>(
@@ -9832,7 +10358,6 @@ struct PeerProfileSettings {
 
 fn resolve_peer_profile<E: ConfigEnv>(
     env: &E,
-    controller_compatibility_target: ControllerCompatibilityTarget,
     profile_user_info_description: Option<String>,
     profile_user_info_picture: Option<String>,
     profile_soulseek_diagnostic_level: Option<String>,
@@ -9864,15 +10389,7 @@ fn resolve_peer_profile<E: ConfigEnv>(
         &["SLSKR_USER_INFO_DESCRIPTION", "SLSKD_SLSK_DESCRIPTION"],
     )
     .or(profile_user_info_description)
-    .unwrap_or_else(|| match controller_compatibility_target {
-        ControllerCompatibilityTarget::Slskd => {
-            "A slskd user. https://github.com/slskd/slskd".to_owned()
-        }
-        ControllerCompatibilityTarget::Slskdn => {
-            "A slskdN user. Unofficial fork of slskd: https://github.com/snapetech/slskdn"
-                .to_owned()
-        }
-    });
+    .unwrap_or_else(|| "A slskR user. https://github.com/snapetech/slskr".to_owned());
     let user_info_picture = optional_env_any(
         env,
         &[
@@ -9947,6 +10464,7 @@ struct ListenerAndObfuscationResolution {
 fn resolve_listener_and_obfuscation<E: ConfigEnv>(
     env: &E,
     controller_compatibility_target: ControllerCompatibilityTarget,
+    current_upstream_behavior: bool,
     advanced_networking: &AdvancedNetworkingSettings,
     listen_port: u32,
     auto_connect: bool,
@@ -10024,7 +10542,11 @@ fn resolve_listener_and_obfuscation<E: ConfigEnv>(
         None
     };
     let obfuscated_listener_bind = if supports_soulseek_obfuscation {
+        // A zero obfuscation port is the shared-listener sentinel. Keep the
+        // dedicated bind absent in that mode so the runtime can demultiplex
+        // plain and type-1 framed connections on the regular socket.
         env.var("SLSKR_OBFUSCATED_LISTENER_BIND")
+            .or(listeners_obfuscated_bind)
             .or_else(|| {
                 upstream_obfuscated_port
                     .filter(|port| *port != 0)
@@ -10035,16 +10557,6 @@ fn resolve_listener_and_obfuscation<E: ConfigEnv>(
                             .map_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED), |bind| bind.ip());
                         SocketAddr::new(host, port).to_string()
                     })
-            })
-            .or(listeners_obfuscated_bind)
-            .or_else(|| {
-                (listen_port < 65_535).then(|| {
-                    let host = listener_bind
-                        .as_deref()
-                        .and_then(|value| value.parse::<SocketAddr>().ok())
-                        .map_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED), |bind| bind.ip());
-                    SocketAddr::new(host, (listen_port + 1) as u16).to_string()
-                })
             })
     } else {
         None
@@ -10061,7 +10573,13 @@ fn resolve_listener_and_obfuscation<E: ConfigEnv>(
                 .filter(|port| *port != 0)
                 .map(u32::from)
                 .or(listeners_obfuscated_advertised_port)
-                .or_else(|| (listen_port < 65_535).then_some(listen_port + 1))
+                .or_else(|| {
+                    obfuscated_listener_bind
+                        .as_deref()
+                        .and_then(|value| value.parse::<SocketAddr>().ok())
+                        .map(|address| u32::from(address.port()))
+                })
+                .or_else(|| (listen_port < 65_535).then_some(listen_port))
         }
     } else {
         None
@@ -10128,6 +10646,12 @@ fn resolve_listener_and_obfuscation<E: ConfigEnv>(
             ],
             obfuscation_prefer_outbound_file.unwrap_or(true),
         )?;
+        if enabled && !advertise_regular_port && current_upstream_behavior {
+            return Err(
+                "Soulseek obfuscation requires the regular peer port to remain advertised for legacy compatibility"
+                    .to_owned(),
+            );
+        }
         (
             enabled,
             mode,
@@ -11334,6 +11858,111 @@ mod tests {
             config.managed_blacklist.patterns,
             vec![r"^(?<stem>blocked)\k<stem>$"]
         );
+    }
+
+    #[test]
+    fn current_profile_consumes_canonical_auto_replace_settings() {
+        let root = std::env::temp_dir().join(format!(
+            "slskr-auto-replace-current-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("slskd.yml"),
+            "auto_replace:\n  interval_seconds: 180\n  size_threshold_percent: 2.5\n  max_retries: 4\n",
+        )
+        .unwrap();
+
+        let config = super::AppConfig::from_layers(
+            None,
+            super::FileConfig::default(),
+            &MapEnv::default()
+                .with("SLSKD_APP_DIR", root.to_str().unwrap())
+                .with("SLSKR_AUTH_DISABLED", "true"),
+        )
+        .expect("current canonical auto_replace settings");
+        assert!(config.current_upstream_behavior);
+        assert_eq!(
+            config.transfer_download.auto_replace_interval.as_secs(),
+            180
+        );
+        assert_eq!(config.transfer_download.auto_replace_threshold_percent, 2.5);
+        assert_eq!(config.transfer_download.auto_replace_max_retries, Some(4));
+
+        let defaults = super::AppConfig::from_layers(
+            None,
+            super::FileConfig::default(),
+            &MapEnv::default()
+                .with("SLSKD_APP_DIR", root.to_str().unwrap())
+                .with("SLSKR_AUTH_DISABLED", "true")
+                .with("SLSKR_PARITY_PROFILE", "current"),
+        )
+        .expect("current auto_replace defaults");
+        assert_eq!(
+            defaults.transfer_download.auto_replace_interval.as_secs(),
+            180
+        );
+
+        std::fs::remove_file(root.join("slskd.yml")).unwrap();
+        let defaults = super::AppConfig::from_layers(
+            None,
+            super::FileConfig::default(),
+            &MapEnv::default()
+                .with("SLSKD_APP_DIR", root.to_str().unwrap())
+                .with("SLSKR_AUTH_DISABLED", "true")
+                .with("SLSKR_PARITY_PROFILE", "current"),
+        )
+        .expect("current auto_replace defaults without YAML");
+        assert_eq!(
+            defaults.transfer_download.auto_replace_interval.as_secs(),
+            300
+        );
+        assert_eq!(
+            defaults.transfer_download.auto_replace_threshold_percent,
+            0.0
+        );
+        assert_eq!(defaults.transfer_download.auto_replace_max_retries, Some(3));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn current_profile_accepts_upstream_filter_and_lidarr_names() {
+        let current = super::AppConfig::from_layers(
+            None,
+            super::FileConfig::default(),
+            &MapEnv::default()
+                .with("SLSKR_AUTH_DISABLED", "true")
+                .with("DOWNLOAD_FILTER_EXCLUDE", "sample;private")
+                .with("LIDARR_IMPORT_DELAY", "9")
+                .with("LIDARR_IMPORT_RETRY_MAX_ATTEMPTS", "4")
+                .with("LIDARR_IMPORT_RETRY_DELAY", "17")
+                .with("LIDARR_SKIP_ALREADY_OWNED_ALBUMS", "false")
+                .with("LIDARR_EDITION_MATCH_MODE", "prefer"),
+        )
+        .expect("current upstream filter and Lidarr environment names");
+        assert!(current.current_upstream_behavior);
+        assert_eq!(current.download_filter.exclude, ["sample", "private"]);
+        assert_eq!(current.integrations.lidarr.import_delay_seconds, 9);
+        assert_eq!(current.integrations.lidarr.import_retry_max_attempts, 4);
+        assert_eq!(current.integrations.lidarr.import_retry_delay_seconds, 17);
+        assert!(!current.integrations.lidarr.skip_already_owned_albums);
+        assert_eq!(current.integrations.lidarr.edition_match_mode, "prefer");
+
+        let frozen = super::AppConfig::from_layers(
+            None,
+            super::FileConfig::default(),
+            &MapEnv::default()
+                .with("SLSKR_AUTH_DISABLED", "true")
+                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn")
+                .with("LIDARR_IMPORT_DELAY", "19"),
+        )
+        .expect("frozen profile ignores current-only environment names");
+        assert!(!frozen.current_upstream_behavior);
+        assert_eq!(frozen.integrations.lidarr.import_delay_seconds, 0);
     }
 
     #[test]
@@ -12578,6 +13207,80 @@ mod tests {
     }
 
     #[test]
+    fn gold_star_club_autojoin_is_profile_aware_and_configurable() {
+        let parsed: super::FileConfig =
+            toml::from_str("[podcore.gold_star_club]\nautojoin = false\n")
+                .expect("Gold Star Club TOML setting");
+        assert_eq!(parsed.podcore.gold_star_club.autojoin, Some(false));
+
+        let current = super::AppConfig::from_layers(
+            None,
+            super::FileConfig::default(),
+            &MapEnv::default().with("SLSKR_AUTH_DISABLED", "true"),
+        )
+        .expect("native/current Gold Star Club default");
+        assert!(!current.advanced_networking.gold_star_club_autojoin);
+
+        let current_enabled = super::AppConfig::from_layers(
+            None,
+            super::FileConfig::default(),
+            &MapEnv::default()
+                .with("SLSKR_AUTH_DISABLED", "true")
+                .with("SLSKDN_POD_GOLD_STAR_CLUB_AUTOJOIN", "true"),
+        )
+        .expect("native/current Gold Star Club opt-in");
+        assert!(current_enabled.advanced_networking.gold_star_club_autojoin);
+
+        let frozen = super::AppConfig::from_layers(
+            None,
+            super::FileConfig::default(),
+            &MapEnv::default()
+                .with("SLSKR_AUTH_DISABLED", "true")
+                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+        )
+        .expect("frozen Gold Star Club default");
+        assert!(frozen.advanced_networking.gold_star_club_autojoin);
+
+        let file_disabled = super::FileConfig {
+            podcore: super::PodCoreFileConfig {
+                gold_star_club: super::GoldStarClubFileConfig {
+                    autojoin: Some(false),
+                },
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let from_file = super::AppConfig::from_layers(
+            None,
+            file_disabled,
+            &MapEnv::default()
+                .with("SLSKR_AUTH_DISABLED", "true")
+                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+        )
+        .expect("file-disabled Gold Star Club");
+        assert!(!from_file.advanced_networking.gold_star_club_autojoin);
+
+        let env_wins = super::AppConfig::from_layers(
+            None,
+            super::FileConfig {
+                podcore: super::PodCoreFileConfig {
+                    gold_star_club: super::GoldStarClubFileConfig {
+                        autojoin: Some(false),
+                    },
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            &MapEnv::default()
+                .with("SLSKR_AUTH_DISABLED", "true")
+                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn")
+                .with("SLSKDN_POD_GOLD_STAR_CLUB_AUTOJOIN", "true"),
+        )
+        .expect("environment-enabled Gold Star Club");
+        assert!(env_wins.advanced_networking.gold_star_club_autojoin);
+    }
+
+    #[test]
     fn api_token_rejects_unrepresentable_env_and_file_values() {
         for token in [
             " leading",
@@ -13239,9 +13942,8 @@ mod tests {
             super::FileConfig::default(),
             &MapEnv::default().with("SLSKD_SLSK_OBFUSCATION_ADVERTISE_REGULAR_PORT", "false"),
         )
-        .expect("frozen slskdN options validation accepts the incompatible combination");
-        assert!(missing_regular_advertisement.obfuscation_enabled);
-        assert!(!missing_regular_advertisement.obfuscation_advertise_regular_port);
+        .expect_err("enabled obfuscation must keep the regular port advertised");
+        assert!(missing_regular_advertisement.contains("regular peer port"));
     }
 
     #[test]
@@ -13306,14 +14008,14 @@ mod tests {
     }
 
     #[test]
-    fn virtual_soulfind_v2_is_unavailable_in_both_target_profiles() {
+    fn virtual_soulfind_v2_defaults_enabled_and_honors_explicit_disable() {
         let default = super::AppConfig::from_layers(
             None,
             super::FileConfig::default(),
             &MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
         )
         .expect("default slskdN VirtualSoulfind v2 config");
-        assert!(!default.virtual_soulfind_v2_enabled);
+        assert!(default.virtual_soulfind_v2_enabled);
 
         let file_disabled = super::AppConfig::from_layers(
             None,
@@ -13341,10 +14043,10 @@ mod tests {
                 .with("SLSKR_VIRTUAL_SOULFIND_V2_ENABLED", "true"),
         )
         .expect("environment-enabled VirtualSoulfind v2 config");
-        assert!(!env_enabled.virtual_soulfind_v2_enabled);
+        assert!(env_enabled.virtual_soulfind_v2_enabled);
         assert!(env_enabled
             .sanitized_json()
-            .contains("\"virtual_soulfind_v2_enabled\":false"));
+            .contains("\"virtual_soulfind_v2_enabled\":true"));
     }
 
     #[test]
@@ -13977,6 +14679,8 @@ overlay:
 overlay_data:
   enable: true
   listen_port: 51009
+  share_with_dht_port: false
+  backend_listen_port: 51010
   max_concurrent_streams: 7
   relay_authentication_token: overlay-token
   allowed_relay_destinations: ["8.8.8.8:443"]
@@ -14068,6 +14772,8 @@ security:
             super::PodSignatureMode::Enforce
         );
         assert_eq!(advanced.overlay.quic_backend_listen_port, 51_008);
+        assert!(!advanced.overlay_data.share_with_dht_port);
+        assert_eq!(advanced.overlay_data.backend_listen_port, 51_010);
         assert_eq!(advanced.overlay_data.max_concurrent_streams, 7);
         assert_eq!(advanced.overlay_data.max_concurrent_relays, 3);
         assert!(advanced.relay.enabled);

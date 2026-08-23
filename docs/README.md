@@ -13,6 +13,7 @@ audits.
 | [Install guide](install.md) | Build, install, service, container, config, state, and exposure runbook. |
 | [Credential storage](credential-storage.md) | Soulseek credential-source choices, systemd credentials, Web UI behavior, and security notes. |
 | [Config example](slskr.config.example.toml) | Annotated TOML config with the supported runtime settings. |
+| [Gold Star Club](gold-star-club.md) | Purpose, lifecycle, membership policy, and opt-in/opt-out configuration. |
 | [App surface](app-surface.md) | User-facing CLI, daemon, API, Web UI, auth, and compatibility surface. |
 
 ## Web UI

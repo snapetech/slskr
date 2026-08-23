@@ -1,8 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-STATE_DIR="${SLSKR_VPN_STATE_DIR:-/var/lib/slskr-vpn}"
-STATIC_FORWARD_DIR="${SLSKR_VPN_STATIC_FORWARD_DIR:-/etc/slskr-vpn/static-forwards}"
+AGENT_SCRIPT_PATH="${BASH_SOURCE[0]}"
+if command -v readlink >/dev/null 2>&1; then
+  AGENT_SCRIPT_PATH="$(readlink -f "$AGENT_SCRIPT_PATH" 2>/dev/null || printf '%s' "${BASH_SOURCE[0]}")"
+fi
+AGENT_SCRIPT_DIR="$(cd -- "$(dirname -- "$AGENT_SCRIPT_PATH")" && pwd)"
+
+STATE_DIR="${SLSKR_VPN_STATE_DIR:-${SLSKDN_VPN_STATE_DIR:-/var/lib/slskr-vpn}}"
+STATIC_FORWARD_DIR="${SLSKR_VPN_STATIC_FORWARD_DIR:-${SLSKDN_VPN_STATIC_FORWARD_DIR:-/etc/slskr-vpn/static-forwards}}"
 DAEMON_URL="${SLSKR_URL:-http://127.0.0.1:5030}"
 API_HOST="${SLSKR_VPN_API_HOST:-127.0.0.1}"
 API_PORT="${SLSKR_VPN_API_PORT:-8010}"
@@ -10,6 +16,39 @@ VPN_IFACE="${SLSKR_VPN_IFACE:-slskr-vpn}"
 VPN_TABLE="${SLSKR_VPN_TABLE:-51820}"
 SERVICE_USER="${SLSKR_SERVICE_USER:-slskr}"
 WATCHDOG_THRESHOLD="${SLSKR_VPN_WATCHDOG_THRESHOLD:-3}"
+TUNNEL_TYPE="${SLSKR_VPN_TUNNEL_TYPE:-${SLSKDN_VPN_TUNNEL_TYPE:-wireguard}}"
+PORT_FORWARD_BACKEND="${SLSKR_VPN_PORT_FORWARD_BACKEND:-${VPN_PORT_FORWARD_BACKEND:-natpmp}}"
+PF_GATEWAY="${SLSKR_VPN_PROVIDER_GATEWAY:-${PF_GATEWAY:-10.2.0.1}}"
+PF_LIFETIME="${SLSKR_VPN_PORT_FORWARD_LIFETIME:-${PF_LIFETIME:-60}}"
+PF_ATTEMPTS="${SLSKR_VPN_PORT_FORWARD_ATTEMPTS:-${PF_ATTEMPTS:-90}}"
+SOULSEEK_PRIVATE_PORT="${SLSKR_VPN_SOULSEEK_PRIVATE_PORT:-${SOULSEEK_PRIVATE_PORT:-50300}}"
+INGRESS_MODE="${SLSKR_VPN_INGRESS_MODE:-${SLSKDN_VPN_INGRESS_MODE:-core}}"
+COMPACT_UDP_PORT="${SLSKR_VPN_COMPACT_UDP_PORT:-${SLSKDN_VPN_COMPACT_UDP_PORT:-0}}"
+EXCLUDE_PORT_RE="${SLSKR_VPN_EXCLUDE_PORT_RE:-${PF_EXCLUDE_RE:-^(5030|5031|5353)$}}"
+INGRESS_CONFIG_DIR="${SLSKR_VPN_INGRESS_CONFIG_DIR:-${SLSKDN_VPN_INGRESS_CONFIG_DIR:-/etc/wireguard/slskr-vpn-ingress}}"
+INGRESS_HOST_PREFIX="${SLSKR_VPN_INGRESS_HOST_PREFIX:-${SLSKDN_VPN_INGRESS_HOST_PREFIX:-10.251}}"
+INGRESS_NAMESPACE_PREFIX="${SLSKR_VPN_INGRESS_NAMESPACE_PREFIX:-${SLSKDN_VPN_INGRESS_NAMESPACE_PREFIX:-slskrpf}}"
+INGRESS_SERVICE="${SLSKR_VPN_INGRESS_SERVICE:-slskr-vpn-ingress.service}"
+INGRESS_RENEW_SERVICE="${SLSKR_VPN_INGRESS_RENEW_SERVICE:-slskr-vpn-ingress-renew.service}"
+INGRESS_HANDSHAKE_MAX_AGE="${SLSKR_VPN_INGRESS_HANDSHAKE_MAX_AGE:-${SLSKDN_VPN_INGRESS_HANDSHAKE_MAX_AGE:-300}}"
+VERIFY_TIMEOUT="${SLSKR_VPN_VERIFY_TIMEOUT:-10}"
+RELAY_TUNNEL_TYPE="${SLSKR_RELAY_TUNNEL_TYPE:-wireguard}"
+RELAY_IFACE="${SLSKR_RELAY_IFACE:-${SLSKR_RELAY_WG_IFACE:-slskr-relay}}"
+RELAY_PUBLIC_IFACE="${SLSKR_RELAY_PUBLIC_IFACE:-eth0}"
+RELAY_HOME_IP="${SLSKR_RELAY_HOME_IP:-10.77.0.2}"
+RELAY_TUNNEL_CIDR="${SLSKR_RELAY_TUNNEL_CIDR:-10.77.0.0/30}"
+RELAY_PUBLIC_PORT="${SLSKR_RELAY_PUBLIC_PORT:-50300}"
+RELAY_TARGET_PORT="${SLSKR_RELAY_TARGET_PORT:-50300}"
+RELAY_CONNECTION_LIMIT="${SLSKR_RELAY_CONNECTION_LIMIT:-128}"
+RELAY_BANDWIDTH_MBIT="${SLSKR_RELAY_BANDWIDTH_MBIT:-100}"
+RELAY_HANDSHAKE_MAX_AGE="${SLSKR_RELAY_HANDSHAKE_MAX_AGE:-180}"
+RELAY_PUBLIC_IP="${SLSKR_RELAY_PUBLIC_IP:-}"
+RELAY_PUBLIC_IP_URL="${SLSKR_RELAY_PUBLIC_IP_URL:-https://ifconfig.me/ip}"
+RELAY_API_HOST="${SLSKR_RELAY_API_HOST:-}"
+RELAY_API_PORT="${SLSKR_RELAY_API_PORT:-8010}"
+RELAY_API_KEY_FILE="${SLSKR_RELAY_API_KEY_FILE:-/etc/slskr-relay/api-keys}"
+RELAY_STATE_FILE="${STATE_DIR}/relay.env"
+RELAY_API_SCRIPT="${SLSKR_VPN_RELAY_API_SCRIPT:-${AGENT_SCRIPT_DIR}/relay-api.py}"
 
 mkdir_state() {
   install -d -m 0750 "$STATE_DIR"
@@ -22,7 +61,7 @@ read_state() {
 }
 
 write_state() {
-  local slot="$1" local_port="$2" target_port="$3" proto="$4" public_port="$5" public_ip="$6"
+  local slot="$1" local_port="$2" target_port="$3" proto="$4" public_port="$5" public_ip="$6" namespace="${7:-}"
   mkdir_state
   cat > "${STATE_DIR}/pf${slot}.env" <<STATE
 slot=${slot}
@@ -31,7 +70,7 @@ target_port=${target_port}
 proto=${proto}
 public_port=${public_port}
 public_ip=${public_ip}
-namespace=
+namespace=${namespace}
 STATE
 }
 
@@ -120,6 +159,70 @@ ThreadingHTTPServer((host, port), Handler).serve_forever()
 PY
 }
 
+daemon_listen_port() {
+  local options listen
+  options="$(curl_daemon "${DAEMON_URL%/}/api/v0/options" 2>/dev/null || true)"
+  listen="$(jq -r '
+    .soulseek.listenPort // .soulseek.listen_port //
+    .options.soulseek.listenPort // .options.soulseek.listen_port // 0
+  ' <<<"$options" 2>/dev/null || printf '0')"
+  case "$listen" in
+    ''|*[!0-9]*) printf '0\n' ;;
+    *) printf '%s\n' "$listen" ;;
+  esac
+}
+
+namespace_for_slot() {
+  local slot="$1" candidate
+  candidate="${INGRESS_NAMESPACE_PREFIX}${slot}"
+  if command -v ip >/dev/null 2>&1 && ip netns list 2>/dev/null | awk '{print $1}' | grep -Fxq "$candidate"; then
+    printf '%s\n' "$candidate"
+  fi
+}
+
+natpmp_request() {
+  local slot="$1" namespace="$2" requested_public="$3" private_port="$4" proto="$5"
+  local output public_port public_ip
+  [ -n "$PF_GATEWAY" ] || { echo "PF_GATEWAY is required for NAT-PMP ingress" >&2; return 1; }
+  local -a natpmp_command=(natpmpc -g "$PF_GATEWAY" -a "$requested_public" "$private_port" "$proto" "$PF_LIFETIME")
+  if [ -n "$namespace" ]; then
+    natpmp_command=(ip netns exec "$namespace" "${natpmp_command[@]}")
+  fi
+  if command -v timeout >/dev/null 2>&1; then
+    natpmp_command=(timeout 8 "${natpmp_command[@]}")
+  fi
+  output="$("${natpmp_command[@]}" 2>&1 || true)"
+  while IFS= read -r line; do
+    [ -n "$line" ] && printf 'pf%s: %s\n' "$slot" "$line" >&2
+  done <<<"$output"
+  public_port="$(sed -nE 's/.*Mapped public port[[:space:]]+([0-9]+).*/\1/p' <<<"$output" | tail -n 1)"
+  public_ip="$(sed -nE 's/.*Public IP address[[:space:]]*:?[[:space:]]*([^[:space:]]+).*/\1/p' <<<"$output" | tail -n 1)"
+  NATPMP_PUBLIC_PORT="$public_port"
+  NATPMP_PUBLIC_IP="$public_ip"
+  [ -n "$public_port" ]
+}
+
+claim_natpmp() {
+  local slot="$1" local_port="$2" target_port="$3" proto="$4" namespace="$5"
+  local old_public attempt
+  old_public="$(read_state "${STATE_DIR}/pf${slot}.env" public_port)"
+  for ((attempt = 1; attempt <= PF_ATTEMPTS; attempt++)); do
+    if [ -n "$old_public" ] && natpmp_request "$slot" "$namespace" "$old_public" "$local_port" "$proto" \
+      && [ "$NATPMP_PUBLIC_PORT" = "$old_public" ]; then
+      write_state "$slot" "$local_port" "$target_port" "$proto" "$NATPMP_PUBLIC_PORT" "$NATPMP_PUBLIC_IP" "$namespace"
+      return 0
+    fi
+    if natpmp_request "$slot" "$namespace" 0 "$local_port" "$proto" \
+      && [ -n "$NATPMP_PUBLIC_PORT" ]; then
+      write_state "$slot" "$local_port" "$target_port" "$proto" "$NATPMP_PUBLIC_PORT" "$NATPMP_PUBLIC_IP" "$namespace"
+      return 0
+    fi
+    [ "$attempt" -lt "$PF_ATTEMPTS" ] && sleep 1
+  done
+  echo "pf${slot}: unable to claim a NAT-PMP ${proto} mapping after ${PF_ATTEMPTS} attempts" >&2
+  return 1
+}
+
 ingress() {
   mkdir_state
   local source="${STATIC_FORWARD_DIR}/pf0.env"
@@ -133,6 +236,13 @@ ingress() {
     [ -n "$local_port" ] && [ -n "$target_port" ] && [ -n "$public_port" ] \
       || { echo "static forward must define local_port, target_port, and public_port" >&2; return 1; }
     write_state 0 "$local_port" "$target_port" "${proto:-tcp}" "$public_port" "$public_ip"
+  elif [ "${PORT_FORWARD_BACKEND,,}" = "natpmp" ]; then
+    command -v natpmpc >/dev/null 2>&1 || { echo "natpmpc command is required for NAT-PMP ingress" >&2; return 2; }
+    local target_port namespace
+    target_port="$(daemon_listen_port)"
+    [ "${target_port:-0}" -gt 0 ] 2>/dev/null || target_port="$SOULSEEK_PRIVATE_PORT"
+    namespace="$(namespace_for_slot 0)"
+    claim_natpmp 0 "$SOULSEEK_PRIVATE_PORT" "$target_port" tcp "$namespace" || return 1
   elif [ -n "${SLSKR_API_KEY:-}" ]; then
     local application forwarded listen
     application="$(curl_daemon "${DAEMON_URL%/}/api/v0/application")"
@@ -143,7 +253,7 @@ ingress() {
     fi
   fi
   cat > "${STATE_DIR}/summary.env" <<SUMMARY
-mode=static
+mode=${PORT_FORWARD_BACKEND,,}
 claimed=$(find "$STATE_DIR" -maxdepth 1 -name 'pf*.env' -type f | wc -l)
 SUMMARY
 }
@@ -151,6 +261,44 @@ SUMMARY
 cleanup_ingress() {
   mkdir_state
   rm -f "${STATE_DIR}"/pf*.env "${STATE_DIR}/summary.env"
+}
+
+renew_ingress() {
+  [ "${PORT_FORWARD_BACKEND,,}" = "natpmp" ] || return 0
+  command -v natpmpc >/dev/null 2>&1 || { echo "natpmpc command is required for NAT-PMP renewal" >&2; return 2; }
+  mkdir_state
+  local renewed=0 total=0 state_file slot local_port target_port proto namespace public_port
+  for state_file in "${STATE_DIR}"/pf*.env; do
+    [ -f "$state_file" ] || continue
+    slot="$(read_state "$state_file" slot)"
+    local_port="$(read_state "$state_file" local_port)"
+    target_port="$(read_state "$state_file" target_port)"
+    proto="$(read_state "$state_file" proto)"
+    namespace="$(read_state "$state_file" namespace)"
+    public_port="$(read_state "$state_file" public_port)"
+    [ -n "$slot" ] && [ -n "$local_port" ] && [ -n "$target_port" ] && [ -n "$proto" ] || continue
+    total=$((total + 1))
+    if [ -z "$namespace" ]; then
+      namespace="$(namespace_for_slot "$slot")"
+    fi
+    if natpmp_request "$slot" "$namespace" "${public_port:-0}" "$local_port" "$proto" \
+      && [ -n "$NATPMP_PUBLIC_PORT" ]; then
+      write_state "$slot" "$local_port" "$target_port" "$proto" "$NATPMP_PUBLIC_PORT" "$NATPMP_PUBLIC_IP" "$namespace"
+      renewed=$((renewed + 1))
+      printf 'pf%s: renewed %s public %s -> private %s -> target %s\n' \
+        "$slot" "$proto" "$NATPMP_PUBLIC_PORT" "$local_port" "$target_port" >&2
+    elif natpmp_request "$slot" "$namespace" 0 "$local_port" "$proto" \
+      && [ -n "$NATPMP_PUBLIC_PORT" ]; then
+      write_state "$slot" "$local_port" "$target_port" "$proto" "$NATPMP_PUBLIC_PORT" "$NATPMP_PUBLIC_IP" "$namespace"
+      renewed=$((renewed + 1))
+      printf 'pf%s: re-claimed %s public %s -> private %s -> target %s\n' \
+        "$slot" "$proto" "$NATPMP_PUBLIC_PORT" "$local_port" "$target_port" >&2
+    else
+      printf 'pf%s: failed to renew %s mapping\n' "$slot" "$proto" >&2
+    fi
+  done
+  [ "$total" -eq 0 ] && { echo "No existing ingress mappings found to renew" >&2; return 0; }
+  [ "$renewed" -eq "$total" ]
 }
 
 split() {
@@ -172,9 +320,222 @@ platform_split() {
   esac
 }
 
+systemd_unit_loaded() {
+  local unit="$1" state
+  [ -n "$unit" ] || return 1
+  state="$(systemctl show "$unit" -p LoadState --value 2>/dev/null || true)"
+  [ "${state//$'\n'/}" = "loaded" ]
+}
+
+ingress_renewal_failed() {
+  [ "${PORT_FORWARD_BACKEND,,}" = "natpmp" ] || return 1
+  systemd_unit_loaded "$INGRESS_RENEW_SERVICE" || return 0
+  systemctl is-failed --quiet "$INGRESS_RENEW_SERVICE" 2>/dev/null
+}
+
+latest_wireguard_handshake() {
+  local namespace="$1" interface="$2" output latest
+  output="$(ip netns exec "$namespace" wg show "$interface" latest-handshakes 2>/dev/null)" || return 1
+  latest="$(awk '
+    $2 ~ /^[0-9]+$/ && $2 > newest { newest = $2 }
+    END { print newest + 0 }
+  ' <<<"$output")"
+  [ "${latest:-0}" -gt 0 ] 2>/dev/null || return 1
+  printf '%s\n' "$latest"
+}
+
+wireguard_ingress_handshakes_healthy() {
+  [ "${TUNNEL_TYPE,,}" = "wireguard" ] || return 0
+  local found=0 now latest age file slot namespace
+  now="$(date +%s)"
+  while IFS= read -r file; do
+    [ -f "$file" ] || continue
+    namespace="$(read_state "$file" namespace)"
+    [ -n "$namespace" ] || continue
+    found=1
+    slot="$(read_state "$file" slot)"
+    latest="$(latest_wireguard_handshake "$namespace" "pf${slot}")" || return 1
+    age=$((now - latest))
+    [ "$age" -ge 0 ] && [ "$age" -le "$INGRESS_HANDSHAKE_MAX_AGE" ] || return 1
+  done < <(find "$STATE_DIR" -maxdepth 1 -name 'pf*.env' -type f -print | sort)
+  [ "$found" -eq 0 ] || return 0
+}
+
+wireguard_tunnel_healthy() {
+  [ "${TUNNEL_TYPE,,}" = "wireguard" ] || return 0
+  command -v wg >/dev/null || return 1
+  local output
+  output="$(wg show "$VPN_IFACE" latest-handshakes 2>/dev/null)" || return 1
+  awk '$2 ~ /^[0-9]+$/ && $2 > 0 { found = 1 } END { exit(found ? 0 : 1) }' <<<"$output"
+}
+
+validate_relay_configuration() {
+  [ "${RELAY_TUNNEL_TYPE,,}" = "wireguard" ] || [ "${RELAY_TUNNEL_TYPE,,}" = "tailscale" ] || {
+    echo "SLSKR_RELAY_TUNNEL_TYPE must be wireguard or tailscale" >&2
+    return 1
+  }
+  python3 - "$RELAY_TUNNEL_TYPE" "$RELAY_HOME_IP" "$RELAY_TUNNEL_CIDR" "$RELAY_PUBLIC_PORT" "$RELAY_TARGET_PORT" "$RELAY_API_PORT" <<'PY'
+import ipaddress
+import sys
+
+tunnel, home, cidr, public_port, target_port, api_port = sys.argv[1:]
+try:
+    home_ip = ipaddress.ip_address(home)
+    network = ipaddress.ip_network(cidr, strict=False)
+    ports = [int(public_port), int(target_port), int(api_port)]
+except ValueError as error:
+    raise SystemExit(f"invalid relay network or port: {error}")
+if home_ip.version != 4 or not (home_ip.is_private or (tunnel.lower() == "tailscale" and home_ip in ipaddress.ip_network("100.64.0.0/10"))):
+    raise SystemExit("SLSKR_RELAY_HOME_IP must be a private tunnel IPv4 address")
+if tunnel.lower() == "tailscale" and network != ipaddress.ip_network(f"{home_ip}/32"):
+    raise SystemExit("SLSKR_RELAY_TUNNEL_CIDR must match the exact Tailscale home /32")
+if any(port < 1024 or port > 65535 for port in ports):
+    raise SystemExit("relay ports must be between 1024 and 65535")
+PY
+  [ -r "$RELAY_API_KEY_FILE" ] || {
+    echo "relay API key file is not readable: $RELAY_API_KEY_FILE" >&2
+    return 1
+  }
+  awk 'length($0) >= 32 && $0 !~ /^[[:space:]]*#/ { found = 1 } END { exit(found ? 0 : 1) }' "$RELAY_API_KEY_FILE" || {
+    echo "relay API key file must contain a key of at least 32 characters" >&2
+    return 1
+  }
+}
+
+recreate_iptables_chain() {
+  local table="$1" chain="$2"
+  if [ -n "$table" ]; then
+    iptables -t "$table" -N "$chain" 2>/dev/null || true
+    iptables -t "$table" -F "$chain"
+  else
+    iptables -N "$chain" 2>/dev/null || true
+    iptables -F "$chain"
+  fi
+}
+
+ensure_iptables_rule() {
+  local table="$1" chain="$2"
+  shift 2
+  local -a rule=("$@")
+  if [ -n "$table" ]; then
+    iptables -t "$table" -C "$chain" "${rule[@]}" >/dev/null 2>&1 || iptables -t "$table" -A "$chain" "${rule[@]}"
+  else
+    iptables -C "$chain" "${rule[@]}" >/dev/null 2>&1 || iptables -A "$chain" "${rule[@]}"
+  fi
+}
+
+resolve_relay_public_ip() {
+  local value="${RELAY_PUBLIC_IP:-}"
+  if [ -z "$value" ]; then
+    value="$(curl --fail --silent --show-error --max-time "$VERIFY_TIMEOUT" "$RELAY_PUBLIC_IP_URL")"
+  fi
+  python3 - "$value" <<'PY'
+import ipaddress
+import sys
+try:
+    print(ipaddress.ip_address(sys.argv[1].strip()))
+except ValueError:
+    raise SystemExit("relay public IP discovery returned an invalid address")
+PY
+}
+
+relay_apply() {
+  [ "$(id -u)" -eq 0 ] || { echo "relay-apply requires root" >&2; return 1; }
+  [ "$(uname -s)" = "Linux" ] || { echo "relay-apply is supported only on Linux" >&2; return 2; }
+  validate_relay_configuration || return $?
+  for command in ip iptables sysctl; do
+    command -v "$command" >/dev/null || { echo "missing relay command: $command" >&2; return 2; }
+  done
+  if [ "${RELAY_TUNNEL_TYPE,,}" = "tailscale" ]; then
+    command -v tailscale >/dev/null || { echo "missing relay command: tailscale" >&2; return 2; }
+  else
+    command -v wg >/dev/null || { echo "missing relay command: wg" >&2; return 2; }
+  fi
+  if [ "$RELAY_BANDWIDTH_MBIT" -gt 0 ]; then
+    command -v tc >/dev/null || { echo "missing relay command: tc" >&2; return 2; }
+  fi
+  sysctl -qw net.ipv4.ip_forward=1
+  ip link show "$RELAY_IFACE" >/dev/null
+  if [ "${RELAY_TUNNEL_TYPE,,}" = "tailscale" ]; then
+    tailscale status --json >/dev/null
+  fi
+
+  local nat_chain="SLSKR-RELAY-NAT" forward_chain="SLSKR-RELAY-FWD"
+  recreate_iptables_chain nat "$nat_chain"
+  recreate_iptables_chain "" "$forward_chain"
+  ensure_iptables_rule nat PREROUTING -j "$nat_chain"
+  ensure_iptables_rule "" FORWARD -j "$forward_chain"
+  ensure_iptables_rule nat POSTROUTING -s "$RELAY_TUNNEL_CIDR" -o "$RELAY_PUBLIC_IFACE" -j MASQUERADE
+  iptables -t nat -A "$nat_chain" -i "$RELAY_PUBLIC_IFACE" -p tcp --dport "$RELAY_PUBLIC_PORT" -j DNAT --to-destination "${RELAY_HOME_IP}:${RELAY_TARGET_PORT}"
+  iptables -A "$forward_chain" -i "$RELAY_PUBLIC_IFACE" -o "$RELAY_IFACE" -p tcp --dport "$RELAY_TARGET_PORT" -m conntrack --ctstate NEW -m connlimit --connlimit-above "$RELAY_CONNECTION_LIMIT" --connlimit-mask 0 -j REJECT --reject-with tcp-reset
+  iptables -A "$forward_chain" -i "$RELAY_PUBLIC_IFACE" -o "$RELAY_IFACE" -p tcp -d "$RELAY_HOME_IP" --dport "$RELAY_TARGET_PORT" -m conntrack --ctstate NEW,ESTABLISHED -j ACCEPT
+  iptables -A "$forward_chain" -i "$RELAY_IFACE" -o "$RELAY_PUBLIC_IFACE" -s "$RELAY_TUNNEL_CIDR" -m conntrack --ctstate NEW,ESTABLISHED,RELATED -j ACCEPT
+  iptables -A "$forward_chain" -i "$RELAY_PUBLIC_IFACE" -o "$RELAY_IFACE" -d "$RELAY_TUNNEL_CIDR" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+  if [ "$RELAY_BANDWIDTH_MBIT" -gt 0 ]; then
+    tc qdisc replace dev "$RELAY_IFACE" root tbf rate "${RELAY_BANDWIDTH_MBIT}mbit" burst 256kb latency 100ms
+    tc qdisc replace dev "$RELAY_IFACE" handle ffff: ingress
+    tc filter replace dev "$RELAY_IFACE" parent ffff: protocol all u32 match u32 0 0 police rate "${RELAY_BANDWIDTH_MBIT}mbit" burst 256kb drop flowid :1
+  fi
+
+  local public_ip
+  public_ip="$(resolve_relay_public_ip)"
+  mkdir_state
+  {
+    printf 'public_ip=%s\n' "$public_ip"
+    printf 'public_port=%s\n' "$RELAY_PUBLIC_PORT"
+    printf 'target_port=%s\n' "$RELAY_TARGET_PORT"
+    printf 'home_ip=%s\n' "$RELAY_HOME_IP"
+  } > "$RELAY_STATE_FILE"
+  printf 'Configured TCP relay %s:%s -> %s:%s over %s/%s\n' "$public_ip" "$RELAY_PUBLIC_PORT" "$RELAY_HOME_IP" "$RELAY_TARGET_PORT" "$RELAY_TUNNEL_TYPE" "$RELAY_IFACE"
+}
+
+relay_api() {
+  local host="$RELAY_API_HOST"
+  if [ -z "$host" ]; then
+    if [ "${RELAY_TUNNEL_TYPE,,}" = "tailscale" ]; then
+      host="$(tailscale ip -4)"
+    else
+      host="10.77.0.1"
+    fi
+  fi
+  export SLSKR_RELAY_TUNNEL_TYPE="$RELAY_TUNNEL_TYPE"
+  export SLSKR_RELAY_IFACE="$RELAY_IFACE"
+  export SLSKR_RELAY_HOME_IP="$RELAY_HOME_IP"
+  export SLSKR_RELAY_PUBLIC_PORT="$RELAY_PUBLIC_PORT"
+  export SLSKR_RELAY_TARGET_PORT="$RELAY_TARGET_PORT"
+  export SLSKR_RELAY_HANDSHAKE_MAX_AGE="$RELAY_HANDSHAKE_MAX_AGE"
+  export SLSKR_RELAY_CONNECTION_LIMIT="$RELAY_CONNECTION_LIMIT"
+  export SLSKR_RELAY_BANDWIDTH_MBIT="$RELAY_BANDWIDTH_MBIT"
+  export SLSKR_RELAY_API_KEY_FILE
+  [ -r "$RELAY_API_SCRIPT" ] || { echo "relay API helper is missing: $RELAY_API_SCRIPT" >&2; return 2; }
+  exec python3 "$RELAY_API_SCRIPT" "$STATE_DIR" "$host" "$RELAY_API_PORT"
+}
+
+relay_run() {
+  relay_apply && relay_api
+}
+
 verify() {
   command -v curl >/dev/null || { echo "curl command is required" >&2; return 2; }
   curl_daemon "${DAEMON_URL%/}/api/v0/health" >/dev/null
+  if [ "${PORT_FORWARD_BACKEND,,}" = "natpmp" ]; then
+    systemd_unit_loaded "$INGRESS_RENEW_SERVICE" || {
+      echo "ingress renewal unit is not loaded: $INGRESS_RENEW_SERVICE" >&2
+      return 1
+    }
+    if systemctl is-failed --quiet "$INGRESS_RENEW_SERVICE" 2>/dev/null; then
+      echo "ingress renewal unit is failed: $INGRESS_RENEW_SERVICE" >&2
+      return 1
+    fi
+  fi
+  wireguard_tunnel_healthy || {
+    echo "VPN tunnel has no recent WireGuard handshake on $VPN_IFACE" >&2
+    return 1
+  }
+  wireguard_ingress_handshakes_healthy || {
+    echo "VPN ingress WireGuard namespace handshake is missing or stale" >&2
+    return 1
+  }
   local public_port
   public_port="$(read_state "${STATE_DIR}/pf0.env" public_port)"
   [ -n "$public_port" ] || { echo "no forwarded port state" >&2; return 1; }
@@ -183,6 +544,12 @@ verify() {
 
 watchdog() {
   mkdir_state
+  if ingress_renewal_failed || ! wireguard_ingress_handshakes_healthy; then
+    logger -t slskr-vpn-watchdog "VPN ingress renewal or WireGuard namespace health failed; restarting ${INGRESS_SERVICE}" 2>/dev/null || true
+    systemctl restart "$INGRESS_SERVICE" 2>/dev/null || true
+    printf '0\n' > "${STATE_DIR}/watchdog.failures"
+    return 0
+  fi
   local failures=0
   failures="$(cat "${STATE_DIR}/watchdog.failures" 2>/dev/null || printf '0')"
   if verify; then
@@ -193,7 +560,7 @@ watchdog() {
   printf '%s\n' "$failures" > "${STATE_DIR}/watchdog.failures"
   logger -t slskr-vpn-watchdog "VPN verification failed (${failures}/${WATCHDOG_THRESHOLD})" 2>/dev/null || true
   if [ "$failures" -ge "$WATCHDOG_THRESHOLD" ]; then
-    systemctl restart slskr-vpn-ingress.service 2>/dev/null || true
+    systemctl restart "$INGRESS_SERVICE" 2>/dev/null || true
     printf '0\n' > "${STATE_DIR}/watchdog.failures"
   fi
   return 1
@@ -202,13 +569,17 @@ watchdog() {
 case "${1:-}" in
   api) api ;;
   ingress) ingress ;;
+  renew-ingress) renew_ingress ;;
+  relay-apply) relay_apply ;;
+  relay-api) relay_api ;;
+  relay-run) relay_run ;;
   cleanup-ingress) cleanup_ingress ;;
   split) split ;;
   platform-split) platform_split ;;
   verify|status) verify ;;
   watchdog) watchdog ;;
   *)
-    echo "Usage: slskr-vpn-agent {api|ingress|cleanup-ingress|split|platform-split|verify|status|watchdog}" >&2
+    echo "Usage: slskr-vpn-agent {api|ingress|renew-ingress|cleanup-ingress|split|platform-split|relay-apply|relay-api|relay-run|verify|status|watchdog}" >&2
     exit 64
     ;;
 esac

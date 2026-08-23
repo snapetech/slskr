@@ -4,4 +4,4 @@ After=slskr-vpn-ingress.service
 
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/systemctl restart slskr-vpn-ingress.service
+ExecStart=/usr/local/bin/slskr-vpn-agent renew-ingress

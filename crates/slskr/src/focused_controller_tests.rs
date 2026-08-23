@@ -1280,6 +1280,46 @@ async fn slskd_debug_view_projects_frozen_default_authentication_values() {
     );
 }
 
+#[tokio::test]
+async fn versioned_search_accepts_web_acquisition_profiles() {
+    let (state, _receiver) = test_state_with_env(MapEnv::default());
+    for profile in [
+        "lossless-exact",
+        "fast-good-enough",
+        "album-complete",
+        "rare-hunt",
+        "conservative-network",
+        "mesh-preferred",
+        "metadata-strict",
+    ] {
+        let body = serde_json::json!({
+            "searchText": "profile-validation",
+            "acquisitionProfile": profile,
+        })
+        .to_string();
+        let response = super::route_http_request("POST", "/api/v0/searches", None, &body, &state)
+            .await
+            .expect("versioned search response");
+        assert_eq!(
+            response.status, "409 Conflict",
+            "{profile}: {}",
+            response.body
+        );
+    }
+
+    let rejected = super::route_http_request(
+        "POST",
+        "/api/v0/searches",
+        None,
+        r#"{"searchText":"profile-validation","acquisitionProfile":"made-up-profile"}"#,
+        &state,
+    )
+    .await
+    .expect("rejected versioned search response");
+    assert_eq!(rejected.status, "400 Bad Request");
+    assert!(rejected.body.contains("known acquisition profile"));
+}
+
 #[test]
 fn profile_static_roots_serve_the_selected_spa_on_dashboard() {
     let root = std::env::temp_dir().join(format!(

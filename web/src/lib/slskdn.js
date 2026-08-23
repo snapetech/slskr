@@ -128,7 +128,7 @@ const parseCapabilities = ({ capabilitiesJson, capabilitiesVersion }) => {
 
   return {
     features: asArray(document.features),
-    version: document.version || capabilitiesVersion || 'slskdN',
+    version: document.version || capabilitiesVersion || 'slskR',
   };
 };
 

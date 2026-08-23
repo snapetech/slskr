@@ -29,6 +29,9 @@ const fallbackOnly = args.includes('--fallback-only');
 const failOnUnmatched = args.includes('--fail-on-unmatched');
 const failOnFallback = args.includes('--fail-on-fallback');
 const includeResponse = args.includes('--include-response');
+const excludedRoutePatterns = args
+  .flatMap((value, index) => (value === '--exclude-route' ? [args[index + 1] ?? ''] : []))
+  .filter(Boolean);
 const requestedConcurrency = Number.parseInt(option('--concurrency') ?? '8', 10);
 const probeConcurrency = Number.isInteger(requestedConcurrency) && requestedConcurrency > 0
   ? requestedConcurrency
@@ -224,6 +227,12 @@ async function probe(row) {
 }
 
 const rows = inventory();
+const selectedRows = rows.filter((row) => {
+  const subject = `${row.method} ${row.route}`;
+  return !excludedRoutePatterns.some(
+    (pattern) => subject === pattern || row.route === pattern,
+  );
+});
 async function probeAll(input, concurrency = 8) {
   const output = new Array(input.length);
   let next = 0;
@@ -238,7 +247,7 @@ async function probeAll(input, concurrency = 8) {
   return output;
 }
 
-const output = probeBase ? await probeAll(rows, probeConcurrency) : rows;
+const output = probeBase ? await probeAll(selectedRows, probeConcurrency) : selectedRows;
 const displayed = unmatchedOnly
   ? output.filter((row) => ['generic_404', 'html_fallback'].includes(row.result))
   : fallbackOnly
@@ -265,7 +274,7 @@ const probeErrors = output.filter(
   (row) => !['handled', 'generic_404', 'html_fallback', 'compatibility_fallback'].includes(row.result),
 ).length;
 process.stderr.write(
-  `slskdN controller inventory: ${rows.length} routes${
+  `slskdN controller inventory: ${rows.length} routes; selected ${selectedRows.length}${
     probeBase
       ? `; ${generic404} generic slskR 404 responses; ${htmlFallbacks} HTML fallbacks; ${compatibilityFallbacks} compatibility fallbacks; ${probeErrors} probe errors`
       : ''

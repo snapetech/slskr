@@ -681,6 +681,96 @@ SLSKR_RUNTIME_CONFIG_MAPPINGS["transfers.upload.speed_limit"].update(
     environment=["SLSKD_UPLOAD_SPEED_LIMIT"], commandLine=["--upload-speed-limit"]
 )
 
+SLSKR_RUNTIME_CONFIG_MAPPINGS.update(
+    {
+        "auto_replace.interval_seconds": {
+            "environment": ["AUTO_REPLACE_INTERVAL"],
+            "commandLine": ["--auto-replace-interval"],
+            "runtime": "current canonical auto-replace scheduler interval and legacy frozen download projection",
+        },
+        "auto_replace.max_retries": {
+            "environment": ["AUTO_REPLACE_MAX_RETRIES"],
+            "commandLine": ["--auto-replace-max-retries"],
+            "runtime": "current canonical persisted auto-replacement retry budget",
+        },
+        "auto_replace.size_threshold_percent": {
+            "environment": ["AUTO_REPLACE_THRESHOLD"],
+            "commandLine": ["--auto-replace-threshold"],
+            "runtime": "current canonical alternative-source size threshold",
+        },
+        "filters.download.exclude": {
+            "environment": ["SLSKR_DOWNLOAD_FILTER_EXCLUDE", "SLSKD_DOWNLOAD_FILTER_EXCLUDE"],
+            "commandLine": ["--download-filter-exclude"],
+            "runtime": "global exclusion policy enforced at every download enqueue and retry boundary",
+        },
+        "integrations.acoustid.enabled": {
+            "environment": ["SLSKD_ACOUSTID_ENABLED"],
+            "commandLine": [],
+            "runtime": "AcoustID lookup gate and SongID capability evidence",
+        },
+        "integrations.acoustid.client_id": {
+            "environment": ["SLSKD_ACOUSTID_CLIENT_ID"],
+            "commandLine": [],
+            "runtime": "AcoustID credential-backed lookup and SongID capability evidence",
+        },
+        "integrations.chromaprint.enabled": {
+            "environment": ["SLSKD_CHROMAPRINT_ENABLED"],
+            "commandLine": [],
+            "runtime": "Chromaprint fingerprinting gate and SongID capability evidence",
+        },
+        "integrations.chromaprint.ffmpeg_path": {
+            "environment": ["SLSKD_CHROMAPRINT_FFMPEG_PATH"],
+            "commandLine": [],
+            "runtime": "configured ffmpeg executable for fingerprint extraction",
+        },
+        "integrations.chromaprint.sample_rate": {
+            "environment": ["SLSKD_CHROMAPRINT_SAMPLE_RATE"],
+            "commandLine": [],
+            "runtime": "Chromaprint sample-rate configuration",
+        },
+        "integrations.chromaprint.channels": {
+            "environment": ["SLSKD_CHROMAPRINT_CHANNELS"],
+            "commandLine": [],
+            "runtime": "Chromaprint channel-count configuration",
+        },
+        "integrations.chromaprint.duration_seconds": {
+            "environment": ["SLSKD_CHROMAPRINT_DURATION_SECONDS"],
+            "commandLine": [],
+            "runtime": "Chromaprint analysis duration bound",
+        },
+        "integrations.lidarr.import_delay_seconds": {
+            "environment": ["SLSKR_LIDARR_IMPORT_DELAY"],
+            "commandLine": ["--lidarr-import-delay"],
+            "runtime": "automatic Lidarr import delay before the first attempt",
+        },
+        "integrations.lidarr.import_retry_delay_seconds": {
+            "environment": ["SLSKR_LIDARR_IMPORT_RETRY_DELAY"],
+            "commandLine": ["--lidarr-import-retry-delay"],
+            "runtime": "bounded exponential Lidarr import retry delay",
+        },
+        "integrations.lidarr.import_retry_max_attempts": {
+            "environment": ["SLSKR_LIDARR_IMPORT_RETRY_MAX_ATTEMPTS"],
+            "commandLine": ["--lidarr-import-retry-max-attempts"],
+            "runtime": "bounded Lidarr import retry count and persisted history",
+        },
+        "integrations.lidarr.skip_already_owned_albums": {
+            "environment": ["SLSKR_LIDARR_SKIP_ALREADY_OWNED_ALBUMS"],
+            "commandLine": ["--lidarr-skip-already-owned-albums"],
+            "runtime": "Lidarr parse/ownership precheck before automatic import",
+        },
+        "overlay_data.share_with_dht_port": {
+            "environment": [],
+            "commandLine": [],
+            "runtime": "shared UDP DHT/QUIC data-plane demultiplexing",
+        },
+        "overlay_data.backend_listen_port": {
+            "environment": [],
+            "commandLine": [],
+            "runtime": "loopback QUIC data-plane backend behind the shared public socket",
+        },
+    }
+)
+
 TRANSFER_DOWNLOAD_CONFIG_PATHS = {
     "transfers.download.auto_replace_interval",
     "transfers.download.auto_replace_stuck",
@@ -1208,6 +1298,7 @@ FULLY_PROVEN_CONFIG_PATHS = {
     "dht.dht_port",
     "dht.enabled",
     "feature.swagger",
+    "filters.download.exclude",
     "filters.search.request",
     "flags.case_sensitive_reg_ex",
     "flags.no_config_watch",
@@ -1219,6 +1310,16 @@ FULLY_PROVEN_CONFIG_PATHS = {
     "flags.no_share_scan",
     "flags.force_share_scan",
     "instance_name",
+    "auto_replace.interval_seconds",
+    "auto_replace.max_retries",
+    "auto_replace.size_threshold_percent",
+    "integrations.acoustid.client_id",
+    "integrations.acoustid.enabled",
+    "integrations.chromaprint.channels",
+    "integrations.chromaprint.duration_seconds",
+    "integrations.chromaprint.enabled",
+    "integrations.chromaprint.ffmpeg_path",
+    "integrations.chromaprint.sample_rate",
     "headless",
     "integrations.lidarr.api_key",
     "integrations.lidarr.auto_download",
@@ -1228,6 +1329,10 @@ FULLY_PROVEN_CONFIG_PATHS = {
     "integrations.lidarr.import_path_from",
     "integrations.lidarr.import_path_to",
     "integrations.lidarr.import_replace_existing_files",
+    "integrations.lidarr.import_delay_seconds",
+    "integrations.lidarr.import_retry_delay_seconds",
+    "integrations.lidarr.import_retry_max_attempts",
+    "integrations.lidarr.skip_already_owned_albums",
     "integrations.lidarr.max_items_per_sync",
     "integrations.lidarr.sync_interval_seconds",
     "integrations.lidarr.sync_wanted_to_wishlist",
@@ -1373,6 +1478,8 @@ FULLY_PROVEN_CONFIG_PATHS = {
     "web.rate_limiting.mesh_gateway_window_seconds",
     "web.ip_address",
     "web.port",
+    "overlay_data.backend_listen_port",
+    "overlay_data.share_with_dht_port",
 }
 FULLY_PROVEN_CONFIG_PATHS.update(TRANSFER_UPLOAD_GROUP_CONFIG_PATHS)
 FULLY_PROVEN_CONFIG_PATHS.update(TRANSFER_DOWNLOAD_CONFIG_PATHS)

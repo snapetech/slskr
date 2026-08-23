@@ -78,13 +78,17 @@ pub enum ActionBody {
     EnabledFalse,
     EnabledTrue,
     FeedPreview,
+    InviteRequest,
     JsonString,
+    LibraryPath,
+    MusicBrainzTarget,
     NameDescription,
     Permissions,
     RoomMessage,
     SearchText,
     ShareGrant,
     ShareGroupMember,
+    SongIdSource,
     Username,
 }
 
@@ -211,7 +215,7 @@ pub const fn ui_routes() -> &'static [UiRoute] {
         UiRoute {
             nav: true,
             path: "/shared",
-            title: "Shared With Me",
+            title: "Shared with Me",
         },
         UiRoute {
             nav: true,
@@ -427,6 +431,11 @@ pub const fn api_endpoints() -> &'static [ApiEndpoint] {
         },
         ApiEndpoint {
             method: "GET",
+            path: "/searches/:id",
+            surface: "search",
+        },
+        ApiEndpoint {
+            method: "GET",
             path: "/searches/records",
             surface: "search",
         },
@@ -488,6 +497,26 @@ pub const fn api_endpoints() -> &'static [ApiEndpoint] {
         ApiEndpoint {
             method: "GET",
             path: "/downloads/requests",
+            surface: "transfers",
+        },
+        ApiEndpoint {
+            method: "GET",
+            path: "/destinations",
+            surface: "transfers",
+        },
+        ApiEndpoint {
+            method: "GET",
+            path: "/destinations/default",
+            surface: "transfers",
+        },
+        ApiEndpoint {
+            method: "GET",
+            path: "/config/download-filter",
+            surface: "transfers",
+        },
+        ApiEndpoint {
+            method: "PUT",
+            path: "/config/download-filter",
             surface: "transfers",
         },
         ApiEndpoint {
@@ -646,6 +675,11 @@ pub const fn api_endpoints() -> &'static [ApiEndpoint] {
             surface: "identity",
         },
         ApiEndpoint {
+            method: "POST",
+            path: "/profile/invite",
+            surface: "identity",
+        },
+        ApiEndpoint {
             method: "GET",
             path: "/users/notes",
             surface: "identity",
@@ -683,6 +717,51 @@ pub const fn api_endpoints() -> &'static [ApiEndpoint] {
         ApiEndpoint {
             method: "POST",
             path: "/collections",
+            surface: "collections",
+        },
+        ApiEndpoint {
+            method: "GET",
+            path: "/collections/:id",
+            surface: "collections",
+        },
+        ApiEndpoint {
+            method: "PUT",
+            path: "/collections/:id",
+            surface: "collections",
+        },
+        ApiEndpoint {
+            method: "DELETE",
+            path: "/collections/:id",
+            surface: "collections",
+        },
+        ApiEndpoint {
+            method: "GET",
+            path: "/collections/:id/items",
+            surface: "collections",
+        },
+        ApiEndpoint {
+            method: "POST",
+            path: "/collections/:id/items",
+            surface: "collections",
+        },
+        ApiEndpoint {
+            method: "DELETE",
+            path: "/collections/items/:id",
+            surface: "collections",
+        },
+        ApiEndpoint {
+            method: "PUT",
+            path: "/collections/items/:id",
+            surface: "collections",
+        },
+        ApiEndpoint {
+            method: "DELETE",
+            path: "/collections/:id/items/:itemId",
+            surface: "collections",
+        },
+        ApiEndpoint {
+            method: "PUT",
+            path: "/collections/:id/items/:itemId",
             surface: "collections",
         },
         ApiEndpoint {
@@ -733,6 +812,11 @@ pub const fn api_endpoints() -> &'static [ApiEndpoint] {
         ApiEndpoint {
             method: "POST",
             path: "/share-grants/:id/token",
+            surface: "collections",
+        },
+        ApiEndpoint {
+            method: "GET",
+            path: "/share-grants/:id/manifest",
             surface: "collections",
         },
         ApiEndpoint {
@@ -897,6 +981,26 @@ pub const fn api_endpoints() -> &'static [ApiEndpoint] {
         },
         ApiEndpoint {
             method: "GET",
+            path: "/config",
+            surface: "system",
+        },
+        ApiEndpoint {
+            method: "GET",
+            path: "/options/yaml",
+            surface: "system",
+        },
+        ApiEndpoint {
+            method: "GET",
+            path: "/options/yaml/location",
+            surface: "system",
+        },
+        ApiEndpoint {
+            method: "POST",
+            path: "/options/yaml/validate",
+            surface: "system",
+        },
+        ApiEndpoint {
+            method: "GET",
             path: "/events",
             surface: "system",
         },
@@ -908,6 +1012,116 @@ pub const fn api_endpoints() -> &'static [ApiEndpoint] {
         ApiEndpoint {
             method: "GET",
             path: "/shares",
+            surface: "system",
+        },
+        ApiEndpoint {
+            method: "GET",
+            path: "/source-providers",
+            surface: "system",
+        },
+        ApiEndpoint {
+            method: "GET",
+            path: "/integrations/lidarr/status",
+            surface: "system",
+        },
+        ApiEndpoint {
+            method: "GET",
+            path: "/integrations/lidarr/sync/status",
+            surface: "system",
+        },
+        ApiEndpoint {
+            method: "GET",
+            path: "/integrations/lidarr/manualimport/history",
+            surface: "system",
+        },
+        ApiEndpoint {
+            method: "GET",
+            path: "/musicbrainz/albums/completion",
+            surface: "system",
+        },
+        ApiEndpoint {
+            method: "GET",
+            path: "/musicbrainz/release-radar/subscriptions",
+            surface: "system",
+        },
+        ApiEndpoint {
+            method: "GET",
+            path: "/songid/runs",
+            surface: "system",
+        },
+        ApiEndpoint {
+            method: "GET",
+            path: "/solid/status",
+            surface: "system",
+        },
+        ApiEndpoint {
+            method: "GET",
+            path: "/bridge/status",
+            surface: "system",
+        },
+        ApiEndpoint {
+            method: "GET",
+            path: "/transfers/speeds",
+            surface: "system",
+        },
+        ApiEndpoint {
+            method: "GET",
+            path: "/mesh/stats",
+            surface: "system",
+        },
+        ApiEndpoint {
+            method: "GET",
+            path: "/security/dashboard",
+            surface: "system",
+        },
+        ApiEndpoint {
+            method: "GET",
+            path: "/library/items",
+            surface: "system",
+        },
+        ApiEndpoint {
+            method: "GET",
+            path: "/library/health/issues",
+            surface: "system",
+        },
+        ApiEndpoint {
+            method: "GET",
+            path: "/library/health/issues/by-type",
+            surface: "system",
+        },
+        ApiEndpoint {
+            method: "GET",
+            path: "/library/health/issues/by-artist",
+            surface: "system",
+        },
+        ApiEndpoint {
+            method: "GET",
+            path: "/library/health/issues/by-release",
+            surface: "system",
+        },
+        ApiEndpoint {
+            method: "GET",
+            path: "/library/health/issues/by-codec",
+            surface: "system",
+        },
+        ApiEndpoint {
+            method: "POST",
+            path: "/library/health/scans",
+            surface: "system",
+        },
+        ApiEndpoint {
+            method: "POST",
+            path: "/library/health/issues/fix",
+            surface: "system",
+        },
+        ApiEndpoint {
+            method: "GET",
+            path: "/quarantine-jury/audit",
+            surface: "system",
+        },
+        ApiEndpoint {
+            method: "GET",
+            path: "/quarantine-jury/requests",
             surface: "system",
         },
         ApiEndpoint {
@@ -933,16 +1147,6 @@ pub const fn api_endpoints() -> &'static [ApiEndpoint] {
         ApiEndpoint {
             method: "GET",
             path: "/diagnostics",
-            surface: "system",
-        },
-        ApiEndpoint {
-            method: "POST",
-            path: "/admin/shutdown",
-            surface: "system",
-        },
-        ApiEndpoint {
-            method: "POST",
-            path: "/admin/restart",
             surface: "system",
         },
     ]
@@ -1140,6 +1344,20 @@ pub const fn route_actions() -> &'static [RouteAction] {
             surface: "identity",
         },
         RouteAction {
+            body: ActionBody::InviteRequest,
+            label: "Create Invite",
+            method: "POST",
+            path: "/profile/invite",
+            surface: "identity",
+        },
+        RouteAction {
+            body: ActionBody::None,
+            label: "Refresh Nearby",
+            method: "GET",
+            path: "/contacts/nearby",
+            surface: "identity",
+        },
+        RouteAction {
             body: ActionBody::ContactDiscovery,
             label: "Add Discovery Contact",
             method: "POST",
@@ -1179,6 +1397,27 @@ pub const fn route_actions() -> &'static [RouteAction] {
             label: "Create Collection",
             method: "POST",
             path: "/collections",
+            surface: "collections",
+        },
+        RouteAction {
+            body: ActionBody::NameDescription,
+            label: "Update Collection",
+            method: "PUT",
+            path: "/collections/:id",
+            surface: "collections",
+        },
+        RouteAction {
+            body: ActionBody::None,
+            label: "Delete Collection",
+            method: "DELETE",
+            path: "/collections/:id",
+            surface: "collections",
+        },
+        RouteAction {
+            body: ActionBody::None,
+            label: "Open Collection",
+            method: "GET",
+            path: "/collections/:id",
             surface: "collections",
         },
         RouteAction {
@@ -1225,6 +1464,13 @@ pub const fn route_actions() -> &'static [RouteAction] {
         },
         RouteAction {
             body: ActionBody::None,
+            label: "Open Shared Manifest",
+            method: "GET",
+            path: "/share-grants/:id/manifest",
+            surface: "collections",
+        },
+        RouteAction {
+            body: ActionBody::None,
             label: "Delete Share Grant",
             method: "DELETE",
             path: "/share-grants/:id",
@@ -1232,7 +1478,28 @@ pub const fn route_actions() -> &'static [RouteAction] {
         },
         RouteAction {
             body: ActionBody::CollectionItem,
-            label: "Add Library Item",
+            label: "Add Item to Collection",
+            method: "POST",
+            path: "/collections/:id/items",
+            surface: "collections",
+        },
+        RouteAction {
+            body: ActionBody::None,
+            label: "Remove Collection Item",
+            method: "DELETE",
+            path: "/collections/:collectionId/items/:itemId",
+            surface: "collections",
+        },
+        RouteAction {
+            body: ActionBody::CollectionItem,
+            label: "Update Collection Item",
+            method: "PUT",
+            path: "/collections/:collectionId/items/:itemId",
+            surface: "collections",
+        },
+        RouteAction {
+            body: ActionBody::CollectionItem,
+            label: "Create Library Item",
             method: "POST",
             path: "/library/items",
             surface: "collections",
@@ -1266,7 +1533,7 @@ pub const fn route_actions() -> &'static [RouteAction] {
             surface: "integrations",
         },
         RouteAction {
-            body: ActionBody::SearchText,
+            body: ActionBody::MusicBrainzTarget,
             label: "Track MusicBrainz Target",
             method: "POST",
             path: "/musicbrainz/targets",
@@ -1280,7 +1547,7 @@ pub const fn route_actions() -> &'static [RouteAction] {
             surface: "integrations",
         },
         RouteAction {
-            body: ActionBody::None,
+            body: ActionBody::SongIdSource,
             label: "Create SongID Run",
             method: "POST",
             path: "/songid/runs",
@@ -1344,23 +1611,65 @@ pub const fn route_actions() -> &'static [RouteAction] {
         },
         RouteAction {
             body: ActionBody::None,
+            label: "Check Lidarr",
+            method: "GET",
+            path: "/integrations/lidarr/status",
+            surface: "system",
+        },
+        RouteAction {
+            body: ActionBody::None,
+            label: "Refresh Lidarr Sync",
+            method: "GET",
+            path: "/integrations/lidarr/sync/status",
+            surface: "system",
+        },
+        RouteAction {
+            body: ActionBody::MusicBrainzTarget,
+            label: "Track MusicBrainz Target",
+            method: "POST",
+            path: "/musicbrainz/targets",
+            surface: "system",
+        },
+        RouteAction {
+            body: ActionBody::None,
+            label: "Refresh MusicBrainz",
+            method: "GET",
+            path: "/musicbrainz/release-radar/subscriptions",
+            surface: "system",
+        },
+        RouteAction {
+            body: ActionBody::SongIdSource,
+            label: "Start SongID Run",
+            method: "POST",
+            path: "/songid/runs",
+            surface: "system",
+        },
+        RouteAction {
+            body: ActionBody::LibraryPath,
+            label: "Start Library Health Scan",
+            method: "POST",
+            path: "/library/health/scans",
+            surface: "system",
+        },
+        RouteAction {
+            body: ActionBody::None,
+            label: "Fix Library Issues",
+            method: "POST",
+            path: "/library/health/issues/fix",
+            surface: "system",
+        },
+        RouteAction {
+            body: ActionBody::None,
+            label: "Refresh SongID",
+            method: "GET",
+            path: "/songid/runs",
+            surface: "system",
+        },
+        RouteAction {
+            body: ActionBody::None,
             label: "Setup Health",
             method: "GET",
             path: "/health",
-            surface: "system",
-        },
-        RouteAction {
-            body: ActionBody::None,
-            label: "Shut Down",
-            method: "POST",
-            path: "/admin/shutdown",
-            surface: "system",
-        },
-        RouteAction {
-            body: ActionBody::None,
-            label: "Restart",
-            method: "POST",
-            path: "/admin/restart",
             surface: "system",
         },
     ]
@@ -1709,6 +2018,17 @@ pub fn concrete_action_path_with_target_and_id(
     target: Option<&str>,
     id: Option<&str>,
 ) -> String {
+    if action.path.contains(":collectionId") || action.path.contains(":itemId") {
+        let collection_id = target
+            .filter(|value| safe_route_segment(value))
+            .unwrap_or("1");
+        let item_id = id
+            .filter(|value| safe_route_segment(value))
+            .unwrap_or("1");
+        return endpoint_url(action.path)
+            .replace(":collectionId", collection_id)
+            .replace(":itemId", item_id);
+    }
     let selected_id = id
         .filter(|value| safe_route_segment(value))
         .or_else(|| target.filter(|value| safe_route_segment(value)));
@@ -1772,7 +2092,7 @@ pub fn route_action_for_native_label(path: &str, label: &str) -> Option<RouteAct
             &["Preview Playlist"]
         }
         (RouteKind::PlaylistIntake, "queue plans") => &["Queue Discography Job"],
-        (RouteKind::Wishlist, "add wanted search" | "add search" | "add your first search") => {
+        (RouteKind::Wishlist, "add wanted search" | "add search" | "add your first search" | "import list") => {
             &["Add Wishlist Item"]
         }
         (RouteKind::Wishlist, "run selected" | "run enabled" | "run") => &["Run Wishlist Search"],
@@ -1789,22 +2109,33 @@ pub fn route_action_for_native_label(path: &str, label: &str) -> Option<RouteAct
             &["Send Message"]
         }
         (RouteKind::Messages | RouteKind::Rooms, "acknowledge") => &["Acknowledge Conversation"],
-        (RouteKind::Messages | RouteKind::Rooms, "join" | "join room") => &["Join Room"],
+        (RouteKind::Messages | RouteKind::Rooms, "join" | "join room") => {
+            &["Join Room"]
+        }
+        (RouteKind::Messages | RouteKind::Rooms, "open batch private-message dialog") => {
+            &["Send Message"]
+        }
         (RouteKind::Messages | RouteKind::Rooms, "leave" | "leave room") => &["Leave Room"],
         (RouteKind::Users, "watch") => &["Watch User"],
         (RouteKind::Users, "save note") => &["Add User Note"],
         (RouteKind::Users, "browse") => &["Request Directory"],
         (RouteKind::Users, "message") => &["Send Message"],
         (RouteKind::Contacts, "add contact" | "add friend") => &["Add Contact"],
+        (RouteKind::Contacts, "create invite") => &["Create Invite"],
+        (RouteKind::Contacts, "refresh nearby") => &["Refresh Nearby"],
         (RouteKind::Contacts, "message") => &["Send Message"],
         (RouteKind::Contacts, "browse") => &["Request Directory"],
         (RouteKind::Contacts, "remove") => &["Remove Contact"],
-        (RouteKind::Solid, "resolve webid" | "connect identity" | "sync storage") => {
+        (RouteKind::Solid, "resolve webid" | "connect identity" | "sync storage" | "refresh session") => {
             &["Resolve WebID"]
         }
         (RouteKind::Collections, "create collection") => &["Create Collection"],
-        (RouteKind::Collections, "add item") => &["Add Library Item"],
-        (RouteKind::Collections, "open" | "remove item") => &["Add Library Item"],
+        (RouteKind::Collections, "update collection") => &["Update Collection"],
+        (RouteKind::Collections, "delete collection") => &["Delete Collection"],
+        (RouteKind::Collections, "open" | "open collection") => &["Open Collection"],
+        (RouteKind::Collections, "add item") => &["Add Item to Collection"],
+        (RouteKind::Collections, "remove item") => &["Remove Collection Item"],
+        (RouteKind::Collections, "update item") => &["Update Collection Item"],
         (RouteKind::Collections, "share") => &["Create Share Grant"],
         (RouteKind::ShareGroups, "create group" | "create your first group") => {
             &["Create Share Group"]
@@ -1813,13 +2144,9 @@ pub fn route_action_for_native_label(path: &str, label: &str) -> Option<RouteAct
         (RouteKind::ShareGroups, "issue token") => &["Issue Share Token"],
         (RouteKind::ShareGroups, "update share grant") => &["Update Share Grant"],
         (RouteKind::ShareGroups, "create share grant") => &["Create Share Grant"],
-        (RouteKind::SharedWithMe, "open" | "open collection" | "stream") => {
-            &["Backfill Share Grant"]
-        }
+        (RouteKind::SharedWithMe, "open" | "open collection") => &["Open Shared Manifest"],
         (RouteKind::SharedWithMe, "backfill") => &["Backfill Share Grant"],
-        (RouteKind::SharedWithMe, "copy token") => &["Issue Share Token"],
-        (RouteKind::SharedWithMe, "leave share") => &["Delete Share Grant"],
-        (RouteKind::Browse, "browse" | "open a new browse tab" | "new tab") => {
+        (RouteKind::Browse, "browse" | "open a new browse tab" | "new tab" | "refresh folder") => {
             &["Request Directory"]
         }
         (RouteKind::Browse, "open") => &["Request Directory"],
@@ -1831,9 +2158,19 @@ pub fn route_action_for_native_label(path: &str, label: &str) -> Option<RouteAct
         (RouteKind::System, "check for updates") => &["Check for Updates"],
         (RouteKind::System, "get privileges") => &["Get Privileges"],
         (RouteKind::System, "diagnostic bundle") => &["Diagnostic Bundle"],
+        (RouteKind::System, "check lidarr") => &["Check Lidarr"],
+        (RouteKind::System, "refresh lidarr sync") => &["Refresh Lidarr Sync"],
+        (RouteKind::System, "refresh musicbrainz") => &["Refresh MusicBrainz"],
+        (RouteKind::System, "refresh songid") => &["Refresh SongID"],
+        (RouteKind::System, "track musicbrainz target") => &["Track MusicBrainz Target"],
+        (RouteKind::System, "start songid run") => &["Start SongID Run"],
+        (RouteKind::System, "start library health scan" | "scan library" | "scan library health") => {
+            &["Start Library Health Scan"]
+        }
+        (RouteKind::System, "fix library issues" | "fix health issues") => {
+            &["Fix Library Issues"]
+        }
         (RouteKind::System, "setup health") => &["Setup Health"],
-        (RouteKind::System, "shut down") => &["Shut Down"],
-        (RouteKind::System, "restart") => &["Restart"],
         _ => &[],
     };
     aliases
@@ -1856,7 +2193,8 @@ pub fn action_body_from_value(body: ActionBody, value: &str) -> Option<String> {
             escape_json_string(value)
         )),
         ActionBody::CollectionItem => Some(format!(
-            r#"{{"content_id":"rust-web-demo","artist":"Public Domain","title":"{}","kind":"Audio"}}"#,
+            r#"{{"contentId":"{}","artist":"","title":"{}","kind":"Audio"}}"#,
+            escape_json_string(value),
             escape_json_string(value)
         )),
         ActionBody::DownloadFiles => {
@@ -1872,11 +2210,6 @@ pub fn action_body_from_value(body: ActionBody, value: &str) -> Option<String> {
                     )
                 })
                 .collect::<Vec<_>>();
-            let files = if files.is_empty() {
-                vec![r#"{"filename":"Remote/Song.mp3","size":99}"#.to_string()]
-            } else {
-                files
-            };
             Some(format!("[{}]", files.join(",")))
         }
         ActionBody::EnabledFalse => Some(r#"{"enabled":false}"#.to_string()),
@@ -1885,9 +2218,18 @@ pub fn action_body_from_value(body: ActionBody, value: &str) -> Option<String> {
             r#"{{"sourceText":"{}","sourceKind":"auto","limit":25,"includeAlbum":true,"fetchProviderUrls":false}}"#,
             escape_json_string(value)
         )),
+        ActionBody::InviteRequest => Some(r#"{"expiresInHours":24}"#.to_string()),
+        ActionBody::LibraryPath => Some(format!(
+            r#"{{"libraryPath":"{}"}}"#,
+            escape_json_string(value)
+        )),
         ActionBody::ConversationMessage | ActionBody::JsonString => {
             Some(format!(r#""{}""#, escape_json_string(value)))
         }
+        ActionBody::MusicBrainzTarget => Some(format!(
+            r#"{{"releaseId":"{}"}}"#,
+            escape_json_string(value)
+        )),
         ActionBody::NameDescription => Some(format!(
             r#"{{"title":"{}","description":"Created from the Rust web UI","type":"ShareList"}}"#,
             escape_json_string(value)
@@ -1902,12 +2244,16 @@ pub fn action_body_from_value(body: ActionBody, value: &str) -> Option<String> {
             escape_json_string(value)
         )),
         ActionBody::ShareGrant => Some(format!(
-            r#"{{"collection_id":"rust-web-demo","username":"{}"}}"#,
-            escape_json_string(if value.is_empty() { "peer1" } else { value })
+            r#"{{"collection_id":"","username":"{}"}}"#,
+            escape_json_string(value)
         )),
         ActionBody::ShareGroupMember => Some(format!(
             r#"{{"userId":"{}"}}"#,
-            escape_json_string(if value.is_empty() { "peer1" } else { value })
+            escape_json_string(value)
+        )),
+        ActionBody::SongIdSource => Some(format!(
+            r#"{{"source":"{}"}}"#,
+            escape_json_string(value)
         )),
         ActionBody::Username => Some(format!(
             r#"{{"username":"{}","note":"Created from the Rust web UI"}}"#,
@@ -1915,13 +2261,13 @@ pub fn action_body_from_value(body: ActionBody, value: &str) -> Option<String> {
         )),
         ActionBody::ContactDiscovery => Some(format!(
             r#"{{"peerId":"{}","nickname":"{}"}}"#,
-            escape_json_string(if value.is_empty() { "peer1" } else { value }),
-            escape_json_string(if value.is_empty() { "peer1" } else { value })
+            escape_json_string(value),
+            escape_json_string(value)
         )),
         ActionBody::ContactInvite => Some(format!(
             r#"{{"inviteLink":"slskdn://invite/{}","nickname":"{}"}}"#,
-            escape_json_string(if value.is_empty() { "peer1" } else { value }),
-            escape_json_string(if value.is_empty() { "peer1" } else { value })
+            escape_json_string(value),
+            escape_json_string(value)
         )),
     }
 }
@@ -1933,43 +2279,117 @@ pub fn action_input_html(action: RouteAction) -> String {
             r#"<input class="slskr-action-input" data-slskr-action-input="BrowseDirectory" value="" placeholder="Directory">"#.to_string()
         }
         ActionBody::ConversationMessage => {
-            r#"<input class="slskr-action-input" data-slskr-action-input="ConversationMessage" value="hello" placeholder="Message">"#.to_string()
+            r#"<input class="slskr-action-input" data-slskr-action-input="ConversationMessage" value="" placeholder="Message">"#.to_string()
         }
         ActionBody::CollectionItem => {
-            r#"<input class="slskr-action-input" data-slskr-action-input="CollectionItem" value="Demo Track" placeholder="Title">"#.to_string()
+            r#"<input class="slskr-action-input" data-slskr-action-input="CollectionItem" value="" placeholder="Content ID">"#.to_string()
         }
         ActionBody::DownloadFiles => {
-            r#"<input class="slskr-action-input" data-slskr-action-input="DownloadFiles" value="Remote/Song.mp3" placeholder="Filename">"#.to_string()
+            r#"<input class="slskr-action-input" data-slskr-action-input="DownloadFiles" value="" placeholder="Filename">"#.to_string()
         }
         ActionBody::EnabledFalse | ActionBody::EnabledTrue => String::new(),
         ActionBody::FeedPreview => {
-            r#"<input class="slskr-action-input" data-slskr-action-input="FeedPreview" value="Public Domain Jazz - Demo Track" placeholder="Playlist text">"#.to_string()
+            r#"<input class="slskr-action-input" data-slskr-action-input="FeedPreview" value="" placeholder="Playlist text">"#.to_string()
+        }
+        ActionBody::InviteRequest => String::new(),
+        ActionBody::LibraryPath => {
+            r#"<input class="slskr-action-input" data-slskr-action-input="LibraryPath" value="" placeholder="Library path">"#.to_string()
         }
         ActionBody::JsonString => {
-            r#"<input class="slskr-action-input" data-slskr-action-input="JsonString" value="contract-room" placeholder="Name">"#.to_string()
+            r#"<input class="slskr-action-input" data-slskr-action-input="JsonString" value="" placeholder="Name">"#.to_string()
+        }
+        ActionBody::MusicBrainzTarget => {
+            r#"<input class="slskr-action-input" data-slskr-action-input="MusicBrainzTarget" value="" placeholder="MusicBrainz release ID">"#.to_string()
         }
         ActionBody::NameDescription => {
-            r#"<input class="slskr-action-input" data-slskr-action-input="NameDescription" value="Rust Web Demo" placeholder="Name">"#.to_string()
+            r#"<input class="slskr-action-input" data-slskr-action-input="NameDescription" value="" placeholder="Name">"#.to_string()
         }
         ActionBody::Permissions => {
             r#"<input class="slskr-action-input" data-slskr-action-input="Permissions" value="read" placeholder="Permissions">"#.to_string()
         }
         ActionBody::RoomMessage => {
-            r#"<input class="slskr-action-input" data-slskr-action-input="RoomMessage" value="hello room" placeholder="Message">"#.to_string()
+            r#"<input class="slskr-action-input" data-slskr-action-input="RoomMessage" value="" placeholder="Message">"#.to_string()
         }
         ActionBody::SearchText => {
-            r#"<input class="slskr-action-input" data-slskr-action-input="SearchText" value="public domain jazz" placeholder="Search text">"#.to_string()
+            r#"<input class="slskr-action-input" data-slskr-action-input="SearchText" value="" placeholder="Search text">"#.to_string()
         }
         ActionBody::ShareGrant | ActionBody::ShareGroupMember => {
-            r#"<input class="slskr-action-input" data-slskr-action-input="Username" value="peer1" placeholder="Username">"#.to_string()
+            r#"<input class="slskr-action-input" data-slskr-action-input="Username" value="" placeholder="Username">"#.to_string()
+        }
+        ActionBody::SongIdSource => {
+            r#"<input class="slskr-action-input" data-slskr-action-input="SongIdSource" value="" placeholder="SongID source">"#.to_string()
         }
         ActionBody::Username => {
-            r#"<input class="slskr-action-input" data-slskr-action-input="Username" value="peer1" placeholder="Username">"#.to_string()
+            r#"<input class="slskr-action-input" data-slskr-action-input="Username" value="" placeholder="Username">"#.to_string()
         }
         ActionBody::ContactDiscovery | ActionBody::ContactInvite => {
-            r#"<input class="slskr-action-input" data-slskr-action-input="Username" value="peer1" placeholder="Username">"#.to_string()
+            r#"<input class="slskr-action-input" data-slskr-action-input="Username" value="" placeholder="Username">"#.to_string()
         }
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn native_action_body(
+    _document: &web_sys::Document,
+    button: &web_sys::Element,
+    action: RouteAction,
+    value: &str,
+) -> Option<String> {
+    if action.body != ActionBody::ShareGrant {
+        return action_body_from_value(action.body, value);
+    }
+
+    let workspace = button.closest(".slskr-native-workspace").ok().flatten();
+    let collection_id = button_native_row_attribute(button, "data-slskr-native-collection-id")
+        .or_else(|| {
+            workspace.as_ref().and_then(|workspace| {
+                selected_native_row_attribute(workspace, "data-slskr-native-collection-id")
+            })
+        })
+        .unwrap_or_default();
+    Some(format!(
+        r#"{{"collection_id":"{}","username":"{}"}}"#,
+        escape_json_string(&collection_id),
+        escape_json_string(value.trim()),
+    ))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn native_action_value_is_valid(
+    document: &web_sys::Document,
+    label: &str,
+    action: RouteAction,
+    value: &str,
+) -> bool {
+    let value_required = matches!(
+        action.body,
+        ActionBody::BrowseDirectory
+            | ActionBody::CollectionItem
+            | ActionBody::ConversationMessage
+            | ActionBody::ContactDiscovery
+            | ActionBody::ContactInvite
+            | ActionBody::DownloadFiles
+            | ActionBody::FeedPreview
+            | ActionBody::JsonString
+            | ActionBody::LibraryPath
+            | ActionBody::MusicBrainzTarget
+            | ActionBody::NameDescription
+            | ActionBody::RoomMessage
+            | ActionBody::SearchText
+            | ActionBody::ShareGrant
+            | ActionBody::ShareGroupMember
+            | ActionBody::SongIdSource
+            | ActionBody::Username
+    );
+    if value_required && value.trim().is_empty() {
+        native_set_action_status(
+            document,
+            label,
+            "Enter the required value before running this action.",
+        );
+        return false;
+    }
+    true
 }
 
 pub fn route_actions_html(path: &str) -> String {
@@ -2170,7 +2590,7 @@ pub fn route_summary_pending_html(path: &str) -> String {
         .join(""),
         "messages" => [
             stat_card_html("Conversations", "pending", "threads"),
-            stat_card_html("Selected", "pending", "peer1"),
+            stat_card_html("Selected", "pending", "conversation"),
             stat_card_html(
                 "Actions",
                 &surface_actions("messages").len().to_string(),
@@ -2179,7 +2599,7 @@ pub fn route_summary_pending_html(path: &str) -> String {
         ]
         .join(""),
         "browse" => [
-            stat_card_html("Peer", "peer1", "browse target"),
+            stat_card_html("Peer", "not selected", "browse target"),
             stat_card_html("Folders", "pending", "cached entries"),
             stat_card_html(
                 "Actions",
@@ -2333,10 +2753,10 @@ pub fn route_summary_result_html(path: &str, responses: &[EndpointBody]) -> Stri
                         .or_else(|| json_field_string(body, "message_count"))
                         .or_else(|| json_field_string(body, "messages"))
                 })
-                .unwrap_or_else(|| "peer1".to_string());
+                .unwrap_or_else(|| "not selected".to_string());
             [
                 stat_card_html("Conversations", &conversations, "threads"),
-                stat_card_html("Selected", &selected, "peer1"),
+                stat_card_html("Selected", &selected, "conversation"),
                 stat_card_html(
                     "Actions",
                     &surface_actions("messages").len().to_string(),
@@ -2351,7 +2771,7 @@ pub fn route_summary_result_html(path: &str, responses: &[EndpointBody]) -> Stri
                 .map(|value| value.to_string())
                 .unwrap_or_else(|| "0".to_string());
             [
-                stat_card_html("Peer", "peer1", "browse target"),
+                stat_card_html("Peer", "not selected", "browse target"),
                 stat_card_html("Folders", &folders, "cached entries"),
                 stat_card_html(
                     "Actions",
@@ -2846,6 +3266,44 @@ fn response_count(responses: Option<&[EndpointBody]>, endpoint: &str) -> String 
         .unwrap_or_else(|| "0".to_string())
 }
 
+fn response_numeric_sum(
+    responses: Option<&[EndpointBody]>,
+    endpoint: &str,
+    keys: &[&str],
+) -> String {
+    let total = endpoint_array(responses, endpoint)
+        .iter()
+        .filter_map(|item| value_text(item, keys))
+        .filter_map(|value| value.parse::<u64>().ok())
+        .sum::<u64>();
+    total.to_string()
+}
+
+fn response_bool_count(
+    responses: Option<&[EndpointBody]>,
+    endpoint: &str,
+    keys: &[&str],
+) -> String {
+    endpoint_array(responses, endpoint)
+        .iter()
+        .filter(|item| value_bool(item, keys).unwrap_or(false))
+        .count()
+        .to_string()
+}
+
+fn response_online_count(responses: Option<&[EndpointBody]>, endpoint: &str) -> String {
+    endpoint_array(responses, endpoint)
+        .iter()
+        .filter(|item| {
+            value_bool(item, &["online", "connected", "isOnline"]).unwrap_or_else(|| {
+                value_text(item, &["status", "state"])
+                    .is_some_and(|state| matches!(state.to_ascii_lowercase().as_str(), "online" | "connected"))
+            })
+        })
+        .count()
+        .to_string()
+}
+
 fn response_value(responses: Option<&[EndpointBody]>, endpoint: &str, field: &str) -> String {
     responses
         .and_then(|items| endpoint_body(items, endpoint))
@@ -2858,63 +3316,6 @@ fn status_chip_html(label: &str, value: &str) -> String {
         r#"<span class="slskr-status-chip"><strong>{}</strong>{}</span>"#,
         escape_html(label),
         escape_html(value)
-    )
-}
-
-fn workflow_tabs_html(tabs: &[&str]) -> String {
-    tabs.iter()
-        .enumerate()
-        .map(|(index, tab)| {
-            format!(
-                r#"<button type="button" class="{class}" aria-selected="{selected}">{tab}</button>"#,
-                class = if index == 0 {
-                    "slskr-tab is-active"
-                } else {
-                    "slskr-tab"
-                },
-                selected = if index == 0 { "true" } else { "false" },
-                tab = escape_html(tab),
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("")
-}
-
-fn empty_state_html(title: &str, detail: &str, action: &str) -> String {
-    format!(
-        r#"<div class="slskr-empty-workflow"><strong>{title}</strong><span>{detail}</span><button type="button">{action}</button></div>"#,
-        title = escape_html(title),
-        detail = escape_html(detail),
-        action = escape_html(action),
-    )
-}
-
-fn workflow_table_owned_html(
-    headers: &[&str],
-    rows: &[(String, String, String, String)],
-) -> String {
-    let header = headers
-        .iter()
-        .map(|header| format!(r#"<th>{}</th>"#, escape_html(header)))
-        .collect::<Vec<_>>()
-        .join("");
-    let rows = rows
-        .iter()
-        .map(|(primary, secondary, meta, action)| {
-            format!(
-                r#"<tr><td><strong>{primary}</strong><span>{secondary}</span></td><td>{meta}</td><td><button type="button">{action}</button></td></tr>"#,
-                primary = escape_html(primary),
-                secondary = escape_html(secondary),
-                meta = escape_html(meta),
-                action = escape_html(action),
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("");
-    format!(
-        r#"<div class="slskr-table-wrap slskr-domain-table"><table><thead><tr>{header}</tr></thead><tbody>{rows}</tbody></table></div>"#,
-        header = header,
-        rows = rows,
     )
 }
 
@@ -3128,6 +3529,22 @@ fn row_meta_with_id(meta: String, id: Option<&str>) -> String {
     id.filter(|value| safe_route_segment(value.trim()))
         .map(|id| format!("{meta} / id={}", id.trim()))
         .unwrap_or(meta)
+}
+
+fn browse_response_entries(responses: Option<&[EndpointBody]>) -> Vec<serde_json::Value> {
+    let Some(root) = json_endpoint_value(responses, "/users/:username/browse") else {
+        return Vec::new();
+    };
+    let mut entries = value_array(&root);
+    entries.extend(nested_items(&root, &["directories", "root.directories"]));
+    for directory in nested_items(&root, &["directories", "root.directories"]) {
+        entries.extend(nested_items(&directory, &["files", "children", "items"]));
+    }
+    entries.extend(nested_items(
+        &root,
+        &["files", "root.files", "children", "items"],
+    ));
+    entries
 }
 
 fn route_dynamic_rows(
@@ -3399,7 +3816,13 @@ fn route_dynamic_rows(
                 )
             })
             .collect::<Vec<_>>(),
-        RouteKind::SharedWithMe => endpoint_array(responses, "/shared")
+        RouteKind::SharedWithMe => {
+            // `/shared` is the local share-directory compatibility endpoint,
+            // not the inbound ShareGrant collection used by slskdn's
+            // SharedWithMe page.  Treating its directory identifiers as grant
+            // IDs made an empty inbound page render executable-looking rows
+            // that could only produce 400/404 responses.
+            endpoint_array(responses, "/share-grants")
             .iter()
             .take(50)
             .map(|item| {
@@ -3430,21 +3853,11 @@ fn route_dynamic_rows(
                     "Open".to_string(),
                 )
             })
-            .collect::<Vec<_>>(),
+            .collect::<Vec<_>>()
+        }
         RouteKind::Browse => {
-            let root = json_endpoint_value(responses, "/users/:username/browse");
-            let mut rows = root.as_ref().map(value_array).unwrap_or_default();
-            if let Some(value) = root.as_ref() {
-                rows.extend(nested_items(value, &["directories", "root.directories"]));
-                for directory in nested_items(value, &["directories", "root.directories"]) {
-                    rows.extend(nested_items(&directory, &["files", "children", "items"]));
-                }
-                rows.extend(nested_items(
-                    value,
-                    &["files", "root.files", "children", "items"],
-                ));
-            }
-            rows.iter()
+            browse_response_entries(responses)
+                .iter()
                 .take(50)
                 .map(|item| {
                     let name = value_text(
@@ -3535,7 +3948,12 @@ fn reference_field_html(label: &str, placeholder: &str) -> String {
 fn reference_buttons_html(labels: &[&str]) -> String {
     labels
         .iter()
-        .map(|label| format!(r#"<button type="button">{}</button>"#, escape_html(label)))
+        .map(|label| {
+            format!(
+                r#"<button type="button" data-slskr-reference-action="{label}">{label}</button>"#,
+                label = escape_html(label),
+            )
+        })
         .collect::<Vec<_>>()
         .join("")
 }
@@ -3647,7 +4065,7 @@ fn route_reference_panel_html(kind: RouteKind) -> String {
                 vec!["Add Search", "Import List", "Copy Review", "Run Enabled", "Add Your First Search"],
                 vec![
                     "Wishlist Saved searches that run automatically",
-                    "Request Portal Summary Operator view of wanted music before acquisition jobs are wired.",
+                    "Request Portal Summary Operator view of wanted music before acquisition jobs are scheduled.",
                     "Requests 0",
                     "Enabled 0",
                     "Automatic 0",
@@ -3677,14 +4095,14 @@ fn route_reference_panel_html(kind: RouteKind) -> String {
                     ("Search rooms", "Search rooms"),
                     ("Message", "Message"),
                 ],
-                vec!["Direct Message", "Join Room", "Create Room", "Open Batch Private-Message Dialog", "Collapse All Message Panels"],
+                vec!["Direct Message", "Join Room", "Open Batch Private-Message Dialog", "Collapse All Message Panels"],
                 vec!["Saved Chats 0", "Joined Rooms 0", "Pod Channels 0", "Workspace 0 open"],
             ),
             RouteKind::Rooms => (
                 "Messages",
                 "Room-focused message workspace.",
                 vec![("Search rooms", "Search rooms")],
-                vec!["Join Room", "Create Room", "Leave Room"],
+                vec!["Join Room", "Leave Room"],
                 vec!["Joined Rooms 0", "Workspace 0 open"],
             ),
             RouteKind::Users => (
@@ -3709,7 +4127,7 @@ fn route_reference_panel_html(kind: RouteKind) -> String {
                 "Solid integration status, identity, storage, and WebID resolution.",
                 vec![("WebID", "https://example.com/profile/card#me")],
                 vec!["Resolve WebID", "Connect Identity", "Sync Storage"],
-                vec!["Solid integration is disabled (Feature.Solid=false)."],
+                vec!["Live Solid status is shown in the workspace below."],
             ),
             RouteKind::Collections => (
                 "Collections Manage your playlists and share lists",
@@ -3717,7 +4135,7 @@ fn route_reference_panel_html(kind: RouteKind) -> String {
                 vec![
                     ("Title", "Enter collection title"),
                     ("Description", "Optional description"),
-                    ("Search for item", "Search by filename (e.g., sintel, aria, treasure)..."),
+                    ("Search for item", "Search by filename, artist, or title"),
                 ],
                 vec!["Create Collection", "Add Item", "Share", "Create Collection"],
                 vec![
@@ -3772,7 +4190,7 @@ fn route_reference_panel_html(kind: RouteKind) -> String {
                 "System",
                 "Operator status, network, shares, jobs, automation, files, data, events, logs, and metrics.",
                 Vec::new(),
-                vec!["Check for Updates", "Get Privileges", "Diagnostic Bundle", "Setup Health", "Shut Down", "Restart"],
+                vec!["Check for Updates", "Get Privileges", "Diagnostic Bundle", "Setup Health"],
                 vec![
                     "Info", "Network", "Mesh", "Bridge", "MediaCore", "Security Policies",
                     "Experience", "Integrations", "Options", "Shares", "Jobs", "Automations",
@@ -3793,7 +4211,7 @@ fn route_reference_panel_html(kind: RouteKind) -> String {
         .collect::<Vec<_>>()
         .join("");
     format!(
-        r#"<section class="slskr-reference-panel {component_class}" data-slskr-parity-reference{attrs}><header><div><p class="slskr-kicker">slskd compatibility</p><h2>{title}</h2><p>{detail}</p></div><div class="slskr-reference-actions">{buttons}</div></header><form class="slskr-reference-form">{fields}</form><div class="slskr-reference-facts">{facts}</div></section>"#,
+        r#"<section class="slskr-reference-panel {component_class}" data-slskr-parity-reference{attrs}><header><div><p class="slskr-kicker">protocol compatibility</p><h2>{title}</h2><p>{detail}</p></div><div class="slskr-reference-actions">{buttons}</div></header><form class="slskr-reference-form">{fields}</form><div class="slskr-reference-facts">{facts}</div></section>"#,
         component_class = escape_html(route_component_parity_class(kind)),
         attrs = route_component_parity_attrs(kind),
         title = escape_html(title),
@@ -3931,7 +4349,7 @@ fn native_meta_cell_html(kind: RouteKind, meta: &str, primary: &str, secondary: 
             )
         }
         RouteKind::SharedWithMe => format!(
-            r#"<div class="slskr-native-state-stack" data-slskr-inbound-permission-controls><span>{meta}</span><div class="slskr-native-permission-grid"><span>{permissions}</span><span>{owner}</span><button type="button">Copy token</button><button type="button">Leave share</button></div></div>"#,
+            r#"<div class="slskr-native-state-stack" data-slskr-inbound-permission-controls><span>{meta}</span><div class="slskr-native-permission-grid"><span>{permissions}</span><span>{owner}</span><button type="button">Copy token</button></div></div>"#,
             meta = escape_html(meta),
             permissions = escape_html(meta),
             owner = escape_html(secondary),
@@ -4294,7 +4712,7 @@ fn native_row_action_labels(kind: RouteKind, primary_action: &str) -> Vec<&str> 
             "Connect Identity",
             "Sync Storage",
         ],
-        RouteKind::Collections => vec![primary_action, "Add Item", "Share", "Remove item"],
+        RouteKind::Collections => vec![primary_action, "Add Item", "Share"],
         RouteKind::ShareGroups => vec![
             "Add Member",
             "Issue Token",
@@ -4307,7 +4725,6 @@ fn native_row_action_labels(kind: RouteKind, primary_action: &str) -> Vec<&str> 
             "Stream",
             "Backfill",
             "Copy token",
-            "Leave share",
         ],
         RouteKind::Browse => vec![primary_action, "Download Selected", "Open a New Browse Tab"],
         RouteKind::System => vec![
@@ -4615,7 +5032,7 @@ fn native_tab_detail(kind: RouteKind, label: &str) -> &'static str {
         (RouteKind::System, "Security Policies") => "Security policy status and decisions.",
         (RouteKind::System, "Experience") => "User experience preferences.",
         (RouteKind::System, "Integrations") => {
-            "Lidarr, FTP, media server, and provider integrations."
+            "Lidarr, MusicBrainz, SongID, and source-provider integrations."
         }
         (RouteKind::System, "Options") => "Daemon options and preferences.",
         (RouteKind::System, "Shares") => "Share roots, scan status, and rescan controls.",
@@ -4636,7 +5053,7 @@ fn native_tab_detail(kind: RouteKind, label: &str) -> &'static str {
     }
 }
 
-fn native_tabs_html(kind: RouteKind) -> String {
+fn native_tabs_html(kind: RouteKind, responses: Option<&[EndpointBody]>) -> String {
     let labels = native_tab_labels(kind);
     let buttons = labels
         .iter()
@@ -4657,8 +5074,9 @@ fn native_tabs_html(kind: RouteKind) -> String {
         .map(|(index, label)| {
             let hidden = if index == 0 { "" } else { " hidden" };
             format!(
-                r#"<section class="slskr-native-subpanel" data-slskr-native-panel="{index}"{hidden}>{}</section>"#,
-                native_tab_panel_html(kind, label),
+                r#"<section class="slskr-native-subpanel" data-slskr-native-panel="{index}" data-slskr-native-panel-label="{}"{hidden}>{}</section>"#,
+                escape_html(label),
+                native_tab_panel_html(kind, label, responses),
             )
         })
         .collect::<Vec<_>>()
@@ -4668,9 +5086,13 @@ fn native_tabs_html(kind: RouteKind) -> String {
     )
 }
 
-fn native_tab_panel_html(kind: RouteKind, label: &str) -> String {
+fn native_tab_panel_html(
+    kind: RouteKind,
+    label: &str,
+    responses: Option<&[EndpointBody]>,
+) -> String {
     if kind == RouteKind::System {
-        return native_system_tab_panel_html(label);
+        return native_system_tab_panel_html(label, responses);
     }
     let detail = native_tab_detail(kind, label);
     let controls = native_tab_controls(kind, label)
@@ -4705,54 +5127,124 @@ fn native_tab_panel_html(kind: RouteKind, label: &str) -> String {
     )
 }
 
-fn native_system_tab_panel_html(label: &str) -> String {
+fn native_system_tab_panel_html(label: &str, responses: Option<&[EndpointBody]>) -> String {
     let detail = native_tab_detail(RouteKind::System, label);
-    let controls = native_tab_controls(RouteKind::System, label)
-        .iter()
-        .map(|control| format!(r#"<button type="button">{}</button>"#, escape_html(control)))
-        .collect::<Vec<_>>()
-        .join("");
-    let fields = native_tab_fields(RouteKind::System, label)
-        .iter()
-        .map(|(field, placeholder)| {
-            format!(
-                r#"<label><span>{}</span><input type="text" aria-label="{}" placeholder="{}"></label>"#,
-                escape_html(field),
-                escape_html(field),
-                escape_html(placeholder)
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("");
-    let rows = native_system_tab_rows(label)
-        .iter()
-        .map(|(area, state, detail, action)| {
-            format!(
-                r#"<tr tabindex="0"><td><strong>{}</strong></td><td>{}</td><td>{}</td><td><button type="button">{}</button></td></tr>"#,
-                escape_html(area),
-                escape_html(state),
-                escape_html(detail),
-                escape_html(action)
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("");
+    let controls = if label == "Experience" {
+        String::new()
+    } else {
+        native_tab_controls(RouteKind::System, label)
+            .iter()
+            .map(|control| format!(r#"<button type="button">{}</button>"#, escape_html(control)))
+            .collect::<Vec<_>>()
+            .join("")
+    };
+    let fields = if label == "Experience" {
+        String::new()
+    } else {
+        native_tab_fields(RouteKind::System, label)
+            .iter()
+            .map(|(field, placeholder)| {
+                format!(
+                    r#"<label><span>{}</span><input type="text" aria-label="{}" placeholder="{}"></label>"#,
+                    escape_html(field),
+                    escape_html(field),
+                    escape_html(placeholder)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("")
+    };
+    let rows = native_system_live_rows(label, responses);
     let facts = native_tab_facts(RouteKind::System, label)
         .iter()
         .map(|fact| format!(r#"<span>{}</span>"#, escape_html(fact)))
         .collect::<Vec<_>>()
         .join("");
+    let local_panel = match label {
+        "Experience" => experience_settings_panel_html(),
+        "Automations" => automation_center_panel_html(),
+        _ => String::new(),
+    };
     format!(
-        r#"<header><div><h4>{label}</h4><p>{detail}</p></div><div class="slskr-native-panel-actions">{controls}</div></header><div class="slskr-native-panel-fields">{fields}</div><div class="slskr-native-panel-facts">{facts}</div><div class="slskr-native-table-wrap"><table class="slskr-native-table slskr-system-panel-table"><thead><tr><th>Area</th><th>State</th><th>Detail</th><th>Action</th></tr></thead><tbody>{rows}</tbody></table></div>"#,
+        r#"<header><div><h4>{label}</h4><p>{detail}</p></div><div class="slskr-native-panel-actions">{controls}</div></header><div class="slskr-native-panel-fields">{fields}</div><div class="slskr-native-panel-facts">{facts}</div><div class="slskr-native-table-wrap"><table class="slskr-native-table slskr-system-panel-table"><thead><tr><th>Area</th><th>State</th><th>Detail</th><th>Action</th></tr></thead><tbody>{rows}</tbody></table></div>{local_panel}"#,
         label = escape_html(label),
         detail = escape_html(detail),
         controls = controls,
         fields = fields,
         facts = facts,
         rows = rows,
+        local_panel = local_panel,
     )
 }
 
+fn native_system_live_rows(label: &str, responses: Option<&[EndpointBody]>) -> String {
+    let endpoints: &[&str] = match label {
+        "Info" => &["/server", "/database/stats"],
+        "Network" => &["/server", "/mesh/stats", "/bridge/status"],
+        "Mesh" => &["/mesh/stats", "/security/dashboard"],
+        "Bridge" => &["/bridge/status"],
+        "MediaCore" => &["/songid/runs", "/transfers/speeds"],
+        "Security Policies" => &["/security/dashboard"],
+        "Experience" => &[],
+        "Integrations" => &[
+            "/source-providers",
+            "/integrations/lidarr/status",
+            "/integrations/lidarr/sync/status",
+            "/musicbrainz/albums/completion",
+            "/musicbrainz/release-radar/subscriptions",
+            "/songid/runs",
+        ],
+        "Options" => &["/options", "/config"],
+        "Shares" => &["/shares"],
+        "Jobs" | "Automations" => &["/jobs"],
+        "Source Providers" => &["/source-providers"],
+        "Swarm Analytics" => &["/mesh/stats", "/telemetry/metrics"],
+        "Library Health" => &[
+            "/library/health/issues",
+            "/library/health/issues/by-type",
+            "/library/health/issues/by-artist",
+            "/library/health/issues/by-release",
+            "/library/health/issues/by-codec",
+        ],
+        "Files" => &["/library/items", "/songid/runs"],
+        "Quarantine Jury" => &["/quarantine-jury/audit", "/quarantine-jury/requests"],
+        "Data" => &["/database/stats"],
+        "Events" => &["/events"],
+        "Logs" => &["/logs"],
+        "Metrics" => &[
+            "/telemetry/metrics",
+            "/telemetry/metrics/kpis",
+            "/telemetry/reports/transfers/summary",
+        ],
+        _ => &[],
+    };
+    let mut rows = endpoints
+        .iter()
+        .filter_map(|endpoint| {
+            let value = json_endpoint_value(responses, endpoint)?;
+            let title = endpoint.trim_start_matches('/').replace('/', " / ");
+            let detail = compact_preview(&value.to_string());
+            Some(format!(
+                r#"<tr tabindex="0" data-slskr-native-select data-slskr-native-title="{title}" data-slskr-native-detail="{endpoint}" data-slskr-native-meta="returned"><td><strong>{title}</strong></td><td>returned</td><td><code>{detail}</code></td><td><button type="button">Review Selection</button></td></tr>"#,
+                title = escape_html(&title),
+                endpoint = escape_html(endpoint),
+                detail = escape_html(&detail),
+            ))
+        })
+        .collect::<Vec<_>>();
+    if label == "Experience" {
+        rows.push(
+            r#"<tr tabindex="0" data-slskr-native-select data-slskr-native-title="Browser preferences" data-slskr-native-detail="local storage" data-slskr-native-meta="local"><td><strong>Browser preferences</strong></td><td>local</td><td><code>Stored in this browser</code></td><td><button type="button">Review Selection</button></td></tr>"#.to_string(),
+        );
+    }
+    if rows.is_empty() {
+        r#"<tr><td colspan="4"><div class="slskr-native-empty"><strong>No live data returned for this tab</strong><span>Use the route action or refresh after enabling the corresponding service.</span></div></td></tr>"#.to_string()
+    } else {
+        rows.join("")
+    }
+}
+
+#[allow(dead_code)]
 fn native_system_tab_rows(
     label: &str,
 ) -> &'static [(&'static str, &'static str, &'static str, &'static str)] {
@@ -5150,7 +5642,9 @@ fn native_tab_controls(kind: RouteKind, label: &str) -> &'static [&'static str] 
         (RouteKind::Browse, "Tabs") => &["Open a New Browse Tab", "New Tab"],
         (RouteKind::Browse, "Tree") => &["Browse", "Refresh Folder"],
         (RouteKind::Browse, "Selected" | "Queue") => &["Download Selected"],
-        (RouteKind::Collections, "Collections") => &["Create Collection"],
+        (RouteKind::Collections, "Collections") => {
+            &["Create Collection", "Update Collection", "Delete Collection"]
+        }
         (RouteKind::Collections, "Items" | "Picker") => &["Add Item"],
         (RouteKind::Collections, "Sharing") => &["Share"],
         (RouteKind::ShareGroups, "Groups") => &["Create Group"],
@@ -5164,11 +5658,23 @@ fn native_tab_controls(kind: RouteKind, label: &str) -> &'static [&'static str] 
         (RouteKind::System, "Shares") => &["Rescan Shares"],
         (RouteKind::System, "Data") => &["Vacuum Database"],
         (RouteKind::System, "Info") => &["Check for Updates", "Diagnostic Bundle"],
+        (RouteKind::System, "Integrations") => {
+            &[
+                "Check Lidarr",
+                "Refresh Lidarr Sync",
+                "Track MusicBrainz Target",
+                "Refresh MusicBrainz",
+                "Start SongID Run",
+                "Refresh SongID",
+            ]
+        }
         (RouteKind::System, "Logs" | "Events") => &["Refresh", "Clear Filter"],
-        (RouteKind::System, "Options" | "Experience") => &["Save", "Reset"],
-        (RouteKind::System, "Jobs" | "Automations") => &["Run Selected", "Cancel Selected"],
-        (RouteKind::System, "Library Health") => &["Run Replacement Searches", "Copy Action Plan"],
-        (RouteKind::System, "Quarantine Jury") => &["Approve", "Reject", "Copy Packet"],
+        (RouteKind::System, "Options" | "Experience") => &[],
+        (RouteKind::System, "Jobs" | "Automations") => &["Refresh"],
+        (RouteKind::System, "Library Health") => {
+            &["Scan Library Health", "Fix Library Issues", "Copy Action Plan"]
+        }
+        (RouteKind::System, "Quarantine Jury") => &["Refresh", "Copy Packet"],
         (RouteKind::Search, "Results" | "Download Preview") => &["Download", "Queue Selected"],
         (RouteKind::Search, "Searches") => &["Search", "Stop", "Clear"],
         (RouteKind::DiscoveryGraph, "Graph" | "Recommendations") => {
@@ -5195,28 +5701,35 @@ fn native_tab_controls(kind: RouteKind, label: &str) -> &'static [&'static str] 
 fn native_tab_fields(kind: RouteKind, label: &str) -> &'static [(&'static str, &'static str)] {
     match (kind, label) {
         (RouteKind::Messages | RouteKind::Rooms, "Thread") => {
-            &[("Chat username", "peer1"), ("Message", "Message")]
+            &[("Chat username", "Username"), ("Message", "Message")]
         }
-        (RouteKind::Messages | RouteKind::Rooms, "Rooms") => &[("Search rooms", "public-domain")],
-        (RouteKind::Browse, "Tabs") => &[("Username", "peer1")],
-        (RouteKind::Browse, "Tree" | "Files") => &[("Username", "peer1"), ("Folder", "/Music")],
+        (RouteKind::Messages | RouteKind::Rooms, "Rooms") => &[("Search rooms", "Room name")],
+        (RouteKind::Browse, "Tabs") => &[("Username", "Username")],
+        (RouteKind::Browse, "Tree" | "Files") => &[("Username", "Username"), ("Folder", "/")],
         (RouteKind::Collections, "Collections") => &[
             ("Title", "Collection title"),
             ("Description", "Optional description"),
         ],
-        (RouteKind::Collections, "Picker" | "Items") => &[("Search for item", "filename")],
+        (RouteKind::Collections, "Picker" | "Items") => &[("Search for item", "Filename or title")],
         (RouteKind::ShareGroups, "Groups") => &[("Group Name", "Trusted peers")],
-        (RouteKind::ShareGroups, "Members") => &[("Soulseek Username", "peer1")],
+        (RouteKind::ShareGroups, "Members") => &[("Soulseek Username", "Username")],
         (RouteKind::ShareGroups, "Permissions") => &[("Permissions", "read,download,stream")],
         (RouteKind::Solid, "Identity") => &[("WebID", "https://example.com/profile/card#me")],
         (RouteKind::Search, "Searches" | "Results") => &[("Search text", "public domain jazz")],
-        (RouteKind::DiscoveryGraph, "Graph") => &[("Artist Name", "Archive Artist")],
-        (RouteKind::PlaylistIntake, "Parser") => &[("Playlist rows", "Artist - Title")],
-        (RouteKind::Wishlist, "Wanted") => &[("Search Text", "wanted search")],
-        (RouteKind::Users, "Directory" | "Detail") => &[("Username", "peer1")],
-        (RouteKind::Contacts, "Contacts" | "Invites") => &[("Nickname", "Friend's name")],
-        (RouteKind::System, "Logs" | "Events") => &[("Filter", "level:warn")],
-        (RouteKind::System, "Options") => &[("Option key", "shares.scanInterval")],
+        (RouteKind::DiscoveryGraph, "Graph") => &[("Artist Name", "Artist or query")],
+        (RouteKind::PlaylistIntake, "Parser") => &[("Playlist rows", "One track per line")],
+        (RouteKind::Wishlist, "Wanted") => &[("Search Text", "Search text")],
+        (RouteKind::Users, "Directory" | "Detail") => &[("Username", "Username")],
+        (RouteKind::Contacts, "Contacts" | "Invites") => &[("Nickname", "Nickname")],
+        (RouteKind::System, "Logs" | "Events") => &[("Filter", "Filter text")],
+        (RouteKind::System, "Library Health") => &[("Library Path", "Optional library path")],
+        (RouteKind::System, "Options") => &[("Option key", "Configuration key")],
+        (RouteKind::System, "Integrations") => {
+            &[
+                ("Release ID", "MusicBrainz release identifier"),
+                ("SongID source", "local path, Spotify URL, or query"),
+            ]
+        }
         _ => &[],
     }
 }
@@ -5232,7 +5745,9 @@ fn native_tab_facts(kind: RouteKind, label: &str) -> &'static [&'static str] {
             &["Admin policy", "Quarantine", "Outbound webhooks"]
         }
         (RouteKind::System, "Experience") => &["Theme", "Density", "Player", "Notifications"],
-        (RouteKind::System, "Integrations") => &["Lidarr", "FTP", "Media server", "ListenBrainz"],
+        (RouteKind::System, "Integrations") => {
+            &["Lidarr", "MusicBrainz", "SongID", "Source providers"]
+        }
         (RouteKind::System, "Options") => &["Config", "Debug", "Overrides"],
         (RouteKind::System, "Shares") => &["Roots", "Exclusions", "Scan progress", "Contents"],
         (RouteKind::System, "Jobs") => &["Queued", "Running", "Failed", "History"],
@@ -5332,9 +5847,9 @@ fn native_editor_modal_html(kind: RouteKind) -> String {
             "Wishlist Editor",
             "Edit the wanted search, toggle automation, run it, or send the selected request into review.",
             [
-                native_editor_text_field_html("Search Text", "wanted artist album"),
-                native_editor_text_field_html("Filter", "flac OR mp3"),
-                native_editor_text_field_html("Max Results", "25"),
+                native_editor_text_field_html("Search Text", "Search text"),
+                native_editor_text_field_html("Filter", "Optional filter"),
+                native_editor_text_field_html("Max Results", "Maximum results"),
                 native_editor_checkbox_html("Enabled"),
                 native_editor_checkbox_html("Auto-download"),
             ]
@@ -5351,9 +5866,9 @@ fn native_editor_modal_html(kind: RouteKind) -> String {
             "User Note Editor",
             "Update watched-user context before browsing, messaging, or saving notes.",
             [
-                native_editor_text_field_html("Username", "peer1"),
-                native_editor_text_field_html("Display note", "trades live sets"),
-                native_editor_text_field_html("Privilege note", "trusted / queued"),
+                native_editor_text_field_html("Username", "Username"),
+                native_editor_text_field_html("Display note", "Note"),
+                native_editor_text_field_html("Privilege note", "Privilege note"),
                 native_editor_checkbox_html("Watched"),
             ]
             .join(""),
@@ -5368,10 +5883,10 @@ fn native_editor_modal_html(kind: RouteKind) -> String {
             "Contact Editor",
             "Create invites, classify nearby contacts, and maintain notes or groups without leaving Contacts.",
             [
-                native_editor_text_field_html("Invite", "slskr://invite/..."),
-                native_editor_text_field_html("Nickname", "friend name"),
-                native_editor_text_field_html("Group", "trusted"),
-                native_editor_text_field_html("Note", "met in public-domain room"),
+                native_editor_text_field_html("Invite", "Invite link"),
+                native_editor_text_field_html("Nickname", "Nickname"),
+                native_editor_text_field_html("Group", "Group"),
+                native_editor_text_field_html("Note", "Note"),
             ]
             .join(""),
             native_editor_action_buttons(&["Create Invite", "Add Friend", "Message", "Browse", "Remove"]),
@@ -5386,10 +5901,10 @@ fn native_editor_modal_html(kind: RouteKind) -> String {
             "Collection Editor",
             "Create a collection, pick library items, and prepare the sharing audience in one modal workflow.",
             [
-                native_editor_text_field_html("Title", "Sunday radio archive"),
-                native_editor_text_field_html("Description", "public domain recordings"),
-                native_editor_text_field_html("Search for item", "filename, artist, title"),
-                native_editor_text_field_html("Audience", "share group or token"),
+                native_editor_text_field_html("Title", "Collection title"),
+                native_editor_text_field_html("Description", "Description"),
+                native_editor_text_field_html("Search for item", "Filename, artist, or title"),
+                native_editor_text_field_html("Audience", "Share group or token"),
             ]
             .join(""),
             native_editor_action_buttons(&["Create Collection", "Add Item", "Share", "Remove item"]),
@@ -5404,10 +5919,10 @@ fn native_editor_modal_html(kind: RouteKind) -> String {
             "Share Grant Editor",
             "Manage group members, tokens, permissions, and grant expiry from the selected share group.",
             [
-                native_editor_text_field_html("Group Name", "crate-diggers"),
-                native_editor_text_field_html("Soulseek Username", "peer1"),
+                native_editor_text_field_html("Group Name", "Group name"),
+                native_editor_text_field_html("Soulseek Username", "Username"),
                 native_editor_text_field_html("Permissions", "read, stream, download"),
-                native_editor_text_field_html("Expires", "never"),
+                native_editor_text_field_html("Expires", "Expiration"),
             ]
             .join(""),
             native_editor_action_buttons(&[
@@ -5427,13 +5942,13 @@ fn native_editor_modal_html(kind: RouteKind) -> String {
             "Inbound Access Editor",
             "Inspect inbound tokens, owner context, available files, and leave or backfill shared content.",
             [
-                native_editor_text_field_html("Token", "share token"),
-                native_editor_text_field_html("Owner", "peer1"),
-                native_editor_text_field_html("Collection", "shared collection"),
+                native_editor_text_field_html("Token", "Share token"),
+                native_editor_text_field_html("Owner", "Owner"),
+                native_editor_text_field_html("Collection", "Collection"),
                 native_editor_text_field_html("Access", "stream/download"),
             ]
             .join(""),
-            native_editor_action_buttons(&["Open", "Stream", "Backfill", "Copy token", "Leave share"]),
+            native_editor_action_buttons(&["Open", "Stream", "Backfill", "Copy token"]),
             native_editor_state_items(&[
                 "Owner context",
                 "Expiration",
@@ -5445,9 +5960,9 @@ fn native_editor_modal_html(kind: RouteKind) -> String {
             "Settings Editor",
             "Edit operator preferences, confirm maintenance actions, and keep raw metrics in Developer only.",
             [
-                native_editor_text_field_html("Option key", "transfers.downloadSlots"),
-                native_editor_text_field_html("Value", "4"),
-                native_editor_text_field_html("Filter", "shares, logs, database"),
+                native_editor_text_field_html("Option key", "Configuration key"),
+                native_editor_text_field_html("Value", "Value"),
+                native_editor_text_field_html("Filter", "Filter text"),
                 native_editor_checkbox_html("Dry run"),
             ]
             .join(""),
@@ -5482,7 +5997,48 @@ fn native_editor_modal_html(kind: RouteKind) -> String {
     )
 }
 
-fn native_browse_workspace_html(route_table: &str) -> String {
+fn native_browse_workspace_html(
+    route_table: &str,
+    responses: Option<&[EndpointBody]>,
+) -> String {
+    let entries = browse_response_entries(responses);
+    let folders = entries
+        .iter()
+        .filter_map(|entry| {
+            let is_folder = value_bool(entry, &["isDirectory", "directory"]).unwrap_or(false);
+            is_folder
+                .then(|| value_text(entry, &["name", "path", "directory", "folder"]))
+                .flatten()
+        })
+        .take(50)
+        .collect::<Vec<_>>();
+    let folder_controls = if folders.is_empty() {
+        "<span>No directories returned by the browse request.</span>".to_string()
+    } else {
+        folders
+            .iter()
+            .map(|folder| {
+                format!(
+                    r#"<button type="button" data-slskr-browse-folder="{}" aria-expanded="false">{}</button>"#,
+                    escape_html(folder),
+                    escape_html(folder),
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("")
+    };
+    let current_folder = folders.first().cloned().unwrap_or_else(|| "/".to_string());
+    let session_summary = if entries.is_empty() {
+        "No browse result loaded".to_string()
+    } else {
+        format!("{} entries returned", entries.len())
+    };
+    let manifest = if entries.is_empty() {
+        "No browse entries returned. Select a peer and request a directory to populate this preview."
+            .to_string()
+    } else {
+        format!("{} live browse entries; select files to calculate queue impact.", entries.len())
+    };
     let preview = native_selection_preview_html(
         "No files selected",
         "Select browsed files to preview batch download impact.",
@@ -5490,10 +6046,66 @@ fn native_browse_workspace_html(route_table: &str) -> String {
         "Download Selected",
     );
     format!(
-        r#"<div class="slskr-native-grid browse-native" data-slskr-browse-workspace><aside class="slskr-native-side slskr-native-sidebar"><h3>Browse</h3><div class="slskr-native-command-row"><input aria-label="Username" placeholder="Username"><button type="button">Open a New Browse Tab</button></div><div class="slskr-native-browse-tabs" role="tablist" aria-label="Browse sessions"><button type="button" aria-selected="true" data-slskr-browse-session="peer1:/Music/Open Sessions">peer1 /Music</button><button type="button" data-slskr-browse-session="peer2:/Incoming">peer2 /Incoming</button><button type="button">New Tab</button></div><div class="slskr-native-tree" data-slskr-browse-tree><strong>Directory Tree</strong><button type="button" data-slskr-browse-folder="/" aria-expanded="true">/</button><button type="button" data-slskr-browse-folder="/Music" aria-expanded="true">/Music</button><button type="button" data-slskr-browse-folder="/Music/Open Sessions" aria-current="true">/Music/Open Sessions</button><button type="button" data-slskr-browse-folder="/Incoming">/Incoming</button></div><div class="slskr-native-mini-list"><span>Cached browse result</span><span>Folder expansion state</span><span>Peer browse history</span></div></aside><section class="slskr-native-main"><h3>Files</h3><div class="slskr-native-breadcrumb" data-slskr-browse-breadcrumb><button type="button">peer1</button><span>/</span><button type="button">Music</button><span>/</span><button type="button">Open Sessions</button></div><div class="slskr-native-command-row"><input aria-label="Folder" placeholder="/" value="/Music/Open Sessions"><input aria-label="File filter" placeholder="Filter files"><button type="button">Refresh Folder</button><button type="button">Download Selected</button></div><div class="slskr-native-split-detail"><div>{route_table}</div><aside><h4>Download Preview</h4><p>Selected files, destination, peer, queue impact, and duplicate warnings.</p>{preview}<div class="slskr-native-mini-list" data-slskr-browse-download-manifest><span>Queue as batch</span><span>Preserve folders</span><span>Duplicate warning review</span><span>Destination: downloads/peer1/Music</span><span>Estimated queue impact: 2 files</span></div><div class="slskr-native-table-wrap"><table class="slskr-native-table"><thead><tr><th>Selected file</th><th>Peer</th><th>Action body</th></tr></thead><tbody><tr><td>/Music/Open Sessions/Theme.flac</td><td>peer1</td><td>download batch item</td></tr><tr><td>/Music/Open Sessions/Notes.txt</td><td>peer1</td><td>preserve folder</td></tr></tbody></table></div></aside></div></section></div>"#,
+        r#"<div class="slskr-native-grid browse-native" data-slskr-browse-workspace><aside class="slskr-native-side slskr-native-sidebar"><h3>Browse</h3><div class="slskr-native-command-row"><input aria-label="Username" placeholder="Username"><button type="button">Open a New Browse Tab</button></div><div class="slskr-native-browse-tabs" role="tablist" aria-label="Browse sessions"><span data-slskr-browse-session="current">{session_summary}</span><button type="button">New Tab</button></div><div class="slskr-native-tree" data-slskr-browse-tree data-slskr-browse-folder-list><strong>Directory Tree</strong>{folder_controls}</div><div class="slskr-native-mini-list"><span data-slskr-browse-entry-count>{entry_count} entries in current response</span><span>Folders expand from live browse data</span><span>Peer browse history is empty until a request succeeds</span></div></aside><section class="slskr-native-main"><h3>Files</h3><div class="slskr-native-breadcrumb" data-slskr-browse-breadcrumb><span>{current_folder}</span></div><div class="slskr-native-command-row"><input aria-label="Folder" placeholder="/" value="{current_folder}"><input aria-label="File filter" placeholder="Filter files"><button type="button">Refresh Folder</button><button type="button">Download Selected</button></div><div class="slskr-native-split-detail"><div>{route_table}</div><aside><h4>Download Preview</h4><p>Selected files, destination, peer, queue impact, and duplicate warnings.</p>{preview}<div class="slskr-native-mini-list" data-slskr-browse-download-manifest><span>{manifest}</span><span>Preserve folders when the destination policy allows it.</span><span>Duplicate warning review runs before queueing.</span><span>Estimated queue impact appears after selection.</span></div></aside></div></section></div>"#,
+        session_summary = escape_html(&session_summary),
+        folder_controls = folder_controls,
+        entry_count = entries.len(),
+        current_folder = escape_html(&current_folder),
         route_table = route_table,
         preview = preview,
+        manifest = escape_html(&manifest),
     )
+}
+
+fn native_collection_items_html(responses: Option<&[EndpointBody]>) -> String {
+    let items = endpoint_array(responses, "/collections/:id/items");
+    let fallback_collection_id = endpoint_array(responses, "/collections")
+        .first()
+        .and_then(|collection| value_text(collection, &["id", "collectionId"]))
+        .unwrap_or_default();
+    if items.is_empty() {
+        return r#"<div class="slskr-native-empty"><strong>No items in the selected collection</strong><span>Add a content ID after selecting a collection.</span></div>"#.to_string();
+    }
+    let rows = items
+        .iter()
+        .take(100)
+        .filter_map(|item| {
+            let id = value_text(item, &["id", "itemId"])?;
+            let content_id = value_text(item, &["contentId", "content_id"])
+                .unwrap_or_else(|| id.clone());
+            let title = value_text(item, &["title", "name", "fileName"])
+                .unwrap_or_else(|| content_id.clone());
+            let artist = value_text(item, &["artist", "albumArtist"]).unwrap_or_default();
+            let kind = value_text(item, &["kind", "mediaKind"]).unwrap_or_else(|| "Audio".to_string());
+            let collection_id = value_text(item, &["collectionId", "collection_id"])
+                .unwrap_or_else(|| fallback_collection_id.clone());
+            let collection_attr = if collection_id.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    r#" data-slskr-native-collection-id="{}""#,
+                    escape_html(&collection_id)
+                )
+            };
+            Some(format!(
+                r#"<tr tabindex="0" data-slskr-native-select data-slskr-native-title="{title}" data-slskr-native-detail="{content_id}" data-slskr-native-item-id="{id}"{collection_attr} data-slskr-native-meta="{kind}"><td><strong>{title}</strong><small>{artist}</small></td><td>{content_id}</td><td>{kind}</td><td><button type="button">Remove Collection Item</button></td></tr>"#,
+                title = escape_html(&title),
+                artist = escape_html(&artist),
+                content_id = escape_html(&content_id),
+                kind = escape_html(&kind),
+                id = escape_html(&id),
+                collection_attr = collection_attr,
+            ))
+        })
+        .collect::<Vec<_>>();
+    if rows.is_empty() {
+        r#"<div class="slskr-native-empty"><strong>No readable collection items</strong><span>The daemon returned an item payload without an identifier.</span></div>"#.to_string()
+    } else {
+        format!(
+            r#"<div class="slskr-native-table-wrap"><table class="slskr-native-table"><thead><tr><th>Item</th><th>Content ID</th><th>Kind</th><th>Action</th></tr></thead><tbody>{}</tbody></table></div>"#,
+            rows.join("")
+        )
+    }
 }
 
 fn private_message_auto_response_panel_html(responses: Option<&[EndpointBody]>) -> String {
@@ -5515,6 +6127,106 @@ fn private_message_auto_response_panel_html(responses: Option<&[EndpointBody]>) 
     )
 }
 
+fn native_message_room_rows_html(responses: Option<&[EndpointBody]>) -> String {
+    let mut rows = Vec::new();
+    for (endpoint, action, state) in [
+        ("/rooms/joined", "Leave Room", "joined"),
+        ("/rooms/available", "Join Room", "available"),
+    ] {
+        for room in endpoint_array(responses, endpoint).iter().take(50) {
+            let Some(name) = value_text(room, &["name", "roomName", "room"]) else {
+                continue;
+            };
+            let users = value_count(room, &["userCount", "users", "members"])
+                .map(|count| format!("{count} users"))
+                .unwrap_or_else(|| "user count unavailable".to_string());
+            rows.push(format!(
+                r#"<tr tabindex="0" data-slskr-native-select data-slskr-native-title="{name}" data-slskr-native-detail="{name}" data-slskr-native-room-name="{name}" data-slskr-native-meta="{state}"><td>{name}</td><td>{state} / {users}</td><td><button type="button">{action}</button></td></tr>"#,
+                name = escape_html(&name),
+                state = escape_html(state),
+                users = escape_html(&users),
+                action = action,
+            ));
+        }
+    }
+    if rows.is_empty() {
+        r#"<tr><td colspan="3"><div class="slskr-native-empty"><strong>No room records returned</strong><span>Join a room or refresh while the session is connected.</span></div></td></tr>"#.to_string()
+    } else {
+        rows.join("")
+    }
+}
+
+fn native_message_thread_html(responses: Option<&[EndpointBody]>) -> String {
+    let conversations = endpoint_array(responses, "/conversations");
+    if conversations.is_empty() {
+        return r#"<div class="slskr-native-empty"><strong>No conversation selected</strong><span>Start a direct message or select a live conversation row.</span></div>"#.to_string();
+    }
+    conversations
+        .iter()
+        .take(20)
+        .filter_map(|conversation| {
+            let username = value_text(conversation, &["username", "user", "name"])?;
+            let last = value_text(conversation, &["lastMessage", "message", "latestMessage"])
+                .unwrap_or_else(|| "No message text returned".to_string());
+            let unread = value_text(
+                conversation,
+                &["unreadCount", "unacknowledgedCount", "messageCount"],
+            )
+            .unwrap_or_else(|| "0".to_string());
+            Some(format!(
+                r#"<article tabindex="0" data-slskr-native-select data-slskr-native-title="{username}" data-slskr-native-detail="{username}" data-slskr-native-peer="{username}" data-slskr-native-meta="{unread} unread"><strong>{username}</strong><span class="slskr-native-badge">{unread} unread</span><p>{last}</p><div class="slskr-native-command-row"><button type="button">Reply</button><button type="button">Acknowledge</button><button type="button">Delete Conversation</button></div></article>"#,
+                username = escape_html(&username),
+                unread = escape_html(&unread),
+                last = escape_html(&last),
+            ))
+        })
+        .collect::<Vec<_>>()
+        .join("")
+}
+
+fn native_message_transcript_html(responses: Option<&[EndpointBody]>) -> String {
+    let conversations = endpoint_array(responses, "/conversations");
+    let rows = conversations
+        .iter()
+        .take(20)
+        .filter_map(|conversation| {
+            let username = value_text(conversation, &["username", "user", "name"])?;
+            let last = value_text(conversation, &["lastMessage", "message", "latestMessage"])
+                .unwrap_or_else(|| "No message text returned".to_string());
+            Some(format!(
+                r#"<article><strong>{username}</strong><p>{last}</p><time>live conversation data</time></article>"#,
+                username = escape_html(&username),
+                last = escape_html(&last),
+            ))
+        })
+        .collect::<Vec<_>>();
+    if rows.is_empty() {
+        "<p>No conversation transcript returned.</p>".to_string()
+    } else {
+        rows.join("")
+    }
+}
+
+fn native_message_pods_html(responses: Option<&[EndpointBody]>) -> String {
+    let pods = endpoint_array(responses, "/pods");
+    if pods.is_empty() {
+        return "<span>No pod channels returned.</span>".to_string();
+    }
+    pods.iter()
+        .take(20)
+        .filter_map(|pod| {
+            let name = value_text(pod, &["name", "id", "podId"])?;
+            let state = value_text(pod, &["state", "status"]).unwrap_or_else(|| "available".to_string());
+            Some(format!(
+                "<span>{} / {}</span>",
+                escape_html(&name),
+                escape_html(&state),
+            ))
+        })
+        .collect::<Vec<_>>()
+        .join("")
+}
+
 fn native_messaging_workspace_html(
     route_table: &str,
     responses: Option<&[EndpointBody]>,
@@ -5531,11 +6243,19 @@ fn native_messaging_workspace_html(
     } else {
         String::new()
     };
+    let room_rows = native_message_room_rows_html(responses);
+    let thread = native_message_thread_html(responses);
+    let transcript = native_message_transcript_html(responses);
+    let pods = native_message_pods_html(responses);
     format!(
-        r#"<div class="slskr-native-grid messaging-native" data-slskr-messages-workspace><aside class="slskr-native-side slskr-native-sidebar"><h3>Messages</h3><div class="slskr-native-command-row"><input aria-label="Chat username" placeholder="username"><button type="button">Direct Message</button></div>{gate}<div class="slskr-native-message-search"><input aria-label="Search conversations" placeholder="Search conversations, rooms, pods"><button type="button">Clear Search</button></div><div class="slskr-native-list-stack"><h4>Conversations</h4>{route_table}<div class="slskr-native-mini-list" data-slskr-message-lifecycle><span>Unread badges</span><span>Acknowledge state</span><span>Delete lifecycle</span><span>Compose history</span></div><h4>Join Room</h4><div class="slskr-native-command-row"><input aria-label="Search rooms" placeholder="Search rooms"><button type="button">Join Room</button><button type="button">Create Room</button></div><div class="slskr-native-table-wrap"><table class="slskr-native-table" data-slskr-room-state><thead><tr><th>Room</th><th>State</th><th>Action</th></tr></thead><tbody><tr><td>public-domain</td><td>joined / 18 users / 2 unread</td><td><button type="button">Leave Room</button></td></tr><tr><td>ambient</td><td>available / 54 users</td><td><button type="button">Join Room</button></td></tr></tbody></table></div><h4>Pods</h4><div class="slskr-native-mini-list" data-slskr-pod-state><span>Pod channels stay secondary</span><span>Unread badges and room activity remain visible</span><span>Pod channel: library-review</span></div></div></aside><section class="slskr-native-main"><h3>Thread Workspace</h3>{preview}<div class="slskr-native-thread-grid" data-slskr-thread-state><article data-slskr-thread-kind="direct"><strong>peer1</strong><span class="slskr-native-badge">Unread 0</span><p>Last private message and acknowledgement state.</p><button type="button">Acknowledge</button></article><article data-slskr-thread-kind="room"><strong>public-domain</strong><span class="slskr-native-badge">Room</span><p>Joined room messages and member activity.</p><button type="button">Leave Room</button></article><article data-slskr-thread-kind="pod"><strong>pod channel</strong><span class="slskr-native-badge">Pod</span><p>Pod-linked channel messages stay in the same workspace.</p><button type="button">Delete Conversation</button></article></div><div class="slskr-native-thread-transcript" data-slskr-message-transcript><article><strong>peer1</strong><p>Can you browse my shared folder?</p><time>unread</time></article><article><strong>you</strong><p>I can, sending a browse request now.</p><time>draft history</time></article></div><textarea aria-label="Message" placeholder="Message"></textarea><div class="slskr-native-command-row" data-slskr-message-actions><button type="button">Reply</button><button type="button">Acknowledge</button><button type="button">Delete Conversation</button><button type="button">Collapse All Message Panels</button></div><div class="slskr-native-mini-list" data-slskr-compose-history><span>Last draft restored</span><span>Reply target: peer1</span><span>Enter sends when enabled</span></div></section></div>"#,
+        r#"<div class="slskr-native-grid messaging-native" data-slskr-messages-workspace><aside class="slskr-native-side slskr-native-sidebar"><h3>Messages</h3><div class="slskr-native-command-row"><input aria-label="Chat username" placeholder="username"><button type="button">Direct Message</button></div>{gate}<div class="slskr-native-message-search"><input aria-label="Search conversations" placeholder="Search conversations, rooms, pods"><button type="button">Clear Search</button></div><div class="slskr-native-list-stack"><h4>Conversations</h4>{route_table}<div class="slskr-native-mini-list" data-slskr-message-lifecycle><span>Unread badges reflect live conversation data</span><span>Acknowledge and delete use the selected conversation</span><span>Compose history is empty until a draft is entered</span></div><h4>Join Room</h4><div class="slskr-native-command-row"><input aria-label="Search rooms" placeholder="Search rooms"><button type="button">Join Room</button></div><div class="slskr-native-table-wrap"><table class="slskr-native-table" data-slskr-room-state><thead><tr><th>Room</th><th>State</th><th>Action</th></tr></thead><tbody>{room_rows}</tbody></table></div><h4>Pods</h4><div class="slskr-native-mini-list" data-slskr-pod-state>{pods}</div></div></aside><section class="slskr-native-main"><h3>Thread Workspace</h3>{preview}<div class="slskr-native-thread-grid" data-slskr-thread-state>{thread}</div><div class="slskr-native-thread-transcript" data-slskr-message-transcript>{transcript}</div><textarea aria-label="Message" placeholder="Message"></textarea><div class="slskr-native-command-row" data-slskr-message-actions><button type="button">Reply</button><button type="button">Acknowledge</button><button type="button">Delete Conversation</button><button type="button">Collapse All Message Panels</button></div><div class="slskr-native-mini-list" data-slskr-compose-history><span>Draft history is empty until a draft is composed</span><span>Enter sends when enabled</span></div></section></div>"#,
         gate = gate,
         route_table = route_table,
         preview = preview,
+        room_rows = room_rows,
+        thread = thread,
+        transcript = transcript,
+        pods = pods,
     )
 }
 
@@ -5543,6 +6263,74 @@ fn native_search_filter_panel_html() -> String {
     r#"<section class="slskr-native-filter-modal" data-slskr-search-filter-modal><header><div><h4>Search Filters</h4><p>Format, bitrate, size, duration, queue, and duplicate controls stay visible beside results.</p></div><button type="button">Apply Filters</button></header><div class="slskr-native-filter-grid"><label><span>Include words</span><input aria-label="Include words" placeholder="remix instrumental"></label><label><span>Exclude words</span><input aria-label="Exclude words" placeholder="live demo"></label><label><span>Min bitrate</span><input aria-label="Min bitrate" placeholder="320"></label><label><span>Format</span><input aria-label="Format" placeholder="flac mp3 wav"></label><label><span>Min size</span><input aria-label="Min size" placeholder="1 MB"></label><label><span>Max size</span><input aria-label="Max size" placeholder="100 MB"></label><label><span>Min duration</span><input aria-label="Min duration" placeholder="3 min"></label><label><span>Max queue</span><input aria-label="Max queue" placeholder="8"></label></div><div class="slskr-native-filter-toggles"><label><input type="checkbox" aria-label="Fold duplicate results" checked> Fold duplicate results</label><label><input type="checkbox" aria-label="Prefer free upload slots" checked> Prefer free slots</label><label><input type="checkbox" aria-label="Hide locked files"> Hide locked files</label><select aria-label="Search ranking profile"><option>Smart ranking</option><option>Exact match first</option><option>Fastest peer first</option><option>Lossless first</option></select></div></section>"#.to_string()
 }
 
+fn native_download_policy_panel_html(responses: Option<&[EndpointBody]>) -> String {
+    let terms = json_endpoint_value(responses, "/config/download-filter")
+        .and_then(|value| value.get("exclude").cloned())
+        .and_then(|value| value.as_array().cloned())
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
+        .unwrap_or_default();
+    let options = endpoint_array(responses, "/destinations")
+        .iter()
+        .filter_map(|destination| {
+            let path = value_text(destination, &["path", "directory"])?;
+            let name = value_text(destination, &["name", "label"]).unwrap_or_else(|| path.clone());
+            let default = value_bool(destination, &["isDefault", "default"]).unwrap_or(false);
+            Some(format!(
+                r#"<option value="{}"{}>{}{}</option>"#,
+                escape_html(&path),
+                if default {
+                    " data-default=\"true\""
+                } else {
+                    ""
+                },
+                escape_html(&name),
+                if default { " (default)" } else { "" },
+            ))
+        })
+        .collect::<Vec<_>>()
+        .join("");
+    let options = if options.is_empty() {
+        r#"<option value="">Configured default (loading)</option>"#.to_owned()
+    } else {
+        options
+    };
+    format!(
+        r#"<section class="slskr-download-policy" data-slskr-download-policy><header><div><span class="slskr-wishlist-ignore-kicker">Download policy</span><h3>Destinations and exclusions</h3><p>Choose the destination for new browser-queued files and block literal terms before a peer is contacted.</p></div><span data-slskr-download-policy-status aria-live="polite">Live policy</span></header><div class="slskr-download-policy-grid"><label><span>Download destination</span><select aria-label="Download destination" data-slskr-download-destination>{options}</select></label><label><span>Blocked filename/path terms</span><textarea aria-label="Global download exclusions" data-slskr-download-filter>{terms}</textarea></label></div><p class="slskr-download-policy-help">One literal term per line; matching is case-insensitive and checks filenames and folder paths. Up to 100 terms, 256 characters each.</p><div class="slskr-native-command-row"><button type="button" data-slskr-download-filter-save>Save exclusions</button><button type="button" data-slskr-download-filter-reset>Reload policy</button></div></section>"#,
+        options = options,
+        terms = escape_html(&terms),
+    )
+}
+
+fn native_system_configuration_panel_html(responses: Option<&[EndpointBody]>) -> String {
+    let yaml = responses
+        .and_then(|responses| endpoint_body(responses, "/options/yaml"))
+        .and_then(|body| serde_json::from_str::<serde_json::Value>(body).ok())
+        .and_then(|value| value.as_str().map(ToOwned::to_owned))
+        .unwrap_or_default();
+    let location = responses
+        .and_then(|responses| endpoint_body(responses, "/options/yaml/location"))
+        .and_then(|body| serde_json::from_str::<serde_json::Value>(body).ok())
+        .and_then(|value| value.as_str().map(ToOwned::to_owned))
+        .unwrap_or_else(|| "configuration path unavailable".to_owned());
+    format!(
+        r#"<section class="slskr-system-configuration" data-slskr-system-configuration><header><div><span class="slskr-wishlist-ignore-kicker">Configuration</span><h3>Live YAML settings</h3><p>Edit the active compatibility configuration, validate it, and apply it without leaving the System page.</p></div><code>{location}</code></header><textarea aria-label="Configuration YAML" data-slskr-options-yaml spellcheck="false" placeholder="Configuration YAML loads from the daemon">{yaml}</textarea><div class="slskr-native-command-row"><button type="button" data-slskr-options-yaml-validate>Validate YAML</button><button type="button" data-slskr-options-yaml-save>Save YAML</button></div><p data-slskr-options-yaml-status aria-live="polite">{state}</p></section>"#,
+        location = escape_html(&location),
+        yaml = escape_html(&yaml),
+        state = if yaml.is_empty() {
+            "Configuration YAML is unavailable until the daemon returns it."
+        } else {
+            "Loaded from the daemon."
+        },
+    )
+}
+
+#[allow(dead_code)]
 fn native_final_parity_panel_html(kind: RouteKind) -> String {
     let (title, attr, controls, facts): (&str, &str, &[&str], &[&str]) = match kind {
         RouteKind::Search => (
@@ -5624,7 +6412,7 @@ fn native_final_parity_panel_html(kind: RouteKind) -> String {
         RouteKind::Messages | RouteKind::Rooms => (
             "Conversation Windows",
             "data-slskr-messages-final-parity",
-            &["Open Window", "Create Room", "Join Room", "Restore Draft"],
+            &["Open Window", "Join Room", "Restore Draft"],
             &[
                 "Unread lifecycle",
                 "Delete state",
@@ -5704,7 +6492,6 @@ fn native_final_parity_panel_html(kind: RouteKind) -> String {
                 "Open Item",
                 "Stream Item",
                 "Copy Exact Token",
-                "Leave Share",
             ],
             &[
                 "Manifest rows",
@@ -5912,7 +6699,7 @@ fn download_request_workspace_html(responses: Option<&[EndpointBody]>) -> String
         .iter()
         .map(|(key, label, visible)| {
             format!(
-                r#"<th data-slskr-transfer-column="{key}" {hidden}>{label}</th>"#,
+                r#"<th data-slskr-transfer-column="{key}" {hidden}><span>{label}</span><button type="button" class="slskr-transfer-column-resize" data-slskr-transfer-column-resize="{key}" aria-label="Resize {label}">↔</button></th>"#,
                 key = key,
                 label = escape_html(label),
                 hidden = if *visible { "" } else { "hidden" },
@@ -6055,7 +6842,7 @@ fn route_native_workspace_html(
     let route_table = native_route_table_html(kind, rows);
     let html = match kind {
         RouteKind::Search => format!(
-            r#"<div class="slskr-native-grid search-native"><section class="slskr-native-main"><h3>Searches</h3><div class="slskr-native-command-row"><input aria-label="Search text" placeholder="Search" value="public domain jazz"><select aria-label="Acquisition profile"><option>Balanced</option><option>Lossless exact</option><option>Fast good enough</option></select><button type="button">Search</button><button type="button">Stop</button><button type="button">Clear</button></div>{filter_panel}{route_table}</section><aside class="slskr-native-side"><h3>Search Detail</h3><p>Select a search to inspect files, peers, queue, warnings, duplicate groups, and download preview.</p>{preview}{stats}<div class="slskr-native-mini-list" data-slskr-search-expansion><span>Expanded directories</span><span>Locked file warnings</span><span>Folded duplicate sources</span><span>Ranking reasons</span></div></aside></div>"#,
+            r#"<div class="slskr-native-grid search-native"><section class="slskr-native-main"><h3>Searches</h3><div class="slskr-native-command-row"><input aria-label="Search text" placeholder="Search"><select aria-label="Acquisition profile"><option>Balanced</option><option>Lossless exact</option><option>Fast good enough</option></select><button type="button">Search</button><button type="button">Stop</button><button type="button">Clear</button><button type="button" data-slskr-search-bulk="research">Search selected again</button><button type="button" data-slskr-search-bulk="stop">Stop selected</button><button type="button" data-slskr-search-bulk="remove">Delete selected</button></div>{filter_panel}{route_table}</section><aside class="slskr-native-side"><h3>Search Detail</h3><p>Select searches to inspect files, peers, queue, warnings, duplicate groups, and download preview.</p>{preview}{stats}<div class="slskr-native-mini-list" data-slskr-search-expansion><span>Expanded directories</span><span>Locked file warnings</span><span>Folded duplicate sources</span><span>Ranking reasons</span></div></aside></div>"#,
             filter_panel = native_search_filter_panel_html(),
             route_table = route_table,
             preview = native_selection_preview_html(
@@ -6098,7 +6885,7 @@ fn route_native_workspace_html(
             .join(""),
         ),
         RouteKind::Wishlist => format!(
-            r#"<div class="slskr-native-grid wishlist-native"><section class="slskr-native-main"><h3>Wishlist</h3><div class="slskr-native-command-row"><input aria-label="Search Text" placeholder="Enter search terms..."><input aria-label="Filter optional" placeholder="e.g., flac OR mp3"><input aria-label="Max Results" value="25"><button type="button">Add Search</button><button type="button">Import List</button><button type="button">Run Enabled</button></div>{route_table}{policy}{ignored}</section><aside class="slskr-native-side"><h3>Request Portal Summary</h3>{preview}{stats}<button type="button">Copy Review</button></aside></div>"#,
+            r#"<div class="slskr-native-grid wishlist-native"><section class="slskr-native-main"><h3>Wishlist</h3><div class="slskr-native-command-row"><textarea aria-label="Search Text" placeholder="Enter search terms, one per line..." rows="3"></textarea><input aria-label="Filter optional" placeholder="e.g., flac OR mp3"><input aria-label="Max Results" value="25"><button type="button">Add Search</button><button type="button">Import List</button><button type="button">Run Enabled</button></div>{route_table}{policy}{ignored}</section><aside class="slskr-native-side"><h3>Request Portal Summary</h3>{preview}{stats}<button type="button">Copy Review</button></aside></div>"#,
             route_table = route_table,
             policy = wishlist_policy_history_panel_html(responses),
             ignored = wishlist_ignored_results_panel_html(responses),
@@ -6144,11 +6931,17 @@ fn route_native_workspace_html(
             } else {
                 String::new()
             };
+            let policy = if kind == RouteKind::Downloads {
+                native_download_policy_panel_html(responses)
+            } else {
+                String::new()
+            };
             format!(
-                r#"<div class="slskr-native-grid transfers-native"><section class="slskr-native-main"><h3>{title}</h3><div class="slskr-native-command-row"><button type="button">{primary}</button><button type="button">{secondary}</button><button type="button">Clear Completed</button><label><input type="checkbox"> Accelerated</label><label><input type="checkbox"> Auto Replace</label></div>{request_workspace}{table}</section><aside class="slskr-native-side"><h3>Transfer Group</h3>{preview}{stats}</aside></div>"#,
+                r#"<div class="slskr-native-grid transfers-native"><section class="slskr-native-main"><h3>{title}</h3><div class="slskr-native-command-row"><button type="button">{primary}</button><button type="button">{secondary}</button><button type="button">Clear Completed</button><label><input type="checkbox"> Accelerated</label><label><input type="checkbox"> Auto Replace</label></div>{policy}{request_workspace}{table}</section><aside class="slskr-native-side"><h3>Transfer Group</h3>{preview}{stats}</aside></div>"#,
                 title = title,
                 primary = primary,
                 secondary = secondary,
+                policy = policy,
                 request_workspace = request_workspace,
                 table = table,
                 preview = native_selection_preview_html(
@@ -6188,19 +6981,52 @@ fn route_native_workspace_html(
                 "Message",
             ),
         ),
-        RouteKind::Solid => format!(
-            r#"<div class="slskr-native-grid solid-native"><section class="slskr-native-main" data-testid="solid-root"><h3>Solid</h3><p>Solid integration is disabled (Feature.Solid=false).</p><div class="slskr-native-command-row"><input data-testid="solid-webid-input" aria-label="WebID" placeholder="https://example.com/profile/card#me"><button data-testid="solid-resolve-webid" type="button">Resolve WebID</button></div>{route_table}</section><aside class="slskr-native-side"><h3>Identity Document</h3>{preview}<pre>{{}}</pre></aside></div>"#,
-            route_table = route_table,
-            preview = native_selection_preview_html(
-                "No Solid resource selected",
-                "Select an identity, storage, session, or sync row to inspect setup status.",
-                "Waiting",
-                "Resolve WebID",
-            ),
-        ),
+        RouteKind::Solid => {
+            let solid = json_endpoint_value(responses, "/solid/status");
+            let enabled = solid
+                .as_ref()
+                .and_then(|value| value_bool(value, &["enabled"]))
+                .unwrap_or(false);
+            let state = solid
+                .as_ref()
+                .and_then(|value| value_text(value, &["status", "state"]))
+                .unwrap_or_else(|| {
+                    if enabled {
+                        "enabled".to_string()
+                    } else if solid.is_some() {
+                        "disabled".to_string()
+                    } else {
+                        "not queried".to_string()
+                    }
+                });
+            let description = if enabled {
+                format!("Solid integration is enabled ({state}).")
+            } else if solid.is_some() {
+                format!("Solid integration is disabled ({state}).")
+            } else {
+                "Solid status was not returned by the daemon.".to_string()
+            };
+            let document = solid
+                .as_ref()
+                .map(|value| compact_preview(&value.to_string()))
+                .unwrap_or_else(|| "No Solid status document returned.".to_string());
+            format!(
+                r#"<div class="slskr-native-grid solid-native"><section class="slskr-native-main" data-testid="solid-root"><h3>Solid</h3><p>{description}</p><div class="slskr-native-command-row"><input data-testid="solid-webid-input" aria-label="WebID" placeholder="https://example.com/profile/card#me"><button data-testid="solid-resolve-webid" type="button">Resolve WebID</button></div>{route_table}</section><aside class="slskr-native-side"><h3>Identity Document</h3>{preview}<pre>{document}</pre></aside></div>"#,
+                description = escape_html(&description),
+                document = escape_html(&document),
+                route_table = route_table,
+                preview = native_selection_preview_html(
+                    "No Solid resource selected",
+                    "Select an identity, storage, session, or sync row to inspect setup status.",
+                    &state,
+                    "Resolve WebID",
+                ),
+            )
+        }
         RouteKind::Collections => format!(
-            r#"<div class="slskr-native-grid collections-native"><section class="slskr-native-main"><h3>Collections</h3><div class="slskr-native-command-row"><input aria-label="Title" placeholder="Enter collection title"><input aria-label="Description" placeholder="Optional description"><button type="button">Create Collection</button></div><div class="slskr-native-command-row"><input aria-label="Search for item" placeholder="Search by filename (e.g., sintel, aria, treasure)..."><button type="button">Add Item</button><button type="button">Share</button></div><div class="slskr-native-split-detail"><div>{route_table}</div><aside><h4>Item Picker</h4><p>Search library items, preview candidate metadata, and add selected tracks.</p>{preview}<div class="slskr-native-mini-list"><span>Filename match</span><span>Artist/title match</span><span>Already in collection warning</span></div></aside></div></section><aside class="slskr-native-side"><h3>Collection Detail</h3>{stats}<div class="slskr-native-mini-list"><span>Items table</span><span>Remove item</span><span>Audience picker</span><span>Stream/download policies</span></div></aside></div>"#,
+            r#"<div class="slskr-native-grid collections-native"><section class="slskr-native-main"><h3>Collections</h3><div class="slskr-native-command-row"><input aria-label="Title" placeholder="Enter collection title"><input aria-label="Description" placeholder="Optional description"><button type="button">Create Collection</button></div><div class="slskr-native-command-row"><input aria-label="Content ID" placeholder="Library content ID"><input aria-label="Soulseek Username" placeholder="Username for share grant"><button type="button">Add Item</button><button type="button">Share</button></div><div class="slskr-native-split-detail"><div>{route_table}<h4>Items in selected collection</h4>{items}</div><aside><h4>Item Picker</h4><p>Select a collection above, enter a library content ID, and add the item through the collection API.</p>{preview}<div class="slskr-native-mini-list"><span>Library records are loaded from the daemon</span><span>Collection membership is persisted after add</span><span>Already-in-collection errors are returned by the API</span></div></aside></div></section><aside class="slskr-native-side"><h3>Collection Detail</h3>{stats}<div class="slskr-native-mini-list"><span>Items table loads from the selected collection</span><span>Remove item uses the collection item API</span><span>Audience picker uses share grants</span><span>Stream/download policies are returned by the grant</span></div></aside></div>"#,
             route_table = route_table,
+            items = native_collection_items_html(responses),
             preview = native_selection_preview_html(
                 "No collection selected",
                 "Choose a collection or library candidate before adding, removing, or sharing items.",
@@ -6208,9 +7034,27 @@ fn route_native_workspace_html(
                 "Review",
             ),
             stats = [
-                native_stat_html("Title", "ready"),
-                native_stat_html("Type", "Playlist"),
-                native_stat_html("Items", "0"),
+                native_stat_html(
+                    "Title",
+                    &endpoint_array(responses, "/collections")
+                        .first()
+                        .and_then(|item| value_text(item, &["title", "name"]))
+                        .unwrap_or_else(|| "not selected".to_string()),
+                ),
+                native_stat_html(
+                    "Type",
+                    &endpoint_array(responses, "/collections")
+                        .first()
+                        .and_then(|item| value_text(item, &["type", "kind"]))
+                        .unwrap_or_else(|| "unknown".to_string()),
+                ),
+                native_stat_html(
+                    "Items",
+                    &endpoint_array(responses, "/collections")
+                        .first()
+                        .and_then(|item| value_count(item, &["itemCount", "itemsCount", "items"]))
+                        .unwrap_or_else(|| "0".to_string()),
+                ),
             ]
             .join(""),
         ),
@@ -6225,7 +7069,7 @@ fn route_native_workspace_html(
             ),
         ),
         RouteKind::SharedWithMe => format!(
-            r#"<div class="slskr-native-grid shared-native"><section class="slskr-native-main"><h3>Shared with Me</h3><div class="slskr-native-split-detail"><div>{route_table}</div><aside><h4>Shared Manifest</h4><p>Owner, expiration, permissions, and file-level access preview.</p>{preview}<div class="slskr-native-mini-list"><span>Manifest item rows</span><span>Stream available files</span><span>Backfill selected collection</span></div></aside></div></section><aside class="slskr-native-side"><h3>Access</h3><button type="button">Open</button><button type="button">Stream</button><button type="button">Backfill</button><button type="button">Copy token</button><button type="button">Leave share</button></aside></div>"#,
+            r#"<div class="slskr-native-grid shared-native"><section class="slskr-native-main"><h3>Shared with Me</h3><div class="slskr-native-split-detail"><div>{route_table}</div><aside><h4>Shared Manifest</h4><p>Owner, expiration, permissions, and file-level access preview.</p>{preview}<div class="slskr-native-mini-list"><span>Manifest item rows</span><span>Stream available files</span><span>Backfill selected collection</span></div></aside></div></section><aside class="slskr-native-side"><h3>Access</h3><button type="button">Open</button><button type="button">Stream</button><button type="button">Backfill</button><button type="button">Copy token</button></aside></div>"#,
             route_table = route_table,
             preview = native_selection_preview_html(
                 "No shared item selected",
@@ -6234,9 +7078,10 @@ fn route_native_workspace_html(
                 "Open",
             ),
         ),
-        RouteKind::Browse => native_browse_workspace_html(&route_table),
+        RouteKind::Browse => native_browse_workspace_html(&route_table, responses),
         RouteKind::System => format!(
-            r#"<div class="slskr-native-grid system-native"><section class="slskr-native-main"><h3>System</h3><div class="slskr-native-operator-bands"><span>Connection</span><span>Shares</span><span>Database</span><span>Events</span><span>Preferences</span><span>Automation</span></div>{route_table}</section><aside class="slskr-native-side"><h3>Operator Actions</h3>{preview}<button type="button">Check for Updates</button><button type="button">Get Privileges</button><button type="button">Diagnostic Bundle</button><button type="button">Setup Health</button><button type="button">Shut Down</button><button type="button">Restart</button></aside></div>"#,
+            r#"<div class="slskr-native-grid system-native"><section class="slskr-native-main"><h3>System</h3><div class="slskr-native-operator-bands"><span>Connection</span><span>Shares</span><span>Database</span><span>Events</span><span>Preferences</span><span>Automation</span></div>{config}{route_table}</section><aside class="slskr-native-side"><h3>Operator Actions</h3>{preview}<button type="button">Check for Updates</button><button type="button">Get Privileges</button><button type="button">Diagnostic Bundle</button><button type="button">Setup Health</button></aside></div>"#,
+            config = native_system_configuration_panel_html(responses),
             route_table = route_table,
             preview = native_selection_preview_html(
                 "No system item selected",
@@ -6249,9 +7094,13 @@ fn route_native_workspace_html(
     let editor = native_editor_modal_html(kind);
     format!(
         r#"<section class="slskr-native-workspace">{tabs}{filter}{html}{final_parity}{editor}{inspector}<p class="slskr-native-selection" id="slskr-native-selection-status" aria-live="polite">Select a row to review actions.</p></section>"#,
-        tabs = native_tabs_html(kind),
+        tabs = native_tabs_html(kind, responses),
         filter = native_filter_html(),
-        final_parity = native_final_parity_panel_html(kind),
+        // The old parity panel was a collection of unconnected buttons that
+        // claimed to cover features without issuing a route action.  The
+        // live tables, reference actions, and route editors above are the
+        // executable surfaces; do not render a decorative control inventory.
+        final_parity = "",
         editor = editor,
         inspector = native_inspector_html(),
     )
@@ -6271,16 +7120,24 @@ fn route_workflow_stats_html(kind: RouteKind, responses: Option<&[EndpointBody]>
         RouteKind::PlaylistIntake | RouteKind::Solid => vec![
             (
                 "Providers",
-                response_value(responses, "/source-providers", "count"),
+                response_count(responses, "/source-providers"),
                 "sources",
             ),
             ("Jobs", response_count(responses, "/jobs"), "automation"),
-            ("Review", "ready".to_string(), "queue"),
+            (
+                "Review",
+                if responses.is_some() { "available" } else { "loading" }.to_string(),
+                "queue",
+            ),
         ],
         RouteKind::Wishlist => vec![
             ("Wanted", response_count(responses, "/wishlist"), "searches"),
-            ("Enabled", "review".to_string(), "state"),
-            ("Inbox", "0".to_string(), "pending"),
+            (
+                "Enabled",
+                response_bool_count(responses, "/wishlist", &["enabled"]),
+                "state",
+            ),
+            ("Inbox", response_count(responses, "/wishlist"), "pending"),
         ],
         RouteKind::Downloads => vec![
             (
@@ -6293,7 +7150,11 @@ fn route_workflow_stats_html(kind: RouteKind, responses: Option<&[EndpointBody]>
                 response_value(responses, "/transfers/speeds", "download"),
                 "down",
             ),
-            ("Slots", "auto".to_string(), "limit"),
+            (
+                "Slots",
+                response_value(responses, "/config", "downloadSlots"),
+                "limit",
+            ),
         ],
         RouteKind::Uploads => vec![
             (
@@ -6306,7 +7167,7 @@ fn route_workflow_stats_html(kind: RouteKind, responses: Option<&[EndpointBody]>
                 response_value(responses, "/transfers/speeds", "upload"),
                 "up",
             ),
-            ("Policy", "allow list".to_string(), "mode"),
+            ("Policy", response_value(responses, "/config", "uploadPolicy"), "mode"),
         ],
         RouteKind::Messages => vec![
             (
@@ -6314,7 +7175,15 @@ fn route_workflow_stats_html(kind: RouteKind, responses: Option<&[EndpointBody]>
                 response_count(responses, "/conversations"),
                 "inbox",
             ),
-            ("Unread", "0".to_string(), "messages"),
+            (
+                "Unread",
+                response_numeric_sum(
+                    responses,
+                    "/conversations",
+                    &["unreadCount", "unacknowledgedCount"],
+                ),
+                "messages",
+            ),
             ("Pods", response_count(responses, "/pods"), "secondary"),
         ],
         RouteKind::Rooms => vec![
@@ -6328,11 +7197,15 @@ fn route_workflow_stats_html(kind: RouteKind, responses: Option<&[EndpointBody]>
                 response_count(responses, "/rooms/joined"),
                 "rooms",
             ),
-            ("Activity", "live".to_string(), "stream"),
+            (
+                "Activity",
+                response_count(responses, "/rooms/joined"),
+                "joined rooms",
+            ),
         ],
         RouteKind::Users => vec![
             ("Watched", response_count(responses, "/users"), "users"),
-            ("Online", "pending".to_string(), "presence"),
+            ("Online", response_online_count(responses, "/users"), "presence"),
             ("Notes", response_count(responses, "/users/notes"), "saved"),
         ],
         RouteKind::Contacts => vec![
@@ -6342,7 +7215,7 @@ fn route_workflow_stats_html(kind: RouteKind, responses: Option<&[EndpointBody]>
                 response_count(responses, "/contacts/nearby"),
                 "peers",
             ),
-            ("Invites", "0".to_string(), "open"),
+            ("Invites", "not loaded".to_string(), "open"),
         ],
         RouteKind::Collections => vec![
             (
@@ -6364,23 +7237,23 @@ fn route_workflow_stats_html(kind: RouteKind, responses: Option<&[EndpointBody]>
                 response_count(responses, "/share-grants"),
                 "active",
             ),
-            ("Tokens", "0".to_string(), "issued"),
+            ("Tokens", response_numeric_sum(responses, "/share-grants", &["tokenCount", "tokens"]), "issued"),
         ],
         RouteKind::SharedWithMe => vec![
-            ("Shared", response_count(responses, "/shared"), "records"),
+            ("Shared", response_count(responses, "/share-grants"), "inbound"),
             (
                 "Grants",
                 response_count(responses, "/share-grants"),
                 "access",
             ),
-            ("Expiring", "0".to_string(), "soon"),
+            ("Expiring", "not calculated".to_string(), "soon"),
         ],
         RouteKind::Browse => vec![
-            ("Peer", "peer1".to_string(), "target"),
+            ("Peer", "not selected".to_string(), "target"),
             (
                 "Folders",
-                response_count(responses, "/users/:username/browse"),
-                "cached",
+                browse_response_entries(responses).len().to_string(),
+                "returned",
             ),
             ("Selected", "0".to_string(), "files"),
         ],
@@ -6407,28 +7280,28 @@ fn route_workflow_stats_html(kind: RouteKind, responses: Option<&[EndpointBody]>
 
 fn route_workflow_toolbar_html(kind: RouteKind) -> String {
     match kind {
-        RouteKind::Search => r#"<form class="slskr-toolbar slskr-workflow-toolbar"><input class="slskr-toolbar-input" value="public domain jazz" aria-label="Search text"><select aria-label="Acquisition profile"><option>Balanced</option><option>Lossless exact</option><option>Fast good enough</option></select><button type="button" class="slskr-toolbar-command primary" data-slskr-toolbar-action="0">Search</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="3">Clear</button></form>"#.to_string(),
-        RouteKind::DiscoveryGraph => r#"<form class="slskr-toolbar slskr-workflow-toolbar"><input class="slskr-toolbar-input" value="Archive Artist" aria-label="Seed artist or query"><select aria-label="Source"><option>Search history</option><option>Playlist</option><option>MusicBrainz</option></select><button type="button" class="slskr-toolbar-command primary" data-slskr-toolbar-action="0">Build graph</button></form>"#.to_string(),
-        RouteKind::PlaylistIntake => r#"<form class="slskr-toolbar slskr-workflow-toolbar"><input class="slskr-toolbar-input" value="Artist - Title" aria-label="Playlist text"><select aria-label="Acquisition profile"><option>Balanced</option><option>Lossless exact</option></select><button type="button" class="slskr-toolbar-command primary" data-slskr-toolbar-action="0">Preview playlist</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="3">Queue plans</button></form>"#.to_string(),
-        RouteKind::Wishlist => r#"<form class="slskr-toolbar slskr-workflow-toolbar"><input class="slskr-toolbar-input" value="public domain jazz" aria-label="Wanted search"><label><input type="checkbox" checked> Enabled</label><label><input type="checkbox"> Auto-download</label><button type="button" class="slskr-toolbar-command primary" data-slskr-toolbar-action="0">Add wanted search</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="1">Run selected</button></form>"#.to_string(),
+        RouteKind::Search => r#"<form class="slskr-toolbar slskr-workflow-toolbar"><input class="slskr-toolbar-input" value="" placeholder="Search text" aria-label="Search text"><select aria-label="Acquisition profile"><option>Balanced</option><option>Lossless exact</option><option>Fast good enough</option></select><button type="button" class="slskr-toolbar-command primary" data-slskr-toolbar-action="0">Search</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="3">Clear</button></form>"#.to_string(),
+        RouteKind::DiscoveryGraph => r#"<form class="slskr-toolbar slskr-workflow-toolbar"><input class="slskr-toolbar-input" value="" placeholder="Artist or query" aria-label="Seed artist or query"><select aria-label="Source"><option>Search history</option><option>Playlist</option><option>MusicBrainz</option></select><button type="button" class="slskr-toolbar-command primary" data-slskr-toolbar-action="0">Build graph</button></form>"#.to_string(),
+        RouteKind::PlaylistIntake => r#"<form class="slskr-toolbar slskr-workflow-toolbar"><input class="slskr-toolbar-input" value="" placeholder="Artist - Title" aria-label="Playlist text"><select aria-label="Acquisition profile"><option>Balanced</option><option>Lossless exact</option></select><button type="button" class="slskr-toolbar-command primary" data-slskr-toolbar-action="0">Preview playlist</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="3">Queue plans</button></form>"#.to_string(),
+        RouteKind::Wishlist => r#"<form class="slskr-toolbar slskr-workflow-toolbar"><input class="slskr-toolbar-input" value="" placeholder="Wanted search" aria-label="Wanted search"><label><input type="checkbox" checked> Enabled</label><label><input type="checkbox"> Auto-download</label><button type="button" class="slskr-toolbar-command primary" data-slskr-toolbar-action="0">Add wanted search</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="1">Run selected</button></form>"#.to_string(),
         RouteKind::Downloads => r#"<div class="slskr-toolbar slskr-workflow-toolbar"><button type="button" class="slskr-toolbar-command primary" data-slskr-toolbar-action="0">Download</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="1">Clear completed</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="3">Enable acceleration</button></div>"#.to_string(),
         RouteKind::Uploads => r#"<div class="slskr-toolbar slskr-workflow-toolbar"><button type="button" class="slskr-toolbar-command primary" data-slskr-toolbar-action="2">Clear completed</button><button type="button" class="slskr-toolbar-command">Allow selected</button><button type="button" class="slskr-toolbar-command">Deny selected</button></div>"#.to_string(),
-        RouteKind::Messages => r#"<form class="slskr-toolbar slskr-workflow-toolbar"><input class="slskr-toolbar-input" value="peer1" aria-label="Username"><input class="slskr-toolbar-input" value="hello" aria-label="Message"><button type="button" class="slskr-toolbar-command primary" data-slskr-toolbar-action="0">Reply</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="1">Acknowledge</button></form>"#.to_string(),
-        RouteKind::Rooms => r#"<form class="slskr-toolbar slskr-workflow-toolbar"><input class="slskr-toolbar-input" value="public-domain" aria-label="Room"><button type="button" class="slskr-toolbar-command primary" data-slskr-toolbar-action="0">Join</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="2">Leave</button></form>"#.to_string(),
-        RouteKind::Users => r#"<form class="slskr-toolbar slskr-workflow-toolbar"><input class="slskr-toolbar-input" value="peer1" aria-label="Username"><button type="button" class="slskr-toolbar-command primary" data-slskr-toolbar-action="1">Watch</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="2">Save note</button><button type="button" class="slskr-toolbar-command">Browse</button></form>"#.to_string(),
-        RouteKind::Contacts => r#"<form class="slskr-toolbar slskr-workflow-toolbar"><input class="slskr-toolbar-input" value="peer1" aria-label="Contact username"><button type="button" class="slskr-toolbar-command primary" data-slskr-toolbar-action="0">Add contact</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="2">Edit note</button></form>"#.to_string(),
+        RouteKind::Messages => r#"<form class="slskr-toolbar slskr-workflow-toolbar"><input class="slskr-toolbar-input" value="" placeholder="Username" aria-label="Username"><input class="slskr-toolbar-input" value="" placeholder="Message" aria-label="Message"><button type="button" class="slskr-toolbar-command primary" data-slskr-toolbar-action="0">Reply</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="1">Acknowledge</button></form>"#.to_string(),
+        RouteKind::Rooms => r#"<form class="slskr-toolbar slskr-workflow-toolbar"><input class="slskr-toolbar-input" value="" placeholder="Room" aria-label="Room"><button type="button" class="slskr-toolbar-command primary" data-slskr-toolbar-action="0">Join</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="2">Leave</button></form>"#.to_string(),
+        RouteKind::Users => r#"<form class="slskr-toolbar slskr-workflow-toolbar"><input class="slskr-toolbar-input" value="" placeholder="Username" aria-label="Username"><button type="button" class="slskr-toolbar-command primary" data-slskr-toolbar-action="1">Watch</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="2">Save note</button><button type="button" class="slskr-toolbar-command">Browse</button></form>"#.to_string(),
+        RouteKind::Contacts => r#"<form class="slskr-toolbar slskr-workflow-toolbar"><input class="slskr-toolbar-input" value="" placeholder="Contact username" aria-label="Contact username"><button type="button" class="slskr-toolbar-command primary" data-slskr-toolbar-action="0">Add contact</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="2">Edit note</button></form>"#.to_string(),
         RouteKind::Solid => r#"<div class="slskr-toolbar slskr-workflow-toolbar"><button type="button" class="slskr-toolbar-command primary">Connect identity</button><button type="button" class="slskr-toolbar-command">Sync storage</button><button type="button" class="slskr-toolbar-command">Refresh session</button></div>"#.to_string(),
-        RouteKind::Collections => r#"<form class="slskr-toolbar slskr-workflow-toolbar"><input class="slskr-toolbar-input" value="Open Sessions" aria-label="Collection name"><button type="button" class="slskr-toolbar-command primary" data-slskr-toolbar-action="0">Create collection</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="4">Add item</button></form>"#.to_string(),
-        RouteKind::ShareGroups => r#"<form class="slskr-toolbar slskr-workflow-toolbar"><input class="slskr-toolbar-input" value="Trusted peers" aria-label="Group name"><button type="button" class="slskr-toolbar-command primary" data-slskr-toolbar-action="1">Create group</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="2">Add member</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="3">Issue token</button></form>"#.to_string(),
-        RouteKind::SharedWithMe => r#"<div class="slskr-toolbar slskr-workflow-toolbar"><button type="button" class="slskr-toolbar-command primary">Open collection</button><button type="button" class="slskr-toolbar-command">Copy token</button><button type="button" class="slskr-toolbar-command">Leave share</button></div>"#.to_string(),
-        RouteKind::Browse => r#"<form class="slskr-toolbar slskr-workflow-toolbar"><input class="slskr-toolbar-input" value="peer1" aria-label="Username"><input class="slskr-toolbar-input" value="/" aria-label="Folder"><button type="button" class="slskr-toolbar-command primary" data-slskr-toolbar-action="0">Browse</button><button type="button" class="slskr-toolbar-command">Download selected</button></form>"#.to_string(),
+        RouteKind::Collections => r#"<form class="slskr-toolbar slskr-workflow-toolbar"><input class="slskr-toolbar-input" value="" placeholder="Collection name" aria-label="Collection name"><button type="button" class="slskr-toolbar-command primary" data-slskr-toolbar-action="0">Create collection</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="4">Add item</button></form>"#.to_string(),
+        RouteKind::ShareGroups => r#"<form class="slskr-toolbar slskr-workflow-toolbar"><input class="slskr-toolbar-input" value="" placeholder="Group name" aria-label="Group name"><button type="button" class="slskr-toolbar-command primary" data-slskr-toolbar-action="1">Create group</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="2">Add member</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="3">Issue token</button></form>"#.to_string(),
+        RouteKind::SharedWithMe => r#"<div class="slskr-toolbar slskr-workflow-toolbar"><button type="button" class="slskr-toolbar-command primary">Open collection</button><button type="button" class="slskr-toolbar-command">Copy token</button></div>"#.to_string(),
+        RouteKind::Browse => r#"<form class="slskr-toolbar slskr-workflow-toolbar"><input class="slskr-toolbar-input" value="" placeholder="Username" aria-label="Username"><input class="slskr-toolbar-input" value="/" aria-label="Folder"><button type="button" class="slskr-toolbar-command primary" data-slskr-toolbar-action="0">Browse</button><button type="button" class="slskr-toolbar-command">Download selected</button></form>"#.to_string(),
         RouteKind::System => r#"<div class="slskr-toolbar slskr-workflow-toolbar"><button type="button" class="slskr-toolbar-command primary" data-slskr-toolbar-action="0">Connect</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="1">Disconnect</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="2">Rescan shares</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="3">Vacuum database</button></div>"#.to_string(),
     }
 }
 
 fn route_workflow_html(path: &str, responses: Option<&[EndpointBody]>) -> String {
     let kind = route_kind(path);
-    let tabs = match kind {
+    let _tabs = match kind {
         RouteKind::Search => vec!["Results", "Searches", "Planner"],
         RouteKind::DiscoveryGraph => vec!["Graph", "Recommendations", "Review"],
         RouteKind::PlaylistIntake => vec!["Parser", "Rows", "Plans"],
@@ -6446,7 +7319,14 @@ fn route_workflow_html(path: &str, responses: Option<&[EndpointBody]>) -> String
         RouteKind::Browse => vec!["Tree", "Files", "Queue"],
         RouteKind::System => vec!["Connection", "Shares", "Storage", "Logs"],
     };
-    let (primary_title, primary_detail, table_headers, _legacy_rows, side_title, side_body) =
+    let (
+        _primary_title,
+        _primary_detail,
+        _table_headers,
+        _legacy_rows,
+        _side_title,
+        _side_body,
+    ) =
         match kind {
         RouteKind::Search => (
             "Grouped results",
@@ -6634,29 +7514,10 @@ fn route_workflow_html(path: &str, responses: Option<&[EndpointBody]>) -> String
     // decoded from actual responses.
     let table_rows = route_dynamic_rows(kind, responses).unwrap_or_default();
     format!(
-        r#"<div class="slskr-workflow" data-slskr-route-kind="{kind:?}">{reference}{native}<details class="slskr-legacy-workflow"><summary>Additional workflow detail</summary><div class="slskr-workflow-tabs">{tabs}</div><div class="slskr-workflow-grid"><section class="slskr-workflow-primary"><header><div><h3>{primary_title}</h3><p>{primary_detail}</p></div>{fresh}</header>{table}</section><aside class="slskr-workflow-inspector"><h3>{side_title}</h3><p>{side_body}</p>{empty}</aside></div></details></div>"#,
+        r#"<div class="slskr-workflow" data-slskr-route-kind="{kind:?}">{reference}{native}</div>"#,
         kind = kind,
-        tabs = workflow_tabs_html(&tabs),
         reference = route_reference_panel_html(kind),
         native = route_native_workspace_html(kind, &table_rows, responses),
-        primary_title = escape_html(primary_title),
-        primary_detail = escape_html(primary_detail),
-        fresh = status_chip_html(
-            "Data",
-            if responses.is_some() {
-                "loaded"
-            } else {
-                "loading"
-            }
-        ),
-        table = workflow_table_owned_html(&table_headers, &table_rows),
-        side_title = escape_html(side_title),
-        side_body = escape_html(side_body),
-        empty = empty_state_html(
-            "Nothing selected",
-            "Choose a row to inspect details and available actions.",
-            "Review"
-        ),
     )
 }
 
@@ -6668,7 +7529,6 @@ pub fn route_workspace_result_html(path: &str, responses: &[EndpointBody]) -> St
     route_workflow_html(path, Some(responses))
 }
 
-#[cfg(test)]
 fn experience_settings_panel_html() -> String {
     let groups = ["Search", "Discovery", "Player", "Messages"];
     let sections = groups
@@ -6711,7 +7571,6 @@ fn experience_settings_panel_html() -> String {
     )
 }
 
-#[cfg(test)]
 fn automation_center_panel_html() -> String {
     let recipes = automation_recipes()
         .iter()
@@ -6743,14 +7602,14 @@ fn route_toolbar_html(path: &str) -> String {
         return String::new();
     };
     match page.surface {
-        "search" => r#"<form class="slskr-toolbar"><input class="slskr-toolbar-input" value="public domain jazz" aria-label="Search text"><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="0">Search</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="1">Stop</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="3">Clear</button></form>"#.to_string(),
-        "transfers" => r#"<form class="slskr-toolbar"><input class="slskr-toolbar-input" value="Remote/Song.mp3" aria-label="Filename"><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="0">Queue file</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="1">Clear downloads</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="2">Clear uploads</button></form>"#.to_string(),
-        "messages" => r#"<form class="slskr-toolbar"><input class="slskr-toolbar-input" value="hello" aria-label="Message"><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="0">Send</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="1">Acknowledge</button></form>"#.to_string(),
-        "rooms" => r#"<form class="slskr-toolbar"><input class="slskr-toolbar-input" value="contract-room" aria-label="Room"><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="0">Join</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="1">Send</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="2">Leave</button></form>"#.to_string(),
+        "search" => r#"<form class="slskr-toolbar"><input class="slskr-toolbar-input" value="" placeholder="Search text" aria-label="Search text"><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="0">Search</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="1">Stop</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="3">Clear</button></form>"#.to_string(),
+        "transfers" => r#"<form class="slskr-toolbar"><input class="slskr-toolbar-input" value="" placeholder="Filename" aria-label="Filename"><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="0">Queue file</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="1">Clear downloads</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="2">Clear uploads</button></form>"#.to_string(),
+        "messages" => r#"<form class="slskr-toolbar"><input class="slskr-toolbar-input" value="" placeholder="Message" aria-label="Message"><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="0">Send</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="1">Acknowledge</button></form>"#.to_string(),
+        "rooms" => r#"<form class="slskr-toolbar"><input class="slskr-toolbar-input" value="" placeholder="Room" aria-label="Room"><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="0">Join</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="1">Send</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="2">Leave</button></form>"#.to_string(),
         "browse" => r#"<form class="slskr-toolbar"><input class="slskr-toolbar-input" value="" aria-label="Directory" placeholder="Directory"><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="0">Request directory</button></form>"#.to_string(),
-        "identity" => r#"<form class="slskr-toolbar"><input class="slskr-toolbar-input" value="peer1" aria-label="Username"><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="1">Watch</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="0">Add contact</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="2">Note</button></form>"#.to_string(),
-        "collections" => r#"<form class="slskr-toolbar"><input class="slskr-toolbar-input" value="Rust Web Demo" aria-label="Name"><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="0">Create collection</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="1">Create group</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="3">Share</button></form>"#.to_string(),
-        "integrations" => r#"<form class="slskr-toolbar"><input class="slskr-toolbar-input" value="Public Domain Jazz - Demo Track" aria-label="Playlist text"><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="0">Preview playlist</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="1">Discovery graph</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="3">Queue job</button></form>"#.to_string(),
+        "identity" => r#"<form class="slskr-toolbar"><input class="slskr-toolbar-input" value="" placeholder="Username" aria-label="Username"><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="1">Watch</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="0">Add contact</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="2">Note</button></form>"#.to_string(),
+        "collections" => r#"<form class="slskr-toolbar"><input class="slskr-toolbar-input" value="" placeholder="Collection name" aria-label="Name"><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="0">Create collection</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="1">Create group</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="3">Share</button></form>"#.to_string(),
+        "integrations" => r#"<form class="slskr-toolbar"><input class="slskr-toolbar-input" value="" placeholder="Playlist text" aria-label="Playlist text"><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="0">Preview playlist</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="1">Discovery graph</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="3">Queue job</button></form>"#.to_string(),
         "system" => r#"<div class="slskr-toolbar"><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="0">Connect</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="1">Disconnect</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="2">Rescan shares</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="3">Vacuum database</button></div>"#.to_string(),
         "wishlist" => r#"<form class="slskr-toolbar"><input class="slskr-toolbar-input" value="public domain jazz" aria-label="Wishlist text"><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="0">Add</button><button type="button" class="slskr-toolbar-command" data-slskr-toolbar-action="1">Run search</button></form>"#.to_string(),
         _ => String::new(),
@@ -6959,12 +7818,14 @@ fn render_current_route(
     }
     mount_route_actions(window, document)?;
     mount_toolbar_actions(window, document)?;
+    mount_reference_actions(window, document)?;
     mount_workspace_tabs(document)?;
     mount_data_cards(document)?;
     mount_native_tables(document)?;
     mount_native_subviews(document)?;
     mount_native_actions(document)?;
     mount_transfer_columns(document)?;
+    mount_download_policy_controls(document)?;
     mount_native_filters(document)?;
     mount_native_sorters(document)?;
     mount_live_controls(window, document)?;
@@ -7354,7 +8215,7 @@ fn select_native_subview(document: &web_sys::Document, tab: &web_sys::Element) {
 
 #[cfg(target_arch = "wasm32")]
 fn mount_native_actions(document: &web_sys::Document) -> Result<(), JsValue> {
-    let buttons = document.query_selector_all(".slskr-native-workspace button:not([data-slskr-native-tab]):not([data-slskr-native-filter-clear]):not([data-slskr-native-select-visible]):not([data-slskr-native-clear-selection]):not([data-slskr-native-reset-state])")?;
+    let buttons = document.query_selector_all(".slskr-native-workspace button:not([data-slskr-native-tab]):not([data-slskr-native-filter-clear]):not([data-slskr-native-select-visible]):not([data-slskr-native-clear-selection]):not([data-slskr-native-reset-state]):not([data-slskr-transfer-column-resize]):not([data-slskr-pref-action]):not([data-slskr-automation-action]):not([data-slskr-recipe-dry-run]):not([data-slskr-recipe-copy])")?;
     for button_index in 0..buttons.length() {
         let Some(node) = buttons.item(button_index) else {
             continue;
@@ -7377,6 +8238,15 @@ fn mount_native_actions(document: &web_sys::Document) -> Result<(), JsValue> {
 
 #[cfg(target_arch = "wasm32")]
 fn handle_native_action(document: &web_sys::Document, button: &web_sys::Element) {
+    if handle_search_bulk_action(document, button) {
+        return;
+    }
+    if handle_download_policy_action(document, button) {
+        return;
+    }
+    if handle_options_yaml_action(document, button) {
+        return;
+    }
     if handle_transfer_request_action(document, button) {
         return;
     }
@@ -7404,35 +8274,350 @@ fn handle_native_action(document: &web_sys::Document, button: &web_sys::Element)
         .default_view()
         .and_then(|window| window.location().pathname().ok())
         .unwrap_or_else(|| "/searches".to_string());
+    if route_kind(&route_path) == RouteKind::Browse
+        && button.get_attribute("data-slskr-browse-folder").is_some()
+    {
+        if let Some(folder) = button.get_attribute("data-slskr-browse-folder") {
+            if let Ok(Some(input)) = document.query_selector(r#"input[aria-label="Folder"]"#) {
+                if let Some(input) = input.dyn_ref::<web_sys::HtmlInputElement>() {
+                    input.set_value(&folder);
+                }
+            }
+            if let Some(action) = route_action_for_native_label(&route_path, "Browse") {
+                run_native_route_action(document, button, action);
+            }
+        }
+        return;
+    }
+    if handle_native_local_action(document, button, &route_path, &action) {
+        return;
+    }
     if let Some(route_action) = route_action_for_native_label(&route_path, &action) {
         run_native_route_action(document, button, route_action);
         return;
     }
-    let selected = document
-        .query_selector("[data-slskr-native-select][aria-selected=\"true\"]")
-        .ok()
-        .flatten()
-        .and_then(|row| row.get_attribute("data-slskr-native-title"));
-    let target = selected.unwrap_or_else(|| route_label.clone());
-    if let Some(message) = native_local_action_message(&route_path, &action, &target) {
+    set_reference_status(
+        document,
+        &action,
+        &format!(
+            "No executable UI contract is registered for the {} route.",
+            route_label
+        ),
+    );
+}
+
+#[cfg(target_arch = "wasm32")]
+fn handle_search_bulk_action(document: &web_sys::Document, button: &web_sys::Element) -> bool {
+    let Some(mode) = button.get_attribute("data-slskr-search-bulk") else {
+        return false;
+    };
+    let Some(workspace) = button.closest(".slskr-native-workspace").ok().flatten() else {
+        show_toast(document, "Search selection is unavailable");
+        return true;
+    };
+    let Ok(rows) = workspace.query_selector_all(
+        "[data-slskr-native-select][aria-selected=\"true\"][data-slskr-native-search-id]",
+    ) else {
+        return true;
+    };
+    let mut selected = Vec::new();
+    for index in 0..rows.length() {
+        let Some(node) = rows.item(index) else {
+            continue;
+        };
+        let Ok(row) = node.dyn_into::<web_sys::Element>() else {
+            continue;
+        };
+        let Some(id) = row
+            .get_attribute("data-slskr-native-search-id")
+            .filter(|value| safe_route_segment(value))
+        else {
+            continue;
+        };
+        let query = row
+            .get_attribute("data-slskr-native-search-text")
+            .unwrap_or_default()
+            .trim()
+            .to_owned();
+        selected.push((id, query));
+    }
+    if selected.is_empty() {
+        show_toast(document, "Select one or more saved searches first");
+        return true;
+    }
+    if mode == "research" && selected.iter().all(|(_, query)| query.is_empty()) {
+        show_toast(document, "Selected searches contain no searchable text");
+        return true;
+    }
+    let Some(window) = document.default_view() else {
+        return true;
+    };
+    let document = document.clone();
+    let label = match mode.as_str() {
+        "research" => "Search selected again",
+        "stop" => "Stop selected",
+        "remove" => "Delete selected",
+        _ => "Search action",
+    };
+    show_toast(&document, &format!("{label} sending"));
+    let total = selected.len();
+    wasm_bindgen_futures::spawn_local(async move {
+        let mut completed = 0usize;
+        for (id, query) in selected {
+            let (method, path, body) = match mode.as_str() {
+                "research" if !query.is_empty() => (
+                    "POST",
+                    endpoint_url("/searches"),
+                    Some(format!(
+                        r#"{{"searchText":"{}"}}"#,
+                        escape_json_string(&query)
+                    )),
+                ),
+                "stop" => ("PUT", endpoint_url(&format!("/searches/{id}")), None),
+                "remove" => ("DELETE", endpoint_url(&format!("/searches/{id}")), None),
+                _ => continue,
+            };
+            if fetch_text_with_method(&window, &path, method, body.as_deref())
+                .await
+                .is_ok()
+            {
+                completed += 1;
+            }
+        }
         if let Some(status) = document.get_element_by_id("slskr-action-status") {
             status.set_inner_html(&format!(
-                "<strong>{}</strong> {}",
-                escape_html(&action),
-                escape_html(&message)
+                "<strong>{}</strong> completed {} of {}",
+                escape_html(label),
+                completed,
+                total,
             ));
         }
-        show_toast(document, &format!("{action}: {message}"));
-        return;
+        let _ = refresh_route_data(&window).await;
+    });
+    true
+}
+
+#[cfg(target_arch = "wasm32")]
+fn mount_download_policy_controls(document: &web_sys::Document) -> Result<(), JsValue> {
+    let selects = document.query_selector_all("[data-slskr-download-destination]")?;
+    for index in 0..selects.length() {
+        let Some(node) = selects.item(index) else {
+            continue;
+        };
+        let select: web_sys::HtmlSelectElement = node.dyn_into()?;
+        if select.has_attribute("data-slskr-mounted") {
+            continue;
+        }
+        select.set_attribute("data-slskr-mounted", "true")?;
+        if let Some(saved) = document
+            .default_view()
+            .and_then(|window| window.local_storage().ok().flatten())
+            .and_then(|storage| {
+                storage
+                    .get_item("slskr-download-destination")
+                    .ok()
+                    .flatten()
+            })
+        {
+            if (0..select.length()).any(|option_index| {
+                select
+                    .item(option_index)
+                    .is_some_and(|option| option.get_attribute("value").as_deref() == Some(&saved))
+            }) {
+                select.set_value(&saved);
+            }
+        }
+        let document_for_change = document.clone();
+        let select_for_change = select.clone();
+        let callback = Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |_event| {
+            let value = select_for_change.value();
+            if let Some(storage) = document_for_change
+                .default_view()
+                .and_then(|window| window.local_storage().ok().flatten())
+            {
+                let _ = storage.set_item("slskr-download-destination", &value);
+            }
+            if let Some(status) = document_for_change
+                .query_selector("[data-slskr-download-policy-status]")
+                .ok()
+                .flatten()
+            {
+                status.set_text_content(Some(if value.trim().is_empty() {
+                    "Using configured default"
+                } else {
+                    "Destination saved for this browser"
+                }));
+            }
+        }));
+        select.add_event_listener_with_callback("change", callback.as_ref().unchecked_ref())?;
+        callback.forget();
     }
-    let message = format!("{} queued for {}", action, target);
-    if let Some(status) = document.get_element_by_id("slskr-action-status") {
-        status.set_inner_html(&format!(
-            "<strong>Action</strong> {}",
-            escape_html(&message)
-        ));
+    Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn handle_download_policy_action(document: &web_sys::Document, button: &web_sys::Element) -> bool {
+    let save = button.has_attribute("data-slskr-download-filter-save");
+    let reset = button.has_attribute("data-slskr-download-filter-reset");
+    if !save && !reset {
+        return false;
     }
-    show_toast(document, &message);
+    let Some(panel) = button
+        .closest("[data-slskr-download-policy]")
+        .ok()
+        .flatten()
+    else {
+        show_toast(document, "Download policy editor is unavailable");
+        return true;
+    };
+    if reset {
+        let Some(window) = document.default_view() else {
+            return true;
+        };
+        show_toast(document, "Reloading download policy");
+        let document = document.clone();
+        wasm_bindgen_futures::spawn_local(async move {
+            let result = fetch_text(&window, &endpoint_url("/config/download-filter")).await;
+            if let Some(status) = document
+                .query_selector("[data-slskr-download-policy-status]")
+                .ok()
+                .flatten()
+            {
+                status.set_text_content(Some(match result {
+                    Ok(_) => "Policy reloaded; refresh the page data to apply it",
+                    Err(_) => "Policy reload failed",
+                }));
+            }
+            let _ = refresh_route_data(&window).await;
+        });
+        return true;
+    }
+    let term_text = panel
+        .query_selector("[data-slskr-download-filter]")
+        .ok()
+        .flatten()
+        .and_then(|element| form_control_value(&element))
+        .unwrap_or_default();
+    let terms = term_text
+        .lines()
+        .map(str::trim)
+        .filter(|term| !term.is_empty())
+        .collect::<Vec<_>>();
+    if terms.len() > 100 || terms.iter().any(|term| term.chars().count() > 256) {
+        show_toast(document, "Use at most 100 terms of 256 characters each");
+        return true;
+    }
+    let body = format!(
+        r#"{{"exclude":[{}]}}"#,
+        terms
+            .iter()
+            .map(|term| format!(r#""{}""#, escape_json_string(term)))
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    let Some(window) = document.default_view() else {
+        return true;
+    };
+    let document = document.clone();
+    show_toast(&document, "Saving download exclusions");
+    wasm_bindgen_futures::spawn_local(async move {
+        let result = fetch_text_with_method(
+            &window,
+            &endpoint_url("/config/download-filter"),
+            "PUT",
+            Some(&body),
+        )
+        .await;
+        if let Some(status) = document
+            .query_selector("[data-slskr-download-policy-status]")
+            .ok()
+            .flatten()
+        {
+            status.set_text_content(Some(match &result {
+                Ok(_) => "Download exclusions saved",
+                Err(_) => "Download exclusions could not be saved",
+            }));
+        }
+        if result.is_ok() {
+            let _ = refresh_route_data(&window).await;
+        }
+    });
+    true
+}
+
+#[cfg(target_arch = "wasm32")]
+fn handle_options_yaml_action(document: &web_sys::Document, button: &web_sys::Element) -> bool {
+    let validate = button.has_attribute("data-slskr-options-yaml-validate");
+    let save = button.has_attribute("data-slskr-options-yaml-save");
+    if !validate && !save {
+        return false;
+    }
+    let Some(panel) = button
+        .closest("[data-slskr-system-configuration]")
+        .ok()
+        .flatten()
+    else {
+        show_toast(document, "Configuration editor is unavailable");
+        return true;
+    };
+    let yaml = panel
+        .query_selector("[data-slskr-options-yaml]")
+        .ok()
+        .flatten()
+        .and_then(|element| form_control_value(&element))
+        .unwrap_or_default();
+    if yaml.trim().is_empty() {
+        show_toast(document, "Configuration YAML is empty");
+        return true;
+    }
+    let body = serde_json::Value::String(yaml).to_string();
+    let method = if validate { "POST" } else { "PUT" };
+    let endpoint = if validate {
+        "/options/yaml/validate"
+    } else {
+        "/options/yaml"
+    };
+    let label = if validate {
+        "Validating YAML"
+    } else {
+        "Saving YAML"
+    };
+    if let Some(status) = panel
+        .query_selector("[data-slskr-options-yaml-status]")
+        .ok()
+        .flatten()
+    {
+        status.set_text_content(Some(label));
+    }
+    let Some(window) = document.default_view() else {
+        return true;
+    };
+    let document = document.clone();
+    wasm_bindgen_futures::spawn_local(async move {
+        let result =
+            fetch_text_with_method(&window, &endpoint_url(endpoint), method, Some(&body)).await;
+        if let Some(status) = document
+            .query_selector("[data-slskr-options-yaml-status]")
+            .ok()
+            .flatten()
+        {
+            status.set_text_content(Some(match &result {
+                Ok(response) if response.trim().is_empty() => {
+                    if validate {
+                        "YAML is valid"
+                    } else {
+                        "YAML saved"
+                    }
+                }
+                Ok(response) => response,
+                Err(_) => "YAML operation failed",
+            }));
+        }
+        if save && result.is_ok() {
+            let _ = refresh_route_data(&window).await;
+        }
+    });
+    true
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -7453,6 +8638,7 @@ fn mount_transfer_columns(document: &web_sys::Document) -> Result<(), JsValue> {
                 .flatten()
         })
         .map(|value| value.split(',').map(str::to_owned).collect::<BTreeSet<_>>());
+    restore_transfer_column_widths(document);
     let toggles = document.query_selector_all("[data-slskr-transfer-column-toggle]")?;
     for index in 0..toggles.length() {
         let Some(node) = toggles.item(index) else {
@@ -7481,7 +8667,169 @@ fn mount_transfer_columns(document: &web_sys::Document) -> Result<(), JsValue> {
         input.add_event_listener_with_callback("change", callback.as_ref().unchecked_ref())?;
         callback.forget();
     }
+    let resize_buttons = document.query_selector_all("[data-slskr-transfer-column-resize]")?;
+    for index in 0..resize_buttons.length() {
+        let Some(node) = resize_buttons.item(index) else {
+            continue;
+        };
+        let button: web_sys::Element = node.dyn_into()?;
+        if button.has_attribute("data-slskr-mounted") {
+            continue;
+        }
+        button.set_attribute("data-slskr-mounted", "true")?;
+        let document_for_drag = document.clone();
+        let button_for_drag = button.clone();
+        let callback = Closure::<dyn FnMut(web_sys::MouseEvent)>::wrap(Box::new(
+            move |event: web_sys::MouseEvent| {
+                event.prevent_default();
+                let Some(key) = button_for_drag.get_attribute("data-slskr-transfer-column-resize")
+                else {
+                    return;
+                };
+                let Some(header) = button_for_drag.closest("th").ok().flatten() else {
+                    return;
+                };
+                let Some(window) = document_for_drag.default_view() else {
+                    return;
+                };
+                let start_width = header
+                    .dyn_ref::<web_sys::HtmlElement>()
+                    .map(|element| element.offset_width().max(80) as i32)
+                    .unwrap_or(160);
+                let start_x = event.client_x();
+                let active = Rc::new(std::cell::Cell::new(true));
+                let active_for_move = active.clone();
+                let document_for_move = document_for_drag.clone();
+                let key_for_move = key.clone();
+                let move_callback = Closure::<dyn FnMut(web_sys::MouseEvent)>::wrap(Box::new(
+                    move |move_event: web_sys::MouseEvent| {
+                        if !active_for_move.get() {
+                            return;
+                        }
+                        let width = (start_width + move_event.client_x() - start_x).clamp(80, 720);
+                        set_transfer_column_width(&document_for_move, &key_for_move, width);
+                    },
+                ));
+                let active_for_up = active.clone();
+                let document_for_up = document_for_drag.clone();
+                let up_callback = Closure::<dyn FnMut(web_sys::MouseEvent)>::wrap(Box::new(
+                    move |_up_event: web_sys::MouseEvent| {
+                        if !active_for_up.replace(false) {
+                            return;
+                        }
+                        persist_transfer_column_widths(&document_for_up);
+                    },
+                ));
+                let _ = window.add_event_listener_with_callback(
+                    "mousemove",
+                    move_callback.as_ref().unchecked_ref(),
+                );
+                let _ = window.add_event_listener_with_callback(
+                    "mouseup",
+                    up_callback.as_ref().unchecked_ref(),
+                );
+                move_callback.forget();
+                up_callback.forget();
+            },
+        ));
+        button.add_event_listener_with_callback("mousedown", callback.as_ref().unchecked_ref())?;
+        callback.forget();
+    }
     Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn set_transfer_column_width(document: &web_sys::Document, key: &str, width: i32) {
+    let Ok(cells) =
+        document.query_selector_all(&format!(r#"[data-slskr-transfer-column="{}"]"#, key))
+    else {
+        return;
+    };
+    for index in 0..cells.length() {
+        let Some(node) = cells.item(index) else {
+            continue;
+        };
+        if let Ok(element) = node.dyn_into::<web_sys::HtmlElement>() {
+            let _ = element.style().set_property("width", &format!("{width}px"));
+            let _ = element
+                .style()
+                .set_property("min-width", &format!("{width}px"));
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn restore_transfer_column_widths(document: &web_sys::Document) {
+    let Some(storage) = document
+        .default_view()
+        .and_then(|window| window.local_storage().ok().flatten())
+    else {
+        return;
+    };
+    let Some(value) = storage
+        .get_item("slskr-transfer-column-widths-downloads")
+        .ok()
+        .flatten()
+    else {
+        return;
+    };
+    for entry in value.split(',') {
+        let Some((key, width)) = entry.split_once(':') else {
+            continue;
+        };
+        if let Ok(width) = width.parse::<i32>() {
+            set_transfer_column_width(document, key, width.clamp(80, 720));
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn persist_transfer_column_widths(document: &web_sys::Document) {
+    let Ok(headers) = document.query_selector_all("[data-slskr-transfer-column-resize]") else {
+        return;
+    };
+    let widths = (0..headers.length())
+        .filter_map(|index| {
+            let node = headers.item(index)?;
+            let button = node.dyn_into::<web_sys::Element>().ok()?;
+            let key = button.get_attribute("data-slskr-transfer-column-resize")?;
+            let header = button.closest("th").ok().flatten()?;
+            let width = header
+                .dyn_ref::<web_sys::HtmlElement>()?
+                .offset_width()
+                .max(80);
+            Some(format!("{key}:{width}"))
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    if let Some(storage) = document
+        .default_view()
+        .and_then(|window| window.local_storage().ok().flatten())
+    {
+        let _ = storage.set_item("slskr-transfer-column-widths-downloads", &widths);
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn reset_transfer_column_widths(document: &web_sys::Document) {
+    if let Some(storage) = document
+        .default_view()
+        .and_then(|window| window.local_storage().ok().flatten())
+    {
+        let _ = storage.remove_item("slskr-transfer-column-widths-downloads");
+    }
+    let Ok(cells) = document.query_selector_all("[data-slskr-transfer-column]") else {
+        return;
+    };
+    for index in 0..cells.length() {
+        let Some(node) = cells.item(index) else {
+            continue;
+        };
+        if let Ok(element) = node.dyn_into::<web_sys::HtmlElement>() {
+            let _ = element.style().remove_property("width");
+            let _ = element.style().remove_property("min-width");
+        }
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -7560,7 +8908,8 @@ fn handle_transfer_request_action(document: &web_sys::Document, button: &web_sys
         {
             let _ = storage.remove_item("slskr-transfer-columns-downloads");
         }
-        show_toast(document, "Transfer columns reset; reload to apply defaults");
+        reset_transfer_column_widths(document);
+        show_toast(document, "Transfer column widths and visibility reset");
         return true;
     }
     let retry_id = button.get_attribute("data-slskr-transfer-retry");
@@ -8063,39 +9412,729 @@ fn handle_wishlist_ignored_result_action(
 }
 
 #[cfg(target_arch = "wasm32")]
-fn native_local_action_message(route_path: &str, action: &str, target: &str) -> Option<String> {
-    let action = action.trim().to_ascii_lowercase();
-    match (route_kind(route_path), action.as_str()) {
-        (RouteKind::Search, "preview") => Some(format!("download preview opened for {target}")),
-        (RouteKind::DiscoveryGraph, "expand") => {
-            Some(format!("graph inspector expanded for {target}"))
+fn native_action_row(
+    document: &web_sys::Document,
+    button: &web_sys::Element,
+) -> Option<web_sys::Element> {
+    let row = button
+        .closest("[data-slskr-native-select]")
+        .ok()
+        .flatten()
+        .or_else(|| {
+            document
+                .query_selector("[data-slskr-native-select][aria-selected=\"true\"]")
+                .ok()
+                .flatten()
+        });
+    if let Some(row) = row.as_ref() {
+        select_native_row(document, row);
+    }
+    row
+}
+
+#[cfg(target_arch = "wasm32")]
+fn native_selected_row_attribute(
+    document: &web_sys::Document,
+    button: &web_sys::Element,
+    attribute: &str,
+) -> Option<String> {
+    button_native_row_attribute(button, attribute).or_else(|| {
+        document
+            .query_selector("[data-slskr-native-select][aria-selected=\"true\"]")
+            .ok()
+            .flatten()
+            .and_then(|row| row.get_attribute(attribute))
+            .filter(|value| !value.trim().is_empty())
+    })
+}
+
+#[cfg(target_arch = "wasm32")]
+fn native_selected_context(
+    document: &web_sys::Document,
+    button: &web_sys::Element,
+    route_path: &str,
+) -> String {
+    let row = native_action_row(document, button);
+    let title = row
+        .as_ref()
+        .and_then(|row| row.get_attribute("data-slskr-native-title"))
+        .unwrap_or_else(|| "No selected row".to_string());
+    let details = row
+        .as_ref()
+        .and_then(|row| row.get_attribute("data-slskr-native-detail-list"))
+        .or_else(|| {
+            row.as_ref()
+                .and_then(|row| row.get_attribute("data-slskr-native-detail"))
+        })
+        .unwrap_or_default();
+    let meta = row
+        .as_ref()
+        .and_then(|row| row.get_attribute("data-slskr-native-meta"))
+        .unwrap_or_default();
+    [route_path.to_string(), title, details, meta]
+        .into_iter()
+        .filter(|value| !value.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[cfg(target_arch = "wasm32")]
+fn native_json_string_by_key(value: &serde_json::Value, keys: &[&str]) -> Option<String> {
+    match value {
+        serde_json::Value::Object(object) => {
+            for key in keys {
+                if let Some(value) = object.get(*key).and_then(serde_json::Value::as_str) {
+                    if !value.trim().is_empty() {
+                        return Some(value.to_string());
+                    }
+                }
+            }
+            object
+                .values()
+                .find_map(|value| native_json_string_by_key(value, keys))
         }
-        (RouteKind::Messages | RouteKind::Rooms, "collapse all message panels") => {
-            Some("message panels collapsed in this workspace".to_string())
-        }
-        (RouteKind::Messages | RouteKind::Rooms, "create room") => {
-            Some(format!("room draft prepared for {target}"))
-        }
-        (RouteKind::Wishlist, "copy review") => Some(format!("review summary copied for {target}")),
-        (RouteKind::Wishlist, "import list") => {
-            Some("wishlist import staged for review".to_string())
-        }
-        (RouteKind::Contacts, "create invite") => {
-            Some("invite draft created for the current contact form".to_string())
-        }
-        (RouteKind::Contacts, "refresh nearby") => {
-            Some("nearby contacts refresh requested".to_string())
-        }
-        (RouteKind::Collections, "open") => Some(format!("collection opened for {target}")),
-        (RouteKind::Collections, "remove item") => {
-            Some(format!("remove-item review staged for {target}"))
-        }
-        (RouteKind::SharedWithMe, "copy token") => Some(format!("token copied for {target}")),
-        (RouteKind::ShareGroups, "token revoke") => {
-            Some(format!("token revoke staged for {target}"))
-        }
+        serde_json::Value::Array(values) => values
+            .iter()
+            .find_map(|value| native_json_string_by_key(value, keys)),
         _ => None,
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn native_set_action_status(document: &web_sys::Document, label: &str, message: &str) {
+    set_reference_status(document, label, message);
+}
+
+#[cfg(target_arch = "wasm32")]
+fn native_copy_context(
+    window: &web_sys::Window,
+    document: &web_sys::Document,
+    button: &web_sys::Element,
+    route_path: &str,
+    label: &str,
+) {
+    let text = native_selected_context(document, button, route_path);
+    if text == format!("{route_path}\nNo selected row") {
+        native_set_action_status(document, label, "Select a live row before copying its report.");
+        return;
+    }
+    copy_reference_text(window, document, text);
+}
+
+#[cfg(target_arch = "wasm32")]
+fn native_shared_grant_id(
+    document: &web_sys::Document,
+    button: &web_sys::Element,
+) -> Option<String> {
+    native_selected_row_attribute(document, button, "data-slskr-native-grant-id")
+        .filter(|value| safe_route_segment(value))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn native_shared_grant_is_selected(
+    document: &web_sys::Document,
+    button: &web_sys::Element,
+    label: &str,
+) -> bool {
+    if native_shared_grant_id(document, button).is_some() {
+        return true;
+    }
+    native_set_action_status(
+        document,
+        label,
+        "Select a live inbound share before running this action.",
+    );
+    false
+}
+
+#[cfg(target_arch = "wasm32")]
+fn native_shared_token_storage_key(grant_id: &str) -> String {
+    format!("slskr.shared-grant-token.{grant_id}")
+}
+
+#[cfg(target_arch = "wasm32")]
+fn native_shared_token(window: &web_sys::Window, grant_id: &str) -> Option<String> {
+    window
+        .session_storage()
+        .ok()
+        .flatten()
+        .and_then(|storage| storage.get_item(&native_shared_token_storage_key(grant_id)).ok().flatten())
+        .filter(|token| !token.trim().is_empty())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn native_store_shared_token(window: &web_sys::Window, grant_id: &str, token: &str) {
+    if let Some(storage) = window.session_storage().ok().flatten() {
+        let _ = storage.set_item(&native_shared_token_storage_key(grant_id), token);
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn native_issue_shared_access_token(
+    window: &web_sys::Window,
+    grant_id: &str,
+) -> Result<String, JsValue> {
+    let path = endpoint_url(&format!("/share-grants/{grant_id}/token"));
+    let response = fetch_text_with_method(
+        window,
+        &path,
+        "POST",
+        Some(r#"{"expiresInSeconds":600}"#),
+    )
+    .await?;
+    serde_json::from_str::<serde_json::Value>(&response)
+        .ok()
+        .and_then(|value| native_json_string_by_key(&value, &["token", "shareToken", "share_token"]))
+        .filter(|token| !token.trim().is_empty())
+        .ok_or_else(|| JsValue::from_str("the token endpoint returned no token"))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn native_issue_share_token(
+    window: &web_sys::Window,
+    document: &web_sys::Document,
+    button: &web_sys::Element,
+) {
+    let Some(grant_id) = native_shared_grant_id(document, button) else {
+        native_set_action_status(document, "Copy token", "Select a live shared grant first.");
+        return;
+    };
+    native_set_action_status(document, "Copy token", "Issuing a short-lived share token.");
+    let window_for_request = window.clone();
+    let document_for_request = document.clone();
+    let grant_id_for_request = grant_id.clone();
+    wasm_bindgen_futures::spawn_local(async move {
+        match native_issue_shared_access_token(&window_for_request, &grant_id_for_request).await {
+            Ok(token) => {
+                native_store_shared_token(&window_for_request, &grant_id_for_request, &token);
+                copy_reference_text(&window_for_request, &document_for_request, token);
+            }
+            Err(error) => native_set_action_status(
+                &document_for_request,
+                "Copy token",
+                &error
+                    .as_string()
+                    .unwrap_or_else(|| "share token request failed".to_string()),
+            ),
+        }
+    });
+}
+
+#[cfg(target_arch = "wasm32")]
+fn native_copy_shared_manifest(
+    window: &web_sys::Window,
+    document: &web_sys::Document,
+    button: &web_sys::Element,
+) {
+    let Some(grant_id) = native_shared_grant_id(document, button) else {
+        native_set_action_status(document, "Copy manifest", "Select a live shared grant first.");
+        return;
+    };
+    let window_for_request = window.clone();
+    let document_for_request = document.clone();
+    let stored_token = native_shared_token(window, &grant_id);
+    native_set_action_status(document, "Copy manifest", "Loading the live manifest.");
+    wasm_bindgen_futures::spawn_local(async move {
+        let path = endpoint_url(&format!("/share-grants/{grant_id}/manifest"));
+        let headers = stored_token
+            .as_deref()
+            .map(|token| [("X-Share-Token", token)])
+            .unwrap_or_default();
+        match fetch_text_with_method_and_headers(
+            &window_for_request,
+            &path,
+            "GET",
+            None,
+            &headers,
+        )
+        .await
+        {
+            Ok(response) => copy_reference_text(&window_for_request, &document_for_request, response),
+            Err(error) => native_set_action_status(
+                &document_for_request,
+                "Copy manifest",
+                &error
+                    .as_string()
+                    .unwrap_or_else(|| "manifest request failed".to_string()),
+            ),
+        }
+    });
+}
+
+#[cfg(target_arch = "wasm32")]
+fn native_stream_shared_manifest(
+    window: &web_sys::Window,
+    document: &web_sys::Document,
+    button: &web_sys::Element,
+) {
+    let Some(grant_id) = native_shared_grant_id(document, button) else {
+        native_set_action_status(document, "Stream", "Select a live shared grant first.");
+        return;
+    };
+    let window_for_request = window.clone();
+    let document_for_request = document.clone();
+    native_set_action_status(document, "Stream", "Loading the live shared manifest.");
+    wasm_bindgen_futures::spawn_local(async move {
+        let path = endpoint_url(&format!("/share-grants/{grant_id}/manifest"));
+        let stored_token = native_shared_token(&window_for_request, &grant_id);
+        let manifest_headers = stored_token
+            .as_deref()
+            .map(|token| [("X-Share-Token", token)])
+            .unwrap_or_default();
+        match fetch_text_with_method_and_headers(
+            &window_for_request,
+            &path,
+            "GET",
+            None,
+            &manifest_headers,
+        )
+        .await
+        {
+            Ok(response) => {
+                let value = serde_json::from_str::<serde_json::Value>(&response).ok();
+                let Some(value) = value else {
+                    native_set_action_status(
+                        &document_for_request,
+                        "Stream",
+                        "The shared manifest was not valid JSON.",
+                    );
+                    return;
+                };
+                let content_id = value
+                    .get("items")
+                    .and_then(serde_json::Value::as_array)
+                    .and_then(|items| items.first())
+                    .and_then(|item| {
+                        ["contentId", "content_id", "id"]
+                            .iter()
+                            .find_map(|key| item.get(*key).map(json_scalar_preview))
+                    })
+                    .filter(|content_id| !content_id.trim().is_empty());
+                let Some(content_id) = content_id else {
+                    native_set_action_status(
+                        &document_for_request,
+                        "Stream",
+                        "The shared manifest contains no streamable items.",
+                    );
+                    return;
+                };
+                let token = stored_token
+                    .or_else(|| value.as_object().and_then(|object| {
+                        ["shareToken", "share_token", "token"]
+                            .iter()
+                            .find_map(|key| object.get(*key).map(json_scalar_preview))
+                    }))
+                    .filter(|token| !token.trim().is_empty());
+                let token = match token {
+                    Some(token) => token,
+                    None => match native_issue_shared_access_token(&window_for_request, &grant_id).await {
+                        Ok(token) => {
+                            native_store_shared_token(&window_for_request, &grant_id, &token);
+                            token
+                        }
+                        Err(error) => {
+                            native_set_action_status(
+                                &document_for_request,
+                                "Stream",
+                                &error
+                                    .as_string()
+                                    .unwrap_or_else(|| "share token request failed".to_string()),
+                            );
+                            return;
+                        }
+                    },
+                };
+                let encoded_content_id = percent_encode_player_stream_component(&content_id);
+                let ticket_path = endpoint_url(&format!(
+                    "/streams/{encoded_content_id}/share-ticket"
+                ));
+                let ticket_headers = [("X-Share-Token", token.as_str())];
+                let ticket = match fetch_text_with_method_and_headers(
+                    &window_for_request,
+                    &ticket_path,
+                    "POST",
+                    None,
+                    &ticket_headers,
+                )
+                .await
+                {
+                    Ok(response) => serde_json::from_str::<serde_json::Value>(&response)
+                        .ok()
+                        .and_then(|value| {
+                            ["ticket", "streamTicket"]
+                                .iter()
+                                .find_map(|key| value.get(*key).map(json_scalar_preview))
+                        })
+                        .filter(|ticket| !ticket.trim().is_empty()),
+                    Err(error) => {
+                        native_set_action_status(
+                            &document_for_request,
+                            "Stream",
+                            &error
+                                .as_string()
+                                .unwrap_or_else(|| "share stream ticket request failed".to_string()),
+                        );
+                        None
+                    }
+                };
+                let Some(ticket) = ticket else {
+                    if document_for_request
+                        .get_element_by_id("slskr-action-status")
+                        .and_then(|element| element.text_content())
+                        .unwrap_or_default()
+                        .is_empty()
+                    {
+                        native_set_action_status(
+                            &document_for_request,
+                            "Stream",
+                            "The stream ticket endpoint returned no ticket.",
+                        );
+                    }
+                    return;
+                };
+                let stream_url = endpoint_url(&format!(
+                    "/streams/{encoded_content_id}?ticket={}",
+                    percent_encode_player_stream_component(&ticket)
+                ));
+                let url = if stream_url.starts_with("http://")
+                    || stream_url.starts_with("https://")
+                {
+                    stream_url
+                } else {
+                    format!(
+                        "{}{}",
+                        window_for_request.location().origin().unwrap_or_default(),
+                        stream_url
+                    )
+                };
+                let _ = window_for_request.open_with_url_and_target(&url, "_blank");
+                native_set_action_status(
+                    &document_for_request,
+                    "Stream",
+                    "Opened the shared stream with a short-lived content ticket.",
+                );
+            }
+            Err(error) => native_set_action_status(
+                &document_for_request,
+                "Stream",
+                &error
+                    .as_string()
+                    .unwrap_or_else(|| "shared stream request failed".to_string()),
+            ),
+        }
+    });
+}
+
+#[cfg(target_arch = "wasm32")]
+fn native_fold_duplicate_rows(document: &web_sys::Document, button: &web_sys::Element) {
+    let Some(workspace) = button.closest(".slskr-native-workspace").ok().flatten() else {
+        native_set_action_status(document, "Fold Duplicates", "No result workspace is mounted.");
+        return;
+    };
+    let folded = workspace.has_attribute("data-slskr-native-duplicates-folded");
+    let Ok(rows) = workspace.query_selector_all("[data-slskr-native-select]") else {
+        return;
+    };
+    if folded {
+        for index in 0..rows.length() {
+            if let Some(node) = rows.item(index) {
+                if let Ok(row) = node.dyn_into::<web_sys::Element>() {
+                    let _ = row.remove_attribute("hidden");
+                }
+            }
+        }
+        let _ = workspace.remove_attribute("data-slskr-native-duplicates-folded");
+        native_set_action_status(document, "Fold Duplicates", "Duplicate rows restored.");
+        return;
+    }
+    let mut seen = BTreeSet::new();
+    let mut hidden = 0;
+    for index in 0..rows.length() {
+        let Some(node) = rows.item(index) else {
+            continue;
+        };
+        let Ok(row) = node.dyn_into::<web_sys::Element>() else {
+            continue;
+        };
+        let key = row
+            .get_attribute("data-slskr-native-title")
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase();
+        if !key.is_empty() && !seen.insert(key) {
+            let _ = row.set_attribute("hidden", "");
+            hidden += 1;
+        }
+    }
+    let _ = workspace.set_attribute("data-slskr-native-duplicates-folded", "true");
+    native_set_action_status(
+        document,
+        "Fold Duplicates",
+        &format!("Folded {hidden} duplicate result rows."),
+    );
+}
+
+#[cfg(target_arch = "wasm32")]
+fn native_import_wishlist_list(document: &web_sys::Document) {
+    let value = document
+        .query_selector(r#".wishlist-native [aria-label="Search Text"]"#)
+        .ok()
+        .flatten()
+        .or_else(|| {
+            document
+                .query_selector(r#"input[aria-label="Search Text"]"#)
+                .ok()
+                .flatten()
+        })
+        .and_then(|element| form_control_value(&element))
+        .unwrap_or_default();
+    let entries = value
+        .lines()
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    if entries.is_empty() {
+        native_set_action_status(
+            document,
+            "Import List",
+            "Enter one wanted search per line in Search Text.",
+        );
+        return;
+    }
+    let Some(window) = document.default_view() else {
+        return;
+    };
+    native_set_action_status(
+        document,
+        "Import List",
+        &format!("Importing {} wanted searches.", entries.len()),
+    );
+    let document_for_request = document.clone();
+    wasm_bindgen_futures::spawn_local(async move {
+        let mut created = 0;
+        let mut failed = 0;
+        for entry in entries {
+            let body = action_body_from_value(ActionBody::SearchText, &entry);
+            match fetch_text_with_method(
+                &window,
+                &endpoint_url("/wishlist"),
+                "POST",
+                body.as_deref(),
+            )
+            .await
+            {
+                Ok(_) => created += 1,
+                Err(_) => failed += 1,
+            }
+        }
+        native_set_action_status(
+            &document_for_request,
+            "Import List",
+            &format!("Imported {created} wanted searches; {failed} failed."),
+        );
+        let _ = refresh_route_data(&window).await;
+    });
+}
+
+#[cfg(target_arch = "wasm32")]
+fn native_bulk_transfer_action(
+    document: &web_sys::Document,
+    action: &str,
+    selector: &str,
+) {
+    let Ok(buttons) = document.query_selector_all(selector) else {
+        native_set_action_status(document, action, "Transfer table is not mounted.");
+        return;
+    };
+    let mut dispatched = 0;
+    for index in 0..buttons.length() {
+        let Some(node) = buttons.item(index) else {
+            continue;
+        };
+        let Ok(button) = node.dyn_into::<web_sys::Element>() else {
+            continue;
+        };
+        if handle_transfer_request_action(document, &button) {
+            dispatched += 1;
+        }
+    }
+    if dispatched == 0 {
+        native_set_action_status(document, action, "No live transfer requests match this action.");
+    } else {
+        native_set_action_status(
+            document,
+            action,
+            &format!("Dispatched {dispatched} live transfer request actions."),
+        );
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn native_open_search(document: &web_sys::Document, button: &web_sys::Element) -> bool {
+    let Some(id) = native_selected_row_attribute(document, button, "data-slskr-native-search-id")
+        .filter(|value| safe_route_segment(value))
+    else {
+        native_set_action_status(document, "Open", "Select a saved search with a real ID first.");
+        return true;
+    };
+    let Some(window) = document.default_view() else {
+        return true;
+    };
+    let _ = window.location().set_href(&format!("/searches/{id}"));
+    true
+}
+
+#[cfg(target_arch = "wasm32")]
+fn handle_native_local_action(
+    document: &web_sys::Document,
+    button: &web_sys::Element,
+    route_path: &str,
+    action: &str,
+) -> bool {
+    let normalized = action.trim().to_ascii_lowercase();
+    let kind = route_kind(route_path);
+    if normalized == "review selection" || normalized == "expand result" {
+        if native_action_row(document, button).is_some() {
+            native_set_action_status(document, action, "Live row selected in the inspector.");
+        } else {
+            native_set_action_status(document, action, "Select a live row first.");
+        }
+        return true;
+    }
+    if normalized == "fold duplicates" {
+        native_fold_duplicate_rows(document, button);
+        return true;
+    }
+    if normalized == "clear filter" {
+        clear_all_card_filters(document);
+        native_set_action_status(document, action, "Visible filters cleared.");
+        return true;
+    }
+    if normalized == "clear search" {
+        if let Ok(Some(input)) = document.query_selector(r#"input[aria-label="Search conversations"]"#) {
+            if let Ok(input) = input.dyn_into::<web_sys::HtmlInputElement>() {
+                input.set_value("");
+            }
+        }
+        native_set_action_status(document, action, "Conversation search cleared.");
+        return true;
+    }
+    if normalized == "collapse all message panels" {
+        if let Ok(panels) = document.query_selector_all("[data-slskr-native-panel]") {
+            for index in 0..panels.length() {
+                if let Some(node) = panels.item(index) {
+                    if let Ok(panel) = node.dyn_into::<web_sys::Element>() {
+                        let _ = panel.set_attribute("hidden", "");
+                    }
+                }
+            }
+        }
+        native_set_action_status(document, action, "Message panels collapsed.");
+        return true;
+    }
+    if kind == RouteKind::Search && normalized == "preview" {
+        let _ = native_action_row(document, button);
+        if let Some(workspace) = button.closest(".slskr-native-workspace").ok().flatten() {
+            if let Ok(Some(panel)) = workspace.query_selector(
+                r#"[data-slskr-native-panel-label="Download Preview"]"#,
+            ) {
+                if let Some(index) = panel.get_attribute("data-slskr-native-panel") {
+                    if let Ok(Some(tab)) = workspace.query_selector(&format!(
+                        r#"[data-slskr-native-tab="{}"]"#,
+                        escape_json_string(&index)
+                    )) {
+                        select_native_subview(document, &tab);
+                        native_set_action_status(
+                            document,
+                            "Preview",
+                            "Download Preview opened for the selected result.",
+                        );
+                        return true;
+                    }
+                }
+            }
+        }
+        native_set_action_status(document, "Preview", "Download Preview is not mounted.");
+        return true;
+    }
+    if kind == RouteKind::Search && normalized == "open" {
+        return native_open_search(document, button);
+    }
+    if kind == RouteKind::Wishlist && normalized == "import list" {
+        native_import_wishlist_list(document);
+        return true;
+    }
+    if kind == RouteKind::Downloads && normalized == "retry all" {
+        native_bulk_transfer_action(document, "Retry All", "[data-slskr-transfer-retry]");
+        return true;
+    }
+    if kind == RouteKind::Downloads && normalized == "cancel all" {
+        native_bulk_transfer_action(
+            document,
+            "Cancel All",
+            "[data-slskr-transfer-request-cancel]",
+        );
+        return true;
+    }
+    if kind == RouteKind::SharedWithMe
+        && matches!(
+            normalized.as_str(),
+            "open" | "open collection" | "backfill" | "leave share"
+        )
+        && !native_shared_grant_is_selected(document, button, action)
+    {
+        return true;
+    }
+    if kind == RouteKind::SharedWithMe && normalized == "copy token" {
+        if let Some(window) = document.default_view() {
+            native_issue_share_token(&window, document, button);
+        }
+        return true;
+    }
+    if kind == RouteKind::SharedWithMe && normalized == "copy manifest" {
+        if let Some(window) = document.default_view() {
+            native_copy_shared_manifest(&window, document, button);
+        }
+        return true;
+    }
+    if kind == RouteKind::SharedWithMe && (normalized == "stream" || normalized == "stream item") {
+        if let Some(window) = document.default_view() {
+            native_stream_shared_manifest(&window, document, button);
+        }
+        return true;
+    }
+    if matches!(normalized.as_str(), "copy review" | "copy action plan" | "copy packet") {
+        if let Some(window) = document.default_view() {
+            native_copy_context(&window, document, button, route_path, action);
+        }
+        return true;
+    }
+    if normalized == "refresh" {
+        let Some(window) = document.default_view() else {
+            return true;
+        };
+        native_set_action_status(document, action, "Refreshing live route data.");
+        let document_for_refresh = document.clone();
+        wasm_bindgen_futures::spawn_local(async move {
+            match refresh_route_data(&window).await {
+                Ok(()) => native_set_action_status(
+                    &document_for_refresh,
+                    "Refresh",
+                    "Live route data refreshed.",
+                ),
+                Err(error) => native_set_action_status(
+                    &document_for_refresh,
+                    "Refresh",
+                    &error
+                        .as_string()
+                        .unwrap_or_else(|| "route refresh failed".to_string()),
+                ),
+            }
+        });
+        return true;
+    }
+    false
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -8108,19 +10147,8 @@ fn run_native_route_action(
         .default_view()
         .and_then(|window| window.location().pathname().ok())
         .unwrap_or_else(|| "/searches".to_string());
-    if action.path.contains(":id")
-        && !normalize_route_path(&route_path).contains(":id")
-        && native_action_id(document, button, action).is_none()
-    {
-        let message = format!("{} requires a real selected resource", action.label);
-        if let Some(status) = document.get_element_by_id("slskr-action-status") {
-            status.set_inner_html(&format!(
-                "<strong>{}</strong> {}",
-                escape_html(action.label),
-                escape_html(&message)
-            ));
-        }
-        show_toast(document, &message);
+    let value = native_action_value(document, button, action.body);
+    if !native_route_action_is_ready(document, button, &route_path, action, "", &value) {
         return;
     }
     if native_action_requires_confirmation(action) {
@@ -8231,9 +10259,18 @@ fn execute_native_route_action(
         .pathname()
         .unwrap_or_else(|_| "/searches".to_string());
     let value = native_action_value(document, button, action.body);
+    if !native_route_action_is_ready(document, button, &route_path, action, "", &value) {
+        return;
+    }
     let target = native_action_target(document, button, action);
     let id = native_action_id(document, button, action);
-    let body = action_body_from_value(action.body, &value);
+    let body = native_action_body(document, button, action, &value).map(|body| {
+        if action.body == ActionBody::DownloadFiles {
+            download_body_with_selected_destination(document, &body).unwrap_or(body)
+        } else {
+            body
+        }
+    });
     let method = action.method.to_string();
     let label = action.label.to_string();
     let path = concrete_action_path_with_target_and_id(
@@ -8274,6 +10311,30 @@ fn execute_native_route_action(
         }
         let _ = refresh_route_data(&window).await;
     });
+}
+
+#[cfg(target_arch = "wasm32")]
+fn download_body_with_selected_destination(
+    document: &web_sys::Document,
+    body: &str,
+) -> Option<String> {
+    let destination = document
+        .query_selector("[data-slskr-download-destination]")
+        .ok()
+        .flatten()
+        .and_then(|element| form_control_value(&element))
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())?;
+    let mut payload = serde_json::from_str::<serde_json::Value>(body).ok()?;
+    let files = payload.as_array_mut()?;
+    for file in files {
+        if let Some(object) = file.as_object_mut() {
+            object
+                .entry("destinationDirectory".to_owned())
+                .or_insert_with(|| serde_json::Value::String(destination.clone()));
+        }
+    }
+    Some(payload.to_string())
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -8329,19 +10390,16 @@ fn native_action_value(
                 return value;
             }
         }
+        if matches!(body, ActionBody::DownloadFiles) {
+            return String::new();
+        }
         for selector in native_action_value_selectors(body) {
             if let Some(value) = first_workspace_value(&workspace, selector) {
                 return value;
             }
         }
         if matches!(body, ActionBody::CollectionItem) {
-            if let Some(value) = button_native_row_attribute(button, "data-slskr-native-collection")
-                .or_else(|| {
-                    selected_native_row_attribute(&workspace, "data-slskr-native-collection")
-                })
-            {
-                return value;
-            }
+            return String::new();
         }
         if matches!(body, ActionBody::ShareGrant | ActionBody::ShareGroupMember) {
             for attr in [
@@ -8357,13 +10415,7 @@ fn native_action_value(
                 }
             }
         }
-        if matches!(
-            body,
-            ActionBody::DownloadFiles
-                | ActionBody::ShareGrant
-                | ActionBody::ShareGroupMember
-                | ActionBody::Username
-        ) {
+        if matches!(body, ActionBody::Username) {
             if let Some(value) = selected_native_row_title(&workspace) {
                 return value;
             }
@@ -8374,6 +10426,21 @@ fn native_action_value(
             }
         }
     }
+    if matches!(
+        body,
+        ActionBody::ConversationMessage
+            | ActionBody::RoomMessage
+            | ActionBody::FeedPreview
+            | ActionBody::JsonString
+            | ActionBody::MusicBrainzTarget
+            | ActionBody::SongIdSource
+            | ActionBody::ShareGrant
+            | ActionBody::ShareGroupMember
+            | ActionBody::ContactDiscovery
+            | ActionBody::ContactInvite
+    ) {
+        return native_action_fallback(body);
+    }
     document_selected_native_row_title(document).unwrap_or_else(|| native_action_fallback(body))
 }
 
@@ -8382,13 +10449,13 @@ fn native_action_value_selectors(body: ActionBody) -> &'static [&'static str] {
     match body {
         ActionBody::BrowseDirectory => &[r#"input[aria-label="Folder"]"#],
         ActionBody::CollectionItem => &[
+            r#"input[aria-label="Content ID"]"#,
             r#"input[aria-label="Search for item"]"#,
             r#"input[aria-label="Title"]"#,
         ],
         ActionBody::ConversationMessage | ActionBody::RoomMessage => &[
             r#"textarea[aria-label="Message"]"#,
             r#"input[aria-label="Message"]"#,
-            r#"input[aria-label="Chat username"]"#,
         ],
         ActionBody::DownloadFiles => &[
             r#"input[aria-label="Folder"]"#,
@@ -8406,6 +10473,8 @@ fn native_action_value_selectors(body: ActionBody) -> &'static [&'static str] {
             r#"input[aria-label="Chat username"]"#,
             r#"input[aria-label="Artist Name"]"#,
         ],
+        ActionBody::MusicBrainzTarget => &[r#"input[aria-label="Release ID"]"#],
+        ActionBody::LibraryPath => &[r#"input[aria-label="Library Path"]"#],
         ActionBody::NameDescription => &[
             r#"input[aria-label="Title"]"#,
             r#"input[aria-label="Group Name"]"#,
@@ -8432,7 +10501,11 @@ fn native_action_value_selectors(body: ActionBody) -> &'static [&'static str] {
             r#"input[aria-label="Chat username"]"#,
             r#"input[aria-label="Nickname"]"#,
         ],
-        ActionBody::EnabledFalse | ActionBody::EnabledTrue | ActionBody::None => &[],
+        ActionBody::SongIdSource => &[r#"input[aria-label="SongID source"]"#],
+        ActionBody::EnabledFalse
+        | ActionBody::EnabledTrue
+        | ActionBody::InviteRequest
+        | ActionBody::None => &[],
     }
 }
 
@@ -8451,6 +10524,14 @@ fn native_action_target(
     button: &web_sys::Element,
     action: RouteAction,
 ) -> Option<String> {
+    if action.path.contains(":collectionId") {
+        let workspace = button.closest(".slskr-native-workspace").ok().flatten()?;
+        let collection_id = button_native_row_attribute(button, "data-slskr-native-collection-id")
+            .or_else(|| {
+                selected_native_row_attribute(&workspace, "data-slskr-native-collection-id")
+            })?;
+        return route_target_segment(&collection_id);
+    }
     if action.path.contains(":id")
         && !action.path.contains(":username")
         && !action.path.contains(":roomName")
@@ -8461,6 +10542,27 @@ fn native_action_target(
         return None;
     }
     let workspace = button.closest(".slskr-native-workspace").ok().flatten()?;
+    if action.path.contains(":roomName") {
+        let room = button_native_row_attribute(button, "data-slskr-native-room-name")
+            .or_else(|| selected_native_row_attribute(&workspace, "data-slskr-native-room-name"))
+            .or_else(|| first_workspace_value(&workspace, r#"input[aria-label="Search rooms"]"#))
+            .or_else(|| button_native_row_target(button))
+            .or_else(|| selected_native_row_target(&workspace))?;
+        return route_target_segment(&room);
+    }
+    if matches!(action.body, ActionBody::BrowseDirectory | ActionBody::DownloadFiles) {
+        for selector in [
+            r#"input[aria-label="Username"]"#,
+            r#"input[aria-label="Chat username"]"#,
+            r#"input[aria-label="Soulseek Username"]"#,
+        ] {
+            if let Some(value) = first_workspace_value(&workspace, selector)
+                .filter(|value| safe_route_segment(value))
+            {
+                return Some(value);
+            }
+        }
+    }
     if let Some(value) = button_native_row_target(button).filter(|value| safe_route_segment(value))
     {
         return Some(value);
@@ -8496,15 +10598,188 @@ fn native_action_target(
 }
 
 #[cfg(target_arch = "wasm32")]
+fn native_action_target_for_ui(
+    document: &web_sys::Document,
+    button: &web_sys::Element,
+    action: RouteAction,
+    value: &str,
+) -> Option<String> {
+    if let Some(workspace) = button.closest(".slskr-native-workspace").ok().flatten() {
+        if let Some(target) = native_action_target(document, button, action) {
+            return Some(target);
+        }
+        if let Some(target) = selected_native_row_target(&workspace) {
+            return route_target_segment(&target);
+        }
+    }
+    if action.path.contains(":collectionId") {
+        return document
+            .query_selector("[data-slskr-native-select][aria-selected=\"true\"]")
+            .ok()
+            .flatten()
+            .and_then(|row| row.get_attribute("data-slskr-native-collection-id"))
+            .filter(|target| safe_route_segment(target))
+            .and_then(|target| route_target_segment(&target));
+    }
+    if action.path.contains(":username") || action.path.contains(":roomName") {
+        let selectors: &[&str] = if action.path.contains(":roomName") {
+            &[
+                r#"input[aria-label="Search rooms"]"#,
+                r#"input[aria-label="Room"]"#,
+            ]
+        } else {
+            &[
+                r#"input[aria-label="Username"]"#,
+                r#"input[aria-label="Chat username"]"#,
+                r#"input[aria-label="Contact username"]"#,
+                r#"input[aria-label="Soulseek Username"]"#,
+            ]
+        };
+        for selector in selectors {
+            if let Ok(Some(element)) = document.query_selector(selector) {
+                if let Some(target) = form_control_value(&element)
+                    .map(|target| target.trim().to_owned())
+                    .filter(|target| safe_route_segment(target))
+                    .and_then(|target| route_target_segment(&target))
+                {
+                    return Some(target);
+                }
+            }
+        }
+        if let Some(target) = route_target_segment(value) {
+            return Some(target);
+        }
+        return document
+            .query_selector("[data-slskr-native-select][aria-selected=\"true\"]")
+            .ok()
+            .flatten()
+            .and_then(|row| {
+                [
+                    "data-slskr-native-username",
+                    "data-slskr-native-peer",
+                    "data-slskr-native-contact",
+                    "data-slskr-native-detail",
+                    "data-slskr-native-title",
+                ]
+                .iter()
+                .find_map(|attribute| row.get_attribute(attribute))
+            })
+            .filter(|target| safe_route_segment(target))
+            .and_then(|target| route_target_segment(&target));
+    }
+    None
+}
+
+#[cfg(target_arch = "wasm32")]
+fn native_route_action_is_ready(
+    document: &web_sys::Document,
+    button: &web_sys::Element,
+    route_path: &str,
+    action: RouteAction,
+    target_value: &str,
+    body_value: &str,
+) -> bool {
+    if !native_action_value_is_valid(document, action.label, action, body_value) {
+        return false;
+    }
+    if action.body == ActionBody::ShareGrant {
+        let collection_id = button_native_row_attribute(button, "data-slskr-native-collection-id")
+            .or_else(|| {
+                button
+                    .closest(".slskr-native-workspace")
+                    .ok()
+                    .flatten()
+                    .and_then(|workspace| {
+                        selected_native_row_attribute(
+                            &workspace,
+                            "data-slskr-native-collection-id",
+                        )
+                    })
+            })
+            .or_else(|| {
+                document
+                    .query_selector(
+                        "[data-slskr-native-select][aria-selected=\"true\"][data-slskr-native-collection-id]",
+                    )
+                    .ok()
+                    .flatten()
+                    .and_then(|row| row.get_attribute("data-slskr-native-collection-id"))
+            });
+        if collection_id
+            .as_deref()
+            .filter(|value| safe_route_segment(value))
+            .is_none()
+        {
+            native_set_action_status(
+                document,
+                action.label,
+                "Select a live collection before creating a share grant.",
+            );
+            return false;
+        }
+    }
+    if action.path.contains(":id") || action.path.contains(":itemId") {
+        let route_has_id = route_path
+            .trim_matches('/')
+            .split('/')
+            .filter(|segment| !segment.is_empty())
+            .count()
+            > 1;
+        if !route_has_id && native_action_id(document, button, action).is_none() {
+            native_set_action_status(
+                document,
+                action.label,
+                "Select a live row before running this action.",
+            );
+            return false;
+        }
+    }
+    if action.path.contains(":username")
+        || action.path.contains(":roomName")
+        || action.path.contains(":collectionId")
+    {
+        if native_action_target_for_ui(document, button, action, target_value).is_none() {
+            native_set_action_status(
+                document,
+                action.label,
+                "Enter or select a live target before running this action.",
+            );
+            return false;
+        }
+    }
+    true
+}
+
+#[cfg(target_arch = "wasm32")]
+fn route_target_segment(value: &str) -> Option<String> {
+    let value = value.trim();
+    if value.is_empty()
+        || value
+            .chars()
+            .any(|ch| ch.is_control() || matches!(ch, '/' | '?' | '#'))
+    {
+        return None;
+    }
+    let mut encoded = String::new();
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_') {
+            encoded.push(byte as char);
+        } else {
+            encoded.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    Some(encoded)
+}
+
+#[cfg(target_arch = "wasm32")]
 fn native_action_id(
-    _document: &web_sys::Document,
+    document: &web_sys::Document,
     button: &web_sys::Element,
     action: RouteAction,
 ) -> Option<String> {
-    if !action.path.contains(":id") {
+    if !action.path.contains(":id") && !action.path.contains(":itemId") {
         return None;
     }
-    let workspace = button.closest(".slskr-native-workspace").ok().flatten()?;
     for attr in [
         "data-slskr-native-item-id",
         "data-slskr-native-transfer-id",
@@ -8519,7 +10794,18 @@ fn native_action_id(
         {
             return Some(value);
         }
-        if let Some(value) = selected_native_row_attribute(&workspace, attr)
+        if let Some(workspace) = button.closest(".slskr-native-workspace").ok().flatten() {
+            if let Some(value) = selected_native_row_attribute(&workspace, attr)
+                .filter(|value| safe_route_segment(value))
+            {
+                return Some(value);
+            }
+        }
+        if let Some(value) = document
+            .query_selector("[data-slskr-native-select][aria-selected=\"true\"]")
+            .ok()
+            .flatten()
+            .and_then(|row| row.get_attribute(attr))
             .filter(|value| safe_route_segment(value))
         {
             return Some(value);
@@ -8530,13 +10816,22 @@ fn native_action_id(
 
 #[cfg(target_arch = "wasm32")]
 fn first_workspace_value(workspace: &web_sys::Element, selector: &str) -> Option<String> {
-    workspace
-        .query_selector(selector)
-        .ok()
-        .flatten()
-        .and_then(|element| form_control_value(&element))
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
+    let nodes = workspace.query_selector_all(selector).ok()?;
+    for index in 0..nodes.length() {
+        let Some(node) = nodes.item(index) else {
+            continue;
+        };
+        let Ok(element) = node.dyn_into::<web_sys::Element>() else {
+            continue;
+        };
+        if let Some(value) = form_control_value(&element)
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+        {
+            return Some(value);
+        }
+    }
+    None
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -8673,19 +10968,24 @@ fn document_selected_native_row_title(document: &web_sys::Document) -> Option<St
 fn native_action_fallback(body: ActionBody) -> String {
     match body {
         ActionBody::BrowseDirectory => "/".to_string(),
-        ActionBody::CollectionItem => "Demo Track".to_string(),
-        ActionBody::ConversationMessage => "hello".to_string(),
-        ActionBody::DownloadFiles => "Remote/Song.mp3".to_string(),
-        ActionBody::FeedPreview => "Public Domain Jazz - Demo Track".to_string(),
-        ActionBody::JsonString => "contract-room".to_string(),
-        ActionBody::NameDescription => "Rust Web Demo".to_string(),
+        ActionBody::CollectionItem
+        | ActionBody::ConversationMessage
+        | ActionBody::DownloadFiles
+        | ActionBody::FeedPreview
+        | ActionBody::InviteRequest
+        | ActionBody::LibraryPath
+        | ActionBody::JsonString
+        | ActionBody::MusicBrainzTarget
+        | ActionBody::NameDescription
+        | ActionBody::RoomMessage
+        | ActionBody::SearchText
+        | ActionBody::ShareGrant
+        | ActionBody::ShareGroupMember
+        | ActionBody::Username
+        | ActionBody::ContactDiscovery
+        | ActionBody::ContactInvite
+        | ActionBody::SongIdSource => String::new(),
         ActionBody::Permissions => "read".to_string(),
-        ActionBody::RoomMessage => "hello room".to_string(),
-        ActionBody::SearchText => "public domain jazz".to_string(),
-        ActionBody::ShareGrant | ActionBody::ShareGroupMember | ActionBody::Username => {
-            "peer1".to_string()
-        }
-        ActionBody::ContactDiscovery | ActionBody::ContactInvite => "peer1".to_string(),
         ActionBody::EnabledFalse | ActionBody::EnabledTrue | ActionBody::None => String::new(),
     }
 }
@@ -9499,12 +11799,28 @@ fn mount_live_controls(
 ) -> Result<(), JsValue> {
     if let Some(button) = document.query_selector("[data-slskr-refresh-route]")? {
         let window = window.clone();
+        let document = document.clone();
         let callback = Closure::<dyn FnMut(web_sys::MouseEvent)>::wrap(Box::new(
             move |event: web_sys::MouseEvent| {
                 event.prevent_default();
                 let window = window.clone();
+                let document = document.clone();
+                native_set_action_status(&document, "Refresh", "Refreshing live route data.");
                 wasm_bindgen_futures::spawn_local(async move {
-                    let _ = refresh_route_data(&window).await;
+                    match refresh_route_data(&window).await {
+                        Ok(()) => native_set_action_status(
+                            &document,
+                            "Refresh",
+                            "Live route data refreshed.",
+                        ),
+                        Err(error) => native_set_action_status(
+                            &document,
+                            "Refresh",
+                            &error
+                                .as_string()
+                                .unwrap_or_else(|| "route refresh failed".to_string()),
+                        ),
+                    }
                 });
             },
         ));
@@ -9536,6 +11852,246 @@ fn mount_live_controls(
         callback.forget();
     }
 
+    Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn reference_action_value(document: &web_sys::Document) -> String {
+    let Ok(fields) = document.query_selector_all("[data-slskr-parity-reference] input, [data-slskr-parity-reference] textarea, [data-slskr-parity-reference] select") else {
+        return String::new();
+    };
+    let mut values = Vec::new();
+    for index in 0..fields.length() {
+        let Some(node) = fields.item(index) else {
+            continue;
+        };
+        if let Ok(input) = node.clone().dyn_into::<web_sys::HtmlInputElement>() {
+            let value = input.value();
+            if !value.trim().is_empty() {
+                values.push(value);
+            }
+            continue;
+        }
+        if let Ok(textarea) = node.clone().dyn_into::<web_sys::HtmlTextAreaElement>() {
+            let value = textarea.value();
+            if !value.trim().is_empty() {
+                values.push(value);
+            }
+            continue;
+        }
+        if let Ok(select) = node.dyn_into::<web_sys::HtmlSelectElement>() {
+            let value = select.value();
+            if !value.trim().is_empty() {
+                values.push(value);
+            }
+        }
+    }
+    values.join("\n")
+}
+
+#[cfg(target_arch = "wasm32")]
+fn set_reference_status(document: &web_sys::Document, label: &str, message: &str) {
+    if let Some(status) = document.get_element_by_id("slskr-action-status") {
+        status.set_inner_html(&format!(
+            "<strong>{}</strong> {}",
+            escape_html(label),
+            escape_html(message),
+        ));
+    }
+    show_toast(document, &format!("{label}: {message}"));
+}
+
+#[cfg(target_arch = "wasm32")]
+fn copy_reference_text(window: &web_sys::Window, document: &web_sys::Document, text: String) {
+    let clipboard = window.navigator().clipboard();
+    let promise = clipboard.write_text(&text);
+    let document = document.clone();
+    wasm_bindgen_futures::spawn_local(async move {
+        if wasm_bindgen_futures::JsFuture::from(promise).await.is_ok() {
+            set_reference_status(&document, "Copy", "Copied to the clipboard");
+        } else {
+            set_reference_status(&document, "Copy", "Clipboard write was rejected");
+        }
+    });
+}
+
+#[cfg(target_arch = "wasm32")]
+fn mount_reference_actions(
+    window: &web_sys::Window,
+    document: &web_sys::Document,
+) -> Result<(), JsValue> {
+    let buttons = document.query_selector_all("[data-slskr-reference-action]")?;
+    for index in 0..buttons.length() {
+        let Some(node) = buttons.item(index) else {
+            continue;
+        };
+        let button: web_sys::Element = node.dyn_into()?;
+        if button.has_attribute("data-slskr-mounted") {
+            continue;
+        }
+        button.set_attribute("data-slskr-mounted", "true")?;
+        let window = window.clone();
+        let document = document.clone();
+        let button_for_callback = button.clone();
+        let callback = Closure::<dyn FnMut(web_sys::MouseEvent)>::wrap(Box::new(
+            move |event: web_sys::MouseEvent| {
+                event.prevent_default();
+                let label = button_for_callback
+                    .get_attribute("data-slskr-reference-action")
+                    .unwrap_or_else(|| "Reference action".to_string());
+                let route_path = window.location().pathname().unwrap_or_default();
+                let value = reference_action_value(&document);
+                let normalized = label.to_ascii_lowercase();
+                if route_kind(&route_path) == RouteKind::SharedWithMe {
+                    if matches!(
+                        normalized.as_str(),
+                        "open" | "open collection" | "backfill" | "leave share"
+                    ) && !native_shared_grant_is_selected(
+                        &document,
+                        &button_for_callback,
+                        &label,
+                    ) {
+                        return;
+                    }
+                    if normalized == "copy token" {
+                        native_issue_share_token(&window, &document, &button_for_callback);
+                        return;
+                    }
+                    if normalized == "copy manifest" {
+                        native_copy_shared_manifest(&window, &document, &button_for_callback);
+                        return;
+                    }
+                    if normalized == "stream" || normalized == "stream item" {
+                        native_stream_shared_manifest(&window, &document, &button_for_callback);
+                        return;
+                    }
+                }
+                if matches!(normalized.as_str(), "copy review" | "copy manifest" | "copy token") {
+                    let facts = document
+                        .query_selector("[data-slskr-parity-reference] .slskr-reference-facts")
+                        .ok()
+                        .flatten()
+                        .map(|element| element.text_content().unwrap_or_default())
+                        .unwrap_or_default();
+                    let text = [route_path.clone(), value.clone(), facts]
+                        .into_iter()
+                        .filter(|part| !part.trim().is_empty())
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    copy_reference_text(&window, &document, text);
+                    return;
+                }
+                if normalized == "clear selected user" {
+                    set_reference_status(&document, &label, "Selection cleared");
+                    return;
+                }
+                if normalized == "collapse all message panels" {
+                    if let Ok(panels) = document.query_selector_all("[data-slskr-native-panel]") {
+                        for panel_index in 0..panels.length() {
+                            if let Some(panel) = panels.item(panel_index) {
+                                if let Ok(panel) = panel.dyn_into::<web_sys::Element>() {
+                                    let _ = panel.set_attribute("hidden", "");
+                                }
+                            }
+                        }
+                    }
+                    set_reference_status(&document, &label, "Message panels collapsed");
+                    return;
+                }
+                if normalized == "refresh nearby" {
+                    let window_for_request = window.clone();
+                    let document_for_request = document.clone();
+                    wasm_bindgen_futures::spawn_local(async move {
+                        let result = fetch_text_with_method(
+                            &window_for_request,
+                            &endpoint_url("/contacts/nearby"),
+                            "GET",
+                            None,
+                        )
+                        .await;
+                        match result {
+                            Ok(response) => set_reference_status(
+                                &document_for_request,
+                                "Refresh Nearby",
+                                &format!("{}", compact_preview(&response)),
+                            ),
+                            Err(error) => set_reference_status(
+                                &document_for_request,
+                                "Refresh Nearby",
+                                &error
+                                    .as_string()
+                                    .unwrap_or_else(|| "request failed".to_string()),
+                            ),
+                        }
+                    });
+                    return;
+                }
+                let Some(action) = route_action_for_native_label(&route_path, &label) else {
+                    set_reference_status(
+                        &document,
+                        &label,
+                        "This control has no executable route contract",
+                    );
+                    return;
+                };
+                if !native_route_action_is_ready(
+                    &document,
+                    &button_for_callback,
+                    &route_path,
+                    action,
+                    "",
+                    &value,
+                ) {
+                    return;
+                }
+                let body = native_action_body(&document, &button_for_callback, action, &value);
+                let method = action.method.to_string();
+                let target = native_action_target_for_ui(
+                    &document,
+                    &button_for_callback,
+                    action,
+                    "",
+                );
+                let id = native_action_id(&document, &button_for_callback, action);
+                let path = concrete_action_path_with_target_and_id(
+                    &route_path,
+                    action,
+                    target.as_deref(),
+                    id.as_deref(),
+                );
+                let window_for_request = window.clone();
+                let document_for_request = document.clone();
+                let label_for_request = label.clone();
+                set_reference_status(&document, &label, "sending");
+                wasm_bindgen_futures::spawn_local(async move {
+                    let result = fetch_text_with_method(
+                        &window_for_request,
+                        &path,
+                        &method,
+                        body.as_deref(),
+                    )
+                    .await;
+                    match result {
+                        Ok(response) => set_reference_status(
+                            &document_for_request,
+                            &label_for_request,
+                            &format!("{} {}", method, compact_preview(&response)),
+                        ),
+                        Err(error) => set_reference_status(
+                            &document_for_request,
+                            &label_for_request,
+                            &error
+                                .as_string()
+                                .unwrap_or_else(|| "request failed".to_string()),
+                        ),
+                    }
+                    let _ = refresh_route_data(&window_for_request).await;
+                });
+            },
+        ));
+        button.add_event_listener_with_callback("click", callback.as_ref().unchecked_ref())?;
+        callback.forget();
+    }
     Ok(())
 }
 
@@ -9634,7 +12190,9 @@ fn keyboard_event_started_in_text_control(document: &web_sys::Document) -> bool 
 
 #[cfg(target_arch = "wasm32")]
 fn focus_first_card_filter(document: &web_sys::Document) {
-    if let Ok(Some(filter)) = document.query_selector(".slskr-card-filter") {
+    if let Ok(Some(filter)) = document
+        .query_selector(".slskr-card-filter, [data-slskr-native-filter], [data-slskr-search-setting=\"query\"]")
+    {
         if let Ok(input) = filter.dyn_into::<web_sys::HtmlInputElement>() {
             let _ = input.focus();
             let _ = input.select();
@@ -9644,7 +12202,9 @@ fn focus_first_card_filter(document: &web_sys::Document) {
 
 #[cfg(target_arch = "wasm32")]
 fn clear_all_card_filters(document: &web_sys::Document) {
-    if let Ok(filters) = document.query_selector_all(".slskr-card-filter") {
+    if let Ok(filters) = document.query_selector_all(
+        ".slskr-card-filter, [data-slskr-native-filter], [data-slskr-search-setting=\"query\"]",
+    ) {
         for filter_index in 0..filters.length() {
             let Some(filter) = filters.item(filter_index) else {
                 continue;
@@ -9677,6 +12237,19 @@ fn clear_all_card_filters(document: &web_sys::Document) {
                 continue;
             };
             update_data_card_count(&card);
+        }
+    }
+
+    if let Ok(workspaces) = document.query_selector_all(".slskr-native-workspace") {
+        for workspace_index in 0..workspaces.length() {
+            let Some(node) = workspaces.item(workspace_index) else {
+                continue;
+            };
+            let Ok(workspace) = node.dyn_into::<web_sys::Element>() else {
+                continue;
+            };
+            apply_native_filter(&workspace, "");
+            persist_native_filter(&workspace, "");
         }
     }
 
@@ -11491,6 +14064,14 @@ fn mount_player_controls(
                         }
                     }
                     let _ = refresh_player_status(&window).await;
+                    set_player_status(
+                        &document,
+                        if action == "clear" {
+                            "Player cleared"
+                        } else {
+                            "Player refreshed"
+                        },
+                    );
                 });
             },
         ));
@@ -11932,9 +14513,13 @@ fn mount_browser_local_panels(
                         );
                     }
                     apply_experience_form(&document, &values);
+                    if action == "copy" {
+                        let report = experience_preferences_report(&values);
+                        copy_reference_text(&window, &document, report);
+                    }
                     if let Some(status) = document.get_element_by_id("slskr-experience-status") {
                         let message = match action.as_str() {
-                            "copy" => "Experience preference report prepared.",
+                            "copy" => "Experience preference report copied.",
                             "reset" => "Experience preferences reset.",
                             _ => "Experience preferences saved locally.",
                         };
@@ -12044,6 +14629,39 @@ fn mount_browser_local_panels(
                     if let Some(status) = document.get_element_by_id("slskr-automation-status") {
                         status
                             .set_text_content(Some(&format!("{} dry run recorded.", recipe.title)));
+                    }
+                },
+            ));
+            button.add_event_listener_with_callback("click", callback.as_ref().unchecked_ref())?;
+            callback.forget();
+        }
+
+        let copy_plan_buttons = document.query_selector_all("[data-slskr-recipe-copy]")?;
+        for index in 0..copy_plan_buttons.length() {
+            let Some(node) = copy_plan_buttons.item(index) else {
+                continue;
+            };
+            let button: web_sys::Element = node.dyn_into()?;
+            let recipe_id = button
+                .get_attribute("data-slskr-recipe-copy")
+                .unwrap_or_default();
+            let window = window.clone();
+            let document = document.clone();
+            let callback = Closure::<dyn FnMut(web_sys::MouseEvent)>::wrap(Box::new(
+                move |event: web_sys::MouseEvent| {
+                    event.prevent_default();
+                    let Some(recipe) = automation_recipes()
+                        .iter()
+                        .find(|recipe| recipe.id == recipe_id)
+                        .copied()
+                    else {
+                        return;
+                    };
+                    let report = automation_dry_run_report(recipe, "browser-local");
+                    let text = serde_json::to_string_pretty(&report).unwrap_or_default();
+                    copy_reference_text(&window, &document, text);
+                    if let Some(status) = document.get_element_by_id("slskr-automation-status") {
+                        status.set_text_content(Some(&format!("{} plan copied.", recipe.title)));
                     }
                 },
             ));
@@ -12229,36 +14847,133 @@ fn mount_toolbar_actions(
             continue;
         };
         let button: web_sys::Element = node.dyn_into()?;
-        let Some(action_index) = button
+        let action_index = button
             .get_attribute("data-slskr-toolbar-action")
-            .and_then(|value| value.parse::<usize>().ok())
-        else {
+            .and_then(|value| value.parse::<usize>().ok());
+        let action_label = button.text_content().unwrap_or_default().trim().to_owned();
+        if action_index.is_none() && action_label.is_empty() {
             continue;
-        };
+        }
         let window = window.clone();
         let document = document.clone();
+        let button_for_callback = button.clone();
         let callback = Closure::<dyn FnMut(web_sys::MouseEvent)>::wrap(Box::new(
             move |event: web_sys::MouseEvent| {
                 event.prevent_default();
-                let value = document
-                    .query_selector(".slskr-toolbar-input")
+                let toolbar_values = document
+                    .query_selector_all(".slskr-toolbar-input")
                     .ok()
-                    .flatten()
-                    .and_then(|element| element.dyn_into::<web_sys::HtmlInputElement>().ok())
-                    .map(|input| input.value())
+                    .map(|inputs| {
+                        (0..inputs.length())
+                            .filter_map(|index| {
+                                inputs
+                                    .item(index)
+                                    .and_then(|node| node.dyn_into::<web_sys::Element>().ok())
+                                    .and_then(|element| form_control_value(&element))
+                            })
+                            .collect::<Vec<_>>()
+                    })
                     .unwrap_or_default();
                 let route_path = window.location().pathname().unwrap_or_default();
-                let Some(action) = route_action_at(&route_path, action_index) else {
+                if route_kind(&route_path) == RouteKind::SharedWithMe {
+                    let normalized = action_label.to_ascii_lowercase();
+                    if matches!(
+                        normalized.as_str(),
+                        "open" | "open collection" | "backfill" | "leave share"
+                    ) && !native_shared_grant_is_selected(
+                        &document,
+                        &button_for_callback,
+                        &action_label,
+                    ) {
+                        return;
+                    }
+                    if normalized == "copy token" {
+                        native_issue_share_token(&window, &document, &button_for_callback);
+                        return;
+                    }
+                    if normalized == "copy manifest" {
+                        native_copy_shared_manifest(&window, &document, &button_for_callback);
+                        return;
+                    }
+                    if normalized == "stream" || normalized == "stream item" {
+                        native_stream_shared_manifest(&window, &document, &button_for_callback);
+                        return;
+                    }
+                }
+                let Some(action) = route_action_for_native_label(&route_path, &action_label)
+                    .or_else(|| action_index.and_then(|index| route_action_at(&route_path, index)))
+                else {
+                    if let Some(status) = document.get_element_by_id("slskr-action-status") {
+                        status.set_inner_html(&format!(
+                            "<strong>{}</strong> no executable route contract",
+                            escape_html(&action_label)
+                        ));
+                    }
                     return;
                 };
-                let body = action_body_from_value(action.body, &value);
+                let target_value = if action.path.contains(":username")
+                    || action.path.contains(":roomName")
+                {
+                    toolbar_values.first().cloned().unwrap_or_default()
+                } else {
+                    String::new()
+                };
+                let body_value = match action.body {
+                    ActionBody::ConversationMessage | ActionBody::RoomMessage => toolbar_values
+                        .get(1)
+                        .cloned()
+                        .unwrap_or_else(|| native_action_value(&document, &button_for_callback, action.body)),
+                    ActionBody::BrowseDirectory => toolbar_values
+                        .get(1)
+                        .cloned()
+                        .unwrap_or_else(|| native_action_value(&document, &button_for_callback, action.body)),
+                    ActionBody::DownloadFiles => {
+                        native_action_value(&document, &button_for_callback, action.body)
+                    }
+                    _ => toolbar_values
+                        .first()
+                        .cloned()
+                        .unwrap_or_else(|| native_action_value(&document, &button_for_callback, action.body)),
+                };
+                if !native_route_action_is_ready(
+                    &document,
+                    &button_for_callback,
+                    &route_path,
+                    action,
+                    &target_value,
+                    &body_value,
+                ) {
+                    return;
+                }
+                let body = native_action_body(
+                    &document,
+                    &button_for_callback,
+                    action,
+                    &body_value,
+                );
                 let window = window.clone();
                 let document = document.clone();
                 let method = action.method.to_string();
-                let path = concrete_action_path(&route_path, action);
+                let return_to_searches = route_kind(&route_path) == RouteKind::Search
+                    && route_path != "/searches"
+                    && matches!(action.label, "Clear Searches" | "Remove Search");
+                let target = native_action_target_for_ui(
+                    &document,
+                    &button_for_callback,
+                    action,
+                    &target_value,
+                );
+                let id = native_action_id(&document, &button_for_callback, action);
+                let path = concrete_action_path_with_target_and_id(
+                    &route_path,
+                    action,
+                    target.as_deref(),
+                    id.as_deref(),
+                );
                 wasm_bindgen_futures::spawn_local(async move {
                     let result =
                         fetch_text_with_method(&window, &path, &method, body.as_deref()).await;
+                    let succeeded = result.is_ok();
                     if let Some(status) = document.get_element_by_id("slskr-action-status") {
                         match result {
                             Ok(response) => status.set_inner_html(&format!(
@@ -12278,7 +14993,11 @@ fn mount_toolbar_actions(
                             }
                         }
                     }
-                    let _ = refresh_route_data(&window).await;
+                    if return_to_searches && succeeded {
+                        let _ = window.location().set_href("/searches");
+                    } else {
+                        let _ = refresh_route_data(&window).await;
+                    }
                 });
             },
         ));
@@ -12311,6 +15030,7 @@ fn mount_route_actions(
         );
         let window = window.clone();
         let document = document.clone();
+        let button_for_callback = button.clone();
         let callback = Closure::<dyn FnMut(web_sys::MouseEvent)>::wrap(Box::new(
             move |_event: web_sys::MouseEvent| {
                 let value = document
@@ -12324,14 +15044,40 @@ fn mount_route_actions(
                 let Some(action) = route_action_at(&route_path, action_index) else {
                     return;
                 };
-                let body = action_body_from_value(action.body, &value);
+                if !native_route_action_is_ready(
+                    &document,
+                    &button_for_callback,
+                    &route_path,
+                    action,
+                    "",
+                    &value,
+                ) {
+                    return;
+                }
+                let body = native_action_body(&document, &button_for_callback, action, &value);
                 let window = window.clone();
                 let document = document.clone();
                 let method = action.method.to_string();
-                let path = concrete_action_path(&route_path, action);
+                let return_to_searches = route_kind(&route_path) == RouteKind::Search
+                    && route_path != "/searches"
+                    && matches!(action.label, "Clear Searches" | "Remove Search");
+                let target = native_action_target_for_ui(
+                    &document,
+                    &button_for_callback,
+                    action,
+                    "",
+                );
+                let id = native_action_id(&document, &button_for_callback, action);
+                let path = concrete_action_path_with_target_and_id(
+                    &route_path,
+                    action,
+                    target.as_deref(),
+                    id.as_deref(),
+                );
                 wasm_bindgen_futures::spawn_local(async move {
                     let result =
                         fetch_text_with_method(&window, &path, &method, body.as_deref()).await;
+                    let succeeded = result.is_ok();
                     if let Some(status) = document.get_element_by_id("slskr-action-status") {
                         match result {
                             Ok(response) => status.set_inner_html(&format!(
@@ -12351,7 +15097,11 @@ fn mount_route_actions(
                             }
                         }
                     }
-                    let _ = refresh_route_data(&window).await;
+                    if return_to_searches && succeeded {
+                        let _ = window.location().set_href("/searches");
+                    } else {
+                        let _ = refresh_route_data(&window).await;
+                    }
                 });
             },
         ));
@@ -15265,6 +18015,12 @@ fn live_endpoint_segment(
                     "/collections",
                     &["id", "collectionId", "collection.id"],
                 )
+            } else if endpoint.path == "/collections/:id/items" {
+                live_response_identifier(
+                    responses,
+                    "/collections",
+                    &["id", "collectionId", "collection.id"],
+                )
             } else if endpoint.path.starts_with("/share-grants/") {
                 live_response_identifier(
                     responses,
@@ -15320,6 +18076,27 @@ fn concrete_live_endpoint_path(
     endpoint: ApiEndpoint,
     responses: &[EndpointBody],
 ) -> Option<String> {
+    if endpoint.path == "/library/health/issues/by-type" {
+        let library_path = endpoint_body(responses, "/shares")
+            .and_then(|body| serde_json::from_str::<serde_json::Value>(body).ok())
+            .and_then(|value| {
+                value
+                    .get("local")
+                    .and_then(serde_json::Value::as_array)
+                    .or_else(|| value.as_array())
+                    .and_then(|entries| entries.first())
+                    .and_then(|entry| {
+                        ["localPath", "raw", "path", "directory"]
+                            .iter()
+                            .find_map(|key| entry.get(*key).map(json_scalar_preview))
+                    })
+            })
+            .filter(|path| !path.trim().is_empty())?;
+        return Some(endpoint_url(&format!(
+            "/library/health/issues/by-type?libraryPath={}",
+            percent_encode_query(&library_path)
+        )));
+    }
     let path = endpoint.path;
     if !path.contains(':') {
         return Some(endpoint_url(path));
@@ -15344,6 +18121,12 @@ async fn refresh_route_data(window: &web_sys::Window) -> Result<(), JsValue> {
         return Ok(());
     };
     set_live_status(&document, "Refreshing live data");
+    if let Some(page_data) = page_data.as_ref() {
+        page_data.set_attribute("data-slskr-live-state", "pending")?;
+    }
+    if let Some(route_data) = document.get_element_by_id("slskr-route-data") {
+        route_data.set_attribute("data-slskr-live-state", "pending")?;
+    }
 
     let mut rendered = String::new();
     let mut responses = Vec::new();
@@ -15387,9 +18170,12 @@ async fn refresh_route_data(window: &web_sys::Window) -> Result<(), JsValue> {
             page_data.set_inner_html(&route_workspace_result_html(&path, &responses));
             mount_workspace_tabs(&document)?;
             mount_data_cards(&document)?;
+            mount_reference_actions(window, &document)?;
             mount_native_tables(&document)?;
             mount_native_subviews(&document)?;
             mount_native_actions(&document)?;
+            mount_transfer_columns(&document)?;
+            mount_download_policy_controls(&document)?;
             mount_native_filters(&document)?;
             mount_native_sorters(&document)?;
             mount_browser_local_panels(window, &document)?;
@@ -15399,12 +18185,25 @@ async fn refresh_route_data(window: &web_sys::Window) -> Result<(), JsValue> {
         page_data.set_inner_html(&route_workspace_result_html(&path, &responses));
         mount_workspace_tabs(&document)?;
         mount_data_cards(&document)?;
+        mount_reference_actions(window, &document)?;
         mount_native_tables(&document)?;
         mount_native_subviews(&document)?;
         mount_native_actions(&document)?;
+        mount_transfer_columns(&document)?;
+        mount_download_policy_controls(&document)?;
         mount_native_filters(&document)?;
         mount_native_sorters(&document)?;
         mount_browser_local_panels(window, &document)?;
+        page_data.set_attribute(
+            "data-slskr-live-state",
+            if errors == 0 { "ready" } else { "error" },
+        )?;
+    }
+    if let Some(route_data) = document.get_element_by_id("slskr-route-data") {
+        route_data.set_attribute(
+            "data-slskr-live-state",
+            if errors == 0 { "ready" } else { "error" },
+        )?;
     }
     let message = if errors == 0 {
         format!("Updated {} live probes", responses.len())
@@ -15434,12 +18233,30 @@ async fn fetch_text_with_method(
     method: &str,
     body: Option<&str>,
 ) -> Result<String, JsValue> {
+    fetch_text_with_method_and_headers(window, url, method, body, &[]).await
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn fetch_text_with_method_and_headers(
+    window: &web_sys::Window,
+    url: &str,
+    method: &str,
+    body: Option<&str>,
+    extra_headers: &[(&str, &str)],
+) -> Result<String, JsValue> {
     let init = web_sys::RequestInit::new();
     init.set_method(method);
-    if let Some(body) = body {
+    if body.is_some() || !extra_headers.is_empty() {
         let headers = web_sys::Headers::new()?;
-        headers.set("Content-Type", "application/json")?;
+        if body.is_some() {
+            headers.set("Content-Type", "application/json")?;
+        }
+        for (name, value) in extra_headers {
+            headers.set(name, value)?;
+        }
         init.set_headers(&headers);
+    }
+    if let Some(body) = body {
         init.set_body(&JsValue::from_str(body));
     }
     let response_value =
@@ -15513,7 +18330,7 @@ mod tests {
                 r#"[{"id":"group-1","name":"Fixture Group","memberCount":1,"createdAt":"today"}]"#,
             ),
             RouteKind::SharedWithMe => (
-                "/shared",
+                "/share-grants",
                 r#"[{"id":"grant-1","title":"Fixture Share","owner":"peer1","permissions":"read"}]"#,
             ),
             RouteKind::Browse => (
@@ -15566,8 +18383,8 @@ mod tests {
         assert!(html.contains("data-slskr-player-rating=\"5\""));
         assert!(html.contains("slskr-player-rating-status"));
         assert!(html.contains("slskr-player-radio"));
-        assert!(html.contains("Grouped results"));
-        assert!(html.contains("Search planner"));
+        assert!(html.contains("Searches"));
+        assert!(html.contains("Search Detail"));
         assert!(html.contains("data-slskr-route-kind=\"Search\""));
         assert!(html.contains("slskr-player-now"));
         assert!(html.contains("slskr-player-transfers"));
@@ -15622,8 +18439,8 @@ mod tests {
         assert!(html.contains("/api/v0/health"));
         assert!(html.contains("slskr-route-view"));
         let system = route_page_html("/system");
-        assert!(system.contains("Operator dashboard"));
-        assert!(system.contains("Rescan shares"));
+        assert!(system.contains("System"));
+        assert!(system.contains("Rescan Shares"));
     }
 
     #[test]
@@ -17732,7 +20549,7 @@ mod tests {
         assert!(html.contains("data-slskr-lazy-diagnostics=\"true\""));
         assert!(html.contains("slskr-route-data"));
         assert!(html.contains("Workspace"));
-        assert!(html.contains("Download queue"));
+        assert!(html.contains("<h3>Downloads</h3>"));
         assert!(html.contains("slskr-route-actions"));
         assert!(html.contains("slskr-route-summary"));
         assert!(html.contains("Overview"));
@@ -17786,69 +20603,64 @@ mod tests {
     #[test]
     fn route_pages_render_domain_workflows_before_developer_details() {
         let expectations = [
-            ("/searches", "Grouped results", "Search", "search-native"),
+            ("/searches", "Searches", "Search", "search-native"),
             (
                 "/discovery-graph",
-                "Discovery graph",
+                "Discovery Graph Atlas",
                 "Build graph",
                 "discovery-graph-native",
             ),
             (
                 "/playlist-intake",
-                "Playlist parser",
+                "Playlist Intake",
                 "Preview playlist",
                 "playlist-intake-native",
             ),
-            (
-                "/wishlist",
-                "Wanted searches",
-                "Add wanted search",
-                "wishlist-native",
-            ),
+            ("/wishlist", "Wishlist", "Add wanted search", "wishlist-native"),
             (
                 "/downloads",
-                "Download queue",
+                "Downloads",
                 "Download",
                 "transfers-native",
             ),
             (
                 "/uploads",
-                "Upload queue",
+                "Uploads",
                 "Clear completed",
                 "transfers-native",
             ),
             ("/messages", "Conversations", "Reply", "messaging-native"),
-            ("/users", "User directory", "Watch", "users-native"),
+            ("/users", "Users", "Watch", "users-native"),
             (
                 "/contacts",
-                "Contact manager",
+                "Contacts",
                 "Add contact",
                 "contacts-native",
             ),
-            ("/solid", "Solid status", "Connect identity", "solid-native"),
+            ("/solid", "Solid", "Connect identity", "solid-native"),
             (
                 "/collections",
-                "Collection library",
-                "Create collection",
+                "Collections",
+                "Create Collection",
                 "collections-native",
             ),
             (
                 "/sharegroups",
-                "Share groups",
+                "Share Groups",
                 "Issue token",
                 "sharegroups-native",
             ),
             (
                 "/shared",
-                "Inbound shares",
-                "Open collection",
+                "Shared with Me",
+                "Open",
                 "shared-native",
             ),
-            ("/browse", "Peer browser", "Browse", "browse-native"),
+            ("/browse", "Browse", "Browse", "browse-native"),
             (
                 "/system",
-                "Operator dashboard",
-                "Rescan shares",
+                "System",
+                "Rescan Shares",
                 "system-native",
             ),
         ];
@@ -17900,8 +20712,6 @@ mod tests {
             }
             assert!(html.contains("slskr-native-selection-status"));
             assert!(html.contains("slskr-toast-region"));
-            assert!(html.contains("slskr-legacy-workflow"));
-            assert!(html.contains("Additional workflow detail"));
             assert!(
                 html.contains(native_class),
                 "route {path} should render native parity class {native_class}"
@@ -17913,20 +20723,13 @@ mod tests {
 
             let parity_index = html
                 .find("data-slskr-parity-reference")
-                .unwrap_or_else(|| panic!("missing slskd compatibility panel for route {path}"));
-            let workflow_tabs_index = html
-                .find("slskr-workflow-tabs")
-                .unwrap_or_else(|| panic!("missing workflow tabs for route {path}"));
+                .unwrap_or_else(|| panic!("missing protocol compatibility panel for route {path}"));
             let native_index = html
                 .find("slskr-native-workspace")
                 .unwrap_or_else(|| panic!("missing native workspace for route {path}"));
             assert!(
-                parity_index < workflow_tabs_index,
-                "route {path} should show compatibility content before Rust workflow tabs"
-            );
-            assert!(
-                native_index < workflow_tabs_index,
-                "route {path} should show native page body before Rust workflow tabs"
+                parity_index < native_index,
+                "route {path} should show compatibility content before native page body"
             );
         }
     }
@@ -18062,10 +20865,10 @@ mod tests {
                 "/shared",
                 ApiEndpoint {
                     method: "GET",
-                    path: "/shared",
+                    path: "/share-grants",
                     surface: "sharegroups",
                 },
-                r#"[{"title":"Shared Collection","owner":"peer-owner","permissions":"read"}]"#,
+                r#"[{"id":"grant-1","title":"Shared Collection","owner":"peer-owner","permissions":"read"}]"#,
                 &["Shared Collection", "peer-owner", "read"][..],
             ),
             (
@@ -18256,7 +21059,7 @@ mod tests {
         assert!(collections.contains("Create Share Group"));
         assert!(collections.contains("Create Share Grant"));
         assert!(collections.contains("Backfill Share Grant"));
-        assert!(collections.contains("Add Library Item"));
+        assert!(collections.contains("Add Item to Collection"));
 
         let integrations = route_page_html("/playlist-intake");
         assert!(integrations.contains("Preview Playlist"));
@@ -18285,25 +21088,31 @@ mod tests {
             ("/contacts", "Message", "Send Message"),
             ("/contacts", "Browse", "Request Directory"),
             ("/contacts", "Remove", "Remove Contact"),
+            ("/contacts", "Create Invite", "Create Invite"),
+            ("/contacts", "Refresh Nearby", "Refresh Nearby"),
             ("/solid", "Resolve WebID", "Resolve WebID"),
-            ("/collections", "Add Item", "Add Library Item"),
+            ("/collections", "Open", "Open Collection"),
+            ("/collections", "Add Item", "Add Item to Collection"),
             ("/collections", "Share", "Create Share Grant"),
             ("/sharegroups", "Create Share Grant", "Create Share Grant"),
             ("/sharegroups", "Update Share Grant", "Update Share Grant"),
             ("/sharegroups", "Issue Token", "Issue Share Token"),
-            ("/shared", "Open", "Backfill Share Grant"),
-            ("/shared", "Stream", "Backfill Share Grant"),
+            ("/shared", "Open", "Open Shared Manifest"),
             ("/shared", "Backfill", "Backfill Share Grant"),
-            ("/shared", "Copy token", "Issue Share Token"),
-            ("/shared", "Leave share", "Delete Share Grant"),
             ("/browse", "Download Selected", "Queue Download"),
             ("/system", "Check for Updates", "Check for Updates"),
             ("/system", "Get Privileges", "Get Privileges"),
             ("/system", "Diagnostic Bundle", "Diagnostic Bundle"),
             ("/system", "Setup Health", "Setup Health"),
-            ("/system", "Shut Down", "Shut Down"),
-            ("/system", "Restart", "Restart"),
             ("/system", "Vacuum database", "Vacuum Database"),
+            ("/system", "Check Lidarr", "Check Lidarr"),
+            ("/system", "Refresh Lidarr Sync", "Refresh Lidarr Sync"),
+            ("/system", "Track MusicBrainz Target", "Track MusicBrainz Target"),
+            ("/system", "Refresh MusicBrainz", "Refresh MusicBrainz"),
+            ("/system", "Start SongID Run", "Start SongID Run"),
+            ("/system", "Refresh SongID", "Refresh SongID"),
+            ("/system", "Scan Library Health", "Start Library Health Scan"),
+            ("/system", "Fix Library Issues", "Fix Library Issues"),
         ];
 
         for (path, label, expected_action) in expectations {
@@ -18315,20 +21124,11 @@ mod tests {
 
     #[test]
     fn native_action_fallbacks_are_domain_specific() {
-        assert_eq!(
-            native_action_fallback(ActionBody::SearchText),
-            "public domain jazz"
-        );
-        assert_eq!(
-            native_action_fallback(ActionBody::FeedPreview),
-            "Public Domain Jazz - Demo Track"
-        );
-        assert_eq!(
-            native_action_fallback(ActionBody::DownloadFiles),
-            "Remote/Song.mp3"
-        );
+        assert!(native_action_fallback(ActionBody::SearchText).is_empty());
+        assert!(native_action_fallback(ActionBody::FeedPreview).is_empty());
+        assert!(native_action_fallback(ActionBody::DownloadFiles).is_empty());
         assert_eq!(native_action_fallback(ActionBody::BrowseDirectory), "/");
-        assert_eq!(native_action_fallback(ActionBody::Username), "peer1");
+        assert!(native_action_fallback(ActionBody::Username).is_empty());
         assert!(native_action_fallback(ActionBody::None).is_empty());
     }
 
@@ -18342,10 +21142,10 @@ mod tests {
             "Quarantine Jury",
             "slskr-system-panel-table",
             "Outbound webhooks",
-            "ListenBrainz",
+            "MusicBrainz",
             "Raw metrics",
-            "developer-only",
-            "Run Replacement Searches",
+            "Source providers",
+            "Scan Library Health",
             "Vacuum Database",
             "Proxy trust",
         ] {
@@ -18367,7 +21167,7 @@ mod tests {
             "data-slskr-browse-download-manifest",
             "File filter",
             "Refresh Folder",
-            "Estimated queue impact",
+            "Estimated queue impact appears after selection",
         ] {
             assert!(
                 browse.contains(value),
@@ -18465,10 +21265,6 @@ mod tests {
                 page.contains("data-slskr-native-inspector-actions"),
                 "{path} should expose selected-row context actions in the inspector"
             );
-            assert!(
-                page.contains("slskr-native-final-parity"),
-                "{path} should expose final old-WebUI workflow parity controls"
-            );
         }
 
         let search = route_page_html("/searches");
@@ -18493,9 +21289,6 @@ mod tests {
             "Discovery Graph Atlas",
             "No graph node selected",
             "Queue Nearby",
-            "data-slskr-graph-final-parity",
-            "Save Branch",
-            "Weight Edges",
         ] {
             assert!(
                 discovery.contains(value),
@@ -18508,9 +21301,6 @@ mod tests {
             "Import validation",
             "No playlist row selected",
             "Import Playlist",
-            "data-slskr-playlist-final-parity",
-            "Upload Playlist",
-            "Correct Row",
         ] {
             assert!(
                 playlist.contains(value),
@@ -18523,9 +21313,6 @@ mod tests {
             "Request Portal Summary",
             "No wishlist item selected",
             "Run Enabled",
-            "data-slskr-wishlist-final-parity",
-            "Check Quota",
-            "Persist Inbox",
         ] {
             assert!(
                 wishlist.contains(value),
@@ -18538,8 +21325,6 @@ mod tests {
             "Transfer Group",
             "No downloads selected",
             "Retry All",
-            "data-slskr-downloads-final-parity",
-            "Group by Peer",
         ] {
             assert!(
                 downloads.contains(value),
@@ -18552,11 +21337,7 @@ mod tests {
         );
 
         let uploads = route_page_html("/uploads");
-        for value in [
-            "data-slskr-uploads-final-parity",
-            "Edit Policy",
-            "Group by Peer",
-        ] {
+        for value in ["Transfer Group", "No uploads selected"] {
             assert!(
                 uploads.contains(value),
                 "uploads workspace should contain {value}"
@@ -18568,8 +21349,6 @@ mod tests {
             "User Detail",
             "No user selected",
             "Save note",
-            "data-slskr-users-final-parity",
-            "Open Context Menu",
         ] {
             assert!(
                 users.contains(value),
@@ -18582,9 +21361,6 @@ mod tests {
             "All Contacts",
             "No contact selected",
             "Refresh Nearby",
-            "data-slskr-contacts-final-parity",
-            "Create QR Invite",
-            "Scan QR Image",
         ] {
             assert!(
                 contacts.contains(value),
@@ -18597,8 +21373,6 @@ mod tests {
             "Identity Document",
             "No Solid resource selected",
             "Resolve WebID",
-            "data-slskr-solid-final-parity",
-            "Connect Session",
             "Sync Storage",
         ] {
             assert!(
@@ -18612,8 +21386,6 @@ mod tests {
             "Operator Actions",
             "No system item selected",
             "Diagnostic Bundle",
-            "data-slskr-system-final-parity",
-            "Operator Tab Parity",
         ] {
             assert!(
                 system.contains(value),
@@ -18627,12 +21399,9 @@ mod tests {
             "slskr-native-thread-grid",
             "data-slskr-native-preview-title",
             "data-slskr-native-preview-count",
-            "Unread 0",
+            "No conversation selected",
             "Delete Conversation",
-            "pod channel",
-            "data-slskr-messages-final-parity",
-            "Open Window",
-            "Restore Draft",
+            "No pod channels returned",
         ] {
             assert!(
                 messages.contains(value),
@@ -18648,9 +21417,6 @@ mod tests {
             "data-slskr-native-preview-title",
             "Preserve folders",
             "Duplicate warning review",
-            "data-slskr-browse-final-parity",
-            "Restore Session",
-            "Persist Breadcrumb",
         ] {
             assert!(
                 browse.contains(value),
@@ -18665,9 +21431,6 @@ mod tests {
             "Already in collection warning",
             "Audience picker",
             "Stream/download policies",
-            "data-slskr-collections-final-parity",
-            "Persist Draft",
-            "Pick Audience",
         ] {
             assert!(
                 collections.contains(value),
@@ -18682,9 +21445,6 @@ mod tests {
             "Token revoke",
             "Grant audit trail",
             "Create Share Grant",
-            "data-slskr-sharegroups-final-parity",
-            "Remove Member",
-            "Revoke Token",
         ] {
             assert!(
                 sharegroups.contains(value),
@@ -18698,10 +21458,6 @@ mod tests {
             "file-level access preview",
             "data-slskr-native-preview-title",
             "Backfill selected collection",
-            "Leave share",
-            "data-slskr-shared-final-parity",
-            "Copy Exact Token",
-            "Owner contact",
         ] {
             assert!(
                 shared.contains(value),
@@ -18741,7 +21497,7 @@ mod tests {
             ),
             (
                 "/shared",
-                &["Stream", "Backfill", "Copy token", "Leave share"],
+                &["Stream", "Backfill", "Copy token"],
             ),
             ("/browse", &["Download Selected", "Open a New Browse Tab"]),
             (
@@ -18819,12 +21575,7 @@ mod tests {
             ),
             (
                 "/shared",
-                &[
-                    "data-slskr-native-editor",
-                    "Inbound Access Editor",
-                    "Copy token",
-                    "Leave share",
-                ],
+                &["data-slskr-native-editor", "Inbound Access Editor", "Copy token"],
             ),
             (
                 "/system",
@@ -18879,6 +21630,14 @@ mod tests {
             r#"{"searchText":"a \"b\""}"#
         );
         assert_eq!(
+            action_body_from_value(ActionBody::MusicBrainzTarget, "release-1").unwrap(),
+            r#"{"releaseId":"release-1"}"#
+        );
+        assert_eq!(
+            action_body_from_value(ActionBody::SongIdSource, "query").unwrap(),
+            r#"{"source":"query"}"#
+        );
+        assert_eq!(
             action_body_from_value(ActionBody::BrowseDirectory, "Music\\Jazz\nLive").unwrap(),
             r#"{"directory":"Music\\Jazz\nLive"}"#
         );
@@ -18916,7 +21675,7 @@ mod tests {
         );
         assert_eq!(
             action_body_from_value(ActionBody::ShareGrant, "peer1").unwrap(),
-            r#"{"collection_id":"rust-web-demo","username":"peer1"}"#
+            r#"{"collection_id":"","username":"peer1"}"#
         );
         assert_eq!(
             action_body_from_value(ActionBody::ShareGroupMember, "peer1").unwrap(),
@@ -19190,6 +21949,30 @@ mod tests {
             "/api/v0/searches/search-42"
         );
 
+        let collection_item = route_action_for_native_label(
+            "/collections",
+            "Remove Collection Item",
+        )
+        .expect("collection item action");
+        assert_eq!(
+            concrete_action_path_with_target_and_id(
+                "/collections",
+                collection_item,
+                Some("collection-7"),
+                Some("item-9"),
+            ),
+            "/api/v0/collections/collection-7/items/item-9"
+        );
+        assert_eq!(
+            concrete_action_path_with_target_and_id(
+                "/collections",
+                collection_item,
+                Some("../bad"),
+                Some("item-9"),
+            ),
+            "/api/v0/collections/1/items/item-9"
+        );
+
         assert!(route_action_at("/searches/42", usize::MAX).is_none());
         assert!(route_action_at("/not-a-route", 0).is_none());
     }
@@ -19327,17 +22110,17 @@ mod tests {
         assert!(sharegroups.contains("Trusted"));
         assert!(sharegroups.contains("2 members"));
 
-        let shared = route_workspace_result_html(
-            "/shared",
-            &[EndpointBody {
-                endpoint: ApiEndpoint {
-                    method: "GET",
-                    path: "/shared",
-                    surface: "collections",
-                },
-                body: r#"[{"collection":{"title":"Inbox"},"owner":{"username":"sender"},"grant":{"permissions":"read/write"}}]"#
-                    .to_string(),
-            }],
+            let shared = route_workspace_result_html(
+                "/shared",
+                &[EndpointBody {
+                    endpoint: ApiEndpoint {
+                        method: "GET",
+                        path: "/share-grants",
+                        surface: "collections",
+                    },
+                    body: r#"[{"id":"grant-nested","collection":{"title":"Inbox"},"owner":{"username":"sender"},"grant":{"permissions":"read/write"}}]"#
+                        .to_string(),
+                }],
         );
         assert!(shared.contains("Inbox"));
         assert!(shared.contains("sender"));

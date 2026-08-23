@@ -274,6 +274,7 @@ Common settings:
 | `SLSKR_API_READ_ONLY_TOKEN` | Optional read-only token. |
 | `SLSKR_API_NOWPLAYING_TOKEN` | Optional token restricted to the scoped now-playing webhook. |
 | `SLSKR_CONTROLLER_COMPATIBILITY_TARGET` | Select frozen conflicting controller semantics: `slskd` or `slskdn` (default). |
+| `SLSKDN_POD_GOLD_STAR_CLUB_AUTOJOIN` | Gold Star Club auto-join; native/current launches are opt-in, while frozen compatibility launches default on for parity. TOML: `[podcore.gold_star_club].autojoin`. |
 | `SLSKR_REMOTE_CONFIGURATION` | Enable remote option overlays and configuration-file APIs; disabled by default. |
 | `SLSKR_SHARE_DIRS` | Semicolon-separated share roots. |
 | `SLSKR_LISTENER_BIND` | Regular peer listener bind address. |
@@ -519,6 +520,7 @@ The table below links the maintained entry points most users need first.
 | [docs/release.md](./docs/release.md) | Release tag, archive, and metadata policy. |
 | [COMPLIANCE.md](./COMPLIANCE.md) | Public posture, licensing, and project compliance notes. |
 | [docs/slskr.config.example.toml](./docs/slskr.config.example.toml) | Annotated config example. |
+| [docs/gold-star-club.md](./docs/gold-star-club.md) | Gold Star Club purpose, lifecycle, and configuration. |
 
 Canonical repository:
 

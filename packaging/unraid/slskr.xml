@@ -30,12 +30,21 @@
       <Name>SLSKR_CONFIG</Name>
       <Value>/app/config/config.toml</Value>
     </Variable>
+    <Variable>
+      <Name>SLSKR_SHARED_DIR</Name>
+      <Value>/music</Value>
+    </Variable>
+    <Variable>
+      <Name>SLSKR_DOWNLOAD_FILTER_EXCLUDE</Name>
+      <Value></Value>
+    </Variable>
   </Environment>
   <Data>
     <Config Name="Config" Target="/app/config" Default="/mnt/user/appdata/slskr/config" Mode="rw" />
     <Config Name="Downloads" Target="/app/downloads" Default="/mnt/user/data/slskr/downloads" Mode="rw" />
     <Config Name="Incomplete" Target="/app/incomplete" Default="/mnt/user/data/slskr/incomplete" Mode="rw" />
     <Config Name="Shares" Target="/app/shares" Default="/mnt/user/data/slskr/shares" Mode="ro" />
+    <Config Name="Music" Target="/music" Default="/mnt/user/music" Mode="ro" Optional="true" />
   </Data>
   <ExtraParams>--restart=unless-stopped</ExtraParams>
   <PostArgs />

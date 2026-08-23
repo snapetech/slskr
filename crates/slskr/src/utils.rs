@@ -70,6 +70,25 @@ pub fn split_request_target(target: &str) -> (&str, Option<&str>) {
     }
 }
 
+/// Returns whether a request path contains a literal `..` path component.
+/// Adjacent dots inside a Soulseek identifier remain valid; only a complete
+/// component is treated as traversal.
+pub fn contains_traversal_component(path: &str) -> bool {
+    let mut component_start = 0_usize;
+    for index in 0..=path.len() {
+        if index < path.len() && !matches!(path.as_bytes()[index], b'/' | b'\\') {
+            continue;
+        }
+        if index.saturating_sub(component_start) == 2
+            && path.as_bytes().get(component_start..index) == Some(b"..")
+        {
+            return true;
+        }
+        component_start = index.saturating_add(1);
+    }
+    false
+}
+
 pub fn authorization_header(request: &str) -> Option<&str> {
     request.lines().skip(1).find_map(|line| {
         let (name, value) = line.split_once(':')?;
@@ -928,6 +947,28 @@ pub fn message_id_path(path: &str) -> Option<u64> {
 // JSON Parsing
 // ============================================================================
 
+const KNOWN_ACQUISITION_PROFILES: &[&str] = &[
+    // Legacy controller values.
+    "default",
+    "lossless",
+    "highquality",
+    "high-quality",
+    "any",
+    // slskR Web UI profile IDs.
+    "lossless-exact",
+    "fast-good-enough",
+    "album-complete",
+    "rare-hunt",
+    "conservative-network",
+    "mesh-preferred",
+    "metadata-strict",
+];
+
+pub fn is_known_acquisition_profile(value: &str) -> bool {
+    let normalized = value.trim().to_ascii_lowercase();
+    KNOWN_ACQUISITION_PROFILES.contains(&normalized.as_str())
+}
+
 pub fn extract_json_string_field(body: &str, field: &str) -> Option<String> {
     serde_json::from_str::<serde_json::Value>(body)
         .ok()?
@@ -1510,5 +1551,27 @@ mod controller_auth_tests {
         assert!(
             api_credential(&config, Some("ApiKey wrong-wrong-wrong"), None, loopback,).is_none()
         );
+    }
+
+    #[test]
+    fn acquisition_profile_validation_accepts_web_and_legacy_ids() {
+        for profile in [
+            "default",
+            "lossless",
+            "highquality",
+            "high-quality",
+            "any",
+            "lossless-exact",
+            "fast-good-enough",
+            "album-complete",
+            "rare-hunt",
+            "conservative-network",
+            "mesh-preferred",
+            "metadata-strict",
+        ] {
+            assert!(is_known_acquisition_profile(profile), "{profile}");
+        }
+        assert!(is_known_acquisition_profile("  Lossless-Exact "));
+        assert!(!is_known_acquisition_profile("made-up-profile"));
     }
 }

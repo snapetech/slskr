@@ -35,6 +35,14 @@ single-node daemon hardening, exact universal replacement parity, production
 policy, live interop proof, public provenance/branding review, and
 release-readiness evidence.
 
+The frozen parity boundary is closed, but the current-upstream code boundary is
+now implemented and verified against controlled fixtures. The implementation
+contract and evidence ledger are in
+[docs/parity/current-upstream-parity-plan.md](docs/parity/current-upstream-parity-plan.md)
+and [docs/parity/current-upstream-evidence.md](docs/parity/current-upstream-evidence.md).
+Frozen compatibility profiles remain required; public Soulseek login and
+third-party provider acceptance still require operator-supplied credentials.
+
 ## Scope
 
 In-scope (normal Soulseek client behavior):

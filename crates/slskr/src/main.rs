@@ -9,6 +9,7 @@ mod config;
 mod content_discovery;
 mod credential_store;
 mod dht;
+mod download_filter;
 mod discovery_graph;
 mod dotnet_regex;
 mod events_ws;
@@ -42,6 +43,7 @@ mod pod_channels;
 mod pods;
 mod port_forwarding;
 mod private_gateway;
+mod quic_alpn;
 #[allow(
     dead_code,
     reason = "probe metadata builders are shared by optional live probes"
@@ -64,6 +66,8 @@ mod route_dispatch;
 )]
 mod routing;
 mod scripts;
+mod search_fallback;
+mod songid_scoring;
 #[allow(
     dead_code,
     reason = "bounded security controls are activated by optional security services"
@@ -214,70 +218,37 @@ fn is_expected_remote_upload_failure(error: &str) -> bool {
     .any(|marker| error.contains(marker))
 }
 
-fn print_controller_logo(target: ControllerCompatibilityTarget) {
+fn print_controller_logo(_target: ControllerCompatibilityTarget) {
+    print_native_product_logo();
+}
+
+fn print_native_product_logo() {
     let full_version = format!("{APP_VERSION} ({APP_VERSION})");
     let development = APP_VERSION == "0.0.0" || cfg!(debug_assertions);
-    let first_variant = std::process::id().is_multiple_of(2);
-    match target {
-        ControllerCompatibilityTarget::Slskd => {
-            let logo = if first_variant {
-                r#"          ▄▄▄▄         ▄▄▄▄       ▄▄▄▄
-  ▄▄▄▄▄▄▄ █  █ ▄▄▄▄▄▄▄ █  █▄▄▄ ▄▄▄█  █
-  █__ --█ █  █ █__ --█ █    ◄█ █  -  █
-  █▄▄▄▄▄█ █▄▄█ █▄▄▄▄▄█ █▄▄█▄▄█ █▄▄▄▄▄█"#
-            } else {
-                r#"        ▄▄▄▄     ▄▄▄▄     ▄▄▄▄
-  ▄▄▄▄▄▄█  █▄▄▄▄▄█  █▄▄▄▄▄█  █
-  █__ --█  █__ --█    ◄█  -  █
-  █▄▄▄▄▄█▄▄█▄▄▄▄▄█▄▄█▄▄█▄▄▄▄▄█"#
-            };
-            let mut banner = format!(
-                "\n\n{logo}\n┍━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ━━━━ ━  ━┉   ┉     ┉\n│ This program is free software: you can redistribute it and/or modify\n│ it under the terms of the GNU Affero General Public License as published\n│ by the Free Software Foundation, version 3.\n│                                     └─▸ SPDX: AGPL-3.0-only\n│\n│ This program is distributed with Additional Terms pursuant to Section 7\n│ of the AGPLv3.  See the LICENSE file in the root directory of this\n│ project for the complete terms and conditions.\n│\n│ 🌐 https://slskd.org\n│ 🐱 https://github.com/slskd/slskd\n│\n├╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌ ╌ ╌╌╌╌ ╌\n│ {full_version}"
-            );
-            if development {
-                banner.push_str("\n│ └─▸ ⚠️ DEVELOPMENT");
-            }
-            banner
-                .push_str("\n╰───────────────────────────────────────────╶──── ─ ─── ─  ── ──┈  ┈");
-            println!("{banner}");
-        }
-        ControllerCompatibilityTarget::Slskdn => {
-            let logo = if first_variant {
-                r#"                   ▄▄▄▄         ▄▄▄▄       ▄▄▄▄
-           ▄▄▄▄▄▄▄ █  █ ▄▄▄▄▄▄▄ █  █▄▄▄ ▄▄▄█  █
-           █__ --█ █  █ █__ --█ █    ◄█ █  -  █
-           █▄▄▄▄▄█ █▄▄█ █▄▄▄▄▄█ █▄▄█▄▄█ █▄▄▄▄▄█"#
-            } else {
-                r#"                    ▄▄▄▄     ▄▄▄▄     ▄▄▄▄
-              ▄▄▄▄▄▄█  █▄▄▄▄▄█  █▄▄▄▄▄█  █
-              █__ --█  █__ --█    ◄█  -  █
-              █▄▄▄▄▄█▄▄█▄▄▄▄▄█▄▄█▄▄█▄▄▄▄▄█"#
-            };
-            let padding = 56usize.saturating_sub(full_version.len());
-            let padding_left = padding / 2;
-            let padding_right = padding_left + padding % 2;
-            let centered_version = format!(
-                "{}{full_version}{}",
-                " ".repeat(padding_left),
-                " ".repeat(padding_right)
-            );
-            let mut banner = format!(
-                "\n\n{logo}\n╒════════════════════════════════════════════════════════╕\n│           GNU AFFERO GENERAL PUBLIC LICENSE            │\n│                   https://slskd.org                    │\n│                                                        │\n│{centered_version}│"
-            );
-            if development {
-                banner.push_str("\n│■■■■■■■■■■■■■■■■■■■■► DEVELOPMENT ◄■■■■■■■■■■■■■■■■■■■■■│");
-            }
-            banner.push_str("\n└────────────────────────────────────────────────────────┘");
-            println!("{banner}");
-        }
+    let padding = 56usize.saturating_sub(full_version.len());
+    let padding_left = padding / 2;
+    let padding_right = padding - padding_left;
+    let centered_version = format!(
+        "{}{full_version}{}",
+        " ".repeat(padding_left),
+        " ".repeat(padding_right)
+    );
+    let mut banner = format!(
+        "\n\n                         slskR\n╒════════════════════════════════════════════════════════╕\n│           GNU AFFERO GENERAL PUBLIC LICENSE            │\n│                  https://github.com/snapetech/slskr    │\n│                                                        │\n│        native Soulseek client, daemon, and Web UI      │\n│{centered_version}│"
+    );
+    if development {
+        banner.push_str("\n│■■■■■■■■■■■■■■■■■■■■► DEVELOPMENT ◄■■■■■■■■■■■■■■■■■■■■■│");
     }
+    banner.push_str("\n└────────────────────────────────────────────────────────┘");
+    println!("{banner}");
 }
 
 #[cfg(test)]
 mod disaster_mode_regression_tests {
     #[test]
     fn status_starts_in_normal_mode_until_runtime_state_changes() {
-        assert_eq!(super::virtual_soulfind_disaster_mode_level(), 0);
+        assert_eq!(super::virtual_soulfind_disaster_mode_level(false), 0);
+        assert_eq!(super::virtual_soulfind_disaster_mode_level(true), 3);
     }
 }
 
@@ -638,7 +609,8 @@ async fn run() -> Result<(), String> {
 }
 
 fn frozen_obfuscation_startup_error(config: &AppConfig) -> Option<&'static str> {
-    (config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
+    (!config.current_upstream_behavior
+        && config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
         && config.obfuscation_enabled
         && !config.obfuscation_advertise_regular_port)
         .then_some(
@@ -802,11 +774,13 @@ fn controller_cli_environment_name(flag: &str) -> Option<(&'static str, bool)> {
         "--slsk-obfuscation-prefer-outbound" => ("SLSKD_SLSK_OBFUSCATION_PREFER_OUTBOUND", false),
         "--download-completed-path-template" => ("SLSKD_DOWNLOAD_COMPLETED_PATH_TEMPLATE", true),
         "--download-completed-layout" => ("SLSKD_DOWNLOAD_COMPLETED_LAYOUT", true),
+        "--download-filter-exclude" => ("SLSKD_DOWNLOAD_FILTER_EXCLUDE", true),
         "--download-slots" => ("SLSKD_DOWNLOAD_SLOTS", true),
         "--download-speed-limit" => ("SLSKD_DOWNLOAD_SPEED_LIMIT", true),
         "--auto-replace-stuck" => ("SLSKD_AUTO_REPLACE_STUCK", false),
         "--auto-replace-threshold" => ("SLSKD_AUTO_REPLACE_THRESHOLD", true),
         "--auto-replace-interval" => ("SLSKD_AUTO_REPLACE_INTERVAL", true),
+        "--auto-replace-max-retries" => ("SLSKD_AUTO_REPLACE_MAX_RETRIES", true),
         "--upload-slots" => ("SLSKD_UPLOAD_SLOTS", true),
         "--upload-speed-limit" => ("SLSKD_UPLOAD_SPEED_LIMIT", true),
         "--slsk-private-message-auto-response" => {
@@ -884,10 +858,19 @@ fn controller_cli_environment_name(flag: &str) -> Option<(&'static str, bool)> {
         "--lidarr-import-path-to" => ("SLSKD_LIDARR_IMPORT_PATH_TO", true),
         "--lidarr-import-mode" => ("SLSKD_LIDARR_IMPORT_MODE", true),
         "--lidarr-import-replace-existing" => ("SLSKD_LIDARR_IMPORT_REPLACE_EXISTING", false),
+        "--lidarr-import-delay" => ("SLSKD_LIDARR_IMPORT_DELAY", true),
+        "--lidarr-import-retry-max-attempts" => {
+            ("SLSKD_LIDARR_IMPORT_RETRY_MAX_ATTEMPTS", true)
+        }
+        "--lidarr-import-retry-delay" => ("SLSKD_LIDARR_IMPORT_RETRY_DELAY", true),
+        "--lidarr-skip-already-owned-albums" => {
+            ("SLSKD_LIDARR_SKIP_ALREADY_OWNED_ALBUMS", false)
+        }
         "--lidarr-delete-rejected-downloads" => ("SLSKD_LIDARR_DELETE_REJECTED_DOWNLOADS", false),
         "--lidarr-blacklist-rejected-downloads" => {
             ("SLSKD_LIDARR_BLACKLIST_REJECTED_DOWNLOADS", false)
         }
+        "--lidarr-edition-match-mode" => ("SLSKD_LIDARR_EDITION_MATCH_MODE", true),
         _ => return None,
     })
 }
@@ -926,7 +909,10 @@ fn parse_serve_args(args: &[OsString]) -> Result<Option<ServeInvocation>, String
         };
         let multi_valued = matches!(
             environment_name,
-            "SLSKD_SHARED_DIR" | "SLSKD_SHARE_FILTER" | "SLSKD_SEARCH_REQUEST_FILTER"
+            "SLSKD_SHARED_DIR"
+                | "SLSKD_SHARE_FILTER"
+                | "SLSKD_SEARCH_REQUEST_FILTER"
+                | "SLSKD_DOWNLOAD_FILTER_EXCLUDE"
         );
         if invocation.config_environment.contains_key(environment_name) && !multi_valued {
             return Err(format!("duplicate serve option {flag}"));
@@ -1444,6 +1430,10 @@ struct SearchResultEntry {
     filename: String,
     size: u64,
     extension: String,
+    bit_rate: Option<u32>,
+    sample_rate: Option<u32>,
+    bit_depth: Option<u32>,
+    length_seconds: Option<u32>,
     locked: bool,
     slot_free: Option<bool>,
     average_speed: Option<u32>,
@@ -1465,6 +1455,13 @@ impl SearchResultEntry {
             .and_then(serde_json::Value::as_str)
             .map(str::to_owned)
             .unwrap_or_else(|| filename.split('.').next_back().unwrap_or("").to_owned());
+        let attribute = |names: &[&str]| {
+            names.iter().find_map(|name| {
+                file.get(*name)
+                    .and_then(serde_json::Value::as_u64)
+                    .and_then(|value| u32::try_from(value).ok())
+            })
+        };
         Some(Self {
             peer_username: peer_username.map(|username| {
                 truncate_utf8_bytes(username.to_owned(), MAX_SEARCH_RESULT_USERNAME_BYTES)
@@ -1475,6 +1472,10 @@ impl SearchResultEntry {
                 .and_then(serde_json::Value::as_u64)
                 .unwrap_or(0),
             extension: truncate_utf8_bytes(extension, MAX_SEARCH_RESULT_EXTENSION_BYTES),
+            bit_rate: attribute(&["bitRate", "bit_rate", "bitrate"]),
+            sample_rate: attribute(&["sampleRate", "sample_rate", "samplerate"]),
+            bit_depth: attribute(&["bitDepth", "bit_depth", "bitdepth"]),
+            length_seconds: attribute(&["length", "lengthSeconds", "length_seconds"]),
             locked: file
                 .get("locked")
                 .or_else(|| file.get("isLocked"))
@@ -1492,6 +1493,10 @@ impl SearchResultEntry {
             filename: entry.filename.clone(),
             size: entry.size,
             extension: entry.extension.clone(),
+            bit_rate: file_attribute_value(entry, 0),
+            sample_rate: file_attribute_value(entry, 4),
+            bit_depth: file_attribute_value(entry, 5),
+            length_seconds: file_attribute_value(entry, 1),
             locked: false,
             slot_free: Some(true),
             average_speed: Some(0),
@@ -1509,6 +1514,10 @@ impl SearchResultEntry {
             filename: entry.filename.clone(),
             size: entry.size,
             extension: entry.extension.clone(),
+            bit_rate: file_attribute_value(entry, 0),
+            sample_rate: file_attribute_value(entry, 4),
+            bit_depth: file_attribute_value(entry, 5),
+            length_seconds: file_attribute_value(entry, 1),
             locked,
             slot_free: Some(response.slot_free),
             average_speed: Some(response.average_speed),
@@ -1522,6 +1531,14 @@ impl SearchResultEntry {
             filename: record.filename.clone(),
             size: record.size.max(0) as u64,
             extension: record.extension.clone(),
+            bit_rate: record.bit_rate.and_then(|value| u32::try_from(value).ok()),
+            sample_rate: record
+                .sample_rate
+                .and_then(|value| u32::try_from(value).ok()),
+            bit_depth: record.bit_depth.and_then(|value| u32::try_from(value).ok()),
+            length_seconds: record
+                .length_seconds
+                .and_then(|value| u32::try_from(value).ok()),
             locked: record.locked,
             slot_free: record.slot_free,
             average_speed: record
@@ -1535,11 +1552,15 @@ impl SearchResultEntry {
 
     fn json(&self) -> String {
         format!(
-            "{{\"peer_username\":{},\"filename\":\"{}\",\"size\":{},\"extension\":\"{}\",\"locked\":{},\"slot_free\":{},\"average_speed\":{},\"queue_length\":{}}}",
+            "{{\"peer_username\":{},\"filename\":\"{}\",\"size\":{},\"extension\":\"{}\",\"bit_rate\":{},\"sample_rate\":{},\"bit_depth\":{},\"length_seconds\":{},\"locked\":{},\"slot_free\":{},\"average_speed\":{},\"queue_length\":{}}}",
             json_option(self.peer_username.as_deref()),
             json_escape(&self.filename),
             self.size,
             json_escape(&self.extension),
+            json_u32_option(self.bit_rate),
+            json_u32_option(self.sample_rate),
+            json_u32_option(self.bit_depth),
+            json_u32_option(self.length_seconds),
             self.locked,
             json_bool_option(self.slot_free),
             json_u32_option(self.average_speed),
@@ -1555,12 +1576,20 @@ impl SearchResultEntry {
             "isLocked": self.locked || !self.slot_free.unwrap_or(true),
             "username": self.peer_username.as_deref().unwrap_or_default(),
             "extension": self.extension,
-            "bitRate": null,
-            "bitDepth": null,
-            "length": null,
-            "sampleRate": null,
+            "bitRate": self.bit_rate,
+            "bitDepth": self.bit_depth,
+            "length": self.length_seconds,
+            "sampleRate": self.sample_rate,
         })
     }
+}
+
+fn file_attribute_value(entry: &FileEntry, code: u32) -> Option<u32> {
+    entry
+        .attributes
+        .iter()
+        .find(|attribute| attribute.code == code)
+        .map(|attribute| attribute.value)
 }
 
 fn bounded_search_result_entry(mut entry: SearchResultEntry) -> SearchResultEntry {
@@ -1598,6 +1627,7 @@ struct SearchRecord {
     filtered_out_count: usize,
     ignored_result_count: usize,
     hidden_locked_count: usize,
+    fallback_attempts: usize,
     expires_at: u64,
     created_at: u64,
     updated_at: u64,
@@ -1621,7 +1651,20 @@ impl SearchRecord {
             .min(MAX_SEARCH_RESULTS_PER_SEARCH)
             .saturating_sub(self.results.len())
             .min(aggregate_remaining);
-        self.results.extend(results.into_iter().take(remaining));
+        if remaining == 0 {
+            return;
+        }
+        let mut seen = self
+            .results
+            .iter()
+            .map(search_result_identity)
+            .collect::<HashSet<_>>();
+        self.results.extend(
+            results
+                .into_iter()
+                .filter(|result| seen.insert(search_result_identity(result)))
+                .take(remaining),
+        );
     }
 
     fn json(&self) -> String {
@@ -1652,6 +1695,11 @@ impl SearchRecord {
             "lockedFileCount": locked_file_count,
             "responseCount": response_count,
             "responsesAvailable": self.status != "active" || !self.results.is_empty(),
+            "rawResponseCount": self.raw_response_count,
+            "filteredOutCount": self.filtered_out_count,
+            "ignoredResultCount": self.ignored_result_count,
+            "hiddenLockedCount": self.hidden_locked_count,
+            "fallbackAttempts": self.fallback_attempts,
             "startedAt": self.created_at.to_string(),
             "endedAt": (self.status != "active").then(|| self.updated_at.to_string()),
             "expires_at": self.expires_at,
@@ -1678,8 +1726,9 @@ impl SearchRecord {
         let response_count = self
             .results
             .iter()
-            .filter(|entry| entry.peer_username.is_some())
-            .count();
+            .filter_map(|entry| entry.peer_username.as_deref())
+            .collect::<HashSet<_>>()
+            .len();
         let locked_file_count = self.results.iter().filter(|entry| entry.locked).count();
         let state = search_state_for_status(self.status);
         let ended_at = if self.status == "active" {
@@ -1688,7 +1737,7 @@ impl SearchRecord {
             format!("\"{}\"", self.updated_at)
         };
         format!(
-            "{{\"id\":\"{}\",\"token\":{},\"query\":\"{}\",\"searchText\":\"{}\",\"target\":\"{}\",\"target_name\":{},\"wishlistItemId\":{},\"status\":\"{}\",\"state\":\"{}\",\"isComplete\":{},\"result_count\":{},\"fileCount\":{},\"lockedFileCount\":{},\"responseCount\":{},\"responsesAvailable\":{},\"responses\":{},\"results\":[{}],\"resultOffset\":{},\"resultLimit\":{},\"startedAt\":\"{}\",\"endedAt\":{},\"expires_at\":{},\"created_at\":{},\"updated_at\":{}}}",
+            "{{\"id\":\"{}\",\"token\":{},\"query\":\"{}\",\"searchText\":\"{}\",\"target\":\"{}\",\"target_name\":{},\"wishlistItemId\":{},\"status\":\"{}\",\"state\":\"{}\",\"isComplete\":{},\"result_count\":{},\"fileCount\":{},\"lockedFileCount\":{},\"responseCount\":{},\"responsesAvailable\":{},\"rawResponseCount\":{},\"filteredOutCount\":{},\"ignoredResultCount\":{},\"hiddenLockedCount\":{},\"fallbackAttempts\":{},\"responses\":{},\"results\":[{}],\"resultOffset\":{},\"resultLimit\":{},\"startedAt\":\"{}\",\"endedAt\":{},\"expires_at\":{},\"created_at\":{},\"updated_at\":{}}}",
             json_escape(&self.id),
             self.token,
             json_escape(&self.query),
@@ -1704,6 +1753,11 @@ impl SearchRecord {
             locked_file_count,
             response_count,
             self.status != "active" || !self.results.is_empty(),
+            self.raw_response_count,
+            self.filtered_out_count,
+            self.ignored_result_count,
+            self.hidden_locked_count,
+            self.fallback_attempts,
             responses,
             results,
             offset,
@@ -1816,6 +1870,7 @@ impl SearchRecord {
             filtered_out_count: 0,
             ignored_result_count: 0,
             hidden_locked_count: 0,
+            fallback_attempts: usize::try_from(record.fallback_attempts.max(0)).unwrap_or_default(),
             expires_at: 0,
             created_at: record.created_at.max(0) as u64,
             updated_at: record.completed_at.unwrap_or(record.created_at).max(0) as u64,
@@ -2070,6 +2125,7 @@ impl SearchStore {
             filtered_out_count: 0,
             ignored_result_count: 0,
             hidden_locked_count: 0,
+            fallback_attempts: 0,
             expires_at: now.saturating_add(ttl_seconds),
             created_at: now,
             updated_at: now,
@@ -2210,6 +2266,36 @@ impl SearchStore {
         expired
     }
 
+    fn reset_for_fallback(
+        &mut self,
+        token: u32,
+        query: String,
+        ttl_seconds: u64,
+    ) -> Option<SearchRecord> {
+        let record = self.records.iter_mut().find(|record| record.token == token)?;
+        if record.target != "wishlist"
+            || record.fallback_attempts >= search_fallback::MAXIMUM_FALLBACK_QUERIES
+        {
+            return None;
+        }
+        let query = query.trim();
+        if query.is_empty() {
+            return None;
+        }
+        let now = unix_timestamp();
+        record.query = truncate_utf8_bytes(query.to_owned(), MAX_SEARCH_QUERY_BYTES);
+        record.status = "active";
+        record.results.clear();
+        record.raw_response_count = 0;
+        record.filtered_out_count = 0;
+        record.ignored_result_count = 0;
+        record.hidden_locked_count = 0;
+        record.fallback_attempts = record.fallback_attempts.saturating_add(1);
+        record.expires_at = now.saturating_add(ttl_seconds);
+        record.updated_at = now;
+        Some(record.clone())
+    }
+
     fn prune_expired(&mut self) -> Vec<SearchRecord> {
         self.expire_due();
         let mut pruned = Vec::new();
@@ -2251,7 +2337,7 @@ impl SearchStore {
                 .map(|entry| (entry, false))
                 .chain(response.private_results.iter().map(|entry| (entry, true)))
             {
-                if !policy.filter.matches(&entry.filename) {
+                if !policy.filter.matches_file_entry(entry) {
                     record.filtered_out_count = record.filtered_out_count.saturating_add(1);
                 } else if ignored_results
                     .iter()
@@ -2269,7 +2355,7 @@ impl SearchStore {
                 .results
                 .iter()
                 .filter(|entry| {
-                    wishlist_policy.is_none_or(|policy| policy.filter.matches(&entry.filename))
+                    wishlist_policy.is_none_or(|policy| policy.filter.matches_file_entry(entry))
                         && !ignored_results
                             .iter()
                             .any(|rule| rule.matches(&response.username, &entry.filename))
@@ -2592,6 +2678,22 @@ impl SearchStore {
     }
 }
 
+fn search_result_identity(result: &SearchResultEntry) -> (String, String, u64) {
+    (
+        result
+            .peer_username
+            .as_deref()
+            .unwrap_or_default()
+            .to_owned(),
+        result
+            .filename
+            .replace('\\', "/")
+            .trim()
+            .to_ascii_lowercase(),
+        result.size,
+    )
+}
+
 fn persisted_search_status(status: &str) -> &'static str {
     match status {
         "active" | "pending" => "active",
@@ -2664,6 +2766,7 @@ fn persisted_search_record(record: &SearchRecord) -> persistence::SearchRecord {
         completed_at,
         room,
         target,
+        fallback_attempts: i64::try_from(record.fallback_attempts).unwrap_or(i64::MAX),
     }
 }
 
@@ -2679,6 +2782,10 @@ fn persisted_search_result_records(record: &SearchRecord) -> Vec<persistence::Se
             filename: result.filename.clone(),
             size: i64::try_from(result.size).unwrap_or(i64::MAX),
             extension: result.extension.clone(),
+            bit_rate: result.bit_rate.map(i64::from),
+            sample_rate: result.sample_rate.map(i64::from),
+            bit_depth: result.bit_depth.map(i64::from),
+            length_seconds: result.length_seconds.map(i64::from),
             locked: result.locked,
             slot_free: result.slot_free,
             average_speed: result.average_speed.map(i64::from),
@@ -3151,6 +3258,12 @@ struct TransferEntry {
     track_number: Option<u32>,
     #[serde(default)]
     year: Option<u32>,
+    #[serde(default = "default_transfer_attempts")]
+    attempts: u32,
+    #[serde(default)]
+    auto_replace_attempts: u32,
+    #[serde(default)]
+    next_attempt_at: Option<u64>,
     size: Option<u64>,
     bytes_transferred: u64,
     status: String,
@@ -3165,11 +3278,15 @@ struct TransferEntry {
     updated_at_ms: u64,
 }
 
+fn default_transfer_attempts() -> u32 {
+    1
+}
+
 impl TransferEntry {
     #[allow(dead_code)]
     fn json(&self) -> String {
         format!(
-            "{{\"id\":{},\"direction\":{},\"token\":{},\"peer_username\":{},\"filename\":\"{}\",\"local_path\":{},\"batch_id\":{},\"request_id\":{},\"request_name\":{},\"destination_directory\":{},\"bit_rate\":{},\"sample_rate\":{},\"bit_depth\":{},\"length_seconds\":{},\"artist\":{},\"album\":{},\"title\":{},\"track_number\":{},\"year\":{},\"size\":{},\"bytes_transferred\":{},\"status\":\"{}\",\"reason\":{},\"failure_code\":{},\"recovery_action\":{},\"recovery_label\":{},\"requested_at\":{},\"started_at\":{},\"start_offset\":{},\"updated_at\":{}}}",
+            "{{\"id\":{},\"direction\":{},\"token\":{},\"peer_username\":{},\"filename\":\"{}\",\"local_path\":{},\"batch_id\":{},\"request_id\":{},\"request_name\":{},\"destination_directory\":{},\"bit_rate\":{},\"sample_rate\":{},\"bit_depth\":{},\"length_seconds\":{},\"artist\":{},\"album\":{},\"title\":{},\"track_number\":{},\"year\":{},\"attempts\":{},\"auto_replace_attempts\":{},\"next_attempt_at\":{},\"size\":{},\"bytes_transferred\":{},\"status\":\"{}\",\"reason\":{},\"failure_code\":{},\"recovery_action\":{},\"recovery_label\":{},\"requested_at\":{},\"started_at\":{},\"start_offset\":{},\"updated_at\":{}}}",
             self.id,
             self.direction,
             self.token,
@@ -3189,6 +3306,9 @@ impl TransferEntry {
             json_option(self.title.as_deref()),
             json_u32_option(self.track_number),
             json_u32_option(self.year),
+            self.attempts,
+            self.auto_replace_attempts,
+            json_u64_option(self.next_attempt_at),
             json_u64_option(self.size),
             self.bytes_transferred,
             json_escape(&self.status),
@@ -3267,6 +3387,8 @@ impl TransferEntry {
             "title": self.title,
             "trackNumber": self.track_number,
             "year": self.year,
+            "attempts": self.attempts,
+            "nextAttemptAt": self.next_attempt_at.map(unix_seconds_rfc3339),
             "size": size,
             "startOffset": self.start_offset,
             "state": slskd_transfer_state(&self.status),
@@ -3487,6 +3609,9 @@ fn persisted_transfer_record(entry: &TransferEntry) -> persistence::TransferReco
         title: entry.title.clone(),
         track_number: entry.track_number.map(i64::from),
         year: entry.year.map(i64::from),
+        attempts: i64::from(entry.attempts.max(1)),
+        auto_replace_attempts: i64::from(entry.auto_replace_attempts),
+        next_attempt_at: entry.next_attempt_at.map(|value| value as i64),
     }
 }
 
@@ -3716,6 +3841,9 @@ struct TransferRequestDetails {
     title: Option<String>,
     track_number: Option<u32>,
     year: Option<u32>,
+    attempts: u32,
+    auto_replace_attempts: u32,
+    next_attempt_at: Option<u64>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -3815,6 +3943,10 @@ impl TransferQueue {
                     title: record.title,
                     track_number: record.track_number.map(|num| num as u32),
                     year: record.year.map(|year| year as u32),
+                    attempts: u32::try_from(record.attempts).unwrap_or(1).max(1),
+                    auto_replace_attempts: u32::try_from(record.auto_replace_attempts)
+                        .unwrap_or(0),
+                    next_attempt_at: record.next_attempt_at.map(|value| value as u64),
                     requested_at: record.started_at as u64,
                     start_offset: 0,
                     updated_at_ms: 0,
@@ -3908,6 +4040,9 @@ impl TransferQueue {
             title: None,
             track_number: None,
             year: None,
+            attempts: 1,
+            auto_replace_attempts: 0,
+            next_attempt_at: None,
             size,
             bytes_transferred: 0,
             status: "rejected".to_owned(),
@@ -3954,6 +4089,9 @@ impl TransferQueue {
             title: None,
             track_number: None,
             year: None,
+            attempts: 1,
+            auto_replace_attempts: 0,
+            next_attempt_at: None,
             size: Some(size),
             bytes_transferred: 0,
             status: "accepted".to_owned(),
@@ -4075,6 +4213,9 @@ impl TransferQueue {
             title: details.title,
             track_number: details.track_number,
             year: details.year,
+            attempts: details.attempts.max(1),
+            auto_replace_attempts: details.auto_replace_attempts,
+            next_attempt_at: details.next_attempt_at,
             size,
             bytes_transferred: 0,
             status: "queued".to_owned(),
@@ -4130,6 +4271,9 @@ impl TransferQueue {
             entry.bytes_transferred = bytes_transferred;
         }
         entry.reason = bounded_transfer_reason(reason);
+        if matches!(status, "succeeded" | "completed" | "cancelled") {
+            entry.next_attempt_at = None;
+        }
         entry.updated_at = now;
         entry.updated_at_ms = unix_timestamp_millis();
         if let Err(error) = append_transfer_event(&self.events_path, entry) {
@@ -4161,6 +4305,9 @@ impl TransferQueue {
             entry.size = size;
         }
         entry.reason = bounded_transfer_reason(reason);
+        if matches!(status, "succeeded" | "completed" | "cancelled") {
+            entry.next_attempt_at = None;
+        }
         entry.updated_at = now;
         entry.updated_at_ms = unix_timestamp_millis();
         if let Err(error) = append_transfer_event(&self.events_path, entry) {
@@ -4196,7 +4343,32 @@ impl TransferQueue {
         entry.status = "in_progress".to_owned();
         entry.bytes_transferred = bytes_transferred;
         entry.reason = None;
+        entry.next_attempt_at = None;
         entry.updated_at = now;
+        entry.updated_at_ms = unix_timestamp_millis();
+        if let Err(error) = append_transfer_event(&self.events_path, entry) {
+            self.events_error = Some(error);
+        }
+        let entry = entry.clone();
+        self.persist_state();
+        self.updated_at = unix_timestamp();
+        Some(entry)
+    }
+
+    fn update_retry_state(
+        &mut self,
+        id: u64,
+        attempt: u32,
+        next_attempt_at: Option<u64>,
+        status: &str,
+        reason: Option<String>,
+    ) -> Option<TransferEntry> {
+        let entry = self.entries.iter_mut().find(|entry| entry.id == id)?;
+        entry.attempts = attempt.max(1);
+        entry.next_attempt_at = next_attempt_at;
+        entry.status = truncate_utf8_bytes(status.to_owned(), MAX_TRANSFER_STATUS_BYTES);
+        entry.reason = bounded_transfer_reason(reason);
+        entry.updated_at = unix_timestamp();
         entry.updated_at_ms = unix_timestamp_millis();
         if let Err(error) = append_transfer_event(&self.events_path, entry) {
             self.events_error = Some(error);
@@ -5008,6 +5180,10 @@ fn bounded_transfer_reason(reason: Option<String>) -> Option<String> {
 }
 
 fn bounded_transfer_entry(mut entry: TransferEntry) -> TransferEntry {
+    entry.attempts = entry.attempts.max(1);
+    if matches!(entry.status.as_str(), "succeeded" | "completed" | "cancelled") {
+        entry.next_attempt_at = None;
+    }
     if entry.updated_at_ms == 0 {
         entry.updated_at_ms = entry.updated_at.saturating_mul(1_000);
     }
@@ -7622,8 +7798,7 @@ impl ManagedBlacklistRuntime {
         target: ControllerCompatibilityTarget,
         case_sensitive_regex: bool,
     ) -> Self {
-        let pattern_case_sensitive =
-            target == ControllerCompatibilityTarget::Slskd && case_sensitive_regex;
+        let pattern_case_sensitive = case_sensitive_regex;
         let patterns =
             compile_controller_regexes(&settings.patterns, pattern_case_sensitive, target)
                 .expect("validated blacklist patterns must compile");
@@ -7641,8 +7816,7 @@ impl ManagedBlacklistRuntime {
         target: ControllerCompatibilityTarget,
         case_sensitive_regex: bool,
     ) {
-        let pattern_case_sensitive =
-            target == ControllerCompatibilityTarget::Slskd && case_sensitive_regex;
+        let pattern_case_sensitive = case_sensitive_regex;
         self.patterns =
             compile_controller_regexes(&settings.patterns, pattern_case_sensitive, target)
                 .expect("validated blacklist patterns must compile");
@@ -9054,6 +9228,26 @@ fn collection_items_id(path: &str) -> Option<&str> {
     (!id.is_empty() && !id.contains('/')).then_some(id)
 }
 
+/// Accept both slskR's historical flat item action path and the current
+/// upstream contract's collection-scoped item action path. The optional
+/// collection id is checked by the dispatcher after resolving the item so a
+/// valid item cannot be mutated through the wrong collection URL.
+fn collection_item_action_ids(path: &str) -> Option<(&str, Option<&str>)> {
+    let path = path.strip_prefix("/api/collections/")?;
+    if let Some(item_id) = path.strip_prefix("items/") {
+        return (!item_id.is_empty() && !item_id.contains('/')).then_some((item_id, None));
+    }
+    let (collection_id, item_id) = path.split_once("/items/")?;
+    if collection_id.is_empty()
+        || item_id.is_empty()
+        || collection_id.contains('/')
+        || item_id.contains('/')
+    {
+        return None;
+    }
+    Some((item_id, Some(collection_id)))
+}
+
 fn wishlist_search_item_id(path: &str) -> Option<&str> {
     let path = path.strip_prefix("/api/wishlist/")?;
     let id = path.strip_suffix("/search")?;
@@ -9418,6 +9612,11 @@ struct WishlistItem {
     total_search_count: u64,
     total_download_count: u64,
     last_search_id: Option<String>,
+    lidarr_album_id: Option<i64>,
+    lidarr_track_id: Option<i64>,
+    lidarr_track_count: Option<i64>,
+    lidarr_duration_seconds: Option<i64>,
+    lidarr_release_disambiguation: Option<String>,
     added_at: u64,
 }
 
@@ -9457,6 +9656,11 @@ impl WishlistItem {
             "totalSearchCount": self.total_search_count,
             "totalDownloadCount": self.total_download_count,
             "lastSearchId": self.last_search_id,
+            "lidarrAlbumId": self.lidarr_album_id,
+            "lidarrTrackId": self.lidarr_track_id,
+            "lidarrTrackCount": self.lidarr_track_count,
+            "lidarrDurationSeconds": self.lidarr_duration_seconds,
+            "lidarrReleaseDisambiguation": self.lidarr_release_disambiguation,
         })
         .to_string()
     }
@@ -9482,6 +9686,11 @@ impl WishlistItem {
             "maxDownloads": self.max_downloads,
             "lastSearchId": self.last_search_id,
             "lastViewedAt": self.last_viewed_at.map(unix_seconds_rfc3339),
+            "lidarrAlbumId": self.lidarr_album_id,
+            "lidarrTrackId": self.lidarr_track_id,
+            "lidarrTrackCount": self.lidarr_track_count,
+            "lidarrDurationSeconds": self.lidarr_duration_seconds,
+            "lidarrReleaseDisambiguation": self.lidarr_release_disambiguation,
         })
         .to_string()
     }
@@ -9505,8 +9714,14 @@ struct WishlistIgnoredResult {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct WishlistResultFilter {
-    include: Vec<String>,
+    clauses: Vec<WishlistFilterClause>,
     exclude: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct WishlistFilterClause {
+    include: Vec<String>,
+    minimum_bitrate: Option<u32>,
 }
 
 impl WishlistResultFilter {
@@ -9529,15 +9744,33 @@ impl WishlistResultFilter {
             terms.push(current);
         }
 
+        let mut clauses = Vec::new();
         let mut include = Vec::new();
         let mut exclude = Vec::new();
+        let mut minimum_bitrate = None;
         for raw_term in terms {
             if raw_term.eq_ignore_ascii_case("OR") {
+                if !include.is_empty() || minimum_bitrate.is_some() {
+                    clauses.push(WishlistFilterClause {
+                        include: std::mem::take(&mut include),
+                        minimum_bitrate: minimum_bitrate.take(),
+                    });
+                }
                 continue;
             }
             let (target, term) = if let Some(term) = raw_term.strip_prefix('-') {
                 (&mut exclude, term)
             } else {
+                let normalized_term = raw_term.to_ascii_lowercase();
+                if let Some(value) = normalized_term
+                    .strip_prefix("minbr:")
+                    .or_else(|| normalized_term.strip_prefix("minbitrate:"))
+                    .and_then(|value| value.parse::<u32>().ok())
+                    .filter(|value| *value > 0)
+                {
+                    minimum_bitrate = Some(minimum_bitrate.unwrap_or(0).max(value));
+                    continue;
+                }
                 (&mut include, raw_term.as_str())
             };
             let term = term
@@ -9549,10 +9782,30 @@ impl WishlistResultFilter {
                 target.push(term);
             }
         }
-        Self { include, exclude }
+        if !include.is_empty() || minimum_bitrate.is_some() {
+            clauses.push(WishlistFilterClause {
+                include,
+                minimum_bitrate,
+            });
+        }
+        if clauses.is_empty() {
+            clauses.push(WishlistFilterClause {
+                include: Vec::new(),
+                minimum_bitrate: None,
+            });
+        }
+        Self { clauses, exclude }
     }
 
-    fn matches(&self, filename: &str) -> bool {
+    fn matches_entry(&self, entry: &SearchResultEntry) -> bool {
+        self.matches_with_bitrate(&entry.filename, entry.bit_rate)
+    }
+
+    fn matches_file_entry(&self, entry: &FileEntry) -> bool {
+        self.matches_with_bitrate(&entry.filename, file_attribute_value(entry, 0))
+    }
+
+    fn matches_with_bitrate(&self, filename: &str, bit_rate: Option<u32>) -> bool {
         let filename = filename.replace('\\', "/").to_ascii_lowercase();
         let extension = virtual_basename(&filename)
             .rsplit_once('.')
@@ -9561,11 +9814,17 @@ impl WishlistResultFilter {
         if self.exclude.iter().any(|term| filename.contains(term)) {
             return false;
         }
-        self.include.is_empty()
-            || self
-                .include
-                .iter()
-                .any(|term| extension == term || filename.contains(term))
+        self.clauses.iter().any(|clause| {
+            let filename_match = clause.include.is_empty()
+                || clause
+                    .include
+                    .iter()
+                    .any(|term| extension == term || filename.contains(term));
+            filename_match
+                && clause
+                    .minimum_bitrate
+                    .is_none_or(|minimum| bit_rate.is_some_and(|value| value >= minimum))
+        })
     }
 }
 
@@ -9683,6 +9942,13 @@ impl WishlistStore {
                 last_search_id: record
                     .last_search_id
                     .map(|id| truncate_utf8_bytes(id, MAX_SEARCH_TARGET_NAME_BYTES)),
+                lidarr_album_id: record.lidarr_album_id,
+                lidarr_track_id: record.lidarr_track_id,
+                lidarr_track_count: record.lidarr_track_count,
+                lidarr_duration_seconds: record.lidarr_duration_seconds,
+                lidarr_release_disambiguation: record
+                    .lidarr_release_disambiguation
+                    .map(|value| truncate_utf8_bytes(value, MAX_LIST_TITLE_BYTES)),
                 added_at: u64::try_from(record.added_at).unwrap_or(0),
             });
         }
@@ -9830,6 +10096,11 @@ impl WishlistStore {
             total_search_count: 0,
             total_download_count: 0,
             last_search_id: None,
+            lidarr_album_id: None,
+            lidarr_track_id: None,
+            lidarr_track_count: None,
+            lidarr_duration_seconds: None,
+            lidarr_release_disambiguation: None,
             added_at: now,
         };
         let record = &mut self.records[index];
@@ -9933,6 +10204,118 @@ impl WishlistStore {
         record.updated_at = now;
         self.updated_at = now;
         Some(item.clone())
+    }
+
+    /// Update one filter across a set of wishlist items as a single in-memory
+    /// mutation.  The existence check intentionally happens before any item
+    /// is changed so the API can preserve the current target's all-or-nothing
+    /// behavior when one requested id is stale.
+    fn update_filters(
+        &mut self,
+        item_ids: &[String],
+        filter: String,
+    ) -> Result<Vec<WishlistItem>, &'static str> {
+        let mut distinct_ids = Vec::new();
+        for item_id in item_ids {
+            let item_id = item_id.trim();
+            if item_id.is_empty() {
+                return Err("At least one wishlist item ID is required");
+            }
+            if !distinct_ids.iter().any(|known| known == item_id) {
+                distinct_ids.push(item_id.to_owned());
+            }
+        }
+        if distinct_ids.is_empty() {
+            return Err("At least one wishlist item ID is required");
+        }
+
+        let known_ids = self
+            .records
+            .iter()
+            .flat_map(|record| record.items.iter())
+            .map(|item| item.id.as_str())
+            .collect::<HashSet<_>>();
+        if distinct_ids
+            .iter()
+            .any(|item_id| !known_ids.contains(item_id.as_str()))
+        {
+            return Err("wishlist item not found");
+        }
+
+        let now = unix_timestamp();
+        let filter = truncate_utf8_bytes(filter.trim().to_owned(), MAX_WISHLIST_FILTER_BYTES);
+        let mut updated = Vec::with_capacity(distinct_ids.len());
+        for record in &mut self.records {
+            for item in &mut record.items {
+                if distinct_ids.iter().any(|item_id| item_id == &item.id) {
+                    item.filter = filter.clone();
+                    updated.push(item.clone());
+                }
+            }
+            if record
+                .items
+                .iter()
+                .any(|item| distinct_ids.iter().any(|item_id| item_id == &item.id))
+            {
+                record.updated_at = now;
+            }
+        }
+        self.updated_at = now;
+        Ok(updated)
+    }
+
+    fn update_lidarr_metadata(
+        &mut self,
+        item_id: &str,
+        album_id: Option<i64>,
+        track_id: Option<i64>,
+        track_count: Option<i64>,
+        duration_seconds: Option<i64>,
+        release_disambiguation: Option<String>,
+    ) -> Option<WishlistItem> {
+        let now = unix_timestamp();
+        let record = self.records.iter_mut().find(|record| record.id == "default")?;
+        let item = record.items.iter_mut().find(|item| item.id == item_id)?;
+        item.lidarr_album_id = album_id;
+        item.lidarr_track_id = track_id;
+        item.lidarr_track_count = track_count;
+        item.lidarr_duration_seconds = duration_seconds;
+        item.lidarr_release_disambiguation = release_disambiguation
+            .map(|value| truncate_utf8_bytes(value.trim().to_owned(), MAX_LIST_TITLE_BYTES))
+            .filter(|value| !value.is_empty());
+        record.updated_at = now;
+        self.updated_at = now;
+        Some(item.clone())
+    }
+
+    fn disable_lidarr_items_for_album(
+        &mut self,
+        album_id: i64,
+        keep_track_ids: &HashSet<i64>,
+    ) -> Vec<WishlistItem> {
+        let now = unix_timestamp();
+        let mut changed = Vec::new();
+        for record in &mut self.records {
+            for item in &mut record.items {
+                if item.lidarr_album_id != Some(album_id) || !item.enabled {
+                    continue;
+                }
+                let keep = item
+                    .lidarr_track_id
+                    .is_some_and(|track_id| keep_track_ids.contains(&track_id));
+                if !keep {
+                    item.enabled = false;
+                    changed.push(item.clone());
+                }
+            }
+            if !changed.is_empty() {
+                record.updated_at = now;
+            }
+        }
+        if !changed.is_empty() {
+            self.updated_at = now;
+        }
+        changed
     }
 
     fn json_array(&mut self) -> String {
@@ -11543,6 +11926,7 @@ struct RuntimeCompatState {
 struct ControllerOptionsOverlayState {
     yaml_effective: serde_json::Value,
     watched_yaml_effective: Option<serde_json::Value>,
+    watched_download_exclusions: Option<Vec<String>>,
     watched_obfuscation: Option<ObfuscationReloadState>,
     watched_restart_fingerprint: Option<String>,
     effective: serde_json::Value,
@@ -11562,6 +11946,7 @@ impl ControllerOptionsOverlayState {
         };
         Ok(Self {
             yaml_effective,
+            watched_download_exclusions: Some(config.download_filter.exclude.clone()),
             watched_obfuscation: Some(ObfuscationReloadState::from_config(config)),
             watched_restart_fingerprint: Some(restart_reload_fingerprint(config)),
             ..Self::default()
@@ -11576,6 +11961,117 @@ impl ControllerOptionsOverlayState {
     fn apply_yaml(&mut self, value: serde_json::Value) {
         self.watched_yaml_effective = Some(value);
     }
+}
+
+/// Return the last validated download policy, including changes applied by
+/// the watched YAML configuration.  `AppConfig` is intentionally immutable
+/// after startup for compatibility and diagnostics, while runtime consumers
+/// must observe a successful live configuration reload immediately.
+async fn effective_download_exclusions(state: &AppState) -> Vec<String> {
+    state
+        .options_overlay
+        .read()
+        .await
+        .watched_download_exclusions
+        .clone()
+        .unwrap_or_else(|| state.config.download_filter.exclude.clone())
+}
+
+async fn cancel_download_if_blocked_by_policy(
+    state: &AppState,
+    transfer: &TransferEntry,
+) -> Option<String> {
+    if transfer.direction != 0 || is_terminal_transfer_status(&transfer.status) {
+        return None;
+    }
+    let exclusions = effective_download_exclusions(state).await;
+    let exclusion = download_filter::matching_exclusion(&transfer.filename, &exclusions)?;
+    let reason = format!("blocked by download exclusion: {exclusion}");
+    let updated = {
+        let mut transfers = state.transfers.write().await;
+        let current = transfers
+            .entries
+            .iter()
+            .find(|entry| entry.id == transfer.id)?;
+        if is_terminal_transfer_status(&current.status) {
+            return None;
+        }
+        transfers.update_status(transfer.id, "cancelled", None, Some(reason.clone()))
+    };
+    if let Some(updated) = updated {
+        persist_transfer_projection(state, &updated).await;
+        record_event(
+            state,
+            "downloads.policy_cancelled",
+            transfer.id.to_string(),
+            Some(reason.clone()),
+        )
+        .await;
+        return Some(reason);
+    }
+    None
+}
+
+async fn effective_sanitized_config_json(state: &AppState) -> String {
+    let exclusions = effective_download_exclusions(state).await;
+    let mut value = serde_json::from_str::<serde_json::Value>(&state.config.sanitized_json())
+        .unwrap_or_else(|_| serde_json::json!({}));
+    value["filters"]["download"]["exclude"] = serde_json::json!(exclusions);
+    serde_json::to_string(&value).unwrap_or_else(|_| state.config.sanitized_json())
+}
+
+async fn cancel_downloads_blocked_by_policy(state: &AppState, exclusions: &[String]) {
+    let updated = {
+        let mut transfers = state.transfers.write().await;
+        transfers
+            .entries
+            .iter()
+            .filter(|entry| {
+                entry.direction == 0
+                    && !is_terminal_transfer_status(&entry.status)
+                    && download_filter::is_excluded(&entry.filename, exclusions)
+            })
+            .map(|entry| entry.id)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .filter_map(|id| {
+                let exclusion = transfers
+                    .entries
+                    .iter()
+                    .find(|entry| entry.id == id)
+                    .and_then(|entry| {
+                        download_filter::matching_exclusion(&entry.filename, exclusions)
+                    })
+                    .unwrap_or_else(|| "global download policy".to_owned());
+                transfers.update_status(
+                    id,
+                    "cancelled",
+                    None,
+                    Some(format!("blocked by download exclusion: {exclusion}")),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    if updated.is_empty() {
+        return;
+    }
+    let count = updated.len();
+    if let Err(error) = persist_transfer_records(state, &updated).await {
+        record_daemon_log(
+            state,
+            logging::LogLevel::Error,
+            "configuration",
+            format!("failed to persist policy-cancelled downloads: {error}"),
+        )
+        .await;
+    }
+    record_event(
+        state,
+        "downloads.policy_cancelled",
+        "downloads",
+        Some(format!("count={count}")),
+    )
+    .await;
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -14250,25 +14746,54 @@ impl LibraryStore {
 fn songid_matches_value(
     library: &LibraryStore,
     shares: &ShareIndexSnapshot,
+    query: Option<&str>,
 ) -> Vec<serde_json::Value> {
     library
         .records
         .iter()
         .flat_map(|item| {
-            let artist = item.artist.to_ascii_lowercase();
-            let title = item.title.to_ascii_lowercase();
             shares.entries.iter().filter_map(move |entry| {
-                let filename = entry.filename.to_ascii_lowercase();
-                let artist_match = !artist.trim().is_empty() && filename.contains(&artist);
-                let title_match = !title.trim().is_empty() && filename.contains(&title);
-                if !artist_match && !title_match {
+                let filename_score = songid_scoring::filename_identity_score(
+                    &item.artist,
+                    &item.title,
+                    &entry.filename,
+                );
+                let query_score = query
+                    .filter(|query| !query.trim().is_empty())
+                    .map(|query| songid_scoring::compare_loose_text(query, &entry.filename))
+                    .unwrap_or(0.0);
+                let score = if query_score > 0.0 {
+                    (filename_score * 0.75 + query_score * 0.25).min(1.0)
+                } else {
+                    filename_score
+                };
+                if score < 0.15 {
                     return None;
                 }
-                let score = match (artist_match, title_match) {
-                    (true, true) => 1.0,
-                    (true, false) | (false, true) => 0.5,
-                    (false, false) => 0.0,
-                };
+                let normalized_filename = songid_scoring::normalize_loose_text(&entry.filename);
+                let normalized_artist = songid_scoring::normalize_loose_text(&item.artist);
+                let normalized_title = songid_scoring::normalize_loose_text(&item.title);
+                let artist_similarity =
+                    songid_scoring::compare_loose_text(&item.artist, &entry.filename);
+                let title_similarity =
+                    songid_scoring::compare_loose_text(&item.title, &entry.filename);
+                let artist_match = !normalized_artist.is_empty()
+                    && normalized_filename.contains(&normalized_artist);
+                let title_match = !normalized_title.is_empty()
+                    && normalized_filename.contains(&normalized_title);
+                let mut signals = Vec::new();
+                if artist_match {
+                    signals.push("artist");
+                }
+                if title_match {
+                    signals.push("title");
+                }
+                if entry.extension.eq_ignore_ascii_case("flac")
+                    || entry.extension.eq_ignore_ascii_case("wav")
+                    || entry.extension.eq_ignore_ascii_case("alac")
+                {
+                    signals.push("lossless_extension");
+                }
                 Some(serde_json::json!({
                     "libraryItemId": item.id,
                     "artist": item.artist,
@@ -14277,6 +14802,21 @@ fn songid_matches_value(
                     "extension": entry.extension,
                     "size": entry.size,
                     "score": score,
+                    "identityScore": score,
+                    "actionScore": (score * 0.75
+                        + if entry.extension.eq_ignore_ascii_case("flac")
+                            || entry.extension.eq_ignore_ascii_case("wav")
+                            || entry.extension.eq_ignore_ascii_case("alac")
+                        {
+                            0.25
+                        } else {
+                            0.0
+                        })
+                        .min(1.0),
+                    "artistSimilarity": artist_similarity,
+                    "titleSimilarity": title_similarity,
+                    "querySimilarity": query_score,
+                    "signals": signals,
                     "source": "share-index",
                 }))
             })
@@ -14777,18 +15317,69 @@ fn songid_local_file_is_allowed(config: &AppConfig, source: &str) -> bool {
 fn songid_runs_value(
     library: &LibraryStore,
     shares: &ShareIndexSnapshot,
+    query: Option<&str>,
 ) -> Vec<serde_json::Value> {
-    let matches = songid_matches_value(library, shares);
+    let matches = songid_matches_value(library, shares, query);
     if library.records.is_empty() && shares.entries.is_empty() {
         return Vec::new();
     }
+    let scores = matches
+        .iter()
+        .filter_map(|candidate| candidate.get("score").and_then(serde_json::Value::as_f64))
+        .collect::<Vec<_>>();
+    let consensus = songid_scoring::identity_consensus(&scores);
+    let strongest = scores
+        .iter()
+        .copied()
+        .fold(0.0_f64, f64::max);
+    let candidate_text = matches
+        .iter()
+        .filter_map(|candidate| candidate.get("filename").and_then(serde_json::Value::as_str))
+        .take(256)
+        .collect::<Vec<_>>()
+        .join("\n");
+    let repeated_candidate_lines = songid_scoring::repeated_line_ratio(&candidate_text);
+    let repeated_candidate_ngrams = songid_scoring::repeated_ngram_ratio(&candidate_text);
+    let matrix = matches
+        .iter()
+        .take(100)
+        .map(|candidate| {
+            serde_json::json!({
+                "libraryItemId": candidate.get("libraryItemId").cloned().unwrap_or(serde_json::Value::Null),
+                "filename": candidate.get("filename").cloned().unwrap_or(serde_json::Value::Null),
+                "score": candidate.get("score").cloned().unwrap_or(serde_json::json!(0.0)),
+                "signals": candidate.get("signals").cloned().unwrap_or_else(|| serde_json::json!([])),
+            })
+        })
+        .collect::<Vec<_>>();
     vec![serde_json::json!({
         "id": "songid-local",
         "status": "completed",
         "libraryItems": library.records.len(),
         "sharedFiles": shares.entries.len(),
         "matches": matches,
-        "matchCount": matches.len(),
+        "matchCount": scores.len(),
+        "scorecard": {
+            "candidateCount": scores.len(),
+            "strongMatchCount": scores.iter().filter(|score| **score >= 0.75).count(),
+            "identityConsensus": consensus,
+            "highestIdentityScore": strongest,
+        },
+        "identityAssessment": {
+            "verdict": if strongest >= 0.8 { "strong_identity" } else if strongest >= 0.45 { "candidate_identity" } else { "weak_identity" },
+            "confidence": consensus,
+            "summary": if scores.is_empty() { "No matching shared files were found." } else { "Shared-file metadata produced identity candidates." },
+        },
+        "forensicMatrix": matrix,
+        "syntheticAssessment": {
+            "verdict": "insufficient_evidence",
+            "confidence": "low",
+            "syntheticScore": 0.0,
+            "identityScore": consensus,
+            "candidateLineRepetition": repeated_candidate_lines,
+            "candidateNgramRepetition": repeated_candidate_ngrams,
+            "summary": "No audio forensic transcript or perturbation evidence was supplied.",
+        },
         "updated_at": library.updated_at,
     })]
 }
@@ -16110,7 +16701,9 @@ fn songid_capabilities_json(integrations: Option<&IntegrationSettings>) -> serde
     }
 
     let yt_dlp = command_exists_on_path("yt-dlp");
-    let ffmpeg = command_exists_on_path("ffmpeg");
+    let ffmpeg = integrations
+        .map(|settings| configured_command_exists(&settings.chromaprint.ffmpeg_path))
+        .unwrap_or_else(|| command_exists_on_path("ffmpeg"));
     let songrec = command_exists_on_path("songrec");
     let whisper = command_exists_on_path("whisper");
     let tesseract = command_exists_on_path("tesseract");
@@ -16330,7 +16923,7 @@ fn songid_capabilities_json(integrations: Option<&IntegrationSettings>) -> serde
             "HashFromAudioFileEnabled flag",
             "broken",
             false,
-            "Not applicable to slskR.".to_owned(),
+            "Startup validation rejects this flag because PCM extraction support for that hardening path is unavailable.".to_owned(),
             &[]
         ),
     ])
@@ -19596,7 +20189,7 @@ async fn route_http_request_with_headers(
         ("GET", "/api/config") => Ok(HttpResponse {
             status: "200 OK",
             content_type: "application/json",
-            body: state.config.sanitized_json(),
+            body: effective_sanitized_config_json(state).await,
         }),
         ("GET", "/api/stats") => {
             let session = state.session.read().await;
@@ -21096,10 +21689,7 @@ async fn route_http_request_with_headers(
         ("POST", "/api/searches") => {
             if route.path.starts_with("/api/v0/")
                 && extract_json_string_field(body, "acquisitionProfile").is_some_and(|profile| {
-                    !matches!(
-                        profile.to_ascii_lowercase().as_str(),
-                        "default" | "lossless" | "highquality" | "high-quality" | "any"
-                    )
+                    !is_known_acquisition_profile(&profile)
                 })
             {
                 return Ok(HttpResponse {
@@ -21241,6 +21831,86 @@ async fn route_http_request_with_headers(
             let Some(token) = search_token_path(normalized_path.as_str(), "/complete") else {
                 return Ok(routing::not_found_response());
             };
+
+            // A wishlist search that completes with too few usable results gets
+            // one of the current smart-fallback queries immediately.  The
+            // session loop also handles this at expiry time, but waiting for the
+            // five-second TTL here makes manual/API completion observably slower
+            // and loses the current upstream behavior.
+            let fallback_query = {
+                let record = state.searches.read().await.get(token);
+                if record.as_ref().is_some_and(|record| {
+                    record.status == "active"
+                        && search_fallback::is_enabled_for_source(record.target)
+                }) {
+                    let record = record.expect("active wishlist search record");
+                    let wishlist_policy = if let Some(item_id) = record.wishlist_item_id() {
+                        state.wishlist.read().await.result_policy_for(item_id)
+                    } else {
+                        None
+                    };
+                    let response_limit = wishlist_policy
+                        .as_ref()
+                        .map(|policy| policy.max_results)
+                        .unwrap_or(MAX_SEARCH_RESULTS_PER_SEARCH);
+                    let file_count = record
+                        .results
+                        .len()
+                        .saturating_add(record.hidden_locked_count);
+                    (search_fallback::needs_fallback(
+                        record.raw_response_count,
+                        file_count,
+                        response_limit,
+                        response_limit,
+                    ))
+                    .then(|| search_fallback::create_queries(&record.query))
+                    .and_then(|queries| queries.get(record.fallback_attempts).cloned())
+                } else {
+                    None
+                }
+            };
+
+            if let Some(fallback_query) = fallback_query {
+                let fallback_record = {
+                    let mut searches = state.searches.write().await;
+                    searches.reset_for_fallback(token, fallback_query, 5)
+                };
+                if let Some(fallback_record) = fallback_record {
+                    let body_json = fallback_record.json();
+                    persist_search_record(state, &fallback_record).await?;
+                    record_event(
+                        state,
+                        "wishlist.search.fallback_started",
+                        fallback_record.token.to_string(),
+                        Some(
+                            serde_json::json!({
+                                "query": fallback_record.query,
+                                "attempt": fallback_record.fallback_attempts,
+                                "source": "completion",
+                            })
+                            .to_string(),
+                        ),
+                    )
+                    .await;
+                    if let Err(error) = send_session_command(
+                        state,
+                        SessionCommand::Search {
+                            token: fallback_record.token,
+                            query: fallback_record.query,
+                            target: SearchDispatchTarget::Wishlist,
+                        },
+                    )
+                    .await
+                    {
+                        update_session(state, |snapshot| {
+                            snapshot.last_error = Some(error.clone());
+                        })
+                        .await;
+                    }
+                    return Ok(routing::ok_response(body_json));
+                }
+            }
+
             let mut searches = state.searches.write().await;
             if let Some((record, transitioned)) = searches.complete(token) {
                 let body_json = record.json();
@@ -21428,6 +22098,10 @@ async fn route_http_request_with_headers(
                         .get("size")
                         .and_then(serde_json::Value::as_u64)
                         .unwrap_or(0),
+                    bit_rate: None,
+                    sample_rate: None,
+                    bit_depth: None,
+                    length_seconds: None,
                     locked,
                     slot_free,
                     average_speed,
@@ -21453,7 +22127,7 @@ async fn route_http_request_with_headers(
                 for entry in &entries {
                     if policy
                         .as_ref()
-                        .is_some_and(|policy| !policy.filter.matches(&entry.filename))
+                        .is_some_and(|policy| !policy.filter.matches_entry(entry))
                     {
                         filtered_out = filtered_out.saturating_add(1);
                     } else if entry.peer_username.as_deref().is_some_and(|username| {
@@ -21470,7 +22144,7 @@ async fn route_http_request_with_headers(
                     if entry.locked
                         || policy
                             .as_ref()
-                            .is_some_and(|policy| !policy.filter.matches(&entry.filename))
+                            .is_some_and(|policy| !policy.filter.matches_entry(entry))
                     {
                         return false;
                     }
@@ -21788,7 +22462,40 @@ async fn route_http_request_with_headers(
         }
 
         ("POST", "/api/transfers") => {
-            if let Some((username, files)) = slskd_enqueue_request(body) {
+            if let Some((username, mut files)) = slskd_enqueue_request(body) {
+                let exclusions = effective_download_exclusions(state).await;
+                let filenames = files
+                    .iter()
+                    .filter_map(|file| file.get("filename").and_then(serde_json::Value::as_str))
+                    .map(str::to_owned)
+                    .collect::<Vec<_>>();
+                let blocked = filenames
+                    .iter()
+                    .filter(|filename| {
+                        crate::download_filter::is_excluded(
+                            filename,
+                            &exclusions,
+                        )
+                    })
+                    .count();
+                if blocked == filenames.len() && !filenames.is_empty() {
+                    return Ok(crate::route_dispatch::download_policy_response(
+                        state,
+                        &filenames,
+                    )
+                    .await
+                    .expect("non-empty blocked list must produce a policy response"));
+                }
+                files.retain(|file| {
+                    file.get("filename")
+                        .and_then(serde_json::Value::as_str)
+                        .is_none_or(|filename| {
+                            !crate::download_filter::is_excluded(
+                                filename,
+                                &exclusions,
+                            )
+                        })
+                });
                 let batch_id = slskd_transfer_batch_id(body)
                     .or_else(|| (files.len() > 1).then(|| uuid::Uuid::new_v4().to_string()));
                 let mut transfers = state.transfers.write().await;
@@ -21852,6 +22559,16 @@ async fn route_http_request_with_headers(
             };
 
             let direction = extract_json_u32_field(body, "direction").unwrap_or(0);
+            if direction == 0 {
+                if let Some(response) = crate::route_dispatch::download_policy_response(
+                    state,
+                    std::slice::from_ref(&filename),
+                )
+                .await
+                {
+                    return Ok(response);
+                }
+            }
             let peer_username = extract_json_string_field(body, "peer_username");
             let supplied_local_path = extract_json_string_field(body, "local_path");
             let batch_id = slskd_transfer_batch_id(body);
@@ -29607,9 +30324,9 @@ async fn route_http_request_with_headers(
                  .pointer("/extra/analysisAudioSource")
                  .and_then(serde_json::Value::as_str)
                  == Some("spotify_page");
-             let library = state.library.read().await;
-             let shares = state.shares.read().await;
-             let runs = songid_runs_value(&library, &shares);
+            let library = state.library.read().await;
+            let shares = state.shares.read().await;
+            let runs = songid_runs_value(&library, &shares, Some(&query));
              let matches = runs
                  .iter()
                  .flat_map(|run| run.get("matches").and_then(serde_json::Value::as_array).cloned().unwrap_or_default())
@@ -29718,22 +30435,23 @@ async fn route_http_request_with_headers(
                  return Ok(routing::not_found_response());
              };
              let runtime = state.runtime.read().await;
-             let Some(run) = runtime.songid_run(run_id) else {
-                 return Ok(routing::not_found_response());
-             };
-             drop(runtime);
-             let matrix = run
-                 .get("matches")
-                 .and_then(serde_json::Value::as_array)
-                 .cloned()
-                 .unwrap_or_default()
-                 .into_iter()
-                 .map(|match_value| {
+            let Some(run) = runtime.songid_run(run_id) else {
+                return Ok(routing::not_found_response());
+            };
+            drop(runtime);
+            let matrix = run
+                .get("forensicMatrix")
+                .or_else(|| run.get("matches"))
+                .and_then(serde_json::Value::as_array)
+                .cloned()
+                .unwrap_or_default()
+                .into_iter()
+                .map(|match_value| {
                      serde_json::json!({
                          "libraryItemId": match_value.get("libraryItemId").cloned().unwrap_or(serde_json::Value::Null),
                          "filename": match_value.get("filename").cloned().unwrap_or(serde_json::Value::Null),
-                         "score": match_value.get("score").cloned().unwrap_or_else(|| serde_json::json!(0.0)),
-                         "signals": ["artist", "title", "extension"],
+                        "score": match_value.get("score").or_else(|| match_value.get("identityScore")).cloned().unwrap_or_else(|| serde_json::json!(0.0)),
+                        "signals": match_value.get("signals").cloned().unwrap_or_else(|| serde_json::json!([])),
                      })
                  })
                  .collect::<Vec<_>>();
@@ -35022,7 +35740,7 @@ async fn solid_client_id_document_response(state: &AppState) -> HttpResponse {
     let document = serde_json::json!({
         "@context": "https://www.w3.org/ns/solid/oidc-context.jsonld",
         "client_id": client_id_url,
-        "client_name": "slskdn",
+        "client_name": "slskR",
         "application_type": "web",
         "redirect_uris": [client_id.to_string()],
         "scope": "openid webid",
@@ -35171,9 +35889,12 @@ fn inject_web_compatibility_target(
     bytes: Vec<u8>,
     file: &Path,
     compatibility_target: ControllerCompatibilityTarget,
+    expose_compatibility_target: bool,
     csp_nonce: Option<&str>,
 ) -> Vec<u8> {
-    if file.file_name().and_then(|name| name.to_str()) != Some("index.html") {
+    if !expose_compatibility_target
+        || file.file_name().and_then(|name| name.to_str()) != Some("index.html")
+    {
         return bytes;
     }
 
@@ -35469,11 +36190,13 @@ fn web_static_error_response(error: &str) -> HttpResponse {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn write_web_static_response<W: tokio::io::AsyncWrite + Unpin>(
     writer: &mut W,
     path: &str,
     configured_content_path: Option<&Path>,
     compatibility_target: ControllerCompatibilityTarget,
+    expose_compatibility_target: bool,
     include_body: bool,
     keep_alive: bool,
     extra_headers: &str,
@@ -35492,6 +36215,7 @@ async fn write_web_static_response<W: tokio::io::AsyncWrite + Unpin>(
         read_bounded_web_static_file_under_root(&root, &file)?,
         &file,
         compatibility_target,
+        expose_compatibility_target,
         csp_nonce.as_deref(),
     );
     let connection_header = if keep_alive { "keep-alive" } else { "close" };
@@ -35828,7 +36552,7 @@ fn normalize_controller_release_version(version_or_tag: &str) -> String {
     {
         normalized = &normalized[refs_prefix.len()..];
     }
-    for prefix in ["build-main-", "build-dev-", "v"] {
+    for prefix in ["build-main-", "build-dev-", "release-v", "v"] {
         if normalized
             .get(..prefix.len())
             .is_some_and(|candidate| candidate.eq_ignore_ascii_case(prefix))
@@ -35943,7 +36667,7 @@ fn controller_releases_url(target: ControllerCompatibilityTarget) -> &'static st
             "https://api.github.com/repos/slskd/slskd/releases/latest"
         }
         ControllerCompatibilityTarget::Slskdn => {
-            "https://api.github.com/repos/snapetech/slskdn/releases/latest"
+            "https://api.github.com/repos/snapetech/slskr/releases/latest"
         }
     }
 }
@@ -35988,7 +36712,7 @@ async fn refresh_controller_version_check(
             .get(releases_url)
             .header(
                 reqwest::header::USER_AGENT,
-                format!("slskdN v{APP_VERSION} ({APP_VERSION})"),
+                format!("slskR v{APP_VERSION} ({APP_VERSION})"),
             )
             .send()
             .await
@@ -36106,6 +36830,18 @@ fn slskd_options_json(
             .remove("file");
     }
     response["feature"]["swagger"] = serde_json::json!(config.controller_swagger);
+    if config.current_upstream_behavior
+        && config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
+    {
+        response["autoReplace"] = serde_json::json!({
+            "intervalSeconds": config.transfer_download.auto_replace_interval.as_secs(),
+            "maxRetries": config
+                .transfer_download
+                .auto_replace_max_retries
+                .unwrap_or(3),
+            "sizeThresholdPercent": config.transfer_download.auto_replace_threshold_percent,
+        });
+    }
     response["flags"]["forceMigrations"] = serde_json::json!(config.daemon_flags.force_migrations);
     response["flags"]["legacyWindowsTcpKeepalive"] =
         serde_json::json!(config.daemon_flags.legacy_windows_tcp_keepalive);
@@ -36482,6 +37218,8 @@ fn slskd_options_json(
     });
     response["filters"]["search"]["request"] =
         serde_json::json!(config.controller_search_request_filters);
+    response["filters"]["download"]["exclude"] =
+        serde_json::json!(config.download_filter.exclude);
     let blacklisted = serde_json::json!({
         "members": config.managed_blacklist.members,
         "patterns": config.managed_blacklist.patterns,
@@ -38149,7 +38887,11 @@ fn apply_watched_controller_configuration<'a>(
                         state.config.controller_compatibility_target,
                     )
                 });
-                if text.is_some() && parsed.is_none() {
+                if text.is_some()
+                    && parsed.is_none()
+                    && state.config.controller_compatibility_target
+                        == ControllerCompatibilityTarget::Slskd
+                {
                     // The frozen controller clears the current options projection
                     // when the watched YAML is syntactically invalid, while
                     // retaining the already-loaded runtime/share index until the
@@ -38184,6 +38926,14 @@ fn apply_watched_controller_configuration<'a>(
             .unwrap_or_else(|| ObfuscationReloadState::from_config(&state.config));
         let reloaded_obfuscation = ObfuscationReloadState::from_config(&reloaded);
         let obfuscation_changed = previous_obfuscation != reloaded_obfuscation;
+        let previous_download_exclusions = state
+            .options_overlay
+            .read()
+            .await
+            .watched_download_exclusions
+            .clone()
+            .unwrap_or_else(|| state.config.download_filter.exclude.clone());
+        let download_exclusions_changed = previous_download_exclusions != reloaded.download_filter.exclude;
         let previous_restart_fingerprint = state
             .options_overlay
             .read()
@@ -38206,6 +38956,7 @@ fn apply_watched_controller_configuration<'a>(
                     .map(controller_yaml_api_projection)
                     .unwrap_or(serde_json::Value::Null),
             );
+            overlay.watched_download_exclusions = Some(reloaded.download_filter.exclude.clone());
             overlay.watched_obfuscation = Some(reloaded_obfuscation);
             overlay.watched_restart_fingerprint = Some(reloaded_restart_fingerprint);
             overlay.watched_share_directories = Some(
@@ -38269,6 +39020,10 @@ fn apply_watched_controller_configuration<'a>(
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner) =
             reloaded.controller_no_config_watch;
+        let previous_case_sensitive_regex = *state
+            .controller_case_sensitive_regex
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         *state
             .controller_case_sensitive_regex
             .write()
@@ -38303,6 +39058,9 @@ fn apply_watched_controller_configuration<'a>(
         *state.core_workflow_settings.write().await = reloaded.core_workflow.clone();
         *state.advanced_networking.write().await = reloaded.advanced_networking.clone();
         *state.media_services.write().await = reloaded.media_services.clone();
+        if download_exclusions_changed {
+            cancel_downloads_blocked_by_policy(state, &reloaded.download_filter.exclude).await;
+        }
         state
             .rooms
             .write()
@@ -38350,13 +39108,14 @@ fn apply_watched_controller_configuration<'a>(
         );
         let search_filters_changed = {
             let current = state.search_request_filters.read().await;
-            current
-                .iter()
-                .map(|filter| filter.expression.as_str())
-                .ne(reloaded
-                    .controller_search_request_filters
+            previous_case_sensitive_regex != reloaded.controller_case_sensitive_regex
+                || current
                     .iter()
-                    .map(String::as_str))
+                    .map(|filter| filter.expression.as_str())
+                    .ne(reloaded
+                        .controller_search_request_filters
+                        .iter()
+                        .map(String::as_str))
         };
         if search_filters_changed {
             *state.search_request_filters.write().await = compile_controller_regexes(
@@ -38399,8 +39158,8 @@ fn apply_watched_controller_configuration<'a>(
         apply_distributed_settings(state, reloaded.soulseek_distributed).await;
         let regular_listener_result =
             reconfigure_regular_listener(state, reloaded.listener_bind.clone()).await;
-        let defer_obfuscated_listener =
-            state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn;
+        let defer_obfuscated_listener = !reloaded.current_upstream_behavior
+            && reloaded.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn;
         if defer_obfuscated_listener
             && matches!(regular_listener_result.as_ref(), Ok(true))
             && state.session.read().await.state == "connected"
@@ -41658,8 +42417,14 @@ fn slskd_application_state_json(
                 .collect(),
         );
     }
+    let compatibility_target = if config.current_upstream_behavior {
+        serde_json::Value::Null
+    } else {
+        serde_json::json!(config.controller_compatibility_target.as_str())
+    };
     serde_json::json!({
-        "compatibilityTarget": config.controller_compatibility_target.as_str(),
+        "product": "slskR",
+        "compatibilityTarget": compatibility_target,
         "version": version,
         "pendingReconnect": runtime.application_reconnect_pending,
         "pendingRestart": runtime.application_restart_requested,
@@ -44722,6 +45487,94 @@ async fn fetch_lidarr_wanted_missing(
     read_bounded_integration_json(response, "Lidarr wanted").await
 }
 
+/// Convert Lidarr's allowed quality tree into the same literal filter syntax
+/// consumed by wishlist candidate selection. `None` means the profile is
+/// intentionally unrestricted; `Some("")` means it contained no recognized
+/// quality and therefore must not replace the operator's configured filter.
+fn lidarr_quality_profile_filter(profile: &serde_json::Value) -> Option<String> {
+    fn quality_name(item: &serde_json::Value) -> String {
+        item.pointer("/quality/name")
+            .or_else(|| item.get("name"))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase()
+    }
+    fn visit(item: &serde_json::Value, filters: &mut Vec<String>, seen: &mut HashSet<String>) -> bool {
+        let name = quality_name(item);
+        let allowed = item
+            .get("allowed")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        if allowed && (name.contains("any") || name.contains("all")) {
+            return true;
+        }
+        if allowed {
+            let mut formats = Vec::new();
+            let mut add = |format: &str| {
+                if !formats.iter().any(|value: &String| value == format) {
+                    formats.push(format.to_owned());
+                }
+            };
+            if name.contains("lossless") {
+                for format in ["flac", "alac", "m4a", "wav", "ape", "aiff", "aif"] {
+                    add(format);
+                }
+            }
+            if name.contains("lossy") {
+                for format in ["mp3", "aac", "m4a", "ogg", "oga", "opus"] {
+                    add(format);
+                }
+            }
+            for (needle, format) in [
+                ("mp3", "mp3"),
+                ("flac", "flac"),
+                ("alac", "alac"),
+                ("aac", "aac"),
+                ("vorbis", "ogg"),
+                ("ogg", "ogg"),
+                ("opus", "opus"),
+                ("ape", "ape"),
+                ("wav", "wav"),
+                ("aiff", "aiff"),
+                ("aif", "aif"),
+                ("m4a", "m4a"),
+            ] {
+                if name.contains(needle) {
+                    add(format);
+                }
+            }
+            let bitrate = name
+                .split(|character: char| !character.is_ascii_digit())
+                .filter_map(|part| part.parse::<u32>().ok())
+                .find(|value| (32..=1_000).contains(value));
+            for format in formats {
+                let filter = bitrate
+                    .map(|value| format!("{format} minbr:{value}"))
+                    .unwrap_or(format);
+                if seen.insert(filter.clone()) {
+                    filters.push(filter);
+                }
+            }
+        }
+        item.get("items")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|items| items.iter().any(|child| visit(child, filters, seen)))
+    }
+
+    let mut filters = Vec::new();
+    let mut seen = HashSet::new();
+    let unrestricted = profile
+        .get("items")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|items| items.iter().any(|item| visit(item, &mut filters, &mut seen)));
+    if unrestricted {
+        None
+    } else {
+        Some(filters.join(" OR "))
+    }
+}
+
 async fn sync_lidarr_wanted_to_wishlist(
     state: &AppState,
     lidarr: &config::LidarrIntegrationSettings,
@@ -44757,6 +45610,8 @@ async fn sync_lidarr_wanted_to_wishlist(
         .collect::<HashSet<_>>();
     let mut page = 1_u64;
     const PAGE_SIZE: u64 = 250;
+    let mut quality_profiles: Option<Vec<serde_json::Value>> = None;
+    let mut monitored_releases = BTreeMap::<i64, Option<serde_json::Value>>::new();
 
     loop {
         let response = fetch_lidarr_wanted_missing(lidarr, page, PAGE_SIZE).await?;
@@ -44764,16 +45619,221 @@ async fn sync_lidarr_wanted_to_wishlist(
             .get("totalRecords")
             .and_then(serde_json::Value::as_u64)
             .unwrap_or_default();
-        let records = response
+        let raw_records = response
             .get("records")
             .and_then(serde_json::Value::as_array)
             .cloned()
             .unwrap_or_default();
-        if records.is_empty() {
+        if raw_records.is_empty() {
             break;
         }
 
+        let mut records = Vec::with_capacity(raw_records.len());
+        for mut album in raw_records {
+            let album_id = album
+                .get("id")
+                .and_then(serde_json::Value::as_i64)
+                .filter(|value| *value > 0);
+            let quality_profile_id = album
+                .get("profileId")
+                .or_else(|| album.pointer("/artist/qualityProfileId"))
+                .and_then(serde_json::Value::as_i64)
+                .filter(|value| *value > 0);
+            if quality_profile_id.is_some() && quality_profiles.is_none() {
+                quality_profiles = Some(
+                    fetch_lidarr_json_get(lidarr, "/api/v1/qualityprofile", "quality profiles")
+                        .await?
+                        .as_array()
+                        .cloned()
+                        .unwrap_or_default(),
+                );
+            }
+            let mut selected_filter = lidarr.wishlist_filter.clone();
+            if let Some(profile_id) = quality_profile_id {
+                if let Some(profile) = quality_profiles.as_ref().and_then(|profiles| {
+                    profiles.iter().find(|profile| {
+                        profile.get("id").and_then(serde_json::Value::as_i64) == Some(profile_id)
+                    })
+                }) {
+                    match lidarr_quality_profile_filter(profile) {
+                        Some(filter) if !filter.is_empty() => selected_filter = filter,
+                        None => selected_filter.clear(),
+                        _ => {}
+                    }
+                }
+            }
+            let monitored_release = if let Some(album_id) = album_id {
+                let needs_release_fetch = matches!(
+                    monitored_releases.entry(album_id),
+                    std::collections::btree_map::Entry::Vacant(_)
+                );
+                if needs_release_fetch {
+                    let release = fetch_lidarr_json_get(
+                        lidarr,
+                        &format!("/api/v1/album/{album_id}"),
+                        "album release detail",
+                    )
+                    .await
+                    .ok()
+                    .and_then(|detail| {
+                        detail
+                            .get("releases")
+                            .and_then(serde_json::Value::as_array)
+                            .and_then(|releases| {
+                                releases
+                                    .iter()
+                                    .find(|release| {
+                                        release
+                                            .get("monitored")
+                                            .and_then(serde_json::Value::as_bool)
+                                            .unwrap_or(false)
+                                    })
+                                    .or_else(|| releases.first())
+                                    .cloned()
+                            })
+                    });
+                    monitored_releases.insert(album_id, release);
+                }
+                monitored_releases.get(&album_id).cloned().flatten()
+            } else {
+                None
+            };
+            let track_file_count = album
+                .pointer("/statistics/trackFileCount")
+                .and_then(serde_json::Value::as_i64)
+                .unwrap_or_default();
+            let total_track_count = album
+                .pointer("/statistics/trackCount")
+                .and_then(serde_json::Value::as_i64)
+                .or_else(|| {
+                    album
+                        .pointer("/statistics/totalTrackCount")
+                        .and_then(serde_json::Value::as_i64)
+                })
+                .unwrap_or_default();
+            let partially_missing = album_id.is_some()
+                && track_file_count > 0
+                && total_track_count > track_file_count;
+            let expected_track_count = monitored_release
+                .as_ref()
+                .and_then(|release| release.get("trackCount"))
+                .and_then(serde_json::Value::as_i64)
+                .filter(|value| *value > 0)
+                .or_else(|| (total_track_count > 0).then_some(total_track_count));
+            let release_duration_seconds = monitored_release
+                .as_ref()
+                .and_then(|release| release.get("duration"))
+                .and_then(serde_json::Value::as_i64)
+                .filter(|value| *value > 0)
+                .map(|value| (value / 1_000).max(1));
+            let release_disambiguation = monitored_release
+                .as_ref()
+                .and_then(|release| {
+                    release
+                        .get("disambiguation")
+                        .or_else(|| release.get("title"))
+                })
+                .and_then(serde_json::Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned);
+            album["__slskrSelectedFilter"] = serde_json::json!(selected_filter);
+            album["__slskrExpectedTrackCount"] = expected_track_count
+                .map(serde_json::Value::from)
+                .unwrap_or(serde_json::Value::Null);
+            album["__slskrReleaseDurationSeconds"] = release_duration_seconds
+                .map(serde_json::Value::from)
+                .unwrap_or(serde_json::Value::Null);
+            album["__slskrReleaseDisambiguation"] = release_disambiguation
+                .clone()
+                .map(serde_json::Value::from)
+                .unwrap_or(serde_json::Value::Null);
+            if let Some(album_id) = album_id.filter(|_| partially_missing) {
+                let tracks = fetch_lidarr_json_get(
+                    lidarr,
+                    &format!("/api/v1/track?albumId={album_id}"),
+                    "album tracks",
+                )
+                .await?
+                .as_array()
+                .cloned()
+                .unwrap_or_default();
+                let album_title = album
+                    .get("title")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default()
+                    .trim();
+                let artist = album
+                    .pointer("/artist/artistName")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default()
+                    .trim();
+                let missing_tracks = tracks
+                    .into_iter()
+                    .filter(|track| {
+                        !track
+                            .get("hasFile")
+                            .and_then(serde_json::Value::as_bool)
+                            .unwrap_or(false)
+                            && track
+                                .get("trackFileId")
+                                .and_then(serde_json::Value::as_i64)
+                                .unwrap_or_default()
+                                <= 0
+                    })
+                    .filter_map(|track| {
+                        let track_id = track
+                            .get("id")
+                            .and_then(serde_json::Value::as_i64)
+                            .filter(|value| *value > 0)?;
+                        let track_title = track
+                            .get("title")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or_default()
+                            .trim();
+                        if track_title.is_empty() {
+                            return None;
+                        }
+                        let track_number = track
+                            .get("trackNumber")
+                            .map(|value| match value {
+                                serde_json::Value::String(value) => value.clone(),
+                                value => value.to_string(),
+                            })
+                            .unwrap_or_default();
+                        let title = [album_title, track_number.trim(), track_title]
+                            .into_iter()
+                            .filter(|value| !value.is_empty())
+                            .collect::<Vec<_>>()
+                            .join(" ");
+                        let search_text = [artist, title.as_str()]
+                            .into_iter()
+                            .filter(|value| !value.is_empty())
+                            .collect::<Vec<_>>()
+                            .join(" ");
+                        let duration_seconds = track
+                            .get("duration")
+                            .and_then(serde_json::Value::as_i64)
+                            .filter(|value| *value > 0)
+                            .map(|value| (value / 1_000).max(1));
+                        Some(serde_json::json!({
+                            "id": track_id,
+                            "artist": artist,
+                            "title": title,
+                            "searchText": search_text,
+                            "durationSeconds": duration_seconds,
+                            "releaseDisambiguation": release_disambiguation.clone(),
+                        }))
+                    })
+                    .collect::<Vec<_>>();
+                album["__slskrPartialAlbum"] = serde_json::json!(true);
+                album["__slskrMissingTracks"] = serde_json::Value::Array(missing_tracks);
+            }
+            records.push(album);
+        }
+
         let mut created = Vec::new();
+        let mut updated = Vec::new();
         let mut reached_cap = false;
         {
             let mut wishlist = state.wishlist.write().await;
@@ -44794,6 +45854,53 @@ async fn sync_lidarr_wanted_to_wishlist(
                     .unwrap_or_default()
                     .trim()
                     .to_owned();
+                let selected_filter = album
+                    .get("__slskrSelectedFilter")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or(lidarr.wishlist_filter.as_str())
+                    .to_owned();
+                let lidarr_album_id = album
+                    .get("id")
+                    .and_then(serde_json::Value::as_i64)
+                    .filter(|value| *value > 0);
+                let lidarr_track_count = album
+                    .pointer("/statistics/trackCount")
+                    .and_then(serde_json::Value::as_i64)
+                    .or_else(|| {
+                        album
+                            .pointer("/statistics/totalTrackCount")
+                            .and_then(serde_json::Value::as_i64)
+                    })
+                    .filter(|value| *value > 0);
+                let expected_track_count = album
+                    .get("__slskrExpectedTrackCount")
+                    .and_then(serde_json::Value::as_i64)
+                    .filter(|value| *value > 0);
+                let release_duration_seconds = album
+                    .get("__slskrReleaseDurationSeconds")
+                    .and_then(serde_json::Value::as_i64)
+                    .filter(|value| *value > 0);
+                let release_disambiguation = album
+                    .get("__slskrReleaseDisambiguation")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned);
+                let lidarr_track_count = expected_track_count.or(lidarr_track_count);
+                let lidarr_duration_seconds = release_duration_seconds.or_else(|| {
+                    album
+                        .get("duration")
+                        .and_then(serde_json::Value::as_i64)
+                        .filter(|value| *value > 0)
+                        .map(|value| (value / 1_000).max(1))
+                });
+                let lidarr_release_disambiguation = release_disambiguation.clone().or_else(|| {
+                    album
+                        .get("disambiguation")
+                        .or_else(|| album.get("releaseDisambiguation"))
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .map(str::to_owned)
+                });
                 let search_text = match (artist.is_empty(), title.is_empty()) {
                     (true, true) => String::new(),
                     (true, false) => title.clone(),
@@ -44804,10 +45911,123 @@ async fn sync_lidarr_wanted_to_wishlist(
                     skipped_count = skipped_count.saturating_add(1);
                     continue;
                 }
+
+                if album
+                    .get("__slskrPartialAlbum")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false)
+                {
+                    if let Some(album_id) = lidarr_album_id {
+                        let missing_track_ids = album
+                            .get("__slskrMissingTracks")
+                            .and_then(serde_json::Value::as_array)
+                            .into_iter()
+                            .flatten()
+                            .filter_map(|track| track.get("id").and_then(serde_json::Value::as_i64))
+                            .collect::<HashSet<_>>();
+                        updated.extend(
+                            wishlist.disable_lidarr_items_for_album(
+                                album_id,
+                                &missing_track_ids,
+                            ),
+                        );
+                    }
+                    let missing_tracks = album
+                        .get("__slskrMissingTracks")
+                        .and_then(serde_json::Value::as_array)
+                        .cloned()
+                        .unwrap_or_default();
+                    if missing_tracks.is_empty() {
+                        skipped_count = skipped_count.saturating_add(1);
+                        continue;
+                    }
+                    for track in missing_tracks {
+                        if created_count.saturating_add(created.len() as u64)
+                            >= lidarr.max_items_per_sync
+                        {
+                            reached_cap = true;
+                            break;
+                        }
+                        let track_id = track
+                            .get("id")
+                            .and_then(serde_json::Value::as_i64)
+                            .filter(|value| *value > 0);
+                        let artist = track
+                            .get("artist")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or_default()
+                            .to_owned();
+                        let title = track
+                            .get("title")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or_default()
+                            .to_owned();
+                        let search_text = track
+                            .get("searchText")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or_default()
+                            .trim()
+                            .to_owned();
+                        if search_text.is_empty() {
+                            skipped_count = skipped_count.saturating_add(1);
+                            continue;
+                        }
+                        let key = format!(
+                            "{}\u{1f}{}",
+                            search_text.to_ascii_lowercase(),
+                            selected_filter.trim().to_ascii_lowercase()
+                        );
+                        if !existing.insert(key) {
+                            duplicate_count = duplicate_count.saturating_add(1);
+                            continue;
+                        }
+                        let item = wishlist.add_item_with_settings(
+                            artist,
+                            title,
+                            "Audio".to_owned(),
+                            selected_filter.clone(),
+                            true,
+                            lidarr.auto_download,
+                            usize::try_from(lidarr.wishlist_max_results)
+                                .unwrap_or(MAX_WISHLIST_RESULTS),
+                            Some(1),
+                        );
+                        match item {
+                            Ok(item) => {
+                                let item = wishlist
+                                .update_lidarr_metadata(
+                                        &item.id,
+                                        lidarr_album_id,
+                                        track_id,
+                                        None,
+                                        track
+                                            .get("durationSeconds")
+                                            .and_then(serde_json::Value::as_i64),
+                                        track
+                                            .get("releaseDisambiguation")
+                                            .and_then(serde_json::Value::as_str)
+                                            .map(str::to_owned)
+                                            .or_else(|| lidarr_release_disambiguation.clone()),
+                                    )
+                                    .unwrap_or(item);
+                                created.push(item);
+                            }
+                            Err(()) => {
+                                skipped_count = skipped_count.saturating_add(1);
+                                reached_cap = true;
+                                break;
+                            }
+                        }
+                    }
+                    if reached_cap {
+                        break;
+                    }
+                    continue;
+                }
                 let key = format!(
                     "{}\u{1f}{}",
                     search_text.to_ascii_lowercase(),
-                    lidarr.wishlist_filter.trim().to_ascii_lowercase()
+                    selected_filter.trim().to_ascii_lowercase()
                 );
                 if !existing.insert(key) {
                     duplicate_count = duplicate_count.saturating_add(1);
@@ -44817,13 +46037,25 @@ async fn sync_lidarr_wanted_to_wishlist(
                     artist,
                     title,
                     "Audio".to_owned(),
-                    lidarr.wishlist_filter.clone(),
+                    selected_filter.clone(),
                     true,
                     lidarr.auto_download,
                     usize::try_from(lidarr.wishlist_max_results).unwrap_or(MAX_WISHLIST_RESULTS),
                     None,
                 ) {
-                    Ok(item) => created.push(item),
+                    Ok(item) => {
+                        let item = wishlist
+                            .update_lidarr_metadata(
+                                &item.id,
+                                lidarr_album_id,
+                                None,
+                                lidarr_track_count,
+                                lidarr_duration_seconds,
+                                lidarr_release_disambiguation,
+                            )
+                            .unwrap_or(item);
+                        created.push(item);
+                    }
                     Err(()) => {
                         skipped_count = skipped_count.saturating_add(1);
                         reached_cap = true;
@@ -44832,7 +46064,7 @@ async fn sync_lidarr_wanted_to_wishlist(
                 }
             }
         }
-        for item in &created {
+        for item in created.iter().chain(updated.iter()) {
             persist_wishlist_item_checked(state, item).await?;
         }
         created_count = created_count.saturating_add(created.len() as u64);
@@ -44973,6 +46205,99 @@ fn lidarr_portable_file_name(path: &str) -> String {
     normalized.rsplit('/').next().unwrap_or_default().to_owned()
 }
 
+async fn fetch_lidarr_json_get(
+    lidarr: &config::LidarrIntegrationSettings,
+    path: &str,
+    label: &str,
+) -> Result<serde_json::Value, String> {
+    let base_url = lidarr
+        .url
+        .as_deref()
+        .ok_or("Lidarr URL is not configured")?;
+    let resolved = validate_lidarr_base_url(base_url)?;
+    let api_key = lidarr
+        .api_key
+        .as_deref()
+        .ok_or("Lidarr API key is not configured")?;
+    let url = format!("{}{}", base_url.trim_end_matches('/'), path);
+    let mut builder = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(lidarr.timeout_seconds))
+        .redirect(reqwest::redirect::Policy::none());
+    for addr in &resolved.addrs {
+        builder = builder.resolve(&resolved.host, *addr);
+    }
+    let response = builder
+        .build()
+        .map_err(|error| format!("failed to build Lidarr client: {error}"))?
+        .get(url)
+        .header("X-Api-Key", api_key)
+        .send()
+        .await
+        .map_err(|error| format!("Lidarr {label} request failed: {error}"))?;
+    if !response.status().is_success() {
+        return Err(format!("Lidarr returned HTTP {}", response.status()));
+    }
+    read_bounded_integration_json(response, &format!("Lidarr {label}"))
+        .await
+}
+
+async fn lidarr_already_owned_skip_reason(
+    lidarr: &config::LidarrIntegrationSettings,
+    directory: &str,
+) -> Result<Option<String>, String> {
+    let release_title = lidarr_portable_file_name(directory);
+    if release_title.trim().is_empty() {
+        return Ok(None);
+    }
+    let parsed = fetch_lidarr_json_get(
+        lidarr,
+        &format!("/api/v1/parse?title={}", url_encode(&release_title)),
+        "release parse",
+    )
+    .await?;
+    let artist_id = parsed
+        .pointer("/artist/id")
+        .and_then(serde_json::Value::as_i64)
+        .filter(|value| *value > 0);
+    let album_title = parsed
+        .pointer("/parsedAlbumInfo/albumTitle")
+        .or_else(|| parsed.pointer("/album/albumTitle"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let (Some(artist_id), Some(album_title)) = (artist_id, album_title) else {
+        return Ok(None);
+    };
+    let albums = fetch_lidarr_json_get(
+        lidarr,
+        &format!("/api/v1/album?artistId={artist_id}"),
+        "artist albums",
+    )
+    .await?;
+    let albums = albums.as_array().cloned().unwrap_or_default();
+    let owned = albums.into_iter().find(|album| {
+        album
+            .get("title")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|title| title.eq_ignore_ascii_case(album_title))
+            && album
+                .pointer("/statistics/totalTrackCount")
+                .and_then(serde_json::Value::as_i64)
+                .is_some_and(|total| {
+                    total > 0
+                        && album
+                            .pointer("/statistics/trackFileCount")
+                            .and_then(serde_json::Value::as_i64)
+                            .is_some_and(|files| files >= total)
+                })
+    });
+    Ok(owned.map(|_| {
+        format!(
+            "Already fully in Lidarr library ({album_title})"
+        )
+    }))
+}
+
 fn lidarr_rejected_filenames(candidates: &[serde_json::Value]) -> Vec<String> {
     let mut seen = HashSet::new();
     candidates
@@ -45052,10 +46377,11 @@ async fn fetch_lidarr_manual_import_candidates(
         .ok_or_else(|| "Lidarr manual import response was not an array".to_owned())
 }
 
-async fn import_lidarr_completed_directory(
+async fn import_lidarr_completed_directory_once(
     state: &AppState,
     lidarr: &config::LidarrIntegrationSettings,
     directory: &str,
+    bypass_debounce: bool,
 ) -> Result<serde_json::Value, String> {
     let empty_result = |enabled: bool, auto_import_enabled: bool| {
         serde_json::json!({
@@ -45083,7 +46409,7 @@ async fn import_lidarr_completed_directory(
     let mapped_directory =
         lidarr_map_import_path(directory, &lidarr.import_path_from, &lidarr.import_path_to);
     let now = unix_timestamp();
-    {
+    if !bypass_debounce {
         let mut recent = state.lidarr_recent_imports.write().await;
         recent.retain(|_, processed_at| now.saturating_sub(*processed_at) <= 60 * 60);
         if recent.insert(mapped_directory.clone(), now).is_some() {
@@ -45091,6 +46417,27 @@ async fn import_lidarr_completed_directory(
             result["directory"] = serde_json::json!(mapped_directory);
             result["skippedReason"] = serde_json::json!("Recently processed");
             return Ok(result);
+        }
+    }
+
+    if lidarr.skip_already_owned_albums && !lidarr.import_replace_existing_files {
+        match lidarr_already_owned_skip_reason(lidarr, &mapped_directory).await {
+            Ok(Some(reason)) => {
+                let mut result = empty_result(true, true);
+                result["directory"] = serde_json::json!(mapped_directory);
+                result["skippedReason"] = serde_json::json!(reason);
+                return Ok(result);
+            }
+            Ok(None) => {}
+            Err(error) => {
+                record_daemon_log(
+                    state,
+                    logging::LogLevel::Debug,
+                    "lidarr",
+                    format!("Lidarr ownership pre-check unavailable: {error}"),
+                )
+                .await;
+            }
         }
     }
 
@@ -45156,6 +46503,207 @@ async fn import_lidarr_completed_directory(
     }))
 }
 
+async fn import_lidarr_completed_directory(
+    state: &AppState,
+    lidarr: &config::LidarrIntegrationSettings,
+    directory: &str,
+) -> Result<serde_json::Value, String> {
+    // Manual imports are explicit user actions: they bypass the automatic
+    // completion debounce and do not inherit the automatic delay/retry loop.
+    import_lidarr_completed_directory_once(state, lidarr, directory, true).await
+}
+
+async fn import_lidarr_completed_directory_automatic(
+    state: &AppState,
+    lidarr: &config::LidarrIntegrationSettings,
+    directory: &str,
+) -> Result<serde_json::Value, String> {
+    if lidarr.import_delay_seconds > 0 {
+        time::sleep(std::time::Duration::from_secs(lidarr.import_delay_seconds)).await;
+    }
+
+    let max_attempts = lidarr.import_retry_max_attempts.saturating_add(1).max(1);
+    let mut retry_delay = std::time::Duration::from_secs(lidarr.import_retry_delay_seconds);
+    let mut last_error = None;
+    for attempt in 0..max_attempts {
+        // The first attempt participates in the completion debounce. Retries
+        // are already part of that same history item and must not turn into a
+        // false "recently processed" skip.
+        match import_lidarr_completed_directory_once(
+            state,
+            lidarr,
+            directory,
+            attempt > 0,
+        )
+        .await
+        {
+            Ok(result) => return Ok(result),
+            Err(error) => {
+                last_error = Some(error);
+                if attempt + 1 < max_attempts {
+                    time::sleep(retry_delay).await;
+                    retry_delay = retry_delay.saturating_mul(2);
+                }
+            }
+        }
+    }
+    Err(last_error.unwrap_or_else(|| "Lidarr import retry loop exhausted".to_owned()))
+}
+
+const LIDARR_IMPORT_HISTORY_PREFIX: &str = "integrations/lidarr/import-history/";
+
+fn lidarr_import_history_key(id: &str) -> String {
+    format!("{LIDARR_IMPORT_HISTORY_PREFIX}{id}")
+}
+
+fn lidarr_import_history_status(result: &serde_json::Value) -> &'static str {
+    if result
+        .get("skippedReason")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|reason| !reason.trim().is_empty())
+    {
+        "Skipped"
+    } else if result
+        .get("commandId")
+        .and_then(serde_json::Value::as_i64)
+        .is_some_and(|command_id| command_id > 0)
+    {
+        "Successful"
+    } else {
+        "Skipped"
+    }
+}
+
+fn lidarr_import_history_record(
+    id: &str,
+    source_directory: &str,
+    result: Option<&serde_json::Value>,
+    error: Option<&str>,
+    retry_of_id: Option<&str>,
+) -> serde_json::Value {
+    let now = chrono::Utc::now().to_rfc3339();
+    let result = result.cloned().unwrap_or_default();
+    let status = error
+        .map(|_| "Failed")
+        .unwrap_or_else(|| lidarr_import_history_status(&result));
+    serde_json::json!({
+        "id": id,
+        "sourceDirectory": source_directory,
+        "directory": result.get("directory").cloned().unwrap_or_else(|| serde_json::json!(source_directory)),
+        "status": status,
+        "errorMessage": error.unwrap_or_default(),
+        "skippedReason": result.get("skippedReason").and_then(serde_json::Value::as_str).unwrap_or_default(),
+        "candidateCount": result.get("candidateCount").and_then(serde_json::Value::as_u64).unwrap_or_default(),
+        "safeCandidateCount": result.get("safeCandidateCount").and_then(serde_json::Value::as_u64).unwrap_or_default(),
+        "rejectedCandidateCount": result.get("rejectedCandidateCount").and_then(serde_json::Value::as_u64).unwrap_or_default(),
+        "commandId": result.get("commandId").cloned().unwrap_or(serde_json::Value::Null),
+        "importMode": result.get("importMode").and_then(serde_json::Value::as_str).unwrap_or_default(),
+        "startedAt": now,
+        "completedAt": chrono::Utc::now().to_rfc3339(),
+        "retryOfId": retry_of_id,
+    })
+}
+
+fn public_lidarr_import_history_record(mut record: serde_json::Value) -> serde_json::Value {
+    if let Some(object) = record.as_object_mut() {
+        object.remove("sourceDirectory");
+    }
+    record
+}
+
+async fn persist_lidarr_import_history(
+    state: &AppState,
+    record: serde_json::Value,
+) -> Result<(), String> {
+    let id = record
+        .get("id")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| "Lidarr import history record has no id".to_owned())?;
+    state
+        .controller_features
+        .write()
+        .await
+        .upsert(lidarr_import_history_key(id), record)
+}
+
+async fn list_lidarr_import_history(
+    state: &AppState,
+    limit: usize,
+) -> Vec<serde_json::Value> {
+    let mut records = state
+        .controller_features
+        .read()
+        .await
+        .values_with_prefix(LIDARR_IMPORT_HISTORY_PREFIX);
+    records.sort_by(|left, right| {
+        right
+            .get("startedAt")
+            .and_then(serde_json::Value::as_str)
+            .cmp(&left.get("startedAt").and_then(serde_json::Value::as_str))
+    });
+    records
+        .into_iter()
+        .take(limit)
+        .map(public_lidarr_import_history_record)
+        .collect()
+}
+
+async fn run_lidarr_import_with_history(
+    state: &AppState,
+    lidarr: &config::LidarrIntegrationSettings,
+    directory: &str,
+    retry_of_id: Option<&str>,
+) -> Result<serde_json::Value, String> {
+    run_lidarr_import_with_history_mode(state, lidarr, directory, retry_of_id, false).await
+}
+
+async fn run_lidarr_automatic_import_with_history(
+    state: &AppState,
+    lidarr: &config::LidarrIntegrationSettings,
+    directory: &str,
+) -> Result<serde_json::Value, String> {
+    run_lidarr_import_with_history_mode(state, lidarr, directory, None, true).await
+}
+
+async fn run_lidarr_import_with_history_mode(
+    state: &AppState,
+    lidarr: &config::LidarrIntegrationSettings,
+    directory: &str,
+    retry_of_id: Option<&str>,
+    automatic: bool,
+) -> Result<serde_json::Value, String> {
+    let id = uuid::Uuid::new_v4().to_string();
+    let result = if automatic {
+        import_lidarr_completed_directory_automatic(state, lidarr, directory).await
+    } else {
+        import_lidarr_completed_directory(state, lidarr, directory).await
+    };
+    match result {
+        Ok(result) => {
+            let record = lidarr_import_history_record(
+                &id,
+                directory,
+                Some(&result),
+                None,
+                retry_of_id,
+            );
+            persist_lidarr_import_history(state, record).await?;
+            Ok(result)
+        }
+        Err(error) => {
+            let record = lidarr_import_history_record(
+                &id,
+                directory,
+                None,
+                Some(&error),
+                retry_of_id,
+            );
+            persist_lidarr_import_history(state, record).await?;
+            Err(error)
+        }
+    }
+}
+
 fn transfer_remote_directory(filename: &str) -> &str {
     filename
         .rfind(['/', '\\'])
@@ -45198,7 +46746,7 @@ async fn maybe_import_lidarr_completed_download(state: &AppState, transfer: &Tra
     if !lidarr.enabled || !lidarr.auto_import_completed {
         return;
     }
-    match import_lidarr_completed_directory(state, &lidarr, &local_directory).await {
+    match run_lidarr_automatic_import_with_history(state, &lidarr, &local_directory).await {
         Ok(result) => {
             if result
                 .get("rejectedCandidateCount")
@@ -46763,6 +48311,7 @@ async fn slskd_enqueue_download_batch(body: &str, state: &AppState) -> HttpRespo
     if files.iter().any(serde_json::Value::is_null) {
         return routing::bad_request_response("One or more files in the request are null");
     }
+    let exclusions = effective_download_exclusions(state).await;
     let parse_guid = |name: &str| -> Result<Option<String>, HttpResponse> {
         let Some(value) = payload.get(name) else {
             return Ok(None);
@@ -46851,6 +48400,37 @@ async fn slskd_enqueue_download_batch(body: &str, state: &AppState) -> HttpRespo
         requested_files.push((filename.to_owned(), size));
     }
 
+    let blocked = requested_files
+        .iter()
+        .filter_map(|(filename, _)| {
+            crate::download_filter::matching_exclusion(
+                filename,
+                &exclusions,
+            )
+            .map(|exclusion| serde_json::json!({
+                "filename": filename,
+                "exclusion": exclusion,
+                "message": "Download blocked by global exclusion",
+            }))
+        })
+        .collect::<Vec<_>>();
+    if blocked.len() == requested_files.len() && !blocked.is_empty() {
+        return HttpResponse {
+            status: "403 Forbidden",
+            content_type: "application/json",
+            body: serde_json::json!({
+                "type": "download_blocked",
+                "title": "Download blocked",
+                "detail": "Every requested file matched a configured global download exclusion.",
+                "blocked": blocked,
+            })
+            .to_string(),
+        };
+    }
+    requested_files.retain(|(filename, _)| {
+        !crate::download_filter::is_excluded(filename, &exclusions)
+    });
+
     if let Err(error) = request_peer_endpoint(state, &username).await {
         return HttpResponse {
             status: "404 Not Found",
@@ -46912,7 +48492,7 @@ async fn slskd_enqueue_download_batch(body: &str, state: &AppState) -> HttpRespo
         return routing::service_unavailable_response(&error);
     }
 
-    let mut failures = Vec::new();
+    let mut failures = blocked;
     let mut staged = Vec::new();
     let mut transfers = state.transfers.write().await;
     for (filename, size) in requested_files {
@@ -47105,6 +48685,13 @@ fn transfer_request_details_from_json(
         title: text(&["title"], MAX_TRANSFER_METADATA_TEXT_BYTES),
         track_number: number(&["trackNumber", "track_number"]),
         year: number(&["year"]),
+        attempts: number(&["attempts"]).unwrap_or(0),
+        auto_replace_attempts: number(&["autoReplaceAttempts", "auto_replace_attempts"])
+            .unwrap_or(0),
+        next_attempt_at: value
+            .get("nextAttemptAt")
+            .or_else(|| value.get("next_attempt_at"))
+            .and_then(serde_json::Value::as_u64),
     }
 }
 
@@ -47235,7 +48822,10 @@ async fn pod_request_peer_id(state: &AppState) -> Option<String> {
 }
 
 fn gold_star_club_available(state: &AppState) -> bool {
-    pods::gold_star_club_available(&state.config.state_dir)
+    pods::gold_star_club_available_with_setting(
+        &state.config.state_dir,
+        state.config.advanced_networking.gold_star_club_autojoin,
+    )
 }
 
 fn spawn_gold_star_club(state: Arc<AppState>) {
@@ -48578,20 +50168,70 @@ fn preview_filename_contains_traversal(value: &str) -> bool {
 }
 
 async fn virtual_soulfind_catalogue(state: &AppState) -> Vec<virtual_soulfind_v2::CatalogueItem> {
-    state
-        .library
-        .read()
-        .await
-        .records
+    let shares = state.shares.read().await;
+    shares
+        .entries
         .iter()
-        .map(|item| virtual_soulfind_v2::CatalogueItem {
-            source_id: item.id.clone(),
-            artist: item.artist.clone(),
-            title: item.title.clone(),
-            kind: item.kind.clone(),
-            created_at: item.created_at,
+        .filter(|entry| matches!(library_media_kind(&entry.extension), "Audio"))
+        .map(|entry| {
+            let (artist, title) = virtual_soulfind_file_metadata(&entry.filename);
+            let local_path = shares
+                .local_paths
+                .get(&entry.filename)
+                .map(|path| path.display().to_string());
+            let source_id = format!(
+                "share:{}",
+                hex::encode(Sha256::digest(
+                    format!("{}|{}", entry.filename, entry.size).as_bytes(),
+                ))
+            );
+            virtual_soulfind_v2::CatalogueItem {
+                source_id,
+                artist,
+                title,
+                kind: "Album".to_owned(),
+                created_at: unix_timestamp(),
+                local_path,
+                size: entry.size,
+            }
         })
         .collect()
+}
+
+fn virtual_soulfind_file_metadata(filename: &str) -> (String, String) {
+    let relative = filename.split_once('/').map_or(filename, |(_, path)| path);
+    let components = relative.split('/').filter(|part| !part.is_empty()).collect::<Vec<_>>();
+    let basename = components.last().copied().unwrap_or(relative);
+    let title = basename
+        .rsplit_once('.')
+        .map_or(basename, |(stem, _)| stem)
+        .trim();
+    let (artist, title) = title
+        .split_once(" - ")
+        .map_or_else(
+            || {
+                (
+                    components
+                        .get(components.len().saturating_sub(2))
+                        .copied()
+                        .unwrap_or("Unknown Artist"),
+                    title,
+                )
+            },
+            |(artist, title)| (artist.trim(), title.trim()),
+        );
+    (
+        if artist.is_empty() {
+            "Unknown Artist".to_owned()
+        } else {
+            artist.to_owned()
+        },
+        if title.is_empty() {
+            "Unknown Track".to_owned()
+        } else {
+            title.to_owned()
+        },
+    )
 }
 
 async fn route_virtual_soulfind_v2(
@@ -58504,6 +60144,15 @@ async fn extended_controller_download_response(
                 "each item requires user and remotePath",
             ));
         }
+        let filename = filename.to_owned();
+        if let Some(response) = crate::route_dispatch::download_policy_response(
+            state,
+            std::slice::from_ref(&filename),
+        )
+        .await
+        {
+            return Err(response);
+        }
         let permit = match state.session_commands.reserve().await {
             Ok(permit) => permit,
             Err(_) => {
@@ -58516,7 +60165,7 @@ async fn extended_controller_download_response(
         let entry = transfers.create(
             0,
             Some(username.to_owned()),
-            filename.to_owned(),
+            filename.clone(),
             None,
             None,
         );
@@ -62290,6 +63939,13 @@ async fn mediacore_mutation_response(
                         "At least one ContentID is required for export",
                     ));
                 }
+                let source_name = if state.config.controller_compatibility_target
+                    == ControllerCompatibilityTarget::Slskdn
+                {
+                    "slskdN"
+                } else {
+                    "slskR"
+                };
                 let features = state.controller_features.read().await;
                 let entries = content_ids
                     .iter()
@@ -62302,7 +63958,7 @@ async fn mediacore_mutation_response(
                                     "contentId": content_id,
                                     "descriptor": descriptor,
                                     "sourceInfo": {
-                                        "name": "slskdN",
+                                        "name": source_name,
                                         "timestamp": chrono::Utc::now().to_rfc3339(),
                                         "version": "1.0.0",
                                         "properties": {"exported":"true", "from_cache":"false"},
@@ -62320,7 +63976,7 @@ async fn mediacore_mutation_response(
                     serde_json::json!({
                         "version": "1.0",
                         "exportedAt": chrono::Utc::now().to_rfc3339(),
-                        "source": "slskdN",
+                        "source": source_name,
                         "entries": entries,
                         "links": [],
                         "metadata": {
@@ -62649,21 +64305,25 @@ fn mediacore_publish_version(
     descriptor: &serde_json::Value,
     published_at: chrono::DateTime<chrono::Utc>,
 ) -> String {
-    let version_seed = format!(
-        "{}:{}:{}",
-        descriptor
-            .get("contentId")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or_default(),
-        descriptor
-            .get("codec")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or_default(),
-        descriptor
-            .get("sizeBytes")
-            .and_then(serde_json::Value::as_i64)
-            .unwrap_or_default()
-    );
+    let content_id = descriptor
+        .get("contentId")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let codec = descriptor
+        .get("codec")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let size = descriptor
+        .get("sizeBytes")
+        .and_then(serde_json::Value::as_i64)
+        .unwrap_or_default();
+    let version_seed = descriptor
+        .get("bitrateKbps")
+        .and_then(serde_json::Value::as_i64)
+        .map_or_else(
+            || format!("{content_id}:{codec}:{size}"),
+            |bitrate| format!("{content_id}:{codec}:{bitrate}:{size}"),
+        );
     format!(
         "{}-{}",
         published_at.timestamp_millis(),
@@ -62675,6 +64335,9 @@ fn mediacore_descriptor_passes_base_validation(
     descriptor: &serde_json::Value,
     now: chrono::DateTime<chrono::Utc>,
 ) -> bool {
+    let bitrate_is_valid = descriptor
+        .get("bitrateKbps")
+        .is_none_or(|value| value.as_i64().is_some_and(|bitrate| (1..=10_000).contains(&bitrate)));
     let has_hashes = descriptor
         .get("hashes")
         .and_then(serde_json::Value::as_array)
@@ -62688,7 +64351,7 @@ fn mediacore_descriptor_passes_base_validation(
     let descriptor_size_is_bounded = serde_json::to_vec(descriptor)
         .map(|bytes| bytes.len() <= 10 * 1024)
         .unwrap_or(false);
-    has_hashes && signature_is_fresh && descriptor_size_is_bounded
+    bitrate_is_valid && has_hashes && signature_is_fresh && descriptor_size_is_bounded
 }
 
 async fn mediacore_publish_descriptor(
@@ -66034,7 +67697,14 @@ async fn extended_controller_get_response(
             // this compatibility runtime has no coordinator transition yet,
             // so --no-connect and disasterMode.force must not fabricate a
             // FullFallback status.
-            let level = virtual_soulfind_disaster_mode_level();
+            let force_disaster_mode = state
+                .media_services
+                .read()
+                .await
+                .virtual_soulfind
+                .disaster_mode
+                .force;
+            let level = virtual_soulfind_disaster_mode_level(force_disaster_mode);
             let (level_name, description) = match level {
                 1 => (
                     "SoulseekDegraded",
@@ -66074,8 +67744,8 @@ async fn extended_controller_get_response(
     }
 }
 
-fn virtual_soulfind_disaster_mode_level() -> u8 {
-    0
+fn virtual_soulfind_disaster_mode_level(force: bool) -> u8 {
+    u8::from(force) * 3
 }
 
 const PODCORE_MIN_DATETIME: &str = "0001-01-01T00:00:00+00:00";
@@ -69622,7 +71292,10 @@ async fn serve(invocation: ServeInvocation) -> Result<(), String> {
     controller_options_state.command_line_environment = invocation.config_environment.clone();
     let backfill_state = BackfillState::load(&config.state_dir)?;
     let pod_channel_store = pod_channels::PodChannelStore::load(&config.state_dir)?;
-    let pod_store = pods::PodStore::load(&config.state_dir)?;
+    let pod_store = pods::PodStore::load_with_setting(
+        &config.state_dir,
+        config.advanced_networking.gold_star_club_autojoin,
+    )?;
     let shared_dht_udp_bind = config.overlay_bind.and_then(|bind| {
         let dht = &config.advanced_networking.dht;
         let overlay = &config.advanced_networking.overlay;
@@ -69635,7 +71308,10 @@ async fn serve(invocation: ServeInvocation) -> Result<(), String> {
             && (overlay.listen_port == dht.dht_port
                 || (overlay.enable_quic
                     && overlay.share_quic_with_dht_port
-                    && overlay.quic_listen_port == dht.dht_port));
+                    && overlay.quic_listen_port == dht.dht_port)
+                || (config.advanced_networking.overlay_data.enable
+                    && config.advanced_networking.overlay_data.share_with_dht_port
+                    && config.advanced_networking.overlay_data.listen_port == dht.dht_port));
         shares_public_udp.then_some(SocketAddr::new(bind.ip(), dht.dht_port))
     });
     let dht = if config.dht_enabled && config.advanced_networking.mesh.enable_dht {
@@ -69655,6 +71331,11 @@ async fn serve(invocation: ServeInvocation) -> Result<(), String> {
                 && overlay.share_quic_with_dht_port
                 && shared_dht_udp_bind.is_some()
                 && overlay.quic_listen_port == config.advanced_networking.dht.dht_port;
+            let quic_data_shared_with_dht = config.advanced_networking.overlay_data.enable
+                && config.advanced_networking.overlay_data.share_with_dht_port
+                && shared_dht_udp_bind.is_some()
+                && config.advanced_networking.overlay_data.listen_port
+                    == config.advanced_networking.dht.dht_port;
             let quic_bind = config.advanced_networking.overlay.enable_quic.then(|| {
                 let address = if quic_shared_with_dht {
                     IpAddr::V4(Ipv4Addr::LOCALHOST)
@@ -69669,12 +71350,23 @@ async fn serve(invocation: ServeInvocation) -> Result<(), String> {
                 SocketAddr::new(address, port)
             });
             let quic_data_bind = config.advanced_networking.overlay_data.enable.then(|| {
+                let shared = quic_data_shared_with_dht;
+                let address = if shared {
+                    IpAddr::V4(Ipv4Addr::LOCALHOST)
+                } else {
+                    bind.ip()
+                };
+                let port = if shared {
+                    config.advanced_networking.overlay_data.backend_listen_port
+                } else {
+                    config.advanced_networking.overlay_data.listen_port
+                };
                 SocketAddr::new(
-                    bind.ip(),
-                    config.advanced_networking.overlay_data.listen_port,
+                    address,
+                    port,
                 )
             });
-            let quic_proxy_bind = quic_shared_with_dht.then(|| {
+            let quic_proxy_bind = (quic_shared_with_dht || quic_data_shared_with_dht).then(|| {
                 shared_dht_udp_bind.expect("QUIC shared mode requires a shared DHT UDP bind")
             });
             let quic_data_policy = config.advanced_networking.overlay_data.enable.then(|| {
@@ -69701,7 +71393,7 @@ async fn serve(invocation: ServeInvocation) -> Result<(), String> {
                 }
             });
             Some(Arc::new(
-                private_gateway::Gateway::load_or_create_with_quic_and_data_policy_and_proxy_and_dht_socket(
+                private_gateway::Gateway::load_or_create_with_quic_and_data_policy_and_proxy_and_dht_socket_with_data_share(
                     bind,
                     &config.state_dir,
                     quic_bind,
@@ -69717,6 +71409,7 @@ async fn serve(invocation: ServeInvocation) -> Result<(), String> {
                         .advanced_networking
                         .overlay_data
                         .max_concurrent_streams,
+                    quic_data_shared_with_dht,
                 )
                 .await?,
             ))
@@ -70713,6 +72406,9 @@ fn auto_replace_retry_settings(
     settings.enabled = download.auto_replace_stuck;
     settings.retry_delay = Duration::ZERO;
     settings.check_interval = download.auto_replace_interval;
+    if let Some(max_retries) = download.auto_replace_max_retries {
+        settings.max_attempts = max_retries;
+    }
     settings.alternate_sources_enabled = true;
     settings.alternate_source_size_tolerance_percent = download.auto_replace_threshold_percent;
     settings
@@ -71262,6 +72958,9 @@ fn retry_request_details(source: &TransferEntry) -> TransferRequestDetails {
         title: source.title.clone(),
         track_number: source.track_number,
         year: source.year,
+        attempts: source.attempts.saturating_add(1),
+        auto_replace_attempts: source.auto_replace_attempts,
+        next_attempt_at: None,
     }
 }
 
@@ -71520,12 +73219,16 @@ fn spawn_configured_listeners(
     regular_commands: mpsc::Receiver<ListenerCommand>,
     obfuscated_commands: mpsc::Receiver<ListenerCommand>,
 ) {
+    let shared_obfuscation = state.config.obfuscation_enabled
+        && state.config.obfuscation_listen_port == 0
+        && state.config.obfuscated_listener_bind.is_none();
     tokio::spawn(run_listener_manager(
         Arc::clone(&state),
         regular_commands,
         false,
+        shared_obfuscation,
     ));
-    tokio::spawn(run_listener_manager(state, obfuscated_commands, true));
+    tokio::spawn(run_listener_manager(state, obfuscated_commands, true, false));
 }
 
 async fn record_listener_bound(
@@ -71586,6 +73289,7 @@ async fn process_listener_incoming(
     remote_addr: SocketAddr,
     obfuscated: bool,
 ) {
+    let obfuscated = obfuscated || incoming_connection_is_obfuscated(&incoming);
     let network_guard = state
         .advanced_networking
         .read()
@@ -71675,6 +73379,17 @@ async fn process_listener_incoming(
     });
 }
 
+fn incoming_connection_is_obfuscated(incoming: &IncomingConnection<TcpStream>) -> bool {
+    matches!(
+        incoming,
+        IncomingConnection::ObfuscatedPeerMessages(_)
+            | IncomingConnection::PeerInit {
+                obfuscated: true,
+                ..
+            }
+    )
+}
+
 fn release_incoming_network_guard(state: &AppState, ip: IpAddr, enabled: bool) {
     if !enabled {
         return;
@@ -71695,6 +73410,7 @@ async fn run_listener_manager(
     state: Arc<AppState>,
     mut commands: mpsc::Receiver<ListenerCommand>,
     obfuscated: bool,
+    shared_obfuscation: bool,
 ) {
     let mut active_bind = if obfuscated && state.config.obfuscation_enabled {
         state.config.obfuscated_listener_bind.clone()
@@ -71773,6 +73489,8 @@ async fn run_listener_manager(
                 accepted = async {
                     if obfuscated {
                         active_listener.accept_obfuscated().await
+                    } else if shared_obfuscation {
+                        active_listener.accept_shared().await
                     } else {
                         active_listener.accept().await
                     }
@@ -74474,6 +76192,9 @@ async fn open_remote_peer_preview_stream(
         title: None,
         track_number: None,
         year: None,
+        attempts: 1,
+        auto_replace_attempts: 0,
+        next_attempt_at: None,
         size: (ticket.size > 0).then_some(ticket.size),
         bytes_transferred: 0,
         status: "peer_negotiating".to_owned(),
@@ -76713,6 +78434,8 @@ async fn check_privileges_after_login(state: &AppState) {
 }
 
 async fn dispatch_queued_downloads_after_login(state: &AppState) {
+    let exclusions = effective_download_exclusions(state).await;
+    cancel_downloads_blocked_by_policy(state, &exclusions).await;
     let queued: Vec<TransferEntry> = {
         let queue = state.transfers.read().await;
         queue
@@ -76892,7 +78615,7 @@ async fn send_session_ping(
 }
 
 async fn send_due_wishlist_search(
-    state: &AppState,
+    state: &Arc<AppState>,
     session: &mut Option<ServerSession<TcpStream>>,
     scheduler: &mut WishlistSearchScheduler,
     next_wishlist_search: &mut Instant,
@@ -76923,15 +78646,77 @@ async fn send_due_wishlist_search(
             .await;
     }
 
-    let Some(active_session) = session.as_mut() else {
-        return;
-    };
-
     let expired_searches = {
         let mut searches = state.searches.write().await;
         searches.expire_due()
     };
+    let mut fallback_started = false;
     for record in expired_searches {
+        let fallback_query = if search_fallback::is_enabled_for_source(record.target) {
+            let wishlist_policy = if let Some(item_id) = record.wishlist_item_id() {
+                state.wishlist.read().await.result_policy_for(item_id)
+            } else {
+                None
+            };
+            let response_limit = wishlist_policy
+                .as_ref()
+                .map(|policy| policy.max_results)
+                .unwrap_or(MAX_SEARCH_RESULTS_PER_SEARCH);
+            let file_count = record
+                .results
+                .len()
+                .saturating_add(record.hidden_locked_count);
+            (search_fallback::needs_fallback(
+                record.raw_response_count,
+                file_count,
+                response_limit,
+                response_limit,
+            ))
+            .then(|| search_fallback::create_queries(&record.query))
+            .and_then(|queries| queries.get(record.fallback_attempts).cloned())
+        } else {
+            None
+        };
+
+        if let Some(fallback_query) = fallback_query {
+            let fallback_record = {
+                let mut searches = state.searches.write().await;
+                searches.reset_for_fallback(record.token, fallback_query.clone(), 5)
+            };
+            if let Some(fallback_record) = fallback_record {
+                if let Err(error) = persist_search_record(state, &fallback_record).await {
+                    update_session(state, |snapshot| {
+                        snapshot.last_error = Some(error.clone());
+                    })
+                    .await;
+                    continue;
+                }
+                record_event(
+                    state,
+                    "wishlist.search.fallback_started",
+                    fallback_record.token.to_string(),
+                    Some(serde_json::json!({
+                        "query": fallback_record.query,
+                        "attempt": fallback_record.fallback_attempts,
+                    })
+                    .to_string()),
+                )
+                .await;
+                send_active_server_message(
+                    state,
+                    session,
+                    ServerMessage::WishlistSearch(SearchRequest {
+                        token: fallback_record.token,
+                        query: fallback_record.query.clone(),
+                    }),
+                    "wishlist smart fallback search",
+                )
+                .await;
+                fallback_started = true;
+                continue;
+            }
+        }
+
         if let Err(error) = persist_search_record(state, &record).await {
             update_session(state, |snapshot| {
                 snapshot.last_error = Some(error.clone());
@@ -76964,6 +78749,10 @@ async fn send_due_wishlist_search(
             .await;
             record_daemon_log(state, logging::LogLevel::Warn, "wishlist", error).await;
         }
+    }
+
+    if fallback_started {
+        return;
     }
 
     let (record, evicted, message) = {
@@ -77027,6 +78816,7 @@ async fn send_due_wishlist_search(
             completed_at: None,
             room: record.target_name.clone(),
             target: Some("wishlist".to_owned()),
+            fallback_attempts: record.fallback_attempts as i64,
         };
         let persist_error = db
             .insert_search(&persisted_search)
@@ -77049,8 +78839,12 @@ async fn send_due_wishlist_search(
     )
     .await;
 
+    let Some(active_session) = session.as_mut() else {
+        return;
+    };
     match active_session.send_server_message(message).await {
         Ok(()) => {
+            spawn_wishlist_smart_fallback(Arc::clone(state), record.token);
             update_session(state, |snapshot| {
                 snapshot.last_error = None;
             })
@@ -77069,6 +78863,82 @@ async fn send_due_wishlist_search(
             .await;
         }
     }
+}
+
+fn spawn_wishlist_smart_fallback(state: Arc<AppState>, token: u32) {
+    tokio::spawn(async move {
+        // Current upstream gives the initial Soulseek query a short response
+        // window before trying one bounded query with suppressed terms removed.
+        // Keep this independent of the server-advertised wishlist interval so
+        // a quiet search cannot wait several minutes for its first fallback.
+        time::sleep(Duration::from_secs(5)).await;
+        let Some(record) = state.searches.read().await.get(token) else {
+            return;
+        };
+        if record.status != "active" || !search_fallback::is_enabled_for_source(record.target) {
+            return;
+        }
+        let wishlist_policy = if let Some(item_id) = record.wishlist_item_id() {
+            state.wishlist.read().await.result_policy_for(item_id)
+        } else {
+            None
+        };
+        let response_limit = wishlist_policy
+            .as_ref()
+            .map(|policy| policy.max_results)
+            .unwrap_or(MAX_SEARCH_RESULTS_PER_SEARCH);
+        let file_count = record
+            .results
+            .len()
+            .saturating_add(record.hidden_locked_count);
+        let Some(fallback_query) = search_fallback::needs_fallback(
+            record.raw_response_count,
+            file_count,
+            response_limit,
+            response_limit,
+        )
+        .then(|| search_fallback::create_queries(&record.query))
+        .and_then(|queries| queries.get(record.fallback_attempts).cloned()) else {
+            return;
+        };
+        drop(record);
+
+        let Some(fallback_record) = ({
+            let mut searches = state.searches.write().await;
+            searches.reset_for_fallback(token, fallback_query.clone(), 5)
+        }) else {
+            return;
+        };
+        if let Err(error) = persist_search_record(&state, &fallback_record).await {
+            update_session(&state, |snapshot| {
+                snapshot.last_error = Some(error);
+            })
+            .await;
+            return;
+        }
+        record_event(
+            &state,
+            "wishlist.search.fallback_started",
+            fallback_record.token.to_string(),
+            Some(
+                serde_json::json!({
+                    "query": fallback_record.query,
+                    "attempt": fallback_record.fallback_attempts,
+                    "source": "initial_search_timeout",
+                })
+                .to_string(),
+            ),
+        )
+        .await;
+        let Ok(permit) = state.session_commands.reserve().await else {
+            return;
+        };
+        permit.send(SessionCommand::Search {
+            token: fallback_record.token,
+            query: fallback_record.query,
+            target: SearchDispatchTarget::Wishlist,
+        });
+    });
 }
 
 async fn send_active_server_message(
@@ -77996,6 +79866,12 @@ async fn project_peer_transfer_response(state: &AppState, address: &PeerAddress)
     let Some(transfer) = transfer else {
         return;
     };
+    if cancel_download_if_blocked_by_policy(state, &transfer)
+        .await
+        .is_some()
+    {
+        return;
+    }
     if transfer.direction == 0 && !download_capacity_available(state, Some(transfer.id)).await {
         let queued = {
             let mut transfers = state.transfers.write().await;
@@ -78428,6 +80304,9 @@ async fn read_remote_flac_header(
         title: None,
         track_number: None,
         year: None,
+        attempts: 1,
+        auto_replace_attempts: 0,
+        next_attempt_at: None,
         size: Some(expected_size),
         bytes_transferred: 0,
         status: "peer_negotiating".to_owned(),
@@ -78712,6 +80591,12 @@ async fn execute_accepted_file_transfer(
     address: &PeerAddress,
     transfer: &TransferEntry,
 ) {
+    if cancel_download_if_blocked_by_policy(state, transfer)
+        .await
+        .is_some()
+    {
+        return;
+    }
     if transfer
         .local_path
         .as_deref()
@@ -79270,6 +81155,9 @@ async fn execute_indirect_file_transfer(
     response: &ConnectToPeerResponse,
     transfer: &TransferEntry,
 ) -> Result<(u64, u64), String> {
+    if let Some(reason) = cancel_download_if_blocked_by_policy(state, transfer).await {
+        return Err(reason);
+    }
     let mut connection = connect_indirect_file_transfer(state, response).await?;
     if transfer.direction == 1 {
         upload_file_transfer_with_connection(state, transfer, &mut connection, true).await
@@ -79472,14 +81360,46 @@ async fn download_file_transfer_with_retry(
     address: &PeerAddress,
     transfer: &TransferEntry,
 ) -> Result<(u64, u64), String> {
+    if let Some(reason) = cancel_download_if_blocked_by_policy(state, transfer).await {
+        return Err(reason);
+    }
+    if transfer_is_cancelled(state, transfer.id).await {
+        return Err("transfer cancelled".to_owned());
+    }
     let retry = state.transfer_download_settings.read().await.retry.clone();
     let mut last_error = None;
-    for attempt in 0..retry.attempts {
+    for attempt in 0..retry.attempts.max(1) {
         if attempt > 0 {
-            time::sleep(download_retry_delay(&retry, attempt)).await;
+            let attempt_number = attempt.saturating_add(1);
+            let delay = download_retry_delay(&retry, attempt);
+            let next_attempt_at = unix_timestamp().saturating_add(delay.as_secs());
+            let scheduled = {
+                let mut transfers = state.transfers.write().await;
+                transfers.update_retry_state(
+                    transfer.id,
+                    attempt_number,
+                    Some(next_attempt_at),
+                    "queued",
+                    Some(format!("retry scheduled for attempt {attempt_number}")),
+                )
+            };
+            if let Some(scheduled) = scheduled {
+                persist_transfer_projection(state, &scheduled).await;
+            }
+            time::sleep(delay).await;
         }
         if transfer_is_cancelled(state, transfer.id).await {
             return Err("transfer cancelled".to_owned());
+        }
+        if attempt > 0 {
+            let attempt_number = attempt.saturating_add(1);
+            let started = {
+                let mut transfers = state.transfers.write().await;
+                transfers.update_retry_state(transfer.id, attempt_number, None, "in_progress", None)
+            };
+            if let Some(started) = started {
+                persist_transfer_projection(state, &started).await;
+            }
         }
         match download_file_transfer(state, address, transfer).await {
             Ok(completed) => return Ok(completed),
@@ -82055,6 +83975,11 @@ fn persisted_wishlist_item(item: &WishlistItem) -> crate::persistence::WishlistI
         total_search_count: i64::try_from(item.total_search_count).unwrap_or(i64::MAX),
         total_download_count: i64::try_from(item.total_download_count).unwrap_or(i64::MAX),
         last_search_id: item.last_search_id.clone(),
+        lidarr_album_id: item.lidarr_album_id,
+        lidarr_track_id: item.lidarr_track_id,
+        lidarr_track_count: item.lidarr_track_count,
+        lidarr_duration_seconds: item.lidarr_duration_seconds,
+        lidarr_release_disambiguation: item.lidarr_release_disambiguation.clone(),
         added_at: i64::try_from(item.added_at).unwrap_or(i64::MAX),
     }
 }
@@ -82098,10 +84023,156 @@ async fn persist_wishlist_items_checked(
     Ok(true)
 }
 
+type WishlistQualityKey = (u8, u64, u8, u32, u32, u8, u64);
+
+#[derive(Clone)]
+struct WishlistAutoDownloadPlan {
+    username: String,
+    directory: String,
+    files: Vec<SearchResultEntry>,
+    coverage: usize,
+    weakest_quality: WishlistQualityKey,
+    representative_quality: WishlistQualityKey,
+    edition_mismatch: bool,
+}
+
+fn wishlist_group_track_identity(filename: &str) -> String {
+    let leaf = virtual_basename(filename);
+    let stem = leaf
+        .rsplit_once('.')
+        .map(|(stem, _)| stem)
+        .unwrap_or(leaf)
+        .trim_end();
+    let stem = stem
+        .strip_suffix(')')
+        .and_then(|value| value.rsplit_once('('))
+        .filter(|(_, suffix)| suffix.trim().chars().all(|character| character.is_ascii_digit()))
+        .map(|(value, _)| value.trim_end())
+        .unwrap_or(stem);
+    stem.to_ascii_lowercase()
+}
+
+fn wishlist_is_audio_format(term: &str) -> bool {
+    matches!(
+        term.trim_start_matches('.'),
+        "flac"
+            | "alac"
+            | "wav"
+            | "ape"
+            | "aiff"
+            | "aif"
+            | "mp3"
+            | "aac"
+            | "m4a"
+            | "ogg"
+            | "oga"
+            | "opus"
+    )
+}
+
+fn wishlist_quality_key_for_format(
+    entry: &SearchResultEntry,
+    format: &str,
+) -> WishlistQualityKey {
+    let format = format.trim_start_matches('.');
+    let bitrate = u64::from(entry.bit_rate.unwrap_or_default());
+    let has_bitrate = entry.bit_rate.is_some_and(|value| value > 0);
+    if matches!(format, "flac" | "alac" | "wav" | "ape" | "aiff" | "aif") {
+        let codec_preference = match format {
+            "flac" => 6,
+            "alac" => 5,
+            "wav" => 4,
+            "ape" => 3,
+            _ => 2,
+        };
+        return (
+            2,
+            0,
+            codec_preference,
+            entry.sample_rate.unwrap_or_default(),
+            entry.bit_depth.unwrap_or_default(),
+            u8::from(has_bitrate),
+            entry.size,
+        );
+    }
+
+    let efficiency_milli = match format {
+        "opus" => 2_000,
+        "aac" | "m4a" => 1_250,
+        "ogg" | "oga" => 1_100,
+        _ => 1_000,
+    };
+    let codec_preference = match format {
+        "opus" => 4,
+        "aac" | "m4a" => 3,
+        "ogg" | "oga" => 2,
+        "mp3" => 1,
+        _ => 0,
+    };
+    (
+        u8::from(has_bitrate),
+        bitrate.saturating_mul(efficiency_milli),
+        codec_preference,
+        entry.sample_rate.unwrap_or_default(),
+        entry.bit_depth.unwrap_or_default(),
+        u8::from(has_bitrate),
+        entry.size,
+    )
+}
+
+fn wishlist_quality_key(
+    entry: &SearchResultEntry,
+    filter: &WishlistResultFilter,
+) -> WishlistQualityKey {
+    let filename = entry.filename.replace('\\', "/").to_ascii_lowercase();
+    let extension = virtual_basename(&filename)
+        .rsplit_once('.')
+        .map(|(_, extension)| extension)
+        .unwrap_or_default();
+    let mut formats = Vec::new();
+
+    for clause in &filter.clauses {
+        if clause
+            .minimum_bitrate
+            .is_some_and(|minimum| entry.bit_rate.is_none_or(|value| value < minimum))
+        {
+            continue;
+        }
+        let filename_matches = clause.include.is_empty()
+            || clause
+                .include
+                .iter()
+                .any(|term| extension == term || filename.contains(term));
+        if !filename_matches {
+            continue;
+        }
+        let format_hints = clause
+            .include
+            .iter()
+            .filter(|term| wishlist_is_audio_format(term) && extension == term.trim_start_matches('.'))
+            .map(|term| term.trim_start_matches('.').to_owned())
+            .collect::<Vec<_>>();
+        if format_hints.is_empty() {
+            formats.push(extension.to_owned());
+        } else {
+            formats.extend(format_hints);
+        }
+    }
+    if formats.is_empty() {
+        formats.push(extension.to_owned());
+    }
+    formats
+        .iter()
+        .map(|format| wishlist_quality_key_for_format(entry, format))
+        .max()
+        .unwrap_or_default()
+}
+
 async fn auto_download_completed_wishlist(
     state: &AppState,
     search: &SearchRecord,
 ) -> Result<usize, String> {
+    const MAX_AUTOMATIC_DOWNLOADS_PER_SEARCH: usize = 50;
     let Some(item_id) = search.wishlist_item_id() else {
         return Ok(0);
     };
@@ -82123,12 +84194,37 @@ async fn auto_download_completed_wishlist(
         return Err("wishlist auto-download is blocked by outbound transfer policy".to_owned());
     }
 
+    let edition_mode = state
+        .integration_settings
+        .read()
+        .await
+        .lidarr
+        .edition_match_mode
+        .clone();
+    let edition_matching_enabled = item.lidarr_album_id.is_some()
+        && !edition_mode.eq_ignore_ascii_case("off");
+    let download_exclusions = effective_download_exclusions(state).await;
+    let recently_completed = recently_completed_wishlist_track_keys(state).await;
+    let wishlist_policy = state.wishlist.read().await.result_policy_for(item_id);
+
     let mut groups = BTreeMap::<(String, String), Vec<SearchResultEntry>>::new();
     for result in &search.results {
         let Some(username) = result.peer_username.as_deref() else {
             continue;
         };
         if result.locked {
+            continue;
+        }
+        if download_filter::is_excluded(&result.filename, &download_exclusions) {
+            continue;
+        }
+        if recently_completed.contains(&wishlist_track_identity(&result.filename)) {
+            continue;
+        }
+        if wishlist_policy
+            .as_ref()
+            .is_some_and(|policy| !policy.filter.matches_entry(result))
+        {
             continue;
         }
         groups
@@ -82139,31 +84235,147 @@ async fn auto_download_completed_wishlist(
             .or_default()
             .push(result.clone());
     }
-    let Some(((username, _directory), files)) =
-        groups
-            .into_iter()
-            .max_by(|(left_key, left_files), (right_key, right_files)| {
-                let left = &left_files[0];
-                let right = &right_files[0];
-                left.slot_free
-                    .unwrap_or(true)
-                    .cmp(&right.slot_free.unwrap_or(true))
-                    .then_with(|| {
-                        left.average_speed
-                            .unwrap_or(0)
-                            .cmp(&right.average_speed.unwrap_or(0))
-                    })
-                    .then_with(|| {
-                        right
-                            .queue_length
-                            .unwrap_or(u32::MAX)
-                            .cmp(&left.queue_length.unwrap_or(u32::MAX))
-                    })
-                    .then_with(|| right_key.cmp(left_key))
+    let remaining_limit = usize::try_from(remaining_downloads).unwrap_or(usize::MAX);
+    let mut plans = Vec::new();
+    for ((username, directory), candidates) in groups {
+        let mut best_per_track = Vec::<SearchResultEntry>::new();
+        for candidate in candidates {
+            let identity = wishlist_group_track_identity(&candidate.filename);
+            if let Some(existing) = best_per_track
+                .iter_mut()
+                .find(|existing| wishlist_group_track_identity(&existing.filename) == identity)
+            {
+                let candidate_quality = wishlist_policy
+                    .as_ref()
+                    .map(|policy| wishlist_quality_key(&candidate, &policy.filter))
+                    .unwrap_or_default();
+                let existing_quality = wishlist_policy
+                    .as_ref()
+                    .map(|policy| wishlist_quality_key(existing, &policy.filter))
+                    .unwrap_or_default();
+                if candidate_quality > existing_quality
+                    || (candidate_quality == existing_quality
+                        && candidate.filename < existing.filename)
+                {
+                    *existing = candidate;
+                }
+            } else {
+                best_per_track.push(candidate);
+            }
+        }
+        best_per_track.sort_by(|left, right| {
+            let left_quality = wishlist_policy
+                .as_ref()
+                .map(|policy| wishlist_quality_key(left, &policy.filter))
+                .unwrap_or_default();
+            let right_quality = wishlist_policy
+                .as_ref()
+                .map(|policy| wishlist_quality_key(right, &policy.filter))
+                .unwrap_or_default();
+            right_quality
+                .cmp(&left_quality)
+                .then_with(|| left.filename.cmp(&right.filename))
+        });
+        let files = best_per_track
+            .iter()
+            .take(remaining_limit)
+            .cloned()
+            .collect::<Vec<_>>();
+        if files.is_empty() {
+            continue;
+        }
+        let edition_mismatch = edition_matching_enabled
+            && wishlist_edition_mismatch(&item, &directory, &best_per_track);
+        if edition_mode.eq_ignore_ascii_case("exclude") && edition_mismatch {
+            continue;
+        }
+        let weakest_quality = files
+            .iter()
+            .map(|file| {
+                wishlist_policy
+                    .as_ref()
+                    .map(|policy| wishlist_quality_key(file, &policy.filter))
+                    .unwrap_or_default()
             })
-    else {
+            .min()
+            .unwrap_or_default();
+        let representative_quality = wishlist_policy
+            .as_ref()
+            .map(|policy| wishlist_quality_key(&files[0], &policy.filter))
+            .unwrap_or_default();
+        plans.push(WishlistAutoDownloadPlan {
+            username,
+            directory,
+            coverage: best_per_track.len().min(remaining_limit),
+            files,
+            weakest_quality,
+            representative_quality,
+            edition_mismatch,
+        });
+    }
+
+    let Some(best_plan) = plans.into_iter().max_by(|left, right| {
+        (!left.edition_mismatch)
+            .cmp(&(!right.edition_mismatch))
+            .then_with(|| left.coverage.cmp(&right.coverage))
+            .then_with(|| left.weakest_quality.cmp(&right.weakest_quality))
+            .then_with(|| left.representative_quality.cmp(&right.representative_quality))
+            .then_with(|| {
+                left.files[0]
+                    .slot_free
+                    .unwrap_or(true)
+                    .cmp(&right.files[0].slot_free.unwrap_or(true))
+            })
+            .then_with(|| {
+                left.files[0]
+                    .average_speed
+                    .unwrap_or(0)
+                    .cmp(&right.files[0].average_speed.unwrap_or(0))
+            })
+            .then_with(|| {
+                right.files[0]
+                    .queue_length
+                    .unwrap_or(u32::MAX)
+                    .cmp(&left.files[0].queue_length.unwrap_or(u32::MAX))
+            })
+            .then_with(|| right.username.cmp(&left.username))
+            .then_with(|| right.directory.cmp(&left.directory))
+    }) else {
         return Ok(0);
     };
+    if best_plan.files.len() > MAX_AUTOMATIC_DOWNLOADS_PER_SEARCH {
+        record_event(
+            state,
+            "wishlist.auto_download_skipped",
+            item_id.to_owned(),
+            Some(format!(
+                "candidate_count={} safety_limit={MAX_AUTOMATIC_DOWNLOADS_PER_SEARCH}",
+                best_plan.files.len()
+            )),
+        )
+        .await;
+        return Ok(0);
+    }
+
+    let username = best_plan.username;
+    let files = best_plan.files;
+
+    // Re-read the mutable state after ranking. A user or integration may have
+    // disabled automatic downloads while the network search was in flight.
+    let latest_item = state.wishlist.read().await.get_item(item_id);
+    let Some(latest_item) = latest_item else {
+        return Ok(0);
+    };
+    if !latest_item.enabled || !latest_item.auto_download {
+        return Ok(0);
+    }
+    let remaining_downloads = latest_item
+        .max_downloads
+        .map(|limit| limit.saturating_sub(latest_item.total_download_count))
+        .unwrap_or(u64::MAX);
+    if remaining_downloads == 0 {
+        return Ok(0);
+    }
 
     let available = {
         let transfers = state.transfers.read().await;
@@ -82174,7 +84386,9 @@ async fn auto_download_completed_wishlist(
     };
     let batch_id = (files.len() > 1).then(|| uuid::Uuid::new_v4().to_string());
     let mut staged = Vec::new();
-    let batch_limit = available.min(usize::try_from(remaining_downloads).unwrap_or(usize::MAX));
+    let batch_limit = available
+        .min(MAX_AUTOMATIC_DOWNLOADS_PER_SEARCH)
+        .min(usize::try_from(remaining_downloads).unwrap_or(usize::MAX));
     for file in files.into_iter().take(batch_limit) {
         let Ok(session_command_permit) = state.session_commands.try_reserve() else {
             break;
@@ -82244,6 +84458,130 @@ async fn auto_download_completed_wishlist(
         .await;
     }
     Ok(enqueued)
+}
+
+fn wishlist_track_identity(filename: &str) -> String {
+    let leaf = virtual_basename(filename);
+    let stem = leaf
+        .rsplit_once('.')
+        .map(|(stem, _)| stem)
+        .unwrap_or(leaf);
+    let mut tokens = stem
+        .split(|character: char| !character.is_alphanumeric())
+        .filter(|token| !token.is_empty())
+        .map(|token| token.to_ascii_lowercase())
+        .collect::<Vec<_>>();
+    if tokens
+        .first()
+        .is_some_and(|token| token.chars().all(|character| character.is_ascii_digit()))
+    {
+        tokens.remove(0);
+    } else if tokens.first().is_some_and(|token| token == "disc")
+        && tokens
+            .get(1)
+            .is_some_and(|token| token.chars().all(|character| character.is_ascii_digit()))
+    {
+        tokens.drain(..2);
+    }
+    tokens.join(" ")
+}
+
+async fn recently_completed_wishlist_track_keys(state: &AppState) -> HashSet<String> {
+    state
+        .transfers
+        .read()
+        .await
+        .entries
+        .iter()
+        .filter(|entry| {
+            entry.direction == 0 && matches!(entry.status.as_str(), "succeeded" | "completed")
+        })
+        .filter_map(|entry| {
+            let identity = entry
+                .title
+                .as_deref()
+                .map(wishlist_track_identity)
+                .filter(|identity| !identity.is_empty())
+                .unwrap_or_else(|| wishlist_track_identity(&entry.filename));
+            (!identity.is_empty()).then_some(identity)
+        })
+        .collect()
+}
+
+const WISHLIST_EDITION_MISMATCH_MARKERS: &[&str] = &[
+    "session",
+    "sessions",
+    "live",
+    "acoustic",
+    "unplugged",
+    "remix",
+    "remixes",
+    "karaoke",
+    "instrumental",
+    "instrumentals",
+    "demo",
+    "demos",
+    "rehearsal",
+    "interview",
+    "radio edit",
+    "bootleg",
+    "commentary",
+];
+
+fn wishlist_edition_mismatch(
+    item: &WishlistItem,
+    directory: &str,
+    files: &[SearchResultEntry],
+) -> bool {
+    if item.lidarr_track_id.is_none() {
+        if let Some(expected_count) = item.lidarr_track_count {
+            if (i64::try_from(files.len()).unwrap_or(i64::MAX) - expected_count).abs() > 1 {
+                return true;
+            }
+        }
+    }
+
+    if let Some(expected_duration) = item
+        .lidarr_duration_seconds
+        .and_then(|value| u32::try_from(value).ok())
+        .filter(|value| *value > 0)
+    {
+        let total_duration = if item.lidarr_track_id.is_some() {
+            files.first().and_then(|file| file.length_seconds)
+        } else if files.iter().all(|file| file.length_seconds.is_some()) {
+            Some(
+                files
+                    .iter()
+                    .filter_map(|file| file.length_seconds)
+                    .sum::<u32>(),
+            )
+        } else {
+            None
+        };
+        if let Some(total_duration) = total_duration {
+            let tolerance = 20_u32.max(expected_duration.saturating_mul(5) / 100);
+            if total_duration.abs_diff(expected_duration) > tolerance {
+                return true;
+            }
+        }
+    }
+
+    let normalized_directory = directory.replace('\\', "/");
+    let folder_name = normalized_directory
+        .rsplit('/')
+        .next()
+        .unwrap_or(directory)
+        .to_ascii_lowercase();
+    let expected_context = format!(
+        "{} {} {}",
+        item.artist,
+        item.title,
+        item.lidarr_release_disambiguation.as_deref().unwrap_or_default()
+    )
+    .to_ascii_lowercase();
+    WISHLIST_EDITION_MISMATCH_MARKERS.iter().any(|marker| {
+        folder_name.contains(marker) && !expected_context.contains(marker)
+    })
 }
 
 fn with_auto_download_rollback(error: String, rollback: Result<(), String>) -> String {
@@ -83515,6 +85853,7 @@ where
             Ok(None) => break, // client closed connection
             Err(e) => {
                 if e.contains("too large")
+                    && !state.config.current_upstream_behavior
                     && state.config.controller_compatibility_target
                         == ControllerCompatibilityTarget::Slskdn
                 {
@@ -84132,6 +86471,7 @@ where
                 path,
                 Some(&state.config.controller_web.content_path),
                 state.config.controller_compatibility_target,
+                !state.config.current_upstream_behavior,
                 method == "GET",
                 keep_alive,
                 &cors_str,
@@ -84668,7 +87008,7 @@ pub fn fallback_dashboard_html() -> String {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>slskr</title>
+  <title>slskR</title>
   <style>
     :root {
       color-scheme: dark;
@@ -87574,7 +89914,7 @@ pub mod tests {
 
     #[cfg_attr(test, test)]
     #[cfg(feature = "full-controller-tests")]
-    fn frozen_blacklist_pattern_case_mode_is_target_specific() {
+    fn blacklist_pattern_case_mode_applies_to_current_and_frozen_profiles() {
         let slskd = super::AppConfig::from_layers(
             None,
             FileConfig::default(),
@@ -87608,7 +89948,8 @@ pub mod tests {
             slskdn.controller_compatibility_target,
             slskdn.controller_case_sensitive_regex,
         );
-        assert!(slskdn_runtime.is_blacklisted(Some("CaseUser"), None, 1));
+        assert!(!slskdn_runtime.is_blacklisted(Some("CaseUser"), None, 1));
+        assert!(slskdn_runtime.is_blacklisted(Some("caseuser"), None, 1));
     }
 
     #[cfg_attr(test, test)]
@@ -98844,6 +101185,10 @@ pub mod tests {
                     filename: "Remote/Other.flac".to_owned(),
                     size: 42,
                     extension: "flac".to_owned(),
+                    bit_rate: None,
+                    sample_rate: None,
+                    bit_depth: None,
+                    length_seconds: None,
                     locked: false,
                     slot_free: Some(true),
                     average_speed: Some(1),
@@ -106162,6 +108507,10 @@ pub mod tests {
             filename: "file".to_owned(),
             size: 1,
             extension: String::new(),
+            bit_rate: None,
+            sample_rate: None,
+            bit_depth: None,
+            length_seconds: None,
             locked: false,
             slot_free: Some(true),
             average_speed: Some(1),
@@ -110789,6 +113138,50 @@ pub mod tests {
                 .len(),
             1
         );
+        let item_id = serde_json::from_str::<serde_json::Value>(&exact.body)
+            .unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        assert_eq!(
+            super::collection_item_action_ids(&format!(
+                "/api/collections/{collection_id}/items/{item_id}"
+            )),
+            Some((item_id.as_str(), Some(collection_id.as_str())))
+        );
+        assert_eq!(
+            super::collection_item_action_ids(&format!(
+                "/api/collections/items/{item_id}"
+            )),
+            Some((item_id.as_str(), None))
+        );
+        assert_eq!(
+            super::collection_item_action_ids(&format!(
+                "/api/collections/{collection_id}/extra/items/{item_id}"
+            )),
+            None
+        );
+
+        let nested_update = super::route_http_request(
+            "PUT",
+            &format!("/api/collections/{collection_id}/items/{item_id}"),
+            None,
+            r#"{"title":"Nested update"}"#,
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(nested_update.status, "200 OK");
+        let nested_delete = super::route_http_request(
+            "DELETE",
+            &format!("/api/collections/{collection_id}/items/{item_id}"),
+            None,
+            "",
+            &state,
+        )
+        .await
+        .unwrap();
+        assert_eq!(nested_delete.status, "200 OK");
     }
 
     #[cfg_attr(test, tokio::test)]
@@ -114078,6 +116471,7 @@ pub mod tests {
                 completed_at: Some(index as i64),
                 room: None,
                 target: Some("global".to_owned()),
+                fallback_attempts: 0,
             })
             .collect::<Vec<_>>();
         persisted.push(crate::persistence::SearchRecord {
@@ -114089,6 +116483,7 @@ pub mod tests {
             completed_at: Some(0),
             room: None,
             target: Some("global".to_owned()),
+            fallback_attempts: 0,
         });
         let hydrated = super::SearchStore::from_persisted(persisted);
         assert_eq!(hydrated.records.len(), super::MAX_SEARCH_RECORDS);
@@ -127417,6 +129812,10 @@ pub mod tests {
                 filename: "Rare/Recording.flac".to_owned(),
                 size: 42,
                 extension: "flac".to_owned(),
+                bit_rate: None,
+                sample_rate: None,
+                bit_depth: None,
+                length_seconds: None,
                 locked: false,
                 slot_free: Some(true),
                 average_speed: Some(1234),
@@ -128672,6 +131071,10 @@ pub mod tests {
                         filename: format!("Library/Track-{index}.flac"),
                         size: 32_768 + index,
                         extension: "flac".to_owned(),
+                        bit_rate: None,
+                        sample_rate: None,
+                        bit_depth: None,
+                        length_seconds: None,
                         locked: false,
                         slot_free: Some(true),
                         average_speed: Some(1_000),
@@ -128681,6 +131084,7 @@ pub mod tests {
                     filtered_out_count: 0,
                     ignored_result_count: 0,
                     hidden_locked_count: 0,
+                    fallback_attempts: 0,
                     expires_at: 0,
                     created_at: index,
                     updated_at: index,
@@ -164701,6 +167105,10 @@ pub mod tests {
                         filename: "Albums/Track.flac".to_owned(),
                         size: 42,
                         extension: "flac".to_owned(),
+                        bit_rate: None,
+                        sample_rate: None,
+                        bit_depth: None,
+                        length_seconds: None,
                         locked: false,
                         slot_free: Some(true),
                         average_speed: Some(204_800),
@@ -164711,6 +167119,10 @@ pub mod tests {
                         filename: "Music/Track.flac".to_owned(),
                         size: 42,
                         extension: "flac".to_owned(),
+                        bit_rate: None,
+                        sample_rate: None,
+                        bit_depth: None,
+                        length_seconds: None,
                         locked: false,
                         slot_free: Some(true),
                         average_speed: Some(102_400),
@@ -164721,6 +167133,7 @@ pub mod tests {
                 filtered_out_count: 0,
                 ignored_result_count: 0,
                 hidden_locked_count: 0,
+                fallback_attempts: 0,
                 expires_at: u64::MAX,
                 created_at: 1,
                 updated_at: 1,
@@ -165959,6 +168372,10 @@ pub mod tests {
                         filename: format!("Library/DifferentialTrack-{index}.flac"),
                         size: 32_768 + index,
                         extension: "flac".to_owned(),
+                        bit_rate: None,
+                        sample_rate: None,
+                        bit_depth: None,
+                        length_seconds: None,
                         locked: false,
                         slot_free: Some(true),
                         average_speed: Some(1_000),
@@ -165968,6 +168385,7 @@ pub mod tests {
                     filtered_out_count: 0,
                     ignored_result_count: 0,
                     hidden_locked_count: 0,
+                    fallback_attempts: 0,
                     expires_at: 0,
                     created_at: index,
                     updated_at: index,
@@ -168069,6 +170487,10 @@ pub mod tests {
                 filename: "Rare/DifferentialRecording.flac".to_owned(),
                 size: 42,
                 extension: "flac".to_owned(),
+                bit_rate: None,
+                sample_rate: None,
+                bit_depth: None,
+                length_seconds: None,
                 locked: false,
                 slot_free: Some(true),
                 average_speed: Some(1234),
@@ -168399,6 +170821,10 @@ pub mod tests {
                         filename: "Partial/Probe.flac".to_owned(),
                         size: 123,
                         extension: "flac".to_owned(),
+                        bit_rate: None,
+                        sample_rate: None,
+                        bit_depth: None,
+                        length_seconds: None,
                         locked: false,
                         slot_free: Some(true),
                         average_speed: Some(1),
@@ -184718,6 +187144,69 @@ pub mod tests {
 
     #[cfg_attr(test, tokio::test)]
     #[cfg(feature = "full-controller-tests")]
+    async fn watched_download_policy_updates_runtime_and_cancels_blocked_downloads() {
+        let (state, _receiver) = test_state_with_env(
+            MapEnv::default().with("SLSKR_REMOTE_CONFIGURATION", "true"),
+        );
+        let entry = {
+            let mut transfers = state.transfers.write().await;
+            let entry = transfers.create(
+                0,
+                Some("peer".to_owned()),
+                "Music/blocked.flac".to_owned(),
+                None,
+                Some(10),
+            );
+            transfers
+                .update_status(entry.id, "peer_lookup", None, None)
+                .expect("active download")
+        };
+        let yaml = "filters:\n  download:\n    exclude:\n      - blocked\n";
+        fs::write(state.config.state_dir.join("slskd.yml"), yaml).unwrap();
+
+        super::apply_watched_controller_configuration(
+            &state,
+            Some(yaml),
+            &state.controller_cli_environment,
+        )
+        .await;
+
+        assert_eq!(
+            super::effective_download_exclusions(&state).await,
+            vec!["blocked".to_owned()]
+        );
+        let transfer = state
+            .transfers
+            .read()
+            .await
+            .entries
+            .iter()
+            .find(|candidate| candidate.id == entry.id)
+            .cloned()
+            .expect("reloaded transfer");
+        assert_eq!(transfer.status, "cancelled");
+        assert!(transfer
+            .reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("blocked by download exclusion")));
+        let config = super::route_http_request(
+            "GET",
+            "/api/config/download-filter",
+            None,
+            "",
+            &state,
+        )
+        .await
+        .expect("download policy response");
+        assert_eq!(config.status, "200 OK");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&config.body).unwrap()["exclude"],
+            serde_json::json!(["blocked"])
+        );
+    }
+
+    #[cfg_attr(test, tokio::test)]
+    #[cfg(feature = "full-controller-tests")]
     async fn watched_slskdn_dht_updates_current_options_but_retains_startup_socket_settings() {
         let (state, _receiver) = test_state_with_env(
             MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
@@ -188497,10 +190986,19 @@ pub mod tests {
                 .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn")
                 .with("SLSK_OBFUSCATION_ADVERTISE_REGULAR_PORT", "false"),
         )
-        .expect("frozen slskdN accepts incompatible obfuscation options");
-        let fatal = super::frozen_obfuscation_startup_error(&invalid_frozen)
-            .expect("runtime construction must fail");
-        assert!(fatal.contains("regular peer port must be advertised"));
+        .expect("frozen compatibility profile accepts the legacy option combination");
+        let frozen_error = super::frozen_obfuscation_startup_error(&invalid_frozen)
+            .expect("frozen compatibility profile must report its startup limitation");
+        assert!(frozen_error.contains("regular peer port must be advertised"));
+
+        let invalid_current = super::AppConfig::from_layers(
+            None,
+            FileConfig::default(),
+            &MapEnv::default()
+                .with("SLSK_OBFUSCATION_ADVERTISE_REGULAR_PORT", "false"),
+        )
+        .expect_err("current behavior must reject hiding the regular port");
+        assert!(invalid_current.contains("regular peer port must be advertised"));
 
         let valid_frozen = super::AppConfig::from_layers(
             None,
@@ -223758,6 +226256,10 @@ pub mod tests {
                             filename: "Library/BackfillResidual.flac".to_owned(),
                             size: 98_765,
                             extension: "flac".to_owned(),
+                            bit_rate: None,
+                            sample_rate: None,
+                            bit_depth: None,
+                            length_seconds: None,
                             locked: false,
                             slot_free: Some(true),
                             average_speed: Some(1_000),
@@ -223767,6 +226269,7 @@ pub mod tests {
                         filtered_out_count: 0,
                         ignored_result_count: 0,
                         hidden_locked_count: 0,
+                        fallback_attempts: 0,
                         expires_at: 0,
                         created_at: 1,
                         updated_at: 1,

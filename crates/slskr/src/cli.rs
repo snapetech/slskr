@@ -2159,6 +2159,13 @@ async fn indirect_peer_probe() -> Result<(), String> {
         .set_wait_port(u32::from(advertised_port))
         .await
         .map_err(|error| format!("indirect probe wait-port update failed: {error}"))?;
+    wait_for_advertised_port_metadata(
+        &mut session,
+        &username,
+        advertised_port,
+        env_duration_secs("SLSK_INDIRECT_METADATA_TIMEOUT_SECONDS", 20, false)?,
+    )
+    .await?;
 
     let token = env_u32("SLSK_INDIRECT_TOKEN", 0x51ab_2001)?;
     let request =
@@ -2167,6 +2174,12 @@ async fn indirect_peer_probe() -> Result<(), String> {
         .send_server_message(request.server_message())
         .await
         .map_err(|error| format!("indirect connect request failed: {error}"))?;
+    println!(
+        "indirect peer request sent; peer={}; token={}; advertised_port={}",
+        redact_username(&peer_username),
+        token,
+        advertised_port
+    );
     if env_bool("SLSK_INDIRECT_SEND_PEER_ADDRESS", false)? {
         session
             .send_server_message(ServerMessage::GetPeerAddressRequest {
@@ -2201,16 +2214,29 @@ async fn wait_for_indirect_probe_inbound(
     timeout: Duration,
 ) -> Result<(IncomingConnection<TcpStream>, SocketAddr), String> {
     let deadline = Instant::now() + timeout;
+    let mut last_listener_error = None;
 
     loop {
         let remaining = deadline.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
-            return Err("indirect probe listener accept timed out".to_owned());
+            return Err(last_listener_error
+                .map(|error| format!("indirect probe listener accept timed out: {error}"))
+                .unwrap_or_else(|| "indirect probe listener accept timed out".to_owned()));
         }
 
         tokio::select! {
-            accept_result = listener.accept() => {
-                return accept_result.map_err(|error| format!("indirect probe accept failed: {error}"));
+            accept_result = listener.accept_with_timeout(remaining.min(Duration::from_secs(3))) => {
+                match accept_result {
+                    Ok(incoming) => return Ok(incoming),
+                    Err(error) => {
+                        // Public Soulseek listener ports receive unsolicited
+                        // peer attempts. One connection that closes before its
+                        // init frame must not consume the entire indirect
+                        // probe; keep accepting until the token-bearing
+                        // PierceFirewall connection arrives.
+                        last_listener_error = Some(error.to_string());
+                    }
+                }
             }
             receive_result = session.receive() => {
                 match receive_result {
@@ -3870,6 +3896,61 @@ async fn resolve_peer_address(
     wait_for_peer_address_response(&mut session, timeout).await
 }
 
+async fn wait_for_advertised_port_metadata(
+    session: &mut ServerSession<TcpStream>,
+    username: &str,
+    expected_port: u16,
+    timeout: Duration,
+) -> Result<(), String> {
+    let deadline = Instant::now() + timeout;
+    let mut last_port = None;
+
+    while Instant::now() < deadline {
+        session
+            .send_server_message(ServerMessage::GetPeerAddressRequest {
+                username: username.to_owned(),
+            })
+            .await
+            .map_err(|error| format!("indirect metadata request failed: {error}"))?;
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        let attempt_timeout = remaining.min(Duration::from_secs(3));
+        match time::timeout(
+            attempt_timeout,
+            wait_for_peer_address_response(session, attempt_timeout),
+        )
+        .await
+        {
+            Ok(Ok(address)) if address.port == u32::from(expected_port) => {
+                println!(
+                    "indirect wait-port metadata propagated; port={} obfuscation_type={} obfuscated_port={}",
+                    address.port, address.obfuscation_type, address.obfuscated_port
+                );
+                return Ok(());
+            }
+            Ok(Ok(address)) => {
+                last_port = Some(address.port);
+            }
+            Ok(Err(error)) => {
+                last_port = Some(0);
+                if remaining <= Duration::from_secs(1) {
+                    return Err(format!(
+                        "indirect wait-port metadata did not propagate: {error}"
+                    ));
+                }
+            }
+            Err(_) => {
+                last_port = Some(0);
+            }
+        }
+        time::sleep(Duration::from_millis(500)).await;
+    }
+
+    Err(format!(
+        "indirect wait-port metadata did not propagate: expected port={expected_port}, last_port={}",
+        last_port.unwrap_or(0)
+    ))
+}
+
 async fn login_probe_session(
     server_address: &str,
     username: String,
@@ -4365,9 +4446,11 @@ where
         }
         ServerMessage::ConnectToPeerResponse(response) => {
             println!(
-                "server event: connect_to_peer received requester={} kind={} token={} host_override={}",
+                "server event: connect_to_peer received requester={} kind={} endpoint={}:{} token={} host_override={}",
                 redact_username(&response.username),
                 response.connection_type,
+                response.ip,
+                response.port,
                 response.token,
                 optional_env("SLSK_SOAK_INDIRECT_HOST_OVERRIDE").is_some()
             );
@@ -4379,13 +4462,24 @@ where
                 timeout_seconds,
                 false,
             )?;
-            match time::timeout(timeout, handle_live_soak_connect_to_peer_response(response)).await
-            {
-                Ok(result) => result?,
-                Err(_) => {
-                    println!("server event: connect_to_peer probe timed out");
+            // An unsolicited public ConnectToPeer response can require a
+            // full TCP timeout when the remote endpoint is stale or filtered.
+            // Never hold the server receive loop on that socket attempt: a
+            // later valid indirect request must still be dispatched while an
+            // unrelated peer is being retried.
+            tokio::spawn(async move {
+                match time::timeout(timeout, handle_live_soak_connect_to_peer_response(response))
+                    .await
+                {
+                    Ok(Ok(())) => {}
+                    Ok(Err(error)) => {
+                        println!("server event: connect_to_peer failed: {error}");
+                    }
+                    Err(_) => {
+                        println!("server event: connect_to_peer probe timed out");
+                    }
                 }
-            }
+            });
         }
         ServerMessage::RoomList(rooms) => {
             println!(
@@ -4545,18 +4639,20 @@ async fn run_listener(listener: Listener, duration: Duration) -> Result<(), Stri
             Ok(Ok((incoming, address))) => {
                 accepted += 1;
                 let name = incoming_connection_name(&incoming);
-                let response_result = handle_plain_soak_incoming(incoming).await;
-                println!(
-                    "listener event: {} from {}",
-                    name,
-                    scrub_socket_addr(address)
-                );
-                if let Err(error) = response_result {
-                    println!(
-                        "listener isolated failed peer connection: {}",
-                        peer_close_reason(&error)
-                    );
-                }
+                let address = scrub_socket_addr(address);
+                // A public listener receives unrelated peer attempts. Handle
+                // each accepted stream independently so a slow or malformed
+                // peer cannot block the next valid direct/indirect handshake.
+                tokio::spawn(async move {
+                    let response_result = handle_plain_soak_incoming(incoming).await;
+                    println!("listener event: {name} from {address}");
+                    if let Err(error) = response_result {
+                        println!(
+                            "listener isolated failed peer connection: {}",
+                            peer_close_reason(&error)
+                        );
+                    }
+                });
             }
             Ok(Err(error)) => println!(
                 "listener rejected invalid peer initialization: {}",
@@ -4584,18 +4680,17 @@ async fn run_obfuscated_listener(listener: Listener, duration: Duration) -> Resu
             Ok(Ok((incoming, address))) => {
                 accepted += 1;
                 let name = incoming_connection_name(&incoming);
-                let response_result = handle_obfuscated_soak_incoming(incoming).await;
-                println!(
-                    "obfuscated listener event: {} from {}",
-                    name,
-                    scrub_socket_addr(address)
-                );
-                if let Err(error) = response_result {
-                    println!(
-                        "obfuscated listener isolated failed peer connection: {}",
-                        peer_close_reason(&error)
-                    );
-                }
+                let address = scrub_socket_addr(address);
+                tokio::spawn(async move {
+                    let response_result = handle_obfuscated_soak_incoming(incoming).await;
+                    println!("obfuscated listener event: {name} from {address}");
+                    if let Err(error) = response_result {
+                        println!(
+                            "obfuscated listener isolated failed peer connection: {}",
+                            peer_close_reason(&error)
+                        );
+                    }
+                });
             }
             Ok(Err(error)) => println!(
                 "obfuscated listener rejected invalid peer initialization: {}",

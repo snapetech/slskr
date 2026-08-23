@@ -35,6 +35,6 @@ install -m 600 "$tmp_config" "$active_config"
 chmod 600 "$active_config"
 
 tmux new-session -d -s "$session" \
-    "cd '$repo_root' && SLSKR_SOAK_CREDENTIAL_FILE='$credential_file' SLSKR_PROTON_ADVERTISE_REGULAR_LOCAL='${SLSKR_PROTON_ADVERTISE_REGULAR_LOCAL:-1}' SLSK_SOAK_ACTIVE_PROBES='${SLSK_SOAK_ACTIVE_PROBES:-1}' SLSK_SOAK_DEFAULT_SEARCH='${SLSK_SOAK_DEFAULT_SEARCH:-1}' SLSK_SERVER='${SLSK_SERVER:-}' scripts/run-in-proton-wg-netns.sh '$namespace' '$active_config' scripts/run-live-soak-proton-natpmp.sh '$log_file'"
+    "cd '$repo_root' && SLSKR_SOAK_CREDENTIAL_FILE='$credential_file' SLSKR_SOAK_ACCOUNT_INDEX='${SLSKR_SOAK_ACCOUNT_INDEX:-}' SLSKR_LIVE_ENV_FILE='${SLSKR_LIVE_ENV_FILE:-$repo_root/.env}' SLSKR_LIVE_EXTRA_ENV_FILE='${SLSKR_LIVE_EXTRA_ENV_FILE:-$repo_root/.secrets/generated-soulseek-accounts.env}' SLSKR_SOAK_SKIP_BUILD='${SLSKR_SOAK_SKIP_BUILD:-0}' SLSKR_MATRIX_BINARY='${SLSKR_MATRIX_BINARY:-}' SLSKR_PROTON_ADVERTISE_REGULAR_LOCAL='${SLSKR_PROTON_ADVERTISE_REGULAR_LOCAL:-1}' SLSK_SOAK_ACTIVE_PROBES='${SLSK_SOAK_ACTIVE_PROBES:-1}' SLSK_SOAK_DEFAULT_SEARCH='${SLSK_SOAK_DEFAULT_SEARCH:-1}' SLSK_SERVER='${SLSK_SERVER:-}' scripts/run-in-proton-wg-netns.sh '$namespace' '$active_config' scripts/run-live-soak-proton-natpmp.sh '$log_file'"
 
 printf '%s\n' "$log_file"

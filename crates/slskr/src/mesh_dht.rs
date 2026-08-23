@@ -1,7 +1,7 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::Mutex};
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
-use ed25519_dalek::{Signer, SigningKey};
+use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use sha1::{Digest as Sha1Digest, Sha1};
 use sha2::Sha256;
@@ -14,6 +14,370 @@ use crate::config::TrustedMeshPeer;
 
 const STORE_TTL_SECONDS: i32 = 3_600;
 const MAX_PUBLICATIONS: usize = 240;
+const MAX_DHT_NODES: usize = 1_024;
+const MAX_DHT_VALUES: usize = 8_192;
+const MAX_DHT_VALUES_PER_PUBLISHER: usize = 256;
+const MAX_DHT_VALUES_PER_NAMESPACE: usize = 64;
+const MAX_DHT_VALUE_BYTES: usize = 512 * 1024;
+const MAX_DHT_TTL_SECONDS: i64 = 24 * 60 * 60;
+const MIN_DHT_TTL_SECONDS: i64 = 60;
+const DHT_SIGNATURE_MAX_AGE_MILLIS: i64 = 5 * 60 * 1_000;
+
+/// Bounded in-process storage and routing state for the authenticated mesh
+/// DHT service.  The public Soulseek DHT remains owned by `crate::dht`; this
+/// state is only for the overlay RPC contract used by trusted mesh peers.
+#[derive(Debug, Default)]
+pub struct DhtServiceState {
+    values: Mutex<BTreeMap<[u8; 20], DhtValue>>,
+    nodes: Mutex<BTreeMap<[u8; 20], DhtNode>>,
+    remote_admissions: Mutex<BTreeMap<(String, [u8; 20]), u64>>,
+}
+
+#[derive(Debug)]
+struct DhtValue {
+    value: Vec<u8>,
+    expires_at: u64,
+}
+
+#[derive(Debug, Clone)]
+struct DhtNode {
+    address: String,
+    last_seen_millis: i64,
+}
+
+impl DhtServiceState {
+    /// Handle one authenticated overlay DHT request.
+    ///
+    /// The surrounding gateway has already validated the mesh envelope and
+    /// bounded the call payload.  This layer validates the Kademlia payload,
+    /// keeps routing/storage state bounded, and returns the same status-code
+    /// meanings used by the current mesh service (`0` success, `1` internal,
+    /// `2` service, `3` method, `4` payload, `6` rate limit, `7` unauthorized).
+    pub async fn handle_call(
+        &self,
+        method: &str,
+        payload: &[u8],
+        remote_username: &str,
+    ) -> Result<Vec<u8>, (i32, String)> {
+        match method {
+            "FindNode" => self.handle_find_node(payload, remote_username),
+            "FindValue" => self.handle_find_value(payload, remote_username),
+            "Store" => self.handle_store(payload),
+            "Ping" => self.handle_ping(payload, remote_username),
+            _ => Err((3, "Unknown method".to_owned())),
+        }
+    }
+
+    fn handle_find_node(
+        &self,
+        payload: &[u8],
+        remote_username: &str,
+    ) -> Result<Vec<u8>, (i32, String)> {
+        let request: FindNodeRequest = parse_dht_payload(payload)?;
+        let target_id = decode_dht_id(&request.target_id)?;
+        let requester_id = decode_dht_id(&request.requester_id)?;
+        self.observe_node(requester_id, remote_username);
+        let nodes = self.closest_nodes(&target_id, request.count);
+        serde_json::to_vec(&FindNodeResponse {
+            target_id: BASE64.encode(target_id),
+            nodes,
+        })
+        .map_err(|_| (1, "FindNode failed".to_owned()))
+    }
+
+    fn handle_find_value(
+        &self,
+        payload: &[u8],
+        remote_username: &str,
+    ) -> Result<Vec<u8>, (i32, String)> {
+        let request: FindValueRequest = parse_dht_payload(payload)?;
+        let key = decode_dht_id(&request.key)?;
+        let requester_id = decode_dht_id(&request.requester_id)?;
+        self.observe_node(requester_id, remote_username);
+
+        let value = {
+            let mut values = self
+                .values
+                .lock()
+                .map_err(|_| (1, "FindValue failed".to_owned()))?;
+            let now = unix_seconds();
+            values.retain(|_, record| record.expires_at > now);
+            values.get(&key).map(|record| record.value.clone())
+        };
+        if let Some(value) = value {
+            return serde_json::to_vec(&FindValueResponse {
+                key: BASE64.encode(key),
+                found: true,
+                value: Some(BASE64.encode(value)),
+                closest_nodes: None,
+            })
+            .map_err(|_| (1, "FindValue failed".to_owned()));
+        }
+
+        serde_json::to_vec(&FindValueResponse {
+            key: BASE64.encode(key),
+            found: false,
+            value: None,
+            closest_nodes: Some(self.closest_nodes(&key, request.count)),
+        })
+        .map_err(|_| (1, "FindValue failed".to_owned()))
+    }
+
+    fn handle_store(&self, payload: &[u8]) -> Result<Vec<u8>, (i32, String)> {
+        let request: StoreRequest = parse_dht_payload(payload)?;
+        let key = decode_dht_id(&request.key)?;
+        let value = decode_dht_bytes(&request.value, MAX_DHT_VALUE_BYTES, "Value")?;
+        let requester_id = decode_dht_id(&request.requester_id)?;
+        let publisher_id = verify_store_request(&request, key, &value, requester_id)
+            .map_err(|error| (7, error))?;
+        let ttl_seconds =
+            i64::from(request.ttl_seconds).clamp(MIN_DHT_TTL_SECONDS, MAX_DHT_TTL_SECONDS) as u64;
+        if !self.admit_remote_store(&publisher_id, key, ttl_seconds) {
+            return Err((6, "Remote DHT storage quota exceeded".to_owned()));
+        }
+
+        {
+            let mut values = self
+                .values
+                .lock()
+                .map_err(|_| (1, "Store failed".to_owned()))?;
+            values.retain(|_, record| record.expires_at > unix_seconds());
+            if values.len() >= MAX_DHT_VALUES && !values.contains_key(&key) {
+                return Err((6, "Remote DHT storage quota exceeded".to_owned()));
+            }
+            values.insert(
+                key,
+                DhtValue {
+                    value,
+                    expires_at: unix_seconds().saturating_add(ttl_seconds),
+                },
+            );
+        }
+        self.observe_node(requester_id, &publisher_id);
+
+        serde_json::to_vec(&StoreResponse {
+            key: BASE64.encode(key),
+            stored: true,
+            ttl_seconds: i32::try_from(ttl_seconds).unwrap_or(i32::MAX),
+            error_message: None,
+        })
+        .map_err(|_| (1, "Store failed".to_owned()))
+    }
+
+    fn handle_ping(&self, payload: &[u8], remote_username: &str) -> Result<Vec<u8>, (i32, String)> {
+        let request: PingRequest = parse_dht_payload(payload)?;
+        let requester_id = decode_dht_id(&request.requester_id)?;
+        self.observe_node(requester_id, remote_username);
+        serde_json::to_vec(&PingResponse {
+            timestamp: unix_millis(),
+        })
+        .map_err(|_| (1, "Ping failed".to_owned()))
+    }
+
+    fn observe_node(&self, node_id: [u8; 20], address: &str) {
+        let address = address.trim();
+        if address.is_empty() {
+            return;
+        }
+        let Ok(mut nodes) = self.nodes.lock() else {
+            return;
+        };
+        if nodes.len() >= MAX_DHT_NODES && !nodes.contains_key(&node_id) {
+            return;
+        }
+        nodes.insert(
+            node_id,
+            DhtNode {
+                address: address.chars().take(512).collect(),
+                last_seen_millis: unix_millis(),
+            },
+        );
+    }
+
+    fn closest_nodes(&self, target: &[u8; 20], requested_count: Option<usize>) -> Vec<DhtNodeInfo> {
+        let count = requested_count.unwrap_or(20).clamp(1, 20);
+        let Ok(nodes) = self.nodes.lock() else {
+            return Vec::new();
+        };
+        let mut closest = nodes
+            .iter()
+            .map(|(node_id, node)| (*node_id, node.clone()))
+            .collect::<Vec<_>>();
+        closest.sort_by_key(|(node_id, _)| xor_distance(node_id, target));
+        closest
+            .into_iter()
+            .take(count)
+            .map(|(node_id, node)| DhtNodeInfo {
+                node_id: BASE64.encode(node_id),
+                address: node.address,
+                last_seen: chrono::DateTime::from_timestamp_millis(node.last_seen_millis)
+                    .map(|timestamp| timestamp.to_rfc3339_opts(chrono::SecondsFormat::Millis, true))
+                    .unwrap_or_else(|| chrono::Utc::now().to_rfc3339()),
+            })
+            .collect()
+    }
+
+    fn admit_remote_store(&self, publisher_id: &str, key: [u8; 20], ttl_seconds: u64) -> bool {
+        let now = unix_seconds();
+        let mut admissions = match self.remote_admissions.lock() {
+            Ok(admissions) => admissions,
+            Err(_) => return false,
+        };
+        admissions.retain(|_, expires_at| *expires_at > now);
+        let record_key = (publisher_id.to_owned(), key);
+        if let Some(expiry) = admissions.get_mut(&record_key) {
+            *expiry = now.saturating_add(ttl_seconds);
+            return true;
+        }
+        let publisher_count = admissions
+            .keys()
+            .filter(|(publisher, _)| publisher == publisher_id)
+            .count();
+        let namespace = key[0];
+        let namespace_count = admissions
+            .keys()
+            .filter(|(publisher, candidate)| publisher == publisher_id && candidate[0] == namespace)
+            .count();
+        if admissions.len() >= MAX_DHT_VALUES
+            || publisher_count >= MAX_DHT_VALUES_PER_PUBLISHER
+            || namespace_count >= MAX_DHT_VALUES_PER_NAMESPACE
+        {
+            return false;
+        }
+        admissions.insert(record_key, now.saturating_add(ttl_seconds));
+        true
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct FindNodeRequest {
+    #[serde(alias = "targetId")]
+    target_id: String,
+    #[serde(alias = "requesterId")]
+    requester_id: String,
+    #[serde(default, alias = "count")]
+    count: Option<usize>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "PascalCase")]
+struct FindNodeResponse {
+    target_id: String,
+    nodes: Vec<DhtNodeInfo>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct FindValueRequest {
+    #[serde(alias = "key")]
+    key: String,
+    #[serde(alias = "requesterId")]
+    requester_id: String,
+    #[serde(default, alias = "count")]
+    count: Option<usize>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "PascalCase")]
+struct FindValueResponse {
+    key: String,
+    found: bool,
+    value: Option<String>,
+    closest_nodes: Option<Vec<DhtNodeInfo>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct PingRequest {
+    #[serde(alias = "requesterId")]
+    requester_id: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "PascalCase")]
+struct PingResponse {
+    timestamp: i64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "PascalCase")]
+struct DhtNodeInfo {
+    node_id: String,
+    address: String,
+    last_seen: String,
+}
+
+fn parse_dht_payload<T: serde::de::DeserializeOwned>(payload: &[u8]) -> Result<T, (i32, String)> {
+    serde_json::from_slice(payload).map_err(|_| (4, "Invalid request payload".to_owned()))
+}
+
+fn decode_dht_id(value: &str) -> Result<[u8; 20], (i32, String)> {
+    let bytes = BASE64
+        .decode(value)
+        .map_err(|_| (4, "Invalid request payload".to_owned()))?;
+    bytes
+        .try_into()
+        .map_err(|_| (4, "Invalid request payload".to_owned()))
+}
+
+fn decode_dht_bytes(value: &str, max_bytes: usize, field: &str) -> Result<Vec<u8>, (i32, String)> {
+    let bytes = BASE64
+        .decode(value)
+        .map_err(|_| (4, format!("{field} is invalid")))?;
+    if bytes.len() > max_bytes {
+        return Err((9, format!("{field} is too large")));
+    }
+    Ok(bytes)
+}
+
+fn xor_distance(left: &[u8; 20], right: &[u8; 20]) -> [u8; 20] {
+    std::array::from_fn(|index| left[index] ^ right[index])
+}
+
+fn verify_store_request(
+    request: &StoreRequest,
+    key: [u8; 20],
+    value: &[u8],
+    requester_id: [u8; 20],
+) -> Result<String, String> {
+    let public_key = BASE64
+        .decode(&request.public_key_base64)
+        .map_err(|_| "Signature verification failed".to_owned())?;
+    let public_key: [u8; 32] = public_key
+        .try_into()
+        .map_err(|_| "Signature verification failed".to_owned())?;
+    let signature = BASE64
+        .decode(&request.signature_base64)
+        .map_err(|_| "Signature verification failed".to_owned())?;
+    let signature = Signature::from_slice(&signature)
+        .map_err(|_| "Signature verification failed".to_owned())?;
+    let requester_digest = Sha256::digest(public_key);
+    if requester_id != requester_digest[..20] {
+        return Err("Signature verification failed".to_owned());
+    }
+    let now = unix_millis();
+    if request.timestamp_unix_ms <= 0
+        || request.timestamp_unix_ms > now
+        || now.saturating_sub(request.timestamp_unix_ms) > DHT_SIGNATURE_MAX_AGE_MILLIS
+    {
+        return Err("Signature verification failed".to_owned());
+    }
+    let signable = store_signable_payload(
+        key,
+        value,
+        requester_id,
+        request.ttl_seconds,
+        &request.public_key_base64,
+        request.timestamp_unix_ms,
+    );
+    let verifying_key = VerifyingKey::from_bytes(&public_key)
+        .map_err(|_| "Signature verification failed".to_owned())?;
+    verifying_key
+        .verify(signable.as_bytes(), &signature)
+        .map_err(|_| "Signature verification failed".to_owned())?;
+    Ok(peer_id_for_public_key(&public_key))
+}
 
 #[derive(Clone, Debug)]
 pub struct ShadowPublication {
@@ -52,7 +416,7 @@ struct Publication {
     value: Vec<u8>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "PascalCase")]
 struct StoreRequest {
     key: String,
@@ -64,10 +428,17 @@ struct StoreRequest {
     timestamp_unix_ms: i64,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "PascalCase")]
 struct StoreResponse {
+    #[serde(default)]
     stored: bool,
+    #[serde(default)]
+    key: String,
+    #[serde(default)]
+    ttl_seconds: i32,
+    #[serde(default)]
+    error_message: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -344,17 +715,20 @@ fn signed_store_request(
 ) -> StoreRequest {
     let public_key = signing_key.verifying_key().to_bytes();
     let requester_digest = Sha256::digest(public_key);
-    let requester_id = &requester_digest[..20];
+    let requester_id: [u8; 20] = requester_digest[..20]
+        .try_into()
+        .expect("SHA-256 digest has at least 20 bytes");
     let key_base64 = BASE64.encode(key);
     let value_base64 = BASE64.encode(value);
     let requester_base64 = BASE64.encode(requester_id);
     let public_key_base64 = BASE64.encode(public_key);
-    let signable = format!(
-        "DhtStore|{timestamp_unix_ms}|{{\"type\":9,\"key\":\"{}\",\"value\":\"{}\",\"requester_id\":\"{}\",\"ttl_seconds\":{ttl_seconds},\"proto_version\":1,\"public_key\":\"{}\",\"timestamp_ms\":{timestamp_unix_ms}}}",
-        dotnet_json_base64(&key_base64),
-        dotnet_json_base64(&value_base64),
-        dotnet_json_base64(&requester_base64),
-        dotnet_json_base64(&public_key_base64),
+    let signable = store_signable_payload(
+        key,
+        value,
+        requester_id,
+        ttl_seconds,
+        &public_key_base64,
+        timestamp_unix_ms,
     );
     let signature = signing_key.sign(signable.as_bytes()).to_bytes();
     StoreRequest {
@@ -366,6 +740,26 @@ fn signed_store_request(
         signature_base64: BASE64.encode(signature),
         timestamp_unix_ms,
     }
+}
+
+fn store_signable_payload(
+    key: [u8; 20],
+    value: &[u8],
+    requester_id: [u8; 20],
+    ttl_seconds: i32,
+    public_key_base64: &str,
+    timestamp_unix_ms: i64,
+) -> String {
+    let key_base64 = BASE64.encode(key);
+    let value_base64 = BASE64.encode(value);
+    let requester_base64 = BASE64.encode(requester_id);
+    format!(
+        "DhtStore|{timestamp_unix_ms}|{{\"type\":9,\"key\":\"{}\",\"value\":\"{}\",\"requester_id\":\"{}\",\"ttl_seconds\":{ttl_seconds},\"proto_version\":1,\"public_key\":\"{}\",\"timestamp_ms\":{timestamp_unix_ms}}}",
+        dotnet_json_base64(&key_base64),
+        dotnet_json_base64(&value_base64),
+        dotnet_json_base64(&requester_base64),
+        dotnet_json_base64(public_key_base64),
+    )
 }
 
 fn dotnet_json_base64(value: &str) -> String {
@@ -476,6 +870,10 @@ fn unix_millis() -> i64 {
     chrono::Utc::now().timestamp_millis()
 }
 
+fn unix_seconds() -> u64 {
+    u64::try_from(chrono::Utc::now().timestamp()).unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -531,6 +929,69 @@ mod tests {
         key.verifying_key()
             .verify(signable.as_bytes(), &signature)
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn dht_service_round_trips_signed_store_and_find_value() {
+        let signing_key = SigningKey::from_bytes(&[9; 32]);
+        let state = DhtServiceState::default();
+        let key = derive_key("mesh:test:dht-service");
+        let value = b"mesh-value";
+        let request = signed_store_request(key, value, 600, unix_millis(), &signing_key);
+        let store = state
+            .handle_call(
+                "Store",
+                &serde_json::to_vec(&request).unwrap(),
+                "overlay-peer",
+            )
+            .await
+            .expect("signed DHT store should be accepted");
+        let store_json: serde_json::Value = serde_json::from_slice(&store).unwrap();
+        assert_eq!(store_json["Stored"], true);
+
+        let find_request = serde_json::json!({
+            "Key": BASE64.encode(key),
+            "RequesterId": BASE64.encode([3_u8; 20]),
+            "Count": 20,
+        });
+        let found = state
+            .handle_call(
+                "FindValue",
+                &serde_json::to_vec(&find_request).unwrap(),
+                "overlay-peer",
+            )
+            .await
+            .expect("stored DHT value should be found");
+        let found_json: serde_json::Value = serde_json::from_slice(&found).unwrap();
+        assert_eq!(found_json["Found"], true);
+        assert_eq!(
+            BASE64
+                .decode(found_json["Value"].as_str().unwrap())
+                .unwrap(),
+            value
+        );
+    }
+
+    #[tokio::test]
+    async fn dht_service_rejects_forged_publisher_identity() {
+        let signing_key = SigningKey::from_bytes(&[10; 32]);
+        let state = DhtServiceState::default();
+        let key = derive_key("mesh:test:dht-forgery");
+        let mut request =
+            signed_store_request(key, b"mesh-value", 600, unix_millis(), &signing_key);
+        let mut requester = BASE64.decode(&request.requester_id).unwrap();
+        requester[0] ^= 0xff;
+        request.requester_id = BASE64.encode(requester);
+        let error = state
+            .handle_call(
+                "Store",
+                &serde_json::to_vec(&request).unwrap(),
+                "overlay-peer",
+            )
+            .await
+            .expect_err("a requester id not bound to the signing key must fail");
+        assert_eq!(error.0, 7);
+        assert_eq!(error.1, "Signature verification failed");
     }
 
     #[test]

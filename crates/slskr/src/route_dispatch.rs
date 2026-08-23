@@ -15,6 +15,130 @@ fn route_is_unhandled(result: &RouteDispatchResult) -> bool {
     matches!(result, Err(error) if error == ROUTE_NOT_HANDLED)
 }
 
+fn parse_download_filter_update(body: &str) -> Result<Vec<String>, String> {
+    let payload = serde_json::from_str::<serde_json::Value>(body)
+        .map_err(|_| "Download filter payload must be valid JSON".to_owned())?;
+    let terms = payload
+        .get("exclude")
+        .or_else(|| payload.get("terms"))
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| "Download filter payload must contain an exclude array".to_owned())?;
+    if terms.len() > 100 {
+        return Err("Download filter supports at most 100 terms".to_owned());
+    }
+    let mut normalized = Vec::with_capacity(terms.len());
+    for term in terms {
+        let term = term
+            .as_str()
+            .ok_or_else(|| "Download filter terms must be strings".to_owned())?
+            .trim();
+        if term.is_empty() {
+            return Err("Download filter terms cannot be blank".to_owned());
+        }
+        if term.chars().count() > 256 {
+            return Err("Download filter terms must be at most 256 characters".to_owned());
+        }
+        if !normalized.iter().any(|existing| existing == term) {
+            normalized.push(term.to_owned());
+        }
+    }
+    Ok(normalized)
+}
+
+async fn update_download_filter(state: &AppState, body: &str) -> HttpResponse {
+    if !effective_remote_configuration(state) {
+        return controller_forbidden_response();
+    }
+    let terms = match parse_download_filter_update(body) {
+        Ok(terms) => terms,
+        Err(error) => return routing::bad_request_response(&error),
+    };
+    let existing = match crate::read_controller_compatibility_yaml(&state.config) {
+        Ok(Some(text)) => text,
+        Ok(None) => String::new(),
+        Err(error) => return routing::service_unavailable_response(&error),
+    };
+    let mut yaml = if existing.trim().is_empty() {
+        serde_yaml::Value::Mapping(serde_yaml::Mapping::new())
+    } else {
+        match serde_yaml::from_str::<serde_yaml::Value>(&existing) {
+            Ok(value @ serde_yaml::Value::Mapping(_)) => value,
+            Ok(serde_yaml::Value::Null) => serde_yaml::Value::Mapping(serde_yaml::Mapping::new()),
+            Ok(_) | Err(_) => {
+                return routing::bad_request_response(
+                    "Existing configuration is not a YAML mapping",
+                )
+            }
+        }
+    };
+    let serde_yaml::Value::Mapping(root) = &mut yaml else {
+        return routing::bad_request_response("Existing configuration is not a YAML mapping");
+    };
+    let filters_key = serde_yaml::Value::String("filters".to_owned());
+    let download_key = serde_yaml::Value::String("download".to_owned());
+    let exclude_key = serde_yaml::Value::String("exclude".to_owned());
+    let filters = root
+        .entry(filters_key)
+        .or_insert_with(|| serde_yaml::Value::Mapping(serde_yaml::Mapping::new()));
+    let serde_yaml::Value::Mapping(filters) = filters else {
+        return routing::bad_request_response("filters must be a YAML mapping");
+    };
+    let download = filters
+        .entry(download_key)
+        .or_insert_with(|| serde_yaml::Value::Mapping(serde_yaml::Mapping::new()));
+    let serde_yaml::Value::Mapping(download) = download else {
+        return routing::bad_request_response("filters.download must be a YAML mapping");
+    };
+    download.insert(
+        exclude_key,
+        serde_yaml::Value::Sequence(terms.into_iter().map(serde_yaml::Value::String).collect()),
+    );
+    let yaml_text = match serde_yaml::to_string(&yaml) {
+        Ok(text) => text,
+        Err(error) => {
+            return routing::service_unavailable_response(&format!(
+                "failed to serialize configuration: {error}"
+            ))
+        }
+    };
+    // The shared controller YAML writer accepts the target's JSON-string
+    // envelope (`"<yaml>"`), not an object wrapper.  Keep the download
+    // policy endpoint on that same validated persistence path.
+    apply_controller_yaml_upload(&serde_json::Value::String(yaml_text).to_string(), state).await
+}
+
+pub(super) async fn download_policy_response(
+    state: &AppState,
+    filenames: &[String],
+) -> Option<HttpResponse> {
+    let exclusions = effective_download_exclusions(state).await;
+    let blocked = filenames
+        .iter()
+        .filter_map(|filename| {
+            crate::download_filter::matching_exclusion(filename, &exclusions).map(|exclusion| {
+                serde_json::json!({
+                    "filename": filename,
+                    "exclusion": exclusion,
+                })
+            })
+        })
+        .collect::<Vec<_>>();
+    if blocked.is_empty() {
+        return None;
+    }
+    Some(HttpResponse {
+        status: "403 Forbidden",
+        content_type: "application/json",
+        body: serde_json::json!({
+            "type": "download_blocked",
+            "title": "Download blocked",
+            "detail": "Every requested file matched a configured global download exclusion.",
+            "blocked": blocked,
+        })
+        .to_string(),
+    })
+}
+
 #[allow(
     dead_code,
     reason = "used by focused and bounded in-process route tests"
@@ -733,6 +857,26 @@ async fn route_http_request_inner(
 
     let route = routing::parse_route(method, path);
     let request_is_versioned_v0 = route.path.starts_with("/api/v0/");
+
+    let (raw_path, _) = crate::utils::split_request_target(path);
+    let mut decoded_path = raw_path.to_owned();
+    let mut traversal = false;
+    for _ in 0..=2 {
+        if crate::utils::contains_traversal_component(&decoded_path) {
+            traversal = true;
+            break;
+        }
+        let next = crate::utils::percent_decode(&decoded_path);
+        if next == decoded_path {
+            break;
+        }
+        decoded_path = next;
+    }
+    if traversal {
+        return Ok(routing::bad_request_response(
+            "One or more files in the request contain a dangerous path traversal segment",
+        ));
+    }
 
     // Normalize versioned paths before matching so static and dynamic routes
     // share the same dispatch behavior.
@@ -1575,7 +1719,11 @@ async fn route_dispatch_group_0(
                 .transpose();
             let credential_store_mode = match credential_store_mode {
                 Ok(mode) => mode,
-                Err(error) => return Ok(routing::bad_request_response(&error)),
+                Err(_) => {
+                    return Ok(routing::bad_request_response(
+                        "limit must be between 1 and 500",
+                    ))
+                }
             };
             match (username, password) {
                 (Some(username), Some(password)) => {
@@ -2693,11 +2841,14 @@ async fn route_dispatch_group_1(
                     serde_json::from_str::<serde_json::Value>(&openapi::generate_openapi_json())
                         .unwrap_or_else(|_| serde_json::json!({}));
                 spec["openapi"] = serde_json::json!("3.0.4");
-                spec["info"]["title"] =
+                spec["info"]["title"] = if state.config.current_upstream_behavior {
+                    serde_json::json!("slskR API")
+                } else {
                     serde_json::json!(match state.config.controller_compatibility_target {
                         ControllerCompatibilityTarget::Slskd => "slskd",
                         ControllerCompatibilityTarget::Slskdn => "slskdN API",
-                    });
+                    })
+                };
                 Ok(HttpResponse {
                     status: "200 OK",
                     content_type: "application/json;charset=utf-8",
@@ -2955,7 +3106,7 @@ async fn route_dispatch_group_1(
         ("GET", "/api/config") => Ok(HttpResponse {
             status: "200 OK",
             content_type: "application/json",
-            body: state.config.sanitized_json(),
+            body: effective_sanitized_config_json(state).await,
         }),
         ("GET", "/api/stats") => {
             let session = state.session.read().await;
@@ -4505,10 +4656,7 @@ async fn route_dispatch_group_2(
         ("POST", "/api/searches") => {
             if route.path.starts_with("/api/v0/")
                 && extract_json_string_field(body, "acquisitionProfile").is_some_and(|profile| {
-                    !matches!(
-                        profile.to_ascii_lowercase().as_str(),
-                        "default" | "lossless" | "highquality" | "high-quality" | "any"
-                    )
+                    !is_known_acquisition_profile(&profile)
                 })
             {
                 return Ok(HttpResponse {
@@ -4716,6 +4864,86 @@ async fn route_dispatch_group_2(
             let Some(token) = search_token_path(normalized_path, "/complete") else {
                 return Ok(routing::not_found_response());
             };
+
+            // A wishlist search that completes with too few usable results gets
+            // one of the current smart-fallback queries immediately.  The
+            // session loop also handles this at expiry time, but waiting for the
+            // five-second TTL here makes manual/API completion observably slower
+            // and loses the current upstream behavior.
+            let fallback_query = {
+                let record = state.searches.read().await.get(token);
+                if record.as_ref().is_some_and(|record| {
+                    record.status == "active"
+                        && search_fallback::is_enabled_for_source(record.target)
+                }) {
+                    let record = record.expect("active wishlist search record");
+                    let wishlist_policy = if let Some(item_id) = record.wishlist_item_id() {
+                        state.wishlist.read().await.result_policy_for(item_id)
+                    } else {
+                        None
+                    };
+                    let response_limit = wishlist_policy
+                        .as_ref()
+                        .map(|policy| policy.max_results)
+                        .unwrap_or(MAX_SEARCH_RESULTS_PER_SEARCH);
+                    let file_count = record
+                        .results
+                        .len()
+                        .saturating_add(record.hidden_locked_count);
+                    (search_fallback::needs_fallback(
+                        record.raw_response_count,
+                        file_count,
+                        response_limit,
+                        response_limit,
+                    ))
+                    .then(|| search_fallback::create_queries(&record.query))
+                    .and_then(|queries| queries.get(record.fallback_attempts).cloned())
+                } else {
+                    None
+                }
+            };
+
+            if let Some(fallback_query) = fallback_query {
+                let fallback_record = {
+                    let mut searches = state.searches.write().await;
+                    searches.reset_for_fallback(token, fallback_query, 5)
+                };
+                if let Some(fallback_record) = fallback_record {
+                    let body_json = fallback_record.json();
+                    persist_search_record(state, &fallback_record).await?;
+                    record_event(
+                        state,
+                        "wishlist.search.fallback_started",
+                        fallback_record.token.to_string(),
+                        Some(
+                            serde_json::json!({
+                                "query": fallback_record.query,
+                                "attempt": fallback_record.fallback_attempts,
+                                "source": "completion",
+                            })
+                            .to_string(),
+                        ),
+                    )
+                    .await;
+                    if let Err(error) = send_session_command(
+                        state,
+                        SessionCommand::Search {
+                            token: fallback_record.token,
+                            query: fallback_record.query,
+                            target: SearchDispatchTarget::Wishlist,
+                        },
+                    )
+                    .await
+                    {
+                        update_session(state, |snapshot| {
+                            snapshot.last_error = Some(error.clone());
+                        })
+                        .await;
+                    }
+                    return Ok(routing::ok_response(body_json));
+                }
+            }
+
             let mut searches = state.searches.write().await;
             if let Some((record, transitioned)) = searches.complete(token) {
                 let body_json = record.json();
@@ -4901,6 +5129,27 @@ async fn route_dispatch_group_2(
                             .get("size")
                             .and_then(serde_json::Value::as_u64)
                             .unwrap_or(0),
+                        bit_rate: payload
+                            .get("bitRate")
+                            .or_else(|| payload.get("bit_rate"))
+                            .and_then(serde_json::Value::as_u64)
+                            .and_then(|value| u32::try_from(value).ok()),
+                        sample_rate: payload
+                            .get("sampleRate")
+                            .or_else(|| payload.get("sample_rate"))
+                            .and_then(serde_json::Value::as_u64)
+                            .and_then(|value| u32::try_from(value).ok()),
+                        bit_depth: payload
+                            .get("bitDepth")
+                            .or_else(|| payload.get("bit_depth"))
+                            .and_then(serde_json::Value::as_u64)
+                            .and_then(|value| u32::try_from(value).ok()),
+                        length_seconds: payload
+                            .get("length")
+                            .or_else(|| payload.get("lengthSeconds"))
+                            .or_else(|| payload.get("length_seconds"))
+                            .and_then(serde_json::Value::as_u64)
+                            .and_then(|value| u32::try_from(value).ok()),
                         locked,
                         slot_free,
                         average_speed,
@@ -4928,7 +5177,7 @@ async fn route_dispatch_group_2(
                     for entry in &entries {
                         if policy
                             .as_ref()
-                            .is_some_and(|policy| !policy.filter.matches(&entry.filename))
+                            .is_some_and(|policy| !policy.filter.matches_entry(entry))
                         {
                             filtered_out = filtered_out.saturating_add(1);
                         } else if entry.peer_username.as_deref().is_some_and(|username| {
@@ -4945,7 +5194,7 @@ async fn route_dispatch_group_2(
                         if entry.locked
                             || policy
                                 .as_ref()
-                                .is_some_and(|policy| !policy.filter.matches(&entry.filename))
+                                .is_some_and(|policy| !policy.filter.matches_entry(entry))
                         {
                             return false;
                         }
@@ -5279,7 +5528,38 @@ async fn route_dispatch_group_2(
         }
 
         ("POST", "/api/transfers") => {
-            if let Some((username, files)) = slskd_enqueue_request(body) {
+            if let Some((username, mut files)) = slskd_enqueue_request(body) {
+                let exclusions = effective_download_exclusions(state).await;
+                let filenames = files
+                    .iter()
+                    .filter_map(|file| file.get("filename").and_then(serde_json::Value::as_str))
+                    .map(str::to_owned)
+                    .collect::<Vec<_>>();
+                let blocked = filenames
+                    .iter()
+                    .filter_map(|filename| {
+                        crate::download_filter::matching_exclusion(filename, &exclusions).map(
+                            |exclusion| {
+                                serde_json::json!({
+                                    "filename": filename,
+                                    "exclusion": exclusion,
+                                })
+                            },
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                if blocked.len() == filenames.len() && !blocked.is_empty() {
+                    return Ok(download_policy_response(state, &filenames)
+                        .await
+                        .expect("non-empty blocked list must produce a policy response"));
+                }
+                files.retain(|file| {
+                    file.get("filename")
+                        .and_then(serde_json::Value::as_str)
+                        .is_none_or(|filename| {
+                            !crate::download_filter::is_excluded(filename, &exclusions)
+                        })
+                });
                 let batch_id = slskd_transfer_batch_id(body)
                     .or_else(|| (files.len() > 1).then(|| uuid::Uuid::new_v4().to_string()));
                 let mut transfers = state.transfers.write().await;
@@ -5333,6 +5613,7 @@ async fn route_dispatch_group_2(
                     serde_json::json!({
                         "queued": count,
                         "transfers": created,
+                        "blocked": blocked,
                     })
                     .to_string(),
                 ));
@@ -5344,6 +5625,13 @@ async fn route_dispatch_group_2(
             };
 
             let direction = extract_json_u32_field(body, "direction").unwrap_or(0);
+            if direction == 0 {
+                if let Some(response) =
+                    download_policy_response(state, std::slice::from_ref(&filename)).await
+                {
+                    return Ok(response);
+                }
+            }
             let peer_username = extract_json_string_field(body, "peer_username");
             let supplied_local_path = extract_json_string_field(body, "local_path");
             let batch_id = slskd_transfer_batch_id(body);
@@ -5830,6 +6118,14 @@ async fn route_dispatch_group_2(
                     "matching alternative has no peer",
                 ));
             };
+            if let Some(exclusion) = crate::download_filter::matching_exclusion(
+                &alternative.filename,
+                &effective_download_exclusions(state).await,
+            ) {
+                return Ok(routing::conflict_response(&format!(
+                    "replacement blocked by download exclusion: {exclusion}"
+                )));
+            }
             let session_command_permit = match state.session_commands.reserve().await {
                 Ok(permit) => permit,
                 Err(_) => {
@@ -5869,6 +6165,9 @@ async fn route_dispatch_group_2(
                     title: original.title.clone(),
                     track_number: original.track_number,
                     year: original.year,
+                    attempts: 1,
+                    auto_replace_attempts: original.auto_replace_attempts.saturating_add(1),
+                    next_attempt_at: None,
                 },
             );
             let replacement = transfers
@@ -5923,12 +6222,16 @@ async fn route_dispatch_group_2(
                 .collect::<Vec<_>>();
             drop(transfers);
 
+            let exclusions = effective_download_exclusions(state).await;
             let searches = state.searches.read().await;
             let replacements = candidates
                 .iter()
                 .filter_map(|transfer| {
                     searches
                         .first_transfer_alternative(transfer)
+                        .filter(|alternative| {
+                            !crate::download_filter::is_excluded(&alternative.filename, &exclusions)
+                        })
                         .map(|alternative| (transfer.clone(), alternative))
                 })
                 .collect::<Vec<_>>();
@@ -5995,6 +6298,9 @@ async fn route_dispatch_group_2(
                         title: original.title.clone(),
                         track_number: original.track_number,
                         year: original.year,
+                        attempts: 1,
+                        auto_replace_attempts: original.auto_replace_attempts.saturating_add(1),
+                        next_attempt_at: None,
                     },
                 );
                 let replacement = transfers
@@ -6049,7 +6355,7 @@ async fn route_dispatch_group_2(
                 return Ok(routing::not_found_response());
             };
             let username = decoded_path_segment(username);
-            let files = slskd_files_from_body(body);
+            let mut files = slskd_files_from_body(body);
             if route.path.starts_with("/api/v0/") && files.is_empty() {
                 return Ok(HttpResponse {
                     status: "400 Bad Request",
@@ -6057,6 +6363,37 @@ async fn route_dispatch_group_2(
                     body: serde_json::json!("At least one file is required").to_string(),
                 });
             }
+            let filenames = files
+                .iter()
+                .filter_map(|file| file.get("filename").and_then(serde_json::Value::as_str))
+                .map(str::to_owned)
+                .collect::<Vec<_>>();
+            let exclusions = effective_download_exclusions(state).await;
+            let blocked = filenames
+                .iter()
+                .filter_map(|filename| {
+                    crate::download_filter::matching_exclusion(filename, &exclusions).map(
+                        |exclusion| {
+                            serde_json::json!({
+                                "filename": filename,
+                                "exclusion": exclusion,
+                            })
+                        },
+                    )
+                })
+                .collect::<Vec<_>>();
+            if blocked.len() == filenames.len() && !blocked.is_empty() {
+                return Ok(download_policy_response(state, &filenames)
+                    .await
+                    .expect("non-empty blocked list must produce a policy response"));
+            }
+            files.retain(|file| {
+                file.get("filename")
+                    .and_then(serde_json::Value::as_str)
+                    .is_none_or(|filename| {
+                        !crate::download_filter::is_excluded(filename, &exclusions)
+                    })
+            });
             let _request_permit = if route.path.starts_with("/api/v0/") {
                 match Arc::clone(&state.download_requests).try_acquire_owned() {
                     Ok(permit) => Some(permit),
@@ -6154,6 +6491,7 @@ async fn route_dispatch_group_2(
                 serde_json::json!({
                     "queued": count,
                     "transfers": created,
+                    "blocked": blocked,
                 })
                 .to_string(),
             ))
@@ -9152,11 +9490,9 @@ async fn route_dispatch_group_4(
                 }
             }
         }
-        ("DELETE", path) if path.starts_with("/api/collections/items/") => {
-            let item_id = path.strip_prefix("/api/collections/items/").unwrap_or("");
-            if item_id.is_empty() {
-                return Ok(routing::not_found_response());
-            }
+        ("DELETE", path) if collection_item_action_ids(path).is_some() => {
+            let (item_id, requested_collection_id) =
+                collection_item_action_ids(path).expect("guarded collection item path");
             let caller_id = utils::authenticated_caller_id(
                 &state.config,
                 authorization,
@@ -9165,6 +9501,12 @@ async fn route_dispatch_group_4(
             );
             let mut collections = state.collections.write().await;
             let collection_id = collections.collection_id_for_item(item_id);
+            if requested_collection_id.is_some_and(|expected| {
+                collection_id.as_deref() != Some(expected)
+            }) {
+                drop(collections);
+                return Ok(routing::not_found_response());
+            }
             if collection_id
                 .as_deref()
                 .and_then(|id| collections.get(id))
@@ -9199,11 +9541,9 @@ async fn route_dispatch_group_4(
                 Ok(routing::not_found_response())
             }
         }
-        ("PUT", path) if path.starts_with("/api/collections/items/") => {
-            let item_id = path.strip_prefix("/api/collections/items/").unwrap_or("");
-            if item_id.is_empty() {
-                return Ok(routing::not_found_response());
-            }
+        ("PUT", path) if collection_item_action_ids(path).is_some() => {
+            let (item_id, requested_collection_id) =
+                collection_item_action_ids(path).expect("guarded collection item path");
             let artist = extract_json_string_field(body, "artist");
             let title = extract_json_string_field(body, "title");
             let kind = extract_json_string_field(body, "kind")
@@ -9217,6 +9557,12 @@ async fn route_dispatch_group_4(
             );
             let mut collections = state.collections.write().await;
             let collection_id = collections.collection_id_for_item(item_id);
+            if requested_collection_id.is_some_and(|expected| {
+                collection_id.as_deref() != Some(expected)
+            }) {
+                drop(collections);
+                return Ok(routing::not_found_response());
+            }
             if collection_id
                 .as_deref()
                 .and_then(|id| collections.get(id))
@@ -10909,6 +11255,18 @@ async fn route_dispatch_group_5(
             drop(destinations);
             Ok(routing::ok_response(json))
         }
+        ("GET", "/api/config/download-filter") => {
+            let exclusions = effective_download_exclusions(state).await;
+            Ok(routing::ok_response(
+                serde_json::json!({
+                    "exclude": exclusions,
+                    "maxTerms": 100,
+                    "maxTermLength": 256,
+                })
+                .to_string(),
+            ))
+        }
+        ("PUT", "/api/config/download-filter") => Ok(update_download_filter(state, body).await),
 
         // BROWSE ENDPOINTS
         ("GET", path)
@@ -12667,6 +13025,44 @@ async fn route_dispatch_group_5(
             Ok(routing::ok_response(payload.to_string()))
         }
 
+        ("PUT", "/api/wishlist/bulk-filter") => {
+            let ids = extract_json_string_array_field(body, "ids")
+                .or_else(|| extract_json_string_array_field(body, "itemIds"))
+                .unwrap_or_default();
+            if ids.is_empty() {
+                return Ok(routing::bad_request_response(
+                    "At least one wishlist item ID is required",
+                ));
+            }
+            let filter = extract_json_string_field(body, "filter").unwrap_or_default();
+            let mut wishlist = state.wishlist.write().await;
+            let previous = wishlist.clone();
+            let updated = match wishlist.update_filters(&ids, filter) {
+                Ok(items) => items,
+                Err("wishlist item not found") => {
+                    drop(wishlist);
+                    return Ok(routing::not_found_response());
+                }
+                Err(message) => {
+                    drop(wishlist);
+                    return Ok(routing::bad_request_response(message));
+                }
+            };
+            let mutated = wishlist.clone();
+            let updated_count = updated.len();
+            drop(wishlist);
+            if let Err(error) = persist_wishlist_items_checked(state, &updated).await {
+                rollback_wishlist_if_unchanged(state, previous, &mutated).await;
+                return Ok(wishlist_storage_error_response(
+                    route.path.starts_with("/api/v0/"),
+                    &error,
+                ));
+            }
+            Ok(routing::ok_response(
+                serde_json::json!({ "updatedCount": updated_count }).to_string(),
+            ))
+        }
+
         ("PUT", path) if path.starts_with("/api/wishlist/") => {
             let Some(item_id) = path_segment_after(path, "/api/wishlist/") else {
                 return Ok(routing::not_found_response());
@@ -13422,7 +13818,7 @@ async fn route_dispatch_group_6(
                  == Some("spotify_page");
              let library = state.library.read().await;
              let shares = state.shares.read().await;
-             let runs = songid_runs_value(&library, &shares);
+             let runs = songid_runs_value(&library, &shares, None);
              let matches = runs
                  .iter()
                  .flat_map(|run| run.get("matches").and_then(serde_json::Value::as_array).cloned().unwrap_or_default())
@@ -13531,24 +13927,25 @@ async fn route_dispatch_group_6(
                  return Ok(routing::not_found_response());
              };
              let runtime = state.runtime.read().await;
-             let Some(run) = runtime.songid_run(run_id) else {
-                 return Ok(routing::not_found_response());
-             };
-             drop(runtime);
-             let matrix = run
-                 .get("matches")
-                 .and_then(serde_json::Value::as_array)
-                 .cloned()
-                 .unwrap_or_default()
-                 .into_iter()
-                 .map(|match_value| {
-                     serde_json::json!({
-                         "libraryItemId": match_value.get("libraryItemId").cloned().unwrap_or(serde_json::Value::Null),
-                         "filename": match_value.get("filename").cloned().unwrap_or(serde_json::Value::Null),
-                         "score": match_value.get("score").cloned().unwrap_or_else(|| serde_json::json!(0.0)),
-                         "signals": ["artist", "title", "extension"],
-                     })
-                 })
+            let Some(run) = runtime.songid_run(run_id) else {
+                return Ok(routing::not_found_response());
+            };
+            drop(runtime);
+            let matrix = run
+                .get("forensicMatrix")
+                .or_else(|| run.get("matches"))
+                .and_then(serde_json::Value::as_array)
+                .cloned()
+                .unwrap_or_default()
+                .into_iter()
+                .map(|match_value| {
+                    serde_json::json!({
+                        "libraryItemId": match_value.get("libraryItemId").cloned().unwrap_or(serde_json::Value::Null),
+                        "filename": match_value.get("filename").cloned().unwrap_or(serde_json::Value::Null),
+                        "score": match_value.get("score").or_else(|| match_value.get("identityScore")).cloned().unwrap_or_else(|| serde_json::json!(0.0)),
+                        "signals": match_value.get("signals").cloned().unwrap_or_else(|| serde_json::json!([])),
+                    })
+                })
                  .collect::<Vec<_>>();
              let count = matrix.len();
              Ok(routing::ok_response(serde_json::json!({
@@ -16297,6 +16694,72 @@ async fn route_dispatch_group_6(
             Ok(routing::accepted_response(body))
         }
 
+        ("GET", "/api/integrations/lidarr/manualimport/history")
+        | ("GET", "/api/v0/integrations/lidarr/manualimport/history") => {
+            let limit = match query_bounded_usize(route.query, "limit", 1, 500) {
+                Ok(value) => value.unwrap_or(50),
+                Err(_) => {
+                    return Ok(routing::bad_request_response(
+                        "limit must be between 1 and 500",
+                    ))
+                }
+            };
+            Ok(routing::ok_response(
+                serde_json::Value::Array(list_lidarr_import_history(state, limit).await)
+                    .to_string(),
+            ))
+        }
+
+        ("POST", path)
+            if (path.starts_with("/api/integrations/lidarr/manualimport/history/")
+                || path.starts_with("/api/v0/integrations/lidarr/manualimport/history/"))
+                && path.ends_with("/retry") =>
+        {
+            let prefix = if path.starts_with("/api/v0/") {
+                "/api/v0/integrations/lidarr/manualimport/history/"
+            } else {
+                "/api/integrations/lidarr/manualimport/history/"
+            };
+            let Some(history_id) = path
+                .strip_prefix(prefix)
+                .and_then(|value| value.strip_suffix("/retry"))
+                .filter(|value| uuid::Uuid::parse_str(value).is_ok())
+            else {
+                return Ok(routing::bad_request_response("HistoryId is required"));
+            };
+            let Some(history) = state
+                .controller_features
+                .read()
+                .await
+                .get(&lidarr_import_history_key(history_id))
+                .cloned()
+            else {
+                return Ok(routing::not_found_response());
+            };
+            let Some(directory) = history
+                .get("sourceDirectory")
+                .and_then(serde_json::Value::as_str)
+                .filter(|value| !value.trim().is_empty())
+            else {
+                return Ok(routing::bad_request_response(
+                    "Import history record has no source directory",
+                ));
+            };
+            let lidarr = state.integration_settings.read().await.lidarr.clone();
+            let result = match run_lidarr_import_with_history(
+                state,
+                &lidarr,
+                directory,
+                Some(history_id),
+            )
+            .await
+            {
+                Ok(result) => result,
+                Err(error) => return Ok(routing::service_unavailable_response(&error)),
+            };
+            Ok(routing::ok_response(result.to_string()))
+        }
+
         ("POST", "/api/integrations/lidarr/manualimport") => {
             let directory = extract_json_string_field(body, "directory").unwrap_or_default();
             if route.path.starts_with("/api/v0/") {
@@ -16304,7 +16767,7 @@ async fn route_dispatch_group_6(
                     return Ok(routing::bad_request_response("Directory is required"));
                 }
                 let lidarr = state.integration_settings.read().await.lidarr.clone();
-                let mut result = match import_lidarr_completed_directory(state, &lidarr, &directory).await
+                let mut result = match run_lidarr_import_with_history(state, &lidarr, &directory, None).await
                 {
                     Ok(result) => result,
                     Err(error) => return Ok(routing::service_unavailable_response(&error)),

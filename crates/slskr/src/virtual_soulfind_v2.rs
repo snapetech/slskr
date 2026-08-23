@@ -2,6 +2,7 @@ use chrono::{DateTime, SecondsFormat, Utc};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::Path;
 
 const MAX_TRACK_INTENTS: usize = 1_024;
 const MAX_RELEASE_INTENTS: usize = 512;
@@ -15,6 +16,12 @@ pub struct CatalogueItem {
     pub title: String,
     pub kind: String,
     pub created_at: u64,
+    /// A local source is executable only while this path remains a regular
+    /// file.  Metadata-only catalogue entries are still useful to the pure
+    /// planning API, but they must not be reported as an available local
+    /// acquisition source by the live processor.
+    pub local_path: Option<String>,
+    pub size: u64,
 }
 
 #[derive(Clone, Debug)]
@@ -239,9 +246,17 @@ impl State {
         }
         intent.status = "InProgress".to_owned();
         intent.updated_at = timestamp_now();
-        let track_exists = catalogue
-            .iter()
-            .any(|item| track_id(item) == intent.track_id);
+        let track_exists = catalogue.iter().any(|item| {
+                track_id(item) == intent.track_id
+                && item
+                    .local_path
+                    .as_deref()
+                    .is_none_or(|path| {
+                        Path::new(path).metadata().is_ok_and(|metadata| {
+                            metadata.is_file() && (item.size == 0 || metadata.len() == item.size)
+                        })
+                    })
+        });
         let now = timestamp_now();
         intent.status = if track_exists { "Completed" } else { "Failed" }.to_owned();
         intent.planned_sources = track_exists.then(|| "[\"LocalLibrary\"]".to_owned());
@@ -522,6 +537,8 @@ mod tests {
             title: "Track".to_owned(),
             kind: "Album".to_owned(),
             created_at: 1_700_000_000,
+            local_path: None,
+            size: 0,
         }]
     }
 

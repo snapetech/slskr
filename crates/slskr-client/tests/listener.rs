@@ -4,7 +4,10 @@ use slskr_client::{
         write_connection_kind, write_init_frame, write_obfuscated_init_frame,
         write_obfuscated_init_frame_with_key,
     },
-    listener::{demux_incoming, demux_obfuscated_incoming, IncomingConnection, Listener},
+    listener::{
+        demux_incoming, demux_obfuscated_incoming, demux_shared_incoming, IncomingConnection,
+        Listener,
+    },
     peer_cache::MAX_PEER_USERNAME_BYTES,
     ClientError,
 };
@@ -142,6 +145,59 @@ async fn demuxes_obfuscated_peer_message_connection() {
         panic!("expected obfuscated peer messages");
     };
     assert_eq!(peer.receive().await.unwrap(), message);
+}
+
+#[tokio::test]
+async fn shared_demux_accepts_plain_and_obfuscated_initialization() {
+    let init = InitMessage::PeerInit {
+        username: "peer".to_owned(),
+        connection_type: "P".to_owned(),
+        token: 0,
+    };
+
+    let (mut plain_client, plain_server) = duplex(512);
+    write_init_frame(&mut plain_client, &init.encode().unwrap())
+        .await
+        .unwrap();
+    let plain = demux_shared_incoming(plain_server).await.unwrap();
+    assert!(matches!(
+        plain,
+        IncomingConnection::PeerInit {
+            obfuscated: false,
+            kind: ConnectionKind::PeerMessages,
+            ..
+        }
+    ));
+
+    let (mut obfuscated_client, obfuscated_server) = duplex(512);
+    write_obfuscated_init_frame_with_key(
+        &mut obfuscated_client,
+        &init.encode().unwrap(),
+        0x4aee_9414,
+    )
+    .await
+    .unwrap();
+    let obfuscated = demux_shared_incoming(obfuscated_server).await.unwrap();
+    assert!(matches!(
+        obfuscated,
+        IncomingConnection::ObfuscatedPeerMessages(_)
+    ));
+}
+
+#[tokio::test]
+async fn shared_listener_accepts_raw_connection_kind() {
+    let listener = Listener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let client_task = tokio::spawn(async move {
+        let mut stream = TcpStream::connect(address).await.unwrap();
+        write_connection_kind(&mut stream, ConnectionKind::Distributed)
+            .await
+            .unwrap();
+    });
+
+    let (incoming, _) = listener.accept_shared().await.unwrap();
+    assert!(matches!(incoming, IncomingConnection::Distributed(_)));
+    client_task.await.unwrap();
 }
 
 #[tokio::test]

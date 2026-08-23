@@ -105,6 +105,28 @@ impl Listener {
         })?
     }
 
+    pub async fn accept_shared(
+        &self,
+    ) -> Result<(IncomingConnection<TcpStream>, SocketAddr), ClientError> {
+        self.accept_shared_with_timeout(DEFAULT_INIT_HANDSHAKE_TIMEOUT)
+            .await
+    }
+
+    pub async fn accept_shared_with_timeout(
+        &self,
+        timeout: Duration,
+    ) -> Result<(IncomingConnection<TcpStream>, SocketAddr), ClientError> {
+        time::timeout(timeout, async {
+            let (stream, address) = self.inner.accept().await?;
+            let incoming = demux_shared_incoming(stream).await?;
+            Ok((incoming, address))
+        })
+        .await
+        .map_err(|_| ClientError::TimedOut {
+            operation: "shared plain/obfuscated peer initialization handshake",
+        })?
+    }
+
     #[must_use]
     pub fn into_inner(self) -> TcpListener {
         self.inner
@@ -136,6 +158,110 @@ where
                     token,
                     stream,
                     obfuscated: true,
+                })
+            }
+        }
+        InitMessage::PierceFirewall { token } => {
+            Ok(IncomingConnection::PierceFirewall { token, stream })
+        }
+        InitMessage::Unknown { code, payload } => Ok(IncomingConnection::UnknownInit {
+            code,
+            payload,
+            stream,
+        }),
+    }
+}
+
+pub async fn demux_shared_incoming<S>(mut stream: S) -> Result<IncomingConnection<S>, ClientError>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    // Raw direct connections begin with a one-byte connection kind. Init
+    // frames begin with a four-byte length prefix, while type-1 obfuscation
+    // begins with a four-byte key. Preserve the raw form before consuming the
+    // prefix used to distinguish the two framed forms.
+    let first = stream.read_u8().await?;
+    if let Ok(kind) = ConnectionKind::try_from(first) {
+        return Ok(match kind {
+            ConnectionKind::PeerMessages => {
+                IncomingConnection::PeerMessages(PeerMessageConnection::new(stream))
+            }
+            ConnectionKind::FileTransfer => {
+                IncomingConnection::FileTransfer(FileTransferConnection::new(stream))
+            }
+            ConnectionKind::Distributed => {
+                IncomingConnection::Distributed(DistributedConnection::new(stream))
+            }
+        });
+    }
+
+    let mut prefix = [0_u8; 4];
+    prefix[0] = first;
+    stream.read_exact(&mut prefix[1..]).await?;
+    let candidate_length = u32::from_le_bytes(prefix) as usize;
+    if (1..=crate::io::DEFAULT_MAX_FRAME_LEN).contains(&candidate_length) {
+        let mut encoded = Vec::with_capacity(4 + candidate_length);
+        encoded.extend_from_slice(&prefix);
+        encoded.resize(4 + candidate_length, 0);
+        stream.read_exact(&mut encoded[4..]).await?;
+        let frame = InitFrame::decode(&encoded)?;
+        return incoming_from_init_message(InitMessage::decode(frame)?, stream, false);
+    }
+
+    // The first four bytes are the obfuscation key. The next four bytes are
+    // the rotated init-frame length prefix. Decode the header before
+    // allocating or reading the remainder so malformed peers cannot request
+    // an unbounded buffer.
+    let mut first_block = [0_u8; 8];
+    first_block[..4].copy_from_slice(&prefix);
+    stream.read_exact(&mut first_block[4..]).await?;
+    let decoded_first_block = slskr_protocol::decode_rotated(&first_block)?;
+    let length = u32::from_le_bytes([
+        decoded_first_block[0],
+        decoded_first_block[1],
+        decoded_first_block[2],
+        decoded_first_block[3],
+    ]) as usize;
+    if !(1..=crate::io::DEFAULT_MAX_FRAME_LEN).contains(&length) {
+        return Err(ClientError::FrameTooLarge {
+            length,
+            max: crate::io::DEFAULT_MAX_FRAME_LEN,
+        });
+    }
+    let mut obfuscated = Vec::with_capacity(8 + length);
+    obfuscated.extend_from_slice(&first_block);
+    obfuscated.resize(8 + length, 0);
+    stream.read_exact(&mut obfuscated[8..]).await?;
+    let decoded = slskr_protocol::decode_rotated(&obfuscated)?;
+    let frame = InitFrame::decode(&decoded)?;
+    let message = decode_obfuscated_init_message(frame)?;
+    incoming_from_init_message(message, stream, true)
+}
+
+fn incoming_from_init_message<S>(
+    message: InitMessage,
+    stream: S,
+    obfuscated: bool,
+) -> Result<IncomingConnection<S>, ClientError> {
+    match message {
+        InitMessage::PeerInit {
+            username,
+            connection_type,
+            token,
+        } => {
+            let username = normalize_peer_username(&username)?.to_owned();
+            let kind = ConnectionKind::try_from_connection_type(&connection_type)?;
+            if obfuscated && kind == ConnectionKind::PeerMessages {
+                Ok(IncomingConnection::ObfuscatedPeerMessages(
+                    ObfuscatedPeerMessageConnection::with_peer_username(stream, Some(username)),
+                ))
+            } else {
+                Ok(IncomingConnection::PeerInit {
+                    username,
+                    kind,
+                    token,
+                    stream,
+                    obfuscated,
                 })
             }
         }

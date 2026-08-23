@@ -12,6 +12,7 @@ use std::{
 };
 
 use crate::mesh_security::OverlayRateLimiter;
+use crate::quic_alpn;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use rcgen::generate_simple_self_signed;
 use sha2::{Digest, Sha256};
@@ -22,7 +23,7 @@ use slskr_client::overlay::{
     TunnelDataResponse, FEATURE_MESH_SEARCH, FEATURE_MESH_SERVICE, MAX_OVERLAY_MESSAGE_BYTES,
     OVERLAY_MAGIC, OVERLAY_VERSION,
 };
-use slskr_client::overlay_control::{ControlEnvelope, CONTROL_MAX_DATAGRAM_BYTES};
+use slskr_client::overlay_control::ControlEnvelope;
 use slskr_client::quic_control::{QuicControlConnection, QuicControlError, QuicControlServer};
 use slskr_client::quic_data::{
     QuicDataConnection, QuicDataError, QuicDataInboundStream, QuicDataReceiveStream,
@@ -132,6 +133,7 @@ pub struct Gateway {
     quic_listener: Mutex<Option<QuicControlServer>>,
     quic_data_listener: Mutex<Option<QuicDataServer>>,
     quic_proxy_backend: Option<SocketAddr>,
+    quic_data_proxy_backend: Option<SocketAddr>,
     quic_data_policy: Option<Arc<QuicDataPolicy>>,
     quic_data_max_concurrent_streams: usize,
     quic_data_relays: Arc<Semaphore>,
@@ -140,6 +142,7 @@ pub struct Gateway {
     overlay_connections: RwLock<BTreeMap<String, OverlayConnectionMetadata>>,
     replay_nonces: Mutex<BTreeMap<(String, String), u64>>,
     overlay_rate_limiter: Arc<OverlayRateLimiter>,
+    dht_service: crate::mesh_dht::DhtServiceState,
 }
 
 impl fmt::Debug for Gateway {
@@ -239,6 +242,7 @@ impl Gateway {
             None,
             quic_data_policy,
             max_concurrent_streams,
+            false,
         )
         .await
     }
@@ -268,6 +272,7 @@ impl Gateway {
             dht_backend,
             quic_data_policy,
             max_concurrent_streams,
+            false,
         )
         .await
     }
@@ -298,6 +303,36 @@ impl Gateway {
             dht_backend,
             quic_data_policy,
             max_concurrent_streams,
+            false,
+        )
+        .await
+    }
+
+    pub async fn load_or_create_with_quic_and_data_policy_and_proxy_and_dht_socket_with_data_share(
+        bind: SocketAddr,
+        state_dir: &Path,
+        quic_bind: Option<SocketAddr>,
+        quic_data_bind: Option<SocketAddr>,
+        quic_proxy_bind: Option<SocketAddr>,
+        shared_udp_bind: Option<SocketAddr>,
+        shared_udp_socket: Option<Arc<StdUdpSocket>>,
+        dht_backend: Option<SocketAddr>,
+        quic_data_policy: Option<QuicDataPolicy>,
+        max_concurrent_streams: usize,
+        data_shared_with_dht: bool,
+    ) -> Result<Self, String> {
+        Self::load_or_create_with_quic_and_data_policy_and_proxy_inner(
+            bind,
+            state_dir,
+            quic_bind,
+            quic_data_bind,
+            quic_proxy_bind,
+            shared_udp_bind,
+            shared_udp_socket,
+            dht_backend,
+            quic_data_policy,
+            max_concurrent_streams,
+            data_shared_with_dht,
         )
         .await
     }
@@ -313,6 +348,7 @@ impl Gateway {
         dht_backend: Option<SocketAddr>,
         quic_data_policy: Option<QuicDataPolicy>,
         max_concurrent_streams: usize,
+        data_shared_with_dht: bool,
     ) -> Result<Self, String> {
         let (certificate, private_key) = load_or_create_certificate(state_dir)?;
         let certificate_sha256 = Sha256::digest(certificate.as_ref()).into();
@@ -394,7 +430,11 @@ impl Gateway {
             dht_forward_target: dht_backend,
             quic_listener: Mutex::new(quic_listener),
             quic_data_listener: Mutex::new(quic_data_listener),
-            quic_proxy_backend: quic_proxy_bind.and(quic_bind),
+            quic_proxy_backend: quic_proxy_bind
+                .zip(quic_bind)
+                .filter(|(_, backend)| backend.ip().is_loopback())
+                .map(|(_, backend)| backend),
+            quic_data_proxy_backend: data_shared_with_dht.then_some(quic_data_bind).flatten(),
             quic_data_max_concurrent_streams: max_concurrent_streams.clamp(1, 1_024),
             quic_data_relays: Arc::new(Semaphore::new(
                 quic_data_policy
@@ -407,6 +447,7 @@ impl Gateway {
             overlay_connections: RwLock::new(BTreeMap::new()),
             replay_nonces: Mutex::new(BTreeMap::new()),
             overlay_rate_limiter: Arc::new(OverlayRateLimiter::new()),
+            dht_service: crate::mesh_dht::DhtServiceState::default(),
         })
     }
 
@@ -503,9 +544,15 @@ impl Gateway {
             let gateway = Arc::clone(&self);
             let udp_state = Arc::clone(&state);
             let quic_proxy_backend = self.quic_proxy_backend;
+            let quic_data_proxy_backend = self.quic_data_proxy_backend;
             tokio::spawn(async move {
                 gateway
-                    .run_udp_control(udp_listener, udp_state, quic_proxy_backend)
+                    .run_udp_control(
+                        udp_listener,
+                        udp_state,
+                        quic_proxy_backend,
+                        quic_data_proxy_backend,
+                    )
                     .await;
             });
         }
@@ -556,6 +603,7 @@ impl Gateway {
         socket: UdpSocket,
         state: Arc<super::AppState>,
         quic_proxy_backend: Option<SocketAddr>,
+        quic_data_proxy_backend: Option<SocketAddr>,
     ) {
         let public_socket = Arc::new(socket);
         let mut quic_sessions = HashMap::new();
@@ -606,60 +654,38 @@ impl Gateway {
                 // intentionally ignored just as before.
                 continue;
             }
-            if received.0 > CONTROL_MAX_DATAGRAM_BYTES {
-                if is_quic_initial_packet(&buffer[..received.0]) {
-                    if let Some(quic_proxy_backend) = quic_proxy_backend {
-                        if quic_sessions.len() >= QUIC_PROXY_MAX_SESSIONS {
-                            continue;
-                        }
-                        let Some(admission_lease) = quic_admission.try_acquire(received.1) else {
-                            continue;
-                        };
-                        if let Ok(session) = QuicProxySession::new(
-                            received.1,
-                            quic_proxy_backend,
-                            Arc::clone(&public_socket),
-                            admission_lease,
-                        )
+            if is_quic_initial_packet(&buffer[..received.0]) {
+                let Some(quic_backend) = select_quic_proxy_backend(
+                    &buffer[..received.0],
+                    quic_proxy_backend,
+                    quic_data_proxy_backend,
+                ) else {
+                    continue;
+                };
+                if quic_sessions.len() >= QUIC_PROXY_MAX_SESSIONS {
+                    continue;
+                }
+                let Some(admission_lease) = quic_admission.try_acquire(received.1) else {
+                    continue;
+                };
+                if let Ok(session) = QuicProxySession::new(
+                    received.1,
+                    quic_backend,
+                    Arc::clone(&public_socket),
+                    admission_lease,
+                )
+                .await
+                {
+                    session
+                        .sender
+                        .send(buffer[..received.0].to_vec())
                         .await
-                        {
-                            session
-                                .sender
-                                .send(buffer[..received.0].to_vec())
-                                .await
-                                .ok();
-                            quic_sessions.insert(received.1, session);
-                        }
-                    }
+                        .ok();
+                    quic_sessions.insert(received.1, session);
                 }
                 continue;
             }
             let Ok(envelope) = ControlEnvelope::decode(&buffer[..received.0]) else {
-                if is_quic_initial_packet(&buffer[..received.0]) {
-                    if let Some(quic_proxy_backend) = quic_proxy_backend {
-                        if quic_sessions.len() >= QUIC_PROXY_MAX_SESSIONS {
-                            continue;
-                        }
-                        let Some(admission_lease) = quic_admission.try_acquire(received.1) else {
-                            continue;
-                        };
-                        if let Ok(session) = QuicProxySession::new(
-                            received.1,
-                            quic_proxy_backend,
-                            Arc::clone(&public_socket),
-                            admission_lease,
-                        )
-                        .await
-                        {
-                            session
-                                .sender
-                                .send(buffer[..received.0].to_vec())
-                                .await
-                                .ok();
-                            quic_sessions.insert(received.1, session);
-                        }
-                    }
-                }
                 continue;
             };
             let now = match i64::try_from(super::unix_timestamp_millis()) {
@@ -1059,6 +1085,19 @@ fn is_quic_initial_packet(buffer: &[u8]) -> bool {
     let version = u32::from_be_bytes([buffer[1], buffer[2], buffer[3], buffer[4]]);
     let packet_type = (buffer[0] & 0x30) >> 4;
     (version == 0x0000_0001 && packet_type == 0) || (version == 0x6b33_43cf && packet_type == 1)
+}
+
+fn select_quic_proxy_backend(
+    packet: &[u8],
+    control_backend: Option<SocketAddr>,
+    data_backend: Option<SocketAddr>,
+) -> Option<SocketAddr> {
+    if let Some(alpn) = quic_alpn::first_alpn(packet) {
+        if alpn == "slskdn-overlay-data" {
+            return data_backend.or(control_backend);
+        }
+    }
+    control_backend.or(data_backend)
 }
 
 #[derive(Clone, Default)]
@@ -1535,6 +1574,11 @@ impl Gateway {
                 }
                 "MeshContent" => {
                     self.handle_mesh_content_call(&call.method, &call.payload, state)
+                        .await
+                }
+                "dht" => {
+                    self.dht_service
+                        .handle_call(&call.method, &call.payload, remote_username)
                         .await
                 }
                 _ => Err((2, "Unknown service".to_owned())),

@@ -136,6 +136,18 @@ pub fn gold_star_club_opted_in_value(value: Option<&str>) -> bool {
     })
 }
 
+pub fn gold_star_club_opted_in_for_profile(
+    value: Option<&str>,
+    current_upstream_behavior: bool,
+) -> bool {
+    if current_upstream_behavior {
+        value.is_some_and(|value| value.trim().eq_ignore_ascii_case("true"))
+    } else {
+        gold_star_club_opted_in_value(value)
+    }
+}
+
+#[allow(dead_code)]
 pub fn gold_star_club_opted_in() -> bool {
     gold_star_club_opted_in_value(std::env::var(GOLD_STAR_CLUB_AUTOJOIN_ENV).ok().as_deref())
 }
@@ -148,8 +160,23 @@ pub fn gold_star_club_is_revoked(state_dir: &Path) -> bool {
     gold_star_club_revocation_path(state_dir).is_file()
 }
 
+#[allow(dead_code)]
 pub fn gold_star_club_available(state_dir: &Path) -> bool {
-    gold_star_club_opted_in() && !gold_star_club_is_revoked(state_dir)
+    gold_star_club_available_for_profile(state_dir, false)
+}
+
+pub fn gold_star_club_available_for_profile(
+    state_dir: &Path,
+    current_upstream_behavior: bool,
+) -> bool {
+    gold_star_club_opted_in_for_profile(
+        std::env::var(GOLD_STAR_CLUB_AUTOJOIN_ENV).ok().as_deref(),
+        current_upstream_behavior,
+    ) && !gold_star_club_is_revoked(state_dir)
+}
+
+pub fn gold_star_club_available_with_setting(state_dir: &Path, enabled: bool) -> bool {
+    enabled && !gold_star_club_is_revoked(state_dir)
 }
 
 pub fn record_gold_star_club_revocation(state_dir: &Path, peer_id: &str) -> Result<(), String> {
@@ -211,20 +238,63 @@ struct PodStateFile {
 pub struct PodStore {
     pods: BTreeMap<String, StoredPod>,
     state_path: PathBuf,
+    gold_star_club_enabled: bool,
 }
 
 impl PodStore {
+    #[allow(dead_code)]
     pub fn load(state_dir: &Path) -> Result<Self, String> {
+        Self::load_with_profile(state_dir, false)
+    }
+
+    pub fn load_with_profile(
+        state_dir: &Path,
+        current_upstream_behavior: bool,
+    ) -> Result<Self, String> {
+        Self::load_with_setting(
+            state_dir,
+            gold_star_club_opted_in_for_profile(
+                std::env::var(GOLD_STAR_CLUB_AUTOJOIN_ENV).ok().as_deref(),
+                current_upstream_behavior,
+            ),
+        )
+    }
+
+    pub fn load_with_setting(
+        state_dir: &Path,
+        gold_star_club_enabled: bool,
+    ) -> Result<Self, String> {
         let state_path = state_dir.join("pods.json");
         let pods = load_state(&state_path)?;
-        Ok(Self { pods, state_path })
+        Ok(Self {
+            pods,
+            state_path,
+            gold_star_club_enabled,
+        })
     }
 
     #[cfg(any(test, feature = "bounded-differential"))]
     pub fn empty(state_dir: &Path) -> Self {
+        Self::empty_with_profile(state_dir, false)
+    }
+
+    #[cfg(any(test, feature = "bounded-differential"))]
+    pub fn empty_with_profile(state_dir: &Path, current_upstream_behavior: bool) -> Self {
+        Self::empty_with_setting(
+            state_dir,
+            gold_star_club_opted_in_for_profile(
+                std::env::var(GOLD_STAR_CLUB_AUTOJOIN_ENV).ok().as_deref(),
+                current_upstream_behavior,
+            ),
+        )
+    }
+
+    #[cfg(any(test, feature = "bounded-differential"))]
+    pub fn empty_with_setting(state_dir: &Path, gold_star_club_enabled: bool) -> Self {
         Self {
             pods: BTreeMap::new(),
             state_path: state_dir.join("pods.json"),
+            gold_star_club_enabled,
         }
     }
 
@@ -324,9 +394,9 @@ impl PodStore {
     }
 
     pub fn ensure_gold_star_club(&mut self) -> Result<PodRecord, String> {
-        if !gold_star_club_available(self.state_path.parent().unwrap_or_else(|| Path::new("."))) {
+        if !self.gold_star_club_available() {
             return Err(format!(
-                "Gold Star Club is disabled by {GOLD_STAR_CLUB_AUTOJOIN_ENV}=false or local revocation"
+                "Gold Star Club is disabled by configuration or local revocation"
             ));
         }
         if let Some(existing) = self.pods.get(GOLD_STAR_CLUB_POD_ID) {
@@ -631,9 +701,7 @@ impl PodStore {
     pub fn create(&mut self, mut pod: PodRecord, creator: String) -> Result<PodRecord, String> {
         normalize_pod(&mut pod)?;
         validate_peer_id(&creator)?;
-        if is_gold_star_club(&pod.pod_id)
-            && !gold_star_club_available(self.state_path.parent().unwrap_or_else(|| Path::new(".")))
-        {
+        if is_gold_star_club(&pod.pod_id) && !self.gold_star_club_available() {
             return Err("Gold Star Club is disabled or locally revoked".to_owned());
         }
         if self.pods.contains_key(&pod.pod_id) {
@@ -709,9 +777,7 @@ impl PodStore {
 
     pub fn join(&mut self, pod_id: &str, peer_id: String) -> Result<Option<bool>, String> {
         validate_peer_id(&peer_id)?;
-        if is_gold_star_club(pod_id)
-            && !gold_star_club_available(self.state_path.parent().unwrap_or_else(|| Path::new(".")))
-        {
+        if is_gold_star_club(pod_id) && !self.gold_star_club_available() {
             return Err("Gold Star Club is disabled or locally revoked".to_owned());
         }
         let Some(stored) = self.pods.get(pod_id) else {
@@ -928,8 +994,14 @@ impl PodStore {
     }
 
     fn reserved_pod_available(&self, pod_id: &str) -> bool {
-        !is_gold_star_club(pod_id)
-            || gold_star_club_available(self.state_path.parent().unwrap_or_else(|| Path::new(".")))
+        !is_gold_star_club(pod_id) || self.gold_star_club_available()
+    }
+
+    fn gold_star_club_available(&self) -> bool {
+        self.gold_star_club_enabled
+            && !gold_star_club_is_revoked(
+                self.state_path.parent().unwrap_or_else(|| Path::new(".")),
+            )
     }
 }
 
@@ -1435,13 +1507,14 @@ fn default_member_role() -> String {
 #[cfg(test)]
 mod tests {
     use super::{
+        gold_star_club_available_with_setting, gold_star_club_opted_in_for_profile,
         gold_star_club_opted_in_value, gold_star_club_pod, record_gold_star_club_revocation,
         PodRecord, PodStore, GOLD_STAR_CLUB_GENERAL_CHANNEL_ID, GOLD_STAR_CLUB_MAX_MEMBERS,
         GOLD_STAR_CLUB_POD_ID,
     };
 
     #[test]
-    fn gold_star_club_defaults_on_and_honors_explicit_opt_out() {
+    fn frozen_gold_star_club_defaults_on_and_honors_explicit_opt_out() {
         assert!(gold_star_club_opted_in_value(Some(" true ")));
         assert!(gold_star_club_opted_in_value(Some("TRUE")));
         assert!(gold_star_club_opted_in_value(Some("1")));
@@ -1463,6 +1536,36 @@ mod tests {
             pod.tags,
             ["gold-star", "first-250", "realm-governance", "testing"]
         );
+    }
+
+    #[test]
+    fn current_profile_requires_exact_gold_star_opt_in() {
+        assert!(!gold_star_club_opted_in_for_profile(None, true));
+        assert!(!gold_star_club_opted_in_for_profile(Some("yes"), true));
+        assert!(gold_star_club_opted_in_for_profile(Some(" true "), true));
+        assert!(gold_star_club_opted_in_for_profile(None, false));
+    }
+
+    #[test]
+    fn configured_gold_star_club_setting_controls_reserved_pod_availability() {
+        let state_dir = std::env::temp_dir().join(format!(
+            "slskr-gold-star-setting-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&state_dir).unwrap();
+
+        let mut disabled = PodStore::empty_with_setting(&state_dir, false);
+        assert!(!gold_star_club_available_with_setting(&state_dir, false));
+        assert!(disabled.ensure_gold_star_club().is_err());
+
+        let mut enabled = PodStore::empty_with_setting(&state_dir, true);
+        assert!(gold_star_club_available_with_setting(&state_dir, true));
+        assert_eq!(
+            enabled.ensure_gold_star_club().unwrap().pod_id,
+            GOLD_STAR_CLUB_POD_ID
+        );
+
+        std::fs::remove_dir_all(state_dir).unwrap();
     }
 
     #[test]

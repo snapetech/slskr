@@ -42,6 +42,7 @@ pub struct SearchRecord {
     pub completed_at: Option<i64>,
     pub room: Option<String>,
     pub target: Option<String>,
+    pub fallback_attempts: i64,
 }
 
 /// Search result row for persistence.
@@ -53,6 +54,10 @@ pub struct SearchResultRecord {
     pub filename: String,
     pub size: i64,
     pub extension: String,
+    pub bit_rate: Option<i64>,
+    pub sample_rate: Option<i64>,
+    pub bit_depth: Option<i64>,
+    pub length_seconds: Option<i64>,
     pub locked: bool,
     pub slot_free: Option<bool>,
     pub average_speed: Option<i64>,
@@ -88,6 +93,9 @@ pub struct TransferRecord {
     pub title: Option<String>,
     pub track_number: Option<i64>,
     pub year: Option<i64>,
+    pub attempts: i64,
+    pub auto_replace_attempts: i64,
+    pub next_attempt_at: Option<i64>,
 }
 
 /// Durable transfer-batch metadata.  The frozen slskd target stores batches
@@ -285,6 +293,11 @@ pub struct WishlistItemRecord {
     pub total_search_count: i64,
     pub total_download_count: i64,
     pub last_search_id: Option<String>,
+    pub lidarr_album_id: Option<i64>,
+    pub lidarr_track_id: Option<i64>,
+    pub lidarr_track_count: Option<i64>,
+    pub lidarr_duration_seconds: Option<i64>,
+    pub lidarr_release_disambiguation: Option<String>,
     pub added_at: i64,
 }
 
@@ -492,8 +505,9 @@ impl<'r> FromRow<'r, SqliteRow> for SearchRecord {
             result_count: row.try_get("result_count")?,
             created_at: row.try_get("created_at")?,
             completed_at: row.try_get("completed_at")?,
-            room: row.try_get("room")?,
-            target: row.try_get("target")?,
+                room: row.try_get("room")?,
+                target: row.try_get("target")?,
+                fallback_attempts: row.try_get("fallback_attempts")?,
         })
     }
 }
@@ -507,6 +521,10 @@ impl<'r> FromRow<'r, SqliteRow> for SearchResultRecord {
             filename: row.try_get("filename")?,
             size: row.try_get("size")?,
             extension: row.try_get("extension")?,
+            bit_rate: row.try_get("bit_rate")?,
+            sample_rate: row.try_get("sample_rate")?,
+            bit_depth: row.try_get("bit_depth")?,
+            length_seconds: row.try_get("length_seconds")?,
             locked: row.try_get("locked")?,
             slot_free: row.try_get("slot_free")?,
             average_speed: row.try_get("average_speed")?,
@@ -544,6 +562,9 @@ impl<'r> FromRow<'r, SqliteRow> for TransferRecord {
             title: row.try_get("title")?,
             track_number: row.try_get("track_number")?,
             year: row.try_get("year")?,
+            attempts: row.try_get("attempts")?,
+            auto_replace_attempts: row.try_get("auto_replace_attempts")?,
+            next_attempt_at: row.try_get("next_attempt_at")?,
         })
     }
 }
@@ -769,6 +790,11 @@ impl<'r> FromRow<'r, SqliteRow> for WishlistItemRecord {
             total_search_count: row.try_get("total_search_count")?,
             total_download_count: row.try_get("total_download_count")?,
             last_search_id: row.try_get("last_search_id")?,
+            lidarr_album_id: row.try_get("lidarr_album_id")?,
+            lidarr_track_id: row.try_get("lidarr_track_id")?,
+            lidarr_track_count: row.try_get("lidarr_track_count")?,
+            lidarr_duration_seconds: row.try_get("lidarr_duration_seconds")?,
+            lidarr_release_disambiguation: row.try_get("lidarr_release_disambiguation")?,
             added_at: row.try_get("added_at")?,
         })
     }
@@ -1115,6 +1141,7 @@ impl DatabaseManager {
                 completed_at INTEGER,
                 room TEXT,
                 target TEXT
+                , fallback_attempts INTEGER NOT NULL DEFAULT 0
             )
             "#,
         )
@@ -1131,6 +1158,10 @@ impl DatabaseManager {
                 filename TEXT NOT NULL,
                 size INTEGER NOT NULL,
                 extension TEXT NOT NULL,
+                bit_rate INTEGER,
+                sample_rate INTEGER,
+                bit_depth INTEGER,
+                length_seconds INTEGER,
                 locked INTEGER NOT NULL,
                 slot_free INTEGER,
                 average_speed INTEGER,
@@ -1171,6 +1202,9 @@ impl DatabaseManager {
                 , title TEXT
                 , track_number INTEGER
                 , year INTEGER
+                , attempts INTEGER NOT NULL DEFAULT 1
+                , auto_replace_attempts INTEGER NOT NULL DEFAULT 0
+                , next_attempt_at INTEGER
             )
             "#,
         )
@@ -1459,6 +1493,11 @@ impl DatabaseManager {
                 total_search_count INTEGER NOT NULL DEFAULT 0,
                 total_download_count INTEGER NOT NULL DEFAULT 0,
                 last_search_id TEXT,
+                lidarr_album_id INTEGER,
+                lidarr_track_id INTEGER,
+                lidarr_track_count INTEGER,
+                lidarr_duration_seconds INTEGER,
+                lidarr_release_disambiguation TEXT,
                 added_at INTEGER NOT NULL
             )
             "#,
@@ -1689,6 +1728,7 @@ impl DatabaseManager {
         .execute(&self.pool)
         .await?;
         self.ensure_runtime_compat_columns().await?;
+        self.ensure_search_columns().await?;
         self.ensure_security_ban_columns().await?;
         self.ensure_wishlist_item_columns().await?;
         self.ensure_collection_columns().await?;
@@ -1940,6 +1980,23 @@ impl DatabaseManager {
         Ok(())
     }
 
+    async fn ensure_search_columns(&self) -> Result<(), Box<dyn std::error::Error>> {
+        for statement in [
+            "ALTER TABLE searches ADD COLUMN fallback_attempts INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE search_results ADD COLUMN bit_rate INTEGER",
+            "ALTER TABLE search_results ADD COLUMN sample_rate INTEGER",
+            "ALTER TABLE search_results ADD COLUMN bit_depth INTEGER",
+            "ALTER TABLE search_results ADD COLUMN length_seconds INTEGER",
+        ] {
+            if let Err(error) = query(statement).execute(&self.pool).await {
+                if !error.to_string().contains("duplicate column name") {
+                    return Err(Box::new(error));
+                }
+            }
+        }
+        Ok(())
+    }
+
     async fn ensure_security_ban_columns(&self) -> Result<(), Box<dyn std::error::Error>> {
         for statement in [
             "ALTER TABLE security_bans ADD COLUMN reason TEXT NOT NULL DEFAULT 'Manual ban'",
@@ -1976,6 +2033,11 @@ impl DatabaseManager {
             "ALTER TABLE wishlist_items ADD COLUMN total_search_count INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE wishlist_items ADD COLUMN total_download_count INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE wishlist_items ADD COLUMN last_search_id TEXT",
+            "ALTER TABLE wishlist_items ADD COLUMN lidarr_album_id INTEGER",
+            "ALTER TABLE wishlist_items ADD COLUMN lidarr_track_id INTEGER",
+            "ALTER TABLE wishlist_items ADD COLUMN lidarr_track_count INTEGER",
+            "ALTER TABLE wishlist_items ADD COLUMN lidarr_duration_seconds INTEGER",
+            "ALTER TABLE wishlist_items ADD COLUMN lidarr_release_disambiguation TEXT",
         ] {
             if let Err(error) = query(statement).execute(&self.pool).await {
                 let message = error.to_string();
@@ -2049,6 +2111,9 @@ impl DatabaseManager {
             "ALTER TABLE transfers ADD COLUMN title TEXT",
             "ALTER TABLE transfers ADD COLUMN track_number INTEGER",
             "ALTER TABLE transfers ADD COLUMN year INTEGER",
+            "ALTER TABLE transfers ADD COLUMN attempts INTEGER NOT NULL DEFAULT 1",
+            "ALTER TABLE transfers ADD COLUMN auto_replace_attempts INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE transfers ADD COLUMN next_attempt_at INTEGER",
         ] {
             if let Err(error) = query(statement).execute(&self.pool).await {
                 if !error.to_string().contains("duplicate column name") {
@@ -2156,8 +2221,8 @@ impl DatabaseManager {
     ) -> Result<(), Box<dyn std::error::Error>> {
         query(
             r#"
-            INSERT OR REPLACE INTO searches (id, query, status, result_count, created_at, completed_at, room, target)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT OR REPLACE INTO searches (id, query, status, result_count, created_at, completed_at, room, target, fallback_attempts)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#
         )
         .bind(&record.id)
@@ -2168,6 +2233,7 @@ impl DatabaseManager {
         .bind(record.completed_at)
         .bind(&record.room)
         .bind(&record.target)
+        .bind(record.fallback_attempts)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -2179,7 +2245,7 @@ impl DatabaseManager {
         id: &str,
     ) -> Result<Option<SearchRecord>, Box<dyn std::error::Error>> {
         let record = query_as::<_, SearchRecord>(
-            "SELECT id, query, status, result_count, created_at, completed_at, room, target FROM searches WHERE id = ?"
+            "SELECT id, query, status, result_count, created_at, completed_at, room, target, fallback_attempts FROM searches WHERE id = ?"
         )
         .bind(id)
         .fetch_optional(&self.pool)
@@ -2194,7 +2260,7 @@ impl DatabaseManager {
         offset: i32,
     ) -> Result<Vec<SearchRecord>, Box<dyn std::error::Error>> {
         let records = query_as::<_, SearchRecord>(
-            "SELECT id, query, status, result_count, created_at, completed_at, room, target FROM searches ORDER BY created_at DESC LIMIT ? OFFSET ?"
+            "SELECT id, query, status, result_count, created_at, completed_at, room, target, fallback_attempts FROM searches ORDER BY created_at DESC LIMIT ? OFFSET ?"
         )
         .bind(limit)
         .bind(offset)
@@ -2250,8 +2316,8 @@ impl DatabaseManager {
             let insert = query(
                 r#"
                 INSERT INTO search_results
-                (search_id, peer_username, filename, size, extension, locked, slot_free, average_speed, queue_length, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (search_id, peer_username, filename, size, extension, bit_rate, sample_rate, bit_depth, length_seconds, locked, slot_free, average_speed, queue_length, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 "#,
             )
             .bind(search_id)
@@ -2259,6 +2325,10 @@ impl DatabaseManager {
             .bind(&record.filename)
             .bind(record.size)
             .bind(&record.extension)
+            .bind(record.bit_rate)
+            .bind(record.sample_rate)
+            .bind(record.bit_depth)
+            .bind(record.length_seconds)
             .bind(record.locked)
             .bind(record.slot_free)
             .bind(record.average_speed)
@@ -2285,7 +2355,7 @@ impl DatabaseManager {
         let records = if let Some(search_id) = search_id {
             query_as::<_, SearchResultRecord>(
                 r#"
-                SELECT id, search_id, peer_username, filename, size, extension, locked, slot_free, average_speed, queue_length, created_at
+                SELECT id, search_id, peer_username, filename, size, extension, bit_rate, sample_rate, bit_depth, length_seconds, locked, slot_free, average_speed, queue_length, created_at
                 FROM search_results
                 WHERE search_id = ?
                 ORDER BY id
@@ -2300,7 +2370,7 @@ impl DatabaseManager {
         } else {
             query_as::<_, SearchResultRecord>(
                 r#"
-                SELECT id, search_id, peer_username, filename, size, extension, locked, slot_free, average_speed, queue_length, created_at
+                SELECT id, search_id, peer_username, filename, size, extension, bit_rate, sample_rate, bit_depth, length_seconds, locked, slot_free, average_speed, queue_length, created_at
                 FROM search_results
                 ORDER BY search_id, id
                 LIMIT ? OFFSET ?
@@ -2639,8 +2709,13 @@ impl DatabaseManager {
     ) -> Result<(), Box<dyn std::error::Error>> {
         query(
             r#"
-            INSERT OR REPLACE INTO transfers (id, direction, filename, peer_username, filesize, progress, status, started_at, completed_at, request_id, wishlist_item_id, request_name, destination_directory, local_path, batch_id, reason, bit_rate, sample_rate, bit_depth, length_seconds, artist, album, title, track_number, year)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT OR REPLACE INTO transfers (id, direction, filename, peer_username, filesize, progress, status, started_at, completed_at, request_id, wishlist_item_id, request_name, destination_directory, local_path, batch_id, reason, bit_rate, sample_rate, bit_depth, length_seconds, artist, album, title, track_number, year, attempts, auto_replace_attempts, next_attempt_at)
+            VALUES (
+                ?, ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?
+            )
             "#
         )
         .bind(&record.id)
@@ -2668,6 +2743,9 @@ impl DatabaseManager {
         .bind(&record.title)
         .bind(record.track_number)
         .bind(record.year)
+        .bind(record.attempts)
+        .bind(record.auto_replace_attempts)
+        .bind(record.next_attempt_at)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -2679,7 +2757,7 @@ impl DatabaseManager {
         id: &str,
     ) -> Result<Option<TransferRecord>, Box<dyn std::error::Error>> {
         let record = query_as::<_, TransferRecord>(
-            "SELECT id, direction, filename, peer_username, filesize, progress, status, started_at, completed_at, request_id, wishlist_item_id, request_name, destination_directory, local_path, batch_id, reason, bit_rate, sample_rate, bit_depth, length_seconds, artist, album, title, track_number, year FROM transfers WHERE id = ?"
+            "SELECT id, direction, filename, peer_username, filesize, progress, status, started_at, completed_at, request_id, wishlist_item_id, request_name, destination_directory, local_path, batch_id, reason, bit_rate, sample_rate, bit_depth, length_seconds, artist, album, title, track_number, year, attempts, auto_replace_attempts, next_attempt_at FROM transfers WHERE id = ?"
         )
         .bind(id)
         .fetch_optional(&self.pool)
@@ -2696,7 +2774,7 @@ impl DatabaseManager {
     ) -> Result<Vec<TransferRecord>, Box<dyn std::error::Error>> {
         let records = if let Some(status) = status {
             query_as::<_, TransferRecord>(
-                "SELECT id, direction, filename, peer_username, filesize, progress, status, started_at, completed_at, request_id, wishlist_item_id, request_name, destination_directory, local_path, batch_id, reason, bit_rate, sample_rate, bit_depth, length_seconds, artist, album, title, track_number, year FROM transfers WHERE status = ? ORDER BY started_at DESC LIMIT ? OFFSET ?"
+                "SELECT id, direction, filename, peer_username, filesize, progress, status, started_at, completed_at, request_id, wishlist_item_id, request_name, destination_directory, local_path, batch_id, reason, bit_rate, sample_rate, bit_depth, length_seconds, artist, album, title, track_number, year, attempts, auto_replace_attempts, next_attempt_at FROM transfers WHERE status = ? ORDER BY started_at DESC LIMIT ? OFFSET ?"
             )
             .bind(status)
             .bind(limit)
@@ -2705,7 +2783,7 @@ impl DatabaseManager {
             .await?
         } else {
             query_as::<_, TransferRecord>(
-                "SELECT id, direction, filename, peer_username, filesize, progress, status, started_at, completed_at, request_id, wishlist_item_id, request_name, destination_directory, local_path, batch_id, reason, bit_rate, sample_rate, bit_depth, length_seconds, artist, album, title, track_number, year FROM transfers ORDER BY started_at DESC LIMIT ? OFFSET ?"
+                "SELECT id, direction, filename, peer_username, filesize, progress, status, started_at, completed_at, request_id, wishlist_item_id, request_name, destination_directory, local_path, batch_id, reason, bit_rate, sample_rate, bit_depth, length_seconds, artist, album, title, track_number, year, attempts, auto_replace_attempts, next_attempt_at FROM transfers ORDER BY started_at DESC LIMIT ? OFFSET ?"
             )
             .bind(limit)
             .bind(offset)
@@ -2807,8 +2885,13 @@ impl DatabaseManager {
         for (transfer, event) in records {
             let transfer_insert = query(
                 r#"
-                INSERT OR REPLACE INTO transfers (id, direction, filename, peer_username, filesize, progress, status, started_at, completed_at, request_id, wishlist_item_id, request_name, destination_directory, local_path, batch_id, reason, bit_rate, sample_rate, bit_depth, length_seconds, artist, album, title, track_number, year)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT OR REPLACE INTO transfers (id, direction, filename, peer_username, filesize, progress, status, started_at, completed_at, request_id, wishlist_item_id, request_name, destination_directory, local_path, batch_id, reason, bit_rate, sample_rate, bit_depth, length_seconds, artist, album, title, track_number, year, attempts, auto_replace_attempts, next_attempt_at)
+                VALUES (
+                    ?, ?, ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?
+                )
                 "#,
             )
             .bind(&transfer.id)
@@ -2836,6 +2919,9 @@ impl DatabaseManager {
             .bind(&transfer.title)
             .bind(transfer.track_number)
             .bind(transfer.year)
+            .bind(transfer.attempts)
+            .bind(transfer.auto_replace_attempts)
+            .bind(transfer.next_attempt_at)
             .execute(&mut *transaction)
             .await;
             if let Err(error) = transfer_insert {
@@ -3530,8 +3616,9 @@ impl DatabaseManager {
                  last_visible_hit_count, last_hidden_locked_hit_count,
                  last_filtered_out_hit_count, last_ignored_result_hit_count,
                  last_response_count, total_search_count, total_download_count,
-                 last_search_id, added_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 last_search_id, lidarr_album_id, lidarr_track_id, lidarr_track_count,
+                 lidarr_duration_seconds, lidarr_release_disambiguation, added_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 artist = excluded.artist,
                 title = excluded.title,
@@ -3552,6 +3639,11 @@ impl DatabaseManager {
                 total_search_count = excluded.total_search_count,
                 total_download_count = excluded.total_download_count,
                 last_search_id = excluded.last_search_id,
+                lidarr_album_id = excluded.lidarr_album_id,
+                lidarr_track_id = excluded.lidarr_track_id,
+                lidarr_track_count = excluded.lidarr_track_count,
+                lidarr_duration_seconds = excluded.lidarr_duration_seconds,
+                lidarr_release_disambiguation = excluded.lidarr_release_disambiguation,
                 added_at = excluded.added_at
             "#,
         )
@@ -3575,6 +3667,11 @@ impl DatabaseManager {
         .bind(record.total_search_count)
         .bind(record.total_download_count)
         .bind(&record.last_search_id)
+        .bind(record.lidarr_album_id)
+        .bind(record.lidarr_track_id)
+        .bind(record.lidarr_track_count)
+        .bind(record.lidarr_duration_seconds)
+        .bind(&record.lidarr_release_disambiguation)
         .bind(record.added_at)
         .execute(&self.pool)
         .await?;
@@ -3589,7 +3686,7 @@ impl DatabaseManager {
         let mut transaction = self.pool.begin().await?;
         for batch in records.chunks(40) {
             let values = std::iter::repeat_n(
-                "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 batch.len(),
             )
             .collect::<Vec<_>>()
@@ -3599,10 +3696,11 @@ impl DatabaseManager {
                 INSERT INTO wishlist_items
                     (id, artist, title, kind, filter, enabled, auto_download, max_results,
                      max_downloads, last_viewed_at, last_searched_at, last_match_count,
-                     last_visible_hit_count, last_hidden_locked_hit_count,
-                     last_filtered_out_hit_count, last_ignored_result_hit_count,
-                     last_response_count, total_search_count, total_download_count,
-                     last_search_id, added_at)
+                    last_visible_hit_count, last_hidden_locked_hit_count,
+                    last_filtered_out_hit_count, last_ignored_result_hit_count,
+                    last_response_count, total_search_count, total_download_count,
+                    last_search_id, lidarr_album_id, lidarr_track_id, lidarr_track_count,
+                    lidarr_duration_seconds, lidarr_release_disambiguation, added_at)
                 VALUES {values}
                 ON CONFLICT(id) DO UPDATE SET
                     artist = excluded.artist,
@@ -3624,6 +3722,11 @@ impl DatabaseManager {
                     total_search_count = excluded.total_search_count,
                     total_download_count = excluded.total_download_count,
                     last_search_id = excluded.last_search_id,
+                    lidarr_album_id = excluded.lidarr_album_id,
+                    lidarr_track_id = excluded.lidarr_track_id,
+                    lidarr_track_count = excluded.lidarr_track_count,
+                    lidarr_duration_seconds = excluded.lidarr_duration_seconds,
+                    lidarr_release_disambiguation = excluded.lidarr_release_disambiguation,
                     added_at = excluded.added_at
                 "#
             );
@@ -3652,6 +3755,11 @@ impl DatabaseManager {
                     .bind(record.total_search_count)
                     .bind(record.total_download_count)
                     .bind(&record.last_search_id)
+                    .bind(record.lidarr_album_id)
+                    .bind(record.lidarr_track_id)
+                    .bind(record.lidarr_track_count)
+                    .bind(record.lidarr_duration_seconds)
+                    .bind(&record.lidarr_release_disambiguation)
                     .bind(record.added_at);
             }
             statement.execute(&mut *transaction).await?;
@@ -3682,7 +3790,7 @@ impl DatabaseManager {
         offset: i32,
     ) -> Result<Vec<WishlistItemRecord>, Box<dyn std::error::Error>> {
         let records = query_as::<_, WishlistItemRecord>(
-            "SELECT id, artist, title, kind, filter, enabled, auto_download, max_results, max_downloads, last_viewed_at, last_searched_at, last_match_count, last_visible_hit_count, last_hidden_locked_hit_count, last_filtered_out_hit_count, last_ignored_result_hit_count, last_response_count, total_search_count, total_download_count, last_search_id, added_at FROM wishlist_items ORDER BY added_at DESC LIMIT ? OFFSET ?",
+            "SELECT id, artist, title, kind, filter, enabled, auto_download, max_results, max_downloads, last_viewed_at, last_searched_at, last_match_count, last_visible_hit_count, last_hidden_locked_hit_count, last_filtered_out_hit_count, last_ignored_result_hit_count, last_response_count, total_search_count, total_download_count, last_search_id, lidarr_album_id, lidarr_track_id, lidarr_track_count, lidarr_duration_seconds, lidarr_release_disambiguation, added_at FROM wishlist_items ORDER BY added_at DESC LIMIT ? OFFSET ?",
         )
         .bind(limit)
         .bind(offset)
@@ -3738,8 +3846,8 @@ impl DatabaseManager {
                 query(
                     r#"
                     INSERT INTO search_results
-                        (search_id, peer_username, filename, size, extension, locked, slot_free, average_speed, queue_length, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        (search_id, peer_username, filename, size, extension, bit_rate, sample_rate, bit_depth, length_seconds, locked, slot_free, average_speed, queue_length, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     "#,
                 )
                 .bind(&search.id)
@@ -3747,6 +3855,10 @@ impl DatabaseManager {
                 .bind(&result.filename)
                 .bind(result.size)
                 .bind(&result.extension)
+                .bind(result.bit_rate)
+                .bind(result.sample_rate)
+                .bind(result.bit_depth)
+                .bind(result.length_seconds)
                 .bind(result.locked)
                 .bind(result.slot_free)
                 .bind(result.average_speed)
@@ -5283,6 +5395,7 @@ mod tests {
             completed_at: Some(now + 100),
             room: None,
             target: None,
+            fallback_attempts: 0,
         };
 
         db.insert_search(&record).await.unwrap();
@@ -5307,6 +5420,10 @@ mod tests {
             filename: filename.to_owned(),
             size: 10,
             extension: "flac".to_owned(),
+            bit_rate: None,
+            sample_rate: None,
+            bit_depth: None,
+            length_seconds: None,
             locked: false,
             slot_free: Some(true),
             average_speed: Some(1),
@@ -5379,6 +5496,9 @@ mod tests {
             title: Some("Test".to_owned()),
             track_number: Some(1),
             year: Some(2026),
+            attempts: 1,
+            auto_replace_attempts: 0,
+            next_attempt_at: None,
         };
 
         db.insert_transfer(&record).await.unwrap();
@@ -5464,6 +5584,9 @@ mod tests {
             title: None,
             track_number: None,
             year: None,
+            attempts: 1,
+            auto_replace_attempts: 0,
+            next_attempt_at: None,
         };
         let event = |id: &str| TransferEventRecord {
             id: 0,

@@ -112,6 +112,35 @@ set -a
 source "$credential_file"
 set +a
 
+if [[ -n "${SLSKR_SOAK_ACCOUNT_INDEX:-}" ]]; then
+    if [[ ! "${SLSKR_SOAK_ACCOUNT_INDEX}" =~ ^[1-9][0-9]*$ ]]; then
+        echo "SLSKR_SOAK_ACCOUNT_INDEX must be a positive integer" >&2
+        exit 2
+    fi
+    account_env_file="${SLSKR_LIVE_ENV_FILE:-$repo_root/.env}"
+    account_extra_env_file="${SLSKR_LIVE_EXTRA_ENV_FILE:-$repo_root/.secrets/generated-soulseek-accounts.env}"
+    if [[ ! -f "$account_env_file" ]]; then
+        echo "missing live account file: $account_env_file" >&2
+        exit 1
+    fi
+    set -a
+    # shellcheck disable=SC1090
+    source "$account_env_file"
+    if [[ -f "$account_extra_env_file" ]]; then
+        # shellcheck disable=SC1090
+        source "$account_extra_env_file"
+    fi
+    set +a
+    username_var="SLSKR_TEST_${SLSKR_SOAK_ACCOUNT_INDEX}_USERNAME"
+    password_var="SLSKR_TEST_${SLSKR_SOAK_ACCOUNT_INDEX}_PASSWORD"
+    export SLSK_USERNAME="${!username_var:-}"
+    export SLSK_PASSWORD="${!password_var:-}"
+    if [[ -z "$SLSK_USERNAME" || -z "$SLSK_PASSWORD" ]]; then
+        echo "missing credentials for SLSKR_SOAK_ACCOUNT_INDEX=${SLSKR_SOAK_ACCOUNT_INDEX}" >&2
+        exit 1
+    fi
+fi
+
 export SLSK_USERNAME="${SLSK_USERNAME:-${SLSKR_SOAK_USERNAME:-${SLSK_INTEGRATION_USERNAME:?missing soak username}}}"
 export SLSK_PASSWORD="${SLSK_PASSWORD:-${SLSKR_SOAK_PASSWORD:-${SLSK_INTEGRATION_PASSWORD:?missing soak password}}}"
 export SLSK_LISTEN_PORT="$listen_port"
@@ -137,7 +166,14 @@ slskr_bin="$repo_root/target/debug/slskr"
     printf '[slskr-proton-natpmp-soak start=%s gateway=%s listen_port=%s obfuscated_port=%s]\n' \
         "$(date -Is)" "$gateway" "$listen_port" "$obfuscated_port"
 
-    RUSTFLAGS="${RUSTFLAGS:-} -Awarnings" scripts/with-build-guard.sh cargo build -q -p slskr
+    if [[ "${SLSKR_SOAK_SKIP_BUILD:-0}" == "1" ]]; then
+        if [[ -z "${SLSKR_MATRIX_BINARY:-}" || ! -x "${SLSKR_MATRIX_BINARY}" ]]; then
+            echo "SLSKR_SOAK_SKIP_BUILD=1 requires an executable SLSKR_MATRIX_BINARY" >&2
+            exit 1
+        fi
+    else
+        scripts/with-build-guard.sh cargo build -q -p slskr
+    fi
 
     advertised_port="$(claim_tcp_port "$listen_port")"
     obfuscated_advertised_port="$(claim_tcp_port "$obfuscated_port")"
@@ -159,7 +195,7 @@ slskr_bin="$repo_root/target/debug/slskr"
     renew_loop &
     renew_pid=$!
 
-    "$slskr_bin" soak live
+    "${SLSKR_MATRIX_BINARY:-$slskr_bin}" soak live
     status=$?
     printf '[slskr-proton-natpmp-soak exit=%s at %s]\n' "$status" "$(date -Is)"
     exit "$status"

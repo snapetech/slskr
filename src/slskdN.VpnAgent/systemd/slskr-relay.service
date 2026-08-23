@@ -1,0 +1,23 @@
+[Unit]
+Description=Bounded self-hosted Soulseek relay for slskR
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/slskr-relay/relay.env
+ExecStartPre=/usr/local/bin/slskr-vpn-agent relay-apply
+ExecStart=/usr/local/bin/slskr-vpn-agent relay-api
+ExecReload=/usr/local/bin/slskr-vpn-agent relay-apply
+Restart=always
+RestartSec=2s
+User=root
+Group=root
+NoNewPrivileges=true
+ProtectHome=true
+ProtectSystem=full
+ReadOnlyPaths=/etc/slskr-relay /etc/wireguard
+ReadWritePaths=/var/lib/slskr-vpn
+
+[Install]
+WantedBy=multi-user.target

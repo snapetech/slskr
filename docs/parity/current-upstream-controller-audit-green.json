@@ -1,0 +1,14 @@
+{
+  "inventoryRoutes": 687,
+  "selectedRoutes": 685,
+  "excludedRoutes": [
+    "DELETE /api/v0/application",
+    "DELETE /api/v0/server"
+  ],
+  "generic404": 0,
+  "htmlFallbacks": 0,
+  "compatibilityFallbacks": 0,
+  "probeErrors": 0,
+  "result": "pass",
+  "command": "node scripts/audit-slskdn-controller-routes.mjs --slskdn-root ../slskdn --materialize --probe-base http://127.0.0.1:58071 --concurrency 1 --exclude-route 'DELETE /api/v0/application' --exclude-route 'DELETE /api/v0/server' --unmatched-only --fail-on-unmatched --fail-on-fallback"
+}

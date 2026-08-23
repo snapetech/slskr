@@ -1715,6 +1715,94 @@ body {
   white-space: nowrap;
 }
 
+.slskr-transfer-request-table th {
+  min-width: 92px;
+  position: relative;
+}
+
+.slskr-transfer-request-table th > span {
+  display: inline-block;
+  padding-right: 18px;
+}
+
+.slskr-transfer-column-resize {
+  background: transparent !important;
+  border: 0 !important;
+  color: #8ca49d !important;
+  cursor: col-resize !important;
+  font-size: 12px;
+  line-height: 1;
+  min-height: 0 !important;
+  padding: 2px !important;
+  position: absolute;
+  right: 2px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.slskr-transfer-column-resize:hover,
+.slskr-transfer-column-resize:focus-visible {
+  color: #f2b880 !important;
+}
+
+.slskr-download-policy,
+.slskr-system-configuration {
+  background: #0e1718;
+  border: 1px solid #2b504d;
+  display: grid;
+  gap: 10px;
+  margin: 12px 0;
+  padding: 13px;
+}
+
+.slskr-download-policy header,
+.slskr-system-configuration header {
+  align-items: start;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+}
+
+.slskr-download-policy h3,
+.slskr-download-policy p,
+.slskr-system-configuration h3,
+.slskr-system-configuration p {
+  margin: 0;
+}
+
+.slskr-download-policy-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(180px, 0.7fr) minmax(260px, 1.3fr);
+}
+
+.slskr-download-policy-grid label {
+  display: grid;
+  gap: 5px;
+}
+
+.slskr-download-policy textarea {
+  min-height: 112px;
+  resize: vertical;
+}
+
+.slskr-download-policy-help,
+.slskr-system-configuration [data-slskr-options-yaml-status] {
+  color: #9eb4ad;
+  font-size: 12px;
+}
+
+.slskr-system-configuration textarea {
+  background: #0a1112;
+  border: 1px solid #365853;
+  color: #dce8e1;
+  font: 12px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace;
+  min-height: 280px;
+  padding: 10px;
+  resize: vertical;
+  width: 100%;
+}
+
 .slskr-transfer-request-name,
 .slskr-transfer-attempt-spine {
   display: grid;

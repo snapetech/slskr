@@ -111,6 +111,13 @@ peer_response_seconds = 5
 # [1,"join-request",podId,peerId,role,timestamp,message,nonce].
 signature_mode = "off"
 
+[podcore.gold_star_club]
+# Native/current slskR launches default to false (opt in with true). An
+# explicitly selected frozen slskdN compatibility profile defaults to true for
+# parity; set this to false there to opt out. The environment variable
+# SLSKDN_POD_GOLD_STAR_CLUB_AUTOJOIN overrides this value.
+autojoin = false
+
 [shares]
 dirs = ["/srv/slskr/shares/music"]
 # Regular expressions match original local directory and file paths.
