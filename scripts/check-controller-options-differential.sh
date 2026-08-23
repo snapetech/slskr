@@ -3735,16 +3735,21 @@ log=pathlib.Path(sys.argv[3]).read_text(encoding="utf-8")
 target=sys.argv[2]
 slskd_marker="This program is free software: you can redistribute it and/or modify"
 slskdn_marker="GNU AFFERO GENERAL PUBLIC LICENSE"
-version_marker="│ 0.0.0 (0.0.0)" if target == "slskd" else "│                     0.0.0 (0.0.0)"
+native_marker="native Soulseek client, daemon, and Web UI"
+has_native_logo=native_marker in log
+has_slskd_logo=slskd_marker in log
+has_slskdn_logo=slskdn_marker in log and not has_native_logo
 print(json.dumps({
     "current":options["flags"]["noLogo"],
     "startup":startup["flags"]["noLogo"],
     "pendingRestart":application["pendingRestart"],
-    "banner":slskd_marker in log if target == "slskd" else slskdn_marker in log,
-    "otherBanner":slskdn_marker in log if target == "slskd" else slskd_marker in log,
-    "version":version_marker in log,
+    # The frozen controllers and native slskR intentionally use different
+    # product identities. Compare startup-logo semantics, not branding text.
+    "banner":has_slskd_logo or has_slskdn_logo or has_native_logo,
+    "otherBanner":has_slskdn_logo if target == "slskd" else has_slskd_logo,
+    "version":"0.0.0 (0.0.0)" in log or "slskr 0.0.0" in log,
     "development":"DEVELOPMENT" in log,
-    "website":"https://slskd.org" in log,
+    "website":any(marker in log for marker in ("https://slskd.org", "https://github.com/snapetech/slskr")),
 },sort_keys=True,separators=(",",":")))
 PY
   printf 'status=200\ncontent-type=application/json\n' >"$suite/no-logo-$stage.meta"
