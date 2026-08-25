@@ -6007,6 +6007,9 @@ async fn route_dispatch_group_2(
             let Some(filename) = filename else {
                 return Ok(routing::not_found_response());
             };
+            if state.session.read().await.state != "connected" {
+                return Ok(routing::no_content_response());
+            }
             let address = if let Some(address) = cached_peer_endpoint(state, &username).await {
                 address
             } else if state.regular_listener_commands.is_none()
@@ -7170,6 +7173,11 @@ async fn route_dispatch_group_2(
                     .await
             {
                 return Ok(response);
+            }
+            if test_user_endpoint_peer_address(state, &username).is_none()
+                && state.session.read().await.state != "connected"
+            {
+                return Ok(routing::not_found_response());
             }
             let address = if let Some(address) = test_user_endpoint_peer_address(state, &username) {
                 address

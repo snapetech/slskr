@@ -247,8 +247,9 @@ fn print_native_product_logo() {
 mod disaster_mode_regression_tests {
     #[test]
     fn status_starts_in_normal_mode_until_runtime_state_changes() {
-        assert_eq!(super::virtual_soulfind_disaster_mode_level(false), 0);
-        assert_eq!(super::virtual_soulfind_disaster_mode_level(true), 3);
+        assert_eq!(super::virtual_soulfind_disaster_mode_level(false, true), 0);
+        assert_eq!(super::virtual_soulfind_disaster_mode_level(true, true), 3);
+        assert_eq!(super::virtual_soulfind_disaster_mode_level(true, false), 0);
     }
 }
 
@@ -22923,9 +22924,12 @@ async fn route_http_request_with_headers(
                     .then(|| entry.filename.clone())
              });
              drop(transfers);
-             let Some(filename) = filename else {
-                 return Ok(routing::not_found_response());
-             };
+            let Some(filename) = filename else {
+                return Ok(routing::not_found_response());
+            };
+            if state.session.read().await.state != "connected" {
+                return Ok(routing::no_content_response());
+            }
             let address = if let Some(address) = cached_peer_endpoint(state, &username).await {
                 address
             } else if state.regular_listener_commands.is_none()
@@ -23986,6 +23990,11 @@ async fn route_http_request_with_headers(
                     .await
             {
                 return Ok(response);
+            }
+            if test_user_endpoint_peer_address(state, &username).is_none()
+                && state.session.read().await.state != "connected"
+            {
+                return Ok(routing::not_found_response());
             }
             let address = if let Some(address) = test_user_endpoint_peer_address(state, &username) {
                 address
@@ -36509,6 +36518,7 @@ impl ControllerVersionState {
             "current": APP_VERSION,
             "isCanary": false,
             "isDevelopment": APP_VERSION == "0.0.0" || cfg!(debug_assertions),
+            "isUpdateAvailable": false,
         });
         if target == ControllerCompatibilityTarget::Slskdn {
             value["latest"] = serde_json::json!(self.latest.as_deref().unwrap_or_default());
@@ -36532,6 +36542,16 @@ impl ControllerVersionState {
             value["isUpdateAvailable"] = serde_json::json!(is_update_available);
         }
         value
+    }
+}
+
+#[cfg(test)]
+mod controller_version_state_tests {
+    #[test]
+    fn initial_json_includes_update_availability() {
+        let value = super::ControllerVersionState::initial()
+            .json(super::ControllerCompatibilityTarget::Slskdn);
+        assert_eq!(value["isUpdateAvailable"], false);
     }
 }
 
@@ -67700,7 +67720,10 @@ async fn extended_controller_get_response(
                 .virtual_soulfind
                 .disaster_mode
                 .force;
-            let level = virtual_soulfind_disaster_mode_level(force_disaster_mode);
+            let level = virtual_soulfind_disaster_mode_level(
+                force_disaster_mode,
+                state.config.current_upstream_behavior,
+            );
             let (level_name, description) = match level {
                 1 => (
                     "SoulseekDegraded",
@@ -67740,8 +67763,8 @@ async fn extended_controller_get_response(
     }
 }
 
-fn virtual_soulfind_disaster_mode_level(force: bool) -> u8 {
-    u8::from(force) * 3
+fn virtual_soulfind_disaster_mode_level(force: bool, current_upstream_behavior: bool) -> u8 {
+    u8::from(force && current_upstream_behavior) * 3
 }
 
 const PODCORE_MIN_DATETIME: &str = "0001-01-01T00:00:00+00:00";
