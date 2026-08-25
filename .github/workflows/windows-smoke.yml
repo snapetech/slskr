@@ -24,6 +24,8 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # actions/checkout@v6
+        with:
+          fetch-depth: 2
 
       - name: Enable Windows long paths for Git dependencies
         run: git config --global core.longpaths true
