@@ -12195,7 +12195,10 @@ mod tests {
             &MapEnv::default().with("SLSKR_FROZEN_TRANSFER_GROUPS_JSON", blacklist_duplicate),
         )
         .expect_err("slskdN rejects blacklisted/user-defined duplicate membership");
-        assert!(native_blacklist.contains("multiple groups"), "{native_blacklist}");
+        assert!(
+            native_blacklist.contains("multiple groups"),
+            "{native_blacklist}"
+        );
 
         let slskd = super::AppConfig::from_layers(
             None,
