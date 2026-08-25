@@ -50,7 +50,7 @@ node web/scripts/audit-react-webui.mjs
 Use it after route, navigation, API-client, or visual shell changes. The audit
 expects a human-usable app shape: recognizable navigation, populated primary
 views, working actions, stable player chrome, and slskd/slskdN-style operating
-surfaces for users migrating from that family of Web UIs.
+surfaces for users migrating from compatible Soulseek Web UIs.
 
 ## Screenshots
 

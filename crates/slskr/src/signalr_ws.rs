@@ -1,4 +1,4 @@
-//! SignalR JSON-hub compatibility for the frozen slskd and slskdN web clients.
+//! SignalR JSON-hub compatibility for the frozen legacy and native web clients.
 //!
 //! The controller already exposes a separate raw event feed for slskR's native
 //! UI.  The frozen clients use ASP.NET SignalR instead, so their hub protocol
@@ -39,14 +39,14 @@ pub(crate) fn hub_name(path: &str) -> Option<&'static str> {
 /// Return a hub only when the selected compatibility profile exposes it.
 pub(crate) fn hub_name_for_target(
     path: &str,
-    target: crate::config::ControllerCompatibilityTarget,
+    target: crate::config::ControllerProfile,
 ) -> Option<&'static str> {
     let hub = hub_name(path)?;
     let supported = match target {
-        crate::config::ControllerCompatibilityTarget::Slskd => {
+        crate::config::ControllerProfile::Legacy => {
             matches!(hub, "application" | "logs" | "search" | "metrics")
         }
-        crate::config::ControllerCompatibilityTarget::Slskdn => {
+        crate::config::ControllerProfile::Native => {
             matches!(
                 hub,
                 "application" | "logs" | "search" | "songid" | "listening-party" | "transfers"
@@ -68,14 +68,14 @@ pub(crate) fn negotiate_hub_name(path: &str) -> Option<&'static str> {
 /// Return a negotiation route only when the selected profile exposes it.
 pub(crate) fn negotiate_hub_name_for_target(
     path: &str,
-    target: crate::config::ControllerCompatibilityTarget,
+    target: crate::config::ControllerProfile,
 ) -> Option<&'static str> {
     let hub = negotiate_hub_name(path)?;
     let supported = match target {
-        crate::config::ControllerCompatibilityTarget::Slskd => {
+        crate::config::ControllerProfile::Legacy => {
             matches!(hub, "application" | "logs" | "search" | "metrics")
         }
-        crate::config::ControllerCompatibilityTarget::Slskdn => {
+        crate::config::ControllerProfile::Native => {
             matches!(
                 hub,
                 "application" | "logs" | "search" | "songid" | "listening-party" | "transfers"
@@ -391,7 +391,7 @@ async fn initial_hub_messages(state: &AppState, hub: &str) -> Vec<(String, Value
             let application_state = application_state_json(state).await;
             let options = {
                 let overlay = state.options_overlay.read().await;
-                serde_json::from_str::<Value>(&crate::slskd_options_json(
+                serde_json::from_str::<Value>(&crate::controller_options_json(
                     &state.config,
                     &overlay,
                     true,
@@ -449,7 +449,7 @@ async fn event_hub_messages(
             if record.kind.starts_with("options.") {
                 let options = {
                     let overlay = state.options_overlay.read().await;
-                    serde_json::from_str::<Value>(&crate::slskd_options_json(
+                    serde_json::from_str::<Value>(&crate::controller_options_json(
                         &state.config,
                         &overlay,
                         true,
@@ -536,7 +536,7 @@ async fn application_state_json(state: &AppState) -> String {
     let distributed_settings = *state.soulseek_distributed_settings.read().await;
     let runtime_credentials_configured = state.runtime_credentials.read().await.is_some();
     let connected_endpoint = crate::connected_server_address(state);
-    crate::slskd_application_state_json(
+    crate::application_state_json(
         &session,
         &share_lifecycle,
         &rooms,
@@ -548,7 +548,7 @@ async fn application_state_json(state: &AppState) -> String {
         &state.config,
         runtime_credentials_configured,
         connected_endpoint.as_deref(),
-        crate::slskd_version_json(state),
+        crate::controller_version_json(state),
     )
 }
 
@@ -633,18 +633,18 @@ mod tests {
 
     #[test]
     fn hub_routes_match_the_frozen_profile_matrices() {
-        use crate::config::ControllerCompatibilityTarget::{Slskd, Slskdn};
+        use crate::config::ControllerProfile::{Legacy, Native};
 
-        assert_eq!(hub_name_for_target("/hub/metrics", Slskd), Some("metrics"));
-        assert_eq!(hub_name_for_target("/hub/transfers", Slskd), None);
-        assert_eq!(hub_name_for_target("/hub/songid", Slskdn), Some("songid"));
-        assert_eq!(hub_name_for_target("/hub/metrics", Slskdn), None);
+        assert_eq!(hub_name_for_target("/hub/metrics", Legacy), Some("metrics"));
+        assert_eq!(hub_name_for_target("/hub/transfers", Legacy), None);
+        assert_eq!(hub_name_for_target("/hub/songid", Native), Some("songid"));
+        assert_eq!(hub_name_for_target("/hub/metrics", Native), None);
         assert_eq!(
-            negotiate_hub_name_for_target("/hub/listening-party/negotiate", Slskdn),
+            negotiate_hub_name_for_target("/hub/listening-party/negotiate", Native),
             Some("listening-party")
         );
         assert_eq!(
-            negotiate_hub_name_for_target("/hub/listening-party/negotiate", Slskd),
+            negotiate_hub_name_for_target("/hub/listening-party/negotiate", Legacy),
             None
         );
     }

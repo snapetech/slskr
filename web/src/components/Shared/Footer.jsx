@@ -148,7 +148,7 @@ class Footer extends Component {
   };
 
   fetchBuildInfo = async () => {
-    if (this.props.compatibilityTarget === 'slskd') {
+    if (this.props.runtimeProfile === 'legacy') {
       return;
     }
 
@@ -161,7 +161,7 @@ class Footer extends Component {
   };
 
   render() {
-    if (this.props.compatibilityTarget === 'slskd') {
+    if (this.props.runtimeProfile === 'legacy') {
       return (
         <footer
           className="slskr-footer"

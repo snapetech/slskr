@@ -166,7 +166,7 @@ impl PodChannelStore {
     }
 
     /// Append a message received from a peer while retaining its wire identity.
-    /// The frozen slskdN PodMessaging service rejects a repeated MessageId before
+    /// The frozen native profile PodMessaging service rejects a repeated MessageId before
     /// storage; local generated messages continue to use `append` above.
     #[allow(
         clippy::too_many_arguments,

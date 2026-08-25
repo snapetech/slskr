@@ -320,7 +320,7 @@ const CompatibilityMessagingChrome = ({ onRefresh }) => (
   </div>
 );
 
-const Messaging = ({ compatibilityTarget, initialKind = 'mixed', state }) => {
+const Messaging = ({ runtimeProfile, initialKind = 'mixed', state }) => {
   const navigate = useNavigate();
   const [panels, setPanels] = useState(() => loadPanels());
   const [chatTarget, setChatTarget] = useState('');
@@ -378,7 +378,7 @@ const Messaging = ({ compatibilityTarget, initialKind = 'mixed', state }) => {
       chat.getAll(),
       rooms.getJoined(),
       pods.list().catch(() => []),
-      compatibilityTarget === 'slskdn'
+      runtimeProfile === 'native'
         ? pods.discoverAll(50).catch(() => [])
         : Promise.resolve([]),
     ]);
@@ -390,7 +390,7 @@ const Messaging = ({ compatibilityTarget, initialKind = 'mixed', state }) => {
       : [];
     const podList = Array.isArray(serverPods) ? serverPods : [];
     const podDetails =
-      compatibilityTarget === 'slskdn'
+      runtimeProfile === 'native'
         ? Array.isArray(serverDiscoveredPods) && serverDiscoveredPods.length > 0
           ? serverDiscoveredPods
           : podList
@@ -430,7 +430,7 @@ const Messaging = ({ compatibilityTarget, initialKind = 'mixed', state }) => {
         )
         .sort((a, b) => channelLabel(a).localeCompare(channelLabel(b))),
     );
-  }, [compatibilityTarget]);
+  }, [runtimeProfile]);
 
   const savedChatNames = useMemo(
     () =>
@@ -698,7 +698,7 @@ const Messaging = ({ compatibilityTarget, initialKind = 'mixed', state }) => {
   const openPanels = panels.filter((panel) => !panel.collapsed);
   const collapsedPanels = panels.filter((panel) => panel.collapsed);
 
-  if (compatibilityTarget === 'slskdn') {
+  if (runtimeProfile === 'native') {
     return <CompatibilityMessagingChrome onRefresh={() => hydrate()} />;
   }
 

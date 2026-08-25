@@ -4,7 +4,7 @@ use base64::{engine::general_purpose::STANDARD, Engine as _};
 use reqwest::{header, StatusCode};
 use serde::Deserialize;
 
-use crate::config::{ControllerCompatibilityTarget, VpnIntegrationSettings};
+use crate::config::{ControllerProfile, VpnIntegrationSettings};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Status {
@@ -205,7 +205,7 @@ async fn get_optional_json<T: serde::de::DeserializeOwned>(
 
 pub(crate) async fn poll_once(
     options: &VpnIntegrationSettings,
-    target: ControllerCompatibilityTarget,
+    target: ControllerProfile,
 ) -> Result<Status, String> {
     let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
@@ -215,7 +215,7 @@ pub(crate) async fn poll_once(
         .map_err(|error| format!("failed to initialize Gluetun client: {error}"))?;
 
     let relay = if options.self_hosted_relay {
-        get_optional_json::<RelayResponse>(&client, options, "/v1/slskdn/relay")
+        get_optional_json::<RelayResponse>(&client, options, "/v1/slskr/relay")
             .await?
             .map(|relay| RelayStatus {
                 mode: relay.mode,
@@ -256,10 +256,10 @@ pub(crate) async fn poll_once(
             .filter(|port| *port > 0)
             .and_then(|port| u16::try_from(port).ok());
 
-        if target == ControllerCompatibilityTarget::Slskdn {
+        if target == ControllerProfile::Native {
             let response = request(
                 &client,
-                endpoint(&options.gluetun.url, "/v1/slskdn/portforwards"),
+                endpoint(&options.gluetun.url, "/v1/slskr/portforwards"),
                 options,
             )
             .send()
@@ -355,7 +355,7 @@ mod tests {
         let mut options = options(format!("http://{address}"));
         options.port_forwarding = false;
         options.self_hosted_relay = true;
-        let status = poll_once(&options, ControllerCompatibilityTarget::Slskdn)
+        let status = poll_once(&options, ControllerProfile::Native)
             .await
             .unwrap();
         let relay = status.relay.unwrap();
@@ -374,12 +374,12 @@ mod tests {
         );
         assert_eq!(relay.path, "direct");
         let requests = server.await.unwrap();
-        assert!(requests[0].starts_with("GET /v1/slskdn/relay "));
+        assert!(requests[0].starts_with("GET /v1/slskr/relay "));
         assert!(requests[1].starts_with("GET /v1/publicip/ip "));
     }
 
     #[tokio::test]
-    async fn slskdn_poll_uses_api_key_and_projects_multi_forward_fallback() {
+    async fn native_poll_uses_api_key_and_projects_multi_forward_fallback() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let server = tokio::spawn(async move {
@@ -400,7 +400,7 @@ mod tests {
         });
         let status = poll_once(
             &options(format!("http://{address}")),
-            ControllerCompatibilityTarget::Slskdn,
+            ControllerProfile::Native,
         )
         .await
         .unwrap();
@@ -415,11 +415,11 @@ mod tests {
         assert!(requests
             .iter()
             .all(|request| !request.to_ascii_lowercase().contains("authorization:")));
-        assert!(requests[2].starts_with("GET /v1/slskdn/portforwards "));
+        assert!(requests[2].starts_with("GET /v1/slskr/portforwards "));
     }
 
     #[tokio::test]
-    async fn slskd_poll_uses_basic_auth_and_skips_multi_forward_endpoint() {
+    async fn controller_poll_uses_basic_auth_and_skips_multi_forward_endpoint() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let server = tokio::spawn(async move {
@@ -439,7 +439,7 @@ mod tests {
         });
         let mut options = options(format!("http://{address}"));
         options.gluetun.api_key.clear();
-        let status = poll_once(&options, ControllerCompatibilityTarget::Slskd)
+        let status = poll_once(&options, ControllerProfile::Legacy)
             .await
             .unwrap();
         assert_eq!(status.forwarded_port, Some(55_555));
@@ -466,7 +466,7 @@ mod tests {
             });
             let result = poll_once(
                 &options(format!("http://{address}")),
-                ControllerCompatibilityTarget::Slskdn,
+                ControllerProfile::Native,
             )
             .await;
             server.await.unwrap();
@@ -479,7 +479,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn slskdn_missing_multi_forward_endpoint_is_compatible() {
+    async fn native_missing_multi_forward_endpoint_is_compatible() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let server = tokio::spawn(async move {
@@ -503,7 +503,7 @@ mod tests {
         });
         let status = poll_once(
             &options(format!("http://{address}")),
-            ControllerCompatibilityTarget::Slskdn,
+            ControllerProfile::Native,
         )
         .await
         .unwrap();

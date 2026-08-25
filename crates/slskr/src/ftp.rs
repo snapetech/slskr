@@ -8,7 +8,7 @@ use suppaftp::tokio::{
 use suppaftp::types::FileType;
 use tokio_rustls::rustls;
 
-use crate::config::{ControllerCompatibilityTarget, FtpIntegrationSettings};
+use crate::config::{ControllerProfile, FtpIntegrationSettings};
 
 #[derive(Debug)]
 struct AcceptAnyServerCertificate {
@@ -81,21 +81,21 @@ fn accept_any_tls_config() -> Result<rustls::ClientConfig, String> {
 
 fn ftp_tls_config(
     options: &FtpIntegrationSettings,
-    target: ControllerCompatibilityTarget,
+    target: ControllerProfile,
 ) -> Result<rustls::ClientConfig, String> {
     if !options.ignore_certificate_errors {
         return public_root_tls_config();
     }
     match target {
-        ControllerCompatibilityTarget::Slskd => accept_any_tls_config(),
-        ControllerCompatibilityTarget::Slskdn => crate::webhooks::self_issued_tls_config()
+        ControllerProfile::Legacy => accept_any_tls_config(),
+        ControllerProfile::Native => crate::webhooks::self_issued_tls_config()
             .map_err(|error| format!("FTP TLS verifier construction failed: {error}")),
     }
 }
 
 fn ftp_connector(
     options: &FtpIntegrationSettings,
-    target: ControllerCompatibilityTarget,
+    target: ControllerProfile,
 ) -> Result<AsyncRustlsConnector, String> {
     let config = ftp_tls_config(options, target)?;
     Ok(AsyncRustlsConnector::from(
@@ -192,7 +192,7 @@ where
 
 async fn attempt_upload(
     options: &FtpIntegrationSettings,
-    target: ControllerCompatibilityTarget,
+    target: ControllerProfile,
     local_path: &Path,
 ) -> Result<(), String> {
     let endpoint = ftp_endpoint(options);
@@ -258,15 +258,15 @@ async fn attempt_upload(
 
 pub async fn upload_completed_file(
     options: &FtpIntegrationSettings,
-    target: ControllerCompatibilityTarget,
+    target: ControllerProfile,
     local_path: &Path,
 ) -> Result<(), String> {
     if !options.enabled {
         return Ok(());
     }
     let attempts = match target {
-        ControllerCompatibilityTarget::Slskd => options.retry_attempts,
-        ControllerCompatibilityTarget::Slskdn => options.retry_attempts.max(1),
+        ControllerProfile::Legacy => options.retry_attempts,
+        ControllerProfile::Native => options.retry_attempts.max(1),
     };
     let mut last_error = "FTP upload was not attempted".to_owned();
     for attempt in 0..attempts {
@@ -686,7 +686,7 @@ mod tests {
             retry_attempts: 1,
             ..FtpIntegrationSettings::default()
         };
-        upload_completed_file(&options, ControllerCompatibilityTarget::Slskdn, &file)
+        upload_completed_file(&options, ControllerProfile::Native, &file)
             .await
             .unwrap();
         let (commands, uploaded) = server.await.unwrap();
@@ -718,7 +718,7 @@ mod tests {
             retry_attempts: 1,
             ..FtpIntegrationSettings::default()
         };
-        upload_completed_file(&options, ControllerCompatibilityTarget::Slskdn, &file)
+        upload_completed_file(&options, ControllerProfile::Native, &file)
             .await
             .unwrap();
         let (commands, uploaded) = server.await.unwrap();
@@ -756,13 +756,9 @@ mod tests {
         for (mode, implicit) in [("explicit", false), ("implicit", true)] {
             let (root, file) = local_file().await;
             let (address, server) = spawn_ftps_fixture("127.0.0.1", implicit).await;
-            upload_completed_file(
-                &options(address, mode),
-                ControllerCompatibilityTarget::Slskdn,
-                &file,
-            )
-            .await
-            .unwrap();
+            upload_completed_file(&options(address, mode), ControllerProfile::Native, &file)
+                .await
+                .unwrap();
             let (commands, uploaded) = server.await.unwrap().unwrap();
             if !implicit {
                 assert!(commands.contains(&"PROT P".to_owned()), "{commands:?}");
@@ -776,7 +772,7 @@ mod tests {
         let (address, server) = spawn_ftps_fixture("wrong.invalid", false).await;
         assert!(upload_completed_file(
             &options(address, "explicit"),
-            ControllerCompatibilityTarget::Slskdn,
+            ControllerProfile::Native,
             &file,
         )
         .await
@@ -788,7 +784,7 @@ mod tests {
         let (address, server) = spawn_ftps_fixture("wrong.invalid", false).await;
         upload_completed_file(
             &options(address, "explicit"),
-            ControllerCompatibilityTarget::Slskd,
+            ControllerProfile::Legacy,
             &file,
         )
         .await
@@ -802,7 +798,7 @@ mod tests {
         let mut strict = options(address, "explicit");
         strict.ignore_certificate_errors = false;
         assert!(
-            upload_completed_file(&strict, ControllerCompatibilityTarget::Slskdn, &file)
+            upload_completed_file(&strict, ControllerProfile::Native, &file)
                 .await
                 .is_err()
         );
@@ -829,7 +825,7 @@ mod tests {
             retry_attempts: 1,
             ..FtpIntegrationSettings::default()
         };
-        upload_completed_file(&options, ControllerCompatibilityTarget::Slskdn, &file)
+        upload_completed_file(&options, ControllerProfile::Native, &file)
             .await
             .unwrap();
         let (commands, uploaded) = server.await.unwrap();
@@ -854,7 +850,7 @@ mod tests {
             ..FtpIntegrationSettings::default()
         };
         assert!(
-            upload_completed_file(&options, ControllerCompatibilityTarget::Slskd, &file)
+            upload_completed_file(&options, ControllerProfile::Legacy, &file)
                 .await
                 .is_err()
         );
@@ -869,7 +865,7 @@ mod tests {
             drop(stream);
         });
         assert!(
-            upload_completed_file(&options, ControllerCompatibilityTarget::Slskdn, &file)
+            upload_completed_file(&options, ControllerProfile::Native, &file)
                 .await
                 .is_err()
         );

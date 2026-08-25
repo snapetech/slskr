@@ -487,7 +487,7 @@ pub async fn probe_store(
     signing_key: &SigningKey,
 ) -> Result<(), String> {
     let key = derive_key("slskr:interop:dht-store-v1");
-    // DHT STORE signatures are self-certifying.  Older slskdN targets bind
+    // DHT STORE signatures are self-certifying.  Older native profile targets bind
     // the authenticated overlay identity to the Ed25519-derived peer ID,
     // rather than to the Soulseek account name used by other mesh calls.
     // Announce the signing identity for this DHT-only session so both target
@@ -895,7 +895,7 @@ mod tests {
     }
 
     #[test]
-    fn namespaced_key_matches_slskdn_vector() {
+    fn namespaced_key_matches_native_vector() {
         assert_eq!(
             hex::encode(derive_key("mesh:content-peers:recording-1")),
             "636693889e36652eac8f48fa6c4189eae0a3be7d"

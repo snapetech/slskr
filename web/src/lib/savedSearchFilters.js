@@ -3,11 +3,21 @@ import {
   setLocalStorageItem,
 } from './storage';
 
-const savedSearchFiltersKey = 'slskd-saved-search-filters';
+const savedSearchFiltersKey = 'slskr-saved-search-filters';
+const legacySavedSearchFiltersKey = 'slskd-saved-search-filters';
 
 const parseSavedFilters = () => {
   try {
-    const parsed = JSON.parse(getLocalStorageItem(savedSearchFiltersKey, '[]'));
+    const stored = getLocalStorageItem(savedSearchFiltersKey);
+    const legacyStored =
+      stored === null
+        ? getLocalStorageItem(legacySavedSearchFiltersKey)
+        : null;
+    const value = stored ?? legacyStored ?? '[]';
+    if (stored === null && legacyStored !== null) {
+      setLocalStorageItem(savedSearchFiltersKey, legacyStored);
+    }
+    const parsed = JSON.parse(value);
     return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];

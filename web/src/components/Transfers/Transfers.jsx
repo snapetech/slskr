@@ -60,7 +60,7 @@ const groupFlatTransfers = (records) => {
   return Array.from(groups.values());
 };
 
-const Transfers = ({ compatibilityTarget, direction, server }) => {
+const Transfers = ({ runtimeProfile, direction, server }) => {
   const testId = direction === 'download' ? 'downloads-root' : 'uploads-root';
   const [connecting, setConnecting] = useState(true);
   const [transfers, setTransfers] = useState([]);
@@ -285,7 +285,7 @@ const Transfers = ({ compatibilityTarget, direction, server }) => {
 
     try {
       const response =
-        compatibilityTarget === 'slskdn'
+        runtimeProfile === 'native'
           ? groupFlatTransfers((await transfersLibrary.getChanges()).transfers)
           : await transfersLibrary.getAll({ direction });
 
@@ -314,7 +314,7 @@ const Transfers = ({ compatibilityTarget, direction, server }) => {
     return () => {
       clearInterval(interval);
     };
-  }, [compatibilityTarget, direction]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [runtimeProfile, direction]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useMemo(() => {
     setConnecting(true);
@@ -489,7 +489,7 @@ const Transfers = ({ compatibilityTarget, direction, server }) => {
 
   useEffect(() => {
     const fetchDownloadModeStatus = async () => {
-      if (direction !== 'download' || compatibilityTarget === 'slskd') {
+      if (direction !== 'download' || runtimeProfile === 'legacy') {
         return;
       }
 
@@ -506,7 +506,7 @@ const Transfers = ({ compatibilityTarget, direction, server }) => {
     };
 
     fetchDownloadModeStatus();
-  }, [compatibilityTarget, direction]);
+  }, [runtimeProfile, direction]);
 
   const handleAutoReplaceChange = async (enabled) => {
     try {

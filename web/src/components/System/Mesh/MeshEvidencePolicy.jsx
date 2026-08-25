@@ -66,7 +66,7 @@ const sampleEvidence = JSON.stringify(
   2,
 );
 
-const MeshEvidencePolicy = ({ compatibilityTarget } = {}) => {
+const MeshEvidencePolicy = ({ runtimeProfile } = {}) => {
   const [policy, setPolicy] = useState(getMeshEvidencePolicy);
   const [reviewError, setReviewError] = useState('');
   const [reviewInput, setReviewInput] = useState('');
@@ -161,7 +161,7 @@ const MeshEvidencePolicy = ({ compatibilityTarget } = {}) => {
       <div className="mesh-evidence-policy-grid">
         <Segment>
           <Header as="h4">Inbound Trust Gate</Header>
-          {compatibilityTarget === 'slskdn' ? (
+          {runtimeProfile === 'native' ? (
             <div aria-label="Mesh evidence inbound trust tier">
               Disabled
             </div>

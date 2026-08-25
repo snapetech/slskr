@@ -180,7 +180,7 @@ pub async fn post_pod_message(
     result
 }
 
-/// Deliver a PodCore message using the frozen slskdN UDP control envelope.
+/// Deliver a PodCore message using the frozen native profile UDP control envelope.
 ///
 /// The target sends the complete `PodMessage` JSON as the envelope payload and
 /// signs the envelope with its persistent Ed25519 control key.  No response is
@@ -200,7 +200,7 @@ pub async fn post_pod_message_control(
     Ok(message_id)
 }
 
-/// Deliver a PodCore message over the frozen slskdN QUIC control transport.
+/// Deliver a PodCore message over the frozen native profile QUIC control transport.
 pub async fn post_pod_message_quic(
     peer: &TrustedMeshPeer,
     local_username: &str,
@@ -458,7 +458,7 @@ mod tests {
     use tokio::net::{TcpListener, UdpSocket};
 
     #[tokio::test]
-    async fn slskdn_pod_control_route_emits_signed_messagepack_envelope() {
+    async fn native_pod_control_route_emits_signed_messagepack_envelope() {
         let receiver = UdpSocket::bind("127.0.0.1:0").await.unwrap();
         let endpoint = receiver.local_addr().unwrap();
         let peer = TrustedMeshPeer {

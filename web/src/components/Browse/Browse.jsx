@@ -32,7 +32,7 @@ const saveTabsToStorage = (tabsToSave) => {
   );
 };
 
-const Browse = ({ compatibilityTarget } = {}) => {
+const Browse = ({ runtimeProfile } = {}) => {
   const location = useLocation();
   const [tabs, setTabs] = useState(() => loadTabsFromStorage());
   const [activeIndex, setActiveIndex] = useState(0);
@@ -120,7 +120,7 @@ const Browse = ({ compatibilityTarget } = {}) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.state]);
 
-  if (compatibilityTarget) {
+  if (runtimeProfile) {
     const requestedUser =
       location.state?.user ||
       new URLSearchParams(location.search).get('user') ||
@@ -143,7 +143,7 @@ const Browse = ({ compatibilityTarget } = {}) => {
             Browse user files
           </button>
         </div>
-        {compatibilityTarget === 'slskdn' && (
+        {runtimeProfile === 'native' && (
           <Button
             compact
             size="tiny"

@@ -43,7 +43,7 @@ const saveTabsToStorage = (tabsToSave) => {
   );
 };
 
-const Chat = ({ compatibilityTarget, state }) => {
+const Chat = ({ runtimeProfile, state }) => {
   const location = useLocation();
   const [tabs, setTabs] = useState(() => loadTabsFromStorage());
   const [activeIndex, setActiveIndex] = useState(0);
@@ -252,7 +252,7 @@ const Chat = ({ compatibilityTarget, state }) => {
     ),
   }));
 
-  if (compatibilityTarget === 'slskd') {
+  if (runtimeProfile === 'legacy') {
     return (
       <div className="chats compatibility-chat">
         <button

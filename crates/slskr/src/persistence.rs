@@ -98,10 +98,10 @@ pub struct TransferRecord {
     pub next_attempt_at: Option<i64>,
 }
 
-/// Durable transfer-batch metadata.  The frozen slskd target stores batches
+/// Durable transfer-batch metadata. The legacy profile stores batches
 /// in its Transfers database separately from the associated transfer rows;
 /// keeping that boundary here prevents the controller-feature JSON file from
-/// becoming the source of truth for the slskd compatibility profile.
+/// becoming the source of truth for the legacy compatibility profile.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TransferBatchRecord {
     pub id: String,
@@ -112,7 +112,7 @@ pub struct TransferBatchRecord {
     pub options_json: Option<String>,
 }
 
-/// Durable HashDb row using the core columns shared by the frozen slskdN
+/// Durable HashDb row using the core columns shared by the frozen native profile
 /// schema and slskR's content-discovery model.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct HashDbRecord {
@@ -135,7 +135,7 @@ pub struct HashDbStateRecord {
     pub value: Option<String>,
 }
 
-/// Durable overlay/Soulseek traffic counters used by the slskdN fairness
+/// Durable overlay/Soulseek traffic counters used by the native profile fairness
 /// guard projection.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct TrafficTotalsRecord {
@@ -505,9 +505,9 @@ impl<'r> FromRow<'r, SqliteRow> for SearchRecord {
             result_count: row.try_get("result_count")?,
             created_at: row.try_get("created_at")?,
             completed_at: row.try_get("completed_at")?,
-                room: row.try_get("room")?,
-                target: row.try_get("target")?,
-                fallback_attempts: row.try_get("fallback_attempts")?,
+            room: row.try_get("room")?,
+            target: row.try_get("target")?,
+            fallback_attempts: row.try_get("fallback_attempts")?,
         })
     }
 }
@@ -1211,7 +1211,7 @@ impl DatabaseManager {
         .execute(&self.pool)
         .await?;
 
-        // Create the durable slskd-compatible transfer batch table.  This is
+        // Create the durable controller-compatible transfer batch table. This is
         // intentionally separate from the generic controller feature store:
         // batch reads must fail with the Transfers database, and batch rows
         // must survive a process restart alongside their transfer records.

@@ -19,6 +19,7 @@ lock_wait_seconds="${SLSKR_BUILD_LOCK_WAIT_SECONDS:-0}"
 virtual_memory_kib="${SLSKR_RUST_VIRTUAL_MEMORY_KIB:-12582912}"
 build_jobs="${SLSKR_RUST_BUILD_JOBS:-1}"
 max_virtual_memory_kib=12582912
+format_virtual_memory_kib=4194304
 host_platform="$(uname -s 2>/dev/null || printf 'unknown')"
 virtual_memory_limit_supported=1
 if [[ "$host_platform" == "Darwin" ]]; then
@@ -35,6 +36,13 @@ fi
 if [[ ! "$virtual_memory_kib" =~ ^[1-9][0-9]{0,7}$ || "$virtual_memory_kib" -gt "$max_virtual_memory_kib" ]]; then
   printf 'SLSKR_RUST_VIRTUAL_MEMORY_KIB must be between 1 and %s\n' "$max_virtual_memory_kib" >&2
   exit 2
+fi
+if [[ "$1" == "cargo" && "${2:-}" == "fmt" ]] \
+  && ((virtual_memory_kib > format_virtual_memory_kib)); then
+  # rustfmt's diff emitter can construct pathological in-memory diffs for the
+  # monolithic controller source. Keep formatting at the application guard's
+  # 4 GiB hard ceiling even when other Rust commands use the 12 GiB ceiling.
+  virtual_memory_kib="$format_virtual_memory_kib"
 fi
 if [[ "$build_jobs" != "1" ]]; then
   printf 'SLSKR_RUST_BUILD_JOBS must be exactly 1; parallel Rust builds are disabled\n' >&2
@@ -194,14 +202,12 @@ export CARGO_INCREMENTAL="${CARGO_INCREMENTAL:-0}"
 export RUST_TEST_THREADS=1
 export RUST_MIN_STACK="${RUST_MIN_STACK:-16777216}"
 
-# A few long-lived application runners enter the 4 GiB process cgroup before
-# they discover that a Cargo command is needed. On a systemd user manager,
-# move that Cargo command into a sibling Rust-specific unit instead of
-# inheriting the browser-sized cgroup. The build lock is already held by this
-# wrapper, and the child inherits the build settings while marking the guard
-# held so compiler-wrapper calls do not recursively create units.
+# On a systemd user manager, every top-level Cargo command moves into a
+# sibling Rust-specific unit with a hard resident-memory and no-swap ceiling.
+# This applies to direct builds as well as Cargo discovered inside the
+# application guard. The child inherits the build settings while marking the
+# guard held so compiler-wrapper calls do not recursively create units.
 if [[ "$1" == "cargo" \
-  && "${SLSKR_PROCESS_MEMORY_GUARD_HELD:-0}" == "1" \
   && "${SLSKR_BUILD_GUARD_HELD:-0}" != "1" \
   && "${SLSKR_PROCESS_MEMORY_GUARD_DISABLE_SYSTEMD:-0}" != "1" ]] \
   && command -v systemd-run >/dev/null 2>&1 \

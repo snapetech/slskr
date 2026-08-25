@@ -1,10 +1,10 @@
-//! A salted Bloom filter matching slskdN's `PodCore.BloomFilter` bit-for-bit:
+//! A salted Bloom filter matching native profile's `PodCore.BloomFilter` bit-for-bit:
 //! same optimal size/hash-count formulas, same FNV-1a-variant double-hashing
 //! scheme (operating on UTF-16 code units, matching C# `foreach (char c in
 //! input)` exactly via `str::encode_utf16`), so filters built by slskR and
-//! slskdN against the same salted items are directly comparable.
+//! native profile against the same salted items are directly comparable.
 //!
-//! One deliberate divergence: slskdN's `Math.Abs` throws `OverflowException`
+//! One deliberate divergence: native profile's `Math.Abs` throws `OverflowException`
 //! on the `i32::MIN` hash-combination edge case (~1 in 4 billion). We treat
 //! that value safely via `i32::unsigned_abs` instead of importing the crash.
 
@@ -122,7 +122,7 @@ fn hash_index(item: &str, i: usize, bit_size: usize) -> usize {
     (combined.unsigned_abs() as usize) % bit_size
 }
 
-/// Matches slskdN's `LibraryBloomDiffService.BuildSaltedItem`: salt, a
+/// Matches native profile's `LibraryBloomDiffService.BuildSaltedItem`: salt, a
 /// lower-cased namespace, and a lower-cased identifier, joined by the ASCII
 /// Unit Separator control character.
 pub fn build_salted_item(salt_id: &str, namespace: &str, identifier: &str) -> String {
@@ -140,7 +140,7 @@ mod tests {
 
     #[test]
     fn stable_hash_matches_the_oracle_fnv1a_variant() {
-        // Hand-computed against slskdN's GetStableHash(string, int) for a
+        // Hand-computed against native profile's GetStableHash(string, int) for a
         // plain-ASCII input, seed 1: hash = 2166136261 ^ 1 = 2166136260,
         // then for each byte b: hash = (hash ^ b) * 16777619 (u32 wrapping).
         let mut hash: u32 = 2_166_136_261_u32 ^ 1;

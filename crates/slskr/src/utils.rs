@@ -12,7 +12,7 @@ use slskr_client::protocol::peer::PeerMessage;
 use slskr_client::protocol::server::ServerMessage;
 use tokio::net::TcpStream;
 
-use crate::config::{AppConfig, ControllerCompatibilityTarget};
+use crate::config::{AppConfig, ControllerProfile};
 
 pub(crate) fn is_blocked_outbound_ipv4(ip: Ipv4Addr) -> bool {
     let address = u32::from(ip);
@@ -105,8 +105,8 @@ pub struct RequestSecurityHeaders {
     pub cookie: Option<String>,
     pub content_type: Option<String>,
     pub x_share_token: Option<String>,
-    pub x_slskdn_api_key: Option<String>,
-    pub x_slskdn_csrf: Option<String>,
+    pub x_gateway_api_key: Option<String>,
+    pub x_gateway_csrf: Option<String>,
     pub x_relay_agent: Option<String>,
     pub x_relay_credential: Option<String>,
     /// ActivityPub HTTP Signature verification: `Date`, `Digest`, and
@@ -126,8 +126,8 @@ impl RequestSecurityHeaders {
             cookie: h.cookie.clone(),
             content_type: h.content_type.clone(),
             x_share_token: h.x_share_token.clone(),
-            x_slskdn_api_key: h.x_slskdn_api_key.clone(),
-            x_slskdn_csrf: h.x_slskdn_csrf.clone(),
+            x_gateway_api_key: h.x_gateway_api_key.clone(),
+            x_gateway_csrf: h.x_gateway_csrf.clone(),
             x_relay_agent: h.x_relay_agent.clone(),
             x_relay_credential: h.x_relay_credential.clone(),
             date: h.date.clone(),
@@ -185,14 +185,14 @@ struct RouteAuthPolicy<'a> {
     scopes: &'a [String],
 }
 
-static SLSKDN_CONTROLLER_AUTH_RULES: LazyLock<Vec<ControllerAuthRule>> = LazyLock::new(|| {
-    serde_json::from_str(include_str!("../data/slskdn-controller-auth-policy.json"))
-        .expect("checked slskdN controller auth policy registry")
+static NATIVE_CONTROLLER_AUTH_RULES: LazyLock<Vec<ControllerAuthRule>> = LazyLock::new(|| {
+    serde_json::from_str(include_str!("../data/native-controller-auth-policy.json"))
+        .expect("checked native controller auth policy registry")
 });
 
-static SLSKD_CONTROLLER_AUTH_RULES: LazyLock<Vec<ControllerAuthRule>> = LazyLock::new(|| {
-    serde_json::from_str(include_str!("../data/slskd-controller-auth-policy.json"))
-        .expect("checked slskd controller auth policy registry")
+static LEGACY_CONTROLLER_AUTH_RULES: LazyLock<Vec<ControllerAuthRule>> = LazyLock::new(|| {
+    serde_json::from_str(include_str!("../data/legacy-controller-auth-policy.json"))
+        .expect("checked legacy controller auth policy registry")
 });
 
 fn route_template_matches(template: &str, path: &str) -> bool {
@@ -234,13 +234,13 @@ fn route_template_precedence(template: &str) -> Vec<u8> {
 }
 
 fn controller_route_auth_policy(
-    target: ControllerCompatibilityTarget,
+    target: ControllerProfile,
     method: &str,
     path: &str,
 ) -> Option<RouteAuthPolicy<'static>> {
     let rules = match target {
-        ControllerCompatibilityTarget::Slskd => &*SLSKD_CONTROLLER_AUTH_RULES,
-        ControllerCompatibilityTarget::Slskdn => &*SLSKDN_CONTROLLER_AUTH_RULES,
+        ControllerProfile::Legacy => &*LEGACY_CONTROLLER_AUTH_RULES,
+        ControllerProfile::Native => &*NATIVE_CONTROLLER_AUTH_RULES,
     };
     let rule = rules
         .iter()
@@ -298,6 +298,10 @@ pub(crate) fn issue_admin_jwt(
     now: u64,
 ) -> Option<(String, AdminJwtClaims)> {
     let secret = config.controller_web_jwt_key.as_str();
+    let issuer = match config.controller_profile {
+        crate::config::ControllerProfile::Legacy => "slskd",
+        crate::config::ControllerProfile::Native => "slskr",
+    };
     let claims = AdminJwtClaims {
         jti: uuid::Uuid::new_v4().simple().to_string(),
         name: username.to_owned(),
@@ -306,8 +310,8 @@ pub(crate) fn issue_admin_jwt(
         iat: now,
         nbf: now,
         exp: now.saturating_add(config.controller_web_jwt_ttl_millis / 1000),
-        iss: "slskd".to_owned(),
-        aud: "slskd".to_owned(),
+        iss: issuer.to_owned(),
+        aud: issuer.to_owned(),
     };
     let header = URL_SAFE_NO_PAD.encode(br#"{"alg":"HS256","typ":"JWT"}"#);
     let payload = URL_SAFE_NO_PAD.encode(serde_json::to_vec(&claims).ok()?);
@@ -346,10 +350,14 @@ pub(crate) fn verify_admin_jwt(
     mac.verify_slice(&signature).ok()?;
     let claims =
         serde_json::from_slice::<AdminJwtClaims>(&URL_SAFE_NO_PAD.decode(payload).ok()?).ok()?;
+    let issuer = match config.controller_profile {
+        crate::config::ControllerProfile::Legacy => "slskd",
+        crate::config::ControllerProfile::Native => "slskr",
+    };
     if claims.role != "Administrator"
         || claims.scope != "*"
-        || claims.iss != "slskd"
-        || claims.aud != "slskd"
+        || claims.iss != issuer
+        || claims.aud != issuer
         || claims.jti.is_empty()
         || claims.name.trim().is_empty()
         || claims.nbf > now
@@ -503,7 +511,7 @@ pub fn authorize_controller_route_from(
     if !config.auth_required {
         return Ok(());
     }
-    let policy = controller_route_auth_policy(config.controller_compatibility_target, method, path)
+    let policy = controller_route_auth_policy(config.controller_profile, method, path)
         .unwrap_or_else(|| {
             let normalized = normalize_api_path(path);
             let public = !path.starts_with("/api/")
@@ -536,7 +544,7 @@ pub fn authorize_controller_route_from(
 }
 
 pub fn controller_route_requires_principal(config: &AppConfig, method: &str, path: &str) -> bool {
-    controller_route_auth_policy(config.controller_compatibility_target, method, path).map_or_else(
+    controller_route_auth_policy(config.controller_profile, method, path).map_or_else(
         || {
             let normalized = normalize_api_path(path);
             path.starts_with("/api/")
@@ -1416,7 +1424,7 @@ mod controller_auth_tests {
             None,
             FileConfig::default(),
             &TestEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                .with("SLSKR_CONTROLLER_PROFILE", target)
                 .with("SLSKR_API_TOKEN", "admin-token")
                 .with("SLSKR_API_READ_WRITE_TOKEN", "write-token")
                 .with("SLSKR_API_READ_ONLY_TOKEN", "read-token")
@@ -1525,9 +1533,9 @@ mod controller_auth_tests {
     }
 
     #[test]
-    fn frozen_slskd_and_slskdn_auth_registries_are_exhaustively_enforced() {
-        assert_registry("slskd", &SLSKD_CONTROLLER_AUTH_RULES, 96);
-        assert_registry("slskdn", &SLSKDN_CONTROLLER_AUTH_RULES, 683);
+    fn frozen_controller_and_native_auth_registries_are_exhaustively_enforced() {
+        assert_registry("slskd", &LEGACY_CONTROLLER_AUTH_RULES, 96);
+        assert_registry("slskdn", &NATIVE_CONTROLLER_AUTH_RULES, 683);
     }
 
     #[test]

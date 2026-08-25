@@ -52,8 +52,8 @@ pub struct HttpHeaders {
     pub transfer_encoding: Option<String>,
     pub authorization: Option<String>,
     pub x_api_key: Option<String>,
-    pub x_slskdn_api_key: Option<String>,
-    pub x_slskdn_csrf: Option<String>,
+    pub x_gateway_api_key: Option<String>,
+    pub x_gateway_csrf: Option<String>,
     pub x_share_token: Option<String>,
     pub x_relay_agent: Option<String>,
     pub x_relay_credential: Option<String>,
@@ -110,8 +110,8 @@ impl HttpHeaders {
                     "transfer-encoding" => headers.transfer_encoding = Some(value.to_lowercase()),
                     "authorization" => headers.authorization = Some(value.to_string()),
                     "x-api-key" => headers.x_api_key = Some(value.to_string()),
-                    "x-slskdn-apikey" => headers.x_slskdn_api_key = Some(value.to_string()),
-                    "x-slskdn-csrf" => headers.x_slskdn_csrf = Some(value.to_string()),
+                    "x-slskdn-apikey" => headers.x_gateway_api_key = Some(value.to_string()),
+                    "x-slskdn-csrf" => headers.x_gateway_csrf = Some(value.to_string()),
                     "x-share-token" => headers.x_share_token = Some(value.to_string()),
                     "x-relay-agent" => headers.x_relay_agent = Some(value.to_string()),
                     "x-relay-credential" => headers.x_relay_credential = Some(value.to_string()),
@@ -342,11 +342,11 @@ async fn read_http_request_inner<R: AsyncBufRead + Unpin>(
             }
             "x-slskdn-apikey" => {
                 reject_duplicate_singleton(&mut singleton_headers, &name)?;
-                headers.x_slskdn_api_key = Some(value.to_string());
+                headers.x_gateway_api_key = Some(value.to_string());
             }
             "x-slskdn-csrf" => {
                 reject_duplicate_singleton(&mut singleton_headers, &name)?;
-                headers.x_slskdn_csrf = Some(value.to_string());
+                headers.x_gateway_csrf = Some(value.to_string());
             }
             "x-share-token" => {
                 reject_duplicate_singleton(&mut singleton_headers, &name)?;
@@ -1032,8 +1032,8 @@ mod tests {
         assert_eq!(headers.content_length, Some(256));
         assert_eq!(headers.authorization, Some("Bearer token123".to_string()));
         assert_eq!(headers.x_api_key, Some("key123".to_string()));
-        assert_eq!(headers.x_slskdn_api_key, Some("gateway-key".to_string()));
-        assert_eq!(headers.x_slskdn_csrf, Some("csrf-token".to_string()));
+        assert_eq!(headers.x_gateway_api_key, Some("gateway-key".to_string()));
+        assert_eq!(headers.x_gateway_csrf, Some("csrf-token".to_string()));
         assert_eq!(headers.x_share_token, Some("share-secret".to_string()));
         assert_eq!(headers.range, Some("bytes=10-19".to_string()));
         assert_eq!(
@@ -1409,7 +1409,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn slskd_file_routes_accept_client_base64_whitespace_only_in_the_final_segment() {
+    async fn controller_file_routes_accept_client_base64_whitespace_only_in_the_final_segment() {
         for target in [
             "/api/v0/files/downloads/directories/Zm9v%0A?recursive=True",
             "/api/files/incomplete/files/Zm9v%0D%0A",

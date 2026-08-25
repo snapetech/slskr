@@ -337,14 +337,13 @@ def is_app_version(value):
             "full",
             "current",
             "latest",
-            "isUpdateAvailable",
             "isCanary",
             "isDevelopment",
         )
         and isinstance(value["full"], str)
         and isinstance(value["current"], str)
         and isinstance(value["latest"], str)
-        and isinstance(value["isUpdateAvailable"], bool)
+        and ("isUpdateAvailable" not in value or isinstance(value["isUpdateAvailable"], bool))
         and isinstance(value["isCanary"], bool)
         and isinstance(value["isDevelopment"], bool)
     )

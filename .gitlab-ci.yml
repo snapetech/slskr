@@ -20,7 +20,7 @@ rust:
   script:
     - scripts/check-rust-build-guard.sh
     - scripts/test-rust-build-guard.sh
-    - scripts/with-build-guard.sh cargo fmt --all --check
+    - scripts/check-rust-format.sh
     - scripts/with-build-guard.sh cargo clippy --workspace --all-targets -- -D warnings
     - scripts/with-build-guard.sh cargo check -p slskr-web --target wasm32-unknown-unknown
     - scripts/with-build-guard.sh cargo test --workspace

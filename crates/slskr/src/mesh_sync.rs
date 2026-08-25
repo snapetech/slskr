@@ -1,4 +1,4 @@
-//! Runtime handling for the frozen slskdN `MESH:<TYPE>:<JSON>` private-message
+//! Runtime handling for the frozen native profile `MESH:<TYPE>:<JSON>` private-message
 //! protocol.
 
 use std::{

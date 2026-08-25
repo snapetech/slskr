@@ -1857,20 +1857,20 @@ const PlayerLauncher = ({ compact = false, onPlayItem }) => {
 
 const PlayerVisualTile = ({
   audioElement,
-  compatibilityTarget,
+  runtimeProfile,
   current,
   mode,
   onModeChange,
   onTileModeChange,
   tileMode,
 }) => {
-  const compatibilitySlskdn = compatibilityTarget === 'slskdn';
+  const nativeProfile = runtimeProfile === 'native';
   const tileModes = ['art', 'rustymilk-webgl2', 'rustymilk-webgpu', 'spectrum', 'scope'];
   const visualizerTileModes = ['rustymilk-webgl2', 'rustymilk-webgpu'];
   const tileModeLabels = {
     art: 'album art',
-    'rustymilk-webgl2': compatibilitySlskdn ? 'MilkDrop3 WebGL2' : 'RustyMilk WebGL2',
-    'rustymilk-webgpu': compatibilitySlskdn ? 'MilkDrop3 WebGPU' : 'RustyMilk WebGPU',
+    'rustymilk-webgl2': nativeProfile ? 'MilkDrop3 WebGL2' : 'RustyMilk WebGL2',
+    'rustymilk-webgpu': nativeProfile ? 'MilkDrop3 WebGPU' : 'RustyMilk WebGPU',
     butterchurn: 'Butterchurn',
     scope: 'signal scope',
     spectrum: 'spectrum bars',
@@ -1897,7 +1897,7 @@ const PlayerVisualTile = ({
   const normalizedTileMode = tileModes.includes(tileMode) ? tileMode : 'art';
   const showingVisualizer = visualizerTileModes.includes(normalizedTileMode);
   const showingAnalyzer = ['spectrum', 'scope'].includes(normalizedTileMode);
-  const nextTileMode = compatibilitySlskdn && normalizedTileMode === 'art'
+  const nextTileMode = nativeProfile && normalizedTileMode === 'art'
     ? 'butterchurn'
     : tileModes[(tileModes.indexOf(normalizedTileMode) + 1) % tileModes.length];
   const visualizerDisplayMode = mode === 'off' ? 'inline' : mode;
@@ -1997,7 +1997,7 @@ const PlayerVisualTile = ({
         }
       />
       <div className="player-visual-tile-controls" onClick={(event) => event.stopPropagation()}>
-        {(compatibilitySlskdn
+        {(nativeProfile
           ? ['spectrum', 'scope', 'butterchurn', 'rustymilk-webgl2', 'rustymilk-webgpu']
           : ['spectrum', 'scope', 'rustymilk-webgl2', 'rustymilk-webgpu']
         ).map((option) => (
@@ -2092,7 +2092,7 @@ const PlayerAnalyzerTile = ({ audioElement, mode, onModeChange }) => {
   );
 };
 
-const PlayerBar = ({ compatibilityTarget } = {}) => {
+const PlayerBar = ({ runtimeProfile } = {}) => {
   const navigate = useNavigate();
   const audioRef = useRef(null);
   const fadeAudioRef = useRef(null);
@@ -2610,7 +2610,7 @@ const PlayerBar = ({ compatibilityTarget } = {}) => {
         <div className="player-display">
           <PlayerVisualTile
             audioElement={playerAudioElement}
-            compatibilityTarget={compatibilityTarget}
+            runtimeProfile={runtimeProfile}
             current={current}
             mode={visualizerMode}
             onModeChange={setVisualizerMode}
@@ -2750,13 +2750,13 @@ const PlayerBar = ({ compatibilityTarget } = {}) => {
               active={visualizerMode !== 'off'}
               content={
                 visualizerMode === 'off'
-                  ? `Show the ${compatibilityTarget === 'slskdn' ? 'MilkDrop3' : 'RustyMilk'} visualizer.`
-                  : `Hide the ${compatibilityTarget === 'slskdn' ? 'MilkDrop3' : 'RustyMilk'} visualizer.`
+                  ? `Show the ${runtimeProfile === 'native' ? 'MilkDrop3' : 'RustyMilk'} visualizer.`
+                  : `Hide the ${runtimeProfile === 'native' ? 'MilkDrop3' : 'RustyMilk'} visualizer.`
               }
               aria-label={
                 visualizerMode === 'off'
-                  ? `Show ${compatibilityTarget === 'slskdn' ? 'MilkDrop3' : 'RustyMilk'} visualizer`
-                  : `Hide ${compatibilityTarget === 'slskdn' ? 'MilkDrop3' : 'RustyMilk'} visualizer`
+                  ? `Show ${runtimeProfile === 'native' ? 'MilkDrop3' : 'RustyMilk'} visualizer`
+                  : `Hide ${runtimeProfile === 'native' ? 'MilkDrop3' : 'RustyMilk'} visualizer`
               }
               data-testid="player-toggle-visualizer"
               icon="eye"

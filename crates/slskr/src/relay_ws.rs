@@ -179,7 +179,7 @@ where
                 .unwrap_or_default();
             let credential = arguments.get(1).and_then(Value::as_str).unwrap_or_default();
             let settings = state.advanced_networking.read().await.relay.clone();
-            let scheme = relay::credential_scheme(state.config.controller_compatibility_target);
+            let scheme = relay::credential_scheme(state.config.controller_profile);
             let authenticated = state.relay.write().await.protocol.authenticate_agent(
                 &settings,
                 scheme,

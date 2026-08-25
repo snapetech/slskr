@@ -47,7 +47,7 @@ async fn daemon_http_api_smoke() {
         .arg("serve")
         .env("SLSKR_HTTP_BIND", format!("127.0.0.1:{port}"))
         .env("SLSKR_STATE_DIR", &state_dir)
-        .env("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd")
+        .env("SLSKR_CONTROLLER_PROFILE", "legacy")
         .env("SLSKD_NO_HTTPS", "true")
         .env("SLSKR_API_TOKEN", "smoke-token")
         // Windows starts Rust processes with a small default stack; the
@@ -170,7 +170,7 @@ async fn serve_once_waits_for_the_accepted_request() {
         .args(["serve", "--once"])
         .env("SLSKR_HTTP_BIND", format!("127.0.0.1:{port}"))
         .env("SLSKR_STATE_DIR", &state_dir)
-        .env("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd")
+        .env("SLSKR_CONTROLLER_PROFILE", "legacy")
         .env("SLSKD_NO_HTTPS", "true")
         .env("SLSKR_AUTO_CONNECT", "false")
         .env("SLSKR_DHT_ENABLED", "false")

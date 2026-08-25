@@ -1,6 +1,6 @@
 //! Bounded security controls used by the compatibility runtime.
 //!
-//! The frozen slskdN security surface contains several small stateful services
+//! The frozen native profile security surface contains several small stateful services
 //! rather than one shared security database.  These controls keep their state
 //! local, bounded, and redacted at the reporting boundary so the callers can
 //! compose them without leaking peer identifiers or secret material.
@@ -1370,7 +1370,7 @@ impl HoneypotControl {
     pub const MAX_EVENTS: usize = 10_000;
     pub const MAX_PROFILES: usize = 1_000;
     const DECOYS: [&'static str; 5] = [
-        "slskd_config_backup.zip",
+        "slskr_config_backup.zip",
         "admin_credentials.txt",
         "database_dump.sql",
         "private_keys.pem",

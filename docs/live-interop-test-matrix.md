@@ -109,7 +109,7 @@ For account rotation, add more `SLSKR_TEST_N_USERNAME` / `SLSKR_TEST_N_PASSWORD`
 
 | Scope | Result | Evidence |
 | --- | --- | --- |
-| `slskr` Rust formatting | Passed | `scripts/with-build-guard.sh cargo fmt --all --check` |
+| `slskr` Rust formatting | Passed | `scripts/check-rust-format.sh` |
 | `slskr` Rust workspace tests | Passed | `scripts/with-build-guard.sh cargo test --workspace`: all protocol, client, daemon, API smoke, and Soulfind contract tests passed |
 | `slskr` web tests | Passed | `web npm test`: 82 files, 508 tests passed |
 | `slskr` web production build | Passed | `web npm run build` |

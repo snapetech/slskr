@@ -210,7 +210,7 @@ Scope: current `slskR` checkout, including Rust daemon/API, Rust WASM UI, React 
 - `npm --prefix web outdated --json`
 - `npm --prefix dashboard outdated --json`
 - `npm --prefix client-ts outdated --json`
-- `scripts/with-build-guard.sh cargo fmt --all --check`
+- `scripts/check-rust-format.sh`
 - `scripts/with-build-guard.sh cargo clippy --workspace --all-targets -- -D warnings`
 - `python3 -m compileall -q client-python`
 - `npm --prefix web run lint`

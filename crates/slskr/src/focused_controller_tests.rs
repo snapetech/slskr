@@ -115,14 +115,14 @@ fn test_state_with_env(
         messages: RwLock::new(super::MessageStore::new()),
         managed_blacklist: RwLock::new(super::ManagedBlacklistRuntime::new(
             config.managed_blacklist.clone(),
-            config.controller_compatibility_target,
+            config.controller_profile,
             config.controller_case_sensitive_regex,
         )),
         search_request_filters: RwLock::new(
             super::compile_controller_regexes(
                 &config.controller_search_request_filters,
                 config.controller_case_sensitive_regex,
-                config.controller_compatibility_target,
+                config.controller_profile,
             )
             .expect("focused search filters"),
         ),
@@ -252,7 +252,7 @@ fn write_file_lifecycle_ledger(file_name: &str, ledger: &[serde_json::Value]) {
 }
 
 #[tokio::test]
-async fn controller_api_differential_slskd_file_transfer_room_residuals() {
+async fn controller_api_differential_controller_file_transfer_room_residuals() {
     let target = "slskd";
     let mut ledger = Vec::new();
     let mut mismatches = Vec::new();
@@ -274,7 +274,7 @@ async fn controller_api_differential_slskd_file_transfer_room_residuals() {
 
     let (state, _receiver) = test_state_with_env(
         MapEnv::default()
-            .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+            .with("SLSKR_CONTROLLER_PROFILE", target)
             .with("SLSKR_REMOTE_FILE_MANAGEMENT", "true")
             .with("SLSKR_TEST_USER_ENDPOINT_OVERRIDES", "peer=127.0.0.1:2234"),
     );
@@ -468,7 +468,7 @@ async fn controller_api_differential_slskd_file_transfer_room_residuals() {
     let reset_dir = state.config.state_dir.display().to_string();
     let (reset_state, _receiver) = test_state_with_env(
         MapEnv::default()
-            .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+            .with("SLSKR_CONTROLLER_PROFILE", target)
             .with("SLSKR_REMOTE_FILE_MANAGEMENT", "true")
             .with("SLSKR_STATE_DIR", &reset_dir),
     );
@@ -535,7 +535,7 @@ async fn controller_api_differential_slskd_file_transfer_room_residuals() {
     fs::write(&incomplete_conflict, b"not a directory").expect("incomplete conflict");
     let (failure_state, _receiver) = test_state_with_env(
         MapEnv::default()
-            .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+            .with("SLSKR_CONTROLLER_PROFILE", target)
             .with("SLSKR_REMOTE_FILE_MANAGEMENT", "true"),
     );
     *failure_state
@@ -874,11 +874,14 @@ async fn controller_api_differential_slskd_file_transfer_room_residuals() {
         mismatches.len(),
         mismatches.join("; ")
     );
-    write_ledger("slskd_focused_file_transfer_room_residuals.json", &ledger);
+    write_ledger(
+        "controller_focused_file_transfer_room_residuals.json",
+        &ledger,
+    );
 }
 
 #[test]
-fn folder_contents_response_parser_accepts_slskd_wire_shape() {
+fn folder_contents_response_parser_accepts_controller_wire_shape() {
     let entries =
         crate::config::parse_share_entries("open-commons-fixtures/commons-click-track.ogg=168370")
             .expect("fixture share entry");
@@ -924,11 +927,11 @@ fn folder_request_replaces_previous_browse_entries() {
 }
 
 #[tokio::test]
-async fn file_lifecycle_differential_slskd_file_service_existing_missing_overwrite() {
+async fn file_lifecycle_differential_controller_file_service_existing_missing_overwrite() {
     let target = "slskd";
     let (state, _receiver) = test_state_with_env(
         MapEnv::default()
-            .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+            .with("SLSKR_CONTROLLER_PROFILE", target)
             .with("SLSKR_REMOTE_FILE_MANAGEMENT", "true"),
     );
     let managed_file = state
@@ -969,7 +972,7 @@ async fn file_lifecycle_differential_slskd_file_service_existing_missing_overwri
         managed_file.exists()
     );
     write_file_lifecycle_ledger(
-        "slskd_focused_file_service_existing_missing_overwrite.json",
+        "controller_focused_file_service_existing_missing_overwrite.json",
         &[serde_json::json!({
             "target": target,
             "subject": "Files/FileService",
@@ -1111,15 +1114,15 @@ fn security_authorization_matrix_matches_declared_policy_for_every_frozen_route(
     for (target, source) in [
         (
             "slskd",
-            include_str!("../data/slskd-controller-auth-policy.json"),
+            include_str!("../data/legacy-controller-auth-policy.json"),
         ),
         (
             "slskdn",
-            include_str!("../data/slskdn-controller-auth-policy.json"),
+            include_str!("../data/native-controller-auth-policy.json"),
         ),
     ] {
         let rules: Vec<AuthPolicyRow> =
-            serde_json::from_str(source).expect("checked controller auth policy registry");
+            serde_json::from_str(source).expect("checked profile auth policy registry");
         let state_dir = std::env::temp_dir().join(format!(
             "slskr-focused-security-auth-{target}-{}",
             uuid::Uuid::new_v4()
@@ -1130,7 +1133,7 @@ fn security_authorization_matrix_matches_declared_policy_for_every_frozen_route(
             &MapEnv::default()
                 .with("SLSKR_STATE_DIR", state_dir.to_str().expect("state path"))
                 .with("SLSKR_AUTH_DISABLED", "false")
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                .with("SLSKR_CONTROLLER_PROFILE", target)
                 .with("SLSKR_API_TOKEN", "admin-token")
                 .with("SLSKR_API_READ_WRITE_TOKEN", "write-token")
                 .with("SLSKR_API_READ_ONLY_TOKEN", "read-token")
@@ -1213,10 +1216,10 @@ fn security_authorization_matrix_matches_declared_policy_for_every_frozen_route(
 }
 
 #[tokio::test]
-async fn application_projection_exposes_selected_compatibility_target() {
-    for target in ["slskd", "slskdn"] {
+async fn application_projection_exposes_selected_runtime_profile() {
+    for (reference_fixture, expected_profile) in [("slskd", "legacy"), ("slskdn", "native")] {
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", reference_fixture),
         );
         let response = super::route_http_request("GET", "/api/v0/application", None, "", &state)
             .await
@@ -1225,15 +1228,14 @@ async fn application_projection_exposes_selected_compatibility_target() {
             .expect("application projection JSON");
 
         assert_eq!(response.status, "200 OK");
-        assert_eq!(body["compatibilityTarget"], target);
+        assert_eq!(body["runtimeProfile"], expected_profile);
     }
 }
 
 #[tokio::test]
 async fn watched_obfuscation_changes_mark_reconnect_once_while_connected() {
-    let (state, _receiver) = test_state_with_env(
-        MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
-    );
+    let (state, _receiver) =
+        test_state_with_env(MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "native"));
     state.session.write().await.state = "connected";
     let yaml = "soulseek:\n  obfuscation:\n    enabled: false\n    mode: prefer\n    listen_port: 50302\n    advertise_regular_port: false\n    prefer_outbound: false\n";
     fs::write(state.config.state_dir.join("slskd.yml"), yaml).unwrap();
@@ -1259,12 +1261,11 @@ async fn watched_obfuscation_changes_mark_reconnect_once_while_connected() {
 }
 
 #[tokio::test]
-async fn slskd_debug_view_projects_frozen_default_authentication_values() {
-    let (state, _receiver) = test_state_with_env(
-        MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd"),
-    );
+async fn controller_debug_view_projects_frozen_default_authentication_values() {
+    let (state, _receiver) =
+        test_state_with_env(MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "legacy"));
     let overlay = state.options_overlay.read().await;
-    let debug = super::slskd_options_debug_view(&state, &overlay);
+    let debug = super::controller_options_debug_view(&state, &overlay);
 
     assert!(state.config.controller_metrics_password.is_empty());
     assert!(state
@@ -1330,44 +1331,44 @@ fn profile_static_roots_serve_the_selected_spa_on_dashboard() {
             .map(|duration| duration.as_nanos())
             .unwrap_or(0)
     ));
-    fs::create_dir_all(root.join("slskd")).expect("create slskd profile root");
-    fs::create_dir_all(root.join("slskdn")).expect("create slskdn profile root");
-    fs::write(root.join("slskd/index.html"), "slskd-ui").expect("write slskd index");
-    fs::write(root.join("slskdn/index.html"), "slskdn-ui").expect("write slskdn index");
+    fs::create_dir_all(root.join("legacy")).expect("create legacy profile root");
+    fs::create_dir_all(root.join("native")).expect("create native profile root");
+    fs::write(root.join("legacy/index.html"), "legacy-ui").expect("write legacy index");
+    fs::write(root.join("native/index.html"), "native-ui").expect("write native index");
 
-    let (slskd_root, slskd_index, _) = super::web_static_file_for_request(
+    let (legacy_root, legacy_index, _) = super::web_static_file_for_request(
         "/dashboard",
         Some(&root),
-        Some(super::ControllerCompatibilityTarget::Slskd),
+        Some(super::ControllerProfile::Legacy),
     )
-    .expect("slskd dashboard SPA root");
-    let (slskdn_root, slskdn_index, _) = super::web_static_file_for_request(
+    .expect("legacy dashboard SPA root");
+    let (native_root, native_index, _) = super::web_static_file_for_request(
         "/dashboard",
         Some(&root),
-        Some(super::ControllerCompatibilityTarget::Slskdn),
+        Some(super::ControllerProfile::Native),
     )
-    .expect("slskdn dashboard SPA root");
+    .expect("native dashboard SPA root");
 
-    assert!(slskd_root.ends_with("slskd"));
-    assert!(slskd_index.ends_with("slskd/index.html"));
-    assert!(slskdn_root.ends_with("slskdn"));
-    assert!(slskdn_index.ends_with("slskdn/index.html"));
+    assert!(legacy_root.ends_with("legacy"));
+    assert!(legacy_index.ends_with("legacy/index.html"));
+    assert!(native_root.ends_with("native"));
+    assert!(native_index.ends_with("native/index.html"));
     assert!(super::web_static_file_for_request(
         "/health",
         Some(&root),
-        Some(super::ControllerCompatibilityTarget::Slskd),
+        Some(super::ControllerProfile::Legacy),
     )
     .is_none());
     assert!(super::web_static_file_for_request(
         "/health/mesh",
         Some(&root),
-        Some(super::ControllerCompatibilityTarget::Slskdn),
+        Some(super::ControllerProfile::Native),
     )
     .is_none());
     assert!(super::web_static_file_for_request(
         "/health?probe=1",
         Some(&root),
-        Some(super::ControllerCompatibilityTarget::Slskd),
+        Some(super::ControllerProfile::Legacy),
     )
     .is_none());
     let _ = fs::remove_dir_all(root);

@@ -51,7 +51,7 @@ run_optional_step shellcheck "Shell lint" shellcheck \
   scripts/*.sh
 run_optional_step actionlint "GitHub workflow lint" actionlint
 run_step "Security scans" scripts/run-security-scans.sh
-run_step "Rust formatting" scripts/with-build-guard.sh cargo fmt --all --check
+run_step "Rust formatting" scripts/check-rust-format.sh
 run_step "Rust clippy" scripts/with-build-guard.sh cargo clippy --workspace --all-targets -- -D warnings
 run_step "Rust wasm web check" scripts/with-build-guard.sh cargo check -p slskr-web --target wasm32-unknown-unknown
 run_step "Rust tests" scripts/with-build-guard.sh cargo test --workspace

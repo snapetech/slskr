@@ -218,7 +218,7 @@ fn is_expected_remote_upload_failure(error: &str) -> bool {
     .any(|marker| error.contains(marker))
 }
 
-fn print_controller_logo(_target: ControllerCompatibilityTarget) {
+fn print_controller_logo(_target: ControllerProfile) {
     print_native_product_logo();
 }
 
@@ -309,7 +309,7 @@ const WEBSOCKET_AUTH_PROTOCOL_PREFIX: &str = "slskr.api-token.";
 use crate::config::{
     json_bool_option, json_escape, json_option, json_u32_option, json_u64_option,
     json_usize_option, parse_compat_ip_address, AcoustIdIntegrationSettings, AppConfig,
-    ChromaprintIntegrationSettings, ConfigEnv, ControllerCompatibilityTarget, IntegrationSettings,
+    ChromaprintIntegrationSettings, ConfigEnv, ControllerProfile, IntegrationSettings,
     MusicBrainzIntegrationSettings, PodSignatureMode, ProcessEnv, ShareDirectory, TrustedMeshPeer,
 };
 use crate::utils::*;
@@ -476,7 +476,7 @@ fn controller_cors_headers(
     fallback_host: &str,
     preflight: bool,
 ) -> String {
-    if config.controller_compatibility_target == ControllerCompatibilityTarget::Slskd {
+    if config.controller_profile == ControllerProfile::Legacy {
         let security_headers = RequestSecurityHeaders::from_http_headers(headers);
         let Some(origin) = security_headers.origin.as_deref() else {
             return String::new();
@@ -611,7 +611,7 @@ async fn run() -> Result<(), String> {
 
 fn frozen_obfuscation_startup_error(config: &AppConfig) -> Option<&'static str> {
     (!config.current_upstream_behavior
-        && config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
+        && config.controller_profile == ControllerProfile::Native
         && config.obfuscation_enabled
         && !config.obfuscation_advertise_regular_port)
         .then_some(
@@ -999,7 +999,7 @@ impl ShareRoot {
     }
 }
 
-fn slskd_share_value(root: &ShareRoot) -> serde_json::Value {
+fn controller_share_value(root: &ShareRoot) -> serde_json::Value {
     let mut value = serde_json::json!({
         "localPath": root.local_path.display().to_string(),
         "id": share_root_id(&root.label),
@@ -1100,7 +1100,7 @@ impl ShareLifecycleState {
         }
     }
 
-    fn json(&self, target: ControllerCompatibilityTarget) -> serde_json::Value {
+    fn json(&self, target: ControllerProfile) -> serde_json::Value {
         let scan_progress = if self.scan_progress.fract() == 0.0 {
             serde_json::json!(self.scan_progress as u64)
         } else {
@@ -1118,7 +1118,7 @@ impl ShareLifecycleState {
         });
         if self.ready {
             value["hosts"] = serde_json::json!(["local"]);
-        } else if target == ControllerCompatibilityTarget::Slskdn {
+        } else if target == ControllerProfile::Native {
             value["hosts"] = serde_json::json!([]);
         }
         value
@@ -1569,7 +1569,7 @@ impl SearchResultEntry {
         )
     }
 
-    fn slskd_file_json(&self) -> serde_json::Value {
+    fn controller_file_json(&self) -> serde_json::Value {
         serde_json::json!({
             "filename": self.filename,
             "size": self.size,
@@ -1723,7 +1723,7 @@ impl SearchRecord {
             .map(SearchResultEntry::json)
             .collect::<Vec<_>>()
             .join(",");
-        let responses = self.slskd_responses_json();
+        let responses = self.controller_responses_json();
         let response_count = self
             .results
             .iter()
@@ -1771,11 +1771,11 @@ impl SearchRecord {
         )
     }
 
-    fn slskd_responses_json(&self) -> String {
-        self.slskd_responses_json_with_query(None)
+    fn controller_responses_json(&self) -> String {
+        self.controller_responses_json_with_query(None)
     }
 
-    fn slskd_responses_json_with_query(&self, query: Option<&str>) -> String {
+    fn controller_responses_json_with_query(&self, query: Option<&str>) -> String {
         let filter = RecordListFilter::from_query(query);
         let mut grouped: BTreeMap<String, Vec<&SearchResultEntry>> = BTreeMap::new();
         for result in &self.results {
@@ -1803,12 +1803,12 @@ impl SearchRecord {
                 let files = entries
                     .iter()
                     .filter(|entry| !entry.locked)
-                    .map(|entry| entry.slskd_file_json())
+                    .map(|entry| entry.controller_file_json())
                     .collect::<Vec<_>>();
                 let locked_files = entries
                     .iter()
                     .filter(|entry| entry.locked)
-                    .map(|entry| entry.slskd_file_json())
+                    .map(|entry| entry.controller_file_json())
                     .collect::<Vec<_>>();
                 let file_count = files.len();
                 let locked_file_count = locked_files.len();
@@ -2447,7 +2447,7 @@ impl SearchStore {
         )
     }
 
-    fn slskd_list_json(&self, query: Option<&str>) -> String {
+    fn controller_list_json(&self, query: Option<&str>) -> String {
         let filter = RecordListFilter::from_query(query);
         let records = self
             .filtered_records(&filter)
@@ -2982,7 +2982,7 @@ impl EventRecord {
         )
     }
 
-    fn slskd_json(&self) -> serde_json::Value {
+    fn controller_json(&self) -> serde_json::Value {
         let data = self.data_json();
         serde_json::json!({
             "id": self.id.to_string(),
@@ -3164,7 +3164,7 @@ impl EventStore {
         )
     }
 
-    fn slskd_json(&self, query: Option<&str>) -> String {
+    fn controller_json(&self, query: Option<&str>) -> String {
         let filter = RecordListFilter::from_query(query);
         let entries = self
             .records
@@ -3195,7 +3195,7 @@ impl EventStore {
             .rev()
             .skip(filter.offset)
             .take(filter.limit.unwrap_or(usize::MAX))
-            .map(EventRecord::slskd_json)
+            .map(EventRecord::controller_json)
             .collect::<Vec<_>>();
         serde_json::Value::Array(entries).to_string()
     }
@@ -3346,7 +3346,7 @@ impl TransferEntry {
         }
     }
 
-    fn slskd_file_json(&self) -> serde_json::Value {
+    fn controller_file_json(&self) -> serde_json::Value {
         let size = self.size.unwrap_or(0);
         let bytes_remaining = size.saturating_sub(self.bytes_transferred);
         let percent_complete = if size == 0 {
@@ -3392,7 +3392,7 @@ impl TransferEntry {
             "nextAttemptAt": self.next_attempt_at.map(unix_seconds_rfc3339),
             "size": size,
             "startOffset": self.start_offset,
-            "state": slskd_transfer_state(&self.status),
+            "state": controller_transfer_state(&self.status),
             "requestedAt": self.requested_at.to_string(),
             "enqueuedAt": self.requested_at.to_string(),
             "startedAt": started_at,
@@ -3725,7 +3725,7 @@ fn transfer_hub_activity_json(entry: &TransferEntry) -> serde_json::Value {
     } else {
         ((entry.bytes_transferred as f64 / size as f64) * 100.0).min(100.0)
     };
-    let state = slskd_transfer_state(&entry.status);
+    let state = controller_transfer_state(&entry.status);
     serde_json::json!({
         "timestamp": unix_seconds_rfc3339(unix_timestamp()),
         "id": entry.id.to_string(),
@@ -3771,7 +3771,7 @@ fn publish_transfer_hub_event(state: &AppState, kind: &str, entry: &TransferEntr
     let _ = state.event_tx.send(record);
 }
 
-fn slskd_transfer_state(status: &str) -> &str {
+fn controller_transfer_state(status: &str) -> &str {
     match status {
         "queued" => "Queued",
         "accepted" | "peer_lookup" | "peer_negotiating" | "indirect_pending" | "in_progress" => {
@@ -3784,7 +3784,7 @@ fn slskd_transfer_state(status: &str) -> &str {
     }
 }
 
-fn slskdn_download_status(status: &str) -> &str {
+fn native_download_status(status: &str) -> &str {
     match status {
         "queued" | "peer_lookup" | "peer_negotiating" | "indirect_pending" => "queued",
         "accepted" | "in_progress" => "running",
@@ -3795,7 +3795,7 @@ fn slskdn_download_status(status: &str) -> &str {
     }
 }
 
-fn slskdn_compatibility_download_json(entry: &TransferEntry) -> serde_json::Value {
+fn native_compatibility_download_json(entry: &TransferEntry) -> serde_json::Value {
     let size = entry.size.unwrap_or(0);
     let id = entry
         .request_id
@@ -3806,7 +3806,7 @@ fn slskdn_compatibility_download_json(entry: &TransferEntry) -> serde_json::Valu
         "User": entry.peer_username,
         "RemotePath": entry.filename,
         "LocalPath": entry.local_path,
-        "Status": slskdn_download_status(&entry.status),
+        "Status": native_download_status(&entry.status),
         "Progress": if size == 0 { 0.0 } else { entry.bytes_transferred as f64 / size as f64 },
         "Size": size,
         "Remaining": size.saturating_sub(entry.bytes_transferred),
@@ -4638,7 +4638,7 @@ impl TransferQueue {
         self.stats_json()
     }
 
-    fn slskd_transfer_groups(
+    fn controller_transfer_groups(
         &self,
         direction: u32,
         username: Option<&str>,
@@ -4664,7 +4664,7 @@ impl TransferQueue {
                     .map(|(directory, entries)| {
                         let files = entries
                             .into_iter()
-                            .map(TransferEntry::slskd_file_json)
+                            .map(TransferEntry::controller_file_json)
                             .collect::<Vec<_>>();
                         serde_json::json!({
                             "directory": directory,
@@ -4681,27 +4681,27 @@ impl TransferQueue {
             .collect::<Vec<_>>()
     }
 
-    fn slskd_transfers_json(&self, direction: u32, username: Option<&str>) -> String {
-        serde_json::Value::Array(self.slskd_transfer_groups(direction, username)).to_string()
+    fn controller_transfers_json(&self, direction: u32, username: Option<&str>) -> String {
+        serde_json::Value::Array(self.controller_transfer_groups(direction, username)).to_string()
     }
 
-    fn slskd_transfer_user_json(&self, direction: u32, username: &str) -> Option<String> {
-        self.slskd_transfer_groups(direction, Some(username))
+    fn controller_transfer_user_json(&self, direction: u32, username: &str) -> Option<String> {
+        self.controller_transfer_groups(direction, Some(username))
             .into_iter()
             .next()
             .map(|transfer| transfer.to_string())
     }
 
-    fn slskd_transfer_json(&self, direction: u32, username: &str, id: u64) -> Option<String> {
+    fn controller_transfer_json(&self, direction: u32, username: &str, id: u64) -> Option<String> {
         let entry = self.entries.iter().find(|entry| {
             entry.direction == direction
                 && entry.id == id
                 && entry.peer_username.as_deref() == Some(username)
         })?;
-        Some(entry.slskd_file_json().to_string())
+        Some(entry.controller_file_json().to_string())
     }
 
-    fn slskd_transfer_position(&self, direction: u32, username: &str, id: u64) -> usize {
+    fn controller_transfer_position(&self, direction: u32, username: &str, id: u64) -> usize {
         for (position, entry) in self
             .entries
             .iter()
@@ -5435,7 +5435,7 @@ impl UserRecord {
         )
     }
 
-    fn slskd_status_json(&self) -> serde_json::Value {
+    fn controller_status_json(&self) -> serde_json::Value {
         let presence = match self.status.as_deref() {
             Some("online") | Some("Online") => "Online",
             Some("away") | Some("Away") => "Away",
@@ -5448,7 +5448,7 @@ impl UserRecord {
         })
     }
 
-    fn slskd_info_json(&self) -> serde_json::Value {
+    fn controller_info_json(&self) -> serde_json::Value {
         serde_json::json!({
             "description": "",
             "hasFreeUploadSlot": true,
@@ -6787,7 +6787,7 @@ impl BrowseRecord {
         )
     }
 
-    fn slskd_status_json(&self) -> String {
+    fn controller_status_json(&self) -> String {
         let size = self.entries.iter().map(|entry| entry.size).sum::<u64>();
         let complete = matches!(self.status, "ready" | "partial");
         let percent_complete = if complete { 100.0 } else { 0.0 };
@@ -6795,7 +6795,7 @@ impl BrowseRecord {
         serde_json::json!({
             "username": self.username,
             "status": self.status,
-            "state": browse_slskd_state(self.status),
+            "state": browse_controller_state(self.status),
             "size": size,
             "bytesTransferred": if complete { size } else { 0 },
             "bytesRemaining": if complete { 0 } else { size },
@@ -6822,7 +6822,7 @@ fn public_browse_reason(status: &str, reason: Option<&str>) -> Option<&'static s
     })
 }
 
-fn browse_slskd_state(status: &str) -> &'static str {
+fn browse_controller_state(status: &str) -> &'static str {
     match status {
         "ready" | "partial" => "Completed",
         "failed" => "Failed",
@@ -7343,7 +7343,7 @@ impl MessageRecord {
         )
     }
 
-    fn slskd_json(&self) -> serde_json::Value {
+    fn controller_json(&self) -> serde_json::Value {
         serde_json::json!({
             "timestamp": self.created_at.to_string(),
             "createdAtMs": self.created_at_ms,
@@ -7570,7 +7570,7 @@ impl MessageStore {
         )
     }
 
-    fn slskd_conversations_json(&self, query: Option<&str>) -> String {
+    fn controller_conversations_json(&self, query: Option<&str>) -> String {
         let filter = RecordListFilter::from_query(query);
         let mut grouped: BTreeMap<String, Vec<&MessageRecord>> = BTreeMap::new();
         for record in &self.records {
@@ -7587,12 +7587,12 @@ impl MessageStore {
         }
         let conversations = grouped
             .into_iter()
-            .map(|(username, messages)| slskd_conversation_json(username, messages, true))
+            .map(|(username, messages)| controller_conversation_json(username, messages, true))
             .collect::<Vec<_>>();
         serde_json::Value::Array(conversations).to_string()
     }
 
-    fn slskd_conversation_json(
+    fn controller_conversation_json(
         &self,
         username: &str,
         include_messages: bool,
@@ -7604,26 +7604,26 @@ impl MessageStore {
             .filter(|record| record.username == username)
             .collect::<Vec<_>>();
         let mut conversation =
-            slskd_conversation_json(username.to_owned(), messages.clone(), false);
+            controller_conversation_json(username.to_owned(), messages.clone(), false);
         if include_messages {
             conversation["messages"] = serde_json::Value::Array(
                 messages
                     .into_iter()
                     .filter(|record| since.is_none_or(|since| record.created_at_ms > since))
-                    .map(MessageRecord::slskd_json)
+                    .map(MessageRecord::controller_json)
                     .collect(),
             );
         }
         conversation.to_string()
     }
 
-    fn slskd_messages_json(&self, username: &str, unacknowledged_only: bool) -> String {
+    fn controller_messages_json(&self, username: &str, unacknowledged_only: bool) -> String {
         let messages = self
             .records
             .iter()
             .filter(|record| record.username == username)
             .filter(|record| !unacknowledged_only || !record.acknowledged)
-            .map(MessageRecord::slskd_json)
+            .map(MessageRecord::controller_json)
             .collect::<Vec<_>>();
         serde_json::Value::Array(messages).to_string()
     }
@@ -7702,7 +7702,7 @@ const MAX_MANAGED_BLACKLIST_DECISIONS: usize = 1_000;
 struct ManagedBlacklistRuntime {
     settings: crate::config::ManagedBlacklistSettings,
     patterns: Vec<ControllerRegex>,
-    target: ControllerCompatibilityTarget,
+    target: ControllerProfile,
     decisions: BTreeMap<String, (bool, u64)>,
 }
 
@@ -7739,16 +7739,16 @@ impl ControllerRegex {
     }
 }
 
-const SLSKDN_REGEX_MATCH_TIMEOUT: Duration = Duration::from_millis(250);
+const NATIVE_REGEX_MATCH_TIMEOUT: Duration = Duration::from_millis(250);
 
-fn controller_regex_timeout(target: ControllerCompatibilityTarget) -> Option<Duration> {
-    (target == ControllerCompatibilityTarget::Slskdn).then_some(SLSKDN_REGEX_MATCH_TIMEOUT)
+fn controller_regex_timeout(target: ControllerProfile) -> Option<Duration> {
+    (target == ControllerProfile::Native).then_some(NATIVE_REGEX_MATCH_TIMEOUT)
 }
 
 fn compile_controller_regexes(
     expressions: &[String],
     case_sensitive: bool,
-    target: ControllerCompatibilityTarget,
+    target: ControllerProfile,
 ) -> Result<Vec<ControllerRegex>, String> {
     let match_timeout = controller_regex_timeout(target);
     expressions
@@ -7762,7 +7762,7 @@ fn compile_controller_regexes(
 fn compile_controller_regexes_for_request(
     expressions: Vec<String>,
     case_sensitive: bool,
-    target: ControllerCompatibilityTarget,
+    target: ControllerProfile,
 ) -> Result<Vec<ControllerRegex>, String> {
     std::thread::Builder::new()
         .name("slskr-regex-compile".to_owned())
@@ -7776,12 +7776,12 @@ fn compile_controller_regexes_for_request(
 impl ManagedBlacklistRuntime {
     fn username_is_blacklisted(&self, username: &str) -> bool {
         let member_match = match self.target {
-            ControllerCompatibilityTarget::Slskd => self
+            ControllerProfile::Legacy => self
                 .settings
                 .members
                 .iter()
                 .any(|member| member == username),
-            ControllerCompatibilityTarget::Slskdn => self
+            ControllerProfile::Native => self
                 .settings
                 .members
                 .iter()
@@ -7796,7 +7796,7 @@ impl ManagedBlacklistRuntime {
 
     fn new(
         settings: crate::config::ManagedBlacklistSettings,
-        target: ControllerCompatibilityTarget,
+        target: ControllerProfile,
         case_sensitive_regex: bool,
     ) -> Self {
         let pattern_case_sensitive = case_sensitive_regex;
@@ -7814,7 +7814,7 @@ impl ManagedBlacklistRuntime {
     fn replace(
         &mut self,
         settings: crate::config::ManagedBlacklistSettings,
-        target: ControllerCompatibilityTarget,
+        target: ControllerProfile,
         case_sensitive_regex: bool,
     ) {
         let pattern_case_sensitive = case_sensitive_regex;
@@ -7947,7 +7947,7 @@ fn is_private_message_auto_response_candidate(message: &str) -> bool {
     named_check || (has_intent && has_identity) || share_gate
 }
 
-fn slskd_conversation_json(
+fn controller_conversation_json(
     username: String,
     messages: Vec<&MessageRecord>,
     include_messages: bool,
@@ -7959,7 +7959,7 @@ fn slskd_conversation_json(
     let messages_json = include_messages.then(|| {
         messages
             .into_iter()
-            .map(MessageRecord::slskd_json)
+            .map(MessageRecord::controller_json)
             .collect::<Vec<_>>()
     });
     let mut value = serde_json::json!({
@@ -7995,7 +7995,7 @@ impl RoomMessageRecord {
         )
     }
 
-    fn slskd_json(&self, room_name: &str) -> serde_json::Value {
+    fn controller_json(&self, room_name: &str) -> serde_json::Value {
         serde_json::json!({
             "id": self.id.to_string(),
             "timestamp": self.created_at.to_string(),
@@ -8026,7 +8026,7 @@ impl RoomRosterEntry {
     /// `status` matches the wire protocol's numeric UserPresence codes
     /// (0=offline, 1=away, 2=online), which the oracle serializes by enum
     /// name via a global `JsonStringEnumConverter`.
-    fn slskd_json(&self, local_username: &str) -> serde_json::Value {
+    fn controller_json(&self, local_username: &str) -> serde_json::Value {
         serde_json::json!({
             "username": self.username,
             "status": match self.status {
@@ -8091,7 +8091,7 @@ impl RoomRecord {
         )
     }
 
-    fn slskd_info_json(&self) -> serde_json::Value {
+    fn controller_info_json(&self) -> serde_json::Value {
         serde_json::json!({
             "name": self.name,
             "userCount": self.user_count.unwrap_or(0),
@@ -8104,12 +8104,12 @@ impl RoomRecord {
         })
     }
 
-    fn slskd_room_json(&self) -> serde_json::Value {
+    fn controller_room_json(&self) -> serde_json::Value {
         serde_json::json!({
             "name": self.name,
             "isPrivate": self.kind != "public",
             "users": self.members,
-            "messages": self.messages.iter().map(|message| message.slskd_json(&self.name)).collect::<Vec<_>>(),
+            "messages": self.messages.iter().map(|message| message.controller_json(&self.name)).collect::<Vec<_>>(),
             "ticker": self.ticker,
             "lastError": self.last_error,
         })
@@ -8558,11 +8558,11 @@ impl RoomStore {
         format!("[{}]", records)
     }
 
-    fn slskd_available_json(&self) -> String {
+    fn controller_available_json(&self) -> String {
         serde_json::Value::Array(
             self.records
                 .iter()
-                .map(RoomRecord::slskd_info_json)
+                .map(RoomRecord::controller_info_json)
                 .collect::<Vec<_>>(),
         )
         .to_string()
@@ -8632,7 +8632,7 @@ impl CollectionItem {
         )
     }
 
-    fn slskdn_json(&self, collection_id: &str, ordinal: usize) -> String {
+    fn native_json(&self, collection_id: &str, ordinal: usize) -> String {
         serde_json::json!({
             "id": self.id,
             "collectionId": collection_id,
@@ -8685,7 +8685,7 @@ impl CollectionRecord {
         )
     }
 
-    fn slskdn_json(&self) -> String {
+    fn native_json(&self) -> String {
         serde_json::json!({
             "id": self.id,
             "ownerUserId": self.owner_user_id,
@@ -9274,7 +9274,7 @@ fn wishlist_ignored_result_ids(path: &str) -> Option<(&str, &str)> {
         .then_some((item_id, rule_id))
 }
 
-/// The frozen slskdN WishlistController binds both route identifiers as
+/// The frozen native profile WishlistController binds both route identifiers as
 /// `Guid`.  Keep malformed v0 identifiers in the controller's 400 contract
 /// instead of allowing the compatibility route helpers to fall through to a
 /// generic 404.
@@ -9315,7 +9315,7 @@ fn wishlist_storage_error_response(is_versioned_v0: bool, message: &str) -> Http
     }
 }
 
-async fn controller_slskdn_wishlist_read_failure_response(
+async fn controller_native_wishlist_read_failure_response(
     state: &AppState,
     method: &str,
     path: &str,
@@ -9413,12 +9413,12 @@ fn virtual_soulfind_legacy_variants(
         .collect()
 }
 
-async fn controller_slskdn_virtual_soulfind_read_failure_response(
+async fn controller_native_virtual_soulfind_read_failure_response(
     state: &AppState,
     method: &str,
     path: &str,
 ) -> Option<HttpResponse> {
-    if state.config.controller_compatibility_target != ControllerCompatibilityTarget::Slskdn
+    if state.config.controller_profile != ControllerProfile::Native
         || method != "GET"
     {
         return None;
@@ -9459,13 +9459,13 @@ fn user_route_username(path: &str, suffix: &str) -> Option<String> {
     Some(decoded_path_segment(username))
 }
 
-async fn controller_slskd_user_read_failure_response(
+async fn controller_user_read_failure_response(
     state: &AppState,
     route_path: &str,
     username: &str,
     browse: bool,
 ) -> Option<HttpResponse> {
-    if state.config.controller_compatibility_target != ControllerCompatibilityTarget::Slskd
+    if state.config.controller_profile != ControllerProfile::Legacy
         || !route_path.starts_with("/api/v0/")
         || state.session.read().await.state == "connected"
     {
@@ -9666,7 +9666,7 @@ impl WishlistItem {
         .to_string()
     }
 
-    fn slskdn_json(&self) -> String {
+    fn native_json(&self) -> String {
         serde_json::json!({
             "id": self.id,
             "searchText": self.search_text(),
@@ -9846,7 +9846,7 @@ impl WishlistIgnoredResult {
         })
     }
 
-    fn slskdn_json(&self) -> serde_json::Value {
+    fn native_json(&self) -> serde_json::Value {
         serde_json::json!({
             "id": self.id,
             "wishlistItemId": self.wishlist_item_id,
@@ -10486,7 +10486,7 @@ impl WishlistStore {
         if username.is_empty() || normalized_directory.is_empty() {
             return Err("invalid");
         }
-        // The versioned slskdN contract normalizes separators and trailing
+        // The versioned native profile contract normalizes separators and trailing
         // slashes but preserves a leading slash. The legacy route trims both
         // sides, so keep the two externally visible profiles distinct.
         let directory = if uuid::Uuid::parse_str(item_id).is_ok() {
@@ -10606,7 +10606,7 @@ impl ContactRecord {
         )
     }
 
-    fn slskdn_json(&self, peer_id: &str) -> String {
+    fn native_json(&self, peer_id: &str) -> String {
         serde_json::json!({
             "id": self.id,
             "peerId": peer_id,
@@ -11217,7 +11217,7 @@ impl UserNoteRecord {
         )
     }
 
-    fn slskdn_json(&self) -> String {
+    fn native_json(&self) -> String {
         serde_json::json!({
             "username": self.username,
             "note": self.note,
@@ -11332,7 +11332,7 @@ impl UserNoteStore {
             .cloned()
     }
 
-    fn set_slskdn(
+    fn set_versioned(
         &mut self,
         username: String,
         note: String,
@@ -12173,7 +12173,7 @@ struct BackfillCandidate {
     discovered_at: u64,
     peer_backfills_today: u32,
     is_peer_online: bool,
-    is_peer_slskdn: bool,
+    is_peer_native: bool,
 }
 
 impl BackfillCandidate {
@@ -12190,7 +12190,7 @@ impl BackfillCandidate {
             "discoveredAt": unix_seconds_rfc3339(self.discovered_at),
             "peerBackfillsToday": self.peer_backfills_today,
             "isPeerOnline": self.is_peer_online,
-            "isPeerSlskdn": self.is_peer_slskdn,
+            "isPeerSlskdn": self.is_peer_native,
         })
     }
 }
@@ -13079,7 +13079,7 @@ impl SecurityState {
         })
     }
 
-    fn slskdn_bans_json(&self) -> String {
+    fn native_bans_json(&self) -> String {
         let now = unix_timestamp();
         serde_json::Value::Array(
             self.bans
@@ -13847,7 +13847,7 @@ async fn sha256_local_file(path: &Path) -> Option<String> {
     Some(hex::encode(hasher.finalize()))
 }
 
-async fn slskdn_library_item_value(
+async fn native_library_item_value(
     entry: &FileEntry,
     local_path: Option<&Path>,
     display_path: &str,
@@ -13899,7 +13899,7 @@ fn library_entry_matches(
     query_matches && kind_matches
 }
 
-async fn slskdn_library_items_search_json(state: &AppState, raw_query: Option<&str>) -> String {
+async fn native_library_items_search_json(state: &AppState, raw_query: Option<&str>) -> String {
     let query = query_parameter(raw_query, "query")
         .map(|value| value.trim().to_owned())
         .filter(|value| !value.is_empty());
@@ -13961,7 +13961,7 @@ async fn slskdn_library_items_search_json(state: &AppState, raw_query: Option<&s
         let filters = compile_controller_regexes_for_request(
             settings.filters.clone(),
             case_sensitive,
-            state.config.controller_compatibility_target,
+            state.config.controller_profile,
         )
         .expect("validated share filters must compile");
         let scan = scan_share_dirs(
@@ -14001,7 +14001,7 @@ async fn slskdn_library_items_search_json(state: &AppState, raw_query: Option<&s
 
     let mut items = Vec::with_capacity(candidates.len());
     for (entry, local_path, display_path) in candidates {
-        items.push(slskdn_library_item_value(&entry, local_path.as_deref(), &display_path).await);
+        items.push(native_library_item_value(&entry, local_path.as_deref(), &display_path).await);
     }
     serde_json::json!({"items": items}).to_string()
 }
@@ -16182,11 +16182,11 @@ impl DistributedRuntime {
         &self,
         settings: crate::config::SoulseekDistributedSettings,
         connected: bool,
-        target: ControllerCompatibilityTarget,
+        target: ControllerProfile,
     ) -> serde_json::Value {
         if connected {
             let mut value = self.json(settings);
-            if target == ControllerCompatibilityTarget::Slskdn && self.parent.is_none() {
+            if target == ControllerProfile::Native && self.parent.is_none() {
                 value["parent"] = serde_json::json!("");
             } else if self.parent.is_none() {
                 value
@@ -16204,7 +16204,7 @@ impl DistributedRuntime {
             "hasParent": false,
             "isBranchRoot": false,
         });
-        if target == ControllerCompatibilityTarget::Slskdn {
+        if target == ControllerProfile::Native {
             value["branchRoot"] = serde_json::json!("");
             value["parent"] = serde_json::json!("");
         }
@@ -17449,7 +17449,7 @@ async fn effective_user_info_description(state: &AppState) -> String {
         .read()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .clone();
-    if state.config.controller_compatibility_target != ControllerCompatibilityTarget::Slskdn {
+    if state.config.controller_profile != ControllerProfile::Native {
         return base;
     }
     let now_playing = state.now_playing.read().await;
@@ -17504,14 +17504,14 @@ fn controller_options_validation_failure_response(state: &AppState) -> Option<Ht
         .read()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     error.as_ref()?;
-    Some(match state.config.controller_compatibility_target {
-        ControllerCompatibilityTarget::Slskd => HttpResponse {
+    Some(match state.config.controller_profile {
+        ControllerProfile::Legacy => HttpResponse {
             status: "500 Internal Server Error",
             content_type: "application/json; charset=utf-8",
             body: serde_json::Value::String("A validation error has occurred.".to_owned())
                 .to_string(),
         },
-        ControllerCompatibilityTarget::Slskdn => HttpResponse {
+        ControllerProfile::Native => HttpResponse {
             status: "500 Internal Server Error",
             content_type: "application/problem+json",
             body: serde_json::json!({
@@ -18212,7 +18212,7 @@ async fn route_http_request_with_headers(
         normalized_path = "/api/server/status".to_owned();
     }
 
-    // slskdN's mesh-gateway middleware short-circuits every /mesh request
+    // native profile's mesh-gateway middleware short-circuits every /mesh request
     // while the feature is disabled, before auth or controller fallback can
     // change the wire response.  Keep the same disabled contract here.
     if (normalized_path == "/mesh" || normalized_path.starts_with("/mesh/"))
@@ -18255,7 +18255,7 @@ async fn route_http_request_with_headers(
         }
     }
 
-    if state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn {
+    if state.config.controller_profile == ControllerProfile::Native {
         let feature = state.media_services.read().await.features.clone();
         let feature_disabled = (!feature.collections_sharing
             && (normalized_path.starts_with("/api/collections")
@@ -18300,10 +18300,10 @@ async fn route_http_request_with_headers(
     }
 
     if route.path == "/api/v0/application/dump"
-        && ((state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskd
+        && ((state.config.controller_profile == ControllerProfile::Legacy
             && method == "POST")
-            || (state.config.controller_compatibility_target
-                == ControllerCompatibilityTarget::Slskdn
+            || (state.config.controller_profile
+                == ControllerProfile::Native
                 && method == "GET"))
     {
         return Ok(routing::method_not_allowed_response());
@@ -18352,7 +18352,7 @@ async fn route_http_request_with_headers(
         }
     }
 
-    if state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
+    if state.config.controller_profile == ControllerProfile::Native
         && method == "POST"
         && normalized_path == "/api/application/dump"
     {
@@ -18423,33 +18423,33 @@ async fn route_http_request_with_headers(
         return Ok(response);
     }
 
-    if state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn {
+    if state.config.controller_profile == ControllerProfile::Native {
         if let Some(response) = bridge_transfer_blank_segment_response(method, route.path) {
             return Ok(response);
         }
     }
 
     if let Some(response) =
-        controller_slskdn_virtual_soulfind_read_failure_response(state, method, &normalized_path)
+        controller_native_virtual_soulfind_read_failure_response(state, method, &normalized_path)
             .await
     {
         return Ok(response);
     }
 
     if let Some(response) =
-        controller_slskdn_wishlist_read_failure_response(state, method, route.path).await
+        controller_native_wishlist_read_failure_response(state, method, route.path).await
     {
         return Ok(response);
     }
 
     if method == "GET" {
         if let Some(response) =
-            controller_slskdn_hashdb_read_failure_response(state, route.path).await
+            controller_native_hashdb_read_failure_response(state, route.path).await
         {
             return Ok(response);
         }
         if let Some(response) =
-            controller_slskdn_backfill_candidates_read_failure_response(state, method, route.path)
+            controller_native_backfill_candidates_read_failure_response(state, method, route.path)
                 .await
         {
             return Ok(response);
@@ -18457,18 +18457,18 @@ async fn route_http_request_with_headers(
     }
     if method == "POST" {
         if let Some(response) =
-            controller_slskdn_hashdb_write_failure_response(state, route.path).await
+            controller_native_hashdb_write_failure_response(state, route.path).await
         {
             return Ok(response);
         }
     }
 
     if let Some(response) =
-        controller_slskdn_transfer_storage_failure_response(state, method, route.path).await
+        controller_native_transfer_storage_failure_response(state, method, route.path).await
     {
         return Ok(response);
     }
-    if let Some(response) = controller_slskdn_transfer_input_validation_response(
+    if let Some(response) = controller_native_transfer_input_validation_response(
         state,
         method,
         route.path,
@@ -18478,12 +18478,12 @@ async fn route_http_request_with_headers(
         return Ok(response);
     }
     if let Some(response) =
-        controller_slskdn_transfer_auto_replace_status_response(state, method, route.path).await
+        controller_native_transfer_auto_replace_status_response(state, method, route.path).await
     {
         return Ok(response);
     }
     if let Some(response) =
-        controller_slskdn_autoreplace_mutation_response(state, method, route.path).await
+        controller_native_autoreplace_mutation_response(state, method, route.path).await
     {
         return Ok(response);
     }
@@ -18509,21 +18509,21 @@ async fn route_http_request_with_headers(
         }
     }
 
-    if state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn {
+    if state.config.controller_profile == ControllerProfile::Native {
         if let Some(response) =
-            controller_slskdn_search_query_validation(method, route.path, route.query)
+            controller_native_search_query_validation(method, route.path, route.query)
         {
             return Ok(response);
         }
         if let Some(response) =
-            controller_slskdn_search_storage_failure_response(state, method, route.path).await
+            controller_native_search_storage_failure_response(state, method, route.path).await
         {
             return Ok(response);
         }
     }
 
     if method == "DELETE"
-        && state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskd
+        && state.config.controller_profile == ControllerProfile::Legacy
     {
         for prefix in ["/api/v0/transfers/downloads/", "/api/v0/transfers/uploads/"] {
             if let Some(value) = route.path.strip_prefix(prefix) {
@@ -18660,18 +18660,18 @@ async fn route_http_request_with_headers(
         ("HEAD", "/health/mesh") => Ok(head_response(mesh_health_response(&state.config))),
         ("GET", "/api/version") => Ok(version_response()),
         ("GET", "/api/capabilities")
-            if state.config.controller_compatibility_target
-                == ControllerCompatibilityTarget::Slskdn
+            if state.config.controller_profile
+                == ControllerProfile::Native
                 && matches!(route.path, "/api/slskdn/capabilities" | "/api/v0/slskdn/capabilities") =>
         {
-            Ok(slskdn_capabilities_response(state).await)
+            Ok(native_capabilities_response(state).await)
         }
         ("GET", "/api/capabilities")
-            if state.config.controller_compatibility_target
-                == ControllerCompatibilityTarget::Slskdn
+            if state.config.controller_profile
+                == ControllerProfile::Native
                 && route.path == "/api/v0/capabilities" =>
         {
-            Ok(slskdn_capability_controller_response(state).await)
+            Ok(native_capability_controller_response(state).await)
         }
         ("GET", "/api/capabilities") => Ok(capabilities_response()),
         ("GET", "/.well-known/webfinger") => {
@@ -18683,14 +18683,14 @@ async fn route_http_request_with_headers(
         ("GET", "/mesh/http/services") => Ok(mesh_http_services_response(state).await),
         ("GET", "/api/security/bans") if route.path.starts_with("/api/v0/") => {
             let security = state.security.read().await;
-            Ok(routing::ok_response(security.slskdn_bans_json()))
+            Ok(routing::ok_response(security.native_bans_json()))
         }
         ("GET", "/api/security/transports/status")
             if route.path.starts_with("/api/v0/")
-                && state.config.controller_compatibility_target
-                    == ControllerCompatibilityTarget::Slskdn =>
+                && state.config.controller_profile
+                    == ControllerProfile::Native =>
         {
-            // Matches slskdn's versioned TransportSelectorStatus contract.
+            // Matches the native profile's versioned TransportSelectorStatus contract.
             // The native slskR endpoint below intentionally retains its
             // historical selectedTransport/healthy shape.
             let configured = state
@@ -18716,13 +18716,13 @@ async fn route_http_request_with_headers(
                     .to_string(),
             ))
         }
-        // slskdN keeps the legacy /api/info compatibility controller as a
+        // native profile keeps the legacy /api/info compatibility controller as a
         // deliberately small projection.  Do not route it through slskR's
         // richer /api/application lifecycle DTO: clients use these fields to
         // identify the compatibility implementation and Soulseek state.
         ("GET", "/api/application")
-            if state.config.controller_compatibility_target
-                == ControllerCompatibilityTarget::Slskdn
+            if state.config.controller_profile
+                == ControllerProfile::Native
                 && route.path == "/api/info" =>
         {
             let session = state.session.read().await;
@@ -18745,8 +18745,8 @@ async fn route_http_request_with_headers(
             };
             Ok(routing::ok_response(
                 serde_json::json!({
-                    "impl": "slskdn",
-                    "compat": "slskd",
+                    "impl": "slskr",
+                    "compat": "legacy",
                     "version": APP_VERSION,
                     "soulseek": {
                         "connected": connected,
@@ -18767,7 +18767,7 @@ async fn route_http_request_with_headers(
             let distributed_settings = *state.soulseek_distributed_settings.read().await;
             let runtime_credentials_configured = state.runtime_credentials.read().await.is_some();
             let connected_endpoint = connected_server_address(state);
-            let body = slskd_application_state_json(
+            let body = application_state_json(
                 &session,
                 &share_lifecycle,
                 &rooms,
@@ -18779,7 +18779,7 @@ async fn route_http_request_with_headers(
                 &state.config,
                 runtime_credentials_configured,
                 connected_endpoint.as_deref(),
-                slskd_version_json(state),
+                controller_version_json(state),
             );
             drop(runtime);
             drop(distributed_network);
@@ -18798,7 +18798,7 @@ async fn route_http_request_with_headers(
             Ok(controller_version_latest_response(
                 state,
                 query_parameter(route.query, "forceCheck").as_deref() == Some("true"),
-                controller_releases_url(state.config.controller_compatibility_target),
+                controller_releases_url(state.config.controller_profile),
             )
             .await)
         }
@@ -18856,7 +18856,7 @@ async fn route_http_request_with_headers(
             let session = state.session.read().await;
             let runtime_credentials_configured = state.runtime_credentials.read().await.is_some();
             let connected_endpoint = connected_server_address(state);
-            let body = slskd_server_state_json(
+            let body = controller_server_state_json(
                 &session,
                 &state.config,
                 runtime_credentials_configured,
@@ -18951,7 +18951,7 @@ async fn route_http_request_with_headers(
                     let runtime_credentials_configured =
                         state.runtime_credentials.read().await.is_some();
                     let connected_endpoint = connected_server_address(state);
-                    let body = slskd_server_state_json(
+                    let body = controller_server_state_json(
                         &session,
                         &state.config,
                         runtime_credentials_configured,
@@ -18990,7 +18990,7 @@ async fn route_http_request_with_headers(
             let session = state.session.read().await;
             let runtime_credentials_configured = state.runtime_credentials.read().await.is_some();
             let connected_endpoint = connected_server_address(state);
-            let body = slskd_server_state_json(
+            let body = controller_server_state_json(
                 &session,
                 &state.config,
                 runtime_credentials_configured,
@@ -19024,7 +19024,7 @@ async fn route_http_request_with_headers(
                     let runtime_credentials_configured =
                         state.runtime_credentials.read().await.is_some();
                     let connected_endpoint = connected_server_address(state);
-                    let body = slskd_server_state_json(
+                    let body = controller_server_state_json(
                         &session,
                         &state.config,
                         runtime_credentials_configured,
@@ -19059,7 +19059,7 @@ async fn route_http_request_with_headers(
             let session = state.session.read().await;
             let runtime_credentials_configured = state.runtime_credentials.read().await.is_some();
             let connected_endpoint = connected_server_address(state);
-            let body = slskd_server_state_json(
+            let body = controller_server_state_json(
                 &session,
                 &state.config,
                 runtime_credentials_configured,
@@ -19169,7 +19169,7 @@ async fn route_http_request_with_headers(
         }
         ("GET", "/api/capabilities/peers") => {
             // Matches the oracle's CapabilitiesController contract: known
-            // slskdn capability peers, not the generic connected-user list.
+            // Native capability peers, not the generic connected-user list.
             let mesh = state.mesh.read().await;
             let peers = mesh.capability_service_peers_json();
             let count = peers.len();
@@ -19224,10 +19224,10 @@ async fn route_http_request_with_headers(
                         .is_some_and(|status| status.eq_ignore_ascii_case("known"))
                 })
                 .count();
-            let slskdn_peers = state.mesh.read().await.capability_records.len();
+            let native_peers = state.mesh.read().await.capability_records.len();
             Ok(routing::ok_response(serde_json::json!({
                 "totalPeers": peer_ids.len(),
-                "slskdnPeers": slskdn_peers,
+                "capabilityPeers": native_peers,
                 "totalFlacEntries": total_flac_entries,
                 "hashedFlacEntries": hashed_flac_entries,
                 "totalHashEntries": persisted_entries,
@@ -19568,8 +19568,8 @@ async fn route_http_request_with_headers(
             };
             let recording_id = decoded_path_segment(raw_recording_id);
             let discovery = state.content_discovery.read().await;
-            if state.config.controller_compatibility_target
-                == ControllerCompatibilityTarget::Slskdn
+            if state.config.controller_profile
+                == ControllerProfile::Native
             {
                 return Ok(routing::ok_response(
                     serde_json::json!({
@@ -19821,7 +19821,7 @@ async fn route_http_request_with_headers(
                 ));
             }
             if let Some(response) =
-                controller_slskdn_backfill_file_write_failure_response(state, method, route.path)
+                controller_native_backfill_file_write_failure_response(state, method, route.path)
                     .await
             {
                 return Ok(response);
@@ -19930,10 +19930,10 @@ async fn route_http_request_with_headers(
                 spec["openapi"] = serde_json::json!("3.0.4");
                 spec["info"]["title"] = serde_json::json!(match state
                     .config
-                    .controller_compatibility_target
+                    .controller_profile
                 {
-                    ControllerCompatibilityTarget::Slskd => "slskd",
-                    ControllerCompatibilityTarget::Slskdn => "slskdN API",
+                    ControllerProfile::Legacy => "slskd",
+                    ControllerProfile::Native => "slskr API",
                 });
                 Ok(HttpResponse {
                     status: "200 OK",
@@ -20116,13 +20116,13 @@ async fn route_http_request_with_headers(
                         capabilities_response().body,
                     ),
                     ("GET", "/api/v0/capabilities")
-                        if state.config.controller_compatibility_target
-                            == ControllerCompatibilityTarget::Slskdn =>
+                        if state.config.controller_profile
+                            == ControllerProfile::Native =>
                     {
                         batch::create_success_result(
                             operation.id,
                             200,
-                            slskdn_capability_controller_response(state).await.body,
+                            native_capability_controller_response(state).await.body,
                         )
                     },
                     ("GET", "/api/v0/capabilities") => batch::create_success_result(
@@ -20360,30 +20360,30 @@ async fn route_http_request_with_headers(
         }
         ("GET", "/api/telemetry/reports/transfers/summary") => {
             if let Some(response) =
-                controller_slskd_telemetry_report_read_failure_response(state, route.path).await
+                controller_telemetry_report_read_failure_response(state, route.path).await
             {
                 return Ok(response);
             }
             let transfers = state.transfers.read().await;
             let body = if route.path.starts_with("/api/v0/") {
-                slskd_versioned_transfer_summary_report(route.query, &transfers)
+                controller_versioned_transfer_summary_report(route.query, &transfers)
             } else {
-                slskd_transfer_summary_report(route.query, &transfers)
+                controller_transfer_summary_report(route.query, &transfers)
             };
             drop(transfers);
             Ok(routing::ok_response(body))
         }
         ("GET", "/api/telemetry/reports/transfers/histogram") => {
             if let Some(response) =
-                controller_slskd_telemetry_report_read_failure_response(state, route.path).await
+                controller_telemetry_report_read_failure_response(state, route.path).await
             {
                 return Ok(response);
             }
             let transfers = state.transfers.read().await;
             let body = if route.path.starts_with("/api/v0/") {
-                slskd_versioned_transfer_histogram_report(route.query, &transfers)
+                controller_versioned_transfer_histogram_report(route.query, &transfers)
             } else {
-                Ok(slskd_transfer_histogram_report(route.query, &transfers))
+                Ok(controller_transfer_histogram_report(route.query, &transfers))
             };
             drop(transfers);
             Ok(match body {
@@ -20393,12 +20393,12 @@ async fn route_http_request_with_headers(
         }
         ("GET", "/api/telemetry/reports/transfers/leaderboard") => {
             if let Some(response) =
-                controller_slskd_telemetry_report_read_failure_response(state, route.path).await
+                controller_telemetry_report_read_failure_response(state, route.path).await
             {
                 return Ok(response);
             }
             let transfers = state.transfers.read().await;
-            let result = slskd_transfer_leaderboard_report(route.query, &transfers);
+            let result = controller_transfer_leaderboard_report(route.query, &transfers);
             drop(transfers);
             Ok(match result {
                 Ok(body) => routing::ok_response(body),
@@ -20413,23 +20413,23 @@ async fn route_http_request_with_headers(
             };
             let username = decoded_path_segment(username);
             if let Some(response) =
-                controller_slskd_telemetry_report_read_failure_response(state, route.path).await
+                controller_telemetry_report_read_failure_response(state, route.path).await
             {
                 return Ok(response);
             }
             let transfers = state.transfers.read().await;
-            let body = slskd_user_transfer_report(&username, &transfers);
+            let body = controller_user_transfer_report(&username, &transfers);
             drop(transfers);
             Ok(routing::ok_response(body))
         }
         ("GET", "/api/telemetry/reports/transfers/exceptions") => {
             if let Some(response) =
-                controller_slskd_telemetry_report_read_failure_response(state, route.path).await
+                controller_telemetry_report_read_failure_response(state, route.path).await
             {
                 return Ok(response);
             }
             let transfers = state.transfers.read().await;
-            let result = slskd_transfer_exceptions_report(route.query, &transfers);
+            let result = controller_transfer_exceptions_report(route.query, &transfers);
             drop(transfers);
             Ok(match result {
                 Ok(body) => routing::ok_response(body),
@@ -20438,12 +20438,12 @@ async fn route_http_request_with_headers(
         }
         ("GET", "/api/telemetry/reports/transfers/exceptions/pareto") => {
             if let Some(response) =
-                controller_slskd_telemetry_report_read_failure_response(state, route.path).await
+                controller_telemetry_report_read_failure_response(state, route.path).await
             {
                 return Ok(response);
             }
             let transfers = state.transfers.read().await;
-            let result = slskd_transfer_exceptions_pareto_report(route.query, &transfers);
+            let result = controller_transfer_exceptions_pareto_report(route.query, &transfers);
             drop(transfers);
             Ok(match result {
                 Ok(body) => routing::ok_response(body),
@@ -20452,12 +20452,12 @@ async fn route_http_request_with_headers(
         }
         ("GET", "/api/telemetry/reports/transfers/directories") => {
             if let Some(response) =
-                controller_slskd_telemetry_report_read_failure_response(state, route.path).await
+                controller_telemetry_report_read_failure_response(state, route.path).await
             {
                 return Ok(response);
             }
             let transfers = state.transfers.read().await;
-            let body = slskd_transfer_directories_report(route.query, &transfers);
+            let body = controller_transfer_directories_report(route.query, &transfers);
             drop(transfers);
             Ok(routing::ok_response(body))
         }
@@ -20648,7 +20648,7 @@ async fn route_http_request_with_headers(
             })
         }
         ("GET", "/api/events") | ("GET", "/api/events/slskd") => {
-            if state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
+            if state.config.controller_profile == ControllerProfile::Native
                 && route.path == "/api/v0/events"
             {
                 if let Some(raw) = query_parameter(route.query, "offset") {
@@ -20677,12 +20677,12 @@ async fn route_http_request_with_headers(
                 }
             }
             if let Some(response) =
-                controller_slskd_events_read_failure_response(state, route.path).await
+                controller_events_read_failure_response(state, route.path).await
             {
                 return Ok(response);
             }
             if let Some(response) =
-                controller_slskdn_events_read_failure_response(state, route.path).await
+                controller_native_events_read_failure_response(state, route.path).await
             {
                 return Ok(response);
             }
@@ -20690,7 +20690,7 @@ async fn route_http_request_with_headers(
             Ok(HttpResponse {
                 status: "200 OK",
                 content_type: "application/json",
-                body: events.slskd_json(route.query),
+                body: events.controller_json(route.query),
             })
         }
         ("POST", path) if path.starts_with("/api/events/") => {
@@ -20745,8 +20745,8 @@ async fn route_http_request_with_headers(
             let count = events.records.len();
             if let Err(error) = persist_event_record_checked(state, &record).await {
                 *events = previous;
-                return Ok(if state.config.controller_compatibility_target
-                    == ControllerCompatibilityTarget::Slskdn
+                return Ok(if state.config.controller_profile
+                    == ControllerProfile::Native
                 {
                     routing::internal_server_error_response("Failed to raise event")
                 } else {
@@ -20757,13 +20757,13 @@ async fn route_http_request_with_headers(
             scripts::dispatch(
                 state.integration_settings.read().await.scripts.clone(),
                 state.config.state_dir.join("scripts"),
-                state.config.controller_compatibility_target,
+                state.config.controller_profile,
                 kind,
                 &serde_json::json!({}),
             );
             let response_body = serde_json::json!({
                 "recorded": true,
-                "event": record.slskd_json(),
+                "event": record.controller_json(),
                 "count": count,
             })
             .to_string();
@@ -20999,13 +20999,13 @@ async fn route_http_request_with_headers(
               }
               let model = serde_json::from_str::<serde_json::Value>(body);
               if model.as_ref().is_ok_and(|value| !value.is_object()) {
-                  return Ok(match state.config.controller_compatibility_target {
-                      ControllerCompatibilityTarget::Slskd => HttpResponse {
+                  return Ok(match state.config.controller_profile {
+                      ControllerProfile::Legacy => HttpResponse {
                           status: "204 No Content",
                           content_type: "",
                           body: String::new(),
                       },
-                      ControllerCompatibilityTarget::Slskdn => options_model_binding_problem_response(),
+                      ControllerProfile::Native => options_model_binding_problem_response(),
                   });
               }
               if model.is_err() {
@@ -21161,7 +21161,7 @@ async fn route_http_request_with_headers(
             let mut roots = shares
                 .roots
                 .iter()
-                .map(slskd_share_value)
+                .map(controller_share_value)
                 .collect::<Vec<_>>();
             if roots.is_empty() && !shares.entries.is_empty() {
                 roots.push(serde_json::json!({
@@ -21213,8 +21213,8 @@ async fn route_http_request_with_headers(
         | ("GET", "/api/v0/files/downloads/directories")
         | ("GET", "/api/v0/files/incomplete/directories") => {
             if matches!(
-                state.config.controller_compatibility_target,
-                ControllerCompatibilityTarget::Slskd | ControllerCompatibilityTarget::Slskdn
+                state.config.controller_profile,
+                ControllerProfile::Legacy | ControllerProfile::Native
             )
                 && query_bool_is_invalid(route.query, "recursive")
             {
@@ -21227,19 +21227,19 @@ async fn route_http_request_with_headers(
             } else {
                 effective_incomplete_dir(state)
             };
-            if state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskd
+            if state.config.controller_profile == ControllerProfile::Legacy
                 && !root.is_dir()
             {
                 return Ok(file_storage_error_response(STORAGE_DIRECTORY_NOT_FOUND_ERROR));
             }
             let options = StorageDirectoryListOptions::from_query(route.query);
-            match slskd_storage_directory_json(&root, None, options) {
+            match controller_storage_directory_json(&root, None, options) {
                 Ok(json) => Ok(HttpResponse {
                     status: "200 OK",
                     content_type: "application/json; charset=utf-8",
                     body: target_storage_directory_json(
                         json,
-                        state.config.controller_compatibility_target,
+                        state.config.controller_profile,
                     ),
                 }),
                 Err(error) => Ok(file_storage_error_response(&error)),
@@ -21251,7 +21251,7 @@ async fn route_http_request_with_headers(
                 || path.starts_with("/api/v0/files/downloads/directories/")
                 || path.starts_with("/api/v0/files/incomplete/directories/")) =>
         {
-            let Some((storage, resource, encoded_name)) = slskd_file_storage_resource_path(path)
+            let Some((storage, resource, encoded_name)) = controller_file_storage_resource_path(path)
             else {
                 return Ok(routing::not_found_response());
             };
@@ -21259,8 +21259,8 @@ async fn route_http_request_with_headers(
                 return Ok(routing::not_found_response());
             }
             if matches!(
-                state.config.controller_compatibility_target,
-                ControllerCompatibilityTarget::Slskd | ControllerCompatibilityTarget::Slskdn
+                state.config.controller_profile,
+                ControllerProfile::Legacy | ControllerProfile::Native
             )
                 && query_bool_is_invalid(route.query, "recursive")
             {
@@ -21274,13 +21274,13 @@ async fn route_http_request_with_headers(
                 effective_incomplete_dir(state)
             };
             let options = StorageDirectoryListOptions::from_query(route.query);
-            match slskd_storage_directory_json(&root, Some(encoded_name), options) {
+            match controller_storage_directory_json(&root, Some(encoded_name), options) {
                 Ok(json) => Ok(HttpResponse {
                     status: "200 OK",
                     content_type: "application/json; charset=utf-8",
                     body: target_storage_directory_json(
                         json,
-                        state.config.controller_compatibility_target,
+                        state.config.controller_profile,
                     ),
                 }),
                 Err(error) => Ok(file_storage_error_response(&error)),
@@ -21303,7 +21303,7 @@ async fn route_http_request_with_headers(
                     body: String::new(),
                 });
             }
-            let Some((storage, resource, encoded_name)) = slskd_file_storage_resource_path(path)
+            let Some((storage, resource, encoded_name)) = controller_file_storage_resource_path(path)
             else {
                 return Ok(routing::not_found_response());
             };
@@ -21326,9 +21326,9 @@ async fn route_http_request_with_headers(
                 Ok(false)
                     if resource == "files"
                         && matches!(
-                            state.config.controller_compatibility_target,
-                            ControllerCompatibilityTarget::Slskd
-                                | ControllerCompatibilityTarget::Slskdn
+                            state.config.controller_profile,
+                            ControllerProfile::Legacy
+                                | ControllerProfile::Native
                         ) => Ok(HttpResponse {
                     status: "204 No Content",
                     content_type: "",
@@ -21610,7 +21610,7 @@ async fn route_http_request_with_headers(
         ("GET", "/api/searches") => {
             let mut searches = state.searches.write().await;
             let expired = searches.expire_due();
-            let body = searches.slskd_list_json(route.query);
+            let body = searches.controller_list_json(route.query);
             drop(searches);
             persist_search_records(state, &expired).await?;
             Ok(HttpResponse {
@@ -21659,11 +21659,11 @@ async fn route_http_request_with_headers(
         ("GET", "/api/transfers") if route.path.starts_with("/api/v0/") => {
             let transfers = state.transfers.read().await;
             let downloads = serde_json::from_str::<Vec<serde_json::Value>>(
-                &transfers.slskd_transfers_json(0, None),
+                &transfers.controller_transfers_json(0, None),
             )
             .unwrap_or_default();
             let uploads = serde_json::from_str::<Vec<serde_json::Value>>(
-                &transfers.slskd_transfers_json(1, None),
+                &transfers.controller_transfers_json(1, None),
             )
             .unwrap_or_default();
             Ok(routing::ok_response(
@@ -22209,10 +22209,10 @@ async fn route_http_request_with_headers(
                 .filter(|entry| entry.direction == 0)
                 .filter(|entry| {
                     requested_state.as_deref().is_none_or(|requested| {
-                        slskdn_download_status(entry.status.as_str()) == requested
+                        native_download_status(entry.status.as_str()) == requested
                     })
                 })
-                .map(slskdn_compatibility_download_json)
+                .map(native_compatibility_download_json)
                 .collect::<Vec<_>>();
             Ok(routing::ok_response(
                 serde_json::json!({"downloads": downloads}).to_string(),
@@ -22376,7 +22376,7 @@ async fn route_http_request_with_headers(
                         || !matches!(entry.status.as_str(), "succeeded" | "completed")
                 })
                 .filter(|entry| since.is_none_or(|since| entry.updated_at_ms > since))
-                .map(TransferEntry::slskd_file_json)
+                .map(TransferEntry::controller_file_json)
                 .collect::<Vec<_>>();
             let download = transfers
                 .entries
@@ -22445,7 +22445,7 @@ async fn route_http_request_with_headers(
             let rows = page
                 .into_iter()
                 .take(limit)
-                .map(TransferEntry::slskd_file_json)
+                .map(TransferEntry::controller_file_json)
                 .collect::<Vec<_>>();
             Ok(routing::ok_response(
                 serde_json::json!({
@@ -22459,11 +22459,11 @@ async fn route_http_request_with_headers(
         }
 
         ("POST", "/api/transfers/downloads/batches") => {
-            Ok(slskd_enqueue_download_batch(body, state).await)
+            Ok(controller_enqueue_download_batch(body, state).await)
         }
 
         ("POST", "/api/transfers") => {
-            if let Some((username, mut files)) = slskd_enqueue_request(body) {
+            if let Some((username, mut files)) = controller_enqueue_request(body) {
                 let exclusions = effective_download_exclusions(state).await;
                 let filenames = files
                     .iter()
@@ -22497,7 +22497,7 @@ async fn route_http_request_with_headers(
                             )
                         })
                 });
-                let batch_id = slskd_transfer_batch_id(body)
+                let batch_id = controller_transfer_batch_id(body)
                     .or_else(|| (files.len() > 1).then(|| uuid::Uuid::new_v4().to_string()));
                 let mut transfers = state.transfers.write().await;
                 let mut created = Vec::new();
@@ -22539,7 +22539,7 @@ async fn route_http_request_with_headers(
                         batch_id.clone(),
                         details,
                     );
-                    created.push(entry.slskd_file_json());
+                    created.push(entry.controller_file_json());
                     created_entries.push(entry);
                 }
                 let count = created.len();
@@ -22572,7 +22572,7 @@ async fn route_http_request_with_headers(
             }
             let peer_username = extract_json_string_field(body, "peer_username");
             let supplied_local_path = extract_json_string_field(body, "local_path");
-            let batch_id = slskd_transfer_batch_id(body);
+            let batch_id = controller_transfer_batch_id(body);
             let size = extract_json_u64_field(body, "size");
             let payload = serde_json::from_str::<serde_json::Value>(body)
                 .unwrap_or(serde_json::Value::Null);
@@ -22611,14 +22611,14 @@ async fn route_http_request_with_headers(
 
          ("GET", "/api/transfers/downloads") | ("GET", "/api/transfers/downloads/") => {
              if let Some(response) =
-                 controller_slskd_transfer_storage_read_failure_response(state, route.path).await
+                 controller_transfer_storage_read_failure_response(state, route.path).await
              {
                  return Ok(response);
              }
              let transfers = state.transfers.read().await;
              if route.path == "/api/downloads"
-                 && state.config.controller_compatibility_target
-                     == ControllerCompatibilityTarget::Slskdn
+                 && state.config.controller_profile
+                     == ControllerProfile::Native
              {
                  let requested_status = query_parameter(route.query, "status")
                      .map(|value| value.to_ascii_lowercase())
@@ -22631,37 +22631,37 @@ async fn route_http_request_with_headers(
                      .filter(|entry| entry.direction == 0)
                      .filter(|entry| {
                          requested_status.as_deref().is_none_or(|requested| {
-                             slskdn_download_status(entry.status.as_str()) == requested
+                             native_download_status(entry.status.as_str()) == requested
                          })
                      })
-                     .map(slskdn_compatibility_download_json)
+                     .map(native_compatibility_download_json)
                      .collect::<Vec<_>>();
                  drop(transfers);
                  return Ok(routing::ok_response(
                      serde_json::json!({"downloads": downloads}).to_string(),
                  ));
              }
-             let body = transfers.slskd_transfers_json(0, None);
+             let body = transfers.controller_transfers_json(0, None);
              drop(transfers);
              Ok(routing::ok_response(body))
          }
 
          ("GET", "/api/transfers/uploads") | ("GET", "/api/transfers/uploads/") => {
              if let Some(response) =
-                 controller_slskd_transfer_storage_read_failure_response(state, route.path).await
+                 controller_transfer_storage_read_failure_response(state, route.path).await
              {
                  return Ok(response);
              }
              let transfers = state.transfers.read().await;
-             let body = transfers.slskd_transfers_json(1, None);
+             let body = transfers.controller_transfers_json(1, None);
              drop(transfers);
              Ok(routing::ok_response(body))
          }
 
          ("GET", "/api/transfers/downloads/accelerated") => {
              if route.path.starts_with("/api/v0/")
-                 && state.config.controller_compatibility_target
-                     == ControllerCompatibilityTarget::Slskdn
+                 && state.config.controller_profile
+                     == ControllerProfile::Native
              {
                  let enabled = state.runtime.read().await.accelerated_downloads_enabled;
                  return Ok(routing::ok_response(
@@ -22675,7 +22675,7 @@ async fn route_http_request_with_headers(
              }
              let transfers = state.transfers.read().await;
              let mut value = serde_json::from_str::<serde_json::Value>(
-                 &slskd_accelerated_downloads_json(route.query, &transfers),
+                 &controller_accelerated_downloads_json(route.query, &transfers),
              )
              .unwrap_or_else(|_| serde_json::json!({}));
              value["updatedAt"] = serde_json::json!(unix_timestamp());
@@ -22686,8 +22686,8 @@ async fn route_http_request_with_headers(
 
          ("GET", "/api/transfers/downloads/auto-replace/status")
              if route.path.starts_with("/api/v0/")
-                 && state.config.controller_compatibility_target
-                     == ControllerCompatibilityTarget::Slskdn =>
+                 && state.config.controller_profile
+                     == ControllerProfile::Native =>
          {
              let stuck_count = state
                  .transfers
@@ -22714,7 +22714,7 @@ async fn route_http_request_with_headers(
          ("GET", "/api/transfers/downloads/stuck") => {
              let transfers = state.transfers.read().await;
              let value = serde_json::from_str::<serde_json::Value>(
-                 &slskd_stuck_downloads_json(route.query, &transfers),
+                 &controller_stuck_downloads_json(route.query, &transfers),
              )
              .unwrap_or_else(|_| serde_json::json!({"stuck": []}));
              drop(transfers);
@@ -22751,14 +22751,14 @@ async fn route_http_request_with_headers(
 
          ("GET", "/api/transfers/downloads/user-stats") => {
              let transfers = state.transfers.read().await;
-             let body = slskd_download_user_stats_json(route.query, &transfers);
+             let body = controller_download_user_stats_json(route.query, &transfers);
              drop(transfers);
              Ok(routing::ok_response(body))
          }
 
          ("GET", "/api/transfers/downloads/stats") => {
              let transfers = state.transfers.read().await;
-             let json = slskd_download_stats_json(&transfers);
+             let json = controller_download_stats_json(&transfers);
              drop(transfers);
              Ok(routing::ok_response(json))
          }
@@ -22771,11 +22771,11 @@ async fn route_http_request_with_headers(
                  return Ok(routing::bad_request_response("invalid batch id"));
              }
              if let Some(response) =
-                 controller_slskd_transfer_storage_read_failure_response(state, route.path).await
+                 controller_transfer_storage_read_failure_response(state, route.path).await
              {
                  return Ok(response);
              }
-            let batch_record = match slskd_read_transfer_batch(state, &batch_id).await {
+            let batch_record = match controller_read_transfer_batch(state, &batch_id).await {
                 Ok(record) => record,
                 Err(error) => return Ok(routing::internal_server_error_response(&error)),
             };
@@ -22786,7 +22786,7 @@ async fn route_http_request_with_headers(
                  .filter(|entry| {
                      entry.direction == 0 && entry.batch_id.as_deref() == Some(batch_id.as_str())
                  })
-                 .map(TransferEntry::slskd_file_json)
+                 .map(TransferEntry::controller_file_json)
                  .collect::<Vec<_>>();
              if downloads.is_empty() && batch_record.is_none() {
                  drop(transfers);
@@ -22826,8 +22826,8 @@ async fn route_http_request_with_headers(
              }).to_string()))
          }
 
-         ("GET", path) if slskd_transfer_user_path(path, "downloads").is_some() => {
-             let Some(username) = slskd_transfer_user_path(path, "downloads") else {
+         ("GET", path) if controller_transfer_user_path(path, "downloads").is_some() => {
+             let Some(username) = controller_transfer_user_path(path, "downloads") else {
                  return Ok(routing::not_found_response());
              };
              let username = decoded_path_segment(username);
@@ -22835,20 +22835,20 @@ async fn route_http_request_with_headers(
                  return Ok(routing::bad_request_response("username is required"));
              }
              if let Some(response) =
-                 controller_slskd_transfer_storage_read_failure_response(state, route.path).await
+                 controller_transfer_storage_read_failure_response(state, route.path).await
              {
                  return Ok(response);
              }
              let transfers = state.transfers.read().await;
-             let body = transfers.slskd_transfer_user_json(0, username.trim());
+             let body = transfers.controller_transfer_user_json(0, username.trim());
              drop(transfers);
              Ok(body
                  .map(routing::ok_response)
                  .unwrap_or_else(routing::not_found_response))
          }
 
-         ("GET", path) if slskd_transfer_user_path(path, "uploads").is_some() => {
-             let Some(username) = slskd_transfer_user_path(path, "uploads") else {
+         ("GET", path) if controller_transfer_user_path(path, "uploads").is_some() => {
+             let Some(username) = controller_transfer_user_path(path, "uploads") else {
                  return Ok(routing::not_found_response());
              };
              let username = decoded_path_segment(username);
@@ -22856,62 +22856,62 @@ async fn route_http_request_with_headers(
                  return Ok(routing::bad_request_response("username is required"));
              }
              if let Some(response) =
-                 controller_slskd_transfer_storage_read_failure_response(state, route.path).await
+                 controller_transfer_storage_read_failure_response(state, route.path).await
              {
                  return Ok(response);
              }
              let transfers = state.transfers.read().await;
-             let body = transfers.slskd_transfer_user_json(1, username.trim());
+             let body = transfers.controller_transfer_user_json(1, username.trim());
              drop(transfers);
              Ok(body
                  .map(routing::ok_response)
                  .unwrap_or_else(routing::not_found_response))
          }
 
-         ("GET", path) if slskd_transfer_file_path(path, "downloads").is_some() && !path.ends_with("/position") => {
-             let Some((username, id)) = slskd_transfer_file_path(path, "downloads") else {
+         ("GET", path) if controller_transfer_file_path(path, "downloads").is_some() && !path.ends_with("/position") => {
+             let Some((username, id)) = controller_transfer_file_path(path, "downloads") else {
                  return Ok(routing::not_found_response());
              };
              if let Some(response) =
-                 controller_slskd_transfer_storage_read_failure_response(state, route.path).await
+                 controller_transfer_storage_read_failure_response(state, route.path).await
              {
                  return Ok(response);
              }
              let username = decoded_path_segment(username);
              let transfers = state.transfers.read().await;
               let response = transfers
-                  .slskd_transfer_json(0, &username, id)
+                  .controller_transfer_json(0, &username, id)
                   .map(routing::ok_response)
                   .unwrap_or_else(routing::not_found_response);
              drop(transfers);
              Ok(response)
          }
 
-         ("GET", path) if slskd_transfer_file_path(path, "uploads").is_some() && !path.ends_with("/position") => {
-             let Some((username, id)) = slskd_transfer_file_path(path, "uploads") else {
+         ("GET", path) if controller_transfer_file_path(path, "uploads").is_some() && !path.ends_with("/position") => {
+             let Some((username, id)) = controller_transfer_file_path(path, "uploads") else {
                  return Ok(routing::not_found_response());
              };
              if let Some(response) =
-                 controller_slskd_transfer_storage_read_failure_response(state, route.path).await
+                 controller_transfer_storage_read_failure_response(state, route.path).await
              {
                  return Ok(response);
              }
              let username = decoded_path_segment(username);
              let transfers = state.transfers.read().await;
               let response = transfers
-                  .slskd_transfer_json(1, &username, id)
+                  .controller_transfer_json(1, &username, id)
                   .map(routing::ok_response)
                   .unwrap_or_else(routing::not_found_response);
              drop(transfers);
              Ok(response)
          }
 
-         ("GET", path) if slskd_transfer_position_path(path).is_some() => {
-             let Some((username, id)) = slskd_transfer_position_path(path) else {
+         ("GET", path) if controller_transfer_position_path(path).is_some() => {
+             let Some((username, id)) = controller_transfer_position_path(path) else {
                  return Ok(routing::not_found_response());
              };
              if let Some(response) =
-                 controller_slskd_transfer_storage_read_failure_response(state, route.path).await
+                 controller_transfer_storage_read_failure_response(state, route.path).await
              {
                  return Ok(response);
              }
@@ -23255,12 +23255,12 @@ async fn route_http_request_with_headers(
             ))
         }
 
-         ("POST", path) if slskd_transfer_user_path(path, "downloads").is_some() => {
-             let Some(username) = slskd_transfer_user_path(path, "downloads") else {
+         ("POST", path) if controller_transfer_user_path(path, "downloads").is_some() => {
+             let Some(username) = controller_transfer_user_path(path, "downloads") else {
                  return Ok(routing::not_found_response());
              };
              let username = decoded_path_segment(username);
-             let files = slskd_files_from_body(body);
+             let files = controller_files_from_body(body);
              if route.path.starts_with("/api/v0/") && files.is_empty() {
                  return Ok(HttpResponse {
                      status: "400 Bad Request",
@@ -23285,7 +23285,7 @@ async fn route_http_request_with_headers(
              } else {
                  None
              };
-             let batch_id = slskd_transfer_batch_id(body)
+             let batch_id = controller_transfer_batch_id(body)
                  .or_else(|| (files.len() > 1).then(|| uuid::Uuid::new_v4().to_string()));
              let mut transfers = state.transfers.write().await;
              let previous_entries = transfers.entries.clone();
@@ -23344,7 +23344,7 @@ async fn route_http_request_with_headers(
                      batch_id.clone(),
                      details,
                  );
-                 created.push(entry.slskd_file_json());
+                 created.push(entry.controller_file_json());
                  created_entries.push(entry);
              }
              let count = created.len();
@@ -23400,8 +23400,8 @@ async fn route_http_request_with_headers(
              }
          }
 
-         ("DELETE", path) if slskd_transfer_file_path(path, "downloads").is_some() => {
-             let Some((username, id)) = slskd_transfer_file_path(path, "downloads") else {
+         ("DELETE", path) if controller_transfer_file_path(path, "downloads").is_some() => {
+             let Some((username, id)) = controller_transfer_file_path(path, "downloads") else {
                  return Ok(routing::not_found_response());
              };
               let username = decoded_path_segment(username);
@@ -23431,8 +23431,8 @@ async fn route_http_request_with_headers(
               Ok(routing::no_content_response())
          }
 
-         ("DELETE", path) if slskd_transfer_file_path(path, "uploads").is_some() => {
-             let Some((username, id)) = slskd_transfer_file_path(path, "uploads") else {
+         ("DELETE", path) if controller_transfer_file_path(path, "uploads").is_some() => {
+             let Some((username, id)) = controller_transfer_file_path(path, "uploads") else {
                  return Ok(routing::not_found_response());
              };
               let username = decoded_path_segment(username);
@@ -23728,7 +23728,7 @@ async fn route_http_request_with_headers(
         // TRANSFER STATISTICS ENDPOINTS
         ("GET", "/api/transfers/speeds") => {
             let transfers = state.transfers.read().await;
-            let json = slskd_transfer_speeds_json(&transfers);
+            let json = controller_transfer_speeds_json(&transfers);
             drop(transfers);
             Ok(routing::ok_response(json))
         }
@@ -23739,15 +23739,15 @@ async fn route_http_request_with_headers(
                 return Ok(routing::not_found_response());
             };
             if let Some(response) =
-                controller_slskd_user_read_failure_response(state, route.path, &username, false)
+                controller_user_read_failure_response(state, route.path, &username, false)
                     .await
             {
                 return Ok(response);
             }
             let users = state.users.read().await;
             if let Some(record) = users.records.iter().find(|u| u.username == username) {
-                let json = if state.config.controller_compatibility_target
-                    == ControllerCompatibilityTarget::Slskd
+                let json = if state.config.controller_profile
+                    == ControllerProfile::Legacy
                 {
                     serde_json::json!({
                         "description": "",
@@ -23759,14 +23759,14 @@ async fn route_http_request_with_headers(
                     })
                     .to_string()
                 } else {
-                    record.slskd_info_json().to_string()
+                    record.controller_info_json().to_string()
                 };
                 drop(users);
                 Ok(routing::ok_response(json))
             } else {
                 drop(users);
-                if state.config.controller_compatibility_target
-                    == ControllerCompatibilityTarget::Slskd
+                if state.config.controller_profile
+                    == ControllerProfile::Legacy
                 {
                     return Ok(routing::not_found_response());
                 }
@@ -23781,8 +23781,8 @@ async fn route_http_request_with_headers(
                     directory_count: None,
                     updated_at: unix_timestamp(),
                 };
-                let json = if state.config.controller_compatibility_target
-                    == ControllerCompatibilityTarget::Slskd
+                let json = if state.config.controller_profile
+                    == ControllerProfile::Legacy
                 {
                     serde_json::json!({
                         "description": "",
@@ -23794,7 +23794,7 @@ async fn route_http_request_with_headers(
                     })
                     .to_string()
                 } else {
-                    record.slskd_info_json().to_string()
+                    record.controller_info_json().to_string()
                 };
                 Ok(routing::ok_response(json))
             }
@@ -23836,7 +23836,7 @@ async fn route_http_request_with_headers(
                 .find(|record| record.username == username)
                 .map(|record| record.entries.as_slice())
                 .unwrap_or(&[]);
-            let json = slskd_user_directories_json(&directory, entries, route.query);
+            let json = controller_user_directories_json(&directory, entries, route.query);
             drop(browse);
             if let Some(session_command_permit) = session_command_permit {
                 session_command_permit.send(SessionCommand::BrowseFolder {
@@ -23856,15 +23856,15 @@ async fn route_http_request_with_headers(
             let username = user_route_username(path, "/status")
                 .expect("guarded user status path");
             if let Some(response) =
-                controller_slskd_user_read_failure_response(state, route.path, &username, false)
+                controller_user_read_failure_response(state, route.path, &username, false)
                     .await
             {
                 return Ok(response);
             }
             let users = state.users.read().await;
             if let Some(record) = users.records.iter().find(|u| u.username == username) {
-                let json = if state.config.controller_compatibility_target
-                    == ControllerCompatibilityTarget::Slskd
+                let json = if state.config.controller_profile
+                    == ControllerProfile::Legacy
                 {
                     let status = match record.status.as_deref() {
                         Some("online") | Some("Online") => "Online",
@@ -23877,14 +23877,14 @@ async fn route_http_request_with_headers(
                     })
                     .to_string()
                 } else {
-                    record.slskd_status_json().to_string()
+                    record.controller_status_json().to_string()
                 };
                 drop(users);
                 Ok(routing::ok_response(json))
             } else {
                 drop(users);
-                if state.config.controller_compatibility_target
-                    == ControllerCompatibilityTarget::Slskd
+                if state.config.controller_profile
+                    == ControllerProfile::Legacy
                 {
                     return Ok(routing::not_found_response());
                 }
@@ -23899,8 +23899,8 @@ async fn route_http_request_with_headers(
                     directory_count: None,
                     updated_at: unix_timestamp(),
                 };
-                let json = if state.config.controller_compatibility_target
-                    == ControllerCompatibilityTarget::Slskd
+                let json = if state.config.controller_profile
+                    == ControllerProfile::Legacy
                 {
                     serde_json::json!({
                         "isPrivileged": false,
@@ -23908,15 +23908,15 @@ async fn route_http_request_with_headers(
                     })
                     .to_string()
                 } else {
-                    record.slskd_status_json().to_string()
+                    record.controller_status_json().to_string()
                 };
                 Ok(routing::ok_response(json))
             }
         }
 
         ("GET", "/api/users/groups") => {
-            if state.config.controller_compatibility_target
-                != ControllerCompatibilityTarget::Slskdn
+            if state.config.controller_profile
+                != ControllerProfile::Native
             {
                 return Ok(HttpResponse {
                     status: "404 Not Found",
@@ -23960,8 +23960,8 @@ async fn route_http_request_with_headers(
         }
 
         ("GET", path) if path.starts_with("/api/users/") && path.ends_with("/group") => {
-            if state.config.controller_compatibility_target
-                != ControllerCompatibilityTarget::Slskdn
+            if state.config.controller_profile
+                != ControllerProfile::Native
             {
                 return Ok(HttpResponse {
                     status: "404 Not Found",
@@ -23986,7 +23986,7 @@ async fn route_http_request_with_headers(
                 return Ok(routing::not_found_response());
             };
             if let Some(response) =
-                controller_slskd_user_read_failure_response(state, route.path, &username, false)
+                controller_user_read_failure_response(state, route.path, &username, false)
                     .await
             {
                 return Ok(response);
@@ -24004,8 +24004,8 @@ async fn route_http_request_with_headers(
                     Err(_) => return Ok(routing::not_found_response()),
                 }
             };
-            let body = if state.config.controller_compatibility_target
-                == ControllerCompatibilityTarget::Slskd
+            let body = if state.config.controller_profile
+                == ControllerProfile::Legacy
             {
                 serde_json::json!({
                     "addressFamily": "IPv4",
@@ -24146,14 +24146,14 @@ async fn route_http_request_with_headers(
                 return Ok(routing::not_found_response());
             };
             if let Some(response) =
-                controller_slskd_search_responses_read_failure_response(state, route.path, id)
+                controller_search_responses_read_failure_response(state, route.path, id)
                     .await
             {
                 return Ok(response);
             }
             let searches = state.searches.read().await;
             if let Some(record) = searches.get_by_identifier(id) {
-                let json = record.slskd_responses_json_with_query(route.query);
+                let json = record.controller_responses_json_with_query(route.query);
                 drop(searches);
                 Ok(routing::ok_response(json))
             } else {
@@ -24200,8 +24200,8 @@ async fn route_http_request_with_headers(
             }
             if route.path.starts_with("/api/v0/")
                 && matches!(
-                    state.config.controller_compatibility_target,
-                    ControllerCompatibilityTarget::Slskd | ControllerCompatibilityTarget::Slskdn
+                    state.config.controller_profile,
+                    ControllerProfile::Legacy | ControllerProfile::Native
                 )
                 && removed.is_some()
             {
@@ -24451,7 +24451,7 @@ async fn route_http_request_with_headers(
                     .cloned()
                     .expect("joined room exists");
                 drop(rooms);
-                return Ok(routing::ok_response(existing.slskd_room_json().to_string()));
+                return Ok(routing::ok_response(existing.controller_room_json().to_string()));
             }
             let previous = rooms.clone();
             let Some(record) = rooms.join(room_name.to_string()) else {
@@ -24547,7 +24547,7 @@ async fn route_http_request_with_headers(
         }
 
         ("GET", "/api/rooms/available") => {
-            if state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskd
+            if state.config.controller_profile == ControllerProfile::Legacy
                 && route.path.starts_with("/api/v0/")
                 && state.session.read().await.state != "connected"
             {
@@ -24555,14 +24555,14 @@ async fn route_http_request_with_headers(
                     "failed to retrieve available rooms",
                 ));
             }
-            if state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
+            if state.config.controller_profile == ControllerProfile::Native
                 && route.path.starts_with("/api/v0/")
                 && state.session.read().await.state != "connected"
             {
                 return Ok(routing::ok_response("[]".to_owned()));
             }
             let rooms = state.rooms.read().await;
-            let json = rooms.slskd_available_json();
+            let json = rooms.controller_available_json();
             drop(rooms);
             Ok(routing::ok_response(json))
         }
@@ -24603,7 +24603,7 @@ async fn route_http_request_with_headers(
                 let json = serde_json::Value::Array(
                     room.roster
                         .iter()
-                        .map(|user| user.slskd_json(&local_username))
+                        .map(|user| user.controller_json(&local_username))
                         .collect(),
                 )
                 .to_string();
@@ -24632,7 +24632,7 @@ async fn route_http_request_with_headers(
                     .messages
                     .iter()
                     .filter(|message| since.is_none_or(|since| message.created_at_ms > since))
-                    .map(|message| message.slskd_json(&room.name))
+                    .map(|message| message.controller_json(&room.name))
                     .collect::<Vec<_>>();
                 let json = serde_json::Value::Array(messages).to_string();
                 drop(rooms);
@@ -24816,7 +24816,7 @@ async fn route_http_request_with_headers(
                     "Soulseek server connection is not ready",
                 ));
             }
-            if state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
+            if state.config.controller_profile == ControllerProfile::Native
                 && !state.soulseek_safety.try_consume_browse("compatibility")
             {
                 return Ok(HttpResponse {
@@ -25018,7 +25018,7 @@ async fn route_http_request_with_headers(
         }
         ("GET", path) if path.starts_with("/api/users/") && path.ends_with("/browse") => {
             if let Some(username) = user_route_username(path, "/browse") {
-                if let Some(response) = controller_slskd_user_read_failure_response(
+                if let Some(response) = controller_user_read_failure_response(
                     state,
                     route.path,
                     &username,
@@ -25033,15 +25033,15 @@ async fn route_http_request_with_headers(
                     .records
                     .iter()
                     .find(|record| record.username == username);
-                if state.config.controller_compatibility_target
-                    == ControllerCompatibilityTarget::Slskd
+                if state.config.controller_profile
+                    == ControllerProfile::Legacy
                     && record.is_none()
                 {
                     drop(browse);
                     return Ok(routing::not_found_response());
                 }
                 let entries = record.map(|record| record.entries.as_slice()).unwrap_or(&[]);
-                let body = slskd_user_root_json(entries, route.query);
+                let body = controller_user_root_json(entries, route.query);
                 drop(browse);
                 Ok(routing::ok_response(body))
             } else {
@@ -25295,7 +25295,7 @@ async fn route_http_request_with_headers(
                         body: String::new(),
                     }
                 } else {
-                    routing::ok_response(existing.slskd_room_json().to_string())
+                    routing::ok_response(existing.controller_room_json().to_string())
                 });
             }
             let previous = rooms.clone();
@@ -25304,11 +25304,11 @@ async fn route_http_request_with_headers(
                     "room capacity is full",
                 ));
             };
-            let body = record.slskd_room_json().to_string();
+            let body = record.controller_room_json().to_string();
             // The slskd compatibility contract persists this controller's
-            // subscription, while the slskdN fork keeps the tracker transient.
-            if state.config.controller_compatibility_target
-                == ControllerCompatibilityTarget::Slskd
+            // subscription, while the native profile fork keeps the tracker transient.
+            if state.config.controller_profile
+                == ControllerProfile::Legacy
             {
             if let Err(error) = persist_room_join_checked(state, &room_name).await {
                 *rooms = previous;
@@ -25330,11 +25330,11 @@ async fn route_http_request_with_headers(
                 .iter()
                 .find(|r| {
                     r.name == room_name
-                        && (state.config.controller_compatibility_target
-                            != ControllerCompatibilityTarget::Slskd
+                        && (state.config.controller_profile
+                            != ControllerProfile::Legacy
                             || r.joined)
                 })
-                .map(|room| routing::ok_response(room.slskd_room_json().to_string()))
+                .map(|room| routing::ok_response(room.controller_room_json().to_string()))
                 .unwrap_or_else(routing::not_found_response);
             drop(rooms);
             Ok(response)
@@ -25389,8 +25389,8 @@ async fn route_http_request_with_headers(
                 )
                 .await;
                 Ok(if route.path.starts_with("/api/v0/")
-                    || state.config.controller_compatibility_target
-                        == ControllerCompatibilityTarget::Slskd
+                    || state.config.controller_profile
+                        == ControllerProfile::Legacy
                 {
                     HttpResponse {
                         status: "201 Created",
@@ -25432,8 +25432,8 @@ async fn route_http_request_with_headers(
                 .set_ticker(&room_name, ticker.clone())
                 .map(|room| {
                     if route.path.starts_with("/api/v0/")
-                        || state.config.controller_compatibility_target
-                            == ControllerCompatibilityTarget::Slskd
+                        || state.config.controller_profile
+                            == ControllerProfile::Legacy
                     {
                         HttpResponse {
                             status: "201 Created",
@@ -25443,7 +25443,7 @@ async fn route_http_request_with_headers(
                     } else {
                         routing::ok_response(serde_json::json!({
                             "updated": true,
-                            "room": room.slskd_room_json(),
+                            "room": room.controller_room_json(),
                         }).to_string())
                     }
                 })
@@ -25483,8 +25483,8 @@ async fn route_http_request_with_headers(
             let response = match rooms.add_member(&room_name, username.clone()) {
                 Ok(Some(room)) => {
                     if route.path.starts_with("/api/v0/")
-                        || state.config.controller_compatibility_target
-                            == ControllerCompatibilityTarget::Slskd
+                        || state.config.controller_profile
+                            == ControllerProfile::Legacy
                     {
                         HttpResponse {
                             status: "201 Created",
@@ -25494,7 +25494,7 @@ async fn route_http_request_with_headers(
                     } else {
                         routing::ok_response(serde_json::json!({
                             "updated": true,
-                            "room": room.slskd_room_json(),
+                            "room": room.controller_room_json(),
                             "userCount": room.user_count.unwrap_or(0),
                         }).to_string())
                     }
@@ -25528,8 +25528,8 @@ async fn route_http_request_with_headers(
             let previous = rooms.clone();
 
             if route.path.starts_with("/api/v0/")
-                && state.config.controller_compatibility_target
-                    == ControllerCompatibilityTarget::Slskdn
+                && state.config.controller_profile
+                    == ControllerProfile::Native
                 && !rooms
                     .records
                     .iter()
@@ -25551,8 +25551,8 @@ async fn route_http_request_with_headers(
                 send_room_leave_if_connected(state, room_name.to_string()).await;
 
                 Ok(if route.path.starts_with("/api/v0/")
-                    || state.config.controller_compatibility_target
-                        == ControllerCompatibilityTarget::Slskd
+                    || state.config.controller_profile
+                        == ControllerProfile::Legacy
                 {
                     routing::no_content_response()
                 } else {
@@ -25577,7 +25577,7 @@ async fn route_http_request_with_headers(
 
         // WEBUI PARITY: Application/Server/Session status endpoints
         ("GET", "/api/application/build") => {
-            let mut value = slskd_version_json(state);
+            let mut value = controller_version_json(state);
             value["protocol"] = serde_json::json!({
                 "clientName": CLIENT_NAME,
                 "major": CLIENT_MAJOR_VERSION,
@@ -25663,7 +25663,7 @@ async fn route_http_request_with_headers(
                 return Ok(response);
             }
             let overlay = state.options_overlay.read().await;
-            let body = slskd_options_json(&state.config, &overlay, true);
+            let body = controller_options_json(&state.config, &overlay, true);
             drop(overlay);
             Ok(HttpResponse {
                 status: "200 OK",
@@ -25673,7 +25673,7 @@ async fn route_http_request_with_headers(
         }
         ("GET", "/api/options/startup") => {
             let overlay = state.options_overlay.read().await;
-            let body = slskd_options_json(&state.config, &overlay, false);
+            let body = controller_options_json(&state.config, &overlay, false);
             drop(overlay);
             Ok(HttpResponse {
                 status: "200 OK",
@@ -25685,7 +25685,7 @@ async fn route_http_request_with_headers(
             if !effective_remote_configuration(state) {
                 return Ok(controller_forbidden_response());
             }
-            Ok(slskd_options_config_text_response(&state.config))
+            Ok(controller_options_config_text_response(&state.config))
         }
         ("GET", "/api/options/debug") => {
             if let Some(response) = controller_options_validation_failure_response(state) {
@@ -25695,7 +25695,7 @@ async fn route_http_request_with_headers(
                 return Ok(controller_forbidden_response());
             }
             let overlay = state.options_overlay.read().await;
-            let debug_view = slskd_options_debug_view(state, &overlay);
+            let debug_view = controller_options_debug_view(state, &overlay);
             drop(overlay);
             Ok(HttpResponse {
                 status: "200 OK",
@@ -25713,7 +25713,7 @@ async fn route_http_request_with_headers(
             Ok(HttpResponse {
                 status: "200 OK",
                 content_type: "application/json; charset=utf-8",
-                body: slskd_options_config_location_json(&state.config),
+                body: controller_options_config_location_json(&state.config),
             })
         }
         ("GET", "/api/autoreplace") => {
@@ -25840,7 +25840,7 @@ async fn route_http_request_with_headers(
                         .filter(|record| {
                             !collection_owner_forbids(caller_id.as_deref(), &record.owner_user_id)
                         })
-                        .map(CollectionRecord::slskdn_json)
+                        .map(CollectionRecord::native_json)
                         .collect::<Vec<_>>()
                         .join(",")
                 )
@@ -25856,7 +25856,7 @@ async fn route_http_request_with_headers(
                 .roots
                 .iter()
                 .map(|root| {
-                    let mut value = slskd_share_value(root);
+                    let mut value = controller_share_value(root);
                     value["name"] = serde_json::json!(root.label);
                     value
                 })
@@ -25908,7 +25908,7 @@ async fn route_http_request_with_headers(
             };
             let mutated = collections.clone();
             let json = if compatibility_contract {
-                record.slskdn_json()
+                record.native_json()
             } else {
                 record.json()
             };
@@ -25936,7 +25936,7 @@ async fn route_http_request_with_headers(
                 .filter(|record| !collection_owner_forbids(caller_id.as_deref(), &record.owner_user_id))
             {
                 let json = if route.path.starts_with("/api/v0/") {
-                    record.slskdn_json()
+                    record.native_json()
                 } else {
                     record.json()
                 };
@@ -26022,7 +26022,7 @@ async fn route_http_request_with_headers(
             if let Some(record) = updated {
                 let mutated = collections.clone();
                 let json = if compatibility_contract {
-                    record.slskdn_json()
+                    record.native_json()
                 } else {
                     record.json()
                 };
@@ -26112,7 +26112,7 @@ async fn route_http_request_with_headers(
                 let items = record.items.iter()
                     .enumerate()
                     .map(|(ordinal, item)| if compatibility_contract {
-                        item.slskdn_json(&record.id, ordinal)
+                        item.native_json(&record.id, ordinal)
                     } else {
                         item.json()
                     })
@@ -26182,7 +26182,7 @@ async fn route_http_request_with_headers(
                     .expect("item was added to an existing collection");
                 let mutated = collections.clone();
                 let json = if compatibility_contract {
-                    item.slskdn_json(id, record.items.len().saturating_sub(1))
+                    item.native_json(id, record.items.len().saturating_sub(1))
                 } else {
                     item.json()
                 };
@@ -26305,7 +26305,7 @@ async fn route_http_request_with_headers(
                         .records
                         .iter()
                         .flat_map(|record| record.items.iter())
-                        .map(WishlistItem::slskdn_json)
+                        .map(WishlistItem::native_json)
                         .collect::<Vec<_>>()
                         .join(",")
                 )
@@ -26359,7 +26359,7 @@ async fn route_http_request_with_headers(
               Ok(item) => {
                 let mutated = wishlist.clone();
                 let json = if compatibility_contract {
-                    item.slskdn_json()
+                    item.native_json()
                 } else {
                     item.json()
                 };
@@ -26401,7 +26401,7 @@ async fn route_http_request_with_headers(
                 return Ok(routing::not_found_response());
             };
             Ok(routing::ok_response(if route.path.starts_with("/api/v0/") {
-                item.slskdn_json()
+                item.native_json()
             } else {
                 item.json()
             }))
@@ -26454,7 +26454,7 @@ async fn route_http_request_with_headers(
                     .iter()
                     .map(|rule| {
                         if compatibility_contract {
-                            rule.slskdn_json()
+                            rule.native_json()
                         } else {
                             rule.json()
                         }
@@ -26529,7 +26529,7 @@ async fn route_http_request_with_headers(
             }
             let compatibility_contract = route.path.starts_with("/api/v0/");
             let json = if compatibility_contract {
-                rule.slskdn_json()
+                rule.native_json()
             } else {
                 rule.json()
             }
@@ -26685,7 +26685,7 @@ async fn route_http_request_with_headers(
                      }
                  };
                  let mutated = contacts.clone();
-                 let json = record.slskdn_json(&peer_id);
+                 let json = record.native_json(&peer_id);
                  drop(contacts);
                  if added {
                      if let Err(error) = persist_contact_checked(state, &record).await {
@@ -27053,7 +27053,7 @@ async fn route_http_request_with_headers(
             let value = notes
                 .records
                 .iter()
-                .filter_map(|record| serde_json::from_str::<serde_json::Value>(&record.slskdn_json()).ok())
+                .filter_map(|record| serde_json::from_str::<serde_json::Value>(&record.native_json()).ok())
                 .collect::<Vec<_>>();
             Ok(routing::ok_response(serde_json::json!(value).to_string()))
         }
@@ -27073,7 +27073,7 @@ async fn route_http_request_with_headers(
             let previous = notes.clone();
             let versioned = route.path.starts_with("/api/v0/") || route.path.starts_with("/api/v1/");
             let record = if versioned {
-                notes.set_slskdn(
+                notes.set_versioned(
                     username,
                     note,
                     extract_json_string_field(body, "color").unwrap_or_default(),
@@ -27088,7 +27088,7 @@ async fn route_http_request_with_headers(
             };
             let mutated = notes.clone();
             let json = if versioned {
-                record.slskdn_json()
+                record.native_json()
             } else {
                 record.json()
             };
@@ -27120,7 +27120,7 @@ async fn route_http_request_with_headers(
             };
             if let Some(record) = record {
                 let json = if versioned {
-                    record.slskdn_json()
+                    record.native_json()
                 } else {
                     record.json()
                 };
@@ -27742,11 +27742,11 @@ async fn route_http_request_with_headers(
 
         // LIBRARY ITEMS ENDPOINTS
         ("GET", "/api/library/items") => {
-            if state.config.controller_compatibility_target
-                == ControllerCompatibilityTarget::Slskdn
+            if state.config.controller_profile
+                == ControllerProfile::Native
             {
                 return Ok(routing::ok_response(
-                    slskdn_library_items_search_json(state, route.query).await,
+                    native_library_items_search_json(state, route.query).await,
                 ));
             }
             let library = state.library.read().await;
@@ -27898,7 +27898,7 @@ async fn route_http_request_with_headers(
                 .records
                 .iter()
                 .find(|record| record.username == username)
-                .map(BrowseRecord::slskd_status_json);
+                .map(BrowseRecord::controller_status_json);
             drop(browse);
             match tracked {
                 Some(body) => Ok(routing::ok_response(body)),
@@ -28048,7 +28048,7 @@ async fn route_http_request_with_headers(
                 return Ok(response);
             }
             let messages = state.messages.read().await;
-            let body = messages.slskd_conversations_json(route.query);
+            let body = messages.controller_conversations_json(route.query);
             drop(messages);
             Ok(routing::ok_response(body))
         }
@@ -28090,13 +28090,13 @@ async fn route_http_request_with_headers(
                 },
             };
             let messages = state.messages.read().await;
-            if state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskd
+            if state.config.controller_profile == ControllerProfile::Legacy
                 && !messages.records.iter().any(|record| record.username == username)
             {
                 drop(messages);
                 return Ok(routing::not_found_response());
             }
-            let body = messages.slskd_messages_json(&username, unacknowledged_only);
+            let body = messages.controller_messages_json(&username, unacknowledged_only);
             drop(messages);
             Ok(routing::ok_response(body))
         }
@@ -28131,13 +28131,13 @@ async fn route_http_request_with_headers(
                 Err(error) => return Ok(routing::bad_request_response(&error)),
             };
             let messages = state.messages.read().await;
-            if state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskd
+            if state.config.controller_profile == ControllerProfile::Legacy
                 && !messages.records.iter().any(|record| record.username == username)
             {
                 drop(messages);
                 return Ok(routing::not_found_response());
             }
-            let body = messages.slskd_conversation_json(&username, include_messages, since);
+            let body = messages.controller_conversation_json(&username, include_messages, since);
             drop(messages);
             Ok(routing::ok_response(body))
         }
@@ -28191,7 +28191,7 @@ async fn route_http_request_with_headers(
                 body: message_body,
             });
 
-            if state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
+            if state.config.controller_profile == ControllerProfile::Native
                 && route.path.starts_with("/api/v0/")
             {
                 Ok(HttpResponse {
@@ -28254,8 +28254,8 @@ async fn route_http_request_with_headers(
                 body: message_body,
             });
             Ok(if matches!(
-                state.config.controller_compatibility_target,
-                ControllerCompatibilityTarget::Slskd | ControllerCompatibilityTarget::Slskdn
+                state.config.controller_profile,
+                ControllerProfile::Legacy | ControllerProfile::Native
             )
                 && route.path.starts_with("/api/v0/")
             {
@@ -28460,8 +28460,8 @@ async fn route_http_request_with_headers(
             if let Some(job) = state.library.read().await.remediation_job(&job_id) {
                 return Ok(routing::ok_response(job.json().to_string()));
             }
-            if state.config.controller_compatibility_target
-                == ControllerCompatibilityTarget::Slskdn
+            if state.config.controller_profile
+                == ControllerProfile::Native
                 && body.contains("\"status\":\"not_found\"")
             {
                 return Ok(routing::not_found_response());
@@ -28772,8 +28772,8 @@ async fn route_http_request_with_headers(
                 .values()
                 .cloned()
                 .collect::<Vec<_>>();
-            if state.config.controller_compatibility_target
-                == ControllerCompatibilityTarget::Slskdn
+            if state.config.controller_profile
+                == ControllerProfile::Native
             {
                 drop(runtime);
                 return Ok(routing::ok_response(
@@ -28828,8 +28828,8 @@ async fn route_http_request_with_headers(
                  .sum::<u64>();
              let transfer_count = transfers.entries.len();
              drop(transfers);
-             if state.config.controller_compatibility_target
-                 == ControllerCompatibilityTarget::Slskdn
+             if state.config.controller_profile
+                 == ControllerProfile::Native
              {
                  let started_at = runtime
                      .bridge_started_at
@@ -28928,8 +28928,8 @@ async fn route_http_request_with_headers(
                  .count();
              let total_requests = transfers.entries.len();
              drop(transfers);
-             if state.config.controller_compatibility_target
-                 == ControllerCompatibilityTarget::Slskdn
+             if state.config.controller_profile
+                 == ControllerProfile::Native
              {
                  let uptime = runtime
                      .bridge_started_at
@@ -28987,8 +28987,8 @@ async fn route_http_request_with_headers(
              let transfers = state.transfers.read().await;
              let transfer_count = transfers.entries.len();
              drop(transfers);
-             if state.config.controller_compatibility_target
-                 == ControllerCompatibilityTarget::Slskdn
+             if state.config.controller_profile
+                 == ControllerProfile::Native
              {
                  let started_at = runtime
                      .bridge_started_at
@@ -29036,8 +29036,8 @@ async fn route_http_request_with_headers(
          }
 
          ("POST", "/api/bridge/start") => {
-             if state.config.controller_compatibility_target
-                 == ControllerCompatibilityTarget::Slskdn
+             if state.config.controller_profile
+                 == ControllerProfile::Native
                  && route.path.starts_with("/api/v0/")
              {
                  return Ok(routing::ok_response(
@@ -29072,8 +29072,8 @@ async fn route_http_request_with_headers(
          }
 
          ("POST", "/api/bridge/stop") => {
-             if state.config.controller_compatibility_target
-                 == ControllerCompatibilityTarget::Slskdn
+             if state.config.controller_profile
+                 == ControllerProfile::Native
                  && route.path.starts_with("/api/v0/")
              {
                  return Ok(routing::ok_response(
@@ -29097,8 +29097,8 @@ async fn route_http_request_with_headers(
          }
 
          ("PUT", "/api/bridge/admin/config") => {
-             if state.config.controller_compatibility_target
-                 == ControllerCompatibilityTarget::Slskdn
+             if state.config.controller_profile
+                 == ControllerProfile::Native
                  && route.path.starts_with("/api/v0/")
              {
                  if body.trim().is_empty()
@@ -29219,8 +29219,8 @@ async fn route_http_request_with_headers(
                     return Ok(routing::service_unavailable_response(&error));
                 }
                 if matches!(
-                    state.config.controller_compatibility_target,
-                    ControllerCompatibilityTarget::Slskd | ControllerCompatibilityTarget::Slskdn
+                    state.config.controller_profile,
+                    ControllerProfile::Legacy | ControllerProfile::Native
                 )
                     && route.path.starts_with("/api/v0/")
                 {
@@ -29275,8 +29275,8 @@ async fn route_http_request_with_headers(
                 return Ok(routing::service_unavailable_response(&error));
             }
             Ok(if matches!(
-                state.config.controller_compatibility_target,
-                ControllerCompatibilityTarget::Slskd | ControllerCompatibilityTarget::Slskdn
+                state.config.controller_profile,
+                ControllerProfile::Legacy | ControllerProfile::Native
             )
                 && route.path.starts_with("/api/v0/")
             {
@@ -29493,8 +29493,8 @@ async fn route_http_request_with_headers(
             };
             if route.path.starts_with("/api/v0/")
                 && matches!(
-                    state.config.controller_compatibility_target,
-                    ControllerCompatibilityTarget::Slskd | ControllerCompatibilityTarget::Slskdn
+                    state.config.controller_profile,
+                    ControllerProfile::Legacy | ControllerProfile::Native
                 )
             {
                 let mut searches = state.searches.write().await;
@@ -29568,8 +29568,8 @@ async fn route_http_request_with_headers(
 
         ("PUT", "/api/transfers/downloads/accelerated") => {
             if route.path.starts_with("/api/v0/")
-                && state.config.controller_compatibility_target
-                    == ControllerCompatibilityTarget::Slskdn
+                && state.config.controller_profile
+                    == ControllerProfile::Native
             {
                 let enabled = extract_json_bool_field(body, "enabled").unwrap_or(false);
                 {
@@ -29588,7 +29588,7 @@ async fn route_http_request_with_headers(
             }
             let transfers = state.transfers.read().await;
             let mut payload =
-                serde_json::from_str::<serde_json::Value>(&slskd_accelerated_downloads_json(
+                serde_json::from_str::<serde_json::Value>(&controller_accelerated_downloads_json(
                     route.query,
                     &transfers,
                 ))
@@ -29660,7 +29660,7 @@ async fn route_http_request_with_headers(
             ) {
                 let mutated = wishlist.clone();
                 let json = if compatibility_contract {
-                    item.slskdn_json()
+                    item.native_json()
                 } else {
                     item.json()
                 };
@@ -30640,11 +30640,11 @@ async fn route_http_request_with_headers(
 
           // ADDITIONAL MISSING GET ENDPOINTS (Phase 6)
           ("GET", "/api/multisource/jobs") => {
-              let versioned_slskdn = route.path.starts_with("/api/v0/")
-                  && state.config.controller_compatibility_target
-                      == ControllerCompatibilityTarget::Slskdn;
-              let swarm = state.multisource.read().await;
-              let mut jobs = if versioned_slskdn {
+            let versioned_profile = route.path.starts_with("/api/v0/")
+                && state.config.controller_profile
+                    == ControllerProfile::Native;
+            let swarm = state.multisource.read().await;
+            let mut jobs = if versioned_profile {
                   swarm
                       .list()
                       .into_iter()
@@ -30672,7 +30672,7 @@ async fn route_http_request_with_headers(
                       .collect::<Vec<_>>()
               };
               drop(swarm);
-              if !versioned_slskdn {
+            if !versioned_profile {
                   let transfers = state.transfers.read().await;
                   jobs.extend(transfers
                       .entries
@@ -31702,12 +31702,12 @@ async fn route_http_request_with_headers(
                   return Ok(routing::not_found_response());
               };
               let job_id = decoded_path_segment(job_id);
-              let versioned_slskdn = route.path.starts_with("/api/v0/")
-                  && state.config.controller_compatibility_target
-                      == ControllerCompatibilityTarget::Slskdn;
+              let versioned_profile = route.path.starts_with("/api/v0/")
+                  && state.config.controller_profile
+                      == ControllerProfile::Native;
               let swarm = state.multisource.read().await;
               if let Some(job) = swarm.get(&job_id) {
-                  let body = if versioned_slskdn {
+                  let body = if versioned_profile {
                       serde_json::json!({
                           "jobId": job.id,
                           "state": job.status,
@@ -32037,9 +32037,9 @@ async fn route_http_request_with_headers(
               if !effective_remote_configuration(state) {
                   return Ok(controller_forbidden_response());
               }
-              match slskd_options_config_validate_response(
+              match controller_options_config_validate_response(
                   body,
-                  state.config.controller_compatibility_target,
+                  state.config.controller_profile,
               ) {
                   Ok(response) => Ok(response),
                   Err(error) => Ok(routing::bad_request_response(&error)),
@@ -32244,7 +32244,7 @@ async fn route_http_request_with_headers(
                       .and_then(|value| value.get("@context").cloned())
                       .is_some_and(|value| value.is_null())
               {
-                  return Ok(slskdn_model_validation_response());
+                  return Ok(native_model_validation_response());
               }
               let interests = state.interests.read().await;
               let graph_data = interests
@@ -32287,7 +32287,7 @@ async fn route_http_request_with_headers(
                       .and_then(|value| value.get("@context").cloned())
                       .is_some_and(|value| value.is_null())
               {
-                  return Ok(slskdn_model_validation_response());
+                  return Ok(native_model_validation_response());
               }
               let wishlist = state.wishlist.read().await;
               let recommendations = wishlist
@@ -32336,7 +32336,7 @@ async fn route_http_request_with_headers(
               if route.path.starts_with("/api/v0/")
                   && work_ref.get("@context").is_some_and(serde_json::Value::is_null)
               {
-                  return Ok(slskdn_model_validation_response());
+                  return Ok(native_model_validation_response());
               }
               // Matches the oracle's real PromoteToWishlistAsync: a
               // recommendable WorkRef either promotes to a real, honest
@@ -32841,7 +32841,7 @@ async fn route_http_request_with_headers(
                     "share browse unavailable",
                 ));
             }
-            let json = slskd_share_directories_json(&shares.entries, None);
+            let json = controller_share_directories_json(&shares.entries, None);
             drop(shares);
             Ok(HttpResponse {
                 status: "200 OK",
@@ -32868,7 +32868,7 @@ async fn route_http_request_with_headers(
                     "share browse unavailable",
                 ));
             }
-            let json = slskd_share_directories_json(&shares.entries, Some(&root.label));
+            let json = controller_share_directories_json(&shares.entries, Some(&root.label));
             drop(shares);
             Ok(HttpResponse {
                 status: "200 OK",
@@ -32889,7 +32889,7 @@ async fn route_http_request_with_headers(
             else {
                 return Ok(routing::not_found_response());
             };
-            let json = slskd_share_value(root).to_string();
+            let json = controller_share_value(root).to_string();
             drop(shares);
             Ok(HttpResponse {
                 status: "200 OK",
@@ -34414,8 +34414,8 @@ async fn route_http_request_with_headers(
 
         ("GET", "/api/mesh/health")
             if route.path.starts_with("/api/v0/")
-                && state.config.controller_compatibility_target
-                    == ControllerCompatibilityTarget::Slskdn =>
+                && state.config.controller_profile
+                    == ControllerProfile::Native =>
         {
             let routing_nodes = if let Some(dht) = state.dht.as_ref() {
                 serde_json::from_str::<serde_json::Value>(&dht.status_json().await)
@@ -34469,8 +34469,8 @@ async fn route_http_request_with_headers(
                 .is_some_and(|sources| !sources.is_empty()) =>
         {
             if route.path.starts_with("/api/v0/")
-                && state.config.controller_compatibility_target
-                    == ControllerCompatibilityTarget::Slskdn
+                && state.config.controller_profile
+                    == ControllerProfile::Native
             {
                 if normalized_path == "/api/multisource/download" {
                     return Ok(multisource_versioned_download_response(body));
@@ -34558,8 +34558,8 @@ async fn route_http_request_with_headers(
 
         ("POST", "/api/multisource/download") => {
             if route.path.starts_with("/api/v0/")
-                && state.config.controller_compatibility_target
-                    == ControllerCompatibilityTarget::Slskdn
+                && state.config.controller_profile
+                    == ControllerProfile::Native
             {
                 return Ok(multisource_versioned_download_response(body));
             }
@@ -35162,14 +35162,14 @@ async fn route_http_request_with_headers(
             }).to_string()))
         }
 
-        // FairnessController.GetSummary is a versioned slskdN DTO, while the
+        // FairnessController.GetSummary is a versioned native profile DTO, while the
         // unversioned /api/fairness route remains slskR's legacy ranking
         // projection.  With no recorded traffic, the frozen guard returns a
         // neutral upload/download ratio, a zero overlay/Soulseek ratio, and
         // an explicit within-constraints reason.
         ("GET", "/api/fairness")
-            if state.config.controller_compatibility_target
-                == ControllerCompatibilityTarget::Slskdn
+            if state.config.controller_profile
+                == ControllerProfile::Native
                 && route.path == "/api/v0/fairness/summary" =>
         {
             let totals = if let Some(db) = state.db.as_ref() {
@@ -35559,8 +35559,8 @@ async fn route_http_request_with_headers(
                 }
                 Err(error) => {
                     eprintln!("port forwarding start failed: {error}");
-                    Ok(if state.config.controller_compatibility_target
-                        == ControllerCompatibilityTarget::Slskdn
+                    Ok(if state.config.controller_profile
+                        == ControllerProfile::Native
                         && route.path.starts_with("/api/v0/")
                     {
                         routing::internal_server_error_response("Failed to start port forwarding")
@@ -35729,7 +35729,7 @@ fn solid_resolution_error(
 
 async fn solid_client_id_document_response(state: &AppState) -> HttpResponse {
     let media = state.media_services.read().await;
-    if state.config.controller_compatibility_target != ControllerCompatibilityTarget::Slskdn
+    if state.config.controller_profile != ControllerProfile::Native
         || !media.features.solid
     {
         return routing::not_found_response();
@@ -35819,7 +35819,7 @@ fn head_response(response: HttpResponse) -> HttpResponse {
 
 fn web_build_root(
     configured_content_path: Option<&Path>,
-    compatibility_target: Option<ControllerCompatibilityTarget>,
+    runtime_profile: Option<ControllerProfile>,
 ) -> Option<PathBuf> {
     let mut candidates = Vec::new();
     if let Some(configured) = configured_content_path {
@@ -35854,7 +35854,7 @@ fn web_build_root(
             .join("build"),
     );
 
-    if let Some(target) = compatibility_target {
+    if let Some(target) = runtime_profile {
         // Prefer a profile build across every candidate root before falling
         // back to a legacy single-build root. The executable's generated
         // fallback shell can otherwise win before SLSKR_WEB_BUILD_DIR is
@@ -35894,14 +35894,14 @@ fn web_static_content_type(path: &Path) -> &'static str {
     }
 }
 
-fn inject_web_compatibility_target(
+fn inject_web_runtime_profile(
     bytes: Vec<u8>,
     file: &Path,
-    compatibility_target: ControllerCompatibilityTarget,
-    expose_compatibility_target: bool,
+    runtime_profile: ControllerProfile,
+    expose_runtime_profile: bool,
     csp_nonce: Option<&str>,
 ) -> Vec<u8> {
-    if !expose_compatibility_target
+    if !expose_runtime_profile
         || file.file_name().and_then(|name| name.to_str()) != Some("index.html")
     {
         return bytes;
@@ -35916,8 +35916,8 @@ fn inject_web_compatibility_target(
     };
     let insertion_point = marker_start + marker.len();
     let mut metadata = format!(
-        "<meta name=\"slskr-compatibility-target\" content=\"{}\">",
-        compatibility_target.as_str()
+        "<meta name=\"slskr-runtime-profile\" content=\"{}\">",
+        runtime_profile.as_str()
     );
     if let Some(csp_nonce) = csp_nonce {
         metadata.push_str(&format!(
@@ -35934,7 +35934,7 @@ fn inject_web_compatibility_target(
 fn web_static_file_for_request(
     path: &str,
     configured_content_path: Option<&Path>,
-    compatibility_target: Option<ControllerCompatibilityTarget>,
+    runtime_profile: Option<ControllerProfile>,
 ) -> Option<(PathBuf, PathBuf, &'static str)> {
     if path.starts_with("/api/") || path.starts_with("/hub/") || path == "/api" || path == "/hub" {
         return None;
@@ -35944,7 +35944,7 @@ fn web_static_file_for_request(
         return None;
     }
 
-    let root = web_build_root(configured_content_path, compatibility_target)?
+    let root = web_build_root(configured_content_path, runtime_profile)?
         .canonicalize()
         .ok()?;
     let (file, content_type) = web_static_file_for_request_under_root(&root, path)?;
@@ -36044,10 +36044,10 @@ fn resolve_web_static_relative_path(root: &Path, relative_path: &Path) -> Option
 }
 
 fn read_web_index_html() -> Option<String> {
-    let compatibility_target = env::var("SLSKR_CONTROLLER_COMPATIBILITY_TARGET")
+    let runtime_profile = env::var("SLSKR_CONTROLLER_PROFILE")
         .ok()
-        .and_then(|value| ControllerCompatibilityTarget::parse(&value).ok());
-    let (root, path, _) = web_static_file_for_request("/", None, compatibility_target)?;
+        .and_then(|value| ControllerProfile::parse(&value).ok());
+    let (root, path, _) = web_static_file_for_request("/", None, runtime_profile)?;
     let bytes = read_bounded_web_static_file_under_root(&root, &path).ok()?;
     String::from_utf8(bytes).ok()
 }
@@ -36204,14 +36204,14 @@ async fn write_web_static_response<W: tokio::io::AsyncWrite + Unpin>(
     writer: &mut W,
     path: &str,
     configured_content_path: Option<&Path>,
-    compatibility_target: ControllerCompatibilityTarget,
-    expose_compatibility_target: bool,
+    runtime_profile: ControllerProfile,
+    expose_runtime_profile: bool,
     include_body: bool,
     keep_alive: bool,
     extra_headers: &str,
 ) -> Result<Option<usize>, String> {
     let Some((root, file, content_type)) =
-        web_static_file_for_request(path, configured_content_path, Some(compatibility_target))
+        web_static_file_for_request(path, configured_content_path, Some(runtime_profile))
     else {
         return Ok(None);
     };
@@ -36220,11 +36220,11 @@ async fn write_web_static_response<W: tokio::io::AsyncWrite + Unpin>(
     } else {
         None
     };
-    let bytes = inject_web_compatibility_target(
+    let bytes = inject_web_runtime_profile(
         read_bounded_web_static_file_under_root(&root, &file)?,
         &file,
-        compatibility_target,
-        expose_compatibility_target,
+        runtime_profile,
+        expose_runtime_profile,
         csp_nonce.as_deref(),
     );
     let connection_header = if keep_alive { "keep-alive" } else { "close" };
@@ -36439,7 +36439,7 @@ fn controller_metrics_auth_failure(
     if config.controller_metrics_auth_disabled {
         return None;
     }
-    if config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
+    if config.controller_profile == ControllerProfile::Native
         && config.controller_metrics_password.trim().is_empty()
     {
         return Some(HttpResponse {
@@ -36452,8 +36452,8 @@ fn controller_metrics_auth_failure(
     let Some(authorization) = authorization else {
         return Some(controller_metrics_unauthorized_response());
     };
-    let valid = match config.controller_compatibility_target {
-        ControllerCompatibilityTarget::Slskd => {
+    let valid = match config.controller_profile {
+        ControllerProfile::Legacy => {
             let provided = authorization.split(' ').next_back().unwrap_or_default();
             let expected = STANDARD.encode(format!(
                 "{}:{}",
@@ -36464,7 +36464,7 @@ fn controller_metrics_auth_failure(
                 .is_some_and(|prefix| prefix.eq_ignore_ascii_case("Basic"))
                 && provided.eq_ignore_ascii_case(&expected)
         }
-        ControllerCompatibilityTarget::Slskdn => authorization
+        ControllerProfile::Native => authorization
             .get(..6)
             .filter(|prefix| prefix.eq_ignore_ascii_case("Basic "))
             .and_then(|_| STANDARD.decode(authorization[6..].trim()).ok())
@@ -36512,15 +36512,14 @@ impl ControllerVersionState {
         }
     }
 
-    fn json(&self, target: ControllerCompatibilityTarget) -> serde_json::Value {
+    fn json(&self, target: ControllerProfile) -> serde_json::Value {
         let mut value = serde_json::json!({
             "full": format!("{APP_VERSION} ({APP_VERSION})"),
             "current": APP_VERSION,
             "isCanary": false,
             "isDevelopment": APP_VERSION == "0.0.0" || cfg!(debug_assertions),
-            "isUpdateAvailable": false,
         });
-        if target == ControllerCompatibilityTarget::Slskdn {
+        if target == ControllerProfile::Native {
             value["latest"] = serde_json::json!(self.latest.as_deref().unwrap_or_default());
             value["latestTag"] = serde_json::json!(self.latest_tag.as_deref().unwrap_or_default());
             value["latestUrl"] = serde_json::json!(self.latest_url.as_deref().unwrap_or_default());
@@ -36548,19 +36547,40 @@ impl ControllerVersionState {
 #[cfg(test)]
 mod controller_version_state_tests {
     #[test]
-    fn initial_json_includes_update_availability() {
+    fn initial_application_state_version_includes_update_availability() {
         let value = super::ControllerVersionState::initial()
-            .json(super::ControllerCompatibilityTarget::Slskdn);
+            .json(super::ControllerProfile::Native);
+        let value =
+            super::application_state_version_json(value, super::ControllerProfile::Native);
         assert_eq!(value["isUpdateAvailable"], false);
+    }
+
+    #[test]
+    fn initial_legacy_application_state_version_preserves_frozen_options_shape() {
+        let value = super::ControllerVersionState::initial()
+            .json(super::ControllerProfile::Legacy);
+        let value =
+            super::application_state_version_json(value, super::ControllerProfile::Legacy);
+        assert!(value.get("isUpdateAvailable").is_none());
     }
 }
 
-fn slskd_version_json(state: &AppState) -> serde_json::Value {
+fn controller_version_json(state: &AppState) -> serde_json::Value {
     state
         .controller_version
         .read()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .json(state.config.controller_compatibility_target)
+        .json(state.config.controller_profile)
+}
+
+fn application_state_version_json(
+    mut version: serde_json::Value,
+    profile: ControllerProfile,
+) -> serde_json::Value {
+    if profile == ControllerProfile::Native {
+        version["isUpdateAvailable"] = serde_json::json!(false);
+    }
+    version
 }
 
 fn normalize_controller_release_version(version_or_tag: &str) -> String {
@@ -36587,7 +36607,7 @@ fn normalize_controller_release_version(version_or_tag: &str) -> String {
         .to_owned()
 }
 
-fn parse_slskdn_release(version: &str) -> Option<(u64, u32)> {
+fn parse_native_release(version: &str) -> Option<(u64, u32)> {
     let lower = version.to_ascii_lowercase();
     let (release_line, remainder) = lower.split_once("-slskdn.")?;
     let release_line = if (8..=10).contains(&release_line.len())
@@ -36637,8 +36657,8 @@ fn is_newer_controller_release_available(current: &str, latest: &str) -> bool {
         return false;
     }
     if let (Some(current), Some(latest)) = (
-        parse_slskdn_release(&current),
-        parse_slskdn_release(&latest),
+        parse_native_release(&current),
+        parse_native_release(&latest),
     ) {
         return latest > current;
     }
@@ -36655,7 +36675,7 @@ async fn start_controller_version_check(state: Arc<AppState>) {
     if state.config.controller_no_version_check {
         return;
     }
-    if state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskd {
+    if state.config.controller_profile == ControllerProfile::Legacy {
         record_daemon_log(
             &state,
             logging::LogLevel::Info,
@@ -36675,18 +36695,18 @@ async fn start_controller_version_check(state: Arc<AppState>) {
     tokio::spawn(async move {
         refresh_controller_version_check(
             &state,
-            controller_releases_url(state.config.controller_compatibility_target),
+            controller_releases_url(state.config.controller_profile),
         )
         .await
     });
 }
 
-fn controller_releases_url(target: ControllerCompatibilityTarget) -> &'static str {
+fn controller_releases_url(target: ControllerProfile) -> &'static str {
     match target {
-        ControllerCompatibilityTarget::Slskd => {
+        ControllerProfile::Legacy => {
             "https://api.github.com/repos/slskd/slskd/releases/latest"
         }
-        ControllerCompatibilityTarget::Slskdn => {
+        ControllerProfile::Native => {
             "https://api.github.com/repos/snapetech/slskr/releases/latest"
         }
     }
@@ -36700,15 +36720,15 @@ async fn controller_version_latest_response(
     if force_check {
         let check = refresh_controller_version_check(state, releases_url).await;
         if check.is_err()
-            && state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskd
+            && state.config.controller_profile == ControllerProfile::Legacy
         {
             // slskd's ApplicationController awaits CheckVersionAsync without
             // catching its network failure; ASP.NET therefore emits a 500.
-            // slskdN catches the same failure and returns its current state.
+            // native profile catches the same failure and returns its current state.
             return routing::internal_server_error_response("failed to check application version");
         }
     }
-    routing::ok_response(slskd_version_json(state).to_string())
+    routing::ok_response(controller_version_json(state).to_string())
 }
 
 /// Performs one real GitHub Releases lookup and updates `controller_version`
@@ -36717,7 +36737,7 @@ async fn controller_version_latest_response(
 /// `GET .../version/latest?forceCheck=true`, which awaits it directly so
 /// the response reflects a freshly fetched latest release. The returned
 /// error is retained for slskd's controller-specific propagation contract;
-/// slskdN's controller ignores it after recording the failed check.
+/// native profile's controller ignores it after recording the failed check.
 async fn refresh_controller_version_check(
     state: &AppState,
     releases_url: &str,
@@ -36805,17 +36825,17 @@ async fn refresh_controller_version_check(
     }
 }
 
-fn slskd_options_json(
+fn controller_options_json(
     config: &AppConfig,
     overlay: &ControllerOptionsOverlayState,
     include_volatile_overlay: bool,
 ) -> String {
-    let defaults = match config.controller_compatibility_target {
-        ControllerCompatibilityTarget::Slskd => {
-            include_str!("../data/slskd-options-default.json")
+    let defaults = match config.controller_profile {
+        ControllerProfile::Legacy => {
+            include_str!("../data/legacy-options-default.json")
         }
-        ControllerCompatibilityTarget::Slskdn => {
-            include_str!("../data/slskdn-options-default.json")
+        ControllerProfile::Native => {
+            include_str!("../data/native-options-default.json")
         }
     };
     let mut response = serde_json::from_str::<serde_json::Value>(defaults)
@@ -36832,7 +36852,7 @@ fn slskd_options_json(
     response["flags"]["noStart"] = serde_json::json!(config.controller_no_start);
     response["flags"]["noVersionCheck"] = serde_json::json!(config.controller_no_version_check);
     response["flags"]["experimental"] = serde_json::json!(config.controller_experimental);
-    if config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn {
+    if config.controller_profile == ControllerProfile::Native {
         response["flags"]["hashFromAudioFileEnabled"] =
             serde_json::json!(config.controller_hash_from_audio_file_enabled);
     }
@@ -36843,7 +36863,7 @@ fn slskd_options_json(
     response["blacklist"]["enabled"] = serde_json::json!(config.managed_blacklist.enabled);
     if let Some(file) = config.managed_blacklist.file.as_deref() {
         response["blacklist"]["file"] = serde_json::json!(file.display().to_string());
-    } else if config.controller_compatibility_target == ControllerCompatibilityTarget::Slskd {
+    } else if config.controller_profile == ControllerProfile::Legacy {
         response["blacklist"]
             .as_object_mut()
             .expect("slskd blacklist defaults must be an object")
@@ -36851,7 +36871,7 @@ fn slskd_options_json(
     }
     response["feature"]["swagger"] = serde_json::json!(config.controller_swagger);
     if config.current_upstream_behavior
-        && config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
+        && config.controller_profile == ControllerProfile::Native
     {
         response["autoReplace"] = serde_json::json!({
             "intervalSeconds": config.transfer_download.auto_replace_interval.as_secs(),
@@ -36874,19 +36894,19 @@ fn slskd_options_json(
     response["logger"]["disk"] = serde_json::json!(config.logger.disk);
     if let Some(value) = config.logger.loki.as_ref() {
         response["logger"]["loki"] = serde_json::json!(value);
-    } else if config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn {
+    } else if config.controller_profile == ControllerProfile::Native {
         response["logger"]["loki"] = serde_json::json!("");
     } else if let Some(logger) = response["logger"].as_object_mut() {
         logger.remove("loki");
     }
     response["logger"]["noColor"] = serde_json::json!(config.logger.no_color);
-    if config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn {
+    if config.controller_profile == ControllerProfile::Native {
         response["permissions"]["file"]["mode"] = config
             .permissions_file_mode
             .as_ref()
             .map_or_else(|| serde_json::json!(""), |value| serde_json::json!(value));
     }
-    if config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn {
+    if config.controller_profile == ControllerProfile::Native {
         response["telemetry"]["tracing"]["enabled"] =
             serde_json::json!(config.telemetry_tracing.enabled);
         response["telemetry"]["tracing"]["exporter"] =
@@ -36958,7 +36978,7 @@ fn slskd_options_json(
             }
         }
     }
-    if config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn {
+    if config.controller_profile == ControllerProfile::Native {
         response["filters"]["searchRetention"] = serde_json::json!({
             "maxAgeDays": config.search_retention.max_age_days,
             "maxCount": config.search_retention.max_count,
@@ -36972,7 +36992,7 @@ fn slskd_options_json(
     response["metrics"]["authentication"]["username"] =
         serde_json::json!(config.controller_metrics_username);
     response["metrics"]["authentication"]["password"] = serde_json::json!("*****");
-    if config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn {
+    if config.controller_profile == ControllerProfile::Native {
         response["diagnostics"]["allowMemoryDump"] =
             serde_json::json!(config.controller_diagnostics_allow_memory_dump);
         response["diagnostics"]["allowRemoteDump"] =
@@ -36983,7 +37003,7 @@ fn slskd_options_json(
     response["directories"]["incomplete"] =
         serde_json::json!(config.incomplete_dir.display().to_string());
     let web_address_key =
-        if config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn {
+        if config.controller_profile == ControllerProfile::Native {
             "address"
         } else {
             "ipAddress"
@@ -36997,7 +37017,7 @@ fn slskd_options_json(
     response["web"]["port"] = serde_json::json!(config.http_bind.port());
     if let Some(path) = config.controller_web.socket.as_ref() {
         response["web"]["socket"] = serde_json::json!(path.display().to_string());
-    } else if config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn {
+    } else if config.controller_profile == ControllerProfile::Native {
         response["web"]["socket"] = serde_json::json!("");
     } else if let Some(web) = response["web"].as_object_mut() {
         web.remove("socket");
@@ -37012,7 +37032,7 @@ fn slskd_options_json(
         .binds
         .first()
         .map_or(5031, SocketAddr::port));
-    if config.controller_compatibility_target == ControllerCompatibilityTarget::Slskd {
+    if config.controller_profile == ControllerProfile::Legacy {
         if let Some(value) = config.controller_web.https.configured_ip_address.as_ref() {
             response["web"]["https"]["ipAddress"] = serde_json::json!(value);
         } else if let Some(https) = response["web"]["https"].as_object_mut() {
@@ -37027,7 +37047,7 @@ fn slskd_options_json(
         .as_ref()
         .map_or_else(
             || {
-                if config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn {
+                if config.controller_profile == ControllerProfile::Native {
                     serde_json::json!("")
                 } else {
                     serde_json::Value::Null
@@ -37036,7 +37056,7 @@ fn slskd_options_json(
             |path| serde_json::json!(path.display().to_string()),
         );
     response["web"]["https"]["certificate"]["password"] = serde_json::json!("*****");
-    if config.controller_compatibility_target == ControllerCompatibilityTarget::Slskd
+    if config.controller_profile == ControllerProfile::Legacy
         && config
             .controller_web
             .https
@@ -37059,7 +37079,7 @@ fn slskd_options_json(
                     "role": key.role,
                     "cidr": key.cidr,
                 });
-                if config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn {
+                if config.controller_profile == ControllerProfile::Native {
                     value["scopes"] = serde_json::json!("*");
                 }
                 (name.clone(), value)
@@ -37073,7 +37093,7 @@ fn slskd_options_json(
     response["web"]["authentication"]["jwt"]["key"] = serde_json::json!("*****");
     response["web"]["authentication"]["jwt"]["ttl"] =
         serde_json::json!(config.controller_web_jwt_ttl_millis);
-    if config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn {
+    if config.controller_profile == ControllerProfile::Native {
         response["web"]["enforceSecurity"] =
             serde_json::json!(config.controller_web_enforce_security);
         response["web"]["allowRemoteNoAuth"] =
@@ -37107,7 +37127,7 @@ fn slskd_options_json(
     response["rooms"] = serde_json::json!(config.core_workflow.rooms);
     if let Some(picture) = config.user_info_picture.as_deref() {
         response["soulseek"]["picture"] = serde_json::json!(picture.display().to_string());
-    } else if config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn {
+    } else if config.controller_profile == ControllerProfile::Native {
         response["soulseek"]["picture"] = serde_json::json!("");
     } else if let Some(soulseek) = response["soulseek"].as_object_mut() {
         soulseek.remove("picture");
@@ -37120,7 +37140,7 @@ fn slskd_options_json(
         "childLimit": config.soulseek_distributed.child_limit,
         "logging": config.soulseek_distributed.logging,
     });
-    if config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn {
+    if config.controller_profile == ControllerProfile::Native {
         response["soulseek"]["likedInterests"] =
             serde_json::json!(config.core_workflow.liked_interests);
         response["soulseek"]["hatedInterests"] =
@@ -37147,7 +37167,7 @@ fn slskd_options_json(
     let proxy = response["soulseek"]["connection"]["proxy"]
         .as_object_mut()
         .expect("frozen Soulseek proxy defaults must be an object");
-    if config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
+    if config.controller_profile == ControllerProfile::Native
         || !connection.proxy.address.is_empty()
     {
         proxy.insert(
@@ -37162,7 +37182,7 @@ fn slskd_options_json(
     } else {
         proxy.remove("port");
     }
-    if config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
+    if config.controller_profile == ControllerProfile::Native
         || !connection.proxy.username.is_empty()
     {
         proxy.insert(
@@ -37172,7 +37192,7 @@ fn slskd_options_json(
     } else {
         proxy.remove("username");
     }
-    if config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
+    if config.controller_profile == ControllerProfile::Native
         || !connection.proxy.password.is_empty()
     {
         proxy.insert("password".to_owned(), serde_json::json!("*****"));
@@ -37207,7 +37227,7 @@ fn slskd_options_json(
     } else if let Some(cache) = response["shares"]["cache"].as_object_mut() {
         cache.remove("retention");
     }
-    if config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn {
+    if config.controller_profile == ControllerProfile::Native {
         response["shares"]["probeMediaAttributes"] =
             serde_json::json!(config.share_settings.probe_media_attributes);
         response["wishlist"] = serde_json::json!({
@@ -37245,8 +37265,8 @@ fn slskd_options_json(
         "patterns": config.managed_blacklist.patterns,
         "cidrs": config.managed_blacklist.cidr_values,
     });
-    match config.controller_compatibility_target {
-        ControllerCompatibilityTarget::Slskd => {
+    match config.controller_profile {
+        ControllerProfile::Legacy => {
             response["transfers"]["upload"]["slots"] =
                 serde_json::json!(config.transfer_upload.slots);
             response["transfers"]["upload"]["speedLimit"] =
@@ -37257,7 +37277,7 @@ fn slskd_options_json(
             response["transfers"]["groups"]["blacklisted"] = blacklisted;
             response["transfers"]["download"] = transfer_download_options_json(config, false);
         }
-        ControllerCompatibilityTarget::Slskdn => {
+        ControllerProfile::Native => {
             response["global"]["upload"]["slots"] = serde_json::json!(config.transfer_upload.slots);
             response["global"]["upload"]["speedLimit"] =
                 serde_json::json!(config.transfer_upload.speed_limit_kib);
@@ -37274,7 +37294,7 @@ fn slskd_options_json(
             response["global"]["download"]["costBasedScheduling"] = preserved_cost_based;
         }
     }
-    let ftp_key = if config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
+    let ftp_key = if config.controller_profile == ControllerProfile::Native
     {
         "integration"
     } else {
@@ -37293,17 +37313,17 @@ fn slskd_options_json(
         serde_json::json!(config.integrations.ftp.connection_timeout);
     response[ftp_key]["ftp"]["retryAttempts"] =
         serde_json::json!(config.integrations.ftp.retry_attempts);
-    if config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
+    if config.controller_profile == ControllerProfile::Native
         || !config.integrations.ftp.address.is_empty()
     {
         response[ftp_key]["ftp"]["address"] = serde_json::json!(config.integrations.ftp.address);
     }
-    if config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
+    if config.controller_profile == ControllerProfile::Native
         || !config.integrations.ftp.username.is_empty()
     {
         response[ftp_key]["ftp"]["username"] = serde_json::json!(config.integrations.ftp.username);
     }
-    if config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
+    if config.controller_profile == ControllerProfile::Native
         || !config.integrations.ftp.password.is_empty()
     {
         response[ftp_key]["ftp"]["password"] = serde_json::json!("*****");
@@ -37326,7 +37346,7 @@ fn slskd_options_json(
             config.integrations.vpn.gluetun.username.as_str(),
         ),
     ] {
-        if config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
+        if config.controller_profile == ControllerProfile::Native
             || !value.is_empty()
         {
             response[ftp_key]["vpn"]["gluetun"][key] = serde_json::json!(value);
@@ -37342,7 +37362,7 @@ fn slskd_options_json(
             !config.integrations.vpn.gluetun.api_key.is_empty(),
         ),
     ] {
-        if config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
+        if config.controller_profile == ControllerProfile::Native
             || configured
         {
             response[ftp_key]["vpn"]["gluetun"][key] = serde_json::json!("*****");
@@ -37351,7 +37371,7 @@ fn slskd_options_json(
     response[ftp_key]["scripts"] =
         serde_json::to_value(&config.integrations.scripts).expect("script options must serialize");
 
-    if config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn {
+    if config.controller_profile == ControllerProfile::Native {
         let advanced = &config.advanced_networking;
         let dht = if include_volatile_overlay {
             overlay.watched_dht.as_ref().unwrap_or(&advanced.dht)
@@ -37705,9 +37725,9 @@ fn slskd_options_json(
         &overlay.yaml_effective
     };
     if yaml_effective.is_object() {
-        if config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn {
+        if config.controller_profile == ControllerProfile::Native {
             // These sections bind to dedicated runtime option types in
-            // slskdN; they are not arbitrary members of the main Options API.
+            // native profile; they are not arbitrary members of the main Options API.
             // The typed projection above owns the main-Options subsets, while
             // mesh/overlay/PodCore remain runtime-only configuration trees.
             let mut projected = yaml_effective.clone();
@@ -37737,8 +37757,8 @@ fn slskd_options_json(
             merge_json_objects(&mut response, yaml_effective);
         }
     }
-    normalize_frozen_transfer_options_shape(&mut response, config.controller_compatibility_target);
-    if config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn {
+    normalize_frozen_transfer_options_shape(&mut response, config.controller_profile);
+    if config.controller_profile == ControllerProfile::Native {
         if let Some(integration) = response["integration"].as_object_mut() {
             integration.remove("youtube");
             integration.remove("lastfm");
@@ -37782,7 +37802,7 @@ fn slskd_options_json(
                 .filter(|ch| ch.is_alphanumeric())
                 .flat_map(char::to_lowercase)
                 .collect::<String>();
-            if config.controller_compatibility_target == ControllerCompatibilityTarget::Slskd {
+            if config.controller_profile == ControllerProfile::Legacy {
                 if let Some(run) = script
                     .get_mut("run")
                     .and_then(serde_json::Value::as_object_mut)
@@ -37871,7 +37891,7 @@ fn slskd_options_json(
         ),
         (
             "SLSKD_DOWNLOAD_SLOTS",
-            if config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn {
+            if config.controller_profile == ControllerProfile::Native {
                 "/global/download/slots"
             } else {
                 "/transfers/download/slots"
@@ -37879,7 +37899,7 @@ fn slskd_options_json(
         ),
         (
             "SLSKD_DOWNLOAD_SPEED_LIMIT",
-            if config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn {
+            if config.controller_profile == ControllerProfile::Native {
                 "/global/download/speedLimit"
             } else {
                 "/transfers/download/speedLimit"
@@ -38043,7 +38063,7 @@ fn slskd_options_json(
         ),
         (
             "SLSKD_UPLOAD_SLOTS",
-            if config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn {
+            if config.controller_profile == ControllerProfile::Native {
                 "/global/upload/slots"
             } else {
                 "/transfers/upload/slots"
@@ -38051,7 +38071,7 @@ fn slskd_options_json(
         ),
         (
             "SLSKD_UPLOAD_SPEED_LIMIT",
-            if config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn {
+            if config.controller_profile == ControllerProfile::Native {
                 "/global/upload/speedLimit"
             } else {
                 "/transfers/upload/speedLimit"
@@ -38108,10 +38128,10 @@ fn slskd_options_json(
 
 fn normalize_frozen_transfer_options_shape(
     response: &mut serde_json::Value,
-    target: ControllerCompatibilityTarget,
+    target: ControllerProfile,
 ) {
     match target {
-        ControllerCompatibilityTarget::Slskd => {
+        ControllerProfile::Legacy => {
             if let Some(global) = response
                 .as_object_mut()
                 .expect("options response is an object")
@@ -38120,7 +38140,7 @@ fn normalize_frozen_transfer_options_shape(
                 merge_json_objects(&mut response["transfers"], &global);
             }
         }
-        ControllerCompatibilityTarget::Slskdn => {
+        ControllerProfile::Native => {
             let groups = response
                 .get_mut("global")
                 .and_then(serde_json::Value::as_object_mut)
@@ -38175,7 +38195,7 @@ fn normalize_frozen_transfer_options_shape(
     }
 
     match target {
-        ControllerCompatibilityTarget::Slskd => {
+        ControllerProfile::Legacy => {
             if let Some(limits) = response.pointer_mut("/transfers/upload/limits") {
                 materialize_null_windows(limits);
             }
@@ -38198,7 +38218,7 @@ fn normalize_frozen_transfer_options_shape(
                 }
             }
         }
-        ControllerCompatibilityTarget::Slskdn => {
+        ControllerProfile::Native => {
             if let Some(limits) = response.pointer_mut("/global/limits") {
                 materialize_null_windows(limits);
             }
@@ -38243,7 +38263,7 @@ fn transfer_limit_options_json(
     serde_json::Value::Object(value)
 }
 
-fn transfer_download_options_json(config: &AppConfig, slskdn: bool) -> serde_json::Value {
+fn transfer_download_options_json(config: &AppConfig, native_profile: bool) -> serde_json::Value {
     let download = &config.transfer_download;
     let auto_replace_threshold = if download.auto_replace_threshold_percent.fract() == 0.0 {
         serde_json::json!(download.auto_replace_threshold_percent as u64)
@@ -38268,7 +38288,7 @@ fn transfer_download_options_json(config: &AppConfig, slskdn: bool) -> serde_jso
                 .alternate_source_size_tolerance_percent
         )
     };
-    let retry = if slskdn {
+    let retry = if native_profile {
         serde_json::json!({
             "incomplete": download.retry.incomplete,
             "attempts": download.retry.attempts,
@@ -38283,7 +38303,7 @@ fn transfer_download_options_json(config: &AppConfig, slskdn: bool) -> serde_jso
             "maxDelay": download.retry.max_delay.as_millis(),
         })
     };
-    if slskdn {
+    if native_profile {
         serde_json::json!({
             "slots": download.slots,
             "speedLimit": download.speed_limit_kib,
@@ -38336,7 +38356,7 @@ fn transfer_limits_options_json(
 
 fn transfer_group_options_json(
     upload: &crate::config::TransferGroupUploadSettings,
-    slskdn: bool,
+    native_profile: bool,
 ) -> serde_json::Value {
     let mut upload_json = serde_json::json!({
         "priority": upload.priority,
@@ -38345,7 +38365,7 @@ fn transfer_group_options_json(
         "speedLimit": upload.speed_limit_kib,
     });
     let limits = transfer_limits_options_json(&upload.limits);
-    if slskdn {
+    if native_profile {
         upload_json["allowedFileTypes"] = serde_json::json!(upload.allowed_file_types);
         serde_json::json!({"upload": upload_json, "limits": limits})
     } else {
@@ -38354,17 +38374,17 @@ fn transfer_group_options_json(
     }
 }
 
-fn transfer_groups_options_json(config: &AppConfig, slskdn: bool) -> serde_json::Value {
+fn transfer_groups_options_json(config: &AppConfig, native_profile: bool) -> serde_json::Value {
     let groups = &config.transfer_groups;
-    let default = transfer_group_options_json(&groups.default.upload, slskdn);
-    let mut leechers = transfer_group_options_json(&groups.leechers.upload, slskdn);
+    let default = transfer_group_options_json(&groups.default.upload, native_profile);
+    let mut leechers = transfer_group_options_json(&groups.leechers.upload, native_profile);
     leechers["thresholds"] = serde_json::json!({
         "files": groups.leechers.threshold_files,
         "directories": groups.leechers.threshold_directories,
     });
     let mut user_defined = serde_json::Map::new();
     for (name, group) in &groups.user_defined {
-        let mut projected = transfer_group_options_json(&group.upload, slskdn);
+        let mut projected = transfer_group_options_json(&group.upload, native_profile);
         projected["members"] = serde_json::json!(group.members);
         user_defined.insert(name.clone(), projected);
     }
@@ -38380,9 +38400,9 @@ fn transfer_groups_options_json(config: &AppConfig, slskdn: bool) -> serde_json:
     })
 }
 
-fn slskd_options_debug_view(state: &AppState, overlay: &ControllerOptionsOverlayState) -> String {
-    let target = state.config.controller_compatibility_target;
-    let mut options = serde_json::from_str::<serde_json::Value>(&slskd_options_json(
+fn controller_options_debug_view(state: &AppState, overlay: &ControllerOptionsOverlayState) -> String {
+    let target = state.config.controller_profile;
+    let mut options = serde_json::from_str::<serde_json::Value>(&controller_options_json(
         &state.config,
         overlay,
         true,
@@ -38394,7 +38414,7 @@ fn slskd_options_debug_view(state: &AppState, overlay: &ControllerOptionsOverlay
             options["web"]["https"]["port"] = serde_json::json!(port);
         }
     }
-    if target == ControllerCompatibilityTarget::Slskdn {
+    if target == ControllerProfile::Native {
         for (parent, key) in [
             ("dhtRendezvous", "vpnPortSyncMode"),
             ("security.events", "minLogSeverity"),
@@ -38434,20 +38454,20 @@ fn slskd_options_debug_view(state: &AppState, overlay: &ControllerOptionsOverlay
     root.insert("showVersion".to_owned(), serde_json::json!(false));
 
     let dictionary = |type_name: &str| serde_json::Value::String(type_name.to_owned());
-    root[if target == ControllerCompatibilityTarget::Slskdn {
+    root[if target == ControllerProfile::Native {
         "integration"
     } else {
         "integrations"
-    }]["scripts"] = dictionary(if target == ControllerCompatibilityTarget::Slskdn {
+    }]["scripts"] = dictionary(if target == ControllerProfile::Native {
         "System.Collections.Generic.Dictionary`2[System.String,slskd.Options+IntegrationOptions+ScriptOptions]"
     } else {
         "System.Collections.Generic.Dictionary`2[System.String,slskd.Options+IntegrationsOptions+ScriptOptions]"
     });
-    root[if target == ControllerCompatibilityTarget::Slskdn {
+    root[if target == ControllerProfile::Native {
         "integration"
     } else {
         "integrations"
-    }]["webhooks"] = dictionary(if target == ControllerCompatibilityTarget::Slskdn {
+    }]["webhooks"] = dictionary(if target == ControllerProfile::Native {
         "System.Collections.Generic.Dictionary`2[System.String,slskd.Options+IntegrationOptions+WebhookOptions]"
     } else {
         "System.Collections.Generic.Dictionary`2[System.String,slskd.Options+IntegrationsOptions+WebhookOptions]"
@@ -38455,7 +38475,7 @@ fn slskd_options_debug_view(state: &AppState, overlay: &ControllerOptionsOverlay
     root["relay"]["agents"] = dictionary(
         "System.Collections.Generic.Dictionary`2[System.String,slskd.Options+RelayOptions+RelayAgentConfigurationOptions]",
     );
-    if target == ControllerCompatibilityTarget::Slskdn {
+    if target == ControllerProfile::Native {
         root["groups"]["userDefined"] = dictionary(
             "System.Collections.Generic.Dictionary`2[System.String,slskd.Options+GroupsOptions+UserDefinedOptions]",
         );
@@ -38469,8 +38489,8 @@ fn slskd_options_debug_view(state: &AppState, overlay: &ControllerOptionsOverlay
     );
 
     let mut output = String::from("slskd:\n");
-    render_slskd_debug_object(root, 2, &mut Vec::new(), &mut output, state, overlay);
-    let urls = if target == ControllerCompatibilityTarget::Slskdn {
+    render_controller_debug_object(root, 2, &mut Vec::new(), &mut output, state, overlay);
+    let urls = if target == ControllerProfile::Native {
         format!("http://{}", state.config.http_bind)
     } else {
         String::new()
@@ -38481,7 +38501,7 @@ fn slskd_options_debug_view(state: &AppState, overlay: &ControllerOptionsOverlay
     output
 }
 
-fn render_slskd_debug_object(
+fn render_controller_debug_object(
     object: &serde_json::Map<String, serde_json::Value>,
     indentation: usize,
     path: &mut Vec<String>,
@@ -38497,19 +38517,19 @@ fn render_slskd_debug_object(
         match value {
             serde_json::Value::Object(nested) if nested.is_empty() => {}
             serde_json::Value::Object(nested) => {
-                if !slskd_debug_object_has_leaves(nested) {
+                if !controller_debug_object_has_leaves(nested) {
                     path.pop();
                     continue;
                 }
                 output.push_str(&format!("{}{debug_key}:\n", " ".repeat(indentation)));
-                render_slskd_debug_object(nested, indentation + 2, path, output, state, overlay);
+                render_controller_debug_object(nested, indentation + 2, path, output, state, overlay);
             }
             value => {
-                let provider = slskd_debug_provider(path, state, overlay);
-                let raw = slskd_debug_value(path, value, provider, state);
-                if state.config.controller_compatibility_target
-                    == ControllerCompatibilityTarget::Slskdn
-                    && slskdn_debug_key_is_sensitive(&debug_key)
+                let provider = controller_debug_provider(path, state, overlay);
+                let raw = controller_debug_value(path, value, provider, state);
+                if state.config.controller_profile
+                    == ControllerProfile::Native
+                    && native_debug_key_is_sensitive(&debug_key)
                 {
                     output.push_str(&format!(
                         "{}{debug_key}={}*****\n",
@@ -38528,14 +38548,14 @@ fn render_slskd_debug_object(
     }
 }
 
-fn slskd_debug_object_has_leaves(object: &serde_json::Map<String, serde_json::Value>) -> bool {
+fn controller_debug_object_has_leaves(object: &serde_json::Map<String, serde_json::Value>) -> bool {
     object.values().any(|value| match value {
-        serde_json::Value::Object(nested) => slskd_debug_object_has_leaves(nested),
+        serde_json::Value::Object(nested) => controller_debug_object_has_leaves(nested),
         _ => true,
     })
 }
 
-fn slskd_debug_provider<'a>(
+fn controller_debug_provider<'a>(
     path: &[String],
     state: &AppState,
     overlay: &'a ControllerOptionsOverlayState,
@@ -38624,21 +38644,21 @@ fn json_has_debug_path(value: &serde_json::Value, path: &[String]) -> bool {
     true
 }
 
-fn slskd_debug_value(
+fn controller_debug_value(
     path: &[String],
     value: &serde_json::Value,
     provider: &str,
     state: &AppState,
 ) -> String {
     let path = path.join(".");
-    if state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskd {
+    if state.config.controller_profile == ControllerProfile::Legacy {
         match path.as_str() {
             "soulseek.password" => {
                 return controller_debug_password(state, provider).unwrap_or_else(|| {
                     if value.as_str() == Some("*****") {
                         String::new()
                     } else {
-                        slskd_debug_scalar(value, provider)
+                        controller_debug_scalar(value, provider)
                     }
                 });
             }
@@ -38678,7 +38698,7 @@ fn slskd_debug_value(
                     if value.as_str() == Some("*****") {
                         String::new()
                     } else {
-                        slskd_debug_scalar(value, provider)
+                        controller_debug_scalar(value, provider)
                     }
                 });
             }
@@ -38715,7 +38735,7 @@ fn slskd_debug_value(
             return String::new();
         }
     }
-    slskd_debug_scalar(value, provider)
+    controller_debug_scalar(value, provider)
 }
 
 fn controller_debug_password(state: &AppState, provider: &str) -> Option<String> {
@@ -38741,7 +38761,7 @@ fn controller_debug_password(state: &AppState, provider: &str) -> Option<String>
     }
 }
 
-fn slskd_debug_scalar(value: &serde_json::Value, provider: &str) -> String {
+fn controller_debug_scalar(value: &serde_json::Value, provider: &str) -> String {
     match value {
         serde_json::Value::Null => String::new(),
         serde_json::Value::Bool(value) => {
@@ -38758,7 +38778,7 @@ fn slskd_debug_scalar(value: &serde_json::Value, provider: &str) -> String {
     }
 }
 
-fn slskdn_debug_key_is_sensitive(key: &str) -> bool {
+fn native_debug_key_is_sensitive(key: &str) -> bool {
     [
         "password", "passwd", "pwd", "secret", "token", "apikey", "api_key", "key",
     ]
@@ -38788,7 +38808,7 @@ fn controller_compatibility_config_path(config: &AppConfig) -> PathBuf {
     config.state_dir.join("slskd.yml")
 }
 
-fn slskd_options_config_location_json(config: &AppConfig) -> String {
+fn controller_options_config_location_json(config: &AppConfig) -> String {
     serde_json::Value::String(
         controller_compatibility_config_path(config)
             .display()
@@ -38904,7 +38924,7 @@ fn apply_watched_controller_configuration<'a>(
                 let exposed_validation_error = parsed.as_ref().and_then(|value| {
                     controller_yaml_target_validation_error(
                         value,
-                        state.config.controller_compatibility_target,
+                        state.config.controller_profile,
                     )
                 });
                 if text.is_some() && parsed.is_none() && !state.config.current_upstream_behavior {
@@ -39119,7 +39139,7 @@ fn apply_watched_controller_configuration<'a>(
             reloaded.controller_diagnostics_allow_remote_dump;
         state.managed_blacklist.write().await.replace(
             reloaded.managed_blacklist.clone(),
-            reloaded.controller_compatibility_target,
+            reloaded.controller_profile,
             reloaded.controller_case_sensitive_regex,
         );
         let search_filters_changed = {
@@ -39137,7 +39157,7 @@ fn apply_watched_controller_configuration<'a>(
             *state.search_request_filters.write().await = compile_controller_regexes(
                 &reloaded.controller_search_request_filters,
                 reloaded.controller_case_sensitive_regex,
-                reloaded.controller_compatibility_target,
+                reloaded.controller_profile,
             )
             .expect("validated search request filters must compile");
         }
@@ -39175,7 +39195,7 @@ fn apply_watched_controller_configuration<'a>(
         let regular_listener_result =
             reconfigure_regular_listener(state, reloaded.listener_bind.clone()).await;
         let defer_obfuscated_listener = !reloaded.current_upstream_behavior
-            && reloaded.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn;
+            && reloaded.controller_profile == ControllerProfile::Native;
         if defer_obfuscated_listener
             && matches!(regular_listener_result.as_ref(), Ok(true))
             && state.session.read().await.state == "connected"
@@ -39186,7 +39206,7 @@ fn apply_watched_controller_configuration<'a>(
             .obfuscation_enabled
             .then(|| reloaded.obfuscated_listener_bind.clone())
             .flatten();
-        // slskdN projects watched obfuscation changes immediately but keeps
+        // native profile projects watched obfuscation changes immediately but keeps
         // the running obfuscation listener and its advertised port until the
         // reconnect/restart boundary.  Rebinding here would close an active
         // socket when obfuscation is disabled and would open a new socket
@@ -39263,7 +39283,7 @@ fn apply_watched_controller_configuration<'a>(
     })
 }
 
-fn slskd_options_config_text_response(config: &AppConfig) -> HttpResponse {
+fn controller_options_config_text_response(config: &AppConfig) -> HttpResponse {
     match read_controller_compatibility_yaml(config) {
         Ok(Some(text)) => HttpResponse {
             status: "200 OK",
@@ -39278,7 +39298,7 @@ fn slskd_options_config_text_response(config: &AppConfig) -> HttpResponse {
     }
 }
 
-fn slskd_options_config_body(body: &str) -> Result<String, String> {
+fn controller_options_config_body(body: &str) -> Result<String, String> {
     let value = serde_json::from_str::<serde_json::Value>(body)
         .map_err(|error| format!("invalid config JSON string: {error}"))?;
     let Some(text) = value.as_str() else {
@@ -39933,7 +39953,7 @@ fn controller_yaml_api_projection(value: serde_json::Value) -> serde_json::Value
                 auto_response.insert(
                     "message".to_owned(),
                     serde_json::Value::String(
-                        "Hi, I'm human and testing a slskdN client. Shares may be temporarily unavailable while I validate the client."
+                        "Hi, I'm human and testing a slskr client. Shares may be temporarily unavailable while I validate the client."
                             .to_owned(),
                     ),
                 );
@@ -39971,11 +39991,11 @@ fn controller_yaml_api_projection(value: serde_json::Value) -> serde_json::Value
 
 fn controller_web_authentication_validation_error(
     value: &serde_json::Value,
-    target: ControllerCompatibilityTarget,
+    target: ControllerProfile,
 ) -> Option<String> {
-    let target_error = |slskd_error: String| match target {
-        ControllerCompatibilityTarget::Slskd => slskd_error,
-        ControllerCompatibilityTarget::Slskdn => "Invalid YAML configuration".to_owned(),
+    let target_error = |controller_error: String| match target {
+        ControllerProfile::Legacy => controller_error,
+        ControllerProfile::Native => "Invalid YAML configuration".to_owned(),
     };
     let authentication = match value
         .get("web")
@@ -40070,18 +40090,18 @@ fn controller_web_authentication_validation_error(
 
 fn controller_transfer_validation_error(
     value: &serde_json::Value,
-    target: ControllerCompatibilityTarget,
+    target: ControllerProfile,
 ) -> Option<String> {
-    // Frozen slskdN accepts the documented `transfers.download` section but
+    // Frozen native profile accepts the documented `transfers.download` section but
     // rejects legacy `transfers.groups`; groups validate only at the top level.
-    if target == ControllerCompatibilityTarget::Slskdn
+    if target == ControllerProfile::Native
         && value.pointer("/transfers/groups").is_some()
     {
         return Some("Invalid YAML configuration".to_owned());
     }
-    let target_error = |slskd_error: String| match target {
-        ControllerCompatibilityTarget::Slskd => slskd_error,
-        ControllerCompatibilityTarget::Slskdn => "Invalid YAML configuration".to_owned(),
+    let target_error = |controller_error: String| match target {
+        ControllerProfile::Legacy => controller_error,
+        ControllerProfile::Native => "Invalid YAML configuration".to_owned(),
     };
     let range_invalid = |candidate: &serde_json::Value| {
         !candidate.is_null()
@@ -40126,7 +40146,7 @@ fn controller_transfer_validation_error(
         .or_else(|| global.and_then(|global| global.get("download")))
         .and_then(serde_json::Value::as_object);
     if let Some(download) = download {
-        let prefix = if target == ControllerCompatibilityTarget::Slskd {
+        let prefix = if target == ControllerProfile::Legacy {
             "Invalid configuration:\n  Transfers:\n    Download:\n      "
         } else {
             "Invalid configuration:\n  Global:\n    Download:\n      "
@@ -40140,7 +40160,7 @@ fn controller_transfer_validation_error(
             let Some(retry) = retry.as_object() else {
                 return Some(target_error("Invalid configuration".to_owned()));
             };
-            let (strategy_key, strategy_field) = if target == ControllerCompatibilityTarget::Slskd {
+            let (strategy_key, strategy_field) = if target == ControllerProfile::Legacy {
                 ("partial", "Partial")
             } else {
                 ("incomplete", "Incomplete")
@@ -40164,7 +40184,7 @@ fn controller_transfer_validation_error(
                             .is_some_and(|value| (minimum..=maximum).contains(&value))
                 })
             };
-            for (key, field, minimum, maximum) in if target == ControllerCompatibilityTarget::Slskd
+            for (key, field, minimum, maximum) in if target == ControllerProfile::Legacy
             {
                 [
                     ("attempts", "Attempts", 1, i32::MAX as i64),
@@ -40185,7 +40205,7 @@ fn controller_transfer_validation_error(
                 }
             }
         }
-        if target == ControllerCompatibilityTarget::Slskd {
+        if target == ControllerProfile::Legacy {
             if let Some(destination) = download
                 .get("destination")
                 .and_then(serde_json::Value::as_object)
@@ -40230,7 +40250,7 @@ fn controller_transfer_validation_error(
                 }
             }
         }
-        if target == ControllerCompatibilityTarget::Slskdn {
+        if target == ControllerProfile::Native {
             for (key, minimum, maximum) in [
                 ("auto_replace_threshold", 0.1_f64, 50.0_f64),
                 ("auto_replace_interval", 10.0_f64, 3_600.0_f64),
@@ -40345,7 +40365,7 @@ fn controller_transfer_validation_error(
 fn controller_transfer_limits_validation_error(
     limits: Option<&serde_json::Value>,
     prefix: &str,
-    target: ControllerCompatibilityTarget,
+    target: ControllerProfile,
 ) -> Option<String> {
     let limits = match limits {
         None | Some(serde_json::Value::Null) => return None,
@@ -40360,15 +40380,15 @@ fn controller_transfer_limits_validation_error(
             continue;
         };
         if window.is_null() {
-            if target == ControllerCompatibilityTarget::Slskdn {
+            if target == ControllerProfile::Native {
                 return Some("Invalid YAML configuration".to_owned());
             }
             continue;
         }
         let Some(window) = window.as_object() else {
             return Some(match target {
-                ControllerCompatibilityTarget::Slskd => "Invalid configuration".to_owned(),
-                ControllerCompatibilityTarget::Slskdn => "Invalid YAML configuration".to_owned(),
+                ControllerProfile::Legacy => "Invalid configuration".to_owned(),
+                ControllerProfile::Native => "Invalid YAML configuration".to_owned(),
             });
         };
         for (key, field) in [
@@ -40394,8 +40414,8 @@ fn controller_transfer_limits_validation_error(
                     "{prefix}{window_indent}{window_name}:\n{field_indent}The field {field} must be between 1 and 2147483647."
                 );
                 return Some(match target {
-                    ControllerCompatibilityTarget::Slskd => error,
-                    ControllerCompatibilityTarget::Slskdn => {
+                    ControllerProfile::Legacy => error,
+                    ControllerProfile::Native => {
                         "Invalid YAML configuration".to_owned()
                     }
                 });
@@ -40407,13 +40427,13 @@ fn controller_transfer_limits_validation_error(
 
 fn controller_soulseek_connection_validation_error(
     value: &serde_json::Value,
-    target: ControllerCompatibilityTarget,
+    target: ControllerProfile,
 ) -> Option<String> {
     let connection = value.pointer("/soulseek/connection")?;
     let Some(connection) = connection.as_object() else {
         return Some(match target {
-            ControllerCompatibilityTarget::Slskd => "Invalid configuration".to_owned(),
-            ControllerCompatibilityTarget::Slskdn => "Invalid YAML configuration".to_owned(),
+            ControllerProfile::Legacy => "Invalid configuration".to_owned(),
+            ControllerProfile::Native => "Invalid YAML configuration".to_owned(),
         });
     };
     let integer = |candidate: &serde_json::Value| {
@@ -40427,19 +40447,19 @@ fn controller_soulseek_connection_validation_error(
     };
     let finish = |section: &str, errors: Vec<String>| {
         (!errors.is_empty()).then(|| match target {
-            ControllerCompatibilityTarget::Slskd => format!(
+            ControllerProfile::Legacy => format!(
                 "Invalid configuration:\n  Soulseek:\n    Connection:\n      {section}:\n        {}",
                 errors.join("\n        ")
             ),
-            ControllerCompatibilityTarget::Slskdn => "Invalid YAML configuration".to_owned(),
+            ControllerProfile::Native => "Invalid YAML configuration".to_owned(),
         })
     };
 
     if let Some(buffer) = connection.get("buffer") {
         let Some(buffer) = buffer.as_object() else {
             return Some(match target {
-                ControllerCompatibilityTarget::Slskd => "Invalid configuration".to_owned(),
-                ControllerCompatibilityTarget::Slskdn => "Invalid YAML configuration".to_owned(),
+                ControllerProfile::Legacy => "Invalid configuration".to_owned(),
+                ControllerProfile::Native => "Invalid YAML configuration".to_owned(),
             });
         };
         let mut errors = Vec::new();
@@ -40466,8 +40486,8 @@ fn controller_soulseek_connection_validation_error(
     if let Some(timeout) = connection.get("timeout") {
         let Some(timeout) = timeout.as_object() else {
             return Some(match target {
-                ControllerCompatibilityTarget::Slskd => "Invalid configuration".to_owned(),
-                ControllerCompatibilityTarget::Slskdn => "Invalid YAML configuration".to_owned(),
+                ControllerProfile::Legacy => "Invalid configuration".to_owned(),
+                ControllerProfile::Native => "Invalid YAML configuration".to_owned(),
             });
         };
         let mut errors = Vec::new();
@@ -40494,8 +40514,8 @@ fn controller_soulseek_connection_validation_error(
     if let Some(proxy) = connection.get("proxy") {
         let Some(proxy) = proxy.as_object() else {
             return Some(match target {
-                ControllerCompatibilityTarget::Slskd => "Invalid configuration".to_owned(),
-                ControllerCompatibilityTarget::Slskdn => "Invalid YAML configuration".to_owned(),
+                ControllerProfile::Legacy => "Invalid configuration".to_owned(),
+                ControllerProfile::Native => "Invalid YAML configuration".to_owned(),
             });
         };
         let enabled = proxy
@@ -40517,10 +40537,10 @@ fn controller_soulseek_connection_validation_error(
             if let Some(candidate) = proxy.get(key).filter(|candidate| !candidate.is_null()) {
                 let invalid = candidate.as_str().is_none_or(|value| {
                     let length = value.encode_utf16().count();
-                    length > 255 || (target == ControllerCompatibilityTarget::Slskd && length == 0)
+                    length > 255 || (target == ControllerProfile::Legacy && length == 0)
                 });
                 if invalid {
-                    errors.push(if target == ControllerCompatibilityTarget::Slskd {
+                    errors.push(if target == ControllerProfile::Legacy {
                         format!("The field {field} must be a string with a minimum length of 1 and a maximum length of 255.")
                     } else {
                         format!("The field {field} must be a string with a maximum length of 255.")
@@ -40553,11 +40573,11 @@ fn controller_soulseek_connection_validation_error(
 
 fn controller_soulseek_profile_distributed_validation_error(
     value: &serde_json::Value,
-    target: ControllerCompatibilityTarget,
+    target: ControllerProfile,
 ) -> Option<String> {
     let invalid = |detail: String| match target {
-        ControllerCompatibilityTarget::Slskd => detail,
-        ControllerCompatibilityTarget::Slskdn => "Invalid YAML configuration".to_owned(),
+        ControllerProfile::Legacy => detail,
+        ControllerProfile::Native => "Invalid YAML configuration".to_owned(),
     };
     let soulseek = value.get("soulseek")?;
     if soulseek.is_null() {
@@ -40669,11 +40689,11 @@ fn controller_soulseek_profile_distributed_validation_error(
 
 fn controller_yaml_target_validation_error(
     value: &serde_json::Value,
-    target: ControllerCompatibilityTarget,
+    target: ControllerProfile,
 ) -> Option<String> {
-    let target_error = |slskd_error: String| match target {
-        ControllerCompatibilityTarget::Slskd => slskd_error,
-        ControllerCompatibilityTarget::Slskdn => "Invalid YAML configuration".to_owned(),
+    let target_error = |controller_error: String| match target {
+        ControllerProfile::Legacy => controller_error,
+        ControllerProfile::Native => "Invalid YAML configuration".to_owned(),
     };
     if let Some(error) = controller_web_authentication_validation_error(value, target) {
         return Some(error);
@@ -40687,7 +40707,7 @@ fn controller_yaml_target_validation_error(
     if let Some(error) = controller_soulseek_profile_distributed_validation_error(value, target) {
         return Some(error);
     }
-    if target == ControllerCompatibilityTarget::Slskdn {
+    if target == ControllerProfile::Native {
         if let Some(diagnostics) = value.get("diagnostics") {
             if !diagnostics.is_null() {
                 let Some(diagnostics) = diagnostics.as_object() else {
@@ -40901,7 +40921,7 @@ fn controller_yaml_target_validation_error(
     }
     if let Some(flags) = value.get("flags") {
         if flags.is_null() {
-            if target == ControllerCompatibilityTarget::Slskdn {
+            if target == ControllerProfile::Native {
                 return Some("Invalid YAML configuration".to_owned());
             }
         } else {
@@ -40985,7 +41005,7 @@ fn controller_yaml_target_validation_error(
                     ));
                 }
             };
-            if target == ControllerCompatibilityTarget::Slskd
+            if target == ControllerProfile::Legacy
                 && file.as_deref().is_some_and(str::is_empty)
             {
                 return Some("The value cannot be an empty string. (Parameter 'path')".to_owned());
@@ -41083,9 +41103,13 @@ fn controller_yaml_target_validation_error(
                     )),
                 }
             };
+            let default_identity = match target {
+                ControllerProfile::Legacy => "slskd",
+                ControllerProfile::Native => "slskr",
+            };
             let username = match scalar_string(
                 authentication.and_then(|authentication| authentication.get("username")),
-                "slskd",
+                default_identity,
             ) {
                 Ok(username) => username,
                 Err(error) => return Some(error),
@@ -41097,13 +41121,13 @@ fn controller_yaml_target_validation_error(
                 Ok(password) => password,
                 Err(error) => return Some(error),
             };
-            if target == ControllerCompatibilityTarget::Slskd || (enabled && !disabled) {
+            if target == ControllerProfile::Legacy || (enabled && !disabled) {
                 let invalid_username = username.trim().is_empty()
                     || !(1..=255).contains(&username.encode_utf16().count());
                 let invalid_password = password.trim().is_empty()
                     || !(1..=255).contains(&password.encode_utf16().count());
                 if invalid_username || invalid_password {
-                    if target == ControllerCompatibilityTarget::Slskdn {
+                    if target == ControllerProfile::Native {
                         return Some("Invalid YAML configuration".to_owned());
                     }
                     let mut messages = Vec::new();
@@ -41156,7 +41180,7 @@ fn controller_yaml_target_validation_error(
             .to_owned(),
         ));
     }
-    if target == ControllerCompatibilityTarget::Slskdn {
+    if target == ControllerProfile::Native {
         if let Some(auto_retry) = value.pointer("/transfers/download/auto_retry") {
             if !auto_retry.is_null() {
                 let Some(auto_retry) = auto_retry.as_object() else {
@@ -41209,7 +41233,7 @@ fn controller_yaml_target_validation_error(
                                 .and_then(|value| value.parse::<f64>().ok())
                         })
                     };
-                    // Frozen slskdN#65a14a8 uses integer RangeAttribute
+                    // Frozen native profile#65a14a8 uses integer RangeAttribute
                     // operands on this double and rounds the boundary before
                     // validation.  Upstream correction: snapetech/slskdN#271.
                     if !parsed
@@ -41260,7 +41284,7 @@ fn controller_yaml_target_validation_error(
             }
         }
     }
-    if target == ControllerCompatibilityTarget::Slskdn {
+    if target == ControllerProfile::Native {
         if let Some(integrations) = value.get("integrations") {
             let Some(integrations) = integrations.as_object() else {
                 return Some("Invalid YAML configuration".to_owned());
@@ -41443,7 +41467,7 @@ fn controller_yaml_target_validation_error(
         }
     }
     if let Some(address) = value.pointer("/web/ip_address") {
-        if target == ControllerCompatibilityTarget::Slskdn {
+        if target == ControllerProfile::Native {
             return Some("Invalid YAML configuration".to_owned());
         }
         let valid = match address {
@@ -41537,7 +41561,7 @@ fn controller_yaml_target_validation_error(
             return Some(target_error(error));
         }
     }
-    if target == ControllerCompatibilityTarget::Slskdn {
+    if target == ControllerProfile::Native {
         let obfuscation = value.pointer("/soulseek/obfuscation");
         if let Some(obfuscation) = obfuscation {
             let Some(obfuscation) = obfuscation.as_object() else {
@@ -41592,7 +41616,7 @@ fn controller_yaml_target_validation_error(
         .and_then(serde_json::Value::as_str)
         .and_then(|address| address.parse::<IpAddr>().ok())
         .is_some_and(|address| address.is_loopback());
-    (target == ControllerCompatibilityTarget::Slskdn && !no_connect && loopback_listener)
+    (target == ControllerProfile::Native && !no_connect && loopback_listener)
         .then(|| "Invalid YAML configuration".to_owned())
 }
 
@@ -41622,7 +41646,7 @@ fn write_controller_compatibility_yaml(config: &AppConfig, text: &str) -> Result
         .map_err(|error| format!("configuration file write failed: {error}"))
 }
 
-const SLSKDN_DEFAULT_ADVERSARIAL_YAML: &str = r#"security:
+const NATIVE_DEFAULT_ADVERSARIAL_YAML: &str = r#"security:
   adversarial:
     enabled: false
     profile: Disabled
@@ -41659,7 +41683,7 @@ const SLSKDN_DEFAULT_ADVERSARIAL_YAML: &str = r#"security:
       tor:
         socks_address: 127.0.0.1:9050
         isolate_streams: true
-        control_port: __SLSKDN_EMPTY__
+        control_port: __NATIVE_EMPTY__
         verify_connectivity: true
       i2_p:
         sam_address: 127.0.0.1:7656
@@ -41680,18 +41704,18 @@ const SLSKDN_DEFAULT_ADVERSARIAL_YAML: &str = r#"security:
         server_url: ''
         use_wss: true
         ignore_certificate_errors: false
-        sub_protocol: __SLSKDN_EMPTY__
-        custom_headers: __SLSKDN_EMPTY__
+        sub_protocol: __NATIVE_EMPTY__
+        custom_headers: __NATIVE_EMPTY__
         max_pooled_connections: 10
         headers: {}
       http_tunnel:
         enabled: false
-        server_url: __SLSKDN_EMPTY__
+        server_url: __NATIVE_EMPTY__
         proxy_url: ''
         use_https: true
         method: POST
-        custom_headers: __SLSKDN_EMPTY__
-        user_agent: __SLSKDN_EMPTY__
+        custom_headers: __NATIVE_EMPTY__
+        user_agent: __NATIVE_EMPTY__
       obfs4:
         enabled: false
         bridge_lines: []
@@ -41702,8 +41726,8 @@ const SLSKDN_DEFAULT_ADVERSARIAL_YAML: &str = r#"security:
         bridge_url: ''
         front_domain: ''
         verify_front_domain: true
-        custom_headers: __SLSKDN_EMPTY__
-        user_agent: __SLSKDN_EMPTY__
+        custom_headers: __NATIVE_EMPTY__
+        user_agent: __NATIVE_EMPTY__
     onion_routing:
       enabled: false
       circuit_rotation_minutes: 10
@@ -41750,8 +41774,8 @@ const SLSKDN_DEFAULT_ADVERSARIAL_YAML: &str = r#"security:
         socks_host: 127.0.0.1
         socks_port: 9050
         advertise_onion: false
-        onion_port: __SLSKDN_EMPTY__
-        onion_address: __SLSKDN_EMPTY__
+        onion_port: __NATIVE_EMPTY__
+        onion_address: __NATIVE_EMPTY__
         privacy_mode_no_clearnet_advertise: false
         allow_data_over_tor: false
         connection_timeout: 00:00:30
@@ -41763,7 +41787,7 @@ const SLSKDN_DEFAULT_ADVERSARIAL_YAML: &str = r#"security:
         socks_host: 127.0.0.1
         socks_port: 4447
         advertise_i2_p: false
-        destination_address: __SLSKDN_EMPTY__
+        destination_address: __NATIVE_EMPTY__
         allow_data_over_i2p: false
         connection_timeout: 00:00:45
         max_concurrent_connections: 5
@@ -41774,14 +41798,14 @@ const SLSKDN_DEFAULT_ADVERSARIAL_YAML: &str = r#"security:
 ...
 "#;
 
-fn slskdn_adversarial_yaml_update(
+fn native_adversarial_yaml_update(
     current: &str,
     payload: &serde_json::Value,
 ) -> Result<String, String> {
     let object = payload
         .as_object()
         .ok_or_else(|| "Settings cannot be null".to_owned())?;
-    let default_yaml = SLSKDN_DEFAULT_ADVERSARIAL_YAML.replace("__SLSKDN_EMPTY__", "");
+    let default_yaml = NATIVE_DEFAULT_ADVERSARIAL_YAML.replace("__NATIVE_EMPTY__", "");
     let mut rendered = default_yaml
         .trim_end_matches(['\r', '\n'])
         .strip_suffix("...")
@@ -41790,7 +41814,7 @@ fn slskdn_adversarial_yaml_update(
         .lines()
         .map(str::to_owned)
         .collect::<Vec<_>>();
-    apply_slskdn_adversarial_json_object(
+    apply_native_adversarial_json_object(
         &mut rendered,
         &["security".to_owned(), "adversarial".to_owned()],
         object,
@@ -41856,7 +41880,7 @@ fn yaml_indentation(line: &str) -> usize {
     line.bytes().take_while(|byte| *byte == b' ').count()
 }
 
-fn apply_slskdn_adversarial_json_object(
+fn apply_native_adversarial_json_object(
     lines: &mut Vec<String>,
     parent_path: &[String],
     object: &serde_json::Map<String, serde_json::Value>,
@@ -41867,18 +41891,18 @@ fn apply_slskdn_adversarial_json_object(
         match value {
             serde_json::Value::Object(nested) if nested.is_empty() => {}
             serde_json::Value::Object(nested) => {
-                if !replace_slskdn_yaml_value(lines, &path, value) {
-                    apply_slskdn_adversarial_json_object(lines, &path, nested);
+                if !replace_native_yaml_value(lines, &path, value) {
+                    apply_native_adversarial_json_object(lines, &path, nested);
                 }
             }
             _ => {
-                replace_slskdn_yaml_value(lines, &path, value);
+                replace_native_yaml_value(lines, &path, value);
             }
         }
     }
 }
 
-fn replace_slskdn_yaml_value(
+fn replace_native_yaml_value(
     lines: &mut Vec<String>,
     target_path: &[String],
     value: &serde_json::Value,
@@ -41924,7 +41948,7 @@ fn replace_slskdn_yaml_value(
                 })
                 .map(|(end, _)| end)
                 .unwrap_or(lines.len());
-            let replacement = slskdn_yaml_value_lines(key, indentation, target_path, value);
+            let replacement = native_yaml_value_lines(key, indentation, target_path, value);
             lines.splice(index..end, replacement);
             return true;
         }
@@ -41933,7 +41957,7 @@ fn replace_slskdn_yaml_value(
     false
 }
 
-fn slskdn_yaml_value_lines(
+fn native_yaml_value_lines(
     key: &str,
     indentation: usize,
     path: &[String],
@@ -41949,7 +41973,7 @@ fn slskdn_yaml_value_lines(
             output.extend(values.iter().map(|value| {
                 format!(
                     "{prefix}- {}",
-                    slskdn_yaml_scalar(path, value).unwrap_or_default()
+                    native_yaml_scalar(path, value).unwrap_or_default()
                 )
             }));
             output
@@ -41966,7 +41990,7 @@ fn slskdn_yaml_value_lines(
                     .cloned()
                     .chain(std::iter::once(child_key.clone()))
                     .collect::<Vec<_>>();
-                output.extend(slskdn_yaml_value_lines(
+                output.extend(native_yaml_value_lines(
                     &child_key,
                     indentation + 2,
                     &child_path,
@@ -41977,12 +42001,12 @@ fn slskdn_yaml_value_lines(
         }
         _ => vec![format!(
             "{prefix}{key}: {}",
-            slskdn_yaml_scalar(path, value).unwrap_or_default()
+            native_yaml_scalar(path, value).unwrap_or_default()
         )],
     }
 }
 
-fn slskdn_yaml_scalar(path: &[String], value: &serde_json::Value) -> Option<String> {
+fn native_yaml_scalar(path: &[String], value: &serde_json::Value) -> Option<String> {
     match value {
         serde_json::Value::Null => Some(String::new()),
         serde_json::Value::Bool(value) => Some(value.to_string()),
@@ -42044,7 +42068,7 @@ fn slskdn_yaml_scalar(path: &[String], value: &serde_json::Value) -> Option<Stri
     }
 }
 
-fn validate_slskdn_adversarial_settings(payload: &serde_json::Value) -> Result<(), &'static str> {
+fn validate_native_adversarial_settings(payload: &serde_json::Value) -> Result<(), &'static str> {
     let bucket_sizes = payload
         .pointer("/privacy/padding/bucketSizes")
         .or_else(|| payload.pointer("/privacy/padding/bucket_sizes"));
@@ -42058,7 +42082,7 @@ fn validate_slskdn_adversarial_settings(payload: &serde_json::Value) -> Result<(
 }
 
 async fn apply_controller_yaml_upload(body: &str, state: &AppState) -> HttpResponse {
-    let text = match slskd_options_config_body(body) {
+    let text = match controller_options_config_body(body) {
         Ok(text) => text,
         Err(error) => return routing::bad_request_response(&error),
     };
@@ -42075,7 +42099,7 @@ async fn apply_controller_yaml_upload(body: &str, state: &AppState) -> HttpRespo
     };
     if let Some(error) = controller_yaml_target_validation_error(
         &parsed,
-        state.config.controller_compatibility_target,
+        state.config.controller_profile,
     ) {
         return HttpResponse {
             status: "400 Bad Request",
@@ -42106,11 +42130,11 @@ async fn apply_controller_yaml_upload(body: &str, state: &AppState) -> HttpRespo
     }
 }
 
-fn slskd_options_config_validate_response(
+fn controller_options_config_validate_response(
     body: &str,
-    target: ControllerCompatibilityTarget,
+    target: ControllerProfile,
 ) -> Result<HttpResponse, String> {
-    let text = slskd_options_config_body(body)?;
+    let text = controller_options_config_body(body)?;
     let parsed = parse_controller_yaml(&text);
     let parse_failed = parsed.is_err();
     let validation = parsed
@@ -42121,7 +42145,7 @@ fn slskd_options_config_validate_response(
     let (content_type, body) = match validation {
         None => ("", String::new()),
         Some(error) => {
-            let error = if target == ControllerCompatibilityTarget::Slskd
+            let error = if target == ControllerProfile::Legacy
                 && parse_failed
                 && text.trim_start().starts_with("web:")
             {
@@ -42162,7 +42186,7 @@ fn options_model_binding_problem_response() -> HttpResponse {
 
 fn normalize_controller_options_overlay(
     body: &str,
-    target: ControllerCompatibilityTarget,
+    target: ControllerProfile,
 ) -> Result<serde_json::Value, String> {
     let payload = serde_json::from_str::<serde_json::Value>(body)
         .map_err(|_| "Invalid options overlay".to_owned())?;
@@ -42193,7 +42217,7 @@ fn normalize_controller_options_overlay(
                 .ok_or_else(|| "Invalid options overlay".to_owned())?;
             normalized_soulseek.insert("listenPort".to_owned(), serde_json::json!(port));
         }
-        if target == ControllerCompatibilityTarget::Slskdn {
+        if target == ControllerProfile::Native {
             if let Some(auto_response) =
                 json_object_field_ci(soulseek, "privateMessageAutoResponse")
             {
@@ -42219,7 +42243,7 @@ fn normalize_controller_options_overlay(
         }
     }
 
-    if target == ControllerCompatibilityTarget::Slskdn {
+    if target == ControllerProfile::Native {
         if let Some(integration) = json_object_field_ci(object, "integration") {
             if !integration.is_object() {
                 return Err("Invalid options overlay".to_owned());
@@ -42236,7 +42260,7 @@ fn normalize_controller_options_overlay(
 async fn apply_controller_options_overlay(body: &str, state: &AppState) -> HttpResponse {
     let overlay = match normalize_controller_options_overlay(
         body,
-        state.config.controller_compatibility_target,
+        state.config.controller_profile,
     ) {
         Ok(overlay) => overlay,
         Err(error) => return routing::bad_request_response(&error),
@@ -42263,7 +42287,7 @@ async fn apply_controller_options_overlay(body: &str, state: &AppState) -> HttpR
     }
     state.options_overlay.write().await.apply(overlay.clone());
     if listen_changed
-        && state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
+        && state.config.controller_profile == ControllerProfile::Native
         && state.session.read().await.state == "connected"
     {
         state.runtime.write().await.set_reconnect_pending(true);
@@ -42282,7 +42306,7 @@ async fn apply_controller_options_overlay(body: &str, state: &AppState) -> HttpR
     }
 }
 
-fn slskd_options_mutation_response(
+fn controller_options_mutation_response(
     body: &str,
     acknowledgements: u64,
     acknowledgement_persistence_enabled: bool,
@@ -42319,7 +42343,7 @@ fn slskd_options_mutation_response(
     .to_string())
 }
 
-fn slskd_server_state_json(
+fn controller_server_state_json(
     session: &SessionSnapshot,
     config: &AppConfig,
     runtime_credentials_configured: bool,
@@ -42347,7 +42371,7 @@ fn slskd_server_state_json(
             .rsplit_once(':')
             .map(|(address, _)| address.trim_matches(['[', ']']))
     });
-    if config.controller_compatibility_target == ControllerCompatibilityTarget::Slskd {
+    if config.controller_profile == ControllerProfile::Legacy {
         let mut response = serde_json::json!({
             "state": state,
             "isConnected": connected,
@@ -42385,7 +42409,7 @@ fn slskd_server_state_json(
             "ipEndPoint".to_owned(),
             serde_json::json!(connected_endpoint),
         );
-    } else if config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn {
+    } else if config.controller_profile == ControllerProfile::Native {
         object.insert("address".to_owned(), serde_json::json!(""));
         object.insert(
             "ipEndPoint".to_owned(),
@@ -42399,7 +42423,7 @@ fn slskd_server_state_json(
     clippy::too_many_arguments,
     reason = "application state intentionally aggregates independent runtime stores"
 )]
-fn slskd_application_state_json(
+fn application_state_json(
     session: &SessionSnapshot,
     share_lifecycle: &ShareLifecycleState,
     rooms: &RoomStore,
@@ -42423,7 +42447,7 @@ fn slskd_application_state_json(
     if let Some(relay_status) = runtime.vpn.relay.as_ref() {
         vpn["relay"] = relay_status.json();
     }
-    if config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn {
+    if config.controller_profile == ControllerProfile::Native {
         vpn["portForwards"] = serde_json::Value::Array(
             runtime
                 .vpn
@@ -42433,18 +42457,19 @@ fn slskd_application_state_json(
                 .collect(),
         );
     }
-    let compatibility_target = if config.current_upstream_behavior {
+    let runtime_profile = if config.current_upstream_behavior {
         serde_json::Value::Null
     } else {
-        serde_json::json!(config.controller_compatibility_target.as_str())
+        serde_json::json!(config.controller_profile.as_str())
     };
+    let version = application_state_version_json(version, config.controller_profile);
     serde_json::json!({
         "product": "slskR",
-        "compatibilityTarget": compatibility_target,
+        "runtimeProfile": runtime_profile,
         "version": version,
         "pendingReconnect": runtime.application_reconnect_pending,
         "pendingRestart": runtime.application_restart_requested,
-        "server": slskd_server_state_json(
+        "server": controller_server_state_json(
             session,
             config,
             runtime_credentials_configured,
@@ -42487,16 +42512,16 @@ fn slskd_application_state_json(
         "distributedNetwork": distributed_network.application_json(
             distributed_settings,
             session.state == "connected",
-            config.controller_compatibility_target,
+            config.controller_profile,
         ),
-        "shares": share_lifecycle.json(config.controller_compatibility_target),
+        "shares": share_lifecycle.json(config.controller_profile),
         "rooms": rooms.records.iter().map(|room| room.name.clone()).collect::<Vec<_>>(),
         "users": users.records.iter().map(|user| user.username.clone()).collect::<Vec<_>>(),
     })
     .to_string()
 }
 
-async fn slskdn_capabilities_response(state: &AppState) -> HttpResponse {
+async fn native_capabilities_response(state: &AppState) -> HttpResponse {
     let media = state.media_services.read().await;
     let mut features = vec![
         "mbid_jobs",
@@ -42536,8 +42561,8 @@ async fn slskdn_capabilities_response(state: &AppState) -> HttpResponse {
         "Soulseek type-1 peer/distributed/transfer obfuscation is disabled."
     };
     let body = serde_json::json!({
-        "impl": "slskdn",
-        "compat": "slskd",
+        "impl": "slskr",
+        "compat": "legacy",
         "version": APP_VERSION,
         "features": features,
         "obfuscation": {
@@ -42563,7 +42588,7 @@ async fn slskdn_capabilities_response(state: &AppState) -> HttpResponse {
     routing::ok_response(body.to_string())
 }
 
-async fn slskdn_capability_controller_response(state: &AppState) -> HttpResponse {
+async fn native_capability_controller_response(state: &AppState) -> HttpResponse {
     #[derive(Serialize)]
     struct CapabilityFile {
         client: &'static str,
@@ -42583,7 +42608,7 @@ async fn slskdn_capability_controller_response(state: &AppState) -> HttpResponse
 
     let mesh_seq_id = state.content_discovery.read().await.latest_seq();
     let capability_json = CapabilityFile {
-        client: "slskdn",
+        client: "slskr",
         version: "1.0.0",
         features: [
             "dht",
@@ -42598,8 +42623,8 @@ async fn slskdn_capability_controller_response(state: &AppState) -> HttpResponse
         mesh_seq_id,
     };
     let response = CapabilityResponse {
-        version: "slskdn/1.0.0+dht+mesh+swarm",
-        tag: "slskdn_caps:v1;dht=1;mesh=1;swarm=1;hashx=1;flacdb=1",
+        version: "slskr/1.0.0+dht+mesh+swarm",
+        tag: "slskr_caps:v1;dht=1;mesh=1;swarm=1;hashx=1;flacdb=1",
         json: serde_json::to_string_pretty(&capability_json).unwrap_or_else(|_| "{}".to_owned()),
     };
     routing::ok_response(serde_json::to_string(&response).unwrap_or_else(|_| "{}".to_owned()))
@@ -42620,7 +42645,7 @@ fn capabilities_response() -> HttpResponse {
         body: serde_json::json!({
         "version": format!("slskr/{APP_VERSION}+dht+mesh+swarm"),
             "impl": "slskr",
-            "compat": "slskdn-v1",
+            "compat": "slskr-v1",
             "features": capability_json["features"].clone(),
             "obfuscation": {"type1": true, "mode": "compatibility"},
             "feature": {"dht": true, "mesh": true, "swarm": true},
@@ -42895,11 +42920,11 @@ fn capability_service_peer_json(
         "username": descriptor.username,
         "flags": capability_flags_string(flags),
         "flagsValue": flags,
-        // slskdN's SoulseekCapabilityBridgeService records every binary
+        // The native Soulseek capability bridge records every binary
         // capability-envelope observation as its runtime capability client;
         // this is the stable DTO value exposed by CapabilitiesController,
         // not the unrelated UserInfo version-string parser.
-        "clientVersion": "slskdn/runtime-capability-v1",
+        "clientVersion": "slskr/runtime-capability-v1",
         "protocolVersion": 1,
         "canSwarm": flags & CAPABILITY_SUPPORTS_SWARM != 0,
         "canMeshSync": flags & CAPABILITY_SUPPORTS_MESH_SYNC != 0,
@@ -42951,7 +42976,7 @@ fn persisted_capability_descriptor(value: &serde_json::Value) -> Option<PeerCapa
 }
 
 fn parse_capability_tag(description: &str) -> Option<ParsedCapabilityDescription> {
-    let matcher = fancy_regex::Regex::new(r"(?i)slskdn_caps:v(\d+);?(.*)").ok()?;
+    let matcher = fancy_regex::Regex::new(r"(?i)slskr_caps:v(\d+);?(.*)").ok()?;
     let captures = matcher.captures(description).ok()??;
     let protocol_version = captures.get(1)?.as_str().parse::<i32>().ok()?;
     let flags = captures
@@ -42966,7 +42991,7 @@ fn parse_capability_tag(description: &str) -> Option<ParsedCapabilityDescription
 }
 
 fn parse_capability_version(version: &str) -> Option<ParsedCapabilityDescription> {
-    let matcher = fancy_regex::Regex::new(r"(?i)slskdn/([^+\s]+)(\+.*)?").ok()?;
+    let matcher = fancy_regex::Regex::new(r"(?i)(?:slskr|slskdn)/([^+\s]+)(\+.*)?").ok()?;
     let captures = matcher.captures(version).ok()??;
     let client_version = captures.get(1)?.as_str().to_owned();
     let flags = captures
@@ -44235,7 +44260,7 @@ async fn provider_get_json(
         .build()
         .map_err(|error| format!("failed to build provider client: {error}"))?
         .get(url)
-        .header("User-Agent", "slskdN-source-feed-import/1.0")
+        .header("User-Agent", "slskr-source-feed-import/1.0")
         .send()
         .await
         .map_err(|error| format!("{label} request failed: {error}"))?;
@@ -44532,7 +44557,7 @@ async fn fetch_provider_metadata_page(
         .map_err(|error| format!("failed to build provider client: {error}"))?;
     let response = client
         .get(url)
-        .header("User-Agent", "slskdN-source-feed-import/1.0")
+        .header("User-Agent", "slskr-source-feed-import/1.0")
         .send()
         .await
         .map_err(|error| format!("provider metadata request failed: {error}"))?;
@@ -45423,7 +45448,7 @@ fn html_escape(value: &str) -> String {
 
 fn spotify_callback_html(message: &str) -> String {
     format!(
-        "<!doctype html>\n<html>\n  <head><title>Spotify Connection</title></head>\n  <body>\n    <p>{}</p>\n    <script>\n      if (window.opener) {{\n        window.opener.postMessage({{ type: 'slskdn:spotify-connected' }}, window.location.origin);\n      }}\n    </script>\n  </body>\n</html>",
+        "<!doctype html>\n<html>\n  <head><title>Spotify Connection</title></head>\n  <body>\n    <p>{}</p>\n    <script>\n      if (window.opener) {{\n        window.opener.postMessage({{ type: 'slskr:spotify-connected' }}, window.location.origin);\n      }}\n    </script>\n  </body>\n</html>",
         html_escape(message)
     )
 }
@@ -46956,7 +46981,7 @@ async fn maybe_upload_ftp_completed_download(state: &AppState, transfer: &Transf
     if !options.enabled {
         return;
     }
-    let target = state.config.controller_compatibility_target;
+    let target = state.config.controller_profile;
     tokio::spawn(async move {
         if let Err(error) = ftp::upload_completed_file(&options, target, &local_path).await {
             eprintln!("[FTP] Completed-download upload failed: {error}");
@@ -47773,7 +47798,7 @@ fn controller_rate_limit_policy(
     authenticated_caller: Option<&str>,
     remote_addr: Option<SocketAddr>,
 ) -> Option<ControllerRateLimitPolicy> {
-    if config.controller_compatibility_target != ControllerCompatibilityTarget::Slskdn
+    if config.controller_profile != ControllerProfile::Native
         || !config.controller_web_rate_limiting.enabled
     {
         return None;
@@ -48042,13 +48067,13 @@ fn is_websocket_protocol_token(value: &str) -> bool {
         })
 }
 
-fn slskd_transfer_user_path<'a>(path: &'a str, direction: &str) -> Option<&'a str> {
+fn controller_transfer_user_path<'a>(path: &'a str, direction: &str) -> Option<&'a str> {
     let prefix = format!("/api/transfers/{direction}/");
     path.strip_prefix(&prefix)
         .filter(|username| !username.is_empty() && !username.contains('/'))
 }
 
-fn slskd_transfer_file_path<'a>(path: &'a str, direction: &str) -> Option<(&'a str, u64)> {
+fn controller_transfer_file_path<'a>(path: &'a str, direction: &str) -> Option<(&'a str, u64)> {
     let prefix = format!("/api/transfers/{direction}/");
     let rest = path.strip_prefix(&prefix)?;
     let (username, tail) = rest.split_once('/')?;
@@ -48068,8 +48093,8 @@ fn slskd_transfer_file_path<'a>(path: &'a str, direction: &str) -> Option<(&'a s
     Some((username, id.parse().ok()?))
 }
 
-fn slskd_transfer_position_path(path: &str) -> Option<(&str, u64)> {
-    slskd_transfer_file_path(path, "downloads").filter(|_| path.ends_with("/position"))
+fn controller_transfer_position_path(path: &str) -> Option<(&str, u64)> {
+    controller_transfer_file_path(path, "downloads").filter(|_| path.ends_with("/position"))
 }
 
 fn transfer_resource_segment(path: &str) -> Option<&str> {
@@ -48077,7 +48102,7 @@ fn transfer_resource_segment(path: &str) -> Option<&str> {
         .or_else(|| path_segment_after(path, "/api/v0/transfers/"))
 }
 
-fn slskd_file_storage_resource_path(path: &str) -> Option<(&str, &str, &str)> {
+fn controller_file_storage_resource_path(path: &str) -> Option<(&str, &str, &str)> {
     let mut segments = path
         .strip_prefix("/api/files/")
         .or_else(|| path.strip_prefix("/api/v0/files/"))?
@@ -48128,7 +48153,7 @@ fn file_storage_error_response(error: &str) -> HttpResponse {
     }
 }
 
-fn slskd_files_from_body(body: &str) -> Vec<serde_json::Value> {
+fn controller_files_from_body(body: &str) -> Vec<serde_json::Value> {
     let Ok(payload) = serde_json::from_str::<serde_json::Value>(body) else {
         return Vec::new();
     };
@@ -48141,7 +48166,7 @@ fn slskd_files_from_body(body: &str) -> Vec<serde_json::Value> {
     payload.as_array().cloned().unwrap_or_default()
 }
 
-fn slskd_transfer_batch_id(body: &str) -> Option<String> {
+fn controller_transfer_batch_id(body: &str) -> Option<String> {
     let payload = serde_json::from_str::<serde_json::Value>(body).ok()?;
     ["batchId", "batch_id", "id"]
         .iter()
@@ -48231,7 +48256,7 @@ fn transfer_batch_json_from_record(
     Ok(batch)
 }
 
-async fn slskd_read_transfer_batch(
+async fn controller_read_transfer_batch(
     state: &AppState,
     batch_id: &str,
 ) -> Result<Option<serde_json::Value>, String> {
@@ -48250,7 +48275,7 @@ async fn slskd_read_transfer_batch(
         .cloned())
 }
 
-async fn slskd_create_transfer_batch(
+async fn controller_create_transfer_batch(
     state: &AppState,
     batch: &serde_json::Value,
 ) -> Result<(), String> {
@@ -48272,7 +48297,7 @@ async fn slskd_create_transfer_batch(
     )
 }
 
-async fn slskd_delete_transfer_batch(state: &AppState, batch_id: &str) -> Result<(), String> {
+async fn controller_delete_transfer_batch(state: &AppState, batch_id: &str) -> Result<(), String> {
     if let Some(db) = state.db.as_ref() {
         db.delete_transfer_batch(batch_id)
             .await
@@ -48287,7 +48312,7 @@ async fn slskd_delete_transfer_batch(state: &AppState, batch_id: &str) -> Result
         .map(|_| ())
 }
 
-fn slskd_transfer_batch_insert_is_duplicate(error: &str) -> bool {
+fn controller_transfer_batch_insert_is_duplicate(error: &str) -> bool {
     let error = error.to_ascii_lowercase();
     error.contains("unique constraint")
         || error.contains("constraint failed")
@@ -48302,7 +48327,7 @@ fn transfer_batch_with_entries(
     batch
 }
 
-async fn slskd_enqueue_download_batch(body: &str, state: &AppState) -> HttpResponse {
+async fn controller_enqueue_download_batch(body: &str, state: &AppState) -> HttpResponse {
     let payload = match serde_json::from_str::<serde_json::Value>(body) {
         Ok(serde_json::Value::Object(payload)) => serde_json::Value::Object(payload),
         Ok(_) => return routing::bad_request_response("The request body must be an object"),
@@ -48455,7 +48480,7 @@ async fn slskd_enqueue_download_batch(body: &str, state: &AppState) -> HttpRespo
         };
     }
 
-    let existing_record = match slskd_read_transfer_batch(state, &batch_id).await {
+    let existing_record = match controller_read_transfer_batch(state, &batch_id).await {
         Ok(record) => record.is_some(),
         Err(error) => return routing::service_unavailable_response(&error),
     };
@@ -48496,8 +48521,8 @@ async fn slskd_enqueue_download_batch(body: &str, state: &AppState) -> HttpRespo
     if let Some(search_id) = search_id.as_ref() {
         batch["searchId"] = serde_json::Value::String(search_id.clone());
     }
-    if let Err(error) = slskd_create_transfer_batch(state, &batch).await {
-        if slskd_transfer_batch_insert_is_duplicate(&error) {
+    if let Err(error) = controller_create_transfer_batch(state, &batch).await {
+        if controller_transfer_batch_insert_is_duplicate(&error) {
             return HttpResponse {
                 status: "409 Conflict",
                 content_type: "application/json",
@@ -48607,12 +48632,12 @@ async fn slskd_enqueue_download_batch(body: &str, state: &AppState) -> HttpRespo
             .map(|entry| entry.id)
             .collect::<Vec<_>>();
         state.transfers.write().await.remove_entries(&ids);
-        let _ = slskd_delete_transfer_batch(state, &batch_id).await;
+        let _ = controller_delete_transfer_batch(state, &batch_id).await;
         return routing::service_unavailable_response(&error);
     }
     let public_entries = staged_entries
         .iter()
-        .map(TransferEntry::slskd_file_json)
+        .map(TransferEntry::controller_file_json)
         .collect::<Vec<_>>();
     batch = transfer_batch_with_entries(batch, public_entries);
     if state.db.is_none() {
@@ -48628,7 +48653,7 @@ async fn slskd_enqueue_download_batch(body: &str, state: &AppState) -> HttpRespo
                 .collect::<Vec<_>>();
             state.transfers.write().await.remove_entries(&ids);
             let _ = delete_persisted_transfers(state, &staged_entries).await;
-            let _ = slskd_delete_transfer_batch(state, &batch_id).await;
+            let _ = controller_delete_transfer_batch(state, &batch_id).await;
             return routing::service_unavailable_response(&error);
         }
     }
@@ -48711,7 +48736,7 @@ fn transfer_request_details_from_json(
     }
 }
 
-fn slskd_enqueue_request(body: &str) -> Option<(String, Vec<serde_json::Value>)> {
+fn controller_enqueue_request(body: &str) -> Option<(String, Vec<serde_json::Value>)> {
     let payload = serde_json::from_str::<serde_json::Value>(body).ok()?;
     let username = payload.get("username")?.as_str()?.to_owned();
     let files = payload
@@ -48788,7 +48813,7 @@ fn pod_resource_segments(path: &str) -> Option<Vec<String>> {
     (!segments.is_empty()).then_some(segments)
 }
 
-/// The frozen slskdN controller receives whitespace-only route values and
+/// The frozen native profile controller receives whitespace-only route values and
 /// validates them inside the action, returning 400.  The compatibility
 /// dispatcher normally rejects those values in its route-segment helper and
 /// would otherwise expose a generic 404 before the controller contract runs.
@@ -48939,7 +48964,7 @@ async fn versioned_get_failure_contract(
         return None;
     }
 
-    if state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskd
+    if state.config.controller_profile == ControllerProfile::Legacy
         && matches!(
             path,
             "/api/v0/mesh/health" | "/api/v0/signals/config" | "/api/v0/signals/status"
@@ -48960,10 +48985,10 @@ async fn versioned_get_failure_contract(
     }
 
     // FairnessController evaluates its durable TrafficStats row before it
-    // builds the decision DTO.  Preserve the frozen slskdN 500 contract when
+    // builds the decision DTO.  Preserve the frozen native profile 500 contract when
     // that SQLite dependency is present but unavailable; in-memory/no-DB
     // deployments retain the neutral zero-total response.
-    if state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
+    if state.config.controller_profile == ControllerProfile::Native
         && path == "/api/v0/fairness/summary"
     {
         if let Some(db) = state.db.as_ref() {
@@ -48976,8 +49001,8 @@ async fn versioned_get_failure_contract(
     }
 
     if matches!(
-        state.config.controller_compatibility_target,
-        ControllerCompatibilityTarget::Slskd | ControllerCompatibilityTarget::Slskdn
+        state.config.controller_profile,
+        ControllerProfile::Legacy | ControllerProfile::Native
     ) && path == "/api/v0/conversations"
         && (query_bool_is_invalid(query, "includeInactive")
             || query_bool_is_invalid(query, "unAcknowledgedOnly"))
@@ -48988,8 +49013,8 @@ async fn versioned_get_failure_contract(
     }
 
     if matches!(
-        state.config.controller_compatibility_target,
-        ControllerCompatibilityTarget::Slskd | ControllerCompatibilityTarget::Slskdn
+        state.config.controller_profile,
+        ControllerProfile::Legacy | ControllerProfile::Native
     ) && ((path == "/api/v0/application/build"
         && query_bool_is_invalid(query, "checkForUpdates"))
         || (path == "/api/v0/application/version/latest"
@@ -49000,7 +49025,7 @@ async fn versioned_get_failure_contract(
         ));
     }
 
-    if state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
+    if state.config.controller_profile == ControllerProfile::Native
         && path == "/api/v0/network/stats"
         && query_bool_is_invalid(query, "includePeers")
     {
@@ -49009,7 +49034,7 @@ async fn versioned_get_failure_contract(
         ));
     }
 
-    if state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
+    if state.config.controller_profile == ControllerProfile::Native
         && matches!(path, "/api/v0/opinions" | "/api/v0/opinions/summary")
     {
         let enum_query_is_invalid = |name: &str, max_numeric: i64, names: &[&str]| {
@@ -49217,7 +49242,7 @@ async fn versioned_get_failure_contract(
         .strip_prefix("/api/v0/searches/")
         .and_then(|value| value.strip_suffix("/responses"))
     {
-        if state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
+        if state.config.controller_profile == ControllerProfile::Native
             && uuid::Uuid::parse_str(search_id).is_err()
             && search_id.parse::<u32>().is_err()
         {
@@ -49311,9 +49336,9 @@ async fn versioned_get_failure_contract(
     }
 
     if path == "/api/v0/security/adversarial"
-        && state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
+        && state.config.controller_profile == ControllerProfile::Native
     {
-        // The frozen slskdN controller's direct settings GET remains
+        // The frozen native profile controller's direct settings GET remains
         // unregistered even after a successful PUT and persisted YAML update.
         // Keep the mutation/readback store available to its own management
         // flow, but preserve the externally observable GET contract.
@@ -49380,7 +49405,7 @@ async fn versioned_get_failure_contract(
                 continue;
             }
             let username = decoded_path_segment(raw_username);
-            if state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
+            if state.config.controller_profile == ControllerProfile::Native
                 && username.trim().is_empty()
             {
                 return Some(routing::bad_request_response("The request is invalid"));
@@ -49585,7 +49610,7 @@ async fn versioned_relay_request_bytes(
         };
         let authorized = state.relay.write().await.protocol.validate_download(
             &settings,
-            relay::credential_scheme(state.config.controller_compatibility_target),
+            relay::credential_scheme(state.config.controller_profile),
             token,
             credential,
             unix_timestamp(),
@@ -49645,7 +49670,7 @@ async fn versioned_relay_request_bytes(
         }
         let authorized = state.relay.write().await.protocol.validate_file_upload(
             &settings,
-            relay::credential_scheme(state.config.controller_compatibility_target),
+            relay::credential_scheme(state.config.controller_profile),
             token,
             filename,
             credential,
@@ -49702,7 +49727,7 @@ async fn versioned_relay_request_bytes(
         };
         let authorized = state.relay.write().await.protocol.validate_share_upload(
             &settings,
-            relay::credential_scheme(state.config.controller_compatibility_target),
+            relay::credential_scheme(state.config.controller_profile),
             token,
             credential,
             unix_timestamp(),
@@ -49750,7 +49775,7 @@ async fn versioned_relay_request_bytes(
                 ) {
                     Ok(database_path) => match relay::read_share_database(
                         &database_path,
-                        state.config.controller_compatibility_target,
+                        state.config.controller_profile,
                     )
                     .await
                     {
@@ -50257,7 +50282,7 @@ async fn route_virtual_soulfind_v2(
     body: &str,
     state: &AppState,
 ) -> HttpResponse {
-    if state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskd {
+    if state.config.controller_profile == ControllerProfile::Legacy {
         return routing::not_found_response();
     }
     if !state.config.virtual_soulfind_v2_enabled {
@@ -52113,7 +52138,7 @@ fn extended_controller_mutation_route(method: &str, path: &str) -> bool {
     }
 }
 
-fn slskdn_adversarial_mutation_response<'a>(
+fn native_adversarial_mutation_response<'a>(
     body: &'a str,
     state: &'a AppState,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = HttpResponse> + Send + 'a>> {
@@ -52123,7 +52148,7 @@ fn slskdn_adversarial_mutation_response<'a>(
             Ok(_) => return routing::bad_request_response("security body must be an object"),
             Err(_) => return routing::bad_request_response("invalid JSON body"),
         };
-        if let Err(error) = validate_slskdn_adversarial_settings(&payload) {
+        if let Err(error) = validate_native_adversarial_settings(&payload) {
             return HttpResponse {
                 status: "400 Bad Request",
                 content_type: "text/plain; charset=utf-8",
@@ -52150,7 +52175,7 @@ fn slskdn_adversarial_mutation_response<'a>(
                 return routing::internal_server_error_response("Failed to persist settings");
             }
         };
-        let updated = match slskdn_adversarial_yaml_update(&current, &payload) {
+        let updated = match native_adversarial_yaml_update(&current, &payload) {
             Ok(updated) => updated,
             Err(error) => return routing::bad_request_response(&error),
         };
@@ -52318,7 +52343,7 @@ async fn hashdb_backfill_from_history_response(
     )
 }
 
-async fn slskdn_nowplaying_set_track(state: &AppState, artist: String, title: String) {
+async fn native_nowplaying_set_track(state: &AppState, artist: String, title: String) {
     if artist.is_empty() || title.is_empty() {
         return;
     }
@@ -52329,11 +52354,11 @@ async fn slskdn_nowplaying_set_track(state: &AppState, artist: String, title: St
         .upsert("local".to_owned(), artist, title);
 }
 
-async fn slskdn_nowplaying_clear_track(state: &AppState) {
+async fn native_nowplaying_clear_track(state: &AppState) {
     state.now_playing.write().await.clear();
 }
 
-async fn slskdn_nowplaying_webhook_response(body: &str, state: &AppState) -> HttpResponse {
+async fn native_nowplaying_webhook_response(body: &str, state: &AppState) -> HttpResponse {
     if body.trim().is_empty() {
         return routing::bad_request_response("Empty payload");
     }
@@ -52366,9 +52391,9 @@ async fn slskdn_nowplaying_webhook_response(body: &str, state: &AppState) -> Htt
                     .or_else(|| string_field(metadata, "originalTitle"))
                     .unwrap_or_default();
                 let title = string_field(metadata, "title").unwrap_or_default();
-                slskdn_nowplaying_set_track(state, artist, title).await;
+                native_nowplaying_set_track(state, artist, title).await;
             }
-            "media.pause" | "media.stop" => slskdn_nowplaying_clear_track(state).await,
+            "media.pause" | "media.stop" => native_nowplaying_clear_track(state).await,
             _ => {}
         }
         return routing::ok_response(String::new());
@@ -52380,9 +52405,9 @@ async fn slskdn_nowplaying_webhook_response(body: &str, state: &AppState) -> Htt
             "PlaybackStart" | "PlaybackProgress" => {
                 let artist = string_field(object, "Artist").unwrap_or_default();
                 let title = string_field(object, "Name").unwrap_or_default();
-                slskdn_nowplaying_set_track(state, artist, title).await;
+                native_nowplaying_set_track(state, artist, title).await;
             }
-            "PlaybackStop" => slskdn_nowplaying_clear_track(state).await,
+            "PlaybackStop" => native_nowplaying_clear_track(state).await,
             _ => {}
         }
         return routing::ok_response(String::new());
@@ -52391,11 +52416,11 @@ async fn slskdn_nowplaying_webhook_response(body: &str, state: &AppState) -> Htt
     // Generic fallback: { artist, title, album, event }.
     let event = string_field(object, "event").unwrap_or_else(|| "play".to_owned());
     if matches!(event.as_str(), "stop" | "pause") {
-        slskdn_nowplaying_clear_track(state).await;
+        native_nowplaying_clear_track(state).await;
     } else {
         let artist = string_field(object, "artist").unwrap_or_default();
         let title = string_field(object, "title").unwrap_or_default();
-        slskdn_nowplaying_set_track(state, artist, title).await;
+        native_nowplaying_set_track(state, artist, title).await;
     }
     routing::ok_response(String::new())
 }
@@ -52409,13 +52434,13 @@ async fn extended_controller_mutation_response(
     is_versioned_v0: bool,
     headers: &RequestSecurityHeaders,
 ) -> HttpResponse {
-    // slskdN's compatibility controller intentionally has no room tracker or
+    // native profile's compatibility controller intentionally has no room tracker or
     // persistence dependency: it only validates the request and acknowledges
     // the requested operation.  Keep this narrow projection ahead of slskR's
     // richer local room lifecycle so a closed SQLite connection cannot alter
     // the frozen response contract.
     if !is_versioned_v0
-        && state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
+        && state.config.controller_profile == ControllerProfile::Native
     {
         if method == "POST" && path == "/api/rooms" {
             let room = extract_json_string_field(body, "room")
@@ -52526,14 +52551,14 @@ async fn extended_controller_mutation_response(
     if is_versioned_v0
         && method == "POST"
         && path == "/api/nowplaying/webhook"
-        && state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
+        && state.config.controller_profile == ControllerProfile::Native
     {
-        return slskdn_nowplaying_webhook_response(body, state).await;
+        return native_nowplaying_webhook_response(body, state).await;
     }
 
     if is_versioned_v0
         && path == "/api/security/adversarial"
-        && state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
+        && state.config.controller_profile == ControllerProfile::Native
         && !effective_remote_configuration(state)
     {
         return HttpResponse {
@@ -52550,9 +52575,9 @@ async fn extended_controller_mutation_response(
     }
     if method == "PUT"
         && path == "/api/security/adversarial"
-        && state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
+        && state.config.controller_profile == ControllerProfile::Native
     {
-        return Box::pin(slskdn_adversarial_mutation_response(body, state)).await;
+        return Box::pin(native_adversarial_mutation_response(body, state)).await;
     }
     if method == "DELETE" && path == "/api/session" {
         return match send_session_command(state, SessionCommand::Disconnect).await {
@@ -52612,7 +52637,7 @@ async fn extended_controller_mutation_response(
         let Some(query) = query else {
             return routing::bad_request_response("Query is required");
         };
-        if state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
+        if state.config.controller_profile == ControllerProfile::Native
             && !state.soulseek_safety.try_consume_search("user")
         {
             return HttpResponse {
@@ -52883,7 +52908,7 @@ async fn extended_controller_mutation_response(
         let runtime = state.runtime.read().await;
         let next = runtime.options_updates.saturating_add(1);
         drop(runtime);
-        return match slskd_options_mutation_response(body, next, state.db.is_some()) {
+        return match controller_options_mutation_response(body, next, state.db.is_some()) {
             Ok(value) => {
                 let _ = mutate_runtime_compat_state(state, |runtime, _| {
                     runtime.record_options_update().to_string()
@@ -53373,7 +53398,7 @@ async fn extended_controller_mutation_response(
                 .get("security/profile/security/circuits")
                 .is_none()
         {
-            // The frozen slskdN controller exposes the route even when the
+            // The frozen native profile controller exposes the route even when the
             // circuit builder is unavailable.  Preserve the existing
             // compatibility failure contract rather than manufacturing an
             // active circuit in the embedded state store.
@@ -53499,7 +53524,7 @@ const STUN_MAGIC_COOKIE: u32 = 0x2112_A442;
 const STUN_MAPPED_ADDRESS: u16 = 0x0001;
 const STUN_XOR_MAPPED_ADDRESS: u16 = 0x0020;
 /// Public STUN servers used for best-effort NAT type detection, matching
-/// the slskdN oracle's `MeshOptions.StunServers` defaults exactly.
+/// the native profile oracle's `MeshOptions.StunServers` defaults exactly.
 const STUN_SERVERS: [&str; 2] = ["stun.l.google.com:19302", "stun1.l.google.com:19302"];
 
 struct StunMapping {
@@ -53714,7 +53739,7 @@ const BRIDGE_ROOM_LIST_RESPONSE: i32 = 8;
 const BRIDGE_MAX_FRAME_BYTES: usize = 1024 * 1024;
 const BRIDGE_MAX_STRING_BYTES: usize = 1024 * 1024;
 
-/// The frozen slskdN bridge uses a deliberately small Soulseek-compatible
+/// The frozen native profile bridge uses a deliberately small Soulseek-compatible
 /// frame: a little-endian length containing the four-byte message type and
 /// payload, followed by the little-endian type and payload.  Keep this parser
 /// bounded and independent of the HTTP bridge routes so legacy clients use
@@ -54612,7 +54637,7 @@ async fn misc_controller_mutation_response(
             Err(error) => routing::service_unavailable_response(&error),
         };
         if succeeded {
-            // The frozen slskdN service publishes the normalized event to the
+            // The frozen native profile service publishes the normalized event to the
             // listening-party SignalR group after persistence. Reuse the
             // bounded event bus so the compatibility hub can apply the same
             // per-connection group filter without another unbounded channel.
@@ -54860,7 +54885,7 @@ fn activitypub_public_key_pem(state: &AppState) -> String {
 }
 
 /// A parsed `Signature` request header (RFC draft "Signing HTTP Messages"),
-/// matching the frozen slskdN oracle's `TryParseSignature`.
+/// matching the frozen native profile oracle's `TryParseSignature`.
 struct ActivityPubSignature {
     key_id: String,
     algorithm: String,
@@ -55149,7 +55174,7 @@ async fn activitypub_actor_exists(actor: &str, state: &AppState) -> bool {
         return false;
     }
 
-    // slskdN's LibraryActorService always registers its music actor when the
+    // native profile's LibraryActorService always registers its music actor when the
     // music content provider is available.  slskR's share index is that
     // provider boundary, so the native actor is available whenever the
     // federation service is active.  Generic target actors intentionally
@@ -55569,7 +55594,7 @@ fn mesh_gateway_auth_failure(
                 Some("X-Slskdn-ApiKey must be configured for non-localhost gateway access"),
             ));
         };
-        if !headers.x_slskdn_api_key.as_deref().is_some_and(|provided| {
+        if !headers.x_gateway_api_key.as_deref().is_some_and(|provided| {
             constant_time_bytes_equal(provided.as_bytes(), configured_api_key.as_bytes())
         }) {
             return Some(mesh_gateway_error_response(
@@ -55586,7 +55611,7 @@ fn mesh_gateway_auth_failure(
             .as_deref()
             .filter(|value| !value.trim().is_empty())
         {
-            if !headers.x_slskdn_csrf.as_deref().is_some_and(|provided| {
+            if !headers.x_gateway_csrf.as_deref().is_some_and(|provided| {
                 constant_time_bytes_equal(provided.as_bytes(), configured_csrf.as_bytes())
             }) {
                 return Some(mesh_gateway_error_response(
@@ -55976,10 +56001,10 @@ async fn feature_controller_mutation_response(
     if method == "POST" && path.starts_with("/api/searches/") && path.contains("/items/") {
         return Some(
             if is_versioned_v0
-                && state.config.controller_compatibility_target
-                    == ControllerCompatibilityTarget::Slskdn
+                && state.config.controller_profile
+                    == ControllerProfile::Native
             {
-                slskdn_search_action_controller_response(path, state).await
+                native_search_action_controller_response(path, state).await
             } else {
                 search_action_controller_response(path, state).await
             },
@@ -56342,11 +56367,11 @@ async fn feature_controller_mutation_response(
             }
             Err(_) => return Some(routing::bad_request_response("invalid JSON body")),
         };
-        let adversarial_slskdn = path == "/api/security/adversarial"
-            && state.config.controller_compatibility_target
-                == ControllerCompatibilityTarget::Slskdn;
-        if adversarial_slskdn {
-            if let Err(error) = validate_slskdn_adversarial_settings(&payload) {
+        let native_adversarial = path == "/api/security/adversarial"
+            && state.config.controller_profile
+                == ControllerProfile::Native;
+        if native_adversarial {
+            if let Err(error) = validate_native_adversarial_settings(&payload) {
                 return Some(HttpResponse {
                     status: "400 Bad Request",
                     content_type: "text/plain; charset=utf-8",
@@ -56375,7 +56400,7 @@ async fn feature_controller_mutation_response(
                     ));
                 }
             };
-            let updated = match slskdn_adversarial_yaml_update(&current, &payload) {
+            let updated = match native_adversarial_yaml_update(&current, &payload) {
                 Ok(updated) => updated,
                 Err(error) => return Some(routing::bad_request_response(&error)),
             };
@@ -56411,7 +56436,7 @@ async fn feature_controller_mutation_response(
                 .await
                 .upsert(format!("security/profile/{key}"), value.clone())
             {
-                Ok(()) if adversarial_slskdn => HttpResponse {
+                Ok(()) if native_adversarial => HttpResponse {
                     status: "200 OK",
                     content_type: "application/json; charset=utf-8",
                     body: serde_json::json!({
@@ -56728,9 +56753,9 @@ async fn multisource_controller_response(
     state: &AppState,
     is_versioned_v0: bool,
 ) -> HttpResponse {
-    let versioned_slskdn = is_versioned_v0
-        && state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn;
-    if versioned_slskdn {
+    let versioned_profile = is_versioned_v0
+        && state.config.controller_profile == ControllerProfile::Native;
+    if versioned_profile {
         match path {
             "/api/multisource/file-sources" => {
                 let payload = match serde_json::from_str::<serde_json::Value>(body) {
@@ -57210,7 +57235,7 @@ fn work_ref_wishlist_filter(work_ref: &serde_json::Value, note: Option<&str>) ->
     metadata.join("; ")
 }
 
-fn slskdn_model_validation_response() -> HttpResponse {
+fn native_model_validation_response() -> HttpResponse {
     HttpResponse {
         status: "400 Bad Request",
         content_type: "application/problem+json",
@@ -57590,7 +57615,7 @@ async fn musicbrainz_mutation_response(
     if path == "/api/musicbrainz/library-bloom/snapshots/preview" {
         let request = serde_json::from_str::<serde_json::Value>(body)
             .unwrap_or_else(|_| serde_json::json!({}));
-        // Matches slskdN's real item source: locally-held hashdb entries
+        // Matches native profile's real item source: locally-held hashdb entries
         // that carry a MusicBrainz recording id, not the generic library
         // catalog (which has no MusicBrainz identifiers to key membership
         // on). slskR's hashdb doesn't separately track release ids, so
@@ -59193,13 +59218,13 @@ async fn route_pod_message_to_peer(
         .and_then(serde_json::Value::as_i64)
         .and_then(|value| i32::try_from(value).ok())
         .unwrap_or(1);
-    let use_slskdn_control = state.config.controller_compatibility_target
-        == ControllerCompatibilityTarget::Slskdn
+    let use_native_control = state.config.controller_profile
+        == ControllerProfile::Native
         && state
             .private_gateway
             .as_ref()
             .is_none_or(|gateway| gateway.bind() != peer.overlay_endpoint);
-    if use_slskdn_control {
+    if use_native_control {
         let request = mesh_services::PodMessageControlRequest {
             message_id,
             pod_id,
@@ -59525,7 +59550,7 @@ fn ranking_history_counts(transfers: &TransferQueue, username: &str) -> (usize, 
         .iter()
         .filter(|entry| entry.direction == 0 && entry.peer_username.as_deref() == Some(username))
     {
-        match slskd_transfer_state(&entry.status) {
+        match controller_transfer_state(&entry.status) {
             "Completed" => successes += 1,
             "Failed" => failures += 1,
             _ => {}
@@ -59784,7 +59809,7 @@ fn search_controller_problem_response(
     }
 }
 
-async fn slskdn_search_action_controller_response(path: &str, state: &AppState) -> HttpResponse {
+async fn native_search_action_controller_response(path: &str, state: &AppState) -> HttpResponse {
     let Some(segments) = decoded_segments_after(path, "/api/searches/") else {
         return routing::not_found_response();
     };
@@ -60046,9 +60071,9 @@ async fn extended_controller_search_response(
 /// instance's own local identity -- an honest single-peer
 /// simplification, not fabricated peer data.
 async fn bridge_search_response(body: &str, state: &AppState) -> HttpResponse {
-    let slskdn =
-        state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn;
-    let slskdn_query = if slskdn {
+    let native_profile =
+        state.config.controller_profile == ControllerProfile::Native;
+    let native_query = if native_profile {
         let query = serde_json::from_str::<serde_json::Value>(body)
             .ok()
             .and_then(|value| value.get("query").cloned())
@@ -60063,10 +60088,10 @@ async fn bridge_search_response(body: &str, state: &AppState) -> HttpResponse {
     };
     let record = match extended_controller_search_response(body, state).await {
         Ok(record) => record,
-        Err(response) if slskdn && response.status == "503 Service Unavailable" => {
+        Err(response) if native_profile && response.status == "503 Service Unavailable" => {
             return routing::ok_response(
                 serde_json::json!({
-                    "query": slskdn_query.unwrap_or_default(),
+                    "query": native_query.unwrap_or_default(),
                     "users": [],
                 })
                 .to_string(),
@@ -60105,7 +60130,7 @@ async fn bridge_search_response(body: &str, state: &AppState) -> HttpResponse {
         })]
     };
     let body = serde_json::json!({"query": record.query, "users": users}).to_string();
-    if slskdn {
+    if native_profile {
         routing::ok_response(body)
     } else {
         routing::created_response(body)
@@ -60221,9 +60246,9 @@ fn extended_controller_download_success_response(requests: &[TransferEntry]) -> 
 /// optional, falling back to a single-item list) -- only the response
 /// shape needed to change.
 async fn bridge_download_response(body: &str, state: &AppState) -> HttpResponse {
-    let slskdn =
-        state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn;
-    if slskdn {
+    let native_profile =
+        state.config.controller_profile == ControllerProfile::Native;
+    if native_profile {
         let payload = match serde_json::from_str::<serde_json::Value>(body) {
             Ok(serde_json::Value::Object(payload)) => payload,
             _ => return routing::bad_request_response("Request is required"),
@@ -60251,7 +60276,7 @@ async fn bridge_download_response(body: &str, state: &AppState) -> HttpResponse 
             });
             routing::ok_response(serde_json::json!({"transfer_id": transfer_id}).to_string())
         }
-        Err(response) if slskdn && response.status == "503 Service Unavailable" => {
+        Err(response) if native_profile && response.status == "503 Service Unavailable" => {
             routing::internal_server_error_response("Bridge download failed")
         }
         Err(response) => response,
@@ -60276,7 +60301,7 @@ async fn bridge_transfer_progress_response(path: &str, state: &AppState) -> Http
         return routing::not_found_response();
     };
     let transfer_id = decoded_path_segment(raw_transfer_id).trim().to_owned();
-    if state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn {
+    if state.config.controller_profile == ControllerProfile::Native {
         if transfer_id.is_empty() {
             return routing::bad_request_response("TransferId is required");
         }
@@ -60338,7 +60363,7 @@ async fn bridge_transfer_progress_response(path: &str, state: &AppState) -> Http
                 "id": entry.id,
                 "progress": progress,
                 "status": entry.status,
-                "state": slskd_transfer_state(&entry.status),
+                "state": controller_transfer_state(&entry.status),
                 "filename": entry.filename,
                 "username": entry.peer_username,
                 "bytesTransferred": entry.bytes_transferred,
@@ -60464,7 +60489,7 @@ async fn collection_item_controller_response(
         else {
             return routing::not_found_response();
         };
-        item.slskdn_json(collection_id, ordinal)
+        item.native_json(collection_id, ordinal)
     } else {
         response
     };
@@ -60502,7 +60527,7 @@ async fn podcore_local_backfill_response(
             if message.timestamp_unix_ms > *last_seen_timestamp {
                 synchronized = synchronized.saturating_add(1);
                 channel_synchronized = true;
-                // Match slskdN's PodMessageBackfill.EstimateMessageSize:
+                // Match native profile's PodMessageBackfill.EstimateMessageSize:
                 // message ID (50) + sender ID (50) + body + signature + metadata (100).
                 bytes_transferred = bytes_transferred.saturating_add(
                     50usize
@@ -60543,7 +60568,7 @@ fn podcore_storage_error_response(
     storage_error: &str,
 ) -> HttpResponse {
     if versioned_v0
-        && state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
+        && state.config.controller_profile == ControllerProfile::Native
     {
         routing::internal_server_error_response(frozen_message)
     } else {
@@ -60750,8 +60775,8 @@ async fn podcore_mutation_response(
                 return Some(routing::bad_request_response("Pod ID is required"));
             }
             if versioned_v0
-                && state.config.controller_compatibility_target
-                    == ControllerCompatibilityTarget::Slskdn
+                && state.config.controller_profile
+                    == ControllerProfile::Native
                 && state
                     .controller_features
                     .read()
@@ -60782,8 +60807,8 @@ async fn podcore_mutation_response(
                 return Some(routing::bad_request_response("Pod ID is required"));
             }
             if versioned_v0
-                && state.config.controller_compatibility_target
-                    == ControllerCompatibilityTarget::Slskdn
+                && state.config.controller_profile
+                    == ControllerProfile::Native
                 && state
                     .controller_features
                     .read()
@@ -60816,7 +60841,7 @@ async fn podcore_mutation_response(
             ))
         }
         ("POST", [pod_id, section]) if section == "channels" => {
-            // Matches the frozen slskdN contract: creating a pod channel
+            // Matches the frozen native profile contract: creating a pod channel
             // requires the acting peer to moderate the pod.
             if !pod_local_peer_can_moderate(state, pod_id).await {
                 return Some(routing::forbidden_response(
@@ -60875,7 +60900,7 @@ async fn podcore_mutation_response(
             })
         }
         ("PUT", [pod_id, section, channel_id]) if section == "channels" => {
-            // Matches the frozen slskdN contract: updating a pod channel
+            // Matches the frozen native profile contract: updating a pod channel
             // requires the acting peer to moderate the pod.
             if !pod_local_peer_can_moderate(state, pod_id).await {
                 return Some(routing::forbidden_response(
@@ -60941,7 +60966,7 @@ async fn podcore_mutation_response(
             })
         }
         ("DELETE", [pod_id, section, channel_id]) if section == "channels" => {
-            // Matches the frozen slskdN contract: deleting a pod channel
+            // Matches the frozen native profile contract: deleting a pod channel
             // requires the acting peer to moderate the pod.
             if !pod_local_peer_can_moderate(state, pod_id).await {
                 return Some(routing::forbidden_response(
@@ -60988,7 +61013,7 @@ async fn podcore_mutation_response(
         ("POST", [section, pod_id, peer_id, action])
             if section == "membership" && matches!(action.as_str(), "ban" | "unban" | "role") =>
         {
-            // Matches the frozen slskdN contract: BanMember/UnbanMember/
+            // Matches the frozen native profile contract: BanMember/UnbanMember/
             // ChangeRole all require the acting peer to moderate the pod --
             // there is no self-service path for any of these three.
             if !pod_local_peer_can_moderate(state, pod_id).await {
@@ -61085,7 +61110,7 @@ async fn podcore_mutation_response(
                     )))
                 }
             };
-            // Matches the frozen slskdN contract: a peer may only publish
+            // Matches the frozen native profile contract: a peer may only publish
             // membership for themselves, and role/ban state always come
             // from the existing record (or safe defaults), never the
             // request body -- otherwise any caller could self-assign a
@@ -61152,7 +61177,7 @@ async fn podcore_mutation_response(
                     )))
                 }
             };
-            // Matches the frozen slskdN contract: updating a membership
+            // Matches the frozen native profile contract: updating a membership
             // record requires moderating the pod, or the member updating
             // their own record. A non-moderator's role/ban fields in the
             // body are ignored and pinned to the existing record (or safe
@@ -61202,7 +61227,7 @@ async fn podcore_mutation_response(
             })
         }
         ("DELETE", [section, pod_id, peer_id]) if section == "membership" => {
-            // Matches the frozen slskdN contract: removing a membership
+            // Matches the frozen native profile contract: removing a membership
             // record requires either moderating the pod, or the acting
             // peer removing themselves. The acting peer is always this
             // instance's own configured Soulseek identity (as with every
@@ -61352,8 +61377,8 @@ async fn podcore_mutation_response(
                 .map(|(channel_id, timestamp)| (channel_id, timestamp.as_u64().unwrap_or_default()))
                 .collect::<BTreeMap<_, _>>();
             if versioned_v0
-                && state.config.controller_compatibility_target
-                    == ControllerCompatibilityTarget::Slskdn
+                && state.config.controller_profile
+                    == ControllerProfile::Native
                 && (state.pods.read().await.validate_storage().is_err()
                     || state.pod_channels.read().await.validate_storage().is_err())
             {
@@ -61369,8 +61394,8 @@ async fn podcore_mutation_response(
         }
         ("POST", [section, sync_all]) if section == "backfill" && sync_all == "sync-all" => {
             if versioned_v0
-                && state.config.controller_compatibility_target
-                    == ControllerCompatibilityTarget::Slskdn
+                && state.config.controller_profile
+                    == ControllerProfile::Native
                 && (state.pods.read().await.validate_storage().is_err()
                     || state.pod_channels.read().await.validate_storage().is_err())
             {
@@ -61544,8 +61569,8 @@ async fn podcore_mutation_response(
                 Err(error) if error == "Pod already exists" => routing::conflict_response(&error),
                 Err(error)
                     if versioned_v0
-                        && state.config.controller_compatibility_target
-                            == ControllerCompatibilityTarget::Slskdn
+                        && state.config.controller_profile
+                            == ControllerProfile::Native
                         && error.starts_with("pod state write failed") =>
                 {
                     routing::internal_server_error_response(
@@ -62156,7 +62181,7 @@ async fn podcore_mutation_response(
             let is_dht_update = section == "dht" && action == "update";
             let publication_started = std::time::Instant::now();
             if is_dht_update {
-                // slskdN implements UpdateAsync as UnpublishAsync followed by
+                // native profile implements UpdateAsync as UnpublishAsync followed by
                 // PublishAsync, so the lifecycle counters retain the expired
                 // publication even though the DHT key is overwritten.
                 state.podcore_runtime_stats.record_dht_unpublish();
@@ -63955,10 +63980,10 @@ async fn mediacore_mutation_response(
                         "At least one ContentID is required for export",
                     ));
                 }
-                let source_name = if state.config.controller_compatibility_target
-                    == ControllerCompatibilityTarget::Slskdn
+                let source_name = if state.config.controller_profile
+                    == ControllerProfile::Native
                 {
-                    "slskdN"
+                    "slskr"
                 } else {
                     "slskR"
                 };
@@ -64624,7 +64649,7 @@ async fn extended_controller_dynamic_get_response(
             return routing::not_found_response();
         }
         let id = decoded_path_segment(id);
-        if state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
+        if state.config.controller_profile == ControllerProfile::Native
             && uuid::Uuid::parse_str(&id).is_err()
         {
             return routing::bad_request_response("Invalid download ID format");
@@ -64649,7 +64674,7 @@ async fn extended_controller_dynamic_get_response(
                 "User": transfer.peer_username,
                 "RemotePath": transfer.filename,
                 "LocalPath": transfer.local_path,
-                "Status": slskdn_download_status(&transfer.status),
+                "Status": native_download_status(&transfer.status),
                 "Progress": if size == 0 { 0.0 } else { transfer.bytes_transferred as f64 / size as f64 },
                 "Size": size,
                 "Remaining": size.saturating_sub(transfer.bytes_transferred),
@@ -64894,7 +64919,7 @@ async fn extended_controller_dynamic_get_response(
     if let Some(username) = path_segment_between(path, "/api/multisource/users/", "/files") {
         let username = decoded_path_segment(username);
         if versioned_v0
-            && state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
+            && state.config.controller_profile == ControllerProfile::Native
         {
             let username = username.trim().to_owned();
             if username.is_empty() {
@@ -65004,7 +65029,7 @@ async fn extended_controller_dynamic_get_response(
                     .as_deref()
                     .is_some_and(|peer| peer.eq_ignore_ascii_case(&username))
             })
-            .map(SearchResultEntry::slskd_file_json)
+            .map(SearchResultEntry::controller_file_json)
             .take(1_000)
             .collect::<Vec<_>>();
         return routing::ok_response(
@@ -65126,7 +65151,7 @@ async fn extended_controller_dynamic_get_response(
     if let Some(mbid) = path_segment_after(path, "/api/virtualsoulfind/canonical/") {
         let mbid = decoded_path_segment(mbid);
         let discovery = state.content_discovery.read().await;
-        if state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn {
+        if state.config.controller_profile == ControllerProfile::Native {
             let variants = virtual_soulfind_legacy_variants(&discovery, &mbid);
             let canonical_variant = variants.first().cloned();
             let has_canonical_variant = canonical_variant.is_some();
@@ -65704,8 +65729,8 @@ async fn podcore_dynamic_get_response(
     match segments.as_slice() {
         [pod_id, section] if section == "channels" => {
             if versioned_v0
-                && state.config.controller_compatibility_target
-                    == ControllerCompatibilityTarget::Slskdn
+                && state.config.controller_profile
+                    == ControllerProfile::Native
                 && state.pods.read().await.validate_storage().is_err()
             {
                 return routing::internal_server_error_response(
@@ -65728,8 +65753,8 @@ async fn podcore_dynamic_get_response(
         }
         [pod_id, section, channel_id] if section == "channels" => {
             if versioned_v0
-                && state.config.controller_compatibility_target
-                    == ControllerCompatibilityTarget::Slskdn
+                && state.config.controller_profile
+                    == ControllerProfile::Native
                 && state.pods.read().await.validate_storage().is_err()
             {
                 return routing::internal_server_error_response(
@@ -65750,8 +65775,8 @@ async fn podcore_dynamic_get_response(
             if section == "opinions" && content == "content" =>
         {
             if versioned_v0
-                && state.config.controller_compatibility_target
-                    == ControllerCompatibilityTarget::Slskdn
+                && state.config.controller_profile
+                    == ControllerProfile::Native
                 && state
                     .controller_features
                     .read()
@@ -66012,8 +66037,8 @@ async fn podcore_dynamic_get_response(
             if section == "opinions" && members == "members" && affinity == "affinity" =>
         {
             if versioned_v0
-                && state.config.controller_compatibility_target
-                    == ControllerCompatibilityTarget::Slskdn
+                && state.config.controller_profile
+                    == ControllerProfile::Native
                 && state
                     .controller_features
                     .read()
@@ -66029,8 +66054,8 @@ async fn podcore_dynamic_get_response(
         }
         [section, pod_id, last_seen] if section == "backfill" && last_seen == "last-seen" => {
             if versioned_v0
-                && state.config.controller_compatibility_target
-                    == ControllerCompatibilityTarget::Slskdn
+                && state.config.controller_profile
+                    == ControllerProfile::Native
                 && state
                     .controller_features
                     .read()
@@ -66060,8 +66085,8 @@ async fn podcore_dynamic_get_response(
             if section == "dht" && metadata == "metadata" && !tail.is_empty() =>
         {
             if versioned_v0
-                && state.config.controller_compatibility_target
-                    == ControllerCompatibilityTarget::Slskdn
+                && state.config.controller_profile
+                    == ControllerProfile::Native
                 && state
                     .controller_features
                     .read()
@@ -66385,8 +66410,8 @@ async fn podcore_dynamic_get_response(
         }
         [section, seen, message_id, pod_id] if section == "routing" && seen == "seen" => {
             if versioned_v0
-                && state.config.controller_compatibility_target
-                    == ControllerCompatibilityTarget::Slskdn
+                && state.config.controller_profile
+                    == ControllerProfile::Native
                 && state
                     .controller_features
                     .read()
@@ -66406,8 +66431,8 @@ async fn podcore_dynamic_get_response(
             if section == "verification" && membership == "membership" =>
         {
             if versioned_v0
-                && state.config.controller_compatibility_target
-                    == ControllerCompatibilityTarget::Slskdn
+                && state.config.controller_profile
+                    == ControllerProfile::Native
                 && state.pods.read().await.validate_storage().is_err()
             {
                 return routing::internal_server_error_response("Failed to verify membership");
@@ -66441,8 +66466,8 @@ async fn podcore_dynamic_get_response(
             if section == "verification" && role == "role" =>
         {
             if versioned_v0
-                && state.config.controller_compatibility_target
-                    == ControllerCompatibilityTarget::Slskdn
+                && state.config.controller_profile
+                    == ControllerProfile::Native
                 && state.pods.read().await.validate_storage().is_err()
             {
                 return routing::internal_server_error_response("Failed to check role");
@@ -66544,7 +66569,7 @@ fn source_provider_catalog_json(acquisition_planning_enabled: bool) -> String {
         (
             "LocalLibrary",
             "Local Library",
-            "Already indexed or shared files on this slskdN node.",
+            "Already indexed or shared files on this slskr node.",
             "local",
             "Music",
             &["search", "download", "checksum", "metadata", "preview"] as &[&str],
@@ -66570,7 +66595,7 @@ fn source_provider_catalog_json(acquisition_planning_enabled: bool) -> String {
         (
             "NativeMesh",
             "Native Mesh",
-            "Trusted slskdN overlay peers with content descriptors.",
+            "Trusted native overlay peers with content descriptors.",
             "trusted-mesh",
             "Music",
             &["search", "download", "checksum", "preview"],
@@ -66776,8 +66801,8 @@ async fn extended_controller_get_response(
                 .iter()
                 .filter(|room| room.joined)
                 .map(|room| {
-                    if state.config.controller_compatibility_target
-                        == ControllerCompatibilityTarget::Slskdn
+                    if state.config.controller_profile
+                        == ControllerProfile::Native
                     {
                         serde_json::json!({
                             "name": room.name,
@@ -66795,8 +66820,8 @@ async fn extended_controller_get_response(
                     }
                 })
                 .collect::<Vec<_>>();
-            let body = if state.config.controller_compatibility_target
-                == ControllerCompatibilityTarget::Slskdn
+            let body = if state.config.controller_profile
+                == ControllerProfile::Native
             {
                 serde_json::json!({"rooms": rows}).to_string()
             } else {
@@ -67127,7 +67152,7 @@ async fn extended_controller_get_response(
                 .config
                 .username
                 .clone()
-                .unwrap_or_else(|| "slskdn".to_owned());
+                .unwrap_or_else(|| "slskr".to_owned());
             routing::ok_response(
                 serde_json::json!({
                     "type": 1,
@@ -67145,8 +67170,8 @@ async fn extended_controller_get_response(
         }
         "/api/multisource/search" => {
             if versioned_v0
-                && state.config.controller_compatibility_target
-                    == ControllerCompatibilityTarget::Slskdn
+                && state.config.controller_profile
+                    == ControllerProfile::Native
             {
                 let search_text = query_parameter(query, "searchText")
                     .unwrap_or_default()
@@ -67233,8 +67258,8 @@ async fn extended_controller_get_response(
         }
         "/api/multisource/users" => {
             if versioned_v0
-                && state.config.controller_compatibility_target
-                    == ControllerCompatibilityTarget::Slskdn
+                && state.config.controller_profile
+                    == ControllerProfile::Native
             {
                 let search_text = query_parameter(query, "searchText")
                     .unwrap_or_default()
@@ -67562,8 +67587,8 @@ async fn extended_controller_get_response(
         }
         "/api/signals/config"
             if versioned_v0
-                && state.config.controller_compatibility_target
-                    == ControllerCompatibilityTarget::Slskdn =>
+                && state.config.controller_profile
+                    == ControllerProfile::Native =>
         {
             let advanced = state.advanced_networking.read().await;
             let signal_system = &advanced.signal_system;
@@ -67614,8 +67639,8 @@ async fn extended_controller_get_response(
         }
         "/api/signals/status"
             if versioned_v0
-                && state.config.controller_compatibility_target
-                    == ControllerCompatibilityTarget::Slskdn =>
+                && state.config.controller_profile
+                    == ControllerProfile::Native =>
         {
             let advanced = state.advanced_networking.read().await;
             let signal_system = &advanced.signal_system;
@@ -68090,8 +68115,8 @@ async fn podcore_stats_response(
         }
         "/api/podcore/routing/stats" => {
             if versioned_v0
-                && state.config.controller_compatibility_target
-                    == ControllerCompatibilityTarget::Slskdn
+                && state.config.controller_profile
+                    == ControllerProfile::Native
                 && state
                     .controller_features
                     .read()
@@ -68611,7 +68636,7 @@ fn conversation_messages_path(path: &str) -> Option<&str> {
         .filter(|username| !username.is_empty() && !username.contains('/'))
 }
 
-fn slskd_user_file_json(entry: &BrowseEntry) -> serde_json::Value {
+fn controller_user_file_json(entry: &BrowseEntry) -> serde_json::Value {
     serde_json::json!({
         "filename": entry.filename,
         "size": entry.size,
@@ -68622,7 +68647,7 @@ fn slskd_user_file_json(entry: &BrowseEntry) -> serde_json::Value {
     })
 }
 
-fn slskd_share_file_json(entry: &FileEntry) -> serde_json::Value {
+fn controller_share_file_json(entry: &FileEntry) -> serde_json::Value {
     serde_json::json!({
         "filename": entry.filename,
         "size": entry.size,
@@ -68643,7 +68668,7 @@ fn share_entry_matches_prefix(entry: &FileEntry, share_id: &str) -> bool {
             .is_some_and(|rest| rest.starts_with('/'))
 }
 
-fn slskd_share_directories_json(entries: &[FileEntry], share_id: Option<&str>) -> String {
+fn controller_share_directories_json(entries: &[FileEntry], share_id: Option<&str>) -> String {
     let filtered = entries
         .iter()
         .filter(|entry| share_id.is_none_or(|share_id| share_entry_matches_prefix(entry, share_id)))
@@ -68658,14 +68683,14 @@ fn slskd_share_directories_json(entries: &[FileEntry], share_id: Option<&str>) -
             serde_json::json!({
                 "name": name.replace('/', "\\"),
                 "fileCount": files.len(),
-                "files": files.iter().map(slskd_share_file_json).collect::<Vec<_>>(),
+                "files": files.iter().map(controller_share_file_json).collect::<Vec<_>>(),
             })
         })
         .collect::<Vec<_>>();
     serde_json::Value::Array(directories).to_string()
 }
 
-fn slskd_user_directories_json(
+fn controller_user_directories_json(
     directory: &str,
     entries: &[BrowseEntry],
     query: Option<&str>,
@@ -68691,7 +68716,7 @@ fn slskd_user_directories_json(
         .into_iter()
         .skip(filter.offset)
         .take(filter.limit.unwrap_or(usize::MAX))
-        .map(slskd_user_file_json)
+        .map(controller_user_file_json)
         .collect::<Vec<_>>();
     serde_json::Value::Array(vec![serde_json::json!({
         "name": directory,
@@ -68705,7 +68730,7 @@ fn slskd_user_directories_json(
     .to_string()
 }
 
-fn slskd_user_root_json(entries: &[BrowseEntry], query: Option<&str>) -> String {
+fn controller_user_root_json(entries: &[BrowseEntry], query: Option<&str>) -> String {
     let filter = RecordListFilter::from_query(query);
     let grouped = group_browse_entries(entries);
     let directory_count = grouped.len();
@@ -68781,7 +68806,7 @@ fn slskd_user_root_json(entries: &[BrowseEntry], query: Option<&str>) -> String 
                 "fileCount": files.len(),
                 "filteredFileCount": visible_files.len(),
                 "totalBytes": visible_files.iter().map(|entry| entry.size).sum::<u64>(),
-                "files": visible_files.iter().map(|entry| slskd_user_file_json(entry)).collect::<Vec<_>>(),
+                "files": visible_files.iter().map(|entry| controller_user_file_json(entry)).collect::<Vec<_>>(),
             })
         })
         .collect::<Vec<_>>();
@@ -68800,8 +68825,8 @@ fn slskd_user_root_json(entries: &[BrowseEntry], query: Option<&str>) -> String 
     .to_string()
 }
 
-fn target_storage_directory_json(json: String, target: ControllerCompatibilityTarget) -> String {
-    if target != ControllerCompatibilityTarget::Slskdn {
+fn target_storage_directory_json(json: String, target: ControllerProfile) -> String {
+    if target != ControllerProfile::Native {
         return json;
     }
     let Ok(mut value) = serde_json::from_str::<serde_json::Value>(&json) else {
@@ -68826,7 +68851,7 @@ fn target_storage_directory_json(json: String, target: ControllerCompatibilityTa
 }
 
 #[cfg(not(unix))]
-fn slskd_empty_directory_json(name: &str) -> serde_json::Value {
+fn controller_empty_directory_json(name: &str) -> serde_json::Value {
     serde_json::json!({
         "name": name,
         "fullName": name,
@@ -68838,7 +68863,7 @@ fn slskd_empty_directory_json(name: &str) -> serde_json::Value {
     })
 }
 
-fn slskd_filesystem_timestamp(metadata: &fs::Metadata, created: bool) -> String {
+fn controller_filesystem_timestamp(metadata: &fs::Metadata, created: bool) -> String {
     let time = if created {
         metadata.created().or_else(|_| metadata.modified())
     } else {
@@ -68960,7 +68985,7 @@ fn query_bool_is_invalid(query: Option<&str>, key: &str) -> bool {
 }
 
 #[cfg(not(unix))]
-fn slskd_storage_file_json(path: &Path, root: &Path) -> serde_json::Value {
+fn controller_storage_file_json(path: &Path, root: &Path) -> serde_json::Value {
     let relative = path
         .strip_prefix(root)
         .ok()
@@ -68979,13 +69004,13 @@ fn slskd_storage_file_json(path: &Path, root: &Path) -> serde_json::Value {
         "fullName": relative,
         "length": length,
         "attributes": "Normal",
-        "createdAt": metadata.as_ref().map_or_else(|| "0001-01-01T00:00:00Z".to_owned(), |metadata| slskd_filesystem_timestamp(metadata, true)),
-        "modifiedAt": metadata.as_ref().map_or_else(|| "0001-01-01T00:00:00Z".to_owned(), |metadata| slskd_filesystem_timestamp(metadata, false)),
+        "createdAt": metadata.as_ref().map_or_else(|| "0001-01-01T00:00:00Z".to_owned(), |metadata| controller_filesystem_timestamp(metadata, true)),
+        "modifiedAt": metadata.as_ref().map_or_else(|| "0001-01-01T00:00:00Z".to_owned(), |metadata| controller_filesystem_timestamp(metadata, false)),
     })
 }
 
 #[cfg(not(unix))]
-fn slskd_storage_directory_value(
+fn controller_storage_directory_value(
     root: &Path,
     directory: &Path,
     state: &mut StorageDirectoryListState,
@@ -69015,8 +69040,8 @@ fn slskd_storage_directory_value(
     if !metadata.is_dir() {
         return Err("storage path is not a directory".to_owned());
     }
-    let created_at = slskd_filesystem_timestamp(&metadata, true);
-    let modified_at = slskd_filesystem_timestamp(&metadata, false);
+    let created_at = controller_filesystem_timestamp(&metadata, true);
+    let modified_at = controller_filesystem_timestamp(&metadata, false);
 
     let mut entries = Vec::new();
     let mut scanned = 0;
@@ -69042,11 +69067,11 @@ fn slskd_storage_directory_value(
             break;
         }
         if metadata.is_file() {
-            files.push(slskd_storage_file_json(&path, root));
+            files.push(controller_storage_file_json(&path, root));
         } else if metadata.is_dir() {
             if state.options.recursive && depth < SLSKD_STORAGE_MAX_RECURSION_DEPTH {
                 let mut child =
-                    slskd_storage_directory_value(root, &path, state, false, depth + 1)?;
+                    controller_storage_directory_value(root, &path, state, false, depth + 1)?;
                 if let Some(nested) = child
                     .get_mut("files")
                     .and_then(serde_json::Value::as_array_mut)
@@ -69069,7 +69094,7 @@ fn slskd_storage_directory_value(
                     .and_then(|path| path.to_str())
                     .unwrap_or_default()
                     .replace('\\', "/");
-                directories.push(slskd_empty_directory_json(&child_relative));
+                directories.push(controller_empty_directory_json(&child_relative));
                 if state.options.recursive {
                     state.truncated = true;
                 }
@@ -69089,14 +69114,14 @@ fn slskd_storage_directory_value(
     }))
 }
 
-fn slskd_storage_directory_json(
+fn controller_storage_directory_json(
     root: &Path,
     encoded_name: Option<&str>,
     options: StorageDirectoryListOptions,
 ) -> Result<String, String> {
     fs::create_dir_all(root).map_err(|error| format!("storage root create failed: {error}"))?;
     let path = if let Some(encoded_name) = encoded_name {
-        let decoded = decode_slskd_base64_path_segment(encoded_name)?;
+        let decoded = decode_controller_base64_path_segment(encoded_name)?;
         scoped_relative_storage_path(root, &decoded)?
     } else {
         root.to_path_buf()
@@ -69106,7 +69131,7 @@ fn slskd_storage_directory_json(
         let relative = path
             .strip_prefix(root)
             .map_err(|_| "storage path is outside the storage root".to_owned())?;
-        slskd_storage_directory_json_unix(root, relative, options)
+        controller_storage_directory_json_unix(root, relative, options)
     }
     #[cfg(not(unix))]
     {
@@ -69130,7 +69155,7 @@ fn slskd_storage_directory_json(
             return Err("path escapes the storage root".to_owned());
         }
         let mut state = StorageDirectoryListState::new(options);
-        slskd_storage_directory_value(root, &path, &mut state, true, 0).map(|mut value| {
+        controller_storage_directory_value(root, &path, &mut state, true, 0).map(|mut value| {
             value["fullName"] = serde_json::json!("");
             value.to_string()
         })
@@ -69138,7 +69163,7 @@ fn slskd_storage_directory_json(
 }
 
 #[cfg(unix)]
-fn slskd_storage_directory_json_unix(
+fn controller_storage_directory_json_unix(
     root: &Path,
     relative: &Path,
     options: StorageDirectoryListOptions,
@@ -69161,12 +69186,12 @@ fn slskd_storage_directory_json_unix(
         };
     }
     let mut state = StorageDirectoryListState::new(options);
-    slskd_storage_directory_value_unix(root, relative, &directory, &mut state, true, 0)
+    controller_storage_directory_value_unix(root, relative, &directory, &mut state, true, 0)
         .map(|value| value.to_string())
 }
 
 #[cfg(unix)]
-fn slskd_storage_directory_value_unix(
+fn controller_storage_directory_value_unix(
     root: &Path,
     relative: &Path,
     directory: &impl std::os::fd::AsFd,
@@ -69179,7 +69204,7 @@ fn slskd_storage_directory_value_unix(
         .map_err(|error| format!("storage directory metadata failed: {error}"))?;
     let mut files = Vec::new();
     let mut directories = Vec::new();
-    collect_slskd_storage_entries_unix(
+    collect_controller_storage_entries_unix(
         &requested_root,
         Path::new(""),
         directory,
@@ -69197,15 +69222,15 @@ fn slskd_storage_directory_value_unix(
         "name": name,
         "fullName": "",
         "attributes": "Directory",
-        "createdAt": slskd_filesystem_timestamp(&directory_metadata, true),
-        "modifiedAt": slskd_filesystem_timestamp(&directory_metadata, false),
+        "createdAt": controller_filesystem_timestamp(&directory_metadata, true),
+        "modifiedAt": controller_filesystem_timestamp(&directory_metadata, false),
         "files": files,
         "directories": directories,
     }))
 }
 
 #[cfg(unix)]
-fn collect_slskd_storage_entries_unix(
+fn collect_controller_storage_entries_unix(
     requested_root: &Path,
     relative: &Path,
     directory: &impl std::os::fd::AsFd,
@@ -69253,8 +69278,8 @@ fn collect_slskd_storage_entries_unix(
             "fullName": child_relative.to_string_lossy().replace('\\', "/"),
             "length": metadata.len(),
             "attributes": "Normal",
-            "createdAt": slskd_filesystem_timestamp(&metadata, true),
-            "modifiedAt": slskd_filesystem_timestamp(&metadata, false),
+            "createdAt": controller_filesystem_timestamp(&metadata, true),
+            "modifiedAt": controller_filesystem_timestamp(&metadata, false),
         }));
     }
 
@@ -69273,11 +69298,11 @@ fn collect_slskd_storage_entries_unix(
             "name": name_os.to_string_lossy(),
             "fullName": child_relative.to_string_lossy().replace('\\', "/"),
             "attributes": "Directory",
-            "createdAt": slskd_filesystem_timestamp(&metadata, true),
-            "modifiedAt": slskd_filesystem_timestamp(&metadata, false),
+            "createdAt": controller_filesystem_timestamp(&metadata, true),
+            "modifiedAt": controller_filesystem_timestamp(&metadata, false),
         }));
         if state.options.recursive && depth < SLSKD_STORAGE_MAX_RECURSION_DEPTH {
-            collect_slskd_storage_entries_unix(
+            collect_controller_storage_entries_unix(
                 requested_root,
                 &child_relative,
                 &child,
@@ -69293,13 +69318,13 @@ fn collect_slskd_storage_entries_unix(
     Ok(())
 }
 
-fn slskd_transfer_summary_report(query: Option<&str>, transfers: &TransferQueue) -> String {
-    let direction = slskd_transfer_query_direction(query);
-    let username = slskd_transfer_query_username(query);
+fn controller_transfer_summary_report(query: Option<&str>, transfers: &TransferQueue) -> String {
+    let direction = controller_transfer_query_direction(query);
+    let username = controller_transfer_query_username(query);
     let entries = transfers
         .entries
         .iter()
-        .filter(|entry| slskd_transfer_matches_query(entry, direction, username.as_deref()))
+        .filter(|entry| controller_transfer_matches_query(entry, direction, username.as_deref()))
         .collect::<Vec<_>>();
     let downloads = entries.iter().filter(|entry| entry.direction == 0).count();
     let uploads = entries.iter().filter(|entry| entry.direction == 1).count();
@@ -69310,7 +69335,7 @@ fn slskd_transfer_summary_report(query: Option<&str>, transfers: &TransferQueue)
     let average_speed = average_transfer_speed_at(&entries, unix_timestamp());
     let mut by_state = BTreeMap::new();
     for entry in &entries {
-        let state = slskd_transfer_state(&entry.status).to_owned();
+        let state = controller_transfer_state(&entry.status).to_owned();
         let count = by_state.entry(state).or_insert(0usize);
         *count += 1;
     }
@@ -69335,17 +69360,17 @@ fn slskd_transfer_summary_report(query: Option<&str>, transfers: &TransferQueue)
     .to_string()
 }
 
-fn slskd_versioned_transfer_summary_report(
+fn controller_versioned_transfer_summary_report(
     query: Option<&str>,
     transfers: &TransferQueue,
 ) -> String {
-    let direction = slskd_transfer_query_direction(query);
-    let username = slskd_transfer_query_username(query);
-    let start = slskd_transfer_query_unix_timestamp(query, "start")
-        .or_else(|| slskd_transfer_query_unix_timestamp(query, "startDate"))
+    let direction = controller_transfer_query_direction(query);
+    let username = controller_transfer_query_username(query);
+    let start = controller_transfer_query_unix_timestamp(query, "start")
+        .or_else(|| controller_transfer_query_unix_timestamp(query, "startDate"))
         .unwrap_or(0);
-    let end = slskd_transfer_query_unix_timestamp(query, "end")
-        .or_else(|| slskd_transfer_query_unix_timestamp(query, "endDate"))
+    let end = controller_transfer_query_unix_timestamp(query, "end")
+        .or_else(|| controller_transfer_query_unix_timestamp(query, "endDate"))
         .unwrap_or(u64::MAX);
 
     let mut grouped = BTreeMap::<(u32, String), Vec<&TransferEntry>>::new();
@@ -69353,12 +69378,12 @@ fn slskd_versioned_transfer_summary_report(
         is_terminal_transfer_status(&entry.status)
             && entry.updated_at >= start
             && entry.updated_at <= end
-            && slskd_transfer_matches_query(entry, direction, username.as_deref())
+            && controller_transfer_matches_query(entry, direction, username.as_deref())
     }) {
         grouped
             .entry((
                 entry.direction,
-                slskd_transfer_summary_state(&entry.status).to_owned(),
+                controller_transfer_summary_state(&entry.status).to_owned(),
             ))
             .or_default()
             .push(entry);
@@ -69369,14 +69394,14 @@ fn slskd_versioned_transfer_summary_report(
         "Upload": {},
     });
     for ((direction, state), entries) in grouped {
-        let summary = slskd_versioned_transfer_summary_value(&entries);
+        let summary = controller_versioned_transfer_summary_value(&entries);
         let direction_name = if direction == 0 { "Download" } else { "Upload" };
         response[direction_name][state] = summary;
     }
     response.to_string()
 }
 
-fn slskd_versioned_transfer_summary_value(entries: &[&TransferEntry]) -> serde_json::Value {
+fn controller_versioned_transfer_summary_value(entries: &[&TransferEntry]) -> serde_json::Value {
     let usernames = entries
         .iter()
         .map(|entry| entry.peer_username.as_deref().unwrap_or_default())
@@ -69419,7 +69444,7 @@ fn slskd_versioned_transfer_summary_value(entries: &[&TransferEntry]) -> serde_j
     })
 }
 
-fn slskd_transfer_summary_state(status: &str) -> &'static str {
+fn controller_transfer_summary_state(status: &str) -> &'static str {
     match status {
         "succeeded" | "completed" => "Succeeded",
         "cancelled" => "Cancelled",
@@ -69431,8 +69456,8 @@ fn slskd_transfer_summary_state(status: &str) -> &'static str {
     }
 }
 
-fn slskd_transfer_query_unix_timestamp(query: Option<&str>, key: &str) -> Option<u64> {
-    let value = slskd_transfer_query_value(query, key)?;
+fn controller_transfer_query_unix_timestamp(query: Option<&str>, key: &str) -> Option<u64> {
+    let value = controller_transfer_query_value(query, key)?;
     value.parse::<u64>().ok().or_else(|| {
         chrono::DateTime::parse_from_rfc3339(&value)
             .ok()
@@ -69440,7 +69465,7 @@ fn slskd_transfer_query_unix_timestamp(query: Option<&str>, key: &str) -> Option
     })
 }
 
-fn slskd_transfer_query_direction(query: Option<&str>) -> Option<u32> {
+fn controller_transfer_query_direction(query: Option<&str>) -> Option<u32> {
     query_params(query.unwrap_or_default())
         .into_iter()
         .find_map(|(name, value)| {
@@ -69452,13 +69477,13 @@ fn slskd_transfer_query_direction(query: Option<&str>) -> Option<u32> {
         })
 }
 
-fn slskd_transfer_query_username(query: Option<&str>) -> Option<String> {
+fn controller_transfer_query_username(query: Option<&str>) -> Option<String> {
     query_params(query.unwrap_or_default())
         .into_iter()
         .find_map(|(name, value)| (name == "username" && !value.is_empty()).then_some(value))
 }
 
-fn slskd_transfer_query_limit_offset(query: Option<&str>) -> (usize, usize) {
+fn controller_transfer_query_limit_offset(query: Option<&str>) -> (usize, usize) {
     let mut limit = DEFAULT_LIST_LIMIT;
     let mut offset = 0usize;
     for (name, value) in query_params(query.unwrap_or_default()) {
@@ -69471,7 +69496,7 @@ fn slskd_transfer_query_limit_offset(query: Option<&str>) -> (usize, usize) {
     (limit, offset)
 }
 
-fn slskd_transfer_query_value(query: Option<&str>, key: &str) -> Option<String> {
+fn controller_transfer_query_value(query: Option<&str>, key: &str) -> Option<String> {
     query_params(query.unwrap_or_default())
         .into_iter()
         .find_map(|(name, value)| {
@@ -69484,8 +69509,8 @@ fn slskd_transfer_query_value(query: Option<&str>, key: &str) -> Option<String> 
 /// not optional -- a missing direction previously meant "no filter",
 /// silently mixing Upload and Download rows into a single report
 /// instead of rejecting the request the way the oracle does.
-fn slskd_transfer_query_required_direction(query: Option<&str>) -> Result<u32, &'static str> {
-    match slskd_transfer_query_value(query, "direction") {
+fn controller_transfer_query_required_direction(query: Option<&str>) -> Result<u32, &'static str> {
+    match controller_transfer_query_value(query, "direction") {
         None => Err("Direction is required"),
         Some(value) => match value.to_ascii_lowercase().as_str() {
             "download" | "0" => Ok(0),
@@ -69495,7 +69520,7 @@ fn slskd_transfer_query_required_direction(query: Option<&str>) -> Result<u32, &
     }
 }
 
-fn slskd_transfer_matches_query(
+fn controller_transfer_matches_query(
     entry: &TransferEntry,
     direction: Option<u32>,
     username: Option<&str>,
@@ -69504,7 +69529,7 @@ fn slskd_transfer_matches_query(
         && username.is_none_or(|username| entry.peer_username.as_deref() == Some(username))
 }
 
-fn slskd_transfer_speeds_json(transfers: &TransferQueue) -> String {
+fn controller_transfer_speeds_json(transfers: &TransferQueue) -> String {
     let now = unix_timestamp();
     let active_downloads = transfers
         .entries
@@ -69580,7 +69605,7 @@ fn average_transfer_speed_at(entries: &[&TransferEntry], now: u64) -> f64 {
         / entries.len() as f64
 }
 
-fn slskd_download_stats_json(transfers: &TransferQueue) -> String {
+fn controller_download_stats_json(transfers: &TransferQueue) -> String {
     let downloads = transfers
         .entries
         .iter()
@@ -69630,14 +69655,14 @@ fn slskd_download_stats_json(transfers: &TransferQueue) -> String {
     .to_string()
 }
 
-fn slskd_accelerated_downloads_json(query: Option<&str>, transfers: &TransferQueue) -> String {
-    let username = slskd_transfer_query_username(query);
-    let (limit, offset) = slskd_transfer_query_limit_offset(query);
+fn controller_accelerated_downloads_json(query: Option<&str>, transfers: &TransferQueue) -> String {
+    let username = controller_transfer_query_username(query);
+    let (limit, offset) = controller_transfer_query_limit_offset(query);
     let mut candidates = transfers
         .entries
         .iter()
         .filter(|entry| entry.direction == 0)
-        .filter(|entry| slskd_transfer_matches_query(entry, None, username.as_deref()))
+        .filter(|entry| controller_transfer_matches_query(entry, None, username.as_deref()))
         .filter(|entry| {
             matches!(
                 entry.status.as_str(),
@@ -69660,10 +69685,10 @@ fn slskd_accelerated_downloads_json(query: Option<&str>, transfers: &TransferQue
                 "id": entry.id.to_string(),
                 "username": entry.peer_username.as_deref().unwrap_or_default(),
                 "filename": entry.filename,
-                "state": slskd_transfer_state(&entry.status),
+                "state": controller_transfer_state(&entry.status),
                 "bytesTransferred": entry.bytes_transferred,
                 "size": entry.size.unwrap_or(0),
-                "position": transfers.slskd_transfer_position(0, entry.peer_username.as_deref().unwrap_or_default(), entry.id),
+                "position": transfers.controller_transfer_position(0, entry.peer_username.as_deref().unwrap_or_default(), entry.id),
             })
         })
         .collect::<Vec<_>>();
@@ -69678,14 +69703,14 @@ fn slskd_accelerated_downloads_json(query: Option<&str>, transfers: &TransferQue
     .to_string()
 }
 
-fn slskd_stuck_downloads_json(query: Option<&str>, transfers: &TransferQueue) -> String {
-    let username = slskd_transfer_query_username(query);
-    let (limit, offset) = slskd_transfer_query_limit_offset(query);
+fn controller_stuck_downloads_json(query: Option<&str>, transfers: &TransferQueue) -> String {
+    let username = controller_transfer_query_username(query);
+    let (limit, offset) = controller_transfer_query_limit_offset(query);
     let mut entries = transfers
         .entries
         .iter()
         .filter(|entry| entry.direction == 0)
-        .filter(|entry| slskd_transfer_matches_query(entry, None, username.as_deref()))
+        .filter(|entry| controller_transfer_matches_query(entry, None, username.as_deref()))
         .filter(|entry| {
             matches!(entry.status.as_str(), "failed" | "rejected")
                 || (is_active_transfer_status(&entry.status) && entry.bytes_transferred == 0)
@@ -69708,7 +69733,7 @@ fn slskd_stuck_downloads_json(query: Option<&str>, transfers: &TransferQueue) ->
                 "id": entry.id.to_string(),
                 "username": entry.peer_username.as_deref().unwrap_or_default(),
                 "filename": entry.filename,
-                "state": slskd_transfer_state(&entry.status),
+                "state": controller_transfer_state(&entry.status),
                 "bytesTransferred": entry.bytes_transferred,
                 "size": entry.size.unwrap_or(0),
                 "reason": public_transfer_reason(&entry.status, entry.reason.as_deref()).unwrap_or(""),
@@ -69725,7 +69750,7 @@ fn slskd_stuck_downloads_json(query: Option<&str>, transfers: &TransferQueue) ->
     .to_string()
 }
 
-fn slskd_download_user_stats_json(_query: Option<&str>, transfers: &TransferQueue) -> String {
+fn controller_download_user_stats_json(_query: Option<&str>, transfers: &TransferQueue) -> String {
     let mut grouped: BTreeMap<String, (usize, usize, usize, u64, Option<u64>)> = BTreeMap::new();
     for entry in transfers
         .entries
@@ -70304,17 +70329,17 @@ fn pod_cancel_request_path(path: &str, operation: &str) -> Option<(String, Strin
     Some((pod_id, peer_id))
 }
 
-fn slskd_transfer_histogram_report(query: Option<&str>, transfers: &TransferQueue) -> String {
+fn controller_transfer_histogram_report(query: Option<&str>, transfers: &TransferQueue) -> String {
     let interval = query_params(query.unwrap_or_default())
         .into_iter()
         .find_map(|(name, value)| (name == "interval").then(|| value.parse::<u64>().ok())?)
         .unwrap_or(60);
-    let direction = slskd_transfer_query_direction(query);
-    let username = slskd_transfer_query_username(query);
+    let direction = controller_transfer_query_direction(query);
+    let username = controller_transfer_query_username(query);
     let entries = transfers
         .entries
         .iter()
-        .filter(|entry| slskd_transfer_matches_query(entry, direction, username.as_deref()))
+        .filter(|entry| controller_transfer_matches_query(entry, direction, username.as_deref()))
         .collect::<Vec<_>>();
     let buckets = if entries.is_empty() {
         Vec::new()
@@ -70341,11 +70366,11 @@ fn slskd_transfer_histogram_report(query: Option<&str>, transfers: &TransferQueu
     .to_string()
 }
 
-fn slskd_versioned_transfer_histogram_report(
+fn controller_versioned_transfer_histogram_report(
     query: Option<&str>,
     transfers: &TransferQueue,
 ) -> Result<String, &'static str> {
-    let interval_minutes = slskd_transfer_query_value(query, "interval")
+    let interval_minutes = controller_transfer_query_value(query, "interval")
         .map(|value| value.parse::<u64>().map_err(|_| "Invalid interval"))
         .transpose()?
         .unwrap_or(60);
@@ -70353,19 +70378,19 @@ fn slskd_versioned_transfer_histogram_report(
         return Err("Interval must be greater than or equal to 5");
     }
     let now = unix_timestamp();
-    let start = slskd_transfer_query_unix_timestamp(query, "start")
-        .or_else(|| slskd_transfer_query_unix_timestamp(query, "startDate"))
+    let start = controller_transfer_query_unix_timestamp(query, "start")
+        .or_else(|| controller_transfer_query_unix_timestamp(query, "startDate"))
         .unwrap_or_else(|| now.saturating_sub(7 * 24 * 60 * 60));
-    let end = slskd_transfer_query_unix_timestamp(query, "end")
-        .or_else(|| slskd_transfer_query_unix_timestamp(query, "endDate"))
+    let end = controller_transfer_query_unix_timestamp(query, "end")
+        .or_else(|| controller_transfer_query_unix_timestamp(query, "endDate"))
         .unwrap_or(now);
     if end <= start {
         return Err("End time must be later than start time");
     }
     let interval_seconds = interval_minutes.saturating_mul(60);
     let first_bucket = start - (start % interval_seconds);
-    let direction = slskd_transfer_query_direction(query);
-    let username = slskd_transfer_query_username(query);
+    let direction = controller_transfer_query_direction(query);
+    let username = controller_transfer_query_username(query);
     let mut buckets = BTreeMap::<String, serde_json::Value>::new();
     let mut bucket_start = first_bucket;
     while bucket_start < end {
@@ -70396,7 +70421,7 @@ fn slskd_versioned_transfer_histogram_report(
         is_terminal_transfer_status(&entry.status)
             && entry.updated_at >= start
             && entry.updated_at <= end
-            && slskd_transfer_matches_query(entry, direction, username.as_deref())
+            && controller_transfer_matches_query(entry, direction, username.as_deref())
     }) {
         let bucket_start = entry.updated_at - (entry.updated_at % interval_seconds);
         let key = chrono::DateTime::from_timestamp(
@@ -70409,7 +70434,7 @@ fn slskd_versioned_transfer_histogram_report(
             .entry((
                 key,
                 entry.direction,
-                slskd_transfer_summary_state(&entry.status).to_owned(),
+                controller_transfer_summary_state(&entry.status).to_owned(),
             ))
             .or_default()
             .push(entry);
@@ -70423,31 +70448,31 @@ fn slskd_versioned_transfer_histogram_report(
             .get_mut(direction_name)
             .and_then(serde_json::Value::as_object_mut)
             .ok_or("Invalid histogram direction map")?;
-        direction_map.insert(state, slskd_versioned_transfer_summary_value(&entries));
+        direction_map.insert(state, controller_versioned_transfer_summary_value(&entries));
     }
 
     Ok(serde_json::to_string(&buckets).unwrap_or_else(|_| "{}".to_owned()))
 }
 
-fn slskd_transfer_leaderboard_report(
+fn controller_transfer_leaderboard_report(
     query: Option<&str>,
     transfers: &TransferQueue,
 ) -> Result<String, &'static str> {
-    let direction = Some(slskd_transfer_query_required_direction(query)?);
-    let start = slskd_transfer_query_unix_timestamp(query, "start")
-        .or_else(|| slskd_transfer_query_unix_timestamp(query, "startDate"))
+    let direction = Some(controller_transfer_query_required_direction(query)?);
+    let start = controller_transfer_query_unix_timestamp(query, "start")
+        .or_else(|| controller_transfer_query_unix_timestamp(query, "startDate"))
         .unwrap_or(0);
-    let end = slskd_transfer_query_unix_timestamp(query, "end")
-        .or_else(|| slskd_transfer_query_unix_timestamp(query, "endDate"))
+    let end = controller_transfer_query_unix_timestamp(query, "end")
+        .or_else(|| controller_transfer_query_unix_timestamp(query, "endDate"))
         .unwrap_or(u64::MAX);
     if end <= start {
         return Err("End time must be later than start time");
     }
-    let (limit, offset) = slskd_transfer_query_limit_offset(query);
-    let sort_by = slskd_transfer_query_value(query, "sortBy")
+    let (limit, offset) = controller_transfer_query_limit_offset(query);
+    let sort_by = controller_transfer_query_value(query, "sortBy")
         .unwrap_or_else(|| "Count".to_owned())
         .to_ascii_lowercase();
-    let descending = slskd_transfer_query_value(query, "sortOrder")
+    let descending = controller_transfer_query_value(query, "sortOrder")
         .map(|value| !value.eq_ignore_ascii_case("ASC"))
         .unwrap_or(true);
     let now = unix_timestamp();
@@ -70455,13 +70480,13 @@ fn slskd_transfer_leaderboard_report(
     for entry in transfers
         .entries
         .iter()
-        .filter(|entry| slskd_transfer_matches_query(entry, direction, None))
+        .filter(|entry| controller_transfer_matches_query(entry, direction, None))
         .filter(|entry| entry.updated_at >= start && entry.updated_at <= end)
         // Matches the oracle's GetTransferLeaderboard: only completed
         // transfers count toward the leaderboard, not queued/in-progress/
         // cancelled/failed ones -- otherwise a user with many failed
         // attempts could outrank one with fewer, real completions.
-        .filter(|entry| slskd_transfer_state(&entry.status) == "Completed")
+        .filter(|entry| controller_transfer_state(&entry.status) == "Completed")
     {
         let username = entry.peer_username.clone().unwrap_or_default();
         let bytes = entry.size.unwrap_or(entry.bytes_transferred);
@@ -70502,23 +70527,23 @@ fn slskd_transfer_leaderboard_report(
     Ok(serde_json::Value::Array(rows.into_iter().skip(offset).take(limit).collect()).to_string())
 }
 
-fn slskd_transfer_exceptions_report(
+fn controller_transfer_exceptions_report(
     query: Option<&str>,
     transfers: &TransferQueue,
 ) -> Result<String, &'static str> {
-    let direction = Some(slskd_transfer_query_required_direction(query)?);
-    let username = slskd_transfer_query_username(query);
-    let (limit, offset) = slskd_transfer_query_limit_offset(query);
-    let descending = slskd_transfer_query_value(query, "sortOrder")
+    let direction = Some(controller_transfer_query_required_direction(query)?);
+    let username = controller_transfer_query_username(query);
+    let (limit, offset) = controller_transfer_query_limit_offset(query);
+    let descending = controller_transfer_query_value(query, "sortOrder")
         .map(|value| !value.eq_ignore_ascii_case("ASC"))
         .unwrap_or(true);
     let mut entries = transfers
         .entries
         .iter()
-        .filter(|entry| slskd_transfer_matches_query(entry, direction, username.as_deref()))
+        .filter(|entry| controller_transfer_matches_query(entry, direction, username.as_deref()))
         .filter(|entry| {
             matches!(
-                slskd_transfer_state(&entry.status),
+                controller_transfer_state(&entry.status),
                 "Cancelled" | "Failed" | "Rejected"
             )
         })
@@ -70543,9 +70568,9 @@ fn slskd_transfer_exceptions_report(
                 "username": entry.peer_username.as_deref().unwrap_or_default(),
                 "direction": if entry.direction == 0 { "Download" } else { "Upload" },
                 "filename": entry.filename,
-                "state": slskd_transfer_state(&entry.status),
+                "state": controller_transfer_state(&entry.status),
                 "exception": public_transfer_reason(&entry.status, entry.reason.as_deref())
-                    .unwrap_or(slskd_transfer_state(&entry.status)),
+                    .unwrap_or(controller_transfer_state(&entry.status)),
                 "requestedAt": entry.requested_at.to_string(),
             })
         })
@@ -70553,27 +70578,27 @@ fn slskd_transfer_exceptions_report(
     Ok(serde_json::Value::Array(rows).to_string())
 }
 
-fn slskd_transfer_exceptions_pareto_report(
+fn controller_transfer_exceptions_pareto_report(
     query: Option<&str>,
     transfers: &TransferQueue,
 ) -> Result<String, &'static str> {
-    let direction = Some(slskd_transfer_query_required_direction(query)?);
-    let username = slskd_transfer_query_username(query);
-    let (limit, offset) = slskd_transfer_query_limit_offset(query);
+    let direction = Some(controller_transfer_query_required_direction(query)?);
+    let username = controller_transfer_query_username(query);
+    let (limit, offset) = controller_transfer_query_limit_offset(query);
     let mut grouped: BTreeMap<String, (usize, BTreeMap<String, ()>)> = BTreeMap::new();
     for entry in transfers
         .entries
         .iter()
-        .filter(|entry| slskd_transfer_matches_query(entry, direction, username.as_deref()))
+        .filter(|entry| controller_transfer_matches_query(entry, direction, username.as_deref()))
         .filter(|entry| {
             matches!(
-                slskd_transfer_state(&entry.status),
+                controller_transfer_state(&entry.status),
                 "Cancelled" | "Failed" | "Rejected"
             )
         })
     {
         let exception = public_transfer_reason(&entry.status, entry.reason.as_deref())
-            .unwrap_or(slskd_transfer_state(&entry.status))
+            .unwrap_or(controller_transfer_state(&entry.status))
             .to_owned();
         let group = grouped.entry(exception).or_insert((0, BTreeMap::new()));
         group.0 += 1;
@@ -70600,9 +70625,9 @@ fn slskd_transfer_exceptions_pareto_report(
     Ok(serde_json::Value::Array(rows.into_iter().skip(offset).take(limit).collect()).to_string())
 }
 
-fn slskd_transfer_directories_report(query: Option<&str>, transfers: &TransferQueue) -> String {
-    let username = slskd_transfer_query_username(query);
-    let (limit, offset) = slskd_transfer_query_limit_offset(query);
+fn controller_transfer_directories_report(query: Option<&str>, transfers: &TransferQueue) -> String {
+    let username = controller_transfer_query_username(query);
+    let (limit, offset) = controller_transfer_query_limit_offset(query);
     let mut grouped: BTreeMap<String, (usize, u64, BTreeMap<String, ()>)> = BTreeMap::new();
     // Matches the oracle's GetTransferDirectoryFrequency exactly: this
     // report always answers "which of my shared directories are popular"
@@ -70613,8 +70638,8 @@ fn slskd_transfer_directories_report(query: Option<&str>, transfers: &TransferQu
         .entries
         .iter()
         .filter(|entry| entry.direction == 1)
-        .filter(|entry| slskd_transfer_state(&entry.status) == "Completed")
-        .filter(|entry| slskd_transfer_matches_query(entry, None, username.as_deref()))
+        .filter(|entry| controller_transfer_state(&entry.status) == "Completed")
+        .filter(|entry| controller_transfer_matches_query(entry, None, username.as_deref()))
     {
         let directory = Path::new(&entry.filename)
             .parent()
@@ -70652,12 +70677,12 @@ fn slskd_transfer_directories_report(query: Option<&str>, transfers: &TransferQu
     serde_json::Value::Array(rows.into_iter().skip(offset).take(limit).collect()).to_string()
 }
 
-fn slskd_user_transfer_report(username: &str, transfers: &TransferQueue) -> String {
+fn controller_user_transfer_report(username: &str, transfers: &TransferQueue) -> String {
     let entries = transfers
         .entries
         .iter()
         .filter(|entry| entry.peer_username.as_deref() == Some(username))
-        .map(TransferEntry::slskd_file_json)
+        .map(TransferEntry::controller_file_json)
         .collect::<Vec<_>>();
     let direction_report = |direction: u32| {
         let selected = transfers
@@ -70899,10 +70924,10 @@ async fn serve(invocation: ServeInvocation) -> Result<(), String> {
     )?;
     let once = invocation.once;
     if !config.controller_no_logo {
-        print_controller_logo(config.controller_compatibility_target);
+        print_controller_logo(config.controller_profile);
     }
     if let Some(error) = frozen_obfuscation_startup_error(&config) {
-        // Frozen slskdN accepts this combination during options validation,
+        // Frozen native profile accepts this combination during options validation,
         // fails while constructing the runtime, logs a fatal error, and exits 0.
         eprintln!("{error}");
         return Ok(());
@@ -71244,7 +71269,7 @@ async fn serve(invocation: ServeInvocation) -> Result<(), String> {
         .protocol
         .restore_persisted_share_uploads(
             &config.state_dir.join("relay").join("incoming"),
-            config.controller_compatibility_target,
+            config.controller_profile,
         )
         .await?;
     let mut runtime_compat_state = runtime_compat_record
@@ -71450,7 +71475,7 @@ async fn serve(invocation: ServeInvocation) -> Result<(), String> {
     let search_request_filters = compile_controller_regexes(
         &config.controller_search_request_filters,
         config.controller_case_sensitive_regex,
-        config.controller_compatibility_target,
+        config.controller_profile,
     )?;
     let controller_cli_environment = invocation.config_environment.clone();
     let revoked_jwts = RevokedJwtStore::load(&config.state_dir);
@@ -71527,7 +71552,7 @@ async fn serve(invocation: ServeInvocation) -> Result<(), String> {
         messages: RwLock::new(message_store),
         managed_blacklist: RwLock::new(ManagedBlacklistRuntime::new(
             config.managed_blacklist.clone(),
-            config.controller_compatibility_target,
+            config.controller_profile,
             config.controller_case_sensitive_regex,
         )),
         search_request_filters: RwLock::new(search_request_filters),
@@ -71978,15 +72003,15 @@ fn spawn_session_manager(state: Arc<AppState>, mut receiver: mpsc::Receiver<Sess
     tokio::spawn(async move {
         let mut session = None;
         let mut next_ping = Instant::now() + state.config.ping_interval;
-        let wishlist_interval = if state.config.controller_compatibility_target
-            == ControllerCompatibilityTarget::Slskdn
+        let wishlist_interval = if state.config.controller_profile
+            == ControllerProfile::Native
         {
             state.config.core_workflow.wishlist.interval
         } else {
             Duration::from_secs(30)
         };
-        let wishlist_override = (state.config.controller_compatibility_target
-            == ControllerCompatibilityTarget::Slskdn)
+        let wishlist_override = (state.config.controller_profile
+            == ControllerProfile::Native)
             .then_some(wishlist_interval);
         let mut wishlist_scheduler = WishlistSearchScheduler::new(
             Vec::<String>::new(),
@@ -72167,7 +72192,7 @@ fn spawn_vpn_polling(state: Arc<AppState>) {
             let previous_ready = state.runtime.read().await.vpn.is_ready;
             let status = match vpn::poll_once(
                 &options,
-                state.config.controller_compatibility_target,
+                state.config.controller_profile,
             )
             .await
             {
@@ -72434,7 +72459,7 @@ fn auto_replace_retry_settings(
 }
 
 fn spawn_download_auto_replace(state: Arc<AppState>) {
-    if state.config.controller_compatibility_target != ControllerCompatibilityTarget::Slskdn {
+    if state.config.controller_profile != ControllerProfile::Native {
         return;
     }
     tokio::spawn(async move {
@@ -74707,7 +74732,7 @@ async fn handle_inbound_file_transfer(
         )
     })?;
 
-    // slskdN's type-1 transfer manager sends the negotiated remote token
+    // native profile's type-1 transfer manager sends the negotiated remote token
     // immediately after PeerInit.  The regular compatibility path retains
     // the historical local-token send behavior for clients that do not send
     // that framing on an incoming transfer socket.
@@ -75534,7 +75559,7 @@ async fn find_shared_local_file(state: &AppState, filename: &str) -> Option<Shar
 
 /// Issue the frozen listening-party stream ticket for a local content id.
 ///
-/// slskdN binds these tickets to `listening-party:{partyId}` and the radio
+/// native profile binds these tickets to `listening-party:{partyId}` and the radio
 /// controller checks that owner before opening the resolved local file.  The
 /// ticket is cached for its lifetime so repeated directory reads do not fill
 /// the bounded preview-ticket store with duplicate announcements.
@@ -75866,7 +75891,7 @@ async fn open_relay_controller_download(
         .protocol
         .validate_download(
             &settings,
-            relay::credential_scheme(state.config.controller_compatibility_target),
+            relay::credential_scheme(state.config.controller_profile),
             token,
             credential,
             unix_timestamp(),
@@ -75897,9 +75922,9 @@ fn application_dump_path(path: &str) -> bool {
 
 fn application_dump_request(method: &str, path: &str, config: &AppConfig) -> bool {
     application_dump_path(path)
-        && match config.controller_compatibility_target {
-            ControllerCompatibilityTarget::Slskd => method == "GET",
-            ControllerCompatibilityTarget::Slskdn => method == "POST",
+        && match config.controller_profile {
+            ControllerProfile::Legacy => method == "GET",
+            ControllerProfile::Native => method == "POST",
         }
 }
 
@@ -76579,8 +76604,8 @@ async fn configured_download_destination_path(
     let root = configured_default.unwrap_or_else(|| effective_downloads_dir(state));
     let mut path = safe_download_path(&root, relative)?;
     let settings = state.transfer_download_settings.read().await;
-    let rename_existing = state.config.controller_compatibility_target
-        == ControllerCompatibilityTarget::Slskdn
+    let rename_existing = state.config.controller_profile
+        == ControllerProfile::Native
         || settings.destination.exists.eq_ignore_ascii_case("rename");
     drop(settings);
     if !rename_existing || !path.exists() {
@@ -76676,7 +76701,7 @@ async fn render_configured_completed_download_path(
         );
     }
     let settings = state.transfer_download_settings.read().await.clone();
-    if state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn {
+    if state.config.controller_profile == ControllerProfile::Native {
         return match settings.completed_layout.as_str() {
             "flat" => Ok(virtual_basename(remote_filename).to_owned()),
             "uploader_folder" => render_completed_download_path(
@@ -76868,7 +76893,7 @@ fn download_root(state_dir: &Path) -> PathBuf {
     state_dir.join("downloads")
 }
 
-fn decode_slskd_base64_path_segment(encoded: &str) -> Result<String, String> {
+fn decode_controller_base64_path_segment(encoded: &str) -> Result<String, String> {
     let encoded = percent_decode_component(encoded);
     let encoded = encoded
         .bytes()
@@ -76910,7 +76935,7 @@ fn delete_scoped_file_storage_path(
     encoded_name: &str,
     directory: bool,
 ) -> Result<bool, String> {
-    let decoded = decode_slskd_base64_path_segment(encoded_name)?;
+    let decoded = decode_controller_base64_path_segment(encoded_name)?;
     let path = scoped_relative_storage_path(root, &decoded)?;
     fs::create_dir_all(root).map_err(|error| format!("storage root create failed: {error}"))?;
     #[cfg(unix)]
@@ -77485,7 +77510,7 @@ async fn inbound_upload_policy(
     let group =
         transfer_group_upload_settings(&groups, &group_name).unwrap_or(&groups.default.upload);
     if !privileged
-        && state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
+        && state.config.controller_profile == ControllerProfile::Native
         && !group.allowed_file_types.is_empty()
     {
         let extension = Path::new(filename)
@@ -77741,8 +77766,8 @@ where
                     .map(str::trim)
                     .filter(|username| !username.is_empty())
                 {
-                    if state.config.controller_compatibility_target
-                        == ControllerCompatibilityTarget::Slskdn
+                    if state.config.controller_profile
+                        == ControllerProfile::Native
                         && state
                             .managed_blacklist
                             .read()
@@ -77752,9 +77777,9 @@ where
                         return Ok(());
                     }
                     if matches!(
-                        state.config.controller_compatibility_target,
-                        ControllerCompatibilityTarget::Slskd
-                            | ControllerCompatibilityTarget::Slskdn
+                        state.config.controller_profile,
+                        ControllerProfile::Legacy
+                            | ControllerProfile::Native
                     ) && state.session.read().await.state == "connected"
                         && request_peer_endpoint(state, username).await.is_err()
                     {
@@ -80247,7 +80272,7 @@ async fn backfill_candidates(state: &AppState, limit: usize) -> Vec<BackfillCand
                     .config
                     .test_user_endpoint_overrides
                     .contains_key(&peer_id);
-            let is_peer_slskdn = mesh.capability_records.iter().any(|record| {
+            let is_peer_native = mesh.capability_records.iter().any(|record| {
                 record.username.eq_ignore_ascii_case(&peer_id)
                     && record.features.iter().any(|feature| {
                         feature.eq_ignore_ascii_case(FEATURE_CAPABILITIES_V1)
@@ -80262,7 +80287,7 @@ async fn backfill_candidates(state: &AppState, limit: usize) -> Vec<BackfillCand
                 discovered_at,
                 peer_backfills_today,
                 is_peer_online,
-                is_peer_slskdn,
+                is_peer_native,
             }
         })
         .collect()
@@ -80516,7 +80541,7 @@ async fn run_backfill_cycle(state: &AppState) -> serde_json::Value {
             rate_limited = rate_limited.saturating_add(1);
             continue;
         }
-        if candidate.is_peer_slskdn || !candidate.is_peer_online {
+        if candidate.is_peer_native || !candidate.is_peer_online {
             continue;
         }
         attempted = attempted.saturating_add(1);
@@ -80848,7 +80873,7 @@ async fn enrich_completed_audio_metadata(
         return transfer;
     };
 
-    // Matches slskdN's completed-download HashDb pipeline: hash the first
+    // Matches native profile's completed-download HashDb pipeline: hash the first
     // 32 KiB of supported audio files, store the real byte hash under the
     // shared FLAC key, and expose each stage through the metadata activity
     // endpoint. Unsupported and undersized files are recorded as skipped,
@@ -81505,8 +81530,8 @@ async fn download_file_transfer_with_connection(
     )?;
     let incomplete_path =
         ensure_scoped_download_path(&incomplete_dir, incomplete_path.to_string_lossy().as_ref())?;
-    let overwrite_destination = state.config.controller_compatibility_target
-        == ControllerCompatibilityTarget::Slskd
+    let overwrite_destination = state.config.controller_profile
+        == ControllerProfile::Legacy
         && state
             .transfer_download_settings
             .read()
@@ -81581,7 +81606,7 @@ async fn validate_configured_path_policy(state: &AppState, path: &str) -> Result
         .path_guard
         .clone();
     // Traversal confinement is unconditional; the switch controls only the
-    // configurable length/depth limits, matching frozen slskdN.
+    // configurable length/depth limits, matching frozen native profile.
     if path
         .split(['/', '\\'])
         .any(|segment| segment == ".." || segment == ".")
@@ -83230,8 +83255,8 @@ async fn controller_conversation_read_failure_response(
     path: &str,
 ) -> Option<HttpResponse> {
     if !matches!(
-        state.config.controller_compatibility_target,
-        ControllerCompatibilityTarget::Slskd | ControllerCompatibilityTarget::Slskdn
+        state.config.controller_profile,
+        ControllerProfile::Legacy | ControllerProfile::Native
     ) || !path.starts_with("/api/v0/")
     {
         return None;
@@ -83245,13 +83270,13 @@ async fn controller_conversation_read_failure_response(
     None
 }
 
-async fn controller_slskd_telemetry_report_read_failure_response(
+async fn controller_telemetry_report_read_failure_response(
     state: &AppState,
     path: &str,
 ) -> Option<HttpResponse> {
     if !matches!(
-        state.config.controller_compatibility_target,
-        ControllerCompatibilityTarget::Slskd | ControllerCompatibilityTarget::Slskdn
+        state.config.controller_profile,
+        ControllerProfile::Legacy | ControllerProfile::Native
     ) || !path.starts_with("/api/v0/telemetry/reports/transfers/")
     {
         return None;
@@ -83265,11 +83290,11 @@ async fn controller_slskd_telemetry_report_read_failure_response(
     None
 }
 
-async fn controller_slskd_transfer_storage_read_failure_response(
+async fn controller_transfer_storage_read_failure_response(
     state: &AppState,
     path: &str,
 ) -> Option<HttpResponse> {
-    if state.config.controller_compatibility_target != ControllerCompatibilityTarget::Slskd
+    if state.config.controller_profile != ControllerProfile::Legacy
         || !path.starts_with("/api/v0/transfers/")
     {
         return None;
@@ -83283,7 +83308,7 @@ async fn controller_slskd_transfer_storage_read_failure_response(
     None
 }
 
-async fn controller_slskdn_transfer_storage_failure_response(
+async fn controller_native_transfer_storage_failure_response(
     state: &AppState,
     method: &str,
     path: &str,
@@ -83292,10 +83317,10 @@ async fn controller_slskdn_transfer_storage_failure_response(
         || path.starts_with("/api/v0/downloads/")
         || path == "/api/downloads"
         || path.starts_with("/api/downloads/");
-    if state.config.controller_compatibility_target != ControllerCompatibilityTarget::Slskdn
+    if state.config.controller_profile != ControllerProfile::Native
         || (!(path == "/api/v0/transfers" || path.starts_with("/api/v0/transfers/"))
             && !download_route)
-        // Accelerated download mode is process-local in slskdN and does not
+        // Accelerated download mode is process-local in native profile and does not
         // use the transfer database.  Keep its GET/PUT contract available
         // while the persistence store is unavailable.
         || matches!(
@@ -83315,14 +83340,14 @@ async fn controller_slskdn_transfer_storage_failure_response(
     None
 }
 
-fn controller_slskdn_transfer_input_validation_response(
+fn controller_native_transfer_input_validation_response(
     state: &AppState,
     method: &str,
     path: &str,
     query: Option<&str>,
     body: &str,
 ) -> Option<HttpResponse> {
-    if state.config.controller_compatibility_target != ControllerCompatibilityTarget::Slskdn
+    if state.config.controller_profile != ControllerProfile::Native
         || !(path == "/api/v0/transfers" || path.starts_with("/api/v0/transfers/"))
     {
         return None;
@@ -83406,12 +83431,12 @@ fn controller_slskdn_transfer_input_validation_response(
     None
 }
 
-async fn controller_slskdn_transfer_auto_replace_status_response(
+async fn controller_native_transfer_auto_replace_status_response(
     state: &AppState,
     method: &str,
     path: &str,
 ) -> Option<HttpResponse> {
-    if state.config.controller_compatibility_target != ControllerCompatibilityTarget::Slskdn
+    if state.config.controller_profile != ControllerProfile::Native
         || method != "GET"
         || path != "/api/v0/transfers/downloads/auto-replace/status"
     {
@@ -83440,12 +83465,12 @@ async fn controller_slskdn_transfer_auto_replace_status_response(
     ))
 }
 
-async fn controller_slskdn_autoreplace_mutation_response(
+async fn controller_native_autoreplace_mutation_response(
     state: &AppState,
     method: &str,
     path: &str,
 ) -> Option<HttpResponse> {
-    if state.config.controller_compatibility_target != ControllerCompatibilityTarget::Slskdn
+    if state.config.controller_profile != ControllerProfile::Native
         || method != "PUT"
     {
         return None;
@@ -83473,7 +83498,7 @@ async fn controller_slskdn_autoreplace_mutation_response(
         )
     };
 
-    // Frozen slskdN saves this toggle in a local state file and deliberately
+    // Frozen native profile saves this toggle in a local state file and deliberately
     // does not make controller availability depend on the transfer database.
     // Keep the same response when the optional SQLite mirror is unavailable.
     if let Some(db) = state.db.as_ref() {
@@ -83490,11 +83515,11 @@ async fn controller_slskdn_autoreplace_mutation_response(
     Some(routing::ok_response(body))
 }
 
-async fn controller_slskd_events_read_failure_response(
+async fn controller_events_read_failure_response(
     state: &AppState,
     path: &str,
 ) -> Option<HttpResponse> {
-    if state.config.controller_compatibility_target != ControllerCompatibilityTarget::Slskd
+    if state.config.controller_profile != ControllerProfile::Legacy
         || !path.starts_with("/api/v0/")
     {
         return None;
@@ -83508,11 +83533,11 @@ async fn controller_slskd_events_read_failure_response(
     None
 }
 
-async fn controller_slskdn_events_read_failure_response(
+async fn controller_native_events_read_failure_response(
     state: &AppState,
     path: &str,
 ) -> Option<HttpResponse> {
-    if state.config.controller_compatibility_target != ControllerCompatibilityTarget::Slskdn
+    if state.config.controller_profile != ControllerProfile::Native
         || path != "/api/v0/events"
     {
         return None;
@@ -83526,12 +83551,12 @@ async fn controller_slskdn_events_read_failure_response(
     None
 }
 
-async fn controller_slskd_search_responses_read_failure_response(
+async fn controller_search_responses_read_failure_response(
     state: &AppState,
     path: &str,
     search_id: &str,
 ) -> Option<HttpResponse> {
-    if state.config.controller_compatibility_target != ControllerCompatibilityTarget::Slskd
+    if state.config.controller_profile != ControllerProfile::Legacy
         || !path.starts_with("/api/v0/searches/")
         || !path.ends_with("/responses")
     {
@@ -83546,7 +83571,7 @@ async fn controller_slskd_search_responses_read_failure_response(
     None
 }
 
-fn controller_slskdn_search_guid_from_path(path: &str) -> Option<&str> {
+fn controller_native_search_guid_from_path(path: &str) -> Option<&str> {
     let value = path.strip_prefix("/api/v0/searches/")?;
     let value = value.strip_suffix("/responses").unwrap_or(value);
     let value = value
@@ -83558,7 +83583,7 @@ fn controller_slskdn_search_guid_from_path(path: &str) -> Option<&str> {
     (value.split('/').count() == 1 && !value.is_empty()).then_some(value)
 }
 
-fn controller_slskdn_search_query_validation(
+fn controller_native_search_query_validation(
     method: &str,
     path: &str,
     query: Option<&str>,
@@ -83581,7 +83606,7 @@ fn controller_slskdn_search_query_validation(
         && path == "/api/v0/searches"
         && (invalid_i32("limit") || invalid_i32("offset")))
         || (method == "GET"
-            && controller_slskdn_search_guid_from_path(path).is_some()
+            && controller_native_search_guid_from_path(path).is_some()
             && !path.ends_with("/responses")
             && invalid_optional_bool("includeResponses"))
         || (method == "POST"
@@ -83593,12 +83618,12 @@ fn controller_slskdn_search_query_validation(
     None
 }
 
-async fn controller_slskdn_search_storage_failure_response(
+async fn controller_native_search_storage_failure_response(
     state: &AppState,
     method: &str,
     path: &str,
 ) -> Option<HttpResponse> {
-    if state.config.controller_compatibility_target != ControllerCompatibilityTarget::Slskdn
+    if state.config.controller_profile != ControllerProfile::Native
         || !path.starts_with("/api/v0/searches")
     {
         return None;
@@ -83608,7 +83633,7 @@ async fn controller_slskdn_search_storage_failure_response(
         || matches!(method, "DELETE" | "PUT")
         || (method == "POST" && path.contains("/items/"));
     if id_route {
-        if let Some(search_id) = controller_slskdn_search_guid_from_path(path) {
+        if let Some(search_id) = controller_native_search_guid_from_path(path) {
             // The frozen controller binds real IDs as GUIDs.  slskR also
             // retains its historical numeric-token aliases for the v0
             // compatibility surface, so reject malformed text while
@@ -83623,7 +83648,7 @@ async fn controller_slskdn_search_storage_failure_response(
     let result = if method == "GET" && path == "/api/v0/searches" {
         db.list_searches(1, 0).await.map(|_| ())
     } else if method == "GET" && path.ends_with("/responses") {
-        if let Some(search_id) = controller_slskdn_search_guid_from_path(path) {
+        if let Some(search_id) = controller_native_search_guid_from_path(path) {
             db.list_search_results(Some(search_id), 1, 0)
                 .await
                 .map(|_| ())
@@ -83631,7 +83656,7 @@ async fn controller_slskdn_search_storage_failure_response(
             Ok(())
         }
     } else if method == "GET" {
-        if let Some(search_id) = controller_slskdn_search_guid_from_path(path) {
+        if let Some(search_id) = controller_native_search_guid_from_path(path) {
             db.get_search(search_id).await.map(|_| ())
         } else {
             Ok(())
@@ -83639,7 +83664,7 @@ async fn controller_slskdn_search_storage_failure_response(
     } else if method == "DELETE" && path == "/api/v0/searches" {
         db.list_searches(1, 0).await.map(|_| ())
     } else if matches!(method, "DELETE" | "PUT") {
-        if let Some(search_id) = controller_slskdn_search_guid_from_path(path) {
+        if let Some(search_id) = controller_native_search_guid_from_path(path) {
             db.get_search(search_id).await.map(|_| ())
         } else {
             Ok(())
@@ -83647,7 +83672,7 @@ async fn controller_slskdn_search_storage_failure_response(
     } else if method == "POST" && path == "/api/v0/searches/cleanup" {
         db.list_searches(1, 0).await.map(|_| ())
     } else if method == "POST" && path.contains("/items/") {
-        if let Some(search_id) = controller_slskdn_search_guid_from_path(path) {
+        if let Some(search_id) = controller_native_search_guid_from_path(path) {
             db.get_search(search_id).await.map(|_| ())
         } else {
             Ok(())
@@ -83661,11 +83686,11 @@ async fn controller_slskdn_search_storage_failure_response(
         .map(|_| routing::internal_server_error_response("search storage unavailable"))
 }
 
-async fn controller_slskdn_hashdb_read_failure_response(
+async fn controller_native_hashdb_read_failure_response(
     state: &AppState,
     path: &str,
 ) -> Option<HttpResponse> {
-    if state.config.controller_compatibility_target != ControllerCompatibilityTarget::Slskdn
+    if state.config.controller_profile != ControllerProfile::Native
         || !path.starts_with("/api/v0/hashdb/")
         // HashDbController.GenerateKey is a pure key derivation operation;
         // it does not touch SQLite and remains available while the database
@@ -83684,11 +83709,11 @@ async fn controller_slskdn_hashdb_read_failure_response(
     None
 }
 
-async fn controller_slskdn_hashdb_write_failure_response(
+async fn controller_native_hashdb_write_failure_response(
     state: &AppState,
     path: &str,
 ) -> Option<HttpResponse> {
-    if state.config.controller_compatibility_target != ControllerCompatibilityTarget::Slskdn
+    if state.config.controller_profile != ControllerProfile::Native
         || !path.starts_with("/api/v0/hashdb/")
     {
         return None;
@@ -83703,12 +83728,12 @@ async fn controller_slskdn_hashdb_write_failure_response(
     None
 }
 
-async fn controller_slskdn_backfill_candidates_read_failure_response(
+async fn controller_native_backfill_candidates_read_failure_response(
     state: &AppState,
     method: &str,
     path: &str,
 ) -> Option<HttpResponse> {
-    if state.config.controller_compatibility_target != ControllerCompatibilityTarget::Slskdn
+    if state.config.controller_profile != ControllerProfile::Native
         || method != "GET"
         || path != "/api/v0/backfill/candidates"
     {
@@ -83723,12 +83748,12 @@ async fn controller_slskdn_backfill_candidates_read_failure_response(
     None
 }
 
-async fn controller_slskdn_backfill_file_write_failure_response(
+async fn controller_native_backfill_file_write_failure_response(
     state: &AppState,
     method: &str,
     path: &str,
 ) -> Option<HttpResponse> {
-    if state.config.controller_compatibility_target != ControllerCompatibilityTarget::Slskdn
+    if state.config.controller_profile != ControllerProfile::Native
         || method != "POST"
         || path != "/api/v0/backfill/file"
     {
@@ -85215,7 +85240,7 @@ async fn dispatch_webhook_event(
     scripts::dispatch(
         state.integration_settings.read().await.scripts.clone(),
         state.config.state_dir.join("scripts"),
-        state.config.controller_compatibility_target,
+        state.config.controller_profile,
         frozen_event_name,
         &data,
     );
@@ -85873,10 +85898,10 @@ where
             Err(e) => {
                 if e.contains("too large")
                     && !state.config.current_upstream_behavior
-                    && state.config.controller_compatibility_target
-                        == ControllerCompatibilityTarget::Slskdn
+                    && state.config.controller_profile
+                        == ControllerProfile::Native
                 {
-                    // Frozen slskdN#65a14a8 lets Kestrel's body-limit
+                    // Frozen native profile#65a14a8 lets Kestrel's body-limit
                     // BadHttpRequestException reach its generic exception
                     // handler, producing a 500 Problem Details response.
                     // Upstream correction: snapetech/slskdN#276.
@@ -86018,7 +86043,7 @@ where
         let mut sec_headers = RequestSecurityHeaders::from_http_headers(&req.headers);
         sec_headers.remote_addr = remote_addr;
 
-        // The frozen slskdN controller applies distinct fixed-window partitions
+        // The frozen native profile controller applies distinct fixed-window partitions
         // before authorization. An authenticated principal bypasses only the
         // general anonymous API partition; mesh, inbox, event injection, and
         // warm-cache policies still apply.
@@ -86044,7 +86069,7 @@ where
             .as_ref()
             .is_some_and(|policy| policy.max_requests == 0)
         {
-            // Frozen slskdN#65a14a8 accepts non-positive permit counts,
+            // Frozen native profile#65a14a8 accepts non-positive permit counts,
             // then FixedWindowRateLimiter throws when the affected partition
             // is first materialized. Its exception middleware exposes the
             // failure as generic 500 Problem Details.
@@ -86191,7 +86216,7 @@ where
             break;
         }
 
-        // The frozen slskd and slskdN web clients use ASP.NET SignalR for
+        // The frozen slskd and native profile web clients use ASP.NET SignalR for
         // application, search, logging, metrics, transfer, song-id, and
         // listening-party updates.  Keep the native event websocket separate,
         // but expose the target hub paths and JSON protocol at their original
@@ -86208,7 +86233,7 @@ where
         if method == "POST" {
             if let Some(hub) = signalr_ws::negotiate_hub_name_for_target(
                 &websocket_path,
-                state.config.controller_compatibility_target,
+                state.config.controller_profile,
             ) {
                 if !allowed {
                     let response = routing::HttpResponse {
@@ -86263,7 +86288,7 @@ where
         if method == "GET" {
             if let Some(hub) = signalr_ws::hub_name_for_target(
                 &websocket_path,
-                state.config.controller_compatibility_target,
+                state.config.controller_profile,
             ) {
                 if !allowed {
                     let response = routing::HttpResponse {
@@ -86427,29 +86452,29 @@ where
         };
         let request_id = generate_request_id();
 
-        // Frozen slskdN only installs CORS middleware when enabled with a
+        // Frozen native profile only installs CORS middleware when enabled with a
         // non-empty origin list, and only short-circuits genuine preflights.
         // The slskd profile retains slskR's established OPTIONS contract.
-        let slskdn_cors_middleware_active = state.config.controller_compatibility_target
-            == ControllerCompatibilityTarget::Slskdn
+        let native_cors_middleware_active = state.config.controller_profile
+            == ControllerProfile::Native
             && state.config.controller_web_cors.enabled
             && !state.config.controller_web_cors.allowed_origins.is_empty();
-        let slskdn_cors_preflight = slskdn_cors_middleware_active
+        let native_cors_preflight = native_cors_middleware_active
             && is_cors_preflight(method)
             && req.headers.origin.is_some()
             && req.headers.access_control_request_method.is_some();
-        if (state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskd
+        if (state.config.controller_profile == ControllerProfile::Legacy
             && is_cors_preflight(method))
-            || slskdn_cors_preflight
+            || native_cors_preflight
         {
             let fallback_host = state.config.http_bind.to_string();
             let cors_str = controller_cors_headers(
                 &state.config,
                 &req.headers,
                 &fallback_host,
-                slskdn_cors_preflight,
+                native_cors_preflight,
             );
-            let status = if slskdn_cors_preflight {
+            let status = if native_cors_preflight {
                 "204 No Content"
             } else {
                 "200 OK"
@@ -86489,7 +86514,7 @@ where
                 &mut writer,
                 path,
                 Some(&state.config.controller_web.content_path),
-                state.config.controller_compatibility_target,
+                state.config.controller_profile,
                 !state.config.current_upstream_behavior,
                 method == "GET",
                 keep_alive,
@@ -86803,7 +86828,7 @@ where
         };
         let metrics_authenticate_hdr = if controller_metrics_request
             && response.status == "401 Unauthorized"
-            && state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
+            && state.config.controller_profile == ControllerProfile::Native
         {
             "WWW-Authenticate: Basic realm=\"metrics\"\r\n"
         } else {
@@ -88193,7 +88218,7 @@ fn build_share_index(config: &AppConfig) -> ShareIndexSnapshot {
     let filters = compile_controller_regexes(
         &config.share_settings.filters,
         config.controller_case_sensitive_regex,
-        config.controller_compatibility_target,
+        config.controller_profile,
     )
     .expect("validated share filters must compile");
     let mut scan = scan_share_dirs(
@@ -89621,11 +89646,11 @@ pub mod tests {
                 FileConfig::default(),
                 &MapEnv::default()
                     .with("SLSKR_STATE_DIR", state_dir.to_str().unwrap())
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                    .with("SLSKR_CONTROLLER_PROFILE", target),
             )
             .unwrap();
             let overlay = super::ControllerOptionsOverlayState::load(&config).unwrap();
-            let options = serde_json::from_str::<serde_json::Value>(&super::slskd_options_json(
+            let options = serde_json::from_str::<serde_json::Value>(&super::controller_options_json(
                 &config, &overlay, true,
             ))
             .unwrap();
@@ -89857,7 +89882,7 @@ pub mod tests {
 
         let mut runtime = super::ManagedBlacklistRuntime::new(
             enabled.managed_blacklist,
-            enabled.controller_compatibility_target,
+            enabled.controller_profile,
             enabled.controller_case_sensitive_regex,
         );
         assert!(runtime.is_blacklisted(Some("Peer"), Some("127.0.0.1".parse().unwrap()), 100));
@@ -89866,7 +89891,7 @@ pub mod tests {
 
         runtime.replace(
             disabled.managed_blacklist,
-            disabled.controller_compatibility_target,
+            disabled.controller_profile,
             disabled.controller_case_sensitive_regex,
         );
         assert!(!runtime.is_blacklisted(Some("peer"), Some("127.0.0.1".parse().unwrap()), 102));
@@ -89938,37 +89963,37 @@ pub mod tests {
             None,
             FileConfig::default(),
             &MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd")
+                .with("SLSKR_CONTROLLER_PROFILE", "legacy")
                 .with("SLSKR_AUTH_DISABLED", "true")
                 .with("SLSKD_CASE_SENSITIVE_REGEX", "true")
                 .with("SLSKD_BLACKLISTED_PATTERNS", "^caseuser$"),
         )
         .unwrap();
-        let mut slskd_runtime = super::ManagedBlacklistRuntime::new(
+        let mut controller_runtime = super::ManagedBlacklistRuntime::new(
             slskd.managed_blacklist,
-            slskd.controller_compatibility_target,
+            slskd.controller_profile,
             slskd.controller_case_sensitive_regex,
         );
-        assert!(!slskd_runtime.is_blacklisted(Some("CaseUser"), None, 1));
-        assert!(slskd_runtime.is_blacklisted(Some("caseuser"), None, 1));
+        assert!(!controller_runtime.is_blacklisted(Some("CaseUser"), None, 1));
+        assert!(controller_runtime.is_blacklisted(Some("caseuser"), None, 1));
 
         let slskdn = super::AppConfig::from_layers(
             None,
             FileConfig::default(),
             &MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn")
+                .with("SLSKR_CONTROLLER_PROFILE", "native")
                 .with("SLSKR_AUTH_DISABLED", "true")
                 .with("SLSKD_CASE_SENSITIVE_REGEX", "true")
                 .with("SLSKD_BLACKLISTED_PATTERNS", "^caseuser$"),
         )
         .unwrap();
-        let mut slskdn_runtime = super::ManagedBlacklistRuntime::new(
+        let mut native_runtime = super::ManagedBlacklistRuntime::new(
             slskdn.managed_blacklist,
-            slskdn.controller_compatibility_target,
+            slskdn.controller_profile,
             slskdn.controller_case_sensitive_regex,
         );
-        assert!(!slskdn_runtime.is_blacklisted(Some("CaseUser"), None, 1));
-        assert!(slskdn_runtime.is_blacklisted(Some("caseuser"), None, 1));
+        assert!(!native_runtime.is_blacklisted(Some("CaseUser"), None, 1));
+        assert!(native_runtime.is_blacklisted(Some("caseuser"), None, 1));
     }
 
     #[cfg_attr(test, test)]
@@ -90013,11 +90038,11 @@ pub mod tests {
 
     #[cfg_attr(test, test)]
     #[cfg(feature = "full-controller-tests")]
-    fn slskdn_controller_regex_timeout_is_fail_closed() {
+    fn native_controller_regex_timeout_is_fail_closed() {
         let matcher = super::ControllerRegex::compile_with_timeout(
             r"^(?=(a+)+$).*$",
             true,
-            Some(super::SLSKDN_REGEX_MATCH_TIMEOUT),
+            Some(super::NATIVE_REGEX_MATCH_TIMEOUT),
         )
         .expect("pathological regex");
         let hostile_username = format!("{}!", "a".repeat(255));
@@ -90190,7 +90215,7 @@ pub mod tests {
     async fn watched_search_filters_preserve_reloaded_case_mode() {
         let (state, _receiver) = test_state_with_env(
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn")
+                .with("SLSKR_CONTROLLER_PROFILE", "native")
                 .with("SLSKR_SHARE_FIXTURE", "Virtual/SECRET.flac=42")
                 .with("SLSKD_SEARCH_REQUEST_FILTER", "secret")
                 .with("SLSKD_CASE_SENSITIVE_REGEX", "true"),
@@ -90209,7 +90234,7 @@ pub mod tests {
             ),
             ("SLSKR_AUTH_DISABLED".to_owned(), "true".to_owned()),
             (
-                "SLSKR_CONTROLLER_COMPATIBILITY_TARGET".to_owned(),
+                "SLSKR_CONTROLLER_PROFILE".to_owned(),
                 "slskdn".to_owned(),
             ),
         ]);
@@ -90258,7 +90283,7 @@ pub mod tests {
         feature = "bounded-controller-api-tests",
         feature = "bounded-controller-api-tests-1"
     ))]
-    async fn controller_api_differential_slskdn_library_fallback_uses_current_case_mode_for_share_filters(
+    async fn controller_api_differential_native_library_fallback_uses_current_case_mode_for_share_filters(
     ) {
         let root = std::env::temp_dir().join(format!(
             "slskr-library-filter-case-{}",
@@ -90268,7 +90293,7 @@ pub mod tests {
         fs::write(root.join("SECRET.flac"), b"library").unwrap();
         let (state, _receiver) = test_state_with_env(
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn")
+                .with("SLSKR_CONTROLLER_PROFILE", "native")
                 .with("SLSKD_SHARED_DIR", &root.display().to_string())
                 .with("SLSKD_SHARE_FILTER", r"(?<=/)secret(?=\.flac$)")
                 .with("SLSKD_CASE_SENSITIVE_REGEX", "true"),
@@ -90369,7 +90394,7 @@ pub mod tests {
     #[cfg(feature = "full-controller-tests")]
     async fn controller_swagger_routes_follow_the_target_specific_startup_default() {
         let (slskd, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd"),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "legacy"),
         );
         let disabled =
             super::route_http_request("GET", "/swagger/v0/swagger.json", None, "", &slskd)
@@ -90380,7 +90405,7 @@ pub mod tests {
         assert!(disabled.body.is_empty());
 
         let (slskdn, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "native"),
         );
         let enabled =
             super::route_http_request("GET", "/swagger/v0/swagger.json", None, "", &slskdn)
@@ -90389,7 +90414,7 @@ pub mod tests {
         assert_eq!(enabled.status, "200 OK");
         let spec: serde_json::Value = serde_json::from_str(&enabled.body).unwrap();
         assert_eq!(spec["openapi"], "3.0.4");
-        assert_eq!(spec["info"]["title"], "slskdN API");
+        assert_eq!(spec["info"]["title"], "slskr API");
         assert!(spec["paths"]
             .as_object()
             .is_some_and(|paths| !paths.is_empty()));
@@ -90400,7 +90425,7 @@ pub mod tests {
     async fn controller_metrics_route_uses_its_own_basic_authentication() {
         let (state, _receiver) = test_state_with_env(
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn")
+                .with("SLSKR_CONTROLLER_PROFILE", "native")
                 .with("SLSKD_METRICS", "true")
                 .with("SLSKD_METRICS_URL", "prometheus")
                 .with("SLSKD_METRICS_USERNAME", "metrics-user")
@@ -90440,7 +90465,7 @@ pub mod tests {
     async fn controller_headless_suppresses_ui_but_retains_api_routes() {
         let (state, _receiver) = test_state_with_env(
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn")
+                .with("SLSKR_CONTROLLER_PROFILE", "native")
                 .with("SLSKD_HEADLESS", "true"),
         );
         for path in ["/", "/missing-client-route"] {
@@ -90871,7 +90896,7 @@ pub mod tests {
         assert_eq!(config.private_message_auto_response.cooldown_minutes, 45);
         let mut overlay = super::ControllerOptionsOverlayState::load(&config).unwrap();
         overlay.command_line_environment = invocation.config_environment;
-        let options = serde_json::from_str::<serde_json::Value>(&super::slskd_options_json(
+        let options = serde_json::from_str::<serde_json::Value>(&super::controller_options_json(
             &config, &overlay, true,
         ))
         .unwrap();
@@ -90980,7 +91005,7 @@ pub mod tests {
         assert!(config.controller_web_allow_remote_no_auth);
         let mut overlay = super::ControllerOptionsOverlayState::load(&config).unwrap();
         overlay.command_line_environment = invocation.config_environment;
-        let options = serde_json::from_str::<serde_json::Value>(&super::slskd_options_json(
+        let options = serde_json::from_str::<serde_json::Value>(&super::controller_options_json(
             &config, &overlay, true,
         ))
         .unwrap();
@@ -91033,7 +91058,7 @@ pub mod tests {
         let (state, _receiver) = test_state_with_env(
             MapEnv::default()
                 .with("SLSKR_AUTH_DISABLED", "false")
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn")
+                .with("SLSKR_CONTROLLER_PROFILE", "native")
                 .with("SLSKR_API_READ_WRITE_TOKEN", "write-token")
                 .with("SLSKR_API_READ_ONLY_TOKEN", "read-token"),
         );
@@ -91070,8 +91095,8 @@ pub mod tests {
                 cookie: None,
                 content_type: None,
                 x_share_token: None,
-                x_slskdn_api_key: None,
-                x_slskdn_csrf: None,
+                x_gateway_api_key: None,
+                x_gateway_csrf: None,
                 x_relay_agent: None,
                 x_relay_credential: None,
                 remote_addr: None,
@@ -91261,7 +91286,7 @@ pub mod tests {
             }};
         }
 
-        let env = MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target);
+        let env = MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target);
 
         let (session_state, _session_receiver) = test_state_with_env(env.clone());
         let session_malformed =
@@ -92093,7 +92118,7 @@ pub mod tests {
 
     #[cfg_attr(test, tokio::test)]
     #[cfg(feature = "full-controller-tests")]
-    async fn no_auth_mode_uses_slskdn_passthrough_peer_identity() {
+    async fn no_auth_mode_uses_native_passthrough_peer_identity() {
         let (state, _receiver) = test_state_with_env(
             MapEnv::default()
                 .with("SLSK_USERNAME", "")
@@ -92149,7 +92174,7 @@ pub mod tests {
 
     #[cfg_attr(test, test)]
     #[cfg(feature = "full-controller-tests")]
-    fn slskdn_no_auth_passthrough_is_loopback_or_explicit_cidr_only() {
+    fn native_no_auth_passthrough_is_loopback_or_explicit_cidr_only() {
         let config = super::AppConfig::from_layers(
             None,
             FileConfig::default(),
@@ -92487,7 +92512,7 @@ pub mod tests {
             None,
             FileConfig::default(),
             &MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn")
+                .with("SLSKR_CONTROLLER_PROFILE", "native")
                 .with(
                     "SLSKD_API_KEYS_JSON",
                     r#"{"operator":{"key":"0123456789abcdef","role":"readonly","cidr":"127.0.0.1/32"}}"#,
@@ -92582,12 +92607,12 @@ pub mod tests {
 
     #[cfg_attr(test, test)]
     #[cfg(feature = "full-controller-tests")]
-    fn slskd_profile_has_no_slskdn_global_rate_limiter() {
+    fn controller_profile_has_no_native_global_rate_limiter() {
         let config = super::AppConfig::from_layers(
             None,
             FileConfig::default(),
             &MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd")
+                .with("SLSKR_CONTROLLER_PROFILE", "legacy")
                 .with("SLSKR_AUTH_DISABLED", "true")
                 .with("SLSKD_WEB_RATE_LIMITING", "true"),
         )
@@ -92604,7 +92629,7 @@ pub mod tests {
 
     #[cfg_attr(test, test)]
     #[cfg(feature = "full-controller-tests")]
-    fn slskdn_request_body_limit_validation_and_projection_match_frozen_shape() {
+    fn native_request_body_limit_validation_and_projection_match_frozen_shape() {
         for invalid in [
             serde_json::json!({"web": {"max_request_body_size": 0}}),
             serde_json::json!({"web": {"max_request_body_size": -1}}),
@@ -92615,7 +92640,7 @@ pub mod tests {
             assert_eq!(
                 super::controller_yaml_target_validation_error(
                     &invalid,
-                    super::ControllerCompatibilityTarget::Slskdn,
+                    super::ControllerProfile::Native,
                 ),
                 Some("Invalid YAML configuration".to_owned())
             );
@@ -92628,7 +92653,7 @@ pub mod tests {
             assert_eq!(
                 super::controller_yaml_target_validation_error(
                     &valid,
-                    super::ControllerCompatibilityTarget::Slskdn,
+                    super::ControllerProfile::Native,
                 ),
                 None
             );
@@ -92642,7 +92667,7 @@ pub mod tests {
 
     #[cfg_attr(test, test)]
     #[cfg(feature = "full-controller-tests")]
-    fn slskdn_cors_validation_and_projection_match_frozen_shape() {
+    fn native_cors_validation_and_projection_match_frozen_shape() {
         let valid = serde_json::json!({
             "diagnostics": {
                 "allow_memory_dump": "true",
@@ -92667,7 +92692,7 @@ pub mod tests {
         assert_eq!(
             super::controller_yaml_target_validation_error(
                 &valid,
-                super::ControllerCompatibilityTarget::Slskdn,
+                super::ControllerProfile::Native,
             ),
             None
         );
@@ -92690,7 +92715,7 @@ pub mod tests {
             assert_eq!(
                 super::controller_yaml_target_validation_error(
                     &invalid,
-                    super::ControllerCompatibilityTarget::Slskdn,
+                    super::ControllerProfile::Native,
                 ),
                 Some("Invalid YAML configuration".to_owned())
             );
@@ -92720,7 +92745,7 @@ pub mod tests {
         assert_eq!(
             super::controller_yaml_target_validation_error(
                 &scalar_array,
-                super::ControllerCompatibilityTarget::Slskdn,
+                super::ControllerProfile::Native,
             ),
             None
         );
@@ -92733,7 +92758,7 @@ pub mod tests {
 
     #[cfg_attr(test, test)]
     #[cfg(feature = "full-controller-tests")]
-    fn slskdn_rate_limit_validation_projection_and_nonpositive_runtime_match_frozen() {
+    fn native_rate_limit_validation_projection_and_nonpositive_runtime_match_frozen() {
         let valid = serde_json::json!({
             "web": {
                 "rate_limiting": {
@@ -92750,7 +92775,7 @@ pub mod tests {
         assert_eq!(
             super::controller_yaml_target_validation_error(
                 &valid,
-                super::ControllerCompatibilityTarget::Slskdn,
+                super::ControllerProfile::Native,
             ),
             None
         );
@@ -92764,7 +92789,7 @@ pub mod tests {
             assert_eq!(
                 super::controller_yaml_target_validation_error(
                     &invalid,
-                    super::ControllerCompatibilityTarget::Slskdn,
+                    super::ControllerProfile::Native,
                 ),
                 Some("Invalid YAML configuration".to_owned())
             );
@@ -92797,9 +92822,9 @@ pub mod tests {
 
     #[cfg_attr(test, tokio::test)]
     #[cfg(feature = "full-controller-tests")]
-    async fn slskdn_rate_limit_watch_projects_current_values_and_requests_restart() {
+    async fn native_rate_limit_watch_projects_current_values_and_requests_restart() {
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "native"),
         );
         let yaml = "web:\n  max_request_body_size: 7340032\n  cors:\n    enabled: true\n    allow_credentials: true\n    allowed_origins: [https://allowed.example]\n    allowed_headers: [X-Custom]\n    allowed_methods: [GET, POST]\n  rate_limiting:\n    enabled: true\n    api_permit_limit: 9\n    api_window_seconds: -1\n    federation_permit_limit: 8\n    federation_window_seconds: 7\n    mesh_gateway_permit_limit: 6\n    mesh_gateway_window_seconds: 5\n";
         fs::write(state.config.state_dir.join("slskd.yml"), yaml).unwrap();
@@ -92821,7 +92846,7 @@ pub mod tests {
             10 * 1024 * 1024
         );
         let overlay = state.options_overlay.read().await;
-        let options = serde_json::from_str::<serde_json::Value>(&super::slskd_options_json(
+        let options = serde_json::from_str::<serde_json::Value>(&super::controller_options_json(
             &state.config,
             &overlay,
             true,
@@ -93139,14 +93164,14 @@ pub mod tests {
             messages: RwLock::new(message_store),
             managed_blacklist: RwLock::new(super::ManagedBlacklistRuntime::new(
                 config.managed_blacklist.clone(),
-                config.controller_compatibility_target,
+                config.controller_profile,
                 config.controller_case_sensitive_regex,
             )),
             search_request_filters: RwLock::new(
                 super::compile_controller_regexes(
                     &config.controller_search_request_filters,
                     config.controller_case_sensitive_regex,
-                    config.controller_compatibility_target,
+                    config.controller_profile,
                 )
                 .unwrap(),
             ),
@@ -93552,9 +93577,9 @@ pub mod tests {
         feature = "bounded-controller-api-tests",
         feature = "bounded-controller-api-tests-1"
     ))]
-    async fn controller_api_differential_slskdn_network_stats_edge_contracts() {
+    async fn controller_api_differential_native_network_stats_edge_contracts() {
         let target_env =
-            || MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn");
+            || MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "native");
 
         let (malformed_state, _receiver) = test_state_with_env(target_env());
         let malformed = super::route_http_request(
@@ -93649,7 +93674,7 @@ pub mod tests {
         feature = "bounded-controller-api-tests",
         feature = "bounded-controller-api-tests-1"
     ))]
-    async fn controller_api_differential_slskdn_read_projection_runtime_contracts() {
+    async fn controller_api_differential_native_read_projection_runtime_contracts() {
         let target = "slskdn";
         let mut ledger = Vec::new();
         let mut mismatches = Vec::new();
@@ -93671,7 +93696,7 @@ pub mod tests {
 
         let federation_env = || {
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                .with("SLSKR_CONTROLLER_PROFILE", target)
                 .with("FEDERATION_ENABLED", "true")
                 .with("FEDERATION_MODE", "Public")
                 .with("FEDERATION_DOMAIN", "runtime.example")
@@ -93679,7 +93704,7 @@ pub mod tests {
         };
 
         let (logs_state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
         let malformed_logs =
             super::route_http_request("GET", "/api/v0/logs/malformed", None, "", &logs_state)
@@ -93704,7 +93729,7 @@ pub mod tests {
             .await
             .expect("logs runtime database");
         let (logs_runtime_state, _receiver) = test_state_with_env_parts(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
             super::SearchStore::new(),
             Some(logs_db.clone()),
         );
@@ -93811,7 +93836,7 @@ pub mod tests {
             .await
             .expect("collections runtime database");
         let (collections_state, _receiver) = test_state_with_env_parts(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
             super::SearchStore::new(),
             Some(collections_db.clone()),
         );
@@ -93861,7 +93886,7 @@ pub mod tests {
             .await
             .expect("sharegroups runtime database");
         let (sharegroups_state, _receiver) = test_state_with_env_parts(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
             super::SearchStore::new(),
             Some(sharegroups_db.clone()),
         );
@@ -93911,7 +93936,7 @@ pub mod tests {
             .join("controller-api");
         std::fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
         std::fs::write(
-            evidence_dir.join("slskdn_read_projection_runtime_contracts.json"),
+            evidence_dir.join("native_read_projection_runtime_contracts.json"),
             serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
         )
         .expect("write controller-api ledger");
@@ -93929,9 +93954,9 @@ pub mod tests {
         feature = "bounded-controller-api-tests",
         feature = "bounded-controller-api-tests-1"
     ))]
-    async fn controller_api_differential_slskdn_solid_status_edge_contracts() {
+    async fn controller_api_differential_native_solid_status_edge_contracts() {
         let target = "slskdn";
-        let env = || MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target);
+        let env = || MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target);
         let (state, _receiver) = test_state_with_env(env());
 
         let malformed =
@@ -94004,7 +94029,7 @@ pub mod tests {
         feature = "bounded-controller-api-tests",
         feature = "bounded-controller-api-tests-1"
     ))]
-    async fn controller_api_differential_slskdn_solid_resolution_runtime_contracts() {
+    async fn controller_api_differential_native_solid_resolution_runtime_contracts() {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
         let target = "slskdn";
@@ -94021,7 +94046,7 @@ pub mod tests {
             .await
             .expect("Solid resolution runtime database");
         let (runtime_state, _receiver) = test_state_with_env_parts(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
             super::SearchStore::new(),
             Some(db.clone()),
         );
@@ -94041,7 +94066,7 @@ pub mod tests {
         assert_eq!(runtime_json["title"], "Failed to resolve WebID");
 
         let (restart_state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
         configure_failure(&restart_state).await;
         let restarted = super::route_http_request(
@@ -94060,7 +94085,7 @@ pub mod tests {
         );
 
         let (concurrent_state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
         configure_failure(&concurrent_state).await;
         let (first, second) = tokio::join!(
@@ -94089,7 +94114,7 @@ pub mod tests {
         );
 
         let (mutation_state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
         configure_failure(&mutation_state).await;
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -94217,7 +94242,7 @@ pub mod tests {
 
     #[cfg_attr(test, test)]
     #[cfg(feature = "full-controller-tests")]
-    fn controller_release_comparison_matches_frozen_slskdn_rules() {
+    fn controller_release_comparison_matches_frozen_native_rules() {
         use super::{is_newer_controller_release_available, normalize_controller_release_version};
 
         assert_eq!(
@@ -94591,7 +94616,7 @@ pub mod tests {
 
     #[cfg_attr(test, test)]
     #[cfg(feature = "full-controller-tests")]
-    fn spotify_source_targets_match_frozen_slskdn_forms() {
+    fn spotify_source_targets_match_frozen_native_forms() {
         for (input, kind, id, user_token, scope) in [
             (
                 "spotify:playlist:playlist-1",
@@ -95516,7 +95541,7 @@ pub mod tests {
         assert_eq!(hook.timeout, 1234);
         assert_eq!(hook.retry.attempts, 2);
         let overlay = super::ControllerOptionsOverlayState::load(&config).unwrap();
-        let options = serde_json::from_str::<serde_json::Value>(&super::slskd_options_json(
+        let options = serde_json::from_str::<serde_json::Value>(&super::controller_options_json(
             &config, &overlay, true,
         ))
         .unwrap();
@@ -95544,7 +95569,7 @@ pub mod tests {
             FileConfig::default(),
             &MapEnv::default()
                 .with("SLSKD_APP_DIR", state_dir.to_str().unwrap())
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn")
+                .with("SLSKR_CONTROLLER_PROFILE", "native")
                 .with("SLSKD_FTP_PORT", "2222"),
         )
         .unwrap();
@@ -95590,7 +95615,7 @@ pub mod tests {
         assert_eq!(env_config.integrations.ftp.retry_attempts, 4);
 
         let overlay = super::ControllerOptionsOverlayState::load(&config).unwrap();
-        let options = serde_json::from_str::<serde_json::Value>(&super::slskd_options_json(
+        let options = serde_json::from_str::<serde_json::Value>(&super::controller_options_json(
             &config, &overlay, true,
         ))
         .unwrap();
@@ -95644,7 +95669,7 @@ pub mod tests {
             FileConfig::default(),
             &MapEnv::default()
                 .with("SLSKD_APP_DIR", state_dir.to_str().unwrap())
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+                .with("SLSKR_CONTROLLER_PROFILE", "native"),
         )
         .unwrap();
         let vpn = &config.integrations.vpn;
@@ -95662,7 +95687,7 @@ pub mod tests {
         assert!(!config.sanitized_json().contains("fixture-api-key"));
 
         let overlay = super::ControllerOptionsOverlayState::load(&config).unwrap();
-        let options = serde_json::from_str::<serde_json::Value>(&super::slskd_options_json(
+        let options = serde_json::from_str::<serde_json::Value>(&super::controller_options_json(
             &config, &overlay, true,
         ))
         .unwrap();
@@ -95728,7 +95753,7 @@ pub mod tests {
     async fn vpn_state_projects_and_blocks_soulseek_until_ready() {
         let (state, _receiver) = test_state_with_env(
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn")
+                .with("SLSKR_CONTROLLER_PROFILE", "native")
                 .with("SLSKD_VPN", "true")
                 .with("SLSKD_VPN_GLUETUN_URL", "http://127.0.0.1:8000"),
         );
@@ -95800,7 +95825,7 @@ pub mod tests {
             FileConfig::default(),
             &MapEnv::default()
                 .with("SLSKD_APP_DIR", state_dir.to_str().unwrap())
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+                .with("SLSKR_CONTROLLER_PROFILE", "native"),
         )
         .unwrap();
         assert_eq!(config.integrations.scripts.len(), 3);
@@ -95809,7 +95834,7 @@ pub mod tests {
             Some(vec!["-c".to_owned(), "echo fixture".to_owned()])
         );
         let overlay = super::ControllerOptionsOverlayState::load(&config).unwrap();
-        let options = serde_json::from_str::<serde_json::Value>(&super::slskd_options_json(
+        let options = serde_json::from_str::<serde_json::Value>(&super::controller_options_json(
             &config, &overlay, true,
         ))
         .unwrap();
@@ -96156,7 +96181,7 @@ pub mod tests {
             "POST",
             "/api/capabilities/parse",
             None,
-            r#"{"description":"Client slskdn_caps:v7;dht=1;mesh=1;swarm=1;hashx=1;flacdb=1;partial=1"}"#,
+            r#"{"description":"Client slskr_caps:v7;dht=1;mesh=1;swarm=1;hashx=1;flacdb=1;partial=1"}"#,
             &state,
         )
         .await
@@ -96193,7 +96218,7 @@ pub mod tests {
             "POST",
             "/api/capabilities/parse",
             None,
-            r#"{"description":"slskdn_caps:v3;mesh=1","versionString":"slskdn/9.9+swarm"}"#,
+            r#"{"description":"slskr_caps:v3;mesh=1","versionString":"slskdn/9.9+swarm"}"#,
             &state,
         )
         .await
@@ -96219,7 +96244,7 @@ pub mod tests {
             "POST",
             "/api/capabilities/parse",
             None,
-            r#"{"description":"slskdn_caps:v1;dht=1;dht=1"}"#,
+            r#"{"description":"slskr_caps:v1;dht=1;dht=1"}"#,
             &state,
         )
         .await
@@ -96875,7 +96900,7 @@ pub mod tests {
         });
         let (mut state, _receiver) = test_state_with_env(
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd")
+                .with("SLSKR_CONTROLLER_PROFILE", "legacy")
                 .with("SLSKR_ADVANCED_NETWORKING_JSON", &advanced.to_string())
                 .with("SLSKR_TEST_USER_ENDPOINT_OVERRIDES", "member=127.0.0.1:1"),
         );
@@ -98763,7 +98788,7 @@ pub mod tests {
             updated_at: 2,
         };
 
-        for body in [record.json(), record.slskd_status_json()] {
+        for body in [record.json(), record.controller_status_json()] {
             assert!(body.contains("browse failed"));
             assert!(!body.contains("10.0.0.9"));
             assert!(!body.contains("/private"));
@@ -98787,7 +98812,7 @@ pub mod tests {
         let events = state.events.read().await;
         let event = events.records.last().expect("browse failure event");
         assert_eq!(event.detail.as_deref(), Some("browse failed"));
-        for body in [event.json(), event.slskd_json().to_string()] {
+        for body in [event.json(), event.controller_json().to_string()] {
             assert!(!body.contains("10.0.0.9"));
             assert!(!body.contains("/private"));
             assert!(!body.contains("denied"));
@@ -99318,7 +99343,7 @@ pub mod tests {
 
     #[cfg_attr(test, tokio::test)]
     #[cfg(feature = "full-controller-tests")]
-    async fn slskd_file_delete_routes_are_forbidden_by_default() {
+    async fn controller_file_delete_routes_are_forbidden_by_default() {
         let (state, _receiver) = test_state();
         let response = super::route_http_request(
             "DELETE",
@@ -99336,7 +99361,7 @@ pub mod tests {
 
     #[cfg_attr(test, tokio::test)]
     #[cfg(feature = "full-controller-tests")]
-    async fn slskd_file_delete_routes_are_scoped_to_storage_roots() {
+    async fn controller_file_delete_routes_are_scoped_to_storage_roots() {
         let (state, _receiver) =
             test_state_with_env(MapEnv::default().with("SLSKR_REMOTE_FILE_MANAGEMENT", "true"));
         let download_file = state.config.downloads_dir.join("Remote").join("Song.mp3");
@@ -99379,21 +99404,21 @@ pub mod tests {
         .expect("delete missing downloaded file");
         assert_eq!(missing.status, "404 Not Found");
 
-        let (slskd_state, _receiver) = test_state_with_env(
+        let (controller_state, _receiver) = test_state_with_env(
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd")
+                .with("SLSKR_CONTROLLER_PROFILE", "legacy")
                 .with("SLSKR_REMOTE_FILE_MANAGEMENT", "true"),
         );
-        let slskd_missing = super::route_http_request(
+        let controller_missing = super::route_http_request(
             "DELETE",
             "/api/v0/files/downloads/files/UmVtb3RlL1NvbmcubXAz",
             None,
             "",
-            &slskd_state,
+            &controller_state,
         )
         .await
         .expect("slskd repeated file delete");
-        assert_eq!(slskd_missing.status, "204 No Content");
+        assert_eq!(controller_missing.status, "204 No Content");
 
         let traversal = super::route_http_request(
             "DELETE",
@@ -99452,25 +99477,25 @@ pub mod tests {
 
     #[cfg_attr(test, test)]
     #[cfg(feature = "full-controller-tests")]
-    fn slskd_base64_storage_paths_accept_mime_whitespace_but_reject_bad_data() {
+    fn controller_base64_storage_paths_accept_mime_whitespace_but_reject_bad_data() {
         let raw = "a".repeat(80);
         let encoded = super::STANDARD.encode(raw.as_bytes());
         let wrapped = format!("{}%0A{}%0D%0A", &encoded[..76], &encoded[76..]);
         assert_eq!(
-            super::decode_slskd_base64_path_segment(&wrapped).unwrap(),
+            super::decode_controller_base64_path_segment(&wrapped).unwrap(),
             raw
         );
         assert_eq!(
-            super::decode_slskd_base64_path_segment("4KC+").unwrap(),
+            super::decode_controller_base64_path_segment("4KC+").unwrap(),
             "࠾"
         );
-        assert!(super::decode_slskd_base64_path_segment("Zm9v%00").is_err());
-        assert!(super::decode_slskd_base64_path_segment("not-base64!").is_err());
+        assert!(super::decode_controller_base64_path_segment("Zm9v%00").is_err());
+        assert!(super::decode_controller_base64_path_segment("not-base64!").is_err());
     }
 
     #[cfg_attr(test, tokio::test)]
     #[cfg(feature = "full-controller-tests")]
-    async fn slskd_file_directory_routes_list_storage_roots() {
+    async fn controller_file_directory_routes_list_storage_roots() {
         let (state, _receiver) = test_state();
         let album = state.config.downloads_dir.join("Artist").join("Album");
         std::fs::create_dir_all(&album).unwrap();
@@ -99564,14 +99589,14 @@ pub mod tests {
 
     #[cfg_attr(test, test)]
     #[cfg(feature = "full-controller-tests")]
-    fn slskd_storage_directory_listing_is_bounded() {
+    fn controller_storage_directory_listing_is_bounded() {
         let (state, _receiver) = test_state();
         let dir = state.config.state_dir.join("bounded-listing");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("one.txt"), b"1").unwrap();
         std::fs::write(dir.join("two.txt"), b"2").unwrap();
 
-        let json = super::slskd_storage_directory_json(
+        let json = super::controller_storage_directory_json(
             &dir,
             None,
             super::StorageDirectoryListOptions {
@@ -99610,7 +99635,7 @@ pub mod tests {
         std::fs::write(outside.join("secret.txt"), b"secret").unwrap();
         symlink(&outside, root.join("linked")).unwrap();
 
-        let error = super::slskd_storage_directory_json_unix(
+        let error = super::controller_storage_directory_json_unix(
             &root,
             std::path::Path::new("linked"),
             super::StorageDirectoryListOptions {
@@ -99621,7 +99646,7 @@ pub mod tests {
         .expect_err("symlinked directory must be rejected");
         assert!(error.contains("confined open failed"));
 
-        let listing = super::slskd_storage_directory_json(
+        let listing = super::controller_storage_directory_json(
             &root,
             None,
             super::StorageDirectoryListOptions {
@@ -99636,7 +99661,7 @@ pub mod tests {
 
     #[cfg_attr(test, tokio::test)]
     #[cfg(feature = "full-controller-tests")]
-    async fn slskd_storage_directory_routes_ignore_unknown_pagination_parameters() {
+    async fn controller_storage_directory_routes_ignore_unknown_pagination_parameters() {
         let (state, _receiver) = test_state();
         let root = state.config.downloads_dir.clone();
         std::fs::create_dir_all(&root).unwrap();
@@ -99672,7 +99697,7 @@ pub mod tests {
 
     #[cfg_attr(test, tokio::test)]
     #[cfg(feature = "full-controller-tests")]
-    async fn slskd_recursive_storage_listing_has_lower_budget() {
+    async fn controller_recursive_storage_listing_has_lower_budget() {
         let (state, _receiver) = test_state();
         let root = state.config.downloads_dir.clone();
         std::fs::create_dir_all(&root).unwrap();
@@ -99700,7 +99725,7 @@ pub mod tests {
 
     #[cfg_attr(test, test)]
     #[cfg(feature = "full-controller-tests")]
-    fn slskd_recursive_storage_listing_bounds_directory_depth() {
+    fn controller_recursive_storage_listing_bounds_directory_depth() {
         let (state, _receiver) = test_state();
         let root = state.config.state_dir.join("deep-storage-listing");
         let mut directory = root.clone();
@@ -99712,7 +99737,7 @@ pub mod tests {
             std::fs::create_dir_all(&directory).unwrap();
         }
 
-        let json = super::slskd_storage_directory_json(
+        let json = super::controller_storage_directory_json(
             &root,
             None,
             super::StorageDirectoryListOptions {
@@ -101186,7 +101211,7 @@ pub mod tests {
     ))]
     async fn controller_api_differential_peer_and_mesh_preview_stream_tickets_are_short_lived() {
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "native"),
         );
 
         {
@@ -101378,7 +101403,7 @@ pub mod tests {
         }
 
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
         let nominal = super::route_http_request(
             "POST",
@@ -101531,7 +101556,7 @@ pub mod tests {
 
         let (disabled_state, _receiver) = test_state_with_env(
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                .with("SLSKR_CONTROLLER_PROFILE", target)
                 .with(
                     "SLSKR_ADVANCED_NETWORKING_JSON",
                     r#"{"feature":{"streaming":false}}"#,
@@ -101554,7 +101579,7 @@ pub mod tests {
         );
 
         let (capacity_state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
         {
             let mut tickets = capacity_state.stream_tickets.write().await;
@@ -101595,7 +101620,7 @@ pub mod tests {
             .await
             .expect("peer stream runtime-failure database");
         let (failure_state, _failure_receiver) = test_state_with_env_parts(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
             super::SearchStore::new(),
             Some(failure_db.clone()),
         );
@@ -101634,7 +101659,7 @@ pub mod tests {
         );
 
         let (restarted_state, _restarted_receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
         let reset_get = super::route_http_request(
             "GET",
@@ -101662,7 +101687,7 @@ pub mod tests {
         );
 
         let (concurrent_state, _concurrent_receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
         let concurrent = tokio::join!(
             super::route_http_request(
@@ -101751,7 +101776,7 @@ pub mod tests {
 
         let (state, _receiver) = test_state_with_env(
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                .with("SLSKR_CONTROLLER_PROFILE", target)
                 .with("SLSKR_SHARE_FIXTURE", ""),
         );
         let nominal = super::route_http_request(
@@ -101898,7 +101923,7 @@ pub mod tests {
 
         let (disabled_state, _receiver) = test_state_with_env(
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                .with("SLSKR_CONTROLLER_PROFILE", target)
                 .with(
                     "SLSKR_ADVANCED_NETWORKING_JSON",
                     r#"{"feature":{"streaming":false}}"#,
@@ -101936,7 +101961,7 @@ pub mod tests {
         );
 
         let (capacity_state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
         {
             let mut tickets = capacity_state.stream_tickets.write().await;
@@ -101998,7 +102023,7 @@ pub mod tests {
             .await
             .expect("mesh stream runtime-failure database");
         let (failure_state, _failure_receiver) = test_state_with_env_parts(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
             super::SearchStore::new(),
             Some(failure_db.clone()),
         );
@@ -102037,7 +102062,7 @@ pub mod tests {
         );
 
         let (restarted_state, _restarted_receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
         let reset_get = super::route_http_request(
             "GET",
@@ -102065,7 +102090,7 @@ pub mod tests {
         );
 
         let (concurrent_state, _concurrent_receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
         let concurrent = tokio::join!(
             super::route_http_request(
@@ -102226,7 +102251,7 @@ pub mod tests {
 
     #[cfg_attr(test, tokio::test)]
     #[cfg(feature = "full-controller-tests")]
-    async fn slskd_download_batch_enqueue_validates_dispatches_and_persists() {
+    async fn controller_download_batch_enqueue_validates_dispatches_and_persists() {
         let (state, mut receiver) = test_state_with_env(MapEnv::default().with(
             "SLSKR_TEST_USER_ENDPOINT_OVERRIDES",
             "batch-peer=127.0.0.1:2234",
@@ -102411,7 +102436,7 @@ pub mod tests {
         feature = "bounded-controller-api-tests",
         feature = "bounded-controller-api-tests-1"
     ))]
-    async fn controller_api_differential_slskd_application_dump_contracts() {
+    async fn controller_api_differential_controller_application_dump_contracts() {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
         let mut ledger = Vec::new();
@@ -102485,7 +102510,7 @@ pub mod tests {
         std::env::set_var("SLSKR_CONTROLLER_AUDIT_MODE", "1");
 
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd"),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "legacy"),
         );
         let (nominal_headers, nominal_body) = live_dump(Arc::clone(&state)).await;
         let nominal_headers_lower = nominal_headers.to_ascii_lowercase();
@@ -102513,7 +102538,7 @@ pub mod tests {
         );
 
         let (empty_state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd"),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "legacy"),
         );
         let (empty_headers, empty_body) = live_dump(Arc::clone(&empty_state)).await;
         record!(
@@ -102546,7 +102571,7 @@ pub mod tests {
         fs::write(&conflict_root, b"state directory is a file")
             .expect("create application dump state conflict");
         let (mut failure_state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd"),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "legacy"),
         );
         Arc::get_mut(&mut failure_state)
             .expect("exclusive application dump failure state")
@@ -102570,7 +102595,7 @@ pub mod tests {
             .join("controller-api");
         fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
         fs::write(
-            evidence_dir.join("slskd_application_dump_contracts.json"),
+            evidence_dir.join("controller_application_dump_contracts.json"),
             serde_json::to_string_pretty(&ledger).expect("serialize application dump ledger"),
         )
         .expect("write application dump ledger");
@@ -102588,7 +102613,7 @@ pub mod tests {
         feature = "bounded-controller-api-tests",
         feature = "bounded-controller-api-tests-1"
     ))]
-    async fn controller_api_differential_slskdn_application_dump_gates() {
+    async fn controller_api_differential_native_application_dump_gates() {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
         struct AuditModeGuard(Option<std::ffi::OsString>);
@@ -102662,7 +102687,7 @@ pub mod tests {
         }
 
         let (disabled, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "native"),
         );
         let response =
             super::route_http_request("POST", "/api/v0/application/dump", None, "", &disabled)
@@ -102672,7 +102697,7 @@ pub mod tests {
         assert!(response.body.is_empty());
 
         let base = MapEnv::default()
-            .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn")
+            .with("SLSKR_CONTROLLER_PROFILE", "native")
             .with("SLSKD_ALLOW_MEMORY_DUMP", "true")
             .with("SLSKD_ALLOW_REMOTE_NO_AUTH", "true")
             .with("SLSKD_PASSTHROUGH_ALLOWED_CIDRS", "192.0.2.0/24");
@@ -102813,7 +102838,7 @@ pub mod tests {
             .join("controller-api");
         std::fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
         std::fs::write(
-            evidence_dir.join("slskdn_application_dump_gates.json"),
+            evidence_dir.join("native_application_dump_gates.json"),
             serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
         )
         .expect("write controller-api ledger");
@@ -102831,7 +102856,7 @@ pub mod tests {
         feature = "bounded-controller-api-tests",
         feature = "bounded-controller-api-tests-1"
     ))]
-    async fn controller_api_differential_slskdn_application_open_cases() {
+    async fn controller_api_differential_native_application_open_cases() {
         let target = "slskdn";
         let mut ledger = Vec::new();
         let mut mismatches = Vec::new();
@@ -102854,7 +102879,7 @@ pub mod tests {
             }};
         }
 
-        let env = MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target);
+        let env = MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target);
 
         let (application_state, _receiver) = test_state_with_env(env.clone());
         let application_malformed = super::route_http_request(
@@ -103606,7 +103631,7 @@ pub mod tests {
                 .expect("in-memory db");
             let (state, _receiver) = test_state_with_env_parts(
                 MapEnv::default()
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd")
+                    .with("SLSKR_CONTROLLER_PROFILE", "legacy")
                     .with("SLSKR_PERSISTENCE_ENABLED", "true"),
                 super::SearchStore::new(),
                 Some(db.clone()),
@@ -104158,7 +104183,7 @@ pub mod tests {
         assert!(rehydrated
             .get("friend")
             .expect("rehydrated browse")
-            .slskd_status_json()
+            .controller_status_json()
             .contains("\"state\":\"Completed\""));
 
         let stats = super::route_http_request("GET", "/api/admin/database/stats", None, "", &state)
@@ -104270,7 +104295,7 @@ pub mod tests {
         assert_eq!(rehydrated.next_id, 3);
         assert!(rehydrated.json(None).contains("\"topic\":\"searches\""));
         assert!(rehydrated
-            .slskd_json(Some("topic=searches"))
+            .controller_json(Some("topic=searches"))
             .contains("\"type\":\"search.started\""));
 
         let stats = super::route_http_request("GET", "/api/admin/database/stats", None, "", &state)
@@ -104291,7 +104316,7 @@ pub mod tests {
             .expect("in-memory db");
         let (state, _receiver) = test_state_with_env_parts(
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd")
+                .with("SLSKR_CONTROLLER_PROFILE", "legacy")
                 .with("SLSKR_PERSISTENCE_ENABLED", "true"),
             super::SearchStore::new(),
             Some(db.clone()),
@@ -106344,7 +106369,7 @@ pub mod tests {
                 .expect("in-memory db");
             let (state, _receiver) = test_state_with_env_parts(
                 MapEnv::default()
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd")
+                    .with("SLSKR_CONTROLLER_PROFILE", "legacy")
                     .with("SLSKR_PERSISTENCE_ENABLED", "true"),
                 super::SearchStore::new(),
                 Some(db.clone()),
@@ -106434,7 +106459,7 @@ pub mod tests {
         let (state, _receiver) = test_state_with_env_parts(
             MapEnv::default()
                 .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd")
+                .with("SLSKR_CONTROLLER_PROFILE", "legacy")
                 .with("SLSKR_REMOTE_CONFIGURATION", "true"),
             super::SearchStore::new(),
             Some(db.clone()),
@@ -106821,7 +106846,7 @@ pub mod tests {
             .contains("\"kind\":\"options.updated\""));
         assert!(settings_filtered.body.contains("volatile=true"));
 
-        let slskd_events = super::route_http_request(
+        let controller_events = super::route_http_request(
             "GET",
             "/api/v0/events?topic=searches&q=search",
             None,
@@ -106830,12 +106855,12 @@ pub mod tests {
         )
         .await
         .expect("slskd events");
-        assert_eq!(slskd_events.status, "200 OK");
-        let slskd_json = serde_json::from_str::<serde_json::Value>(&slskd_events.body).unwrap();
-        assert_eq!(slskd_json.as_array().unwrap().len(), 1);
-        assert_eq!(slskd_json[0]["topic"], "searches");
-        assert_eq!(slskd_json[0]["type"], "search.started");
-        assert_eq!(slskd_json[0]["payload"]["resource"], "1");
+        assert_eq!(controller_events.status, "200 OK");
+        let controller_json = serde_json::from_str::<serde_json::Value>(&controller_events.body).unwrap();
+        assert_eq!(controller_json.as_array().unwrap().len(), 1);
+        assert_eq!(controller_json[0]["topic"], "searches");
+        assert_eq!(controller_json[0]["type"], "search.started");
+        assert_eq!(controller_json[0]["payload"]["resource"], "1");
     }
 
     #[cfg_attr(test, tokio::test)]
@@ -107982,7 +108007,7 @@ pub mod tests {
 
     #[cfg_attr(test, tokio::test)]
     #[cfg(feature = "full-controller-tests")]
-    async fn search_response_api_accepts_slskd_group_payload() {
+    async fn search_response_api_accepts_controller_group_payload() {
         let (state, _receiver) = test_state();
         super::route_http_request(
             "POST",
@@ -108148,7 +108173,7 @@ pub mod tests {
     #[cfg(feature = "full-controller-tests")]
     async fn search_update_routes_mutate_lifecycle_and_query_projection() {
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd"),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "legacy"),
         );
         super::route_http_request(
             "POST",
@@ -108256,7 +108281,7 @@ pub mod tests {
 
     #[cfg_attr(test, tokio::test)]
     #[cfg(feature = "full-controller-tests")]
-    async fn search_response_api_projects_locked_files_for_slskd_shape() {
+    async fn search_response_api_projects_locked_files_for_controller_shape() {
         let (state, _receiver) = test_state();
         super::route_http_request(
             "POST",
@@ -108377,7 +108402,7 @@ pub mod tests {
         assert_eq!(updated.results[0].queue_length, Some(7));
         assert_eq!(updated.results[1].filename, "Private/Locked.flac");
         assert!(updated.results[1].locked);
-        let responses = serde_json::from_str::<serde_json::Value>(&updated.slskd_responses_json())
+        let responses = serde_json::from_str::<serde_json::Value>(&updated.controller_responses_json())
             .expect("response json");
         assert_eq!(responses[0]["fileCount"], 1);
         assert_eq!(responses[0]["lockedFileCount"], 1);
@@ -108940,7 +108965,7 @@ pub mod tests {
             .expect("in-memory db");
         let (state, _receiver) = test_state_with_env_parts(
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd")
+                .with("SLSKR_CONTROLLER_PROFILE", "legacy")
                 .with("SLSKR_PERSISTENCE_ENABLED", "true"),
             super::SearchStore::new(),
             Some(db.clone()),
@@ -108988,7 +109013,7 @@ pub mod tests {
             .expect("in-memory db");
         let (state, _receiver) = test_state_with_env_parts(
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd")
+                .with("SLSKR_CONTROLLER_PROFILE", "legacy")
                 .with("SLSKR_PERSISTENCE_ENABLED", "true"),
             super::SearchStore::new(),
             Some(db.clone()),
@@ -109326,7 +109351,7 @@ pub mod tests {
 
     #[cfg_attr(test, tokio::test)]
     #[cfg(feature = "full-controller-tests")]
-    async fn slskd_transfer_position_requests_and_returns_the_remote_queue_place() {
+    async fn controller_transfer_position_requests_and_returns_the_remote_queue_place() {
         let mut ledger = Vec::new();
         macro_rules! record_evidence {
             ($case:expr) => {
@@ -109813,7 +109838,7 @@ pub mod tests {
     async fn controller_api_differential_transfer_upload_diagnostics() {
         let target = "slskdn";
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
         let upload_id = {
             let mut transfers = state.transfers.write().await;
@@ -112145,10 +112170,10 @@ pub mod tests {
 
     #[cfg_attr(test, tokio::test)]
     #[cfg(feature = "full-controller-tests")]
-    async fn slskdn_user_group_projects_transfer_group_memberships_and_live_user_classification() {
+    async fn native_user_group_projects_transfer_group_memberships_and_live_user_classification() {
         let (state, _receiver) = test_state_with_env(
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn")
+                .with("SLSKR_CONTROLLER_PROFILE", "native")
                 .with(
                     "SLSKR_FROZEN_TRANSFER_GROUPS_JSON",
                     r#"{"leechers":{"thresholds":{"files":2,"directories":2}},"blacklisted":{"members":["blocked"]},"user_defined":{"trusted":{"upload":{"priority":10},"members":["friend"]}}}"#,
@@ -112266,14 +112291,14 @@ pub mod tests {
         .expect("bounded user group batch");
         assert_eq!(rejected.status, "400 Bad Request");
 
-        let (slskd_state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd"),
+        let (controller_state, _receiver) = test_state_with_env(
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "legacy"),
         );
         for path in [
             "/api/v0/users/friend/group",
             "/api/v0/users/groups?usernames=friend",
         ] {
-            let response = super::route_http_request("GET", path, None, "", &slskd_state)
+            let response = super::route_http_request("GET", path, None, "", &controller_state)
                 .await
                 .unwrap();
             assert_eq!(response.status, "404 Not Found", "{path}");
@@ -112362,7 +112387,7 @@ pub mod tests {
     async fn transfer_group_runtime_uses_frozen_limit_rejection_reasons_and_priority_resolution() {
         let (state, _receiver) = test_state_with_env(
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd")
+                .with("SLSKR_CONTROLLER_PROFILE", "legacy")
                 .with("SLSKR_AUTH_DISABLED", "true")
                 .with(
                     "SLSKR_FROZEN_TRANSFER_UPLOAD_JSON",
@@ -112871,7 +112896,7 @@ pub mod tests {
     #[cfg(feature = "full-controller-tests")]
     async fn compatibility_projections_use_local_state_for_core_stores() {
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd"),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "legacy"),
         );
 
         {
@@ -113893,7 +113918,7 @@ pub mod tests {
         let config = crate::config::AppConfig::from_layers(
             None,
             crate::config::FileConfig::default(),
-            &MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+            &MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "native"),
         )
         .unwrap();
         let mut sync = config.advanced_networking.mesh_sync_security.clone();
@@ -116695,7 +116720,7 @@ pub mod tests {
     #[cfg(feature = "full-controller-tests")]
     async fn compatibility_projections_use_local_state_for_recommendations_and_activity() {
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd"),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "legacy"),
         );
 
         let liked = super::route_http_request(
@@ -118418,7 +118443,7 @@ pub mod tests {
     #[cfg(feature = "full-controller-tests")]
     async fn bridge_admin_clients_never_leaks_unrelated_peer_activity() {
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd"),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "legacy"),
         );
         // Real, unrelated peer activity: an online watched user and a
         // real peer capability record. Neither is a legacy client
@@ -118452,7 +118477,7 @@ pub mod tests {
     #[cfg(feature = "full-controller-tests")]
     async fn bridge_search_and_download_use_real_oracle_shapes() {
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd"),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "legacy"),
         );
         add_test_share(
             &state,
@@ -118954,7 +118979,7 @@ pub mod tests {
         let hashdb = serde_json::from_str::<serde_json::Value>(&hashdb.body).unwrap();
         for key in [
             "totalPeers",
-            "slskdnPeers",
+            "capabilityPeers",
             "totalFlacEntries",
             "hashedFlacEntries",
             "totalHashEntries",
@@ -119011,7 +119036,7 @@ pub mod tests {
 
     #[cfg_attr(test, tokio::test)]
     #[cfg(feature = "full-controller-tests")]
-    async fn materialized_controller_gets_match_slskdn_empty_state_contracts() {
+    async fn materialized_controller_gets_match_native_empty_state_contracts() {
         let (state, _receiver) = test_state();
         let cases = [
             ("/api/v0/nowplaying", "204 No Content", None),
@@ -119123,7 +119148,7 @@ pub mod tests {
 
     #[cfg_attr(test, tokio::test)]
     #[cfg(feature = "full-controller-tests")]
-    async fn openapi_mutation_dtos_match_slskdn_status_and_field_contracts() {
+    async fn openapi_mutation_dtos_match_native_status_and_field_contracts() {
         let (state, _receiver) = test_state();
 
         let collection = super::route_http_request(
@@ -119854,7 +119879,7 @@ pub mod tests {
 
     #[cfg_attr(test, tokio::test)]
     #[cfg(feature = "full-controller-tests")]
-    async fn mediacore_mutations_match_slskdn_validation_and_result_dtos() {
+    async fn mediacore_mutations_match_native_validation_and_result_dtos() {
         let (state, _receiver) = test_state();
 
         let fuzzy_text = super::route_http_request(
@@ -120992,7 +121017,7 @@ pub mod tests {
     async fn controller_api_differential_mesh_stats_reflect_real_merge_activity_not_hardcoded_zeros(
     ) {
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "native"),
         );
 
         let baseline = super::route_http_request("GET", "/api/v0/mesh/stats", None, "", &state)
@@ -121235,7 +121260,7 @@ pub mod tests {
         };
 
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "native"),
         );
         let root = std::env::temp_dir().join(format!(
             "slskr-controller-mesh-message-{}-{}",
@@ -121612,7 +121637,7 @@ pub mod tests {
 
         let (state, _receiver) = test_state_with_env(
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                .with("SLSKR_CONTROLLER_PROFILE", target)
                 .with("SLSKR_SHARE_FIXTURE", ""),
         );
 
@@ -121958,7 +121983,7 @@ pub mod tests {
         }
 
         let runtime_env = MapEnv::default()
-            .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+            .with("SLSKR_CONTROLLER_PROFILE", target)
             .with("SLSKR_PERSISTENCE_ENABLED", "true");
         let runtime_db = super::persistence::DatabaseManager::in_memory()
             .await
@@ -122212,7 +122237,7 @@ pub mod tests {
         }
 
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
 
         let idempotent_body = serde_json::json!({
@@ -122456,7 +122481,7 @@ pub mod tests {
         }
 
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
         let route = "/api/v0/mesh/sync/mesh-unsupported-peer";
         let response = super::route_http_request("POST", route, None, "{}", &state)
@@ -122856,9 +122881,9 @@ pub mod tests {
 
     #[cfg_attr(test, tokio::test)]
     #[cfg(feature = "full-controller-tests")]
-    async fn slskdn_versioned_extended_gets_match_empty_state_contracts() {
+    async fn native_versioned_extended_gets_match_empty_state_contracts() {
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "native"),
         );
 
         let metadata = super::route_http_request(
@@ -123354,7 +123379,7 @@ pub mod tests {
             .expect("write listening-party fixture");
         let (state, _receiver) = test_state_with_env(
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn")
+                .with("SLSKR_CONTROLLER_PROFILE", "native")
                 .with("SLSKR_SHARE_FIXTURE", "")
                 .with("SLSKR_SHARE_DIRS", &root.display().to_string()),
         );
@@ -124000,7 +124025,7 @@ pub mod tests {
     ))]
     async fn controller_api_differential_podcore_content_metadata_requires_a_real_content_id() {
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "native"),
         );
 
         let missing =
@@ -124150,7 +124175,7 @@ pub mod tests {
         });
 
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "native"),
         );
         {
             let mut settings = state.integration_settings.write().await;
@@ -124279,7 +124304,7 @@ pub mod tests {
             );
         });
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "native"),
         );
         {
             let mut settings = state.integration_settings.write().await;
@@ -124481,7 +124506,7 @@ pub mod tests {
     async fn controller_api_differential_podcore_dht_stats_reflect_real_publications_not_a_pod_count_proxy(
     ) {
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "native"),
         );
         state
             .pods
@@ -124729,7 +124754,7 @@ pub mod tests {
     async fn controller_api_differential_podcore_dht_metadata_reads_and_verifies_the_published_record(
     ) {
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "native"),
         );
         let pod_id = "metadata-audit-pod";
         state
@@ -124867,7 +124892,7 @@ pub mod tests {
     async fn controller_api_differential_podcore_backfill_sync_and_sync_all_report_real_local_work()
     {
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "native"),
         );
 
         let empty_stats =
@@ -125259,7 +125284,7 @@ pub mod tests {
     async fn controller_api_differential_podcore_discovery_stats_use_registrations_and_search_activity(
     ) {
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "native"),
         );
         let empty_stats =
             super::route_http_request("GET", "/api/v0/podcore/discovery/stats", None, "", &state)
@@ -126299,7 +126324,7 @@ pub mod tests {
 
     #[cfg_attr(test, tokio::test)]
     #[cfg(feature = "full-controller-tests")]
-    async fn deterministic_openapi_mutations_match_slskdn_status_and_dto_contracts() {
+    async fn deterministic_openapi_mutations_match_native_status_and_dto_contracts() {
         let (state, _receiver) = test_state();
 
         for (path, enabled) in [
@@ -126418,7 +126443,7 @@ pub mod tests {
 
     #[cfg_attr(test, tokio::test)]
     #[cfg(feature = "full-controller-tests")]
-    async fn versioned_openapi_validation_and_large_dtos_match_slskdn_contracts() {
+    async fn versioned_openapi_validation_and_large_dtos_match_native_contracts() {
         let (state, _receiver) = test_state();
 
         for (method, path, body, expected) in [
@@ -126917,7 +126942,7 @@ pub mod tests {
 
     #[cfg_attr(test, tokio::test)]
     #[cfg(feature = "full-controller-tests")]
-    async fn versioned_auxiliary_mutations_match_slskdn_status_and_dto_contracts() {
+    async fn versioned_auxiliary_mutations_match_native_status_and_dto_contracts() {
         let (state, _receiver) = test_state();
 
         let unversioned_warm_cache = super::route_http_request(
@@ -127188,7 +127213,7 @@ pub mod tests {
 
     #[cfg_attr(test, tokio::test)]
     #[cfg(feature = "full-controller-tests")]
-    async fn versioned_discovery_graph_and_opinions_match_slskdn_contracts() {
+    async fn versioned_discovery_graph_and_opinions_match_native_contracts() {
         let (state, _receiver) = test_state();
         let graph = super::route_http_request(
             "POST",
@@ -127421,7 +127446,7 @@ pub mod tests {
 
     #[cfg_attr(test, tokio::test)]
     #[cfg(feature = "full-controller-tests")]
-    async fn versioned_release_radar_matches_slskdn_state_and_result_contracts() {
+    async fn versioned_release_radar_matches_native_state_and_result_contracts() {
         let (state, _receiver) = test_state();
         let artist_id = "00000000-0000-4000-8000-000000000101";
         let subscription = super::route_http_request(
@@ -127553,7 +127578,7 @@ pub mod tests {
 
     #[cfg_attr(test, tokio::test)]
     #[cfg(feature = "full-controller-tests")]
-    async fn podcore_maintenance_mutations_match_slskdn_result_contracts() {
+    async fn podcore_maintenance_mutations_match_native_result_contracts() {
         let (state, _receiver) = test_state();
         let pod_id = "pod:00000000000000000000000000000001";
         state
@@ -127835,7 +127860,7 @@ pub mod tests {
             let (runtime_state, _receiver) = test_state_with_env_parts(
                 MapEnv::default()
                     .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+                    .with("SLSKR_CONTROLLER_PROFILE", "native"),
                 super::SearchStore::new(),
                 Some(db.clone()),
             );
@@ -127863,7 +127888,7 @@ pub mod tests {
             let (runtime_state, _receiver) = test_state_with_env_parts(
                 MapEnv::default()
                     .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+                    .with("SLSKR_CONTROLLER_PROFILE", "native"),
                 super::SearchStore::new(),
                 Some(db.clone()),
             );
@@ -127902,7 +127927,7 @@ pub mod tests {
                 .expect("user-note restart database");
             let env = MapEnv::default()
                 .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn");
+                .with("SLSKR_CONTROLLER_PROFILE", "native");
             let (first_state, _receiver) =
                 test_state_with_env_parts(env.clone(), super::SearchStore::new(), Some(db.clone()));
             let created = super::route_http_request(
@@ -127944,7 +127969,7 @@ pub mod tests {
             let (concurrent_state, _receiver) = test_state_with_env_parts(
                 MapEnv::default()
                     .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+                    .with("SLSKR_CONTROLLER_PROFILE", "native"),
                 super::SearchStore::new(),
                 Some(db.clone()),
             );
@@ -127988,7 +128013,7 @@ pub mod tests {
                 .expect("user-note delete restart database");
             let env = MapEnv::default()
                 .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn");
+                .with("SLSKR_CONTROLLER_PROFILE", "native");
             let (first_state, _receiver) =
                 test_state_with_env_parts(env.clone(), super::SearchStore::new(), Some(db.clone()));
             let created = super::route_http_request(
@@ -128381,7 +128406,7 @@ pub mod tests {
         );
 
         let mut authorized = remote;
-        authorized.x_slskdn_api_key = Some("gateway-key".to_owned());
+        authorized.x_gateway_api_key = Some("gateway-key".to_owned());
         assert!(super::mesh_gateway_auth_failure(&state, &authorized).is_none());
         let unavailable = Box::pin(super::route_http_request_with_headers(
             "POST",
@@ -128398,7 +128423,7 @@ pub mod tests {
         let local = super::RequestSecurityHeaders {
             remote_addr: Some("127.0.0.1:1234".parse().unwrap()),
             origin: Some("https://evil.example".to_owned()),
-            x_slskdn_csrf: Some("csrf-token".to_owned()),
+            x_gateway_csrf: Some("csrf-token".to_owned()),
             ..super::RequestSecurityHeaders::default()
         };
         let origin_denied = Box::pin(super::route_http_request_with_headers(
@@ -128423,7 +128448,7 @@ pub mod tests {
         let valid_local = super::RequestSecurityHeaders {
             remote_addr: Some("127.0.0.1:1234".parse().unwrap()),
             origin: Some("https://localhost:3000".to_owned()),
-            x_slskdn_csrf: Some("csrf-token".to_owned()),
+            x_gateway_csrf: Some("csrf-token".to_owned()),
             ..super::RequestSecurityHeaders::default()
         };
         let local_unavailable = Box::pin(super::route_http_request_with_headers(
@@ -128823,7 +128848,7 @@ pub mod tests {
         // itself was never included, so disabling the feature left the
         // actor/inbox/outbox/followers/following routes fully reachable.
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "native"),
         );
         state
             .media_services
@@ -130919,16 +130944,16 @@ pub mod tests {
         let slskdn = super::route_http_request("GET", "/api/slskdn", None, "", &state)
             .await
             .expect("slskdn summary");
-        let slskdn_json = serde_json::from_str::<serde_json::Value>(&slskdn.body).unwrap();
-        assert_eq!(slskdn_json["status"], "local");
-        assert!(slskdn_json["libraryItems"].as_u64().unwrap() >= 4);
-        let slskdn_health =
+        let native_json = serde_json::from_str::<serde_json::Value>(&slskdn.body).unwrap();
+        assert_eq!(native_json["status"], "local");
+        assert!(native_json["libraryItems"].as_u64().unwrap() >= 4);
+        let native_health =
             super::route_http_request("GET", "/api/slskdn/library/health", None, "", &state)
                 .await
                 .expect("slskdn library health");
-        let slskdn_health_json =
-            serde_json::from_str::<serde_json::Value>(&slskdn_health.body).unwrap();
-        assert_eq!(slskdn_health_json["summary"]["total_issues"], 0);
+        let native_health_json =
+            serde_json::from_str::<serde_json::Value>(&native_health.body).unwrap();
+        assert_eq!(native_health_json["summary"]["total_issues"], 0);
         let podcore_search = super::route_http_request(
             "GET",
             "/api/podcore/content/search?query=Release",
@@ -131289,7 +131314,7 @@ pub mod tests {
     #[cfg(feature = "full-controller-tests")]
     async fn compatibility_projections_use_local_state_for_system_mutation_shells() {
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd"),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "legacy"),
         );
 
         super::route_http_request(
@@ -131842,7 +131867,7 @@ pub mod tests {
 
     async fn configured_relay_test_state() -> (Arc<super::AppState>, &'static str, u64) {
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd"),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "legacy"),
         );
         let secret = "test-token-0123456789";
         {
@@ -131872,7 +131897,7 @@ pub mod tests {
             let mut relay = state.relay.write().await;
             assert!(relay.protocol.authenticate_agent(
                 &relay_settings,
-                super::relay::credential_scheme(state.config.controller_compatibility_target),
+                super::relay::credential_scheme(state.config.controller_profile),
                 "connection-1",
                 "edge-one",
                 &challenge_credential,
@@ -131889,7 +131914,7 @@ pub mod tests {
 
     #[cfg_attr(test, tokio::test)]
     #[cfg(feature = "full-controller-tests")]
-    async fn slskdn_relay_credential_profile_authenticates_agent() {
+    async fn native_relay_credential_profile_authenticates_agent() {
         let (state, _receiver) = test_state_with_env(MapEnv::default());
         let secret = "test-token-0123456789";
         {
@@ -131913,7 +131938,7 @@ pub mod tests {
             .protocol
             .issue_challenge("slskdn-connection", now);
         let credential = super::relay::credential_for_target(
-            super::config::ControllerCompatibilityTarget::Slskdn,
+            super::config::ControllerProfile::Native,
             secret,
             "edge-one",
             &challenge,
@@ -131921,7 +131946,7 @@ pub mod tests {
         let settings = state.advanced_networking.read().await.relay.clone();
         assert!(state.relay.write().await.protocol.authenticate_agent(
             &settings,
-            super::relay::credential_scheme(super::config::ControllerCompatibilityTarget::Slskdn,),
+            super::relay::credential_scheme(super::config::ControllerProfile::Native,),
             "slskdn-connection",
             "edge-one",
             &credential,
@@ -132071,7 +132096,7 @@ pub mod tests {
         let database_source = state.config.state_dir.join("relay-test-source.db");
         super::relay::write_share_database(
             &database_source,
-            super::ControllerCompatibilityTarget::Slskd,
+            super::ControllerProfile::Legacy,
             &[super::relay::RemoteShare {
                 filename: "Remote/Agent.flac".to_owned(),
                 size: 6,
@@ -132335,7 +132360,7 @@ pub mod tests {
             .protocol
             .validate_share_upload(
                 &settings,
-                super::relay::credential_scheme(state.config.controller_compatibility_target),
+                super::relay::credential_scheme(state.config.controller_profile),
                 uuid::Uuid::parse_str(token).expect("share token UUID"),
                 &token_credential,
                 super::unix_timestamp(),
@@ -132511,7 +132536,7 @@ pub mod tests {
 
     #[cfg_attr(test, tokio::test)]
     #[cfg(feature = "full-controller-tests")]
-    async fn versioned_solid_resolution_uses_slskdn_problem_details() {
+    async fn versioned_solid_resolution_uses_native_problem_details() {
         let (state, _receiver) = test_state();
         let invalid =
             super::route_http_request("POST", "/api/v0/solid/resolve-webid", None, "{}", &state)
@@ -132745,22 +132770,22 @@ pub mod tests {
             "Song.flac"
         );
 
-        let slskd_browse =
+        let controller_browse =
             super::route_http_request("GET", "/api/users/friend/browse", None, "", &state)
                 .await
                 .expect("slskd browse fetch");
-        assert_eq!(slskd_browse.status, "200 OK");
-        let slskd_browse_json =
-            serde_json::from_str::<serde_json::Value>(&slskd_browse.body).unwrap();
-        assert_eq!(slskd_browse_json["directoryCount"], 1);
-        assert_eq!(slskd_browse_json["directories"][0]["name"], "Remote/Album");
-        assert_eq!(slskd_browse_json["directories"][0]["fileCount"], 2);
+        assert_eq!(controller_browse.status, "200 OK");
+        let controller_browse_json =
+            serde_json::from_str::<serde_json::Value>(&controller_browse.body).unwrap();
+        assert_eq!(controller_browse_json["directoryCount"], 1);
+        assert_eq!(controller_browse_json["directories"][0]["name"], "Remote/Album");
+        assert_eq!(controller_browse_json["directories"][0]["fileCount"], 2);
         assert_eq!(
-            slskd_browse_json["directories"][0]["files"][0]["filename"],
+            controller_browse_json["directories"][0]["files"][0]["filename"],
             "Song.flac"
         );
 
-        let slskd_directory = super::route_http_request(
+        let controller_directory = super::route_http_request(
             "POST",
             "/api/users/friend/directory",
             None,
@@ -132769,11 +132794,11 @@ pub mod tests {
         )
         .await
         .expect("slskd directory fetch");
-        assert_eq!(slskd_directory.status, "200 OK");
-        let slskd_directory_json =
-            serde_json::from_str::<serde_json::Value>(&slskd_directory.body).unwrap();
-        assert_eq!(slskd_directory_json[0]["name"], "Remote/Album");
-        assert_eq!(slskd_directory_json[0]["fileCount"], 2);
+        assert_eq!(controller_directory.status, "200 OK");
+        let controller_directory_json =
+            serde_json::from_str::<serde_json::Value>(&controller_directory.body).unwrap();
+        assert_eq!(controller_directory_json[0]["name"], "Remote/Album");
+        assert_eq!(controller_directory_json[0]["fileCount"], 2);
 
         let listed = super::route_http_request(
             "GET",
@@ -132964,7 +132989,7 @@ pub mod tests {
 
     #[cfg_attr(test, tokio::test)]
     #[cfg(feature = "full-controller-tests")]
-    async fn browse_response_api_accepts_slskd_directory_payload() {
+    async fn browse_response_api_accepts_controller_directory_payload() {
         let (state, _receiver) = test_state();
 
         let response = super::route_http_request(
@@ -133023,7 +133048,7 @@ pub mod tests {
         feature = "bounded-controller-api-tests",
         feature = "bounded-controller-api-tests-1"
     ))]
-    async fn controller_api_differential_slskd_browse_status_tracks_request_failure_and_completion()
+    async fn controller_api_differential_controller_browse_status_tracks_request_failure_and_completion()
     {
         let (state, _receiver) = test_state();
         state.session.write().await.state = "connected";
@@ -133189,7 +133214,7 @@ pub mod tests {
 
     #[cfg_attr(test, tokio::test)]
     #[cfg(feature = "full-controller-tests")]
-    async fn slskd_user_browse_routes_page_directories_and_directory_files() {
+    async fn controller_user_browse_routes_page_directories_and_directory_files() {
         let (state, _receiver) = test_state();
         super::route_http_request(
             "POST",
@@ -133250,7 +133275,7 @@ pub mod tests {
 
     #[cfg_attr(test, tokio::test)]
     #[cfg(feature = "full-controller-tests")]
-    async fn slskd_user_browse_routes_filter_directories_and_files() {
+    async fn controller_user_browse_routes_filter_directories_and_files() {
         let (state, _receiver) = test_state();
         super::route_http_request(
             "POST",
@@ -135382,8 +135407,8 @@ pub mod tests {
             cookie: None,
             content_type: None,
             x_share_token: None,
-            x_slskdn_api_key: None,
-            x_slskdn_csrf: None,
+            x_gateway_api_key: None,
+            x_gateway_csrf: None,
             x_relay_agent: None,
             x_relay_credential: None,
             remote_addr: None,
@@ -135403,8 +135428,8 @@ pub mod tests {
             cookie: None,
             content_type: None,
             x_share_token: None,
-            x_slskdn_api_key: None,
-            x_slskdn_csrf: None,
+            x_gateway_api_key: None,
+            x_gateway_csrf: None,
             x_relay_agent: None,
             x_relay_credential: None,
             remote_addr: None,
@@ -135424,8 +135449,8 @@ pub mod tests {
             cookie: None,
             content_type: None,
             x_share_token: None,
-            x_slskdn_api_key: None,
-            x_slskdn_csrf: None,
+            x_gateway_api_key: None,
+            x_gateway_csrf: None,
             x_relay_agent: None,
             x_relay_credential: None,
             remote_addr: None,
@@ -135450,8 +135475,8 @@ pub mod tests {
                 cookie: None,
                 content_type: None,
                 x_share_token: None,
-                x_slskdn_api_key: None,
-                x_slskdn_csrf: None,
+                x_gateway_api_key: None,
+                x_gateway_csrf: None,
                 x_relay_agent: None,
                 x_relay_credential: None,
                 remote_addr: None,
@@ -135481,8 +135506,8 @@ pub mod tests {
                 cookie: None,
                 content_type: None,
                 x_share_token: None,
-                x_slskdn_api_key: None,
-                x_slskdn_csrf: None,
+                x_gateway_api_key: None,
+                x_gateway_csrf: None,
                 x_relay_agent: None,
                 x_relay_credential: None,
                 remote_addr: None,
@@ -135616,8 +135641,8 @@ pub mod tests {
             cookie: None,
             content_type: None,
             x_share_token: None,
-            x_slskdn_api_key: None,
-            x_slskdn_csrf: None,
+            x_gateway_api_key: None,
+            x_gateway_csrf: None,
             x_relay_agent: None,
             x_relay_credential: None,
             remote_addr: None,
@@ -135644,7 +135669,7 @@ pub mod tests {
 
     #[cfg_attr(test, test)]
     #[cfg(feature = "full-controller-tests")]
-    fn controller_auth_enforces_slskdn_roles_schemes_scopes_and_anonymous_routes() {
+    fn controller_auth_enforces_native_roles_schemes_scopes_and_anonymous_routes() {
         let state_dir =
             std::env::temp_dir().join(format!("slskr-slskdn-auth-test-{}", uuid::Uuid::new_v4()));
         let config = super::AppConfig::from_layers(
@@ -135703,7 +135728,7 @@ pub mod tests {
 
     #[cfg_attr(test, test)]
     #[cfg(feature = "full-controller-tests")]
-    fn controller_auth_selects_the_frozen_slskd_policy_registry() {
+    fn controller_auth_selects_the_frozen_controller_policy_registry() {
         let state_dir = std::env::temp_dir().join(format!(
             "slskr-controller-auth-test-{}",
             uuid::Uuid::new_v4()
@@ -135713,7 +135738,7 @@ pub mod tests {
             FileConfig::default(),
             &MapEnv::default()
                 .with("SLSKR_STATE_DIR", state_dir.to_str().unwrap())
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd")
+                .with("SLSKR_CONTROLLER_PROFILE", "legacy")
                 .with("SLSKR_API_TOKEN", "admin-token")
                 .with("SLSKR_API_READ_WRITE_TOKEN", "write-token")
                 .with("SLSKR_API_READ_ONLY_TOKEN", "read-token"),
@@ -135742,7 +135767,7 @@ pub mod tests {
             FileConfig::default(),
             &MapEnv::default()
                 .with("SLSKR_STATE_DIR", state_dir.to_str().unwrap())
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn")
+                .with("SLSKR_CONTROLLER_PROFILE", "native")
                 .with("SLSKR_API_TOKEN", "admin-token")
                 .with("SLSKR_API_READ_WRITE_TOKEN", "write-token")
                 .with("SLSKR_API_READ_ONLY_TOKEN", "read-token"),
@@ -135945,11 +135970,11 @@ pub mod tests {
         for (target, source) in [
             (
                 "slskd",
-                include_str!("../data/slskd-controller-auth-policy.json"),
+                include_str!("../data/legacy-controller-auth-policy.json"),
             ),
             (
                 "slskdn",
-                include_str!("../data/slskdn-controller-auth-policy.json"),
+                include_str!("../data/native-controller-auth-policy.json"),
             ),
         ] {
             let rules: Vec<AuthPolicyRow> =
@@ -135964,7 +135989,7 @@ pub mod tests {
                 &MapEnv::default()
                     .with("SLSKR_STATE_DIR", state_dir.to_str().unwrap())
                     .with("SLSKR_AUTH_DISABLED", "false")
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                    .with("SLSKR_CONTROLLER_PROFILE", target)
                     .with("SLSKR_API_TOKEN", "admin-token")
                     .with("SLSKR_API_READ_WRITE_TOKEN", "write-token")
                     .with("SLSKR_API_READ_ONLY_TOKEN", "read-token")
@@ -136109,11 +136134,11 @@ pub mod tests {
         for (target, source) in [
             (
                 "slskd",
-                include_str!("../data/slskd-controller-auth-policy.json"),
+                include_str!("../data/legacy-controller-auth-policy.json"),
             ),
             (
                 "slskdn",
-                include_str!("../data/slskdn-controller-auth-policy.json"),
+                include_str!("../data/native-controller-auth-policy.json"),
             ),
         ] {
             let rules: Vec<AuthPolicyRow> =
@@ -136133,7 +136158,7 @@ pub mod tests {
             let (state, _receiver) = test_state_with_env(
                 MapEnv::default()
                     .with("SLSKR_AUTH_DISABLED", "false")
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                    .with("SLSKR_CONTROLLER_PROFILE", target)
                     .with("SLSKR_API_TOKEN", "admin-token"),
             );
 
@@ -136232,11 +136257,11 @@ pub mod tests {
         for (target, source) in [
             (
                 "slskd",
-                include_str!("../data/slskd-controller-auth-policy.json"),
+                include_str!("../data/legacy-controller-auth-policy.json"),
             ),
             (
                 "slskdn",
-                include_str!("../data/slskdn-controller-auth-policy.json"),
+                include_str!("../data/native-controller-auth-policy.json"),
             ),
         ] {
             let rules: Vec<AuthPolicyRow> =
@@ -136261,7 +136286,7 @@ pub mod tests {
             let (state, _receiver) = test_state_with_env(
                 MapEnv::default()
                     .with("SLSKR_AUTH_DISABLED", "false")
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                    .with("SLSKR_CONTROLLER_PROFILE", target)
                     .with("SLSKR_API_TOKEN", "admin-token"),
             );
 
@@ -136477,11 +136502,11 @@ pub mod tests {
         for (target, source) in [
             (
                 "slskd",
-                include_str!("../data/slskd-controller-auth-policy.json"),
+                include_str!("../data/legacy-controller-auth-policy.json"),
             ),
             (
                 "slskdn",
-                include_str!("../data/slskdn-controller-auth-policy.json"),
+                include_str!("../data/native-controller-auth-policy.json"),
             ),
         ] {
             let rules: Vec<AuthPolicyRow> =
@@ -136496,7 +136521,7 @@ pub mod tests {
             let (state, _receiver) = test_state_with_env(
                 MapEnv::default()
                     .with("SLSKR_AUTH_DISABLED", "false")
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                    .with("SLSKR_CONTROLLER_PROFILE", target)
                     .with("SLSKR_API_TOKEN", "admin-token"),
             );
 
@@ -136506,9 +136531,9 @@ pub mod tests {
                     super::route_http_request("GET", concrete_path, Some(header), "", &state)
                         .await
                         .expect("route response");
-                let slskdn_search_response_id =
+                let native_search_response_id =
                     target == "slskdn" && route_template == "/api/v0/searches/{id}/responses";
-                let pass = if slskdn_search_response_id {
+                let pass = if native_search_response_id {
                     // SearchResponsesController binds {id} as Guid, so an
                     // invalid value is model-validation 400 rather than a
                     // missing-record 404. slskd retains its legacy text id.
@@ -136535,7 +136560,7 @@ pub mod tests {
                     "target": target,
                     "method": "GET",
                     "route": route_template,
-                    "case": if slskdn_search_response_id {
+                    "case": if native_search_response_id {
                         "malformed-path-query-or-body"
                     } else {
                         "missing-empty-or-conflict-state"
@@ -136646,11 +136671,11 @@ pub mod tests {
         for (target, source) in [
             (
                 "slskd",
-                include_str!("../data/slskd-controller-auth-policy.json"),
+                include_str!("../data/legacy-controller-auth-policy.json"),
             ),
             (
                 "slskdn",
-                include_str!("../data/slskdn-controller-auth-policy.json"),
+                include_str!("../data/native-controller-auth-policy.json"),
             ),
         ] {
             let rules: Vec<AuthPolicyRow> =
@@ -136665,7 +136690,7 @@ pub mod tests {
             let (state, _receiver) = test_state_with_env(
                 MapEnv::default()
                     .with("SLSKR_AUTH_DISABLED", "false")
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                    .with("SLSKR_CONTROLLER_PROFILE", target)
                     .with("SLSKR_API_TOKEN", "admin-token"),
             );
 
@@ -136816,7 +136841,7 @@ pub mod tests {
         }
 
         const BOTH: [&str; 2] = ["slskd", "slskdn"];
-        const SLSKDN_ONLY: [&str; 1] = ["slskdn"];
+        const NATIVE_ONLY: [&str; 1] = ["slskdn"];
 
         let cases = [
             Case {
@@ -136853,7 +136878,7 @@ pub mod tests {
                 seed_runtime: "",
                 seed_relay: false,
                 ledger_route: "/api/v0/autoreplace/enable",
-                targets: &SLSKDN_ONLY,
+                targets: &NATIVE_ONLY,
             },
             Case {
                 method: "PUT",
@@ -136862,7 +136887,7 @@ pub mod tests {
                 seed_runtime: "autoreplace",
                 seed_relay: false,
                 ledger_route: "/api/v0/autoreplace/disable",
-                targets: &SLSKDN_ONLY,
+                targets: &NATIVE_ONLY,
             },
             Case {
                 method: "PUT",
@@ -136889,7 +136914,7 @@ pub mod tests {
                 seed_runtime: "",
                 seed_relay: false,
                 ledger_route: "/api/v0/bridge/start",
-                targets: &SLSKDN_ONLY,
+                targets: &NATIVE_ONLY,
             },
             Case {
                 method: "POST",
@@ -136898,7 +136923,7 @@ pub mod tests {
                 seed_runtime: "bridge",
                 seed_relay: false,
                 ledger_route: "/api/v0/bridge/stop",
-                targets: &SLSKDN_ONLY,
+                targets: &NATIVE_ONLY,
             },
             Case {
                 method: "PUT",
@@ -136907,7 +136932,7 @@ pub mod tests {
                 seed_runtime: "",
                 seed_relay: false,
                 ledger_route: "/api/v0/bridge/admin/config",
-                targets: &SLSKDN_ONLY,
+                targets: &NATIVE_ONLY,
             },
             Case {
                 method: "POST",
@@ -136916,7 +136941,7 @@ pub mod tests {
                 seed_runtime: "",
                 seed_relay: false,
                 ledger_route: "/api/v0/songid/runs",
-                targets: &SLSKDN_ONLY,
+                targets: &NATIVE_ONLY,
             },
             Case {
                 method: "POST",
@@ -136925,7 +136950,7 @@ pub mod tests {
                 seed_runtime: "",
                 seed_relay: false,
                 ledger_route: "/api/v0/integrations/lidarr/wanted/sync",
-                targets: &SLSKDN_ONLY,
+                targets: &NATIVE_ONLY,
             },
             Case {
                 method: "POST",
@@ -136934,7 +136959,7 @@ pub mod tests {
                 seed_runtime: "",
                 seed_relay: false,
                 ledger_route: "/api/v0/profile/invite",
-                targets: &SLSKDN_ONLY,
+                targets: &NATIVE_ONLY,
             },
         ];
 
@@ -136952,7 +136977,7 @@ pub mod tests {
                 let (state, _receiver) = test_state_with_env_parts(
                     MapEnv::default()
                         .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                        .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                        .with("SLSKR_CONTROLLER_PROFILE", target),
                     super::SearchStore::new(),
                     Some(db.clone()),
                 );
@@ -137093,7 +137118,7 @@ pub mod tests {
             let (state, _receiver) = test_state_with_env_parts(
                 MapEnv::default()
                     .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                    .with("SLSKR_CONTROLLER_PROFILE", target),
                 super::SearchStore::new(),
                 Some(db.clone()),
             );
@@ -137126,7 +137151,7 @@ pub mod tests {
             let (state, _receiver) = test_state_with_env_parts(
                 MapEnv::default()
                     .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                    .with("SLSKR_CONTROLLER_PROFILE", target),
                 super::SearchStore::new(),
                 Some(db.clone()),
             );
@@ -137171,7 +137196,7 @@ pub mod tests {
             let (state, _receiver) = test_state_with_env_parts(
                 MapEnv::default()
                     .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                    .with("SLSKR_CONTROLLER_PROFILE", target),
                 super::SearchStore::new(),
                 Some(db.clone()),
             );
@@ -137199,7 +137224,7 @@ pub mod tests {
             let (state, _receiver) = test_state_with_env_parts(
                 MapEnv::default()
                     .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                    .with("SLSKR_CONTROLLER_PROFILE", target),
                 super::SearchStore::new(),
                 Some(db.clone()),
             );
@@ -137229,7 +137254,7 @@ pub mod tests {
             let (state, _receiver) = test_state_with_env_parts(
                 MapEnv::default()
                     .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                    .with("SLSKR_CONTROLLER_PROFILE", target),
                 super::SearchStore::new(),
                 Some(db.clone()),
             );
@@ -137281,7 +137306,7 @@ pub mod tests {
             let (state, _receiver) = test_state_with_env_parts(
                 MapEnv::default()
                     .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                    .with("SLSKR_CONTROLLER_PROFILE", target),
                 super::SearchStore::new(),
                 Some(db.clone()),
             );
@@ -137351,7 +137376,7 @@ pub mod tests {
         let persistence_env = || {
             MapEnv::default()
                 .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                .with("SLSKR_CONTROLLER_PROFILE", target)
         };
 
         macro_rules! record {
@@ -138119,7 +138144,7 @@ pub mod tests {
             let (state, _receiver) = test_state_with_env_parts(
                 MapEnv::default()
                     .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                    .with("SLSKR_CONTROLLER_PROFILE", target),
                 super::SearchStore::new(),
                 Some(db.clone()),
             );
@@ -138258,7 +138283,7 @@ pub mod tests {
             let env = || {
                 MapEnv::default()
                     .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                    .with("SLSKR_CONTROLLER_PROFILE", target)
             };
             let (state, _receiver) =
                 test_state_with_env_parts(env(), super::SearchStore::new(), Some(db.clone()));
@@ -138309,7 +138334,7 @@ pub mod tests {
             let (state, _receiver) = test_state_with_env_parts(
                 MapEnv::default()
                     .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                    .with("SLSKR_CONTROLLER_PROFILE", target),
                 super::SearchStore::new(),
                 Some(db.clone()),
             );
@@ -138399,11 +138424,11 @@ pub mod tests {
         for (target, source) in [
             (
                 "slskd",
-                include_str!("../data/slskd-controller-auth-policy.json"),
+                include_str!("../data/legacy-controller-auth-policy.json"),
             ),
             (
                 "slskdn",
-                include_str!("../data/slskdn-controller-auth-policy.json"),
+                include_str!("../data/native-controller-auth-policy.json"),
             ),
         ] {
             let rules: Vec<AuthPolicyRow> =
@@ -138455,7 +138480,7 @@ pub mod tests {
                 let (state, _receiver) = test_state_with_env_parts(
                     MapEnv::default()
                         .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                        .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                        .with("SLSKR_CONTROLLER_PROFILE", target),
                     super::SearchStore::new(),
                     Some(db.clone()),
                 );
@@ -138492,7 +138517,7 @@ pub mod tests {
                 let (state, _receiver) = test_state_with_env_parts(
                     MapEnv::default()
                         .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                        .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                        .with("SLSKR_CONTROLLER_PROFILE", target),
                     super::SearchStore::new(),
                     Some(db.clone()),
                 );
@@ -138535,7 +138560,7 @@ pub mod tests {
                 let (state, _receiver) = test_state_with_env_parts(
                     MapEnv::default()
                         .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                        .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                        .with("SLSKR_CONTROLLER_PROFILE", target),
                     super::SearchStore::new(),
                     Some(db.clone()),
                 );
@@ -138572,7 +138597,7 @@ pub mod tests {
                 let (state, _receiver) = test_state_with_env_parts(
                     MapEnv::default()
                         .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                        .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                        .with("SLSKR_CONTROLLER_PROFILE", target),
                     super::SearchStore::new(),
                     Some(db.clone()),
                 );
@@ -138612,7 +138637,7 @@ pub mod tests {
                 let (state, _receiver) = test_state_with_env_parts(
                     MapEnv::default()
                         .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                        .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                        .with("SLSKR_CONTROLLER_PROFILE", target),
                     super::SearchStore::new(),
                     Some(db.clone()),
                 );
@@ -138646,7 +138671,7 @@ pub mod tests {
                 let (state, _receiver) = test_state_with_env_parts(
                     MapEnv::default()
                         .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                        .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                        .with("SLSKR_CONTROLLER_PROFILE", target),
                     super::SearchStore::new(),
                     Some(db.clone()),
                 );
@@ -138689,7 +138714,7 @@ pub mod tests {
                 let (state, _receiver) = test_state_with_env_parts(
                     MapEnv::default()
                         .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                        .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                        .with("SLSKR_CONTROLLER_PROFILE", target),
                     super::SearchStore::new(),
                     Some(db.clone()),
                 );
@@ -138710,7 +138735,7 @@ pub mod tests {
                 let (state, _receiver) = test_state_with_env_parts(
                     MapEnv::default()
                         .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                        .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                        .with("SLSKR_CONTROLLER_PROFILE", target),
                     super::SearchStore::new(),
                     Some(db.clone()),
                 );
@@ -138792,7 +138817,7 @@ pub mod tests {
             let (state, mut receiver) = test_state_with_env_parts(
                 MapEnv::default()
                     .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                    .with("SLSKR_CONTROLLER_PROFILE", target),
                 super::SearchStore::new(),
                 Some(db.clone()),
             );
@@ -138822,7 +138847,7 @@ pub mod tests {
             let (restarted_state, _) = test_state_with_env_parts(
                 MapEnv::default()
                     .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                    .with("SLSKR_CONTROLLER_PROFILE", target),
                 rehydrated,
                 Some(db),
             );
@@ -138854,7 +138879,7 @@ pub mod tests {
             let (state, _receiver) = test_state_with_env_parts(
                 MapEnv::default()
                     .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                    .with("SLSKR_CONTROLLER_PROFILE", target),
                 super::SearchStore::new(),
                 Some(db.clone()),
             );
@@ -138880,7 +138905,7 @@ pub mod tests {
                 super::EventStore::from_persisted(persisted, super::EVENT_HISTORY_LIMIT);
             let rehydrate_pass = rehydrated.next_id == 2
                 && rehydrated
-                    .slskd_json(None)
+                    .controller_json(None)
                     .contains("\"type\":\"search.started\"");
             if !rehydrate_pass {
                 mismatches.push(format!("{target} Events restart-rehydration"));
@@ -138899,7 +138924,7 @@ pub mod tests {
             let (state, _receiver) = test_state_with_env_parts(
                 MapEnv::default()
                     .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                    .with("SLSKR_CONTROLLER_PROFILE", target),
                 super::SearchStore::new(),
                 Some(db.clone()),
             );
@@ -138993,7 +139018,7 @@ pub mod tests {
             let env = MapEnv::default()
                 .with("SLSKR_STATE_DIR", &state_dir.display().to_string())
                 .with("SLSKR_AUTO_CONNECT", "false")
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                .with("SLSKR_CONTROLLER_PROFILE", target)
                 .with("SLSKR_PERSISTENCE_ENABLED", "true");
             let config =
                 super::AppConfig::from_layers(None, FileConfig::default(), &env).expect("config");
@@ -139115,7 +139140,7 @@ pub mod tests {
             let (state, _receiver) = test_state_with_env_parts(
                 MapEnv::default()
                     .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                    .with("SLSKR_CONTROLLER_PROFILE", target),
                 super::SearchStore::new(),
                 Some(db.clone()),
             );
@@ -139180,7 +139205,7 @@ pub mod tests {
             let (state, _receiver) = test_state_with_env_parts(
                 MapEnv::default()
                     .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                    .with("SLSKR_CONTROLLER_PROFILE", target),
                 super::SearchStore::new(),
                 Some(db.clone()),
             );
@@ -139212,7 +139237,7 @@ pub mod tests {
             let (state, _receiver) = test_state_with_env_parts(
                 MapEnv::default()
                     .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                    .with("SLSKR_CONTROLLER_PROFILE", target),
                 super::SearchStore::new(),
                 Some(db.clone()),
             );
@@ -139449,7 +139474,7 @@ pub mod tests {
         let (state, _receiver) = test_state_with_env_parts(
             MapEnv::default()
                 .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                .with("SLSKR_CONTROLLER_PROFILE", target),
             super::SearchStore::new(),
             Some(db.clone()),
         );
@@ -139604,7 +139629,7 @@ pub mod tests {
     async fn persistence_lifecycle_differential_pod_core_file_state() {
         let target = "slskdn";
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
         let state_dir = state.config.state_dir.clone();
         let mut ledger = Vec::new();
@@ -140218,7 +140243,7 @@ pub mod tests {
     /// Bulk differential proof crediting 8 Collections/CollectionItems
     /// routes' `nominal-status-headers-body` and `mutation-side-effects-
     /// and-readback` cases, independently re-derived from `openapi_
-    /// mutation_dtos_match_slskdn_status_and_field_contracts`'s real CRUD
+    /// mutation_dtos_match_native_status_and_field_contracts`'s real CRUD
     /// lifecycle (create collection -> create item -> update collection ->
     /// update item -> reorder -> re-GET items reflects reorder -> delete
     /// item -> delete collection). slskdN-only (confirmed against the
@@ -140691,7 +140716,7 @@ pub mod tests {
         let persistence_env = || {
             MapEnv::default()
                 .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                .with("SLSKR_CONTROLLER_PROFILE", target)
         };
 
         macro_rules! record {
@@ -141736,7 +141761,7 @@ pub mod tests {
     /// Bulk differential proof crediting 7 more slskdN-only GET routes'
     /// `nominal-status-headers-body` cases, independently re-derived from
     /// `bounded_activity_and_network_polling_routes_project_local_state`,
-    /// `slskdn_versioned_extended_gets_match_empty_state_contracts`, and
+    /// `native_versioned_extended_gets_match_empty_state_contracts`, and
     /// `versioned_hashdb_paging_matches_sequence_controller_contract`.
     /// All confirmed present in the frozen slskdN registry (slskd declares
     /// none of these).
@@ -141770,7 +141795,7 @@ pub mod tests {
         {
             let (state, _receiver) = test_state_with_env(
                 MapEnv::default()
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                    .with("SLSKR_CONTROLLER_PROFILE", target)
                     .with("SLSKR_REMOTE_FILE_MANAGEMENT", "true"),
             );
             let message_id = {
@@ -141837,7 +141862,7 @@ pub mod tests {
         // Transport/listening-party empty-state routes.
         {
             let (state, _receiver) = test_state_with_env(
-                MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
             );
             let transports = super::route_http_request(
                 "GET",
@@ -141873,7 +141898,7 @@ pub mod tests {
         // HashDb paging routes.
         {
             let (state, _receiver) = test_state_with_env(
-                MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
             );
             let hash_by_size_empty = super::route_http_request(
                 "GET",
@@ -143075,7 +143100,7 @@ pub mod tests {
         }
 
         let (empty_state, _empty_receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
         for (route, expected_array) in [
             ("/api/v0/swarm/analytics/dashboard", false),
@@ -143102,7 +143127,7 @@ pub mod tests {
             .expect("swarm analytics runtime database");
         let (runtime_state, _runtime_receiver) = test_state_with_env_parts(
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                .with("SLSKR_CONTROLLER_PROFILE", target)
                 .with("SLSKR_PERSISTENCE_ENABLED", "true"),
             super::SearchStore::new(),
             Some(runtime_db.clone()),
@@ -143405,7 +143430,7 @@ pub mod tests {
         });
         let (state, _receiver) = test_state_with_env(
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                .with("SLSKR_CONTROLLER_PROFILE", target)
                 .with("SLSKR_SIGNAL_SYSTEM_ENABLED", "true")
                 .with("SLSKR_ADVANCED_NETWORKING_JSON", &advanced.to_string()),
         );
@@ -143565,7 +143590,7 @@ pub mod tests {
         });
         let (state, _receiver) = test_state_with_env(
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                .with("SLSKR_CONTROLLER_PROFILE", target)
                 .with("SLSKR_ADVANCED_NETWORKING_JSON", &advanced.to_string()),
         );
         let response =
@@ -143630,7 +143655,7 @@ pub mod tests {
         });
         let (state, _receiver) = test_state_with_env(
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                .with("SLSKR_CONTROLLER_PROFILE", target)
                 .with("SLSKR_ADVANCED_NETWORKING_JSON", &advanced.to_string()),
         );
         {
@@ -143711,7 +143736,7 @@ pub mod tests {
         });
         let (state, _receiver) = test_state_with_env(
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                .with("SLSKR_CONTROLLER_PROFILE", target)
                 .with("SLSKR_ADVANCED_NETWORKING_JSON", &advanced.to_string()),
         );
         {
@@ -147018,7 +147043,7 @@ pub mod tests {
         let persistence_env = || {
             MapEnv::default()
                 .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                .with("SLSKR_CONTROLLER_PROFILE", target)
         };
 
         macro_rules! record {
@@ -147547,7 +147572,7 @@ pub mod tests {
     }
 
     /// Bulk differential proof crediting 14 mediacore routes' cases,
-    /// independently re-derived from `mediacore_mutations_match_slskdn_
+    /// independently re-derived from `mediacore_mutations_match_native_
     /// validation_and_result_dtos`'s real fuzzy-match/perceptual-hash/
     /// portability/retrieval/stats contract checks. slskdN-only (confirmed
     /// against the frozen registry).
@@ -149048,7 +149073,7 @@ pub mod tests {
 
     /// Bulk differential proof crediting 34 GET routes'
     /// `missing-empty-or-conflict-state` cases, independently re-derived
-    /// from `materialized_controller_gets_match_slskdn_empty_state_
+    /// from `materialized_controller_gets_match_native_empty_state_
     /// contracts`'s real empty-state response-shape checks for
     /// nonexistent resources. slskdN-only (confirmed against the frozen
     /// registry).
@@ -149576,7 +149601,7 @@ pub mod tests {
     }
 
     /// Bulk differential proof crediting the remaining tail of
-    /// `openapi_mutation_dtos_match_slskdn_status_and_field_contracts`
+    /// `openapi_mutation_dtos_match_native_status_and_field_contracts`
     /// (everything after the Collections/CollectionItems lifecycle, which
     /// `controller_api_differential_collections_items_crud_reorder_
     /// lifecycle` already credits): mediacore content-id registration
@@ -151423,7 +151448,7 @@ pub mod tests {
 
     /// Bulk differential proof crediting the security/transports/status
     /// and listening-party routes' cases, independently re-derived from
-    /// `slskdn_versioned_extended_gets_match_empty_state_contracts`'s
+    /// `native_versioned_extended_gets_match_empty_state_contracts`'s
     /// real empty-state checks and `listening_party_requires_membership_
     /// and_reports_a_real_event`'s real membership-gated, forgery-
     /// resistant event lifecycle. slskdN-only (confirmed against the
@@ -151455,7 +151480,7 @@ pub mod tests {
         }
 
         let (empty_state, _empty_receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "native"),
         );
         let transports = super::route_http_request(
             "GET",
@@ -151912,7 +151937,7 @@ pub mod tests {
         let (runtime_state, _runtime_receiver) = test_state_with_env_parts(
             MapEnv::default()
                 .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                .with("SLSKR_CONTROLLER_PROFILE", target),
             super::SearchStore::new(),
             Some(runtime_db.clone()),
         );
@@ -151952,7 +151977,7 @@ pub mod tests {
         let (radio_runtime_state, _radio_runtime_receiver) = test_state_with_env_parts(
             MapEnv::default()
                 .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                .with("SLSKR_CONTROLLER_PROFILE", target),
             super::SearchStore::new(),
             Some(radio_runtime_db.clone()),
         );
@@ -152036,7 +152061,7 @@ pub mod tests {
         let (post_runtime_state, _post_runtime_receiver) = test_state_with_env_parts(
             MapEnv::default()
                 .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                .with("SLSKR_CONTROLLER_PROFILE", target),
             super::SearchStore::new(),
             Some(post_runtime_db.clone()),
         );
@@ -152521,7 +152546,7 @@ pub mod tests {
             .expect("ActivityPub runtime database");
         let (runtime_state, _runtime_receiver) = test_state_with_env_parts(
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                .with("SLSKR_CONTROLLER_PROFILE", target)
                 .with("FEDERATION_ENABLED", "true")
                 .with("FEDERATION_MODE", "Public")
                 .with("FEDERATION_DOMAIN", "social.example")
@@ -152904,7 +152929,7 @@ pub mod tests {
 
         let (state, _receiver) = test_state_with_env(
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                .with("SLSKR_CONTROLLER_PROFILE", target)
                 .with("SLSKR_SHARE_FIXTURE", ""),
         );
 
@@ -153156,7 +153181,7 @@ pub mod tests {
 
         let (slow_state, _slow_receiver) = test_state_with_env(
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                .with("SLSKR_CONTROLLER_PROFILE", target)
                 .with("SLSKR_SHARE_FIXTURE", ""),
         );
         let slow_queries = super::route_http_request(
@@ -153291,7 +153316,7 @@ pub mod tests {
 
     /// Bulk differential proof crediting 6 discovery-graph/opinions/
     /// contacts/searches routes' cases, independently re-derived from
-    /// `versioned_discovery_graph_and_opinions_match_slskdn_contracts`'s
+    /// `versioned_discovery_graph_and_opinions_match_native_contracts`'s
     /// real seed-graph, opinion-validation, and honest-404 checks.
     /// slskdN-only (confirmed against the frozen registry).
     #[cfg_attr(test, tokio::test)]
@@ -153616,7 +153641,7 @@ pub mod tests {
         let (summary_runtime_state, _summary_runtime_receiver) = test_state_with_env_parts(
             MapEnv::default()
                 .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                .with("SLSKR_CONTROLLER_PROFILE", target),
             super::SearchStore::new(),
             Some(summary_db.clone()),
         );
@@ -153644,7 +153669,7 @@ pub mod tests {
         let (list_runtime_state, _list_runtime_receiver) = test_state_with_env_parts(
             MapEnv::default()
                 .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                .with("SLSKR_CONTROLLER_PROFILE", target),
             super::SearchStore::new(),
             Some(list_db.clone()),
         );
@@ -153679,7 +153704,7 @@ pub mod tests {
         let (post_runtime_state, _post_runtime_receiver) = test_state_with_env_parts(
             MapEnv::default()
                 .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                .with("SLSKR_CONTROLLER_PROFILE", target),
             super::SearchStore::new(),
             Some(post_db.clone()),
         );
@@ -153767,7 +153792,7 @@ pub mod tests {
         let (delete_runtime_state, _delete_runtime_receiver) = test_state_with_env_parts(
             MapEnv::default()
                 .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                .with("SLSKR_CONTROLLER_PROFILE", target),
             super::SearchStore::new(),
             Some(delete_db.clone()),
         );
@@ -154006,7 +154031,7 @@ pub mod tests {
 
     /// Bulk differential proof crediting 13 miscellaneous deterministic
     /// mutation routes' cases, independently re-derived from
-    /// `deterministic_openapi_mutations_match_slskdn_status_and_dto_
+    /// `deterministic_openapi_mutations_match_native_status_and_dto_
     /// contracts`'s real DTO-shape and status-code checks spanning
     /// autoreplace, destinations, DHT, hashdb optimize, nowplaying,
     /// integrations, transfers, library-health, and overlay-blocklist.
@@ -154288,7 +154313,7 @@ pub mod tests {
 
     /// Bulk differential proof crediting the large table-driven validation
     /// block of `versioned_openapi_validation_and_large_dtos_match_
-    /// slskdn_contracts` (26 routes' rejection-path contracts: malformed
+    /// native_contracts` (26 routes' rejection-path contracts: malformed
     /// body, missing/conflicting resource state, and dependency-
     /// unavailable runtime failures). Independently re-derived from the
     /// same real request/response pairs. The remainder of that source
@@ -154533,7 +154558,7 @@ pub mod tests {
 
     /// Bulk differential proof crediting the large-DTO success-path
     /// remainder of `versioned_openapi_validation_and_large_dtos_match_
-    /// slskdn_contracts` (everything after the rejection-path table
+    /// native_contracts` (everything after the rejection-path table
     /// credited above): multisource/test, musicbrainz library-bloom
     /// preview, SongID run's full ~28-field DTO, taste-recommendations
     /// (+ its 3 sub-route validation guards), portforwarding start/stop
@@ -155033,7 +155058,7 @@ pub mod tests {
 
     /// Bulk differential proof crediting 10 auxiliary mutation routes'
     /// cases, independently re-derived from `versioned_auxiliary_
-    /// mutations_match_slskdn_status_and_dto_contracts`'s real status/DTO
+    /// mutations_match_native_status_and_dto_contracts`'s real status/DTO
     /// checks and `enabled_warm_cache_hints_normalize_persist_and_bound_
     /// popularity`'s real persisted-popularity-counter and input-bounds
     /// checks. slskdN-only (confirmed against the frozen registry;
@@ -155408,7 +155433,7 @@ pub mod tests {
 
     /// Bulk differential proof crediting 5 release-radar routes' cases,
     /// independently re-derived from `versioned_release_radar_matches_
-    /// slskdn_state_and_result_contracts`'s real SongID-confirmation
+    /// native_state_and_result_contracts`'s real SongID-confirmation
     /// gate, deduplication, and notification-routing checks. slskdN-only
     /// (confirmed against the frozen registry).
     #[cfg_attr(test, tokio::test)]
@@ -157429,7 +157454,7 @@ pub mod tests {
         feature = "bounded-controller-api-tests",
         feature = "bounded-controller-api-tests-2"
     ))]
-    async fn controller_api_differential_slskdn_ranking_contracts() {
+    async fn controller_api_differential_native_ranking_contracts() {
         let target = "slskdn";
         let mut ledger = Vec::new();
         let mut mismatches = Vec::new();
@@ -157453,7 +157478,7 @@ pub mod tests {
         }
 
         let env = MapEnv::default()
-            .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+            .with("SLSKR_CONTROLLER_PROFILE", target)
             .with("SLSKR_PERSISTENCE_ENABLED", "true");
         let db = super::persistence::DatabaseManager::in_memory()
             .await
@@ -157846,7 +157871,7 @@ pub mod tests {
             .join("controller-api");
         fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
         fs::write(
-            evidence_dir.join("slskdn_ranking_contracts.json"),
+            evidence_dir.join("native_ranking_contracts.json"),
             serde_json::to_string_pretty(&ledger).expect("serialize ranking ledger"),
         )
         .expect("write ranking ledger");
@@ -158346,7 +158371,7 @@ pub mod tests {
             }};
         }
 
-        let target_env = || MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target);
+        let target_env = || MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target);
         let json_value = |response: &super::routing::HttpResponse| {
             serde_json::from_str::<serde_json::Value>(&response.body)
                 .unwrap_or(serde_json::Value::Null)
@@ -159406,7 +159431,7 @@ pub mod tests {
         let normal_route = format!("/api/v0/streams/{encoded_content_id}/ticket");
         let stream_route = format!("/api/v0/streams/{encoded_content_id}");
         let normal_env = MapEnv::default()
-            .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+            .with("SLSKR_CONTROLLER_PROFILE", target)
             .with("SLSKR_AUTH_DISABLED", "false")
             .with("SLSKR_API_TOKEN", "differential-route-token");
         let normal_authorization = Some("Bearer differential-route-token");
@@ -159650,7 +159675,7 @@ pub mod tests {
         );
 
         let api_env = MapEnv::default()
-            .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+            .with("SLSKR_CONTROLLER_PROFILE", target)
             .with("SLSKR_AUTH_DISABLED", "false")
             .with("SLSKR_API_TOKEN", "differential-route-token");
         let (share_state, _share_receiver) = test_state_with_env(api_env.clone());
@@ -160354,7 +160379,7 @@ pub mod tests {
         let _ = restart_state.port_forwarding.stop(restart_port).await;
 
         let (stop_restart_state, _stop_restart_receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
         let stop_restart = super::route_http_request(
             "POST",
@@ -160404,7 +160429,7 @@ pub mod tests {
             .expect("port forwarding runtime read database");
         let (runtime_read_state, _runtime_read_receiver) = test_state_with_env_parts(
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                .with("SLSKR_CONTROLLER_PROFILE", target)
                 .with("SLSKR_PERSISTENCE_ENABLED", "true"),
             super::SearchStore::new(),
             Some(runtime_read_db.clone()),
@@ -161181,7 +161206,7 @@ pub mod tests {
         let (runtime_state, _runtime_receiver) = test_state_with_env_parts(
             MapEnv::default()
                 .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                .with("SLSKR_CONTROLLER_PROFILE", target),
             super::SearchStore::new(),
             Some(runtime_db.clone()),
         );
@@ -166228,7 +166253,7 @@ pub mod tests {
     ))]
     async fn controller_api_differential_soulseek_discovery_residuals() {
         let target = "slskdn";
-        let base_env = MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target);
+        let base_env = MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target);
         let mut ledger = Vec::new();
         let mut mismatches = Vec::new();
 
@@ -167087,7 +167112,7 @@ pub mod tests {
     ))]
     async fn controller_api_differential_multisource_residuals() {
         let target = "slskdn";
-        let base_env = MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target);
+        let base_env = MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target);
         let mut ledger = Vec::new();
         let mut mismatches = Vec::new();
 
@@ -168596,7 +168621,7 @@ pub mod tests {
     }
 
     /// Bulk differential proof crediting 2 user-group routes' cases,
-    /// independently re-derived from `slskdn_user_group_projects_
+    /// independently re-derived from `native_user_group_projects_
     /// transfer_group_memberships_and_live_user_classification`'s real
     /// blacklist-before-privileged precedence (a blacklisted user stays
     /// blacklisted even if the Soulseek server also reports them as
@@ -168634,7 +168659,7 @@ pub mod tests {
 
         let (state, _receiver) = test_state_with_env(
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn")
+                .with("SLSKR_CONTROLLER_PROFILE", "native")
                 .with(
                     "SLSKR_FROZEN_TRANSFER_GROUPS_JSON",
                     r#"{"leechers":{"thresholds":{"files":2,"directories":2}},"blacklisted":{"members":["differential-blocked"]},"user_defined":{"trusted":{"upload":{"priority":10},"members":["differential-friend"]}}}"#,
@@ -170682,7 +170707,7 @@ pub mod tests {
             }};
         }
 
-        let target_env = || MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target);
+        let target_env = || MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target);
         let json_value = |response: &super::routing::HttpResponse| {
             serde_json::from_str::<serde_json::Value>(&response.body)
                 .unwrap_or(serde_json::Value::Null)
@@ -172782,7 +172807,7 @@ pub mod tests {
         feature = "bounded-controller-api-tests",
         feature = "bounded-controller-api-tests-3"
     ))]
-    async fn controller_api_differential_slskdn_nowplaying_webhook_contracts() {
+    async fn controller_api_differential_native_nowplaying_webhook_contracts() {
         let target = "slskdn";
         let mut ledger = Vec::new();
         let mut mismatches = Vec::new();
@@ -172807,7 +172832,7 @@ pub mod tests {
             }};
         }
 
-        let env = || MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target);
+        let env = || MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target);
         let (state, _receiver) = test_state_with_env(env());
 
         let malformed_get =
@@ -173059,7 +173084,7 @@ pub mod tests {
             .join("controller-api");
         fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
         fs::write(
-            evidence_dir.join("slskdn_nowplaying_webhook_contracts.json"),
+            evidence_dir.join("native_nowplaying_webhook_contracts.json"),
             serde_json::to_string_pretty(&ledger)
                 .expect("serialize slskdn now-playing webhook ledger"),
         )
@@ -174229,7 +174254,7 @@ pub mod tests {
     /// Turtle profile document via a local fixture server --
     /// independently re-derived from `solid_client_id_document_is_
     /// anonymous_and_uses_configured_origin`, `versioned_solid_
-    /// resolution_uses_slskdn_problem_details`, and `solid_webid_
+    /// resolution_uses_native_problem_details`, and `solid_webid_
     /// route_extracts_oidc_issuers_from_profile` with fresh fixture
     /// data. Confirmed against `/tmp/slskr-parity-evidence/
     /// controller-api/*.json` before writing: neither route had any
@@ -175514,7 +175539,7 @@ pub mod tests {
 
         let (disabled_state, _receiver) = test_state_with_env(
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                .with("SLSKR_CONTROLLER_PROFILE", target)
                 .with("SLSKR_VIRTUAL_SOULFIND_V2_ENABLED", "false"),
         );
         for path in ["/api/source-providers", "/api/v0/source-providers"] {
@@ -175565,7 +175590,7 @@ pub mod tests {
 
         let (enabled_state, _receiver) = test_state_with_env(
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                .with("SLSKR_CONTROLLER_PROFILE", target)
                 .with("SLSKR_VIRTUAL_SOULFIND_V2_ENABLED", "true"),
         );
         let enabled =
@@ -175687,7 +175712,7 @@ pub mod tests {
 
         let env = || {
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                .with("SLSKR_CONTROLLER_PROFILE", target)
                 .with("SLSKR_VIRTUAL_SOULFIND_V2_ENABLED", "false")
         };
         let (state, _receiver) = test_state_with_env(env());
@@ -175769,7 +175794,7 @@ pub mod tests {
     async fn controller_api_differential_versioned_soulseek_recommendations() {
         let target = "slskdn";
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
         let expected = serde_json::json!({
             "recommendations": [],
@@ -175828,7 +175853,7 @@ pub mod tests {
     async fn controller_api_differential_versioned_soulseek_item_discovery() {
         let target = "slskdn";
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
         let cases = [
             (
@@ -175897,7 +175922,7 @@ pub mod tests {
     async fn controller_api_differential_versioned_soulseek_similar_users() {
         let target = "slskdn";
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
         let response =
             super::route_http_request("GET", "/api/v0/soulseek/users/similar", None, "", &state)
@@ -175943,7 +175968,7 @@ pub mod tests {
     async fn controller_api_differential_versioned_autoreplace_status() {
         let target = "slskdn";
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
         let response = super::route_http_request("GET", "/api/v0/autoreplace", None, "", &state)
             .await
@@ -175995,7 +176020,7 @@ pub mod tests {
     async fn controller_api_differential_versioned_autoreplace_populated_state() {
         let target = "slskdn";
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
         let enabled =
             super::route_http_request("PUT", "/api/v0/autoreplace/enable", None, "", &state)
@@ -176044,7 +176069,7 @@ pub mod tests {
         feature = "bounded-controller-api-tests",
         feature = "bounded-controller-api-tests-3"
     ))]
-    async fn controller_api_differential_slskdn_autoreplace_edge_contracts() {
+    async fn controller_api_differential_native_autoreplace_edge_contracts() {
         let target = "slskdn";
         let mut ledger = Vec::new();
         let mut mismatches = Vec::new();
@@ -176078,7 +176103,7 @@ pub mod tests {
                     })
         }
 
-        let env = || MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target);
+        let env = || MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target);
         let (state, _receiver) = test_state_with_env(env());
         let malformed_status = super::route_http_request(
             "GET",
@@ -176350,7 +176375,7 @@ pub mod tests {
             .join("controller-api");
         fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
         fs::write(
-            evidence_dir.join("slskdn_autoreplace_edge_contracts.json"),
+            evidence_dir.join("native_autoreplace_edge_contracts.json"),
             serde_json::to_string_pretty(&ledger)
                 .expect("serialize slskdn auto-replace edge ledger"),
         )
@@ -176373,7 +176398,7 @@ pub mod tests {
         feature = "bounded-controller-api-tests",
         feature = "bounded-controller-api-tests-3"
     ))]
-    async fn controller_api_differential_slskdn_options_edge_contracts() {
+    async fn controller_api_differential_native_options_edge_contracts() {
         let target = "slskdn";
         let mut ledger = Vec::new();
         let mut mismatches = Vec::new();
@@ -176407,7 +176432,7 @@ pub mod tests {
 
         let env = || {
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                .with("SLSKR_CONTROLLER_PROFILE", target)
                 .with("SLSKR_REMOTE_CONFIGURATION", "true")
                 .with("SLSKR_DEBUG", "true")
                 .with("SLSKR_NO_CONFIG_WATCH", "true")
@@ -176560,7 +176585,7 @@ pub mod tests {
                 "SLSKR_STATE_DIR",
                 validation_state.config.state_dir.to_str().unwrap(),
             )
-            .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target);
+            .with("SLSKR_CONTROLLER_PROFILE", target);
         let reloaded = super::AppConfig::from_layers(None, FileConfig::default(), &reload_env)
             .expect("reload options validation state");
         record!(
@@ -176690,7 +176715,7 @@ pub mod tests {
             .join("controller-api");
         fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
         fs::write(
-            evidence_dir.join("slskdn_options_edge_contracts.json"),
+            evidence_dir.join("native_options_edge_contracts.json"),
             serde_json::to_string_pretty(&ledger).expect("serialize slskdn options edge ledger"),
         )
         .expect("write slskdn options edge ledger");
@@ -176712,7 +176737,7 @@ pub mod tests {
         feature = "bounded-controller-api-tests",
         feature = "bounded-controller-api-tests-3"
     ))]
-    async fn controller_api_differential_slskdn_events_edge_contracts() {
+    async fn controller_api_differential_native_events_edge_contracts() {
         let target = "slskdn";
         let mut ledger = Vec::new();
         let mut mismatches = Vec::new();
@@ -176734,7 +176759,7 @@ pub mod tests {
 
         let env = || {
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                .with("SLSKR_CONTROLLER_PROFILE", target)
                 .with("SLSKR_PERSISTENCE_ENABLED", "true")
         };
         let db = super::persistence::DatabaseManager::in_memory()
@@ -176854,7 +176879,7 @@ pub mod tests {
             persisted
                 .iter()
                 .any(|event| event.detail.as_deref() == Some("event-a"))
-                && rehydrated.slskd_json(None).contains("event-a")
+                && rehydrated.controller_json(None).contains("event-a")
         );
 
         let concurrent_responses = futures_util::future::join_all([
@@ -176944,7 +176969,7 @@ pub mod tests {
             .join("controller-api");
         fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
         fs::write(
-            evidence_dir.join("slskdn_events_edge_contracts.json"),
+            evidence_dir.join("native_events_edge_contracts.json"),
             serde_json::to_string_pretty(&ledger).expect("serialize slskdn events edge ledger"),
         )
         .expect("write slskdn events edge ledger");
@@ -177012,7 +177037,7 @@ pub mod tests {
         });
         let (state, _receiver) = test_state_with_env(
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                .with("SLSKR_CONTROLLER_PROFILE", target)
                 .with("SLSKR_ADVANCED_NETWORKING_JSON", &advanced.to_string()),
         );
 
@@ -177123,7 +177148,7 @@ pub mod tests {
             }};
         }
 
-        let env = || MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target);
+        let env = || MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target);
         let (state, _receiver) = test_state_with_env(env());
         for route in ["/api/v0/signals/config", "/api/v0/signals/status"] {
             let malformed =
@@ -177622,7 +177647,7 @@ pub mod tests {
             }};
         }
 
-        let env = || MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target);
+        let env = || MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target);
         let (state, _receiver) = test_state_with_env(env());
         {
             let mut browse = state.browse.write().await;
@@ -177760,8 +177785,8 @@ pub mod tests {
     /// genuinely performed and readback-confirmed, and a base64-
     /// decoded path-traversal attempt is rejected) -- independently
     /// re-derived from `build_info_uses_app_version_not_protocol_
-    /// version`, `slskd_file_delete_routes_are_forbidden_by_default`,
-    /// and `slskd_file_delete_routes_are_scoped_to_storage_roots` with
+    /// version`, `controller_file_delete_routes_are_forbidden_by_default`,
+    /// and `controller_file_delete_routes_are_scoped_to_storage_roots` with
     /// fresh fixture data. Confirmed against `/tmp/slskr-parity-
     /// evidence/controller-api/*.json` before writing, per case: zero
     /// prior credit on either route. slskdN-only (confirmed against
@@ -177941,7 +177966,7 @@ pub mod tests {
         }
 
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
 
         let version =
@@ -178084,7 +178109,7 @@ pub mod tests {
         }
 
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
 
         let bridge_config = super::route_http_request(
@@ -178175,7 +178200,7 @@ pub mod tests {
         }
 
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
         {
             let mut session = state.session.write().await;
@@ -178277,7 +178302,7 @@ pub mod tests {
         }
 
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
         state
             .mesh
@@ -178372,7 +178397,7 @@ pub mod tests {
     async fn controller_api_differential_versioned_capability_peers_nominal() {
         let target = "slskdn";
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
         let response =
             super::route_http_request("GET", "/api/v0/capabilities/peers", None, "", &state)
@@ -178420,7 +178445,7 @@ pub mod tests {
         feature = "bounded-controller-api-tests",
         feature = "bounded-controller-api-tests-3"
     ))]
-    async fn controller_api_differential_slskdn_capabilities_contracts() {
+    async fn controller_api_differential_native_capabilities_contracts() {
         let target = "slskdn";
         let mut ledger = Vec::new();
         let mut mismatches = Vec::new();
@@ -178454,7 +178479,7 @@ pub mod tests {
             response.status == "200 OK"
                 && response.content_type.starts_with("application/json")
                 && value["version"] == "slskdn/1.0.0+dht+mesh+swarm"
-                && value["tag"] == "slskdn_caps:v1;dht=1;mesh=1;swarm=1;hashx=1;flacdb=1"
+                && value["tag"] == "slskr_caps:v1;dht=1;mesh=1;swarm=1;hashx=1;flacdb=1"
                 && capability_file["client"] == "slskdn"
                 && capability_file["version"] == "1.0.0"
                 && capability_file["capabilities"] == 63
@@ -178468,7 +178493,7 @@ pub mod tests {
         };
 
         let (root_state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
         let malformed_root =
             super::route_http_request("GET", "/api/v0/capabilities/extra", None, "", &root_state)
@@ -178496,7 +178521,7 @@ pub mod tests {
             .await
             .expect("capabilities runtime database");
         let (runtime_root_state, _receiver) = test_state_with_env_parts(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
             super::SearchStore::new(),
             Some(db.clone()),
         );
@@ -178513,7 +178538,7 @@ pub mod tests {
         );
 
         let (populated_state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
         populated_state
             .mesh
@@ -178570,7 +178595,7 @@ pub mod tests {
             .await
             .expect("mesh-peer runtime database");
         let (runtime_mesh_state, _receiver) = test_state_with_env_parts(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
             super::SearchStore::new(),
             Some(db.clone()),
         );
@@ -178621,7 +178646,7 @@ pub mod tests {
             .await
             .expect("capability-peer runtime database");
         let (runtime_peers_state, _receiver) = test_state_with_env_parts(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
             super::SearchStore::new(),
             Some(db.clone()),
         );
@@ -178718,7 +178743,7 @@ pub mod tests {
             .await
             .expect("capability-peer detail runtime database");
         let (runtime_peer_state, _receiver) = test_state_with_env_parts(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
             super::SearchStore::new(),
             Some(db.clone()),
         );
@@ -178749,7 +178774,7 @@ pub mod tests {
         );
 
         let parse_body =
-            r#"{"description":" slskdn_caps:v7;dht=1;mesh=1;swarm=1;hashx=1;flacdb=1 "}"#;
+            r#"{"description":" slskr_caps:v7;dht=1;mesh=1;swarm=1;hashx=1;flacdb=1 "}"#;
         let parsed = super::route_http_request(
             "POST",
             "/api/v0/capabilities/parse",
@@ -178809,7 +178834,7 @@ pub mod tests {
             .await
             .expect("capabilities parse runtime database");
         let (runtime_parse_state, _receiver) = test_state_with_env_parts(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
             super::SearchStore::new(),
             Some(db.clone()),
         );
@@ -178861,7 +178886,7 @@ pub mod tests {
         );
 
         let (restart_state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
         let restart_parse = super::route_http_request(
             "POST",
@@ -178873,7 +178898,7 @@ pub mod tests {
         .await
         .expect("capability parse before restart check");
         let (restarted_state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
         let restarted_peers = super::route_http_request(
             "GET",
@@ -178922,7 +178947,7 @@ pub mod tests {
             .join("controller-api");
         fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
         fs::write(
-            evidence_dir.join("slskdn_capabilities_contracts.json"),
+            evidence_dir.join("native_capabilities_contracts.json"),
             serde_json::to_string_pretty(&ledger).expect("serialize capabilities ledger"),
         )
         .expect("write capabilities ledger");
@@ -178943,7 +178968,7 @@ pub mod tests {
         feature = "bounded-controller-api-tests",
         feature = "bounded-controller-api-tests-3"
     ))]
-    async fn controller_api_differential_slskdn_profile_contracts() {
+    async fn controller_api_differential_native_profile_contracts() {
         let target = "slskdn";
         let mut ledger = Vec::new();
         let mut mismatches = Vec::new();
@@ -179020,7 +179045,7 @@ pub mod tests {
         let update_body = r#"{"displayName":" Updated Profile ","avatar":" avatar.png ","capabilities":7,"endpoints":[{"type":"Direct","address":"https://profile.example","priority":1},{"type":" ","address":"","priority":2}]}"#;
 
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
         let me = super::route_http_request("GET", "/api/v0/profile/me", None, "", &state)
             .await
@@ -179116,7 +179141,7 @@ pub mod tests {
             .await
             .expect("profile runtime database");
         let (runtime_state, _receiver) = test_state_with_env_parts(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
             super::SearchStore::new(),
             Some(db.clone()),
         );
@@ -179173,7 +179198,7 @@ pub mod tests {
             valid_invite(&empty_invite)
         );
         let (restart_state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
         let restarted_invite = super::route_http_request(
             "POST",
@@ -179235,7 +179260,7 @@ pub mod tests {
             .await
             .expect("profile update runtime database");
         let (runtime_update_state, _receiver) = test_state_with_env_parts(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
             super::SearchStore::new(),
             Some(db.clone()),
         );
@@ -179294,7 +179319,7 @@ pub mod tests {
             .join("controller-api");
         fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
         fs::write(
-            evidence_dir.join("slskdn_profile_contracts.json"),
+            evidence_dir.join("native_profile_contracts.json"),
             serde_json::to_string_pretty(&ledger).expect("serialize profile ledger"),
         )
         .expect("write profile ledger");
@@ -179318,7 +179343,7 @@ pub mod tests {
     async fn controller_api_differential_versioned_destinations_nominal() {
         let target = "slskdn";
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
         let expected_default = serde_json::json!({
             "name": "Downloads",
@@ -179383,7 +179408,7 @@ pub mod tests {
     async fn controller_api_differential_versioned_backfill_candidates_nominal() {
         let target = "slskdn";
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
         let response =
             super::route_http_request("GET", "/api/v0/backfill/candidates", None, "", &state)
@@ -179433,7 +179458,7 @@ pub mod tests {
     async fn controller_api_differential_versioned_multisource_jobs_nominal() {
         let target = "slskdn";
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
         let response =
             super::route_http_request("GET", "/api/v0/multisource/jobs", None, "", &state)
@@ -179483,7 +179508,7 @@ pub mod tests {
     async fn controller_api_differential_versioned_swarm_trends_nominal() {
         let target = "slskdn";
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
         let response =
             super::route_http_request("GET", "/api/v0/swarm/analytics/trends", None, "", &state)
@@ -179537,7 +179562,7 @@ pub mod tests {
     async fn controller_api_differential_versioned_swarm_dashboard_nominal() {
         let target = "slskdn";
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
         let response =
             super::route_http_request("GET", "/api/v0/swarm/analytics/dashboard", None, "", &state)
@@ -179641,7 +179666,7 @@ pub mod tests {
     async fn controller_api_differential_versioned_transfer_history_nominal() {
         let target = "slskdn";
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
         let response = super::route_http_request(
             "GET",
@@ -179698,7 +179723,7 @@ pub mod tests {
     async fn controller_api_differential_versioned_transfer_empty_lists_nominal() {
         let target = "slskdn";
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
         let mut ledger = Vec::new();
         let mut mismatches = Vec::new();
@@ -179756,7 +179781,7 @@ pub mod tests {
     async fn controller_api_differential_versioned_transfer_changes_nominal() {
         let target = "slskdn";
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
         let response =
             super::route_http_request("GET", "/api/v0/transfers/changes", None, "", &state)
@@ -179805,7 +179830,7 @@ pub mod tests {
     async fn controller_api_differential_versioned_transfer_summary_nominal() {
         let target = "slskdn";
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
         let response = super::route_http_request(
             "GET",
@@ -179860,7 +179885,7 @@ pub mod tests {
     async fn controller_api_differential_versioned_transfer_histogram_nominal() {
         let target = "slskdn";
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
         let response = super::route_http_request(
             "GET",
@@ -179918,7 +179943,7 @@ pub mod tests {
     async fn controller_api_differential_versioned_transfer_reports_populated_state() {
         let target = "slskdn";
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
         {
             let mut transfers = state.transfers.write().await;
@@ -180063,7 +180088,7 @@ pub mod tests {
         }
 
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
         let root = std::env::temp_dir().join(format!(
             "slskr-destination-populated-{}",
@@ -180157,7 +180182,7 @@ pub mod tests {
         feature = "bounded-controller-api-tests",
         feature = "bounded-controller-api-tests-3"
     ))]
-    async fn controller_api_differential_slskdn_destinations_edge_contracts() {
+    async fn controller_api_differential_native_destinations_edge_contracts() {
         let target = "slskdn";
         let mut ledger = Vec::new();
         let mut mismatches = Vec::new();
@@ -180189,7 +180214,7 @@ pub mod tests {
         fs::create_dir_all(&root).expect("create destination edge root");
         let env = || {
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                .with("SLSKR_CONTROLLER_PROFILE", target)
                 .with("SLSKR_DOWNLOADS_DIR", &root.display().to_string())
         };
         let (state, _receiver) = test_state_with_env(env());
@@ -180422,7 +180447,7 @@ pub mod tests {
             .join("controller-api");
         fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
         fs::write(
-            evidence_dir.join("slskdn_destinations_edge_contracts.json"),
+            evidence_dir.join("native_destinations_edge_contracts.json"),
             serde_json::to_string_pretty(&ledger)
                 .expect("serialize slskdn destinations edge ledger"),
         )
@@ -181214,7 +181239,7 @@ pub mod tests {
         let persistence_env = || {
             MapEnv::default()
                 .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                .with("SLSKR_CONTROLLER_PROFILE", target)
         };
 
         macro_rules! record {
@@ -182118,7 +182143,7 @@ pub mod tests {
         {
             let (state, _receiver) = test_state_with_env(
                 MapEnv::default()
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                    .with("SLSKR_CONTROLLER_PROFILE", target)
                     .with("SLSKR_REMOTE_CONFIGURATION", "true"),
             );
             let response = super::route_http_request("GET", "/api/v0/options", None, "", &state)
@@ -182141,7 +182166,7 @@ pub mod tests {
         {
             let (state, _receiver) = test_state_with_env(
                 MapEnv::default()
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                    .with("SLSKR_CONTROLLER_PROFILE", target)
                     .with("SLSKR_REMOTE_CONFIGURATION", "true"),
             );
             let patched = super::route_http_request(
@@ -182174,7 +182199,7 @@ pub mod tests {
         {
             let (state, _receiver) = test_state_with_env(
                 MapEnv::default()
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                    .with("SLSKR_CONTROLLER_PROFILE", target)
                     .with("SLSKR_REMOTE_CONFIGURATION", "true"),
             );
             let response = super::route_http_request(
@@ -182203,7 +182228,7 @@ pub mod tests {
 
         {
             let env = MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                .with("SLSKR_CONTROLLER_PROFILE", target)
                 .with("SLSKR_REMOTE_CONFIGURATION", "true");
             let (state, _receiver) = test_state_with_env(env.clone());
             let baseline = super::route_http_request("GET", "/api/v0/options", None, "", &state)
@@ -182241,7 +182266,7 @@ pub mod tests {
         {
             let (state, _receiver) = test_state_with_env(
                 MapEnv::default()
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                    .with("SLSKR_CONTROLLER_PROFILE", target)
                     .with("SLSKR_REMOTE_CONFIGURATION", "true"),
             );
             let ports = [50320_u64, 50321, 50322, 50323];
@@ -182275,7 +182300,7 @@ pub mod tests {
         {
             let (state, _receiver) = test_state_with_env(
                 MapEnv::default()
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                    .with("SLSKR_CONTROLLER_PROFILE", target)
                     .with("SLSKR_REMOTE_CONFIGURATION", "true"),
             );
             *state
@@ -182580,7 +182605,7 @@ pub mod tests {
             .expect("write differential listening-party fixture");
             let (state, _receiver) = test_state_with_env(
                 MapEnv::default()
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn")
+                    .with("SLSKR_CONTROLLER_PROFILE", "native")
                     .with("SLSKR_SHARE_FIXTURE", "")
                     .with("SLSKR_SHARE_DIRS", &root.display().to_string()),
             );
@@ -182663,10 +182688,10 @@ pub mod tests {
     /// inbound/{*targetContentId}`'s real empty-inbound-links shape
     /// for a missing content id (the one genuinely uncredited route
     /// out of the 17-route `materialized_controller_gets_match_
-    /// slskdn_empty_state_contracts` table, independently re-derived
+    /// native_empty_state_contracts` table, independently re-derived
     /// with a fresh path), and `PUT /api/v0/security/adversarial`'s
     /// real target-YAML persistence and KV-store readback
-    /// (independently re-derived from `slskdn_adversarial_put_
+    /// (independently re-derived from `native_adversarial_put_
     /// persists_and_accepts_target_yaml`: the on-disk YAML is genuinely
     /// updated, remains reloadable, and the settings are readable back
     /// from the real controller-features store). Confirmed against
@@ -182702,7 +182727,7 @@ pub mod tests {
         {
             let (state, _receiver) = test_state_with_env(
                 MapEnv::default()
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn")
+                    .with("SLSKR_CONTROLLER_PROFILE", "native")
                     .with("SLSKD_VPN", "true")
                     .with("SLSKD_VPN_GLUETUN_URL", "http://127.0.0.1:8000"),
             );
@@ -182815,7 +182840,7 @@ pub mod tests {
         {
             let (state, _receiver) = test_state_with_env(
                 MapEnv::default()
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn")
+                    .with("SLSKR_CONTROLLER_PROFILE", "native")
                     .with("SLSKR_REMOTE_CONFIGURATION", "true"),
             );
             fs::write(
@@ -182881,8 +182906,8 @@ pub mod tests {
     /// Bulk differential proof crediting `GET /api/v0/files/downloads/
     /// directories`'s real unknown-query-parameter tolerance and real
     /// recursive-listing truncation budget (independently re-derived
-    /// from `slskd_storage_directory_routes_ignore_unknown_pagination_
-    /// parameters` and `slskd_recursive_storage_listing_has_lower_
+    /// from `controller_storage_directory_routes_ignore_unknown_pagination_
+    /// parameters` and `controller_recursive_storage_listing_has_lower_
     /// budget`: unknown `limit`/`offset` params are genuinely ignored
     /// rather than applied, and a 300-file recursive listing is
     /// genuinely truncated to the real `SLSKD_STORAGE_RECURSIVE_LIST_
@@ -182901,7 +182926,7 @@ pub mod tests {
     /// out to be a real, working slskR-internal handler with NO
     /// registered route in either frozen oracle -- confirmed by
     /// regenerating both route registries fresh rather than trusting
-    /// this session's now-stale `/tmp/slskdn_routes.json` snapshot, so
+    /// this session's now-stale `/tmp/native_routes.json` snapshot, so
     /// it was dropped rather than credited.) slskdN-only (confirmed
     /// against the frozen registry).
     #[cfg_attr(test, tokio::test)]
@@ -182994,7 +183019,7 @@ pub mod tests {
         {
             let (state, _receiver) = test_state_with_env(
                 MapEnv::default()
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn")
+                    .with("SLSKR_CONTROLLER_PROFILE", "native")
                     .with("SLSKR_AUTH_DISABLED", "true"),
             );
             let response = super::route_http_request("GET", "/api/v0/server", None, "", &state)
@@ -183507,7 +183532,7 @@ pub mod tests {
     /// redacts a configured Spotify client secret while driving a real
     /// runtime reconnect-pending flag), `GET /api/v0/dht/status`'s
     /// real dynamic reflection of a watched YAML config change
-    /// (independently re-derived from `watched_slskdn_dht_updates_
+    /// (independently re-derived from `watched_native_dht_updates_
     /// current_options_but_retains_startup_socket_settings`: DHT is
     /// genuinely disabled after a real watched-config apply, not a
     /// canned response), and 4 routes from `bridge_projections_
@@ -183549,7 +183574,7 @@ pub mod tests {
             let (state, _receiver) = test_state_with_env(
                 MapEnv::default()
                     .with("SLSKR_REMOTE_CONFIGURATION", "true")
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+                    .with("SLSKR_CONTROLLER_PROFILE", "native"),
             );
             let mut pass = true;
             for body in ["null", "[]"] {
@@ -183574,7 +183599,7 @@ pub mod tests {
             let (state, _receiver) = test_state_with_env(
                 MapEnv::default()
                     .with("SLSKR_REMOTE_CONFIGURATION", "true")
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+                    .with("SLSKR_CONTROLLER_PROFILE", "native"),
             );
             state.session.write().await.state = "connected";
             let response = super::route_http_request(
@@ -183602,7 +183627,7 @@ pub mod tests {
 
         {
             let (state, _receiver) = test_state_with_env(
-                MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+                MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "native"),
             );
             let baseline = super::route_http_request("GET", "/api/v0/dht/status", None, "", &state)
                 .await
@@ -183863,7 +183888,7 @@ pub mod tests {
             let (state, _receiver) = test_state_with_env_parts(
                 MapEnv::default()
                     .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                    .with("SLSKR_CONTROLLER_PROFILE", target),
                 super::SearchStore::new(),
                 Some(db.clone()),
             );
@@ -183942,7 +183967,7 @@ pub mod tests {
             let (state, _receiver) = test_state_with_env_parts(
                 MapEnv::default()
                     .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                    .with("SLSKR_CONTROLLER_PROFILE", target),
                 super::SearchStore::new(),
                 Some(db.clone()),
             );
@@ -184001,7 +184026,7 @@ pub mod tests {
             let (state, _receiver) = test_state_with_env_parts(
                 MapEnv::default()
                     .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                    .with("SLSKR_CONTROLLER_PROFILE", target),
                 super::SearchStore::new(),
                 Some(db.clone()),
             );
@@ -184060,7 +184085,7 @@ pub mod tests {
             let (state, _receiver) = test_state_with_env_parts(
                 MapEnv::default()
                     .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                    .with("SLSKR_CONTROLLER_PROFILE", target),
                 super::SearchStore::new(),
                 Some(db.clone()),
             );
@@ -184119,7 +184144,7 @@ pub mod tests {
             let (state, _receiver) = test_state_with_env_parts(
                 MapEnv::default()
                     .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                    .with("SLSKR_CONTROLLER_PROFILE", target),
                 super::SearchStore::new(),
                 Some(db.clone()),
             );
@@ -184191,7 +184216,7 @@ pub mod tests {
             let (state, _receiver) = test_state_with_env_parts(
                 MapEnv::default()
                     .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                    .with("SLSKR_CONTROLLER_PROFILE", target),
                 super::SearchStore::new(),
                 Some(db.clone()),
             );
@@ -184346,7 +184371,7 @@ pub mod tests {
             let (state, mut receiver) = test_state_with_env_parts(
                 MapEnv::default()
                     .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                    .with("SLSKR_CONTROLLER_PROFILE", target),
                 super::SearchStore::new(),
                 Some(db.clone()),
             );
@@ -184433,7 +184458,7 @@ pub mod tests {
             let (state, _receiver) = test_state_with_env_parts(
                 MapEnv::default()
                     .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                    .with("SLSKR_CONTROLLER_PROFILE", target),
                 super::SearchStore::new(),
                 Some(db.clone()),
             );
@@ -184763,7 +184788,7 @@ pub mod tests {
             let (state, _receiver) = test_state_with_env_parts(
                 MapEnv::default()
                     .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                    .with("SLSKR_CONTROLLER_PROFILE", target),
                 super::SearchStore::new(),
                 Some(db.clone()),
             );
@@ -184801,7 +184826,7 @@ pub mod tests {
             let (state, _receiver) = test_state_with_env_parts(
                 MapEnv::default()
                     .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                    .with("SLSKR_CONTROLLER_PROFILE", target),
                 super::SearchStore::new(),
                 Some(db.clone()),
             );
@@ -184861,7 +184886,7 @@ pub mod tests {
             let (state, _receiver) = test_state_with_env_parts(
                 MapEnv::default()
                     .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                    .with("SLSKR_CONTROLLER_PROFILE", target),
                 super::SearchStore::new(),
                 Some(db.clone()),
             );
@@ -184905,7 +184930,7 @@ pub mod tests {
             let (state, _receiver) = test_state_with_env_parts(
                 MapEnv::default()
                     .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                    .with("SLSKR_CONTROLLER_PROFILE", target),
                 super::SearchStore::new(),
                 Some(db.clone()),
             );
@@ -184949,7 +184974,7 @@ pub mod tests {
             let (state, _receiver) = test_state_with_env_parts(
                 MapEnv::default()
                     .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                    .with("SLSKR_CONTROLLER_PROFILE", target),
                 super::SearchStore::new(),
                 Some(db.clone()),
             );
@@ -185006,7 +185031,7 @@ pub mod tests {
             let (state, _receiver) = test_state_with_env_parts(
                 MapEnv::default()
                     .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                    .with("SLSKR_CONTROLLER_PROFILE", target),
                 super::SearchStore::new(),
                 Some(db.clone()),
             );
@@ -185072,7 +185097,7 @@ pub mod tests {
             let (state, _receiver) = test_state_with_env_parts(
                 MapEnv::default()
                     .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                    .with("SLSKR_CONTROLLER_PROFILE", target),
                 super::SearchStore::new(),
                 Some(db.clone()),
             );
@@ -185148,7 +185173,7 @@ pub mod tests {
             let (state, _receiver) = test_state_with_env_parts(
                 MapEnv::default()
                     .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                    .with("SLSKR_CONTROLLER_PROFILE", target),
                 super::SearchStore::new(),
                 Some(db.clone()),
             );
@@ -185214,7 +185239,7 @@ pub mod tests {
                 let (state, _receiver) = test_state_with_env_parts(
                     MapEnv::default()
                         .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                        .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                        .with("SLSKR_CONTROLLER_PROFILE", target),
                     super::SearchStore::new(),
                     Some(db.clone()),
                 );
@@ -185257,7 +185282,7 @@ pub mod tests {
                 let (state, _receiver) = test_state_with_env_parts(
                     MapEnv::default()
                         .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                        .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                        .with("SLSKR_CONTROLLER_PROFILE", target),
                     super::SearchStore::new(),
                     Some(db.clone()),
                 );
@@ -185304,7 +185329,7 @@ pub mod tests {
                 let (state, _receiver) = test_state_with_env_parts(
                     MapEnv::default()
                         .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                        .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                        .with("SLSKR_CONTROLLER_PROFILE", target),
                     super::SearchStore::new(),
                     Some(db.clone()),
                 );
@@ -185422,7 +185447,7 @@ pub mod tests {
             let (state, _receiver) = test_state_with_env_parts(
                 MapEnv::default()
                     .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                    .with("SLSKR_CONTROLLER_PROFILE", target),
                 super::SearchStore::new(),
                 Some(db.clone()),
             );
@@ -185460,7 +185485,7 @@ pub mod tests {
             let (state, _receiver) = test_state_with_env_parts(
                 MapEnv::default()
                     .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                    .with("SLSKR_CONTROLLER_PROFILE", target),
                 super::SearchStore::new(),
                 Some(db.clone()),
             );
@@ -185511,7 +185536,7 @@ pub mod tests {
             let (state, _receiver) = test_state_with_env_parts(
                 MapEnv::default()
                     .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                    .with("SLSKR_CONTROLLER_PROFILE", target),
                 super::SearchStore::new(),
                 Some(db.clone()),
             );
@@ -185549,7 +185574,7 @@ pub mod tests {
             let (state, _receiver) = test_state_with_env_parts(
                 MapEnv::default()
                     .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                    .with("SLSKR_CONTROLLER_PROFILE", target),
                 super::SearchStore::new(),
                 Some(db.clone()),
             );
@@ -185587,7 +185612,7 @@ pub mod tests {
             let (state, _receiver) = test_state_with_env_parts(
                 MapEnv::default()
                     .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                    .with("SLSKR_CONTROLLER_PROFILE", target),
                 super::SearchStore::new(),
                 Some(db.clone()),
             );
@@ -185621,7 +185646,7 @@ pub mod tests {
             let (state, _receiver) = test_state_with_env_parts(
                 MapEnv::default()
                     .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                    .with("SLSKR_CONTROLLER_PROFILE", target),
                 super::SearchStore::new(),
                 Some(db.clone()),
             );
@@ -185674,7 +185699,7 @@ pub mod tests {
             let (state, _receiver) = test_state_with_env_parts(
                 MapEnv::default()
                     .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                    .with("SLSKR_CONTROLLER_PROFILE", target),
                 super::SearchStore::new(),
                 Some(db.clone()),
             );
@@ -185753,7 +185778,7 @@ pub mod tests {
                 let (state, _receiver) = test_state_with_env_parts(
                     MapEnv::default()
                         .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                        .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                        .with("SLSKR_CONTROLLER_PROFILE", target),
                     super::SearchStore::new(),
                     Some(db.clone()),
                 );
@@ -185798,7 +185823,7 @@ pub mod tests {
                 let (state, _receiver) = test_state_with_env_parts(
                     MapEnv::default()
                         .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                        .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                        .with("SLSKR_CONTROLLER_PROFILE", target),
                     super::SearchStore::new(),
                     Some(db.clone()),
                 );
@@ -185843,7 +185868,7 @@ pub mod tests {
                 let (state, _receiver) = test_state_with_env_parts(
                     MapEnv::default()
                         .with("SLSKR_PERSISTENCE_ENABLED", "true")
-                        .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                        .with("SLSKR_CONTROLLER_PROFILE", target),
                     super::SearchStore::new(),
                     Some(db.clone()),
                 );
@@ -186285,7 +186310,7 @@ pub mod tests {
 
     #[cfg_attr(test, test)]
     #[cfg(feature = "full-controller-tests")]
-    fn slskdn_configured_cors_matches_preflight_and_response_contracts() {
+    fn native_configured_cors_matches_preflight_and_response_contracts() {
         let config = super::AppConfig::from_layers(
             None,
             FileConfig::default(),
@@ -186331,7 +186356,7 @@ pub mod tests {
 
     #[cfg_attr(test, test)]
     #[cfg(feature = "full-controller-tests")]
-    fn slskdn_wildcard_cors_echoes_any_requested_method_and_headers() {
+    fn native_wildcard_cors_echoes_any_requested_method_and_headers() {
         let config = super::AppConfig::from_layers(
             None,
             FileConfig::default(),
@@ -186406,7 +186431,7 @@ pub mod tests {
             let (state, _receiver) = test_state_with_env(
                 MapEnv::default()
                     .with("SLSKR_REMOTE_CONFIGURATION", "true")
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                    .with("SLSKR_CONTROLLER_PROFILE", target),
             );
             assert!(state.config.remote_configuration, "{target}");
             for body in ["null", "[]"] {
@@ -186427,15 +186452,15 @@ pub mod tests {
     #[cfg_attr(test, tokio::test)]
     #[cfg(feature = "full-controller-tests")]
     async fn yaml_validation_matches_target_specific_error_contracts() {
-        let slskd_error = "No node deserializer was able to deserialize the node into type slskd.Options+WebOptions, slskd, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null";
+        let controller_error = "No node deserializer was able to deserialize the node into type slskd.Options+WebOptions, slskd, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null";
         for (target, expected_error) in [
-            ("slskd", slskd_error),
+            ("slskd", controller_error),
             ("slskdn", "Invalid YAML configuration"),
         ] {
             let (state, _receiver) = test_state_with_env(
                 MapEnv::default()
                     .with("SLSKR_REMOTE_CONFIGURATION", "true")
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                    .with("SLSKR_CONTROLLER_PROFILE", target),
             );
             let valid = super::route_http_request(
                 "POST",
@@ -186518,9 +186543,9 @@ pub mod tests {
             let (state, _receiver) = test_state_with_env(
                 MapEnv::default()
                     .with("SLSKR_REMOTE_CONFIGURATION", "true")
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                    .with("SLSKR_CONTROLLER_PROFILE", target),
             );
-            for (yaml, slskd_error) in cases {
+            for (yaml, controller_error) in cases {
                 let response = super::route_http_request(
                     "POST",
                     "/api/v0/options/yaml/validate",
@@ -186535,7 +186560,7 @@ pub mod tests {
                 assert_eq!(
                     serde_json::from_str::<String>(&response.body).unwrap(),
                     if target == "slskd" {
-                        slskd_error
+                        controller_error
                     } else {
                         "Invalid YAML configuration"
                     },
@@ -186587,9 +186612,9 @@ pub mod tests {
             let (state, _receiver) = test_state_with_env(
                 MapEnv::default()
                     .with("SLSKR_REMOTE_CONFIGURATION", "true")
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                    .with("SLSKR_CONTROLLER_PROFILE", target),
             );
-            for (yaml, slskd_error) in cases {
+            for (yaml, controller_error) in cases {
                 let response = super::route_http_request(
                     "POST",
                     "/api/v0/options/yaml/validate",
@@ -186609,7 +186634,7 @@ pub mod tests {
                 assert_eq!(
                     serde_json::from_str::<String>(&response.body).unwrap(),
                     if target == "slskd" {
-                        slskd_error
+                        controller_error
                     } else {
                         "Invalid YAML configuration"
                     },
@@ -186624,7 +186649,7 @@ pub mod tests {
     async fn download_layout_destination_slots_and_pacing_are_live_runtime_consumers() {
         let (slskdn, _receiver) = test_state_with_env(
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn")
+                .with("SLSKR_CONTROLLER_PROFILE", "native")
                 .with("SLSKD_DOWNLOAD_SLOTS", "1")
                 .with("SLSKD_DOWNLOAD_SPEED_LIMIT", "100"),
         );
@@ -186687,7 +186712,7 @@ pub mod tests {
         assert_eq!(super::effective_download_pacing_limit(&slskdn).await, 50);
 
         let (slskd, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd"),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "legacy"),
         );
         assert_eq!(
             super::render_configured_completed_download_path(
@@ -186730,7 +186755,7 @@ pub mod tests {
 
         let (state, _receiver) = test_state_with_env(
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd")
+                .with("SLSKR_CONTROLLER_PROFILE", "legacy")
                 .with(
                     "SLSKR_FROZEN_TRANSFER_DOWNLOAD_JSON",
                     r#"{"retry":{"partial":"resume","attempts":4,"delay":10000,"max_delay":30000},"destination":{"exists":"rename","permissions":{"mode":"0640"}}}"#,
@@ -186835,7 +186860,7 @@ pub mod tests {
 
         let (slskdn, _receiver) = test_state_with_env(
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn")
+                .with("SLSKR_CONTROLLER_PROFILE", "native")
                 .with(
                     "SLSKR_FROZEN_TRANSFER_DOWNLOAD_JSON",
                     r#"{"auto_replace_stuck":true,"auto_replace_threshold":7.5,"auto_replace_interval":91}"#,
@@ -186859,7 +186884,7 @@ pub mod tests {
             ("slskdn", Some(""), Some("255.255.255.255:0")),
         ] {
             let (state, _receiver) = test_state_with_env(
-                MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
             );
             for path in ["/api/v0/server", "/api/v0/application"] {
                 let response = super::route_http_request("GET", path, None, "", &state)
@@ -186897,7 +186922,7 @@ pub mod tests {
             let (state, _receiver) = test_state_with_env(
                 MapEnv::default()
                     .with("SLSKR_REMOTE_CONFIGURATION", "true")
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                    .with("SLSKR_CONTROLLER_PROFILE", target),
             );
             state.session.write().await.state = "connected";
             let response = super::route_http_request(
@@ -186943,7 +186968,7 @@ pub mod tests {
         for target in ["slskd", "slskdn"] {
             let (state, _receiver) = test_state_with_env(
                 MapEnv::default()
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                    .with("SLSKR_CONTROLLER_PROFILE", target)
                     .with("SLSKR_REMOTE_CONFIGURATION", "true")
                     .with("SLSKR_NO_CONFIG_WATCH", "true"),
             );
@@ -186989,7 +187014,7 @@ pub mod tests {
                 None,
                 FileConfig::default(),
                 &MapEnv::default()
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                    .with("SLSKR_CONTROLLER_PROFILE", target)
                     .with("SLSKR_STATE_DIR", state.config.state_dir.to_str().unwrap()),
             )
             .expect("restart must bind compatibility YAML into the real config");
@@ -187022,9 +187047,9 @@ pub mod tests {
 
     #[cfg_attr(test, tokio::test)]
     #[cfg(feature = "full-controller-tests")]
-    async fn watched_slskdn_swagger_updates_current_options_but_not_startup_options() {
+    async fn watched_native_swagger_updates_current_options_but_not_startup_options() {
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "native"),
         );
         assert!(state.config.controller_swagger);
         let yaml = "feature:\n  swagger: false\n";
@@ -187038,13 +187063,13 @@ pub mod tests {
         .await;
 
         let overlay = state.options_overlay.read().await;
-        let current = serde_json::from_str::<serde_json::Value>(&super::slskd_options_json(
+        let current = serde_json::from_str::<serde_json::Value>(&super::controller_options_json(
             &state.config,
             &overlay,
             true,
         ))
         .unwrap();
-        let startup = serde_json::from_str::<serde_json::Value>(&super::slskd_options_json(
+        let startup = serde_json::from_str::<serde_json::Value>(&super::controller_options_json(
             &state.config,
             &overlay,
             false,
@@ -187075,9 +187100,9 @@ pub mod tests {
 
     #[cfg_attr(test, tokio::test)]
     #[cfg(feature = "full-controller-tests")]
-    async fn watched_slskdn_listener_change_requires_reconnect() {
+    async fn watched_native_listener_change_requires_reconnect() {
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "native"),
         );
         state.session.write().await.state = "connected";
         let yaml = "soulseek:\n  listen_port: 50301\n";
@@ -187095,9 +187120,9 @@ pub mod tests {
 
     #[cfg_attr(test, tokio::test)]
     #[cfg(feature = "full-controller-tests")]
-    async fn watched_slskdn_obfuscated_listener_change_waits_for_restart() {
+    async fn watched_native_obfuscated_listener_change_waits_for_restart() {
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "native"),
         );
         let previous_port = super::effective_obfuscated_advertised_port(&state);
         let yaml = "soulseek:\n  obfuscation:\n    listen_port: 50302\n";
@@ -187147,7 +187172,7 @@ pub mod tests {
         .await;
 
         let overlay = state.options_overlay.read().await;
-        let current = serde_json::from_str::<serde_json::Value>(&super::slskd_options_json(
+        let current = serde_json::from_str::<serde_json::Value>(&super::controller_options_json(
             &state.config,
             &overlay,
             true,
@@ -187226,9 +187251,9 @@ pub mod tests {
 
     #[cfg_attr(test, tokio::test)]
     #[cfg(feature = "full-controller-tests")]
-    async fn watched_slskdn_dht_updates_current_options_but_retains_startup_socket_settings() {
+    async fn watched_native_dht_updates_current_options_but_retains_startup_socket_settings() {
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "native"),
         );
         assert!(state.config.advanced_networking.dht.enabled);
         let yaml = "dht:\n  enabled: false\n  dht_port: 51002\n";
@@ -187242,13 +187267,13 @@ pub mod tests {
         .await;
 
         let overlay = state.options_overlay.read().await;
-        let current = serde_json::from_str::<serde_json::Value>(&super::slskd_options_json(
+        let current = serde_json::from_str::<serde_json::Value>(&super::controller_options_json(
             &state.config,
             &overlay,
             true,
         ))
         .unwrap();
-        let startup = serde_json::from_str::<serde_json::Value>(&super::slskd_options_json(
+        let startup = serde_json::from_str::<serde_json::Value>(&super::controller_options_json(
             &state.config,
             &overlay,
             false,
@@ -187411,7 +187436,7 @@ pub mod tests {
     #[cfg(feature = "full-controller-tests")]
     async fn watched_auto_retry_configuration_changes_the_live_retry_cycle_without_restart() {
         let (state, mut receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "native"),
         );
         let now = super::unix_timestamp();
         {
@@ -187474,13 +187499,13 @@ pub mod tests {
         ));
 
         let overlay = state.options_overlay.read().await;
-        let current = serde_json::from_str::<serde_json::Value>(&super::slskd_options_json(
+        let current = serde_json::from_str::<serde_json::Value>(&super::controller_options_json(
             &state.config,
             &overlay,
             true,
         ))
         .unwrap();
-        let startup = serde_json::from_str::<serde_json::Value>(&super::slskd_options_json(
+        let startup = serde_json::from_str::<serde_json::Value>(&super::controller_options_json(
             &state.config,
             &overlay,
             false,
@@ -187546,13 +187571,13 @@ pub mod tests {
         assert!(super::effective_remote_configuration(&state));
         {
             let overlay = state.options_overlay.read().await;
-            let current = serde_json::from_str::<serde_json::Value>(&super::slskd_options_json(
+            let current = serde_json::from_str::<serde_json::Value>(&super::controller_options_json(
                 &state.config,
                 &overlay,
                 true,
             ))
             .unwrap();
-            let startup = serde_json::from_str::<serde_json::Value>(&super::slskd_options_json(
+            let startup = serde_json::from_str::<serde_json::Value>(&super::controller_options_json(
                 &state.config,
                 &overlay,
                 false,
@@ -187591,7 +187616,7 @@ pub mod tests {
         .unwrap();
         assert!(Path::new(&local_path).starts_with(super::effective_downloads_dir(&state)));
         let overlay = state.options_overlay.read().await;
-        let options = super::slskd_options_json(&state.config, &overlay, true);
+        let options = super::controller_options_json(&state.config, &overlay, true);
         drop(overlay);
         assert_eq!(
             serde_json::from_str::<serde_json::Value>(&options).unwrap()["shares"]["directories"]
@@ -187622,13 +187647,13 @@ pub mod tests {
             .expect("self-disabled remote configuration response");
         assert_eq!(forbidden.status, "403 Forbidden");
         let overlay = state.options_overlay.read().await;
-        let current = serde_json::from_str::<serde_json::Value>(&super::slskd_options_json(
+        let current = serde_json::from_str::<serde_json::Value>(&super::controller_options_json(
             &state.config,
             &overlay,
             true,
         ))
         .unwrap();
-        let startup = serde_json::from_str::<serde_json::Value>(&super::slskd_options_json(
+        let startup = serde_json::from_str::<serde_json::Value>(&super::controller_options_json(
             &state.config,
             &overlay,
             false,
@@ -187654,13 +187679,13 @@ pub mod tests {
 
         {
             let overlay = state.options_overlay.read().await;
-            let current = serde_json::from_str::<serde_json::Value>(&super::slskd_options_json(
+            let current = serde_json::from_str::<serde_json::Value>(&super::controller_options_json(
                 &state.config,
                 &overlay,
                 true,
             ))
             .unwrap();
-            let startup = serde_json::from_str::<serde_json::Value>(&super::slskd_options_json(
+            let startup = serde_json::from_str::<serde_json::Value>(&super::controller_options_json(
                 &state.config,
                 &overlay,
                 false,
@@ -187677,7 +187702,7 @@ pub mod tests {
             .await;
 
         let overlay = state.options_overlay.read().await;
-        let current = serde_json::from_str::<serde_json::Value>(&super::slskd_options_json(
+        let current = serde_json::from_str::<serde_json::Value>(&super::controller_options_json(
             &state.config,
             &overlay,
             true,
@@ -187690,7 +187715,7 @@ pub mod tests {
     #[cfg(feature = "full-controller-tests")]
     async fn watched_completed_path_template_updates_projection_and_runtime_without_restart() {
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "native"),
         );
         let cli_environment = BTreeMap::from([
             (
@@ -187722,13 +187747,13 @@ pub mod tests {
             "friend/Albums/Record/Song.flac"
         );
         let overlay = state.options_overlay.read().await;
-        let current = serde_json::from_str::<serde_json::Value>(&super::slskd_options_json(
+        let current = serde_json::from_str::<serde_json::Value>(&super::controller_options_json(
             &state.config,
             &overlay,
             true,
         ))
         .unwrap();
-        let startup = serde_json::from_str::<serde_json::Value>(&super::slskd_options_json(
+        let startup = serde_json::from_str::<serde_json::Value>(&super::controller_options_json(
             &state.config,
             &overlay,
             false,
@@ -187739,7 +187764,7 @@ pub mod tests {
             "{uploader}/{remote_folder}"
         );
         assert_eq!(startup["global"]["download"]["completedPathTemplate"], "");
-        let debug = super::slskd_options_debug_view(&state, &overlay);
+        let debug = super::controller_options_debug_view(&state, &overlay);
         assert!(debug.contains(
             "completedpathtemplate={uploader}/{remote_folder} (YamlConfigurationProvider for 'slskd.yml' (Optional))"
         ));
@@ -187756,7 +187781,7 @@ pub mod tests {
         };
 
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "native"),
         );
         let cli_environment = BTreeMap::from([
             (
@@ -187814,13 +187839,13 @@ pub mod tests {
         assert!(!state.runtime.read().await.application_restart_requested);
 
         let overlay = state.options_overlay.read().await;
-        let current = serde_json::from_str::<serde_json::Value>(&super::slskd_options_json(
+        let current = serde_json::from_str::<serde_json::Value>(&super::controller_options_json(
             &state.config,
             &overlay,
             true,
         ))
         .unwrap();
-        let startup = serde_json::from_str::<serde_json::Value>(&super::slskd_options_json(
+        let startup = serde_json::from_str::<serde_json::Value>(&super::controller_options_json(
             &state.config,
             &overlay,
             false,
@@ -187853,7 +187878,7 @@ pub mod tests {
         for target in ["slskd", "slskdn"] {
             let (state, _receiver) = test_state_with_env(
                 MapEnv::default()
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                    .with("SLSKR_CONTROLLER_PROFILE", target)
                     .with("SLSKR_REMOTE_CONFIGURATION", "true"),
             );
             let first = "soulseek:\n  description: first\n";
@@ -187919,7 +187944,7 @@ pub mod tests {
         for target in ["slskd", "slskdn"] {
             let (state, _receiver) = test_state_with_env(
                 MapEnv::default()
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                    .with("SLSKR_CONTROLLER_PROFILE", target)
                     .with("SLSKR_REMOTE_FILE_MANAGEMENT", "true"),
             );
             let download_file = state
@@ -188083,7 +188108,7 @@ pub mod tests {
         let mut rows = Vec::new();
         for target in ["slskd", "slskdn"] {
             let (state, _receiver) = test_state_with_env(
-                MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
             );
             let rendered = super::render_configured_completed_download_path(
                 &state,
@@ -188223,7 +188248,7 @@ pub mod tests {
         let mut rows = Vec::new();
         for target in ["slskd", "slskdn"] {
             let (state, _receiver) = test_state_with_env(
-                MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
             );
             let state_dir = state.config.state_dir.clone();
             let root = super::effective_downloads_dir(&state);
@@ -188252,7 +188277,7 @@ pub mod tests {
             super::relay_agent::download_completed_file(
                 &state,
                 &settings,
-                state.config.controller_compatibility_target,
+                state.config.controller_profile,
                 &client,
                 "fixture-agent",
                 filename,
@@ -188294,7 +188319,7 @@ pub mod tests {
             super::relay_agent::download_completed_file(
                 &state,
                 &settings,
-                state.config.controller_compatibility_target,
+                state.config.controller_profile,
                 &client,
                 "fixture-agent",
                 filename,
@@ -188321,7 +188346,7 @@ pub mod tests {
             let confinement = super::relay_agent::download_completed_file(
                 &state,
                 &settings,
-                state.config.controller_compatibility_target,
+                state.config.controller_profile,
                 &client,
                 "fixture-agent",
                 "../relay-escape.flac",
@@ -188352,7 +188377,7 @@ pub mod tests {
             let partial_result = super::relay_agent::download_completed_file(
                 &state,
                 &settings,
-                state.config.controller_compatibility_target,
+                state.config.controller_profile,
                 &client,
                 "fixture-agent",
                 filename,
@@ -188377,7 +188402,7 @@ pub mod tests {
             drop(state);
             let (_restarted, _receiver) = test_state_with_env(
                 MapEnv::default()
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                    .with("SLSKR_CONTROLLER_PROFILE", target)
                     .with(
                         "SLSKR_STATE_DIR",
                         state_dir.to_str().expect("relay state path"),
@@ -188645,16 +188670,16 @@ pub mod tests {
 
     #[cfg_attr(test, tokio::test)]
     #[cfg(feature = "full-controller-tests")]
-    async fn slskd_debug_view_projects_frozen_default_authentication_values() {
+    async fn controller_debug_view_projects_frozen_default_authentication_values() {
         let (state, _receiver) = test_state_with_env(
             MapEnv::default()
                 .with("SLSKR_AUTH_DISABLED", "true")
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd")
+                .with("SLSKR_CONTROLLER_PROFILE", "legacy")
                 .with("SLSKR_REMOTE_CONFIGURATION", "true")
                 .with("SLSKR_DEBUG", "true"),
         );
         let overlay = state.options_overlay.read().await;
-        let debug = super::slskd_options_debug_view(&state, &overlay);
+        let debug = super::controller_options_debug_view(&state, &overlay);
 
         assert!(state.config.controller_metrics_password.is_empty());
         assert!(state
@@ -188672,10 +188697,10 @@ pub mod tests {
 
     #[cfg_attr(test, test)]
     #[cfg(feature = "full-controller-tests")]
-    fn slskdn_adversarial_yaml_updates_replace_the_existing_mapping() {
+    fn native_adversarial_yaml_updates_replace_the_existing_mapping() {
         let initial = "debug: true\nremote_configuration: true\n";
         let defaults =
-            super::slskdn_adversarial_yaml_update(initial, &serde_json::json!({})).unwrap();
+            super::native_adversarial_yaml_update(initial, &serde_json::json!({})).unwrap();
         let custom = serde_json::json!({
             "enabled": true,
             "profile": "custom",
@@ -188687,8 +188712,8 @@ pub mod tests {
                 }
             }
         });
-        let updated = super::slskdn_adversarial_yaml_update(&defaults, &custom).unwrap();
-        let direct = super::slskdn_adversarial_yaml_update(initial, &custom).unwrap();
+        let updated = super::native_adversarial_yaml_update(&defaults, &custom).unwrap();
+        let direct = super::native_adversarial_yaml_update(initial, &custom).unwrap();
 
         assert_eq!(updated, direct);
         assert_eq!(updated.matches("\nsecurity:\n").count(), 1);
@@ -188702,9 +188727,9 @@ pub mod tests {
 
     #[cfg_attr(test, test)]
     #[cfg(feature = "full-controller-tests")]
-    fn slskdn_adversarial_yaml_update_preserves_security_siblings() {
+    fn native_adversarial_yaml_update_preserves_security_siblings() {
         let current = "remote_configuration: true\nsecurity:\n  audit_enabled: true\n";
-        let updated = super::slskdn_adversarial_yaml_update(
+        let updated = super::native_adversarial_yaml_update(
             current,
             &serde_json::json!({"transport": {"webSocket": {"enabled": true}}}),
         )
@@ -188719,15 +188744,15 @@ pub mod tests {
 
     #[cfg_attr(test, test)]
     #[cfg(feature = "full-controller-tests")]
-    fn slskdn_adversarial_validation_rejects_nonpositive_bucket_sizes() {
+    fn native_adversarial_validation_rejects_nonpositive_bucket_sizes() {
         assert_eq!(
-            super::validate_slskdn_adversarial_settings(&serde_json::json!({
+            super::validate_native_adversarial_settings(&serde_json::json!({
                 "privacy": {"padding": {"bucketSizes": [256, 0]}}
             })),
             Err("Bucket sizes must be positive")
         );
         assert!(
-            super::validate_slskdn_adversarial_settings(&serde_json::json!({
+            super::validate_native_adversarial_settings(&serde_json::json!({
                 "privacy": {"padding": {"bucketSizes": [256, 512]}}
             }))
             .is_ok()
@@ -188736,10 +188761,10 @@ pub mod tests {
 
     #[cfg_attr(test, tokio::test)]
     #[cfg(feature = "full-controller-tests")]
-    async fn slskdn_adversarial_put_persists_and_accepts_target_yaml() {
+    async fn native_adversarial_put_persists_and_accepts_target_yaml() {
         let (state, _receiver) = test_state_with_env(
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn")
+                .with("SLSKR_CONTROLLER_PROFILE", "native")
                 .with("SLSKR_REMOTE_CONFIGURATION", "true"),
         );
         fs::write(
@@ -188913,7 +188938,7 @@ pub mod tests {
         config.config_file = Some("/private/config/slskr-secret.toml".into());
 
         let location =
-            serde_json::from_str::<String>(&super::slskd_options_config_location_json(&config))
+            serde_json::from_str::<String>(&super::controller_options_config_location_json(&config))
                 .unwrap();
         assert_eq!(PathBuf::from(location), config.state_dir.join("slskd.yml"));
     }
@@ -189203,7 +189228,7 @@ pub mod tests {
     #[cfg(feature = "full-controller-tests")]
     async fn compatibility_noop_routes_advertise_supported_shape() {
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd"),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "legacy"),
         );
 
         let logs = super::route_http_request("GET", "/api/logs", None, "", &state)
@@ -189999,14 +190024,14 @@ pub mod tests {
             messages: RwLock::new(super::MessageStore::new()),
             managed_blacklist: RwLock::new(super::ManagedBlacklistRuntime::new(
                 config.managed_blacklist.clone(),
-                config.controller_compatibility_target,
+                config.controller_profile,
                 config.controller_case_sensitive_regex,
             )),
             search_request_filters: RwLock::new(
                 super::compile_controller_regexes(
                     &config.controller_search_request_filters,
                     config.controller_case_sensitive_regex,
-                    config.controller_compatibility_target,
+                    config.controller_profile,
                 )
                 .unwrap(),
             ),
@@ -190164,8 +190189,8 @@ pub mod tests {
                 cookie: None,
                 content_type: None,
                 x_share_token: None,
-                x_slskdn_api_key: None,
-                x_slskdn_csrf: None,
+                x_gateway_api_key: None,
+                x_gateway_csrf: None,
                 x_relay_agent: None,
                 x_relay_credential: None,
                 remote_addr: None,
@@ -190191,8 +190216,8 @@ pub mod tests {
                 cookie: None,
                 content_type: None,
                 x_share_token: None,
-                x_slskdn_api_key: None,
-                x_slskdn_csrf: None,
+                x_gateway_api_key: None,
+                x_gateway_csrf: None,
                 x_relay_agent: None,
                 x_relay_credential: None,
                 remote_addr: None,
@@ -190218,8 +190243,8 @@ pub mod tests {
                 cookie: Some("other=value; slskr.session=route-token".to_string()),
                 content_type: None,
                 x_share_token: None,
-                x_slskdn_api_key: None,
-                x_slskdn_csrf: None,
+                x_gateway_api_key: None,
+                x_gateway_csrf: None,
                 x_relay_agent: None,
                 x_relay_credential: None,
                 remote_addr: None,
@@ -190319,14 +190344,14 @@ pub mod tests {
             messages: RwLock::new(super::MessageStore::new()),
             managed_blacklist: RwLock::new(super::ManagedBlacklistRuntime::new(
                 cookie_enabled_config.managed_blacklist.clone(),
-                cookie_enabled_config.controller_compatibility_target,
+                cookie_enabled_config.controller_profile,
                 cookie_enabled_config.controller_case_sensitive_regex,
             )),
             search_request_filters: RwLock::new(
                 super::compile_controller_regexes(
                     &cookie_enabled_config.controller_search_request_filters,
                     cookie_enabled_config.controller_case_sensitive_regex,
-                    cookie_enabled_config.controller_compatibility_target,
+                    cookie_enabled_config.controller_profile,
                 )
                 .unwrap(),
             ),
@@ -190467,8 +190492,8 @@ pub mod tests {
                 cookie: Some("other=value; slskr.session=route-token".to_string()),
                 content_type: None,
                 x_share_token: None,
-                x_slskdn_api_key: None,
-                x_slskdn_csrf: None,
+                x_gateway_api_key: None,
+                x_gateway_csrf: None,
                 x_relay_agent: None,
                 x_relay_credential: None,
                 remote_addr: None,
@@ -191002,7 +191027,7 @@ pub mod tests {
             None,
             FileConfig::default(),
             &MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn")
+                .with("SLSKR_CONTROLLER_PROFILE", "native")
                 .with("SLSK_OBFUSCATION_ADVERTISE_REGULAR_PORT", "false"),
         )
         .expect("frozen compatibility profile accepts the legacy option combination");
@@ -191022,7 +191047,7 @@ pub mod tests {
         let valid_frozen = super::AppConfig::from_layers(
             None,
             FileConfig::default(),
-            &MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+            &MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "native"),
         )
         .expect("valid frozen obfuscation options");
         assert!(super::frozen_obfuscation_startup_error(&valid_frozen).is_none());
@@ -191981,7 +192006,7 @@ pub mod tests {
         entry.bytes_transferred = 225;
         entry.updated_at = 104;
 
-        let projection = entry.slskd_file_json();
+        let projection = entry.controller_file_json();
         assert_eq!(projection["startOffset"], 25);
         assert_eq!(projection["startedAt"], "100");
         assert_eq!(projection["endedAt"], "104");
@@ -191991,7 +192016,7 @@ pub mod tests {
 
         entry.status = "in_progress".to_owned();
         entry.bytes_transferred = 500;
-        let overrun = entry.slskd_file_json();
+        let overrun = entry.controller_file_json();
         assert_eq!(overrun["percentComplete"], 100.0);
         assert_eq!(overrun["bytesRemaining"], 0);
         assert_eq!(overrun["remainingTime"], "");
@@ -192036,13 +192061,13 @@ pub mod tests {
         }
 
         let summary = serde_json::from_str::<serde_json::Value>(
-            &super::slskd_transfer_summary_report(Some("direction=Download"), &queue),
+            &super::controller_transfer_summary_report(Some("direction=Download"), &queue),
         )
         .unwrap();
         assert_eq!(summary["averageSpeed"], 75.0);
 
         let leaderboard = serde_json::from_str::<serde_json::Value>(
-            &super::slskd_transfer_leaderboard_report(Some("direction=Download"), &queue)
+            &super::controller_transfer_leaderboard_report(Some("direction=Download"), &queue)
                 .expect("direction is present"),
         )
         .unwrap();
@@ -192056,7 +192081,7 @@ pub mod tests {
             entry.start_offset = 0;
         }
         let speeds =
-            serde_json::from_str::<serde_json::Value>(&super::slskd_transfer_speeds_json(&queue))
+            serde_json::from_str::<serde_json::Value>(&super::controller_transfer_speeds_json(&queue))
                 .unwrap();
         assert!(speeds["download"].as_f64().unwrap() > 0.0);
         assert!(speeds["upload"].as_f64().unwrap() > 0.0);
@@ -192107,7 +192132,7 @@ pub mod tests {
             .status = "succeeded".to_owned();
 
         let leaderboard = serde_json::from_str::<serde_json::Value>(
-            &super::slskd_transfer_leaderboard_report(Some("direction=Download"), &queue)
+            &super::controller_transfer_leaderboard_report(Some("direction=Download"), &queue)
                 .expect("direction is present"),
         )
         .unwrap();
@@ -192174,7 +192199,7 @@ pub mod tests {
             .status = "succeeded".to_owned();
 
         let report = serde_json::from_str::<serde_json::Value>(
-            &super::slskd_transfer_directories_report(None, &queue),
+            &super::controller_transfer_directories_report(None, &queue),
         )
         .unwrap();
         let paths = report
@@ -192942,7 +192967,7 @@ pub mod tests {
 
         let (state, _receiver) = test_state_with_env(
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn")
+                .with("SLSKR_CONTROLLER_PROFILE", "native")
                 .with("SLSKR_LIDARR_ENABLED", "true")
                 .with("SLSKR_LIDARR_URL", &format!("http://{address}"))
                 .with("SLSKR_LIDARR_API_KEY", "fixture-key")
@@ -193356,7 +193381,7 @@ pub mod tests {
             }};
         }
 
-        let env = MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target);
+        let env = MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target);
         let (state, _receiver) = test_state_with_env(env.clone());
 
         for (path, route) in [
@@ -193974,7 +193999,7 @@ pub mod tests {
             assert_eq!(
                 super::controller_yaml_target_validation_error(
                     &value,
-                    super::ControllerCompatibilityTarget::Slskd,
+                    super::ControllerProfile::Legacy,
                 )
                 .as_deref(),
                 slskd,
@@ -193983,7 +194008,7 @@ pub mod tests {
             assert_eq!(
                 super::controller_yaml_target_validation_error(
                     &value,
-                    super::ControllerCompatibilityTarget::Slskdn,
+                    super::ControllerProfile::Native,
                 )
                 .as_deref(),
                 slskdn,
@@ -194101,10 +194126,10 @@ pub mod tests {
         feature = "bounded-controller-api-tests",
         feature = "bounded-controller-api-tests-4"
     ))]
-    async fn controller_api_differential_slskd_file_transfer_and_room_contracts() {
+    async fn controller_api_differential_controller_file_transfer_and_room_contracts() {
         let (state, _receiver) = test_state_with_env(
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd")
+                .with("SLSKR_CONTROLLER_PROFILE", "legacy")
                 .with("SLSKR_REMOTE_FILE_MANAGEMENT", "true")
                 .with("SLSKR_TEST_USER_ENDPOINT_OVERRIDES", "peer=127.0.0.1:2234"),
         );
@@ -194308,7 +194333,7 @@ pub mod tests {
         let reset_state_dir = state.config.state_dir.display().to_string();
         let (reset_state, _receiver) = test_state_with_env(
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd")
+                .with("SLSKR_CONTROLLER_PROFILE", "legacy")
                 .with("SLSKR_REMOTE_FILE_MANAGEMENT", "true")
                 .with("SLSKR_STATE_DIR", &reset_state_dir),
         );
@@ -194379,7 +194404,7 @@ pub mod tests {
             .expect("create incomplete delete conflict");
         let (failure_state, _receiver) = test_state_with_env(
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd")
+                .with("SLSKR_CONTROLLER_PROFILE", "legacy")
                 .with("SLSKR_REMOTE_FILE_MANAGEMENT", "true"),
         );
         *failure_state
@@ -194494,7 +194519,7 @@ pub mod tests {
                 .expect("create incomplete list symlink");
             let (symlink_state, _receiver) = test_state_with_env(
                 MapEnv::default()
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd")
+                    .with("SLSKR_CONTROLLER_PROFILE", "legacy")
                     .with("SLSKR_REMOTE_FILE_MANAGEMENT", "true"),
             );
             *symlink_state
@@ -194783,7 +194808,7 @@ pub mod tests {
             .join("controller-api");
         std::fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
         std::fs::write(
-            evidence_dir.join("slskd_file_transfer_room_contracts.json"),
+            evidence_dir.join("controller_file_transfer_room_contracts.json"),
             serde_json::to_string_pretty(&ledger).expect("serialize slskd controller ledger"),
         )
         .expect("write slskd controller ledger");
@@ -194795,10 +194820,10 @@ pub mod tests {
         feature = "bounded-controller-api-tests",
         feature = "bounded-controller-api-tests-4"
     ))]
-    async fn controller_api_differential_slskd_file_application_and_roster_edges() {
+    async fn controller_api_differential_controller_file_application_and_roster_edges() {
         let (state, _receiver) = test_state_with_env(
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd")
+                .with("SLSKR_CONTROLLER_PROFILE", "legacy")
                 .with("SLSKR_REMOTE_FILE_MANAGEMENT", "true"),
         );
         let mut ledger = Vec::new();
@@ -194996,7 +195021,7 @@ pub mod tests {
         );
 
         let (roster_state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd"),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "legacy"),
         );
         roster_state.session.write().await.state = "connected";
         roster_state.session.write().await.username = Some("edge-self".to_owned());
@@ -195077,7 +195102,7 @@ pub mod tests {
             .join("controller-api");
         fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
         fs::write(
-            evidence_dir.join("slskd_file_application_roster_edges.json"),
+            evidence_dir.join("controller_file_application_roster_edges.json"),
             serde_json::to_string_pretty(&ledger).expect("serialize slskd edge ledger"),
         )
         .expect("write slskd edge ledger");
@@ -195095,10 +195120,10 @@ pub mod tests {
         feature = "bounded-controller-api-tests",
         feature = "bounded-controller-api-tests-4"
     ))]
-    async fn controller_api_differential_slskd_share_and_relay_lifecycle() {
+    async fn controller_api_differential_controller_share_and_relay_lifecycle() {
         let target = "slskd";
         let relay_env = MapEnv::default()
-            .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+            .with("SLSKR_CONTROLLER_PROFILE", target)
             .with("SLSKD_RELAY", "true")
             .with("SLSKD_RELAY_MODE", "agent")
             .with("SLSKD_CONTROLLER_ADDRESS", "http://127.0.0.1:9")
@@ -195276,7 +195301,7 @@ pub mod tests {
         );
 
         let (disabled_state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
         for method in ["PUT", "DELETE"] {
             let response =
@@ -195292,7 +195317,7 @@ pub mod tests {
         }
 
         let (share_state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
         let scan_permit = share_state
             .share_scans
@@ -195330,7 +195355,7 @@ pub mod tests {
         drop(scan_permit);
 
         let (restarted_share_state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
         let reset =
             super::route_http_request("DELETE", "/api/v0/shares", None, "", &restarted_share_state)
@@ -195348,7 +195373,7 @@ pub mod tests {
             .join("controller-api");
         fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
         fs::write(
-            evidence_dir.join("slskd_share_relay_lifecycle.json"),
+            evidence_dir.join("controller_share_relay_lifecycle.json"),
             serde_json::to_string_pretty(&ledger).expect("serialize slskd share/relay ledger"),
         )
         .expect("write slskd share/relay ledger");
@@ -195366,10 +195391,10 @@ pub mod tests {
         feature = "bounded-controller-api-tests",
         feature = "bounded-controller-api-tests-4"
     ))]
-    async fn controller_api_differential_slskd_fixed_route_malformed_paths() {
+    async fn controller_api_differential_controller_fixed_route_malformed_paths() {
         let target = "slskd";
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
         let mut ledger = Vec::new();
         let mut mismatches = Vec::new();
@@ -195428,7 +195453,7 @@ pub mod tests {
             .join("controller-api");
         fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
         fs::write(
-            evidence_dir.join("slskd_fixed_route_malformed_paths.json"),
+            evidence_dir.join("controller_fixed_route_malformed_paths.json"),
             serde_json::to_string_pretty(&ledger).expect("serialize slskd malformed-path ledger"),
         )
         .expect("write slskd malformed-path ledger");
@@ -195446,11 +195471,11 @@ pub mod tests {
         feature = "bounded-controller-api-tests",
         feature = "bounded-controller-api-tests-4"
     ))]
-    async fn controller_api_differential_slskd_parameterized_malformed_paths() {
+    async fn controller_api_differential_controller_parameterized_malformed_paths() {
         let target = "slskd";
         let (state, _receiver) = test_state_with_env(
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                .with("SLSKR_CONTROLLER_PROFILE", target)
                 .with("SLSKR_REMOTE_FILE_MANAGEMENT", "true"),
         );
         let mut ledger = Vec::new();
@@ -195762,7 +195787,7 @@ pub mod tests {
             .join("controller-api");
         fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
         fs::write(
-            evidence_dir.join("slskd_parameterized_malformed_paths.json"),
+            evidence_dir.join("controller_parameterized_malformed_paths.json"),
             serde_json::to_string_pretty(&ledger)
                 .expect("serialize slskd parameterized malformed ledger"),
         )
@@ -195781,14 +195806,14 @@ pub mod tests {
         feature = "bounded-controller-api-tests",
         feature = "bounded-controller-api-tests-4"
     ))]
-    async fn controller_api_differential_slskd_empty_and_missing_state() {
+    async fn controller_api_differential_controller_empty_and_missing_state() {
         let target = "slskd";
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
         let (relay_state, _receiver) = test_state_with_env(
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                .with("SLSKR_CONTROLLER_PROFILE", target)
                 .with("SLSKD_RELAY", "true")
                 .with("SLSKD_RELAY_MODE", "controller")
                 .with("SLSKD_CONTROLLER_ADDRESS", "http://127.0.0.1:9")
@@ -195797,7 +195822,7 @@ pub mod tests {
         );
         let (file_state, _receiver) = test_state_with_env(
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                .with("SLSKR_CONTROLLER_PROFILE", target)
                 .with("SLSKR_REMOTE_FILE_MANAGEMENT", "true"),
         );
         let _ = std::fs::remove_dir_all(&file_state.config.downloads_dir);
@@ -196069,7 +196094,7 @@ pub mod tests {
             .join("controller-api");
         fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
         fs::write(
-            evidence_dir.join("slskd_empty_and_missing_state.json"),
+            evidence_dir.join("controller_empty_and_missing_state.json"),
             serde_json::to_string_pretty(&ledger)
                 .expect("serialize slskd empty/missing state ledger"),
         )
@@ -196088,7 +196113,7 @@ pub mod tests {
         feature = "bounded-controller-api-tests",
         feature = "bounded-controller-api-tests-4"
     ))]
-    async fn controller_api_differential_slskd_relay_controller_routes() {
+    async fn controller_api_differential_controller_relay_controller_routes() {
         let target = "slskd";
         let (state, secret, now) = configured_relay_test_state().await;
         let mut ledger = Vec::new();
@@ -196386,7 +196411,7 @@ pub mod tests {
         let database_source = state.config.state_dir.join("relay-differential-source.db");
         super::relay::write_share_database(
             &database_source,
-            super::ControllerCompatibilityTarget::Slskd,
+            super::ControllerProfile::Legacy,
             &[super::relay::RemoteShare {
                 filename: "Remote/Agent.flac".to_owned(),
                 size: 6,
@@ -196540,7 +196565,7 @@ pub mod tests {
             .join("controller-api");
         fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
         fs::write(
-            evidence_dir.join("slskd_relay_controller_routes.json"),
+            evidence_dir.join("controller_relay_controller_routes.json"),
             serde_json::to_string_pretty(&ledger).expect("serialize slskd relay controller ledger"),
         )
         .expect("write slskd relay controller ledger");
@@ -196558,10 +196583,10 @@ pub mod tests {
         feature = "bounded-controller-api-tests",
         feature = "bounded-controller-api-tests-4"
     ))]
-    async fn controller_api_differential_slskd_core_application_session_events_and_telemetry() {
+    async fn controller_api_differential_controller_core_application_session_events_and_telemetry() {
         let target = "slskd";
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
         let mut ledger = Vec::new();
         let mut mismatches = Vec::new();
@@ -196595,7 +196620,8 @@ pub mod tests {
             "nominal-status-headers-body",
             application.status == "200 OK"
                 && application.content_type == "application/json; charset=utf-8"
-                && application_json["compatibilityTarget"] == target
+                && application_json["runtimeProfile"]
+                    == if target == "slskd" { "legacy" } else { "native" }
                 && application_json["version"]["current"] == env!("CARGO_PKG_VERSION")
                 && application_json["version"]["full"].is_string()
                 && application_json["pendingReconnect"].is_boolean()
@@ -196760,7 +196786,7 @@ pub mod tests {
                 })
         );
         let (fresh_loopback_state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
         let fresh_loopback_logs =
             super::route_http_request("GET", "/api/v0/logs", None, "", &fresh_loopback_state)
@@ -196840,7 +196866,7 @@ pub mod tests {
             .expect("application GC differential database");
         let (gc_state, _receiver) = test_state_with_env_parts(
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                .with("SLSKR_CONTROLLER_PROFILE", target)
                 .with("SLSKR_PERSISTENCE_ENABLED", "true"),
             super::SearchStore::new(),
             Some(gc_db.clone()),
@@ -196890,7 +196916,7 @@ pub mod tests {
         );
 
         let login_env = MapEnv::default()
-            .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+            .with("SLSKR_CONTROLLER_PROFILE", target)
             .with("SLSKR_AUTH_DISABLED", "false")
             .with("SLSKR_API_TOKEN", "slskd-login-secret")
             .with("SLSKD_USERNAME", "admin")
@@ -197487,7 +197513,7 @@ pub mod tests {
             .join("controller-api");
         fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
         fs::write(
-            evidence_dir.join("slskd_core_application_session_events_telemetry.json"),
+            evidence_dir.join("controller_core_application_session_events_telemetry.json"),
             serde_json::to_string_pretty(&ledger).expect("serialize slskd core ledger"),
         )
         .expect("write slskd core ledger");
@@ -197511,7 +197537,7 @@ pub mod tests {
         feature = "bounded-controller-api-tests",
         feature = "bounded-controller-api-tests-4"
     ))]
-    async fn controller_api_differential_slskd_core_failure_restart_and_empty_contracts() {
+    async fn controller_api_differential_controller_core_failure_restart_and_empty_contracts() {
         let target = "slskd";
         let mut ledger = Vec::new();
         let mut mismatches = Vec::new();
@@ -197538,7 +197564,7 @@ pub mod tests {
             .await
             .expect("core differential database");
         let env = MapEnv::default()
-            .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+            .with("SLSKR_CONTROLLER_PROFILE", target)
             .with("SLSKR_PERSISTENCE_ENABLED", "true");
         let (state, _receiver) =
             test_state_with_env_parts(env.clone(), super::SearchStore::new(), Some(db.clone()));
@@ -197672,7 +197698,7 @@ pub mod tests {
                 && persisted_events
                     .iter()
                     .any(|row| row.detail.as_deref() == Some("durable-event"))
-                && rehydrated_events.slskd_json(None).contains("durable-event")
+                && rehydrated_events.controller_json(None).contains("durable-event")
         );
 
         // Two distinct event writes are serialized by the real store and
@@ -197744,7 +197770,7 @@ pub mod tests {
         // validation.  Keep the time range outside the fixture window so
         // the empty assertions cannot accidentally pass from seeded state.
         let (telemetry_state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
         let telemetry_empty_cases = [
             ("/api/v0/telemetry/metrics", "GET"),
@@ -197811,7 +197837,7 @@ pub mod tests {
             .join("controller-api");
         fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
         fs::write(
-            evidence_dir.join("slskd_core_failure_restart_and_empty_contracts.json"),
+            evidence_dir.join("controller_core_failure_restart_and_empty_contracts.json"),
             serde_json::to_string_pretty(&ledger).expect("serialize slskd core failure ledger"),
         )
         .expect("write slskd core failure ledger");
@@ -197829,10 +197855,10 @@ pub mod tests {
         feature = "bounded-controller-api-tests",
         feature = "bounded-controller-api-tests-4"
     ))]
-    async fn controller_api_differential_slskd_users_and_shares() {
+    async fn controller_api_differential_controller_users_and_shares() {
         let (state, _receiver) = test_state_with_env(
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd")
+                .with("SLSKR_CONTROLLER_PROFILE", "legacy")
                 .with("SLSKR_TEST_USER_ENDPOINT_OVERRIDES", "peer=127.0.0.1:2234"),
         );
         state.session.write().await.state = "connected";
@@ -198120,7 +198146,7 @@ pub mod tests {
         );
 
         let (restarted_share_state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd"),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "legacy"),
         );
         let restarted_rescan =
             super::route_http_request("PUT", "/api/v0/shares", None, "", &restarted_share_state)
@@ -198150,7 +198176,7 @@ pub mod tests {
             .join("controller-api");
         fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
         fs::write(
-            evidence_dir.join("slskd_users_shares.json"),
+            evidence_dir.join("controller_users_shares.json"),
             serde_json::to_string_pretty(&ledger).expect("serialize slskd users/shares ledger"),
         )
         .expect("write slskd users/shares ledger");
@@ -198168,9 +198194,9 @@ pub mod tests {
         feature = "bounded-controller-api-tests",
         feature = "bounded-controller-api-tests-4"
     ))]
-    async fn controller_api_differential_slskd_rooms_and_conversations() {
+    async fn controller_api_differential_controller_rooms_and_conversations() {
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd"),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "legacy"),
         );
         state.session.write().await.state = "connected";
         state.rooms.write().await.records.clear();
@@ -198619,7 +198645,7 @@ pub mod tests {
             .join("controller-api");
         fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
         fs::write(
-            evidence_dir.join("slskd_rooms_conversations.json"),
+            evidence_dir.join("controller_rooms_conversations.json"),
             serde_json::to_string_pretty(&ledger)
                 .expect("serialize slskd rooms/conversations ledger"),
         )
@@ -198638,7 +198664,7 @@ pub mod tests {
         feature = "bounded-controller-api-tests",
         feature = "bounded-controller-api-tests-4"
     ))]
-    async fn controller_api_differential_slskd_rooms_conversations_restart_and_failure() {
+    async fn controller_api_differential_controller_rooms_conversations_restart_and_failure() {
         let target = "slskd";
         let mut ledger = Vec::new();
         let mut mismatches = Vec::new();
@@ -198662,7 +198688,7 @@ pub mod tests {
         }
 
         let env = MapEnv::default()
-            .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+            .with("SLSKR_CONTROLLER_PROFILE", target)
             .with("SLSKR_PERSISTENCE_ENABLED", "true");
         let db = super::persistence::DatabaseManager::in_memory()
             .await
@@ -198880,7 +198906,7 @@ pub mod tests {
         );
 
         let (failure_state, failure_receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
         failure_state
             .rooms
@@ -199364,7 +199390,7 @@ pub mod tests {
             .join("controller-api");
         fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
         fs::write(
-            evidence_dir.join("slskd_rooms_conversations_restart_and_failure.json"),
+            evidence_dir.join("controller_rooms_conversations_restart_and_failure.json"),
             serde_json::to_string_pretty(&ledger)
                 .expect("serialize slskd rooms/conversations ledger"),
         )
@@ -199383,9 +199409,9 @@ pub mod tests {
         feature = "bounded-controller-api-tests",
         feature = "bounded-controller-api-tests-4"
     ))]
-    async fn controller_api_differential_slskd_server_state_and_lifecycle() {
+    async fn controller_api_differential_controller_server_state_and_lifecycle() {
         let (state, mut receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd"),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "legacy"),
         );
         let mut ledger = Vec::new();
         let mut mismatches = Vec::new();
@@ -199528,7 +199554,7 @@ pub mod tests {
         );
 
         let (restarted_state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd"),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "legacy"),
         );
         let reset_disconnect =
             super::route_http_request("DELETE", "/api/v0/server", None, "", &restarted_state)
@@ -199542,7 +199568,7 @@ pub mod tests {
         );
 
         let (put_restart_state, mut put_restart_receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd"),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "legacy"),
         );
         let reset_connect =
             super::route_http_request("PUT", "/api/v0/server", None, "", &put_restart_state)
@@ -199562,7 +199588,7 @@ pub mod tests {
         );
 
         let (put_failure_state, put_failure_receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd"),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "legacy"),
         );
         drop(put_failure_receiver);
         let put_failure =
@@ -199578,7 +199604,7 @@ pub mod tests {
         );
 
         let (delete_failure_state, delete_failure_receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd"),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "legacy"),
         );
         delete_failure_state.session.write().await.state = "connected";
         drop(delete_failure_receiver);
@@ -199599,7 +199625,7 @@ pub mod tests {
             .join("controller-api");
         fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
         fs::write(
-            evidence_dir.join("slskd_server_state_lifecycle.json"),
+            evidence_dir.join("controller_server_state_lifecycle.json"),
             serde_json::to_string_pretty(&ledger).expect("serialize slskd server state ledger"),
         )
         .expect("write slskd server state ledger");
@@ -199617,9 +199643,9 @@ pub mod tests {
         feature = "bounded-controller-api-tests",
         feature = "bounded-controller-api-tests-4"
     ))]
-    async fn controller_api_differential_slskd_search_lifecycle() {
+    async fn controller_api_differential_controller_search_lifecycle() {
         let (state, mut receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd"),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "legacy"),
         );
         state.session.write().await.state = "connected";
         let mut ledger = Vec::new();
@@ -199887,7 +199913,7 @@ pub mod tests {
             .join("controller-api");
         fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
         fs::write(
-            evidence_dir.join("slskd_search_lifecycle.json"),
+            evidence_dir.join("controller_search_lifecycle.json"),
             serde_json::to_string_pretty(&ledger).expect("serialize slskd search ledger"),
         )
         .expect("write slskd search ledger");
@@ -199905,7 +199931,7 @@ pub mod tests {
         feature = "bounded-controller-api-tests",
         feature = "bounded-controller-api-tests-4"
     ))]
-    async fn controller_api_differential_slskd_search_failure_restart_and_idempotency() {
+    async fn controller_api_differential_controller_search_failure_restart_and_idempotency() {
         let target = "slskd";
         let mut ledger = Vec::new();
         let mut mismatches = Vec::new();
@@ -199951,7 +199977,7 @@ pub mod tests {
         }
 
         let env = MapEnv::default()
-            .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+            .with("SLSKR_CONTROLLER_PROFILE", target)
             .with("SLSKR_PERSISTENCE_ENABLED", "true");
         let db = super::persistence::DatabaseManager::in_memory()
             .await
@@ -200311,7 +200337,7 @@ pub mod tests {
             .join("controller-api");
         fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
         fs::write(
-            evidence_dir.join("slskd_search_failure_restart_and_idempotency.json"),
+            evidence_dir.join("controller_search_failure_restart_and_idempotency.json"),
             serde_json::to_string_pretty(&ledger).expect("serialize slskd search failure ledger"),
         )
         .expect("write slskd search failure ledger");
@@ -200329,7 +200355,7 @@ pub mod tests {
         feature = "bounded-controller-api-tests",
         feature = "bounded-controller-api-tests-4"
     ))]
-    async fn controller_api_differential_slskdn_search_compatibility_contracts() {
+    async fn controller_api_differential_native_search_compatibility_contracts() {
         let target = "slskdn";
         let mut ledger = Vec::new();
         let mut mismatches = Vec::new();
@@ -200353,7 +200379,7 @@ pub mod tests {
         }
 
         let env = MapEnv::default()
-            .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+            .with("SLSKR_CONTROLLER_PROFILE", target)
             .with("SLSKR_PERSISTENCE_ENABLED", "true");
         let db = super::persistence::DatabaseManager::in_memory()
             .await
@@ -200560,7 +200586,7 @@ pub mod tests {
             .join("controller-api");
         fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
         fs::write(
-            evidence_dir.join("slskdn_search_compatibility_contracts.json"),
+            evidence_dir.join("native_search_compatibility_contracts.json"),
             serde_json::to_string_pretty(&ledger)
                 .expect("serialize slskdn search compatibility ledger"),
         )
@@ -200579,7 +200605,7 @@ pub mod tests {
         feature = "bounded-controller-api-tests",
         feature = "bounded-controller-api-tests-4"
     ))]
-    async fn controller_api_differential_slskdn_searches_open_cases() {
+    async fn controller_api_differential_native_searches_open_cases() {
         let target = "slskdn";
         let mut ledger = Vec::new();
         let mut mismatches = Vec::new();
@@ -200648,7 +200674,7 @@ pub mod tests {
                 .expect("seed expired search");
         }
 
-        let env = MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target);
+        let env = MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target);
         let list_id = "00000000-0000-4000-8000-000000000101";
         let detail_id = "00000000-0000-4000-8000-000000000102";
 
@@ -201487,9 +201513,9 @@ pub mod tests {
         feature = "bounded-controller-api-tests",
         feature = "bounded-controller-api-tests-4"
     ))]
-    async fn controller_api_differential_slskd_upload_lifecycle() {
+    async fn controller_api_differential_controller_upload_lifecycle() {
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd"),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "legacy"),
         );
         let mut ledger = Vec::new();
         let mut mismatches = Vec::new();
@@ -201726,7 +201752,7 @@ pub mod tests {
             .join("controller-api");
         fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
         fs::write(
-            evidence_dir.join("slskd_upload_lifecycle.json"),
+            evidence_dir.join("controller_upload_lifecycle.json"),
             serde_json::to_string_pretty(&ledger).expect("serialize slskd upload ledger"),
         )
         .expect("write slskd upload ledger");
@@ -201744,7 +201770,7 @@ pub mod tests {
         feature = "bounded-controller-api-tests",
         feature = "bounded-controller-api-tests-4"
     ))]
-    async fn controller_api_differential_slskd_transfer_failure_restart_and_idempotency() {
+    async fn controller_api_differential_controller_transfer_failure_restart_and_idempotency() {
         let target = "slskd";
         let mut ledger = Vec::new();
         let mut mismatches = Vec::new();
@@ -201768,7 +201794,7 @@ pub mod tests {
         }
 
         let empty_state = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         )
         .0;
         for (path, route) in [
@@ -201916,7 +201942,7 @@ pub mod tests {
             .await
             .expect("slskd transfer differential database");
         let env = MapEnv::default()
-            .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+            .with("SLSKR_CONTROLLER_PROFILE", target)
             .with("SLSKR_PERSISTENCE_ENABLED", "true")
             .with(
                 "SLSKR_TEST_USER_ENDPOINT_OVERRIDES",
@@ -202036,7 +202062,7 @@ pub mod tests {
             .join("controller-api");
         fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
         fs::write(
-            evidence_dir.join("slskd_transfer_failure_restart_and_idempotency.json"),
+            evidence_dir.join("controller_transfer_failure_restart_and_idempotency.json"),
             serde_json::to_string_pretty(&ledger).expect("serialize slskd transfer failure ledger"),
         )
         .expect("write slskd transfer failure ledger");
@@ -202054,7 +202080,7 @@ pub mod tests {
         feature = "bounded-controller-api-tests",
         feature = "bounded-controller-api-tests-4"
     ))]
-    async fn controller_api_differential_slskd_transfer_batch_cleanup_and_failures() {
+    async fn controller_api_differential_controller_transfer_batch_cleanup_and_failures() {
         let target = "slskd";
         let mut ledger = Vec::new();
         let mut mismatches = Vec::new();
@@ -202078,7 +202104,7 @@ pub mod tests {
         }
 
         let env = MapEnv::default()
-            .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+            .with("SLSKR_CONTROLLER_PROFILE", target)
             .with("SLSKR_PERSISTENCE_ENABLED", "true")
             .with(
                 "SLSKR_TEST_USER_ENDPOINT_OVERRIDES",
@@ -202564,7 +202590,7 @@ pub mod tests {
             .join("controller-api");
         fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
         fs::write(
-            evidence_dir.join("slskd_transfer_batch_cleanup_and_failures.json"),
+            evidence_dir.join("controller_transfer_batch_cleanup_and_failures.json"),
             serde_json::to_string_pretty(&ledger).expect("serialize slskd transfer batch ledger"),
         )
         .expect("write slskd transfer batch ledger");
@@ -202582,9 +202608,9 @@ pub mod tests {
         feature = "bounded-controller-api-tests",
         feature = "bounded-controller-api-tests-4"
     ))]
-    async fn controller_api_differential_slskd_user_browse_contracts() {
+    async fn controller_api_differential_controller_user_browse_contracts() {
         let (state, mut receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd"),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "legacy"),
         );
         let mut ledger = Vec::new();
         let mut mismatches = Vec::new();
@@ -202739,7 +202765,7 @@ pub mod tests {
 
         let nominal_command = receiver.try_recv().ok();
         let (failure_state, failure_receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd"),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "legacy"),
         );
         failure_state.session.write().await.state = "connected";
         drop(failure_receiver);
@@ -202761,7 +202787,7 @@ pub mod tests {
         );
 
         let (reset_state, mut reset_receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd"),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "legacy"),
         );
         reset_state.session.write().await.state = "connected";
         let reset_directory = super::route_http_request(
@@ -202843,7 +202869,7 @@ pub mod tests {
             .join("controller-api");
         fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
         fs::write(
-            evidence_dir.join("slskd_user_browse_contracts.json"),
+            evidence_dir.join("controller_user_browse_contracts.json"),
             serde_json::to_string_pretty(&ledger).expect("serialize slskd browse ledger"),
         )
         .expect("write slskd browse ledger");
@@ -202861,7 +202887,7 @@ pub mod tests {
         feature = "bounded-controller-api-tests",
         feature = "bounded-controller-api-tests-4"
     ))]
-    async fn controller_api_differential_slskd_download_edge_contracts() {
+    async fn controller_api_differential_controller_download_edge_contracts() {
         let target = "slskd";
         let mut ledger = Vec::new();
         let mut mismatches = Vec::new();
@@ -202886,7 +202912,7 @@ pub mod tests {
 
         let batch_id = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
         let (_active_id, completed_id) = {
             let mut transfers = state.transfers.write().await;
@@ -203146,7 +203172,7 @@ pub mod tests {
         });
         let (position_state, _receiver) = test_state_with_env(
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                .with("SLSKR_CONTROLLER_PROFILE", target)
                 .with(
                     "SLSKR_TEST_USER_ENDPOINT_OVERRIDES",
                     &format!("position-peer={endpoint}"),
@@ -203241,7 +203267,7 @@ pub mod tests {
             .join("controller-api");
         fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
         fs::write(
-            evidence_dir.join("slskd_download_edge_contracts.json"),
+            evidence_dir.join("controller_download_edge_contracts.json"),
             serde_json::to_string_pretty(&ledger).expect("serialize slskd download ledger"),
         )
         .expect("write slskd download ledger");
@@ -203259,7 +203285,7 @@ pub mod tests {
         feature = "bounded-controller-api-tests",
         feature = "bounded-controller-api-tests-4"
     ))]
-    async fn controller_api_differential_slskd_runtime_failure_isolation_contracts() {
+    async fn controller_api_differential_controller_runtime_failure_isolation_contracts() {
         let target = "slskd";
         let mut ledger = Vec::new();
         let mut mismatches = Vec::new();
@@ -203286,7 +203312,7 @@ pub mod tests {
             .await
             .expect("slskd runtime-failure database");
         let env = MapEnv::default()
-            .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+            .with("SLSKR_CONTROLLER_PROFILE", target)
             .with("SLSKR_PERSISTENCE_ENABLED", "true")
             .with("SLSKR_REMOTE_CONFIGURATION", "true")
             .with("SLSKR_DEBUG", "true")
@@ -203662,7 +203688,7 @@ pub mod tests {
             .join("controller-api");
         fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
         fs::write(
-            evidence_dir.join("slskd_runtime_failure_isolation_contracts.json"),
+            evidence_dir.join("controller_runtime_failure_isolation_contracts.json"),
             serde_json::to_string_pretty(&ledger).expect("serialize slskd runtime-failure ledger"),
         )
         .expect("write slskd runtime-failure ledger");
@@ -203687,7 +203713,7 @@ pub mod tests {
         feature = "bounded-controller-api-tests",
         feature = "bounded-controller-api-tests-4"
     ))]
-    async fn controller_api_differential_slskdn_security_runtime_failure_contracts() {
+    async fn controller_api_differential_native_security_runtime_failure_contracts() {
         let target = "slskdn";
         let mut ledger = Vec::new();
         let mut mismatches = Vec::new();
@@ -203714,7 +203740,7 @@ pub mod tests {
             .await
             .expect("slskdn security runtime-failure database");
         let env = MapEnv::default()
-            .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+            .with("SLSKR_CONTROLLER_PROFILE", target)
             .with("SLSKR_PERSISTENCE_ENABLED", "true");
         let (state, _receiver) =
             test_state_with_env_parts(env, super::SearchStore::new(), Some(db.clone()));
@@ -204040,7 +204066,7 @@ pub mod tests {
             .join("controller-api");
         fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
         fs::write(
-            evidence_dir.join("slskdn_security_runtime_failure_contracts.json"),
+            evidence_dir.join("native_security_runtime_failure_contracts.json"),
             serde_json::to_string_pretty(&ledger)
                 .expect("serialize slskdn security runtime-failure ledger"),
         )
@@ -204059,7 +204085,7 @@ pub mod tests {
         feature = "bounded-controller-api-tests",
         feature = "bounded-controller-api-tests-4"
     ))]
-    async fn controller_api_differential_slskd_options_overlay_contracts() {
+    async fn controller_api_differential_controller_options_overlay_contracts() {
         let target = "slskd";
         let mut ledger = Vec::new();
         let mut mismatches = Vec::new();
@@ -204083,7 +204109,7 @@ pub mod tests {
         }
 
         let env = MapEnv::default()
-            .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+            .with("SLSKR_CONTROLLER_PROFILE", target)
             .with("SLSKR_REMOTE_CONFIGURATION", "true");
         let (state, _receiver) = test_state_with_env(env.clone());
         let current = super::route_http_request("GET", "/api/v0/options", None, "", &state)
@@ -204167,7 +204193,7 @@ pub mod tests {
         );
 
         let (disabled, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
         let forbidden = super::route_http_request(
             "PATCH",
@@ -204202,7 +204228,7 @@ pub mod tests {
 
         let (failed_options, _receiver) = test_state_with_env(
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                .with("SLSKR_CONTROLLER_PROFILE", target)
                 .with("SLSKR_REMOTE_CONFIGURATION", "true"),
         );
         *failed_options
@@ -204251,7 +204277,7 @@ pub mod tests {
             .join("controller-api");
         fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
         fs::write(
-            evidence_dir.join("slskd_options_overlay_contracts.json"),
+            evidence_dir.join("controller_options_overlay_contracts.json"),
             serde_json::to_string_pretty(&ledger).expect("serialize slskd options ledger"),
         )
         .expect("write slskd options ledger");
@@ -204275,7 +204301,7 @@ pub mod tests {
         feature = "bounded-controller-api-tests",
         feature = "bounded-controller-api-tests-4"
     ))]
-    async fn controller_api_differential_slskdn_transfers_runtime_failure_contracts() {
+    async fn controller_api_differential_native_transfers_runtime_failure_contracts() {
         let target = "slskdn";
         let mut ledger = Vec::new();
         let mut mismatches = Vec::new();
@@ -204302,7 +204328,7 @@ pub mod tests {
             .await
             .expect("slskdn transfers runtime-failure database");
         let env = MapEnv::default()
-            .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+            .with("SLSKR_CONTROLLER_PROFILE", target)
             .with("SLSKR_PERSISTENCE_ENABLED", "true");
         let (state, _receiver) =
             test_state_with_env_parts(env, super::SearchStore::new(), Some(db.clone()));
@@ -204543,7 +204569,7 @@ pub mod tests {
             .join("controller-api");
         fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
         fs::write(
-            evidence_dir.join("slskdn_transfers_runtime_failure_contracts.json"),
+            evidence_dir.join("native_transfers_runtime_failure_contracts.json"),
             serde_json::to_string_pretty(&ledger)
                 .expect("serialize slskdn transfers runtime-failure ledger"),
         )
@@ -204562,7 +204588,7 @@ pub mod tests {
         feature = "bounded-controller-api-tests",
         feature = "bounded-controller-api-tests-4"
     ))]
-    async fn controller_api_differential_slskdn_transfers_empty_and_missing_contracts() {
+    async fn controller_api_differential_native_transfers_empty_and_missing_contracts() {
         let target = "slskdn";
         let mut ledger = Vec::new();
         let mut mismatches = Vec::new();
@@ -204583,7 +204609,7 @@ pub mod tests {
         }
 
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
         let batch_id = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
 
@@ -204972,7 +204998,7 @@ pub mod tests {
             .join("controller-api");
         fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
         fs::write(
-            evidence_dir.join("slskdn_transfers_empty_and_missing_contracts.json"),
+            evidence_dir.join("native_transfers_empty_and_missing_contracts.json"),
             serde_json::to_string_pretty(&ledger)
                 .expect("serialize slskdn transfers empty/missing ledger"),
         )
@@ -204991,7 +205017,7 @@ pub mod tests {
         feature = "bounded-controller-api-tests",
         feature = "bounded-controller-api-tests-4"
     ))]
-    async fn controller_api_differential_slskdn_transfers_malformed_contracts() {
+    async fn controller_api_differential_native_transfers_malformed_contracts() {
         let target = "slskdn";
         let mut ledger = Vec::new();
         let mut mismatches = Vec::new();
@@ -205015,7 +205041,7 @@ pub mod tests {
         }
 
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
 
         for (path, route) in [
@@ -205218,7 +205244,7 @@ pub mod tests {
             .join("controller-api");
         fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
         fs::write(
-            evidence_dir.join("slskdn_transfers_malformed_contracts.json"),
+            evidence_dir.join("native_transfers_malformed_contracts.json"),
             serde_json::to_string_pretty(&ledger)
                 .expect("serialize slskdn transfers malformed ledger"),
         )
@@ -205237,7 +205263,7 @@ pub mod tests {
         feature = "bounded-controller-api-tests",
         feature = "bounded-controller-api-tests-4"
     ))]
-    async fn controller_api_differential_slskdn_transfers_nominal_populated_contracts() {
+    async fn controller_api_differential_native_transfers_nominal_populated_contracts() {
         let target = "slskdn";
         let mut ledger = Vec::new();
         let mut mismatches = Vec::new();
@@ -205293,7 +205319,7 @@ pub mod tests {
         });
         let (state, _receiver) = test_state_with_env(
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                .with("SLSKR_CONTROLLER_PROFILE", target)
                 .with(
                     "SLSKR_TEST_USER_ENDPOINT_OVERRIDES",
                     &format!("position-peer={endpoint}"),
@@ -205491,7 +205517,7 @@ pub mod tests {
             .join("controller-api");
         fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
         fs::write(
-            evidence_dir.join("slskdn_transfers_nominal_populated_contracts.json"),
+            evidence_dir.join("native_transfers_nominal_populated_contracts.json"),
             serde_json::to_string_pretty(&ledger)
                 .expect("serialize slskdn transfers nominal ledger"),
         )
@@ -205510,7 +205536,7 @@ pub mod tests {
         feature = "bounded-controller-api-tests",
         feature = "bounded-controller-api-tests-4"
     ))]
-    async fn controller_api_differential_slskdn_transfers_restart_and_concurrency() {
+    async fn controller_api_differential_native_transfers_restart_and_concurrency() {
         let target = "slskdn";
         let mut ledger = Vec::new();
         let mut mismatches = Vec::new();
@@ -205534,7 +205560,7 @@ pub mod tests {
             .await
             .expect("slskdn transfer restart database");
         let env = MapEnv::default()
-            .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+            .with("SLSKR_CONTROLLER_PROFILE", target)
             .with("SLSKR_PERSISTENCE_ENABLED", "true")
             .with(
                 "SLSKR_TEST_USER_ENDPOINT_OVERRIDES",
@@ -206010,7 +206036,7 @@ pub mod tests {
             .join("controller-api");
         fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
         fs::write(
-            evidence_dir.join("slskdn_transfers_restart_and_concurrency.json"),
+            evidence_dir.join("native_transfers_restart_and_concurrency.json"),
             serde_json::to_string_pretty(&ledger)
                 .expect("serialize slskdn transfers restart ledger"),
         )
@@ -206059,7 +206085,7 @@ pub mod tests {
 
         let (state, _receiver) = test_state_with_env(
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                .with("SLSKR_CONTROLLER_PROFILE", target)
                 .with("SLSKR_API_TOKEN", "security-runtime-secret"),
         );
         let security_settings = state.config.advanced_networking.security.clone();
@@ -206195,7 +206221,7 @@ pub mod tests {
         );
 
         let (restarted, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
         let fresh_profile = super::route_http_request(
             "GET",
@@ -206591,7 +206617,7 @@ pub mod tests {
         }
 
         let base_env = MapEnv::default()
-            .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+            .with("SLSKR_CONTROLLER_PROFILE", target)
             .with("SLSKR_AUTH_DISABLED", "false")
             .with("SLSKR_API_TOKEN", "csrf-filter-secret");
         let (default_state, _receiver) = test_state_with_env(base_env.clone());
@@ -206744,7 +206770,7 @@ pub mod tests {
         }
 
         let base = MapEnv::default()
-            .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+            .with("SLSKR_CONTROLLER_PROFILE", target)
             .with("SLSKD_PASSWORD", "hardening-secret");
         let config = |env: MapEnv| super::AppConfig::from_layers(None, FileConfig::default(), &env);
         let validate_rule = |env: MapEnv, rule: &str| match config(env) {
@@ -206758,8 +206784,8 @@ pub mod tests {
         record!(
             "activation-default-and-profile",
             matches!(
-                defaults.controller_compatibility_target,
-                super::ControllerCompatibilityTarget::Slskdn
+                defaults.controller_profile,
+                super::ControllerProfile::Native
             ) && defaults.auth_required
                 && defaults.validate_controller_startup_hardening().is_ok()
         );
@@ -207323,7 +207349,7 @@ pub mod tests {
         }
 
         let (state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
         let defaults = state.media_services.read().await.solid.clone();
         record!(
@@ -207738,14 +207764,14 @@ pub mod tests {
 
         let remote = super::RequestSecurityHeaders {
             remote_addr: Some("192.0.2.55:4444".parse().unwrap()),
-            x_slskdn_api_key: Some("gateway-secret".to_owned()),
+            x_gateway_api_key: Some("gateway-secret".to_owned()),
             ..super::RequestSecurityHeaders::default()
         };
         let authorized = super::mesh_gateway_auth_failure(&gateway_state, &remote).is_none();
         record!(GATEWAY_AUTH, "accepted-nominal-input", authorized);
 
         let mut invalid_remote = remote.clone();
-        invalid_remote.x_slskdn_api_key = Some("wrong".to_owned());
+        invalid_remote.x_gateway_api_key = Some("wrong".to_owned());
         let rejected = super::mesh_gateway_auth_failure(&gateway_state, &invalid_remote)
             .is_some_and(|response| {
                 response.status == "401 Unauthorized" && !response.body.contains("gateway-secret")
@@ -207753,7 +207779,7 @@ pub mod tests {
         let local_origin = super::RequestSecurityHeaders {
             remote_addr: Some("127.0.0.1:4444".parse().unwrap()),
             origin: Some("https://evil.example".to_owned()),
-            x_slskdn_csrf: Some("csrf-secret".to_owned()),
+            x_gateway_csrf: Some("csrf-secret".to_owned()),
             ..super::RequestSecurityHeaders::default()
         };
         let origin_rejected = super::mesh_gateway_auth_failure(&gateway_state, &local_origin)
@@ -207779,7 +207805,7 @@ pub mod tests {
         let old_rejected = super::mesh_gateway_auth_failure(&rotated_state, &remote)
             .is_some_and(|response| response.status == "401 Unauthorized");
         let mut rotated_remote = remote.clone();
-        rotated_remote.x_slskdn_api_key = Some("rotated-secret".to_owned());
+        rotated_remote.x_gateway_api_key = Some("rotated-secret".to_owned());
         let new_accepted =
             super::mesh_gateway_auth_failure(&rotated_state, &rotated_remote).is_none();
         record!(
@@ -207914,7 +207940,7 @@ pub mod tests {
         fs::create_dir_all(&root).expect("content-safety root");
         let (mut state, _receiver) = test_state_with_env(
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                .with("SLSKR_CONTROLLER_PROFILE", target)
                 .with("SLSKR_AUTH_DISABLED", "true"),
         );
         Arc::get_mut(&mut state)
@@ -210416,15 +210442,15 @@ pub mod tests {
         const JWT: &str = "Core/Security/JwtRevocationStore";
 
         for target in [
-            super::config::ControllerCompatibilityTarget::Slskd,
-            super::config::ControllerCompatibilityTarget::Slskdn,
+            super::config::ControllerProfile::Legacy,
+            super::config::ControllerProfile::Native,
         ] {
             let target_name = target.as_str();
             let default_config = super::AppConfig::from_layers(
                 None,
                 FileConfig::default(),
                 &MapEnv::default()
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target_name)
+                    .with("SLSKR_CONTROLLER_PROFILE", target_name)
                     .with("SLSKR_AUTH_DISABLED", "true"),
             )
             .expect("default blacklist profile");
@@ -210445,7 +210471,7 @@ pub mod tests {
                 None,
                 FileConfig::default(),
                 &MapEnv::default()
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target_name)
+                    .with("SLSKR_CONTROLLER_PROFILE", target_name)
                     .with("SLSKR_AUTH_DISABLED", "true")
                     .with("SLSKD_BLACKLISTED_MEMBERS", "blocked-peer")
                     .with("SLSKD_BLACKLISTED_PATTERNS", "^caseuser$")
@@ -210468,7 +210494,7 @@ pub mod tests {
                 case_match
                     && member_match
                     && cidr_match
-                    && (target == super::config::ControllerCompatibilityTarget::Slskdn
+                    && (target == super::config::ControllerProfile::Native
                         || !case_mode_match)
             );
 
@@ -210476,7 +210502,7 @@ pub mod tests {
                 None,
                 FileConfig::default(),
                 &MapEnv::default()
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target_name)
+                    .with("SLSKR_CONTROLLER_PROFILE", target_name)
                     .with("SLSKR_AUTH_DISABLED", "true")
                     .with("SLSKD_BLACKLISTED_PATTERNS", "["),
             );
@@ -210484,7 +210510,7 @@ pub mod tests {
                 None,
                 FileConfig::default(),
                 &MapEnv::default()
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target_name)
+                    .with("SLSKR_CONTROLLER_PROFILE", target_name)
                     .with("SLSKR_AUTH_DISABLED", "true")
                     .with("SLSKD_BLACKLISTED_CIDRS", "not-a-cidr"),
             );
@@ -210522,7 +210548,7 @@ pub mod tests {
                 None,
                 FileConfig::default(),
                 &MapEnv::default()
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target_name)
+                    .with("SLSKR_CONTROLLER_PROFILE", target_name)
                     .with("SLSKR_AUTH_DISABLED", "true")
                     .with("SLSKD_BLACKLISTED_MEMBERS", "blocked-peer")
                     .with("SLSKD_BLACKLISTED_PATTERNS", "^caseuser$")
@@ -210617,11 +210643,11 @@ pub mod tests {
         feature = "full-controller-tests",
         feature = "bounded-security-control-tests"
     ))]
-    async fn security_controls_differential_slskdn_security_controller() {
+    async fn security_controls_differential_native_security_controller() {
         let target = "slskdn";
         let subject = "Common/Security/API/SecurityController";
         let env = MapEnv::default()
-            .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+            .with("SLSKR_CONTROLLER_PROFILE", target)
             .with("SLSKR_API_TOKEN", "security-controller-secret")
             .with("SLSKR_AUTH_DISABLED", "true");
         let (state, _receiver) = test_state_with_env(env.clone());
@@ -210759,7 +210785,7 @@ pub mod tests {
 
         for target in ["slskd", "slskdn"] {
             let env = MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                .with("SLSKR_CONTROLLER_PROFILE", target)
                 .with("SLSKR_AUTH_DISABLED", "true")
                 .with("SLSKD_ALLOW_REMOTE_NO_AUTH", "true")
                 .with("SLSKD_PASSTHROUGH_ALLOWED_CIDRS", "192.0.2.0/24");
@@ -210857,7 +210883,7 @@ pub mod tests {
             fs::create_dir_all(&root).expect("authentication control state root");
             let jwt_env = MapEnv::default()
                 .with("SLSKR_STATE_DIR", root.to_str().expect("auth state path"))
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                .with("SLSKR_CONTROLLER_PROFILE", target)
                 .with("SLSKD_JWT_KEY", "0123456789abcdef0123456789abcdef")
                 .with("SLSKD_JWT_TTL", "3600000")
                 .with("SLSKR_API_TOKEN", "admin-token");
@@ -211711,7 +211737,7 @@ pub mod tests {
 
         for target in ["slskd", "slskdn"] {
             let env = MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                .with("SLSKR_CONTROLLER_PROFILE", target)
                 .with("SLSKR_REMOTE_CONFIGURATION", "true")
                 .with("SLSKR_DEBUG", "true")
                 .with("SLSKR_NO_CONFIG_WATCH", "true");
@@ -212027,7 +212053,7 @@ pub mod tests {
             );
 
             let disabled = test_state_with_env(
-                MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
             )
             .0;
             for (method, route, case) in [
@@ -212111,7 +212137,7 @@ pub mod tests {
         feature = "bounded-controller-api-tests",
         feature = "bounded-controller-api-tests-4"
     ))]
-    async fn controller_api_differential_slskd_residual_core_contracts() {
+    async fn controller_api_differential_controller_residual_core_contracts() {
         let target = "slskd";
         let mut ledger = Vec::new();
         let mut mismatches = Vec::new();
@@ -212138,7 +212164,7 @@ pub mod tests {
         // required.  The same route reports true once the real API-key gate
         // is enabled and the request carries the configured credential.
         let (default_state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
         let default_enabled =
             super::route_http_request("GET", "/api/v0/session/enabled", None, "", &default_state)
@@ -212169,7 +212195,7 @@ pub mod tests {
         );
 
         let enabled_env = MapEnv::default()
-            .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+            .with("SLSKR_CONTROLLER_PROFILE", target)
             .with("SLSKR_AUTH_DISABLED", "false")
             .with("SLSKR_API_TOKEN", "residual-api-token");
         let (enabled_state, _receiver) = test_state_with_env(enabled_env);
@@ -212223,7 +212249,7 @@ pub mod tests {
 
         let (user_failure_state, _receiver) = test_state_with_env(
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                .with("SLSKR_CONTROLLER_PROFILE", target)
                 .with(
                     "SLSKR_TEST_USER_ENDPOINT_OVERRIDES",
                     "user-read-failure-peer=127.0.0.1:2234",
@@ -212290,7 +212316,7 @@ pub mod tests {
         // concurrent valid logins remain independent, and a fresh state
         // instance can issue another token from the same configured profile.
         let login_env = MapEnv::default()
-            .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+            .with("SLSKR_CONTROLLER_PROFILE", target)
             .with("SLSKR_AUTH_DISABLED", "false")
             .with("SLSKR_API_TOKEN", "residual-login-token")
             .with("SLSKD_USERNAME", "residual-admin")
@@ -212362,7 +212388,7 @@ pub mod tests {
         // is a real missing-body rejection; valid concurrent validations must
         // leave the durable file byte-for-byte unchanged.
         let options_env = MapEnv::default()
-            .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+            .with("SLSKR_CONTROLLER_PROFILE", target)
             .with("SLSKR_REMOTE_CONFIGURATION", "true")
             .with("SLSKR_NO_CONFIG_WATCH", "true");
         let (options_state, _receiver) = test_state_with_env(options_env.clone());
@@ -212514,7 +212540,7 @@ pub mod tests {
         fs::write(&conflict_root, b"state directory is a file").expect("create state conflict");
         let mut conflict_state = test_state_with_env(
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                .with("SLSKR_CONTROLLER_PROFILE", target)
                 .with("SLSKR_REMOTE_CONFIGURATION", "true"),
         )
         .0;
@@ -212573,7 +212599,7 @@ pub mod tests {
         // callers race to set the same durable runtime flag.
         let (application_state, _receiver) = test_state_with_env(
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                .with("SLSKR_CONTROLLER_PROFILE", target)
                 .with("SLSKR_PERSISTENCE_ENABLED", "true"),
         );
         let concurrent_restarts = futures_util::future::join_all([
@@ -212607,7 +212633,7 @@ pub mod tests {
             .expect("residual share database");
         let (share_failure_state, _receiver) = test_state_with_env_parts(
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                .with("SLSKR_CONTROLLER_PROFILE", target)
                 .with("SLSKR_PERSISTENCE_ENABLED", "true"),
             super::SearchStore::new(),
             Some(share_db.clone()),
@@ -212626,7 +212652,7 @@ pub mod tests {
                 && share_failure_state.shares.read().await.json() == previous_shares.json()
         );
         let (share_busy_state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
         let _scan_permit = Arc::clone(&share_busy_state.share_scans)
             .acquire_owned()
@@ -212651,7 +212677,7 @@ pub mod tests {
         // an equivalent browse after that fault reaches the controller's 500
         // middleware instead of returning a stale directory projection.
         let (browse_failure_state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
         let browse_root_id = {
             let mut shares = browse_failure_state.shares.write().await;
@@ -212714,7 +212740,7 @@ pub mod tests {
         // Soulseek client. A disconnected session therefore reaches the
         // framework's 500 path instead of serving the last cached projection.
         let (available_rooms_failure_state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
         let available_rooms_failure = super::route_http_request(
             "GET",
@@ -212766,7 +212792,7 @@ pub mod tests {
             .expect("conversation read failure database");
         let (conversation_failure_state, _receiver) = test_state_with_env_parts(
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                .with("SLSKR_CONTROLLER_PROFILE", target)
                 .with("SLSKR_PERSISTENCE_ENABLED", "true"),
             super::SearchStore::new(),
             Some(conversation_db.clone()),
@@ -212807,7 +212833,7 @@ pub mod tests {
             .expect("telemetry report failure database");
         let (telemetry_report_failure_state, _receiver) = test_state_with_env_parts(
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                .with("SLSKR_CONTROLLER_PROFILE", target)
                 .with("SLSKR_PERSISTENCE_ENABLED", "true"),
             super::SearchStore::new(),
             Some(telemetry_report_db.clone()),
@@ -212958,7 +212984,7 @@ pub mod tests {
         // 404, duplicate member insertion is idempotent, while messages and
         // ticker updates serialize under the room store write lock.
         let (room_state, _receiver) = test_state_with_env(
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target),
         );
         room_state.session.write().await.state = "connected";
         let joined = super::route_http_request(
@@ -213085,7 +213111,7 @@ pub mod tests {
             .join("controller-api");
         fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
         fs::write(
-            evidence_dir.join("slskd_residual_core_contracts.json"),
+            evidence_dir.join("controller_residual_core_contracts.json"),
             serde_json::to_string_pretty(&ledger).expect("serialize slskd residual core ledger"),
         )
         .expect("write slskd residual core ledger");
@@ -213105,7 +213131,7 @@ pub mod tests {
         feature = "full-controller-tests",
         feature = "bounded-persistence-tests"
     ))]
-    async fn persistence_lifecycle_differential_slskd_batches_domain() {
+    async fn persistence_lifecycle_differential_controller_batches_domain() {
         let target = "slskd";
         let mut ledger = Vec::new();
         let mut mismatches = Vec::new();
@@ -213139,7 +213165,7 @@ pub mod tests {
             .await
             .expect("batches controller database");
         let env = MapEnv::default()
-            .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+            .with("SLSKR_CONTROLLER_PROFILE", target)
             .with("SLSKR_PERSISTENCE_ENABLED", "true")
             .with(
                 "SLSKR_TEST_USER_ENDPOINT_OVERRIDES",
@@ -213308,7 +213334,7 @@ pub mod tests {
             .expect("insert corrupt batch options");
         let (corrupt_state, _receiver) = test_state_with_env_parts(
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                .with("SLSKR_CONTROLLER_PROFILE", target)
                 .with("SLSKR_PERSISTENCE_ENABLED", "true"),
             super::SearchStore::new(),
             Some(corrupt_db),
@@ -213356,7 +213382,7 @@ pub mod tests {
         feature = "full-controller-tests",
         feature = "bounded-persistence-tests"
     ))]
-    async fn persistence_lifecycle_differential_slskd_share_files_domain() {
+    async fn persistence_lifecycle_differential_controller_share_files_domain() {
         let target = "slskd";
         let mut ledger = Vec::new();
         let mut mismatches = Vec::new();
@@ -213775,7 +213801,7 @@ pub mod tests {
         feature = "full-controller-tests",
         feature = "bounded-persistence-tests"
     ))]
-    async fn persistence_lifecycle_differential_slskdn_hashdb_domains() {
+    async fn persistence_lifecycle_differential_native_hashdb_domains() {
         let target = "slskdn";
         let mut ledger = Vec::new();
         let mut mismatches = Vec::new();
@@ -213818,7 +213844,7 @@ pub mod tests {
             .await
             .expect("HashDb controller database");
         let env = MapEnv::default()
-            .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+            .with("SLSKR_CONTROLLER_PROFILE", target)
             .with("SLSKR_PERSISTENCE_ENABLED", "true");
         let (state, _receiver) =
             test_state_with_env_parts(env, super::SearchStore::new(), Some(create_db.clone()));
@@ -214109,7 +214135,7 @@ pub mod tests {
             .expect("insert corrupt HashDb state");
         let (corrupt_state, _receiver) = test_state_with_env_parts(
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                .with("SLSKR_CONTROLLER_PROFILE", target)
                 .with("SLSKR_PERSISTENCE_ENABLED", "true"),
             super::SearchStore::new(),
             Some(corrupt_state_db),
@@ -214157,7 +214183,7 @@ pub mod tests {
         feature = "full-controller-tests",
         feature = "bounded-persistence-tests"
     ))]
-    async fn persistence_lifecycle_differential_slskdn_songid_runs() {
+    async fn persistence_lifecycle_differential_native_songid_runs() {
         let target = "slskdn";
         let mut ledger = Vec::new();
         let mut mismatches = Vec::new();
@@ -214195,7 +214221,7 @@ pub mod tests {
         .await
         .expect("create SongID restart database");
         let env = MapEnv::default()
-            .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+            .with("SLSKR_CONTROLLER_PROFILE", target)
             .with("SLSKR_PERSISTENCE_ENABLED", "true");
         let (state, _receiver) =
             test_state_with_env_parts(env, super::SearchStore::new(), Some(restart_db.clone()));
@@ -214284,7 +214310,7 @@ pub mod tests {
             .expect("SongID concurrency database");
         let (concurrent_state, _receiver) = test_state_with_env_parts(
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                .with("SLSKR_CONTROLLER_PROFILE", target)
                 .with("SLSKR_PERSISTENCE_ENABLED", "true"),
             super::SearchStore::new(),
             Some(concurrent_db.clone()),
@@ -214357,7 +214383,7 @@ pub mod tests {
         feature = "full-controller-tests",
         feature = "bounded-persistence-tests"
     ))]
-    async fn persistence_lifecycle_differential_slskdn_traffic_stats_domain() {
+    async fn persistence_lifecycle_differential_native_traffic_stats_domain() {
         let target = "slskdn";
         let mut ledger = Vec::new();
         let mut mismatches = Vec::new();
@@ -214529,7 +214555,7 @@ pub mod tests {
             .await
             .expect("HashDb controller contract database");
         let env = MapEnv::default()
-            .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+            .with("SLSKR_CONTROLLER_PROFILE", target)
             .with("SLSKR_SHARE_FIXTURE", "")
             .with("SLSKR_PERSISTENCE_ENABLED", "true");
         let (state, _receiver) =
@@ -219097,7 +219123,7 @@ pub mod tests {
         }
 
         fn bridge_env() -> MapEnv {
-            MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn")
+            MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "native")
         }
 
         fn json_body(response: &super::routing::HttpResponse) -> serde_json::Value {
@@ -219806,7 +219832,7 @@ pub mod tests {
     ))]
     async fn controller_api_differential_podcore_residuals() {
         let target = "slskdn";
-        let pod_env = || MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target);
+        let pod_env = || MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target);
         let mut ledger = Vec::new();
         let mut mismatches = Vec::new();
 
@@ -221954,7 +221980,7 @@ pub mod tests {
     ))]
     async fn controller_api_differential_mediacore_residuals() {
         let target = "slskdn";
-        let base_env = MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target);
+        let base_env = MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target);
         let mut ledger = Vec::new();
         let mut mismatches = Vec::new();
 
@@ -222438,7 +222464,7 @@ pub mod tests {
     ))]
     async fn controller_api_differential_musicbrainz_residuals() {
         let target = "slskdn";
-        let base_env = MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target);
+        let base_env = MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target);
         let mut ledger = Vec::new();
         let mut mismatches = Vec::new();
 
@@ -223232,7 +223258,7 @@ pub mod tests {
     ))]
     async fn controller_api_differential_jobs_residuals() {
         let target = "slskdn";
-        let base_env = MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target);
+        let base_env = MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target);
         let mut ledger = Vec::new();
         let mut mismatches = Vec::new();
 
@@ -223780,7 +223806,7 @@ pub mod tests {
     ))]
     async fn controller_api_differential_library_residuals() {
         let target = "slskdn";
-        let base_env = MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target);
+        let base_env = MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target);
         let mut ledger = Vec::new();
         let mut mismatches = Vec::new();
 
@@ -224281,7 +224307,7 @@ pub mod tests {
     ))]
     async fn controller_api_differential_security_controller_residuals() {
         let target = "slskdn";
-        let base_env = MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target);
+        let base_env = MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target);
         let mut ledger = Vec::new();
         let mut mismatches = Vec::new();
 
@@ -225213,7 +225239,7 @@ pub mod tests {
     ))]
     async fn controller_api_differential_integrations_residuals() {
         let target = "slskdn";
-        let base_env = MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target);
+        let base_env = MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target);
         let mut ledger = Vec::new();
         let mut mismatches = Vec::new();
 
@@ -225254,14 +225280,14 @@ pub mod tests {
 
         fn spotify_env() -> MapEnv {
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn")
+                .with("SLSKR_CONTROLLER_PROFILE", "native")
                 .with("SLSKR_SPOTIFY_ENABLED", "true")
                 .with("SLSKR_SPOTIFY_CLIENT_ID", "integration-client-id")
         }
 
         fn lidarr_env(url: &str) -> MapEnv {
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn")
+                .with("SLSKR_CONTROLLER_PROFILE", "native")
                 .with("SLSKR_LIDARR_ENABLED", "true")
                 .with("SLSKR_LIDARR_URL", url)
                 .with("SLSKR_LIDARR_API_KEY", "integration-fixture-key")
@@ -226231,7 +226257,7 @@ pub mod tests {
     async fn controller_api_differential_backfill_residuals() {
         let target = "slskdn";
         let base_env = MapEnv::default()
-            .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+            .with("SLSKR_CONTROLLER_PROFILE", target)
             .with("SLSKR_TRANSFER_ALLOW_OUTBOUND", "false");
         let mut ledger = Vec::new();
         let mut mismatches = Vec::new();
@@ -227001,7 +227027,7 @@ pub mod tests {
         feature = "bounded-controller-api-tests",
         feature = "bounded-controller-api-tests-4"
     ))]
-    async fn controller_api_differential_slskdn_native_open_cases() {
+    async fn controller_api_differential_native_native_open_cases() {
         let target = "slskdn";
         let mut ledger = Vec::new();
         let mut mismatches = Vec::new();
@@ -227025,7 +227051,7 @@ pub mod tests {
             }};
         }
 
-        let target_env = || MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target);
+        let target_env = || MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target);
         let json_value = |response: &super::routing::HttpResponse| {
             serde_json::from_str::<serde_json::Value>(&response.body)
                 .unwrap_or(serde_json::Value::Null)
@@ -227658,7 +227684,7 @@ pub mod tests {
             .join("controller-api");
         fs::create_dir_all(&evidence_dir).expect("create slskdn native evidence directory");
         fs::write(
-            evidence_dir.join("slskdn_native_open_cases.json"),
+            evidence_dir.join("native_native_open_cases.json"),
             serde_json::to_string_pretty(&ledger).expect("serialize slskdn native ledger"),
         )
         .expect("write slskdn native ledger");
@@ -227704,7 +227730,7 @@ pub mod tests {
             }};
         }
 
-        let target_env = || MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target);
+        let target_env = || MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target);
         let json_value = |response: &super::routing::HttpResponse| {
             serde_json::from_str::<serde_json::Value>(&response.body)
                 .unwrap_or(serde_json::Value::Null)
@@ -228078,7 +228104,7 @@ pub mod tests {
             }};
         }
 
-        let target_env = || MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target);
+        let target_env = || MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target);
         let json_value = |response: &super::routing::HttpResponse| {
             serde_json::from_str::<serde_json::Value>(&response.body)
                 .unwrap_or(serde_json::Value::Null)
@@ -228440,7 +228466,7 @@ pub mod tests {
             }};
         }
 
-        let target_env = || MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target);
+        let target_env = || MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target);
         let json_value = |response: &super::routing::HttpResponse| {
             serde_json::from_str::<serde_json::Value>(&response.body)
                 .unwrap_or(serde_json::Value::Null)
@@ -228920,7 +228946,7 @@ pub mod tests {
             };
         }
 
-        let target_env = || MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target);
+        let target_env = || MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target);
         let parse_json = |body: &str| {
             serde_json::from_str::<serde_json::Value>(body).unwrap_or(serde_json::Value::Null)
         };
@@ -229462,7 +229488,7 @@ pub mod tests {
             };
         }
 
-        let target_env = || MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target);
+        let target_env = || MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target);
         let parse_json = |body: &str| {
             serde_json::from_str::<serde_json::Value>(body).unwrap_or(serde_json::Value::Null)
         };
@@ -229909,7 +229935,7 @@ pub mod tests {
 
         let env = || {
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                .with("SLSKR_CONTROLLER_PROFILE", target)
                 .with(
                     "SLSKR_TEST_USER_ENDPOINT_OVERRIDES",
                     "differential-peer=127.0.0.1:2234",
@@ -230348,7 +230374,7 @@ pub mod tests {
                 .expect("user note runtime database");
             let (runtime_state, _receiver) =
                 test_state_with_env_parts(env(), super::SearchStore::new(), Some(db.clone()));
-            runtime_state.user_notes.write().await.set_slskdn(
+            runtime_state.user_notes.write().await.set_versioned(
                 "differential-peer".to_owned(),
                 "runtime note".to_owned(),
                 String::new(),
@@ -230521,7 +230547,7 @@ pub mod tests {
             };
         }
 
-        let env = || MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target);
+        let env = || MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target);
         let parse_json = |body: &str| {
             serde_json::from_str::<serde_json::Value>(body).unwrap_or(serde_json::Value::Null)
         };
@@ -230935,7 +230961,7 @@ pub mod tests {
 
         let agent_env = || {
             MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                .with("SLSKR_CONTROLLER_PROFILE", target)
                 .with("SLSKD_RELAY", "true")
                 .with("SLSKD_RELAY_MODE", "agent")
                 .with("SLSKD_CONTROLLER_ADDRESS", "http://127.0.0.1:9")
@@ -230946,7 +230972,7 @@ pub mod tests {
         async fn configured_controller() -> (Arc<super::AppState>, String, u64) {
             let (state, _receiver) = test_state_with_env(
                 MapEnv::default()
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn")
+                    .with("SLSKR_CONTROLLER_PROFILE", "native")
                     .with("SLSKR_AUTH_DISABLED", "true")
                     .with("SLSKD_ALLOW_REMOTE_NO_AUTH", "true")
                     .with("SLSKD_PASSTHROUGH_ALLOWED_CIDRS", "127.0.0.1/32"),
@@ -230973,7 +230999,7 @@ pub mod tests {
                 .protocol
                 .issue_challenge("slskdn-relay-connection", now);
             let credential = super::relay::credential_for_target(
-                super::ControllerCompatibilityTarget::Slskdn,
+                super::ControllerProfile::Native,
                 &secret,
                 "edge-one",
                 &challenge,
@@ -230981,7 +231007,7 @@ pub mod tests {
             let settings = state.advanced_networking.read().await.relay.clone();
             assert!(state.relay.write().await.protocol.authenticate_agent(
                 &settings,
-                super::relay::credential_scheme(super::ControllerCompatibilityTarget::Slskdn,),
+                super::relay::credential_scheme(super::ControllerProfile::Native,),
                 "slskdn-relay-connection",
                 "edge-one",
                 &credential,
@@ -231154,7 +231180,7 @@ pub mod tests {
             .expect("relay download token")
             .1;
         let download_credential = super::relay::credential_for_target(
-            super::ControllerCompatibilityTarget::Slskdn,
+            super::ControllerProfile::Native,
             &secret,
             "edge-one",
             &download_token,
@@ -231247,7 +231273,7 @@ pub mod tests {
             .protocol
             .issue_file_upload_token("edge-one", "Upload.flac", upload_token, now,));
         let upload_credential = super::relay::credential_for_target(
-            super::ControllerCompatibilityTarget::Slskdn,
+            super::ControllerProfile::Native,
             &secret,
             "edge-one",
             &upload_token.to_string(),
@@ -231356,7 +231382,7 @@ pub mod tests {
             .protocol
             .issue_file_upload_token("edge-one", "Concurrent.flac", concurrent_upload_token, now,));
         let concurrent_upload_credential = super::relay::credential_for_target(
-            super::ControllerCompatibilityTarget::Slskdn,
+            super::ControllerProfile::Native,
             &secret,
             "edge-one",
             &concurrent_upload_token.to_string(),
@@ -231406,7 +231432,7 @@ pub mod tests {
             .issue_share_upload_token("edge-one", now)
             .expect("relay share token");
         let share_credential = super::relay::credential_for_target(
-            super::ControllerCompatibilityTarget::Slskdn,
+            super::ControllerProfile::Native,
             &secret,
             "edge-one",
             &share_token,
@@ -231417,7 +231443,7 @@ pub mod tests {
             .join("relay-share-source.db");
         super::relay::write_share_database(
             &share_source,
-            super::ControllerCompatibilityTarget::Slskdn,
+            super::ControllerProfile::Native,
             &[super::relay::RemoteShare {
                 filename: "Remote/Agent.flac".to_owned(),
                 size: 6,
@@ -231534,7 +231560,7 @@ pub mod tests {
             .issue_share_upload_token("edge-one", super::unix_timestamp())
             .expect("concurrent relay share token");
         let concurrent_share_credential = super::relay::credential_for_target(
-            super::ControllerCompatibilityTarget::Slskdn,
+            super::ControllerProfile::Native,
             &secret,
             "edge-one",
             &concurrent_share_token,
@@ -231648,7 +231674,7 @@ pub mod tests {
             .expect("relay stream upload token")
             .to_owned();
         let stream_credential = super::relay::credential_for_target(
-            super::ControllerCompatibilityTarget::Slskdn,
+            super::ControllerProfile::Native,
             &secret,
             "edge-one",
             &stream_token,
@@ -231782,7 +231808,7 @@ pub mod tests {
             }};
         }
 
-        let target_env = || MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target);
+        let target_env = || MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target);
         let json_value = |response: &super::routing::HttpResponse| {
             serde_json::from_str::<serde_json::Value>(&response.body)
                 .unwrap_or(serde_json::Value::Null)
@@ -232530,7 +232556,7 @@ pub mod tests {
             }};
         }
 
-        let target_env = || MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target);
+        let target_env = || MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target);
         let json_value = |response: &super::routing::HttpResponse| {
             serde_json::from_str::<serde_json::Value>(&response.body)
                 .unwrap_or(serde_json::Value::Null)
@@ -233138,7 +233164,7 @@ pub mod tests {
 
     fn file_path_env(target: &str, remote_management: bool) -> MapEnv {
         MapEnv::default()
-            .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+            .with("SLSKR_CONTROLLER_PROFILE", target)
             .with(
                 "SLSKD_REMOTE_FILE_MANAGEMENT",
                 if remote_management { "true" } else { "false" },
@@ -233686,14 +233712,14 @@ pub mod tests {
     ))]
     fn run_bounded_controller_api_tests_1() {
         run_bounded_future(async {
-            controller_api_differential_slskdn_library_fallback_uses_current_case_mode_for_share_filters().await;
+            controller_api_differential_native_library_fallback_uses_current_case_mode_for_share_filters().await;
             controller_api_differential_session_issue_and_revoke().await;
             controller_api_differential_server_session_open_cases().await;
             controller_api_differential_bounded_activity_and_network_polling_routes_project_local_state().await;
-            controller_api_differential_slskdn_network_stats_edge_contracts().await;
-            controller_api_differential_slskdn_read_projection_runtime_contracts().await;
-            controller_api_differential_slskdn_solid_status_edge_contracts().await;
-            controller_api_differential_slskdn_solid_resolution_runtime_contracts().await;
+            controller_api_differential_native_network_stats_edge_contracts().await;
+            controller_api_differential_native_read_projection_runtime_contracts().await;
+            controller_api_differential_native_solid_status_edge_contracts().await;
+            controller_api_differential_native_solid_resolution_runtime_contracts().await;
             controller_api_differential_incremental_transfer_and_message_routes_validate_cursors_and_bound_history().await;
             controller_api_differential_portforwarding_start_readback().await;
             controller_api_differential_overlay_gateway_populated_gets().await;
@@ -233702,9 +233728,9 @@ pub mod tests {
                 .await;
             controller_api_differential_peer_stream_ticket_validation_and_limits().await;
             controller_api_differential_mesh_stream_ticket_validation_and_limits().await;
-            controller_api_differential_slskd_application_dump_contracts().await;
-            controller_api_differential_slskdn_application_dump_gates().await;
-            controller_api_differential_slskdn_application_open_cases().await;
+            controller_api_differential_controller_application_dump_contracts().await;
+            controller_api_differential_native_application_dump_gates().await;
+            controller_api_differential_native_application_open_cases().await;
             controller_api_differential_search_api_creates_reads_and_completes_records().await;
             controller_api_differential_search_creation_rehydrates().await;
             controller_api_differential_search_mutation_lifecycle().await;
@@ -233735,7 +233761,7 @@ pub mod tests {
             controller_api_differential_mesh_http_disabled_shape().await;
             controller_api_differential_library_jobs_and_discovery_projections().await;
             controller_api_differential_user_browse_api_requests_and_ingests_entries().await;
-            controller_api_differential_slskd_browse_status_tracks_request_failure_and_completion()
+            controller_api_differential_controller_browse_status_tracks_request_failure_and_completion()
                 .await;
             controller_api_differential_joined_room_server_snapshot_populates_the_real_user_roster(
             )
@@ -233819,7 +233845,7 @@ pub mod tests {
             controller_api_differential_bridge_admin_and_federation_diagnostics().await;
             controller_api_differential_bridge_admin_stats_and_source_feed_preview().await;
             controller_api_differential_extended_controller_mutations().await;
-            controller_api_differential_slskdn_ranking_contracts().await;
+            controller_api_differential_native_ranking_contracts().await;
             controller_api_differential_quarantine_jury().await;
             controller_api_differential_quarantine_jury_open_cases().await;
             controller_api_differential_content_bound_stream_tickets().await;
@@ -233859,7 +233885,7 @@ pub mod tests {
             controller_api_differential_playback_feedback_and_diagnostics().await;
             controller_api_differential_nowplaying_delete_and_playback_diagnostics_edge_states()
                 .await;
-            controller_api_differential_slskdn_nowplaying_webhook_contracts().await;
+            controller_api_differential_native_nowplaying_webhook_contracts().await;
             controller_api_differential_activitypub_inbox_relationships();
             controller_api_differential_activitypub_outbox_and_undo();
             controller_api_differential_conversations_delete_survives_persistence_failure().await;
@@ -233880,9 +233906,9 @@ pub mod tests {
             controller_api_differential_versioned_soulseek_similar_users().await;
             controller_api_differential_versioned_autoreplace_status().await;
             controller_api_differential_versioned_autoreplace_populated_state().await;
-            controller_api_differential_slskdn_autoreplace_edge_contracts().await;
-            controller_api_differential_slskdn_options_edge_contracts().await;
-            controller_api_differential_slskdn_events_edge_contracts().await;
+            controller_api_differential_native_autoreplace_edge_contracts().await;
+            controller_api_differential_native_options_edge_contracts().await;
+            controller_api_differential_native_events_edge_contracts().await;
             controller_api_differential_versioned_mesh_health_and_signals().await;
             controller_api_differential_versioned_signals_edge_contracts().await;
             controller_api_differential_traces_summary_contracts().await;
@@ -233894,8 +233920,8 @@ pub mod tests {
             controller_api_differential_populated_compatibility_status_and_capabilities().await;
             controller_api_differential_versioned_capability_peer_projections().await;
             controller_api_differential_versioned_capability_peers_nominal().await;
-            controller_api_differential_slskdn_capabilities_contracts().await;
-            controller_api_differential_slskdn_profile_contracts().await;
+            controller_api_differential_native_capabilities_contracts().await;
+            controller_api_differential_native_profile_contracts().await;
             controller_api_differential_versioned_destinations_nominal().await;
             controller_api_differential_versioned_backfill_candidates_nominal().await;
             controller_api_differential_versioned_multisource_jobs_nominal().await;
@@ -233908,7 +233934,7 @@ pub mod tests {
             controller_api_differential_versioned_transfer_histogram_nominal().await;
             controller_api_differential_versioned_transfer_reports_populated_state().await;
             controller_api_differential_versioned_destinations_populated_state().await;
-            controller_api_differential_slskdn_destinations_edge_contracts().await;
+            controller_api_differential_native_destinations_edge_contracts().await;
             controller_api_differential_runtime_failure_security_and_shares().await;
             controller_api_differential_sharegroups_and_shares_rebuild().await;
             controller_api_differential_sharegroups_persistence_and_concurrency().await;
@@ -233931,38 +233957,38 @@ pub mod tests {
             controller_api_differential_mediacore_delete_and_mesh_tickets().await;
             controller_api_differential_lidarr_and_source_feed_contracts().await;
             controller_api_differential_source_feed_open_cases().await;
-            controller_api_differential_slskd_file_transfer_and_room_contracts().await;
-            controller_api_differential_slskd_file_application_and_roster_edges().await;
-            controller_api_differential_slskd_share_and_relay_lifecycle().await;
-            controller_api_differential_slskd_fixed_route_malformed_paths().await;
-            controller_api_differential_slskd_parameterized_malformed_paths().await;
-            controller_api_differential_slskd_empty_and_missing_state().await;
-            controller_api_differential_slskd_relay_controller_routes().await;
-            controller_api_differential_slskd_core_application_session_events_and_telemetry().await;
-            controller_api_differential_slskd_core_failure_restart_and_empty_contracts().await;
-            controller_api_differential_slskd_users_and_shares().await;
-            controller_api_differential_slskd_rooms_and_conversations().await;
-            controller_api_differential_slskd_rooms_conversations_restart_and_failure().await;
-            controller_api_differential_slskd_server_state_and_lifecycle().await;
-            controller_api_differential_slskd_search_lifecycle().await;
-            controller_api_differential_slskd_search_failure_restart_and_idempotency().await;
-            controller_api_differential_slskdn_search_compatibility_contracts().await;
-            controller_api_differential_slskdn_searches_open_cases().await;
-            controller_api_differential_slskd_upload_lifecycle().await;
-            controller_api_differential_slskd_transfer_failure_restart_and_idempotency().await;
-            controller_api_differential_slskd_transfer_batch_cleanup_and_failures().await;
-            controller_api_differential_slskd_user_browse_contracts().await;
-            controller_api_differential_slskd_download_edge_contracts().await;
-            controller_api_differential_slskd_runtime_failure_isolation_contracts().await;
-            controller_api_differential_slskdn_security_runtime_failure_contracts().await;
-            controller_api_differential_slskd_options_overlay_contracts().await;
-            controller_api_differential_slskdn_transfers_runtime_failure_contracts().await;
-            controller_api_differential_slskdn_transfers_empty_and_missing_contracts().await;
-            controller_api_differential_slskdn_transfers_malformed_contracts().await;
-            controller_api_differential_slskdn_transfers_nominal_populated_contracts().await;
-            controller_api_differential_slskdn_transfers_restart_and_concurrency().await;
+            controller_api_differential_controller_file_transfer_and_room_contracts().await;
+            controller_api_differential_controller_file_application_and_roster_edges().await;
+            controller_api_differential_controller_share_and_relay_lifecycle().await;
+            controller_api_differential_controller_fixed_route_malformed_paths().await;
+            controller_api_differential_controller_parameterized_malformed_paths().await;
+            controller_api_differential_controller_empty_and_missing_state().await;
+            controller_api_differential_controller_relay_controller_routes().await;
+            controller_api_differential_controller_core_application_session_events_and_telemetry().await;
+            controller_api_differential_controller_core_failure_restart_and_empty_contracts().await;
+            controller_api_differential_controller_users_and_shares().await;
+            controller_api_differential_controller_rooms_and_conversations().await;
+            controller_api_differential_controller_rooms_conversations_restart_and_failure().await;
+            controller_api_differential_controller_server_state_and_lifecycle().await;
+            controller_api_differential_controller_search_lifecycle().await;
+            controller_api_differential_controller_search_failure_restart_and_idempotency().await;
+            controller_api_differential_native_search_compatibility_contracts().await;
+            controller_api_differential_native_searches_open_cases().await;
+            controller_api_differential_controller_upload_lifecycle().await;
+            controller_api_differential_controller_transfer_failure_restart_and_idempotency().await;
+            controller_api_differential_controller_transfer_batch_cleanup_and_failures().await;
+            controller_api_differential_controller_user_browse_contracts().await;
+            controller_api_differential_controller_download_edge_contracts().await;
+            controller_api_differential_controller_runtime_failure_isolation_contracts().await;
+            controller_api_differential_native_security_runtime_failure_contracts().await;
+            controller_api_differential_controller_options_overlay_contracts().await;
+            controller_api_differential_native_transfers_runtime_failure_contracts().await;
+            controller_api_differential_native_transfers_empty_and_missing_contracts().await;
+            controller_api_differential_native_transfers_malformed_contracts().await;
+            controller_api_differential_native_transfers_nominal_populated_contracts().await;
+            controller_api_differential_native_transfers_restart_and_concurrency().await;
             controller_api_differential_options_action_routes().await;
-            controller_api_differential_slskd_residual_core_contracts().await;
+            controller_api_differential_controller_residual_core_contracts().await;
             controller_api_differential_hashdb_domain_contracts().await;
             controller_api_differential_pods_controller_residuals().await;
             controller_api_differential_wishlist_controller_residuals().await;
@@ -233977,7 +234003,7 @@ pub mod tests {
             controller_api_differential_security_controller_residuals().await;
             controller_api_differential_integrations_residuals().await;
             controller_api_differential_backfill_residuals().await;
-            controller_api_differential_slskdn_native_open_cases().await;
+            controller_api_differential_native_native_open_cases().await;
             controller_api_differential_audio_canonical_dedupe_and_migration().await;
             controller_api_differential_taste_recommendation_open_cases().await;
             controller_api_differential_songid_open_cases().await;
@@ -234043,12 +234069,12 @@ pub mod tests {
             persistence_lifecycle_differential_covered_domains_transaction_and_concurrency_atomicity().await;
             persistence_lifecycle_differential_covered_domains_corrupt_state_and_upgrade_failure()
                 .await;
-            persistence_lifecycle_differential_slskd_batches_domain().await;
-            persistence_lifecycle_differential_slskd_share_files_domain().await;
+            persistence_lifecycle_differential_controller_batches_domain().await;
+            persistence_lifecycle_differential_controller_share_files_domain().await;
             persistence_lifecycle_differential_transfers_domain_full_lifecycle().await;
-            persistence_lifecycle_differential_slskdn_hashdb_domains().await;
-            persistence_lifecycle_differential_slskdn_songid_runs().await;
-            persistence_lifecycle_differential_slskdn_traffic_stats_domain().await;
+            persistence_lifecycle_differential_native_hashdb_domains().await;
+            persistence_lifecycle_differential_native_songid_runs().await;
+            persistence_lifecycle_differential_native_traffic_stats_domain().await;
         });
     }
 
@@ -234101,7 +234127,7 @@ pub mod tests {
             security_controls_differential_route_security_adapters().await;
             security_controls_differential_mesh_transport().await;
             security_controls_differential_core_security().await;
-            security_controls_differential_slskdn_security_controller().await;
+            security_controls_differential_native_security_controller().await;
             security_controls_differential_passthrough_authentication();
             security_controls_differential_authentication_and_jwt();
         });

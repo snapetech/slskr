@@ -90,7 +90,7 @@ export const getHistory = async ({
   };
 };
 
-/** Enqueue a frozen slskd download batch. */
+/** Enqueue a versioned controller-compatible download batch. */
 export const enqueueBatch = ({
   username,
   files = [],

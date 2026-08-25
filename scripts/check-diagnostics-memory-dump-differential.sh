@@ -101,7 +101,7 @@ start_daemon() {
     ) >"$log" 2>&1 &
   else
     (
-      export SLSKR_CONTROLLER_COMPATIBILITY_TARGET=slskdn SLSKR_REMOTE_CONFIGURATION=true
+      export SLSKR_CONTROLLER_PROFILE=native SLSKR_REMOTE_CONFIGURATION=true
       export SLSKR_CONTROLLER_AUDIT_MODE=1
       export SLSKR_OVERLAY_BIND="127.0.0.1:$overlay_port"
       export SLSKD_HTTPS_PORT="$https_port"

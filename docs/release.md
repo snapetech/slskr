@@ -23,6 +23,10 @@ scripts/with-build-guard.sh cargo build --release -p slskr
 scripts/with-build-guard.sh cargo test --workspace
 ```
 
+Rust formatting uses `scripts/check-rust-format.sh`, which checks source files
+individually under a separate hard 4 GiB no-swap process limit. This avoids
+letting the monolithic controller source trigger an unbounded rustfmt diff.
+
 The `slskr` package defaults to its bounded focused controller-test target.
 The historical monolithic controller suite is rejected by the guard when
 requested with `--features full-controller-tests` or `--all-features`, because

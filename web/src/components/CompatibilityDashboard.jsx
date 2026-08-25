@@ -689,7 +689,7 @@ const HistoricalStatistics = ({ data, historyLabel, historyRanges, onHistoryRang
   );
 };
 
-const CompatibilityDashboard = ({ compatibilityTarget, server } = {}) => {
+const CompatibilityDashboard = ({ runtimeProfile, server } = {}) => {
   const [historyLabel, setHistoryLabel] = useState('30d');
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState(EMPTY_REPORT);
@@ -742,7 +742,7 @@ const CompatibilityDashboard = ({ compatibilityTarget, server } = {}) => {
   return (
     <div className="view dashboard compatibility-dashboard">
       <SearchBar server={server} />
-      {compatibilityTarget === 'slskd' ? (
+      {runtimeProfile === 'legacy' ? (
         <Segment>
           <Header as="h4">
             <Icon name="history" />

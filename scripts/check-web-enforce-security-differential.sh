@@ -104,7 +104,7 @@ start_daemon() {
     local overlay_port
     overlay_port="$(pick_free_port)"
     (
-      export SLSKR_CONTROLLER_COMPATIBILITY_TARGET=slskdn SLSKR_REMOTE_CONFIGURATION=true
+      export SLSKR_CONTROLLER_PROFILE=native SLSKR_REMOTE_CONFIGURATION=true
       export SLSKD_HTTPS_PORT="$https_port"
       export SLSKR_OVERLAY_BIND="127.0.0.1:$overlay_port"
       if [[ "$environment_enforce" != __unset__ ]]; then

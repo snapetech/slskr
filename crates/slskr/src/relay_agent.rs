@@ -26,7 +26,7 @@ use tokio_tungstenite::{connect_async_tls_with_config, tungstenite::Message, Con
 use x509_parser::prelude::parse_x509_certificate;
 
 use crate::{
-    config::{ControllerCompatibilityTarget, RelaySettings},
+    config::{ControllerProfile, RelaySettings},
     relay, AppState,
 };
 
@@ -63,7 +63,7 @@ async fn run_connection(state: &Arc<AppState>, settings: &RelaySettings) -> Resu
     if instance_name.is_empty() {
         return Err("relay agent instance name is empty".to_owned());
     }
-    let target = state.config.controller_compatibility_target;
+    let target = state.config.controller_profile;
     let http_client = build_http_client(settings, target)?;
     let websocket_url =
         relay_websocket_url(&settings.controller.address, &settings.controller.api_key)?;
@@ -206,7 +206,7 @@ async fn run_connection(state: &Arc<AppState>, settings: &RelaySettings) -> Resu
 
 fn build_http_client(
     settings: &RelaySettings,
-    target: ControllerCompatibilityTarget,
+    target: ControllerProfile,
 ) -> Result<reqwest::Client, String> {
     let mut builder = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
@@ -376,7 +376,7 @@ fn relay_certificate_pin(certificate: &rustls::pki_types::CertificateDer<'_>) ->
 
 fn relay_tls_config(
     settings: &RelaySettings,
-    target: ControllerCompatibilityTarget,
+    target: ControllerProfile,
 ) -> Result<rustls::ClientConfig, String> {
     let provider = Arc::new(rustls::crypto::ring::default_provider());
     let roots = rustls::RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
@@ -397,7 +397,7 @@ fn relay_tls_config(
             .with_no_client_auth());
     }
     if settings.controller.ignore_certificate_errors {
-        if target == ControllerCompatibilityTarget::Slskdn {
+        if target == ControllerProfile::Native {
             return crate::webhooks::self_issued_tls_config()
                 .map_err(|error| format!("relay TLS configuration failed: {error}"));
         }
@@ -535,7 +535,7 @@ async fn next_signalr_messages(socket: &mut RelaySocket) -> Result<Vec<Value>, S
 async fn upload_shares(
     state: &Arc<AppState>,
     settings: &RelaySettings,
-    target: crate::config::ControllerCompatibilityTarget,
+    target: crate::config::ControllerProfile,
     client: &reqwest::Client,
     instance_name: &str,
     token: &str,
@@ -545,7 +545,7 @@ async fn upload_shares(
         let roots = shares
             .roots
             .iter()
-            .map(crate::slskd_share_value)
+            .map(crate::controller_share_value)
             .collect::<Vec<_>>();
         let files = shares
             .entries
@@ -601,7 +601,7 @@ async fn upload_shares(
 async fn handle_server_invocation(
     state: &Arc<AppState>,
     settings: &RelaySettings,
-    compatibility_target: crate::config::ControllerCompatibilityTarget,
+    runtime_profile: crate::config::ControllerProfile,
     client: &reqwest::Client,
     instance_name: &str,
     socket: &mut RelaySocket,
@@ -653,7 +653,7 @@ async fn handle_server_invocation(
             if let Err(error) = upload_file(
                 state,
                 settings,
-                compatibility_target,
+                runtime_profile,
                 client,
                 instance_name,
                 &filename,
@@ -683,7 +683,7 @@ async fn handle_server_invocation(
                 download_completed_file(
                     state,
                     settings,
-                    compatibility_target,
+                    runtime_profile,
                     client,
                     instance_name,
                     filename,
@@ -701,7 +701,7 @@ async fn handle_server_invocation(
 async fn upload_file(
     state: &Arc<AppState>,
     settings: &RelaySettings,
-    target: crate::config::ControllerCompatibilityTarget,
+    target: crate::config::ControllerProfile,
     client: &reqwest::Client,
     instance_name: &str,
     filename: &str,
@@ -748,7 +748,7 @@ async fn upload_file(
 async fn post_relay_form(
     client: &reqwest::Client,
     settings: &RelaySettings,
-    target: crate::config::ControllerCompatibilityTarget,
+    target: crate::config::ControllerProfile,
     instance_name: &str,
     token: &str,
     path_prefix: &str,
@@ -778,7 +778,7 @@ async fn post_relay_form(
 pub(crate) async fn download_completed_file(
     state: &Arc<AppState>,
     settings: &RelaySettings,
-    target: crate::config::ControllerCompatibilityTarget,
+    target: crate::config::ControllerProfile,
     client: &reqwest::Client,
     instance_name: &str,
     filename: &str,

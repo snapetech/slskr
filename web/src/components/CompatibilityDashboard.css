@@ -58,7 +58,7 @@
 }
 
 .compatibility-dashboard .compatibility-graph-tooltip {
-  background: var(--slskd-panel, #fff);
+  background: var(--slskr-panel, #fff);
   border: 1px solid rgba(128, 128, 128, 0.45);
   border-radius: 4px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
@@ -125,5 +125,5 @@
 }
 
 .dark .compatibility-dashboard .compatibility-graph-legend button {
-  color: var(--slskd-color, #c9d1d9);
+  color: var(--slskr-color, #c9d1d9);
 }

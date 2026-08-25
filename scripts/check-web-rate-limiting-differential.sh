@@ -96,7 +96,7 @@ start_daemon() {
     overlay_port="$(pick_free_port)"
     (
       export SLSKR_AUTH_DISABLED=false SLSKR_API_TOKEN=differential-controller-token-32
-      export SLSKR_CONTROLLER_COMPATIBILITY_TARGET=slskdn
+      export SLSKR_CONTROLLER_PROFILE=native
       export SLSKR_REMOTE_CONFIGURATION=true
       export SLSKD_HTTPS_PORT="$https_port"
       export SLSKR_OVERLAY_BIND="127.0.0.1:$overlay_port"

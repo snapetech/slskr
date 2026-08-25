@@ -27,7 +27,7 @@ const MAX_ALLOWED_DESTINATIONS: usize = 50;
 pub const GOLD_STAR_CLUB_POD_ID: &str = "pod:901d57a2c1bb4e5d90d57a2c1bb4e5d0";
 pub const GOLD_STAR_CLUB_GENERAL_CHANNEL_ID: &str = "gold-star-club-general";
 pub const GOLD_STAR_CLUB_MAX_MEMBERS: usize = 250;
-pub const GOLD_STAR_CLUB_AUTOJOIN_ENV: &str = "SLSKDN_POD_GOLD_STAR_CLUB_AUTOJOIN";
+pub const GOLD_STAR_CLUB_AUTOJOIN_ENV: &str = "SLSKR_POD_GOLD_STAR_CLUB_AUTOJOIN";
 const GOLD_STAR_CLUB_REVOCATION_FILE: &str = "gold-star-club.revoked";
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -395,7 +395,9 @@ impl PodStore {
 
     pub fn ensure_gold_star_club(&mut self) -> Result<PodRecord, String> {
         if !self.gold_star_club_available() {
-            return Err("Gold Star Club is disabled by configuration or local revocation".to_owned());
+            return Err(
+                "Gold Star Club is disabled by configuration or local revocation".to_owned(),
+            );
         }
         if let Some(existing) = self.pods.get(GOLD_STAR_CLUB_POD_ID) {
             return Ok(public_pod(existing, false));

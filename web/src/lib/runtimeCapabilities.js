@@ -245,7 +245,7 @@ export const getNetworkStats = async ({ includePeers = false } = {}) => {
 };
 
 // One server-side summary request shared by the footer and Network dashboard.
-export const getSlskdnStats = async ({ includePeers = false } = {}) => {
+export const getRuntimeStats = async ({ includePeers = false } = {}) => {
   const snapshot = await getNetworkStats({ includePeers });
   return normalizeNetworkStats(snapshot);
 };

@@ -67,7 +67,7 @@ advertised_port = 2234
 # port = 0
 
 [mesh]
-# Frozen slskdN capability messages advertise an overlay port but not the TLS
+# Native capability messages advertise an overlay port but not the TLS
 # certificate hash or HTTP range URL. Pin those values explicitly for peers you
 # operate or have verified out of band. Environment equivalent:
 # SLSKR_TRUSTED_MESH_PEERS='[{"peerId":"...","username":"...","overlayEndpoint":"203.0.113.10:50305","certificateSha256":"...","rangeEndpoint":"https://mesh.example/content/{sha256}/{size}/{recordingId}"}]'
@@ -87,7 +87,7 @@ enabled = false
 # file = "/etc/slskr/blacklist.txt"
 
 [feature]
-# Frozen target defaults differ: false for slskd and true for slskdN.
+# Runtime profile defaults differ: false for legacy and true for native.
 swagger = true
 
 [metrics]
@@ -96,7 +96,7 @@ url = "/metrics"
 
 [metrics.authentication]
 disabled = false
-username = "slskd"
+username = "slskr"
 # No built-in password is used. Set this whenever metrics are enabled with
 # authentication; use a secret manager or SLSKD_METRICS_PASSWORD in production.
 password = "replace-with-a-secret"
@@ -113,9 +113,9 @@ signature_mode = "off"
 
 [podcore.gold_star_club]
 # Native/current slskR launches default to false (opt in with true). An
-# explicitly selected frozen slskdN compatibility profile defaults to true for
+# explicitly selected frozen native profile defaults to true for
 # parity; set this to false there to opt out. The environment variable
-# SLSKDN_POD_GOLD_STAR_CLUB_AUTOJOIN overrides this value.
+# SLSKR_POD_GOLD_STAR_CLUB_AUTOJOIN overrides this value.
 autojoin = false
 
 [shares]
@@ -142,10 +142,10 @@ allow_outbound = true
 # completed_path_template = "{uploader}/{remote_parent}/{request_name}"
 
 [transfers.groups.blacklisted]
-# The frozen options API projects this under `groups.blacklisted` in slskdN
-# mode and `transfers.groups.blacklisted` in slskd mode. Controller YAML accepts
-# the documented `transfers.groups` runtime placement for both targets; slskdN
-# also accepts top-level `groups` and gives it precedence.
+# The native options API projects this under `groups.blacklisted`, while the
+# legacy profile projects it under `transfers.groups.blacklisted`. Controller
+# YAML accepts the documented `transfers.groups` runtime placement for both
+# profiles; native also accepts top-level `groups` and gives it precedence.
 members = []
 patterns = []
 cidrs = []
@@ -176,14 +176,13 @@ max_files_per_cycle = 2
 alternate_source_size_tolerance_percent = 5
 
 [compatibility]
-# Selects behavior where frozen slskd and slskdN contracts conflict. The
-# default is slskdn. This currently selects the exact generated controller
-# authorization registry; additional target conflicts are added here as their
-# differential proofs are completed. Environment equivalent:
-# SLSKR_CONTROLLER_COMPATIBILITY_TARGET=slskd
-controller_target = "slskdn"
-# Matches frozen slskd/slskdN: remote option overlays and configuration-file
-# reads/writes are forbidden unless explicitly enabled.
+# Selects the slskr controller runtime profile. `native` is the normal daemon
+# profile; `legacy` is used only by external differential harnesses.
+# Environment equivalent:
+# SLSKR_CONTROLLER_PROFILE=legacy
+profile = "native"
+# Remote option overlays and configuration-file reads/writes are forbidden
+# unless explicitly enabled.
 remote_configuration = false
 # Frozen upstream aliases DEBUG and NO_CONFIG_WATCH are also accepted.
 debug = false

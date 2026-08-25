@@ -465,8 +465,8 @@ pub fn swagger_ui_html(spec_url: &str) -> String {
     )
 }
 
-/// Generate the frozen slskd/slskdN Swagger UI shell. The upstream targets
-/// publish the same static Swashbuckle index and vary only the generated spec.
+/// Generate the frozen compatibility Swagger UI shell. The legacy and native
+/// profiles publish the same static Swashbuckle index and vary only the spec.
 pub fn frozen_swagger_ui_html() -> String {
     r#"<!-- HTML for static distribution bundle build -->
 <!DOCTYPE html>
@@ -536,7 +536,7 @@ mod tests {
     }
 
     #[test]
-    fn test_openapi_documents_slskd_compatible_arrays() {
+    fn test_openapi_documents_controller_compatible_arrays() {
         let spec = OpenApiSpec::new("Test API", "1.0.0").generate();
         assert_eq!(
             spec["paths"]["/api/searches"]["get"]["responses"]["200"]["content"]
@@ -572,7 +572,7 @@ mod tests {
     }
 
     #[test]
-    fn test_checked_in_openapi_documents_slskd_compatible_arrays() {
+    fn test_checked_in_openapi_documents_controller_compatible_arrays() {
         let spec: Value = serde_json::from_str(CHECKED_IN_OPENAPI_JSON).expect("openapi json");
         assert_eq!(
             spec["paths"]["/api/searches"]["get"]["responses"]["200"]["content"]

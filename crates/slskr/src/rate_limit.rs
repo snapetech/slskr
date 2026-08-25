@@ -424,7 +424,7 @@ pub struct RateLimitHeaders {
     pub reset: String,
 }
 
-/// Soulseek-specific sliding-window caps from the frozen slskdN safety
+/// Soulseek-specific sliding-window caps from the frozen native profile safety
 /// limiter.  These buckets are deliberately separate from the HTTP request
 /// limiter: a caller can have an authenticated API request while still
 /// exhausting the network-operation budget.

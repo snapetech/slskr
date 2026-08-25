@@ -26,7 +26,7 @@ use sqlx_sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
 use uuid::Uuid;
 
-use crate::config::{ControllerCompatibilityTarget, RelaySettings};
+use crate::config::{ControllerProfile, RelaySettings};
 
 const CHALLENGE_TTL_SECONDS: u64 = 10;
 const REQUEST_TTL_SECONDS: u64 = 5 * 60;
@@ -42,14 +42,14 @@ const BASE62_ALPHABET: &[u8; 62] =
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum CredentialScheme {
-    SlskdAesBase62,
-    SlskdnHmacBase64,
+    LegacyAesBase62,
+    NativeHmacBase64,
 }
 
-pub(crate) fn credential_scheme(target: ControllerCompatibilityTarget) -> CredentialScheme {
+pub(crate) fn credential_scheme(target: ControllerProfile) -> CredentialScheme {
     match target {
-        ControllerCompatibilityTarget::Slskd => CredentialScheme::SlskdAesBase62,
-        ControllerCompatibilityTarget::Slskdn => CredentialScheme::SlskdnHmacBase64,
+        ControllerProfile::Legacy => CredentialScheme::LegacyAesBase62,
+        ControllerProfile::Native => CredentialScheme::NativeHmacBase64,
     }
 }
 
@@ -189,12 +189,12 @@ const CURRENT_SHARE_DATABASE_TABLES: &[&str] = &[
 ];
 
 /// Write the SQLite share repository uploaded by a relay agent.  The two
-/// frozen controller targets intentionally have different repository schemas:
-/// slskd uses the legacy ten-table repository, while slskdN adds moderation
-/// columns and the content-items table.
+/// frozen profiles intentionally have different repository schemas: the legacy
+/// profile uses the ten-table repository, while the native profile adds
+/// moderation columns and the content-items table.
 pub(crate) async fn write_share_database(
     path: &Path,
-    target: ControllerCompatibilityTarget,
+    target: ControllerProfile,
     shares: &[RemoteShare],
 ) -> Result<(), String> {
     let options = SqliteConnectOptions::new()
@@ -219,10 +219,10 @@ pub(crate) async fn write_share_database(
                 .map_err(|error| format!("relay share database schema failed: {error}"))?;
         }
         let files_sql = match target {
-            ControllerCompatibilityTarget::Slskd => {
+            ControllerProfile::Legacy => {
                 "CREATE TABLE files (maskedFilename TEXT PRIMARY KEY, originalFilename TEXT NOT NULL, size BIGINT NOT NULL, touchedAt TEXT NOT NULL, code INTEGER DEFAULT 1 NOT NULL, extension TEXT, attributeJson TEXT NOT NULL, timestamp INTEGER NOT NULL)"
             }
-            ControllerCompatibilityTarget::Slskdn => {
+            ControllerProfile::Native => {
                 "CREATE TABLE files (maskedFilename TEXT PRIMARY KEY, originalFilename TEXT NOT NULL, size BIGINT NOT NULL, touchedAt TEXT NOT NULL, code INTEGER DEFAULT 1 NOT NULL, extension TEXT, attributeJson TEXT NOT NULL, timestamp INTEGER NOT NULL, isBlocked INTEGER DEFAULT 0 NOT NULL, isQuarantined INTEGER DEFAULT 0 NOT NULL, moderationReason TEXT)"
             }
         };
@@ -230,7 +230,7 @@ pub(crate) async fn write_share_database(
             .execute(&pool)
             .await
             .map_err(|error| format!("relay share database file schema failed: {error}"))?;
-        if target == ControllerCompatibilityTarget::Slskdn {
+        if target == ControllerProfile::Native {
             query(
                 "CREATE TABLE content_items (contentId TEXT PRIMARY KEY, domain TEXT NOT NULL, workId TEXT, maskedFilename TEXT NOT NULL, isAdvertisable INTEGER DEFAULT 0 NOT NULL, moderationReason TEXT, checkedAt INTEGER NOT NULL, FOREIGN KEY(maskedFilename) REFERENCES files(maskedFilename) ON DELETE CASCADE)",
             )
@@ -292,7 +292,7 @@ pub(crate) async fn write_share_database(
                 .map(|(_, suffix)| suffix.to_lowercase())
                 .unwrap_or_default();
             match target {
-                ControllerCompatibilityTarget::Slskd => {
+                ControllerProfile::Legacy => {
                     query("INSERT INTO files (maskedFilename, originalFilename, size, touchedAt, code, extension, attributeJson, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
                         .bind(&share.filename)
                         .bind(&share.filename)
@@ -306,7 +306,7 @@ pub(crate) async fn write_share_database(
                         .await
                         .map_err(|error| format!("relay share database file failed: {error}"))?;
                 }
-                ControllerCompatibilityTarget::Slskdn => {
+                ControllerProfile::Native => {
                     query("INSERT INTO files (maskedFilename, originalFilename, size, touchedAt, code, extension, attributeJson, timestamp, isBlocked, isQuarantined, moderationReason) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
                         .bind(&share.filename)
                         .bind(&share.filename)
@@ -341,7 +341,7 @@ pub(crate) async fn write_share_database(
 /// files that the controller can use for remote content resolution.
 pub(crate) async fn read_share_database(
     path: &Path,
-    target: ControllerCompatibilityTarget,
+    target: ControllerProfile,
 ) -> Result<Vec<RemoteShare>, String> {
     let options = SqliteConnectOptions::new()
         .filename(path)
@@ -363,16 +363,16 @@ pub(crate) async fn read_share_database(
             .collect::<Vec<_>>();
         tables.sort();
         let mut expected = match target {
-            ControllerCompatibilityTarget::Slskd => OLD_SHARE_DATABASE_TABLES.to_vec(),
-            ControllerCompatibilityTarget::Slskdn => CURRENT_SHARE_DATABASE_TABLES.to_vec(),
+            ControllerProfile::Legacy => OLD_SHARE_DATABASE_TABLES.to_vec(),
+            ControllerProfile::Native => CURRENT_SHARE_DATABASE_TABLES.to_vec(),
         };
         expected.sort_unstable();
         if tables != expected {
             return Err(format!(
                 "relay share database schema does not match {}",
                 match target {
-                    ControllerCompatibilityTarget::Slskd => "slskd",
-                    ControllerCompatibilityTarget::Slskdn => "slskdN",
+                    ControllerProfile::Legacy => "slskd",
+                    ControllerProfile::Native => "native",
                 }
             ));
         }
@@ -566,7 +566,7 @@ impl RuntimeState {
     pub(crate) async fn restore_persisted_share_uploads(
         &mut self,
         incoming_directory: &Path,
-        target: ControllerCompatibilityTarget,
+        target: ControllerProfile,
     ) -> Result<(), String> {
         let manifest_path = incoming_directory.join("manifest.json");
         let bytes = match fs::read(&manifest_path) {
@@ -1280,13 +1280,13 @@ pub(crate) fn credential_for_with_scheme(
     token: &str,
 ) -> String {
     match scheme {
-        CredentialScheme::SlskdAesBase62 => credential_for_aes(secret, agent_name, token),
-        CredentialScheme::SlskdnHmacBase64 => credential_for_hmac(secret, agent_name, token),
+        CredentialScheme::LegacyAesBase62 => credential_for_aes(secret, agent_name, token),
+        CredentialScheme::NativeHmacBase64 => credential_for_hmac(secret, agent_name, token),
     }
 }
 
 pub(crate) fn credential_for_target(
-    target: ControllerCompatibilityTarget,
+    target: ControllerProfile,
     secret: &str,
     agent_name: &str,
     token: &str,
@@ -1328,7 +1328,7 @@ mod tests {
             "1EZXSJxy9aWLtOiBHIVJSQ4hCRoZ6ICplJM3c3sAUyar3MzDvSuVQnQV1pDoVMo2E"
         );
         assert!(verify_credential(
-            CredentialScheme::SlskdAesBase62,
+            CredentialScheme::LegacyAesBase62,
             "0123456789abcdef",
             "edge-one",
             "00000000-0000-0000-0000-000000000001",
@@ -1339,7 +1339,7 @@ mod tests {
             )
         ));
         assert!(!verify_credential(
-            CredentialScheme::SlskdAesBase62,
+            CredentialScheme::LegacyAesBase62,
             "0123456789abcdef",
             "edge-one",
             "00000000-0000-0000-0000-000000000001",
@@ -1352,10 +1352,10 @@ mod tests {
     }
 
     #[test]
-    fn credential_uses_oracle_compatible_slskdn_pbkdf2_hmac_and_base64() {
+    fn credential_uses_oracle_compatible_native_pbkdf2_hmac_and_base64() {
         assert_eq!(
             credential_for_target(
-                ControllerCompatibilityTarget::Slskdn,
+                ControllerProfile::Native,
                 "0123456789abcdef",
                 "edge-one",
                 "00000000-0000-0000-0000-000000000001",
@@ -1363,14 +1363,14 @@ mod tests {
             "1n/Y+pCmvHtSlQQgafVp4X5Xl/LrDsj+sHrAcCwSOqw="
         );
         assert!(verify_credential(
-            CredentialScheme::SlskdnHmacBase64,
+            CredentialScheme::NativeHmacBase64,
             "0123456789abcdef",
             "edge-one",
             "00000000-0000-0000-0000-000000000001",
             "1n/Y+pCmvHtSlQQgafVp4X5Xl/LrDsj+sHrAcCwSOqw=",
         ));
         assert!(!verify_credential(
-            CredentialScheme::SlskdnHmacBase64,
+            CredentialScheme::NativeHmacBase64,
             "0123456789abcdef",
             "edge-one",
             "00000000-0000-0000-0000-000000000001",
@@ -1384,12 +1384,9 @@ mod tests {
             filename: "Remote/Agent.flac".to_owned(),
             size: 6,
         }];
-        for (index, target) in [
-            ControllerCompatibilityTarget::Slskd,
-            ControllerCompatibilityTarget::Slskdn,
-        ]
-        .into_iter()
-        .enumerate()
+        for (index, target) in [ControllerProfile::Legacy, ControllerProfile::Native]
+            .into_iter()
+            .enumerate()
         {
             let path = std::env::temp_dir().join(format!(
                 "slskr-relay-share-test-{index}-{}.db",
@@ -1429,13 +1426,9 @@ mod tests {
             filename: "Remote/Restarted.flac".to_owned(),
             size: 42,
         }];
-        write_share_database(
-            &database_path,
-            ControllerCompatibilityTarget::Slskdn,
-            &shares,
-        )
-        .await
-        .expect("write persisted relay database");
+        write_share_database(&database_path, ControllerProfile::Native, &shares)
+            .await
+            .expect("write persisted relay database");
         let mut state = RuntimeState::new();
         state
             .record_share_upload(
@@ -1449,7 +1442,7 @@ mod tests {
             .expect("record persisted relay share upload");
         let mut restored = RuntimeState::new();
         restored
-            .restore_persisted_share_uploads(&incoming, ControllerCompatibilityTarget::Slskdn)
+            .restore_persisted_share_uploads(&incoming, ControllerProfile::Native)
             .await
             .expect("restore persisted relay database");
         assert_eq!(

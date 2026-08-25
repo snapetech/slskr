@@ -6,7 +6,7 @@ a download entitlement or a separate Soulseek account tier.
 ## Intent
 
 The pod was originally conceived as a small channel where testers could submit
-feedback about slskdN/slskR behavior. Discord is now the primary feedback
+feedback about slskr and reference-client behavior. Discord is now the primary feedback
 channel, so the club is not the supported route for general support. The
 reserved pod and its `testing`/`realm-governance` tags remain as a bounded test
 surface and as a hook for future realm-based group governance. That future
@@ -36,18 +36,18 @@ The setting is read at startup. Environment variables override TOML values.
 autojoin = false
 ```
 
-The upstream-compatible environment name is:
+The slskr environment name is:
 
 ```bash
-SLSKDN_POD_GOLD_STAR_CLUB_AUTOJOIN=false
+SLSKR_POD_GOLD_STAR_CLUB_AUTOJOIN=false
 ```
 
 The default depends on the selected behavior profile:
 
 | Profile | Default | To enable or disable |
 | --- | --- | --- |
-| Native/current slskR (`SLSKR_PARITY_PROFILE=current`, or no explicit compatibility target) | Opt-in | Set `autojoin = true` or the environment variable to `true`. |
-| Frozen compatibility target (`SLSKR_PARITY_PROFILE=frozen`, or an explicit `SLSKR_CONTROLLER_COMPATIBILITY_TARGET` when the parity profile is not `current`) | Enabled for slskdN parity | Set `autojoin = false` or the environment variable to `false`. |
+| Native/current slskr (`SLSKR_PARITY_PROFILE=current`, or no explicit runtime profile) | Opt-in | Set `autojoin = true` or the environment variable to `true`. |
+| Frozen legacy profile (`SLSKR_PARITY_PROFILE=frozen`, or an explicit `SLSKR_CONTROLLER_PROFILE` when the parity profile is not `current`) | Enabled | Set `autojoin = false` or the environment variable to `false`. |
 
 The environment variable accepts the usual boolean spellings (`true`/`false`,
 `1`/`0`, `yes`/`no`, and `on`/`off`).

@@ -2,14 +2,14 @@ use std::{path::Path, process::Stdio, time::Duration};
 
 use tokio::{process::Command, time};
 
-use crate::config::{ControllerCompatibilityTarget, ScriptIntegrationSettings};
+use crate::config::{ControllerProfile, ScriptIntegrationSettings};
 
 fn command_for(
     script: &ScriptIntegrationSettings,
-    target: ControllerCompatibilityTarget,
+    target: ControllerProfile,
 ) -> Result<Command, String> {
     if !script.run.command.is_empty() {
-        if target == ControllerCompatibilityTarget::Slskdn
+        if target == ControllerProfile::Native
             && !script.run.command.starts_with("-c")
             && script.run.command.chars().any(|ch| {
                 matches!(
@@ -58,7 +58,7 @@ fn command_for(
 pub(crate) async fn run(
     script: &ScriptIntegrationSettings,
     script_directory: &Path,
-    target: ControllerCompatibilityTarget,
+    target: ControllerProfile,
     payload: &str,
 ) -> Result<Vec<String>, String> {
     tokio::fs::create_dir_all(script_directory)
@@ -72,7 +72,7 @@ pub(crate) async fn run(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
-    let output = if target == ControllerCompatibilityTarget::Slskdn {
+    let output = if target == ControllerProfile::Native {
         time::timeout(Duration::from_secs(300), command.output())
             .await
             .map_err(|_| "script timed out after 300s".to_owned())?
@@ -98,7 +98,7 @@ pub(crate) async fn run(
 pub(crate) fn dispatch(
     scripts: std::collections::BTreeMap<String, ScriptIntegrationSettings>,
     script_directory: std::path::PathBuf,
-    target: ControllerCompatibilityTarget,
+    target: ControllerProfile,
     event_name: &str,
     data: &serde_json::Value,
 ) {
@@ -156,14 +156,9 @@ mod tests {
             args: "-c 'printf %s \"$SLSKD_SCRIPT_DATA\" > args.json'".to_owned(),
             ..Default::default()
         });
-        run(
-            &args,
-            &directory,
-            ControllerCompatibilityTarget::Slskd,
-            payload,
-        )
-        .await
-        .unwrap();
+        run(&args, &directory, ControllerProfile::Legacy, payload)
+            .await
+            .unwrap();
         assert_eq!(
             tokio::fs::read_to_string(directory.join("args.json"))
                 .await
@@ -179,14 +174,9 @@ mod tests {
             ]),
             ..Default::default()
         });
-        run(
-            &arglist,
-            &directory,
-            ControllerCompatibilityTarget::Slskdn,
-            payload,
-        )
-        .await
-        .unwrap();
+        run(&arglist, &directory, ControllerProfile::Native, payload)
+            .await
+            .unwrap();
         assert_eq!(
             tokio::fs::read_to_string(directory.join("arglist.json"))
                 .await
@@ -197,14 +187,14 @@ mod tests {
     }
 
     #[test]
-    fn slskdn_command_safeguard_preserves_the_frozen_target_difference() {
+    fn native_command_safeguard_preserves_the_frozen_target_difference() {
         let command = script(ScriptRunSettings {
             command: "echo $SLSKD_SCRIPT_DATA".to_owned(),
             ..Default::default()
         });
-        assert!(command_for(&command, ControllerCompatibilityTarget::Slskd).is_ok());
+        assert!(command_for(&command, ControllerProfile::Legacy).is_ok());
         assert_eq!(
-            command_for(&command, ControllerCompatibilityTarget::Slskdn).unwrap_err(),
+            command_for(&command, ControllerProfile::Native).unwrap_err(),
             "Command contains disallowed shell metacharacters"
         );
     }
@@ -231,7 +221,7 @@ mod tests {
         dispatch(
             scripts,
             directory.clone(),
-            ControllerCompatibilityTarget::Slskdn,
+            ControllerProfile::Native,
             "DownloadFileComplete",
             &serde_json::json!({"localFilename": "/downloads/file.flac"}),
         );

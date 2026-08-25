@@ -8,7 +8,7 @@ const MAX_PROFILE_QUADS: usize = 16_384;
 
 /// Extract OIDC issuer IRIs from a bounded Solid WebID profile.
 ///
-/// The frozen slskdN resolver accepts Turtle, JSON-LD, and RDF/XML and resolves
+/// The frozen native profile resolver accepts Turtle, JSON-LD, and RDF/XML and resolves
 /// relative profile IRIs against the requested WebID document. Unknown media
 /// types intentionally use the same Turtle fallback as the oracle.
 pub(crate) fn extract_oidc_issuers(
@@ -50,7 +50,7 @@ pub(crate) fn extract_oidc_issuers(
     Ok(issuers)
 }
 
-/// JSON-LD's RDF graph model is set-like, while the frozen slskdN resolver
+/// JSON-LD's RDF graph model is set-like, while the frozen native profile resolver
 /// preserves repeated values in an explicit issuer array. Restore that narrow
 /// compatibility detail after the standards-compliant parser has validated and
 /// expanded the document.

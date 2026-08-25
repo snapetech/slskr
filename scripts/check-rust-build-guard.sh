@@ -53,6 +53,15 @@ if ! rg -q '^max_virtual_memory_kib=12582912$' scripts/with-build-guard.sh; then
   printf 'Rust build guard check failed: the wrapper hard ceiling must be 12 GiB\n' >&2
   status=1
 fi
+if ! rg -q '^format_virtual_memory_kib=4194304$' scripts/with-build-guard.sh \
+  || ! rg -q 'cargo.*fmt|\$format_virtual_memory_kib' scripts/with-build-guard.sh; then
+  printf 'Rust build guard check failed: Cargo formatting must use the 4 GiB hard ceiling\n' >&2
+  status=1
+fi
+if [[ ! -x scripts/with-rustfmt-guard.sh ]]; then
+  printf 'Rust build guard check failed: direct rustfmt wrapper is missing or not executable\n' >&2
+  status=1
+fi
 if ! rg -q 'full-controller-tests is rejected under the 12 GiB memory-safe profile' scripts/with-build-guard.sh; then
   printf 'Rust build guard check failed: the known monolithic controller test profile must be rejected\n' >&2
   status=1

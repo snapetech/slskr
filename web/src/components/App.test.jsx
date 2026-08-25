@@ -267,7 +267,7 @@ describe('App', () => {
     });
 
     hubHandlers.state({
-      compatibilityTarget: 'slskd',
+      runtimeProfile: 'legacy',
       server: { isConnected: false },
     });
 

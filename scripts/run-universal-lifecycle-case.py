@@ -215,7 +215,7 @@ class Daemon:
                     "SLSKR_HTTP_BIND": f"127.0.0.1:{self.http_port}",
                     "SLSKR_STATE_DIR": str(self.state_directory),
                     "SLSKR_CONFIG": str(self.config_path),
-                    "SLSKR_CONTROLLER_COMPATIBILITY_TARGET": self.profile,
+                    "SLSKR_CONTROLLER_PROFILE": ("legacy" if self.profile == "slskd" else "native"),
                     "SLSKR_AUTO_CONNECT": "false",
                     "SLSKR_AUTH_DISABLED": "true",
                     "SLSKD_NO_HTTPS": "true",

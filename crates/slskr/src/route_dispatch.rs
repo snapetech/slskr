@@ -179,7 +179,7 @@ fn versioned_share_rescan_response(state: &AppState, state_arc: Arc<AppState>) -
     let permit = match Arc::clone(&state.share_scans).try_acquire_owned() {
         Ok(permit) => permit,
         Err(_) => {
-            // The frozen slskd and slskdN controllers expose PUT /api/v0/shares
+            // The legacy and native profile controllers expose PUT /api/v0/shares
             // as an asynchronous, idempotent trigger.  A request that arrives
             // while the scan is already running still returns an empty 200; the
             // separate /shares/rescan route retains the explicit busy error.
@@ -209,9 +209,7 @@ fn versioned_share_rescan_response(state: &AppState, state_arc: Arc<AppState>) -
 }
 
 fn disconnected_search_conflict_response(state: &AppState, display_state: &str) -> HttpResponse {
-    let message = if state.config.controller_compatibility_target
-        == ControllerCompatibilityTarget::Slskdn
-    {
+    let message = if state.config.controller_profile == ControllerProfile::Native {
         "Search could not be started".to_owned()
     } else {
         format!(
@@ -894,7 +892,7 @@ async fn route_http_request_inner(
         normalized_path = "/api/server/status".to_owned();
     }
 
-    // slskdN's mesh-gateway middleware short-circuits every /mesh request
+    // native profile's mesh-gateway middleware short-circuits every /mesh request
     // while the feature is disabled, before auth or controller fallback can
     // change the wire response.  Keep the same disabled contract here.
     if (normalized_path == "/mesh" || normalized_path.starts_with("/mesh/"))
@@ -937,7 +935,7 @@ async fn route_http_request_inner(
         }
     }
 
-    if state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn {
+    if state.config.controller_profile == ControllerProfile::Native {
         let feature = state.media_services.read().await.features.clone();
         let feature_disabled = (!feature.collections_sharing
             && (normalized_path.starts_with("/api/collections")
@@ -982,11 +980,8 @@ async fn route_http_request_inner(
     }
 
     if route.path == "/api/v0/application/dump"
-        && ((state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskd
-            && method == "POST")
-            || (state.config.controller_compatibility_target
-                == ControllerCompatibilityTarget::Slskdn
-                && method == "GET"))
+        && ((state.config.controller_profile == ControllerProfile::Legacy && method == "POST")
+            || (state.config.controller_profile == ControllerProfile::Native && method == "GET"))
     {
         return Ok(routing::method_not_allowed_response());
     }
@@ -1034,7 +1029,7 @@ async fn route_http_request_inner(
         }
     }
 
-    if state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
+    if state.config.controller_profile == ControllerProfile::Native
         && method == "POST"
         && normalized_path == "/api/application/dump"
     {
@@ -1105,33 +1100,33 @@ async fn route_http_request_inner(
         return Ok(response);
     }
 
-    if state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn {
+    if state.config.controller_profile == ControllerProfile::Native {
         if let Some(response) = bridge_transfer_blank_segment_response(method, route.path) {
             return Ok(response);
         }
     }
 
     if let Some(response) =
-        controller_slskdn_virtual_soulfind_read_failure_response(state, method, &normalized_path)
+        controller_native_virtual_soulfind_read_failure_response(state, method, &normalized_path)
             .await
     {
         return Ok(response);
     }
 
     if let Some(response) =
-        controller_slskdn_wishlist_read_failure_response(state, method, route.path).await
+        controller_native_wishlist_read_failure_response(state, method, route.path).await
     {
         return Ok(response);
     }
 
     if method == "GET" {
         if let Some(response) =
-            controller_slskdn_hashdb_read_failure_response(state, route.path).await
+            controller_native_hashdb_read_failure_response(state, route.path).await
         {
             return Ok(response);
         }
         if let Some(response) =
-            controller_slskdn_backfill_candidates_read_failure_response(state, method, route.path)
+            controller_native_backfill_candidates_read_failure_response(state, method, route.path)
                 .await
         {
             return Ok(response);
@@ -1139,18 +1134,18 @@ async fn route_http_request_inner(
     }
     if method == "POST" {
         if let Some(response) =
-            controller_slskdn_hashdb_write_failure_response(state, route.path).await
+            controller_native_hashdb_write_failure_response(state, route.path).await
         {
             return Ok(response);
         }
     }
 
     if let Some(response) =
-        controller_slskdn_transfer_storage_failure_response(state, method, route.path).await
+        controller_native_transfer_storage_failure_response(state, method, route.path).await
     {
         return Ok(response);
     }
-    if let Some(response) = controller_slskdn_transfer_input_validation_response(
+    if let Some(response) = controller_native_transfer_input_validation_response(
         state,
         method,
         route.path,
@@ -1160,12 +1155,12 @@ async fn route_http_request_inner(
         return Ok(response);
     }
     if let Some(response) =
-        controller_slskdn_transfer_auto_replace_status_response(state, method, route.path).await
+        controller_native_transfer_auto_replace_status_response(state, method, route.path).await
     {
         return Ok(response);
     }
     if let Some(response) =
-        controller_slskdn_autoreplace_mutation_response(state, method, route.path).await
+        controller_native_autoreplace_mutation_response(state, method, route.path).await
     {
         return Ok(response);
     }
@@ -1191,22 +1186,20 @@ async fn route_http_request_inner(
         }
     }
 
-    if state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn {
+    if state.config.controller_profile == ControllerProfile::Native {
         if let Some(response) =
-            controller_slskdn_search_query_validation(method, route.path, route.query)
+            controller_native_search_query_validation(method, route.path, route.query)
         {
             return Ok(response);
         }
         if let Some(response) =
-            controller_slskdn_search_storage_failure_response(state, method, route.path).await
+            controller_native_search_storage_failure_response(state, method, route.path).await
         {
             return Ok(response);
         }
     }
 
-    if method == "DELETE"
-        && state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskd
-    {
+    if method == "DELETE" && state.config.controller_profile == ControllerProfile::Legacy {
         for prefix in ["/api/v0/transfers/downloads/", "/api/v0/transfers/uploads/"] {
             if let Some(value) = route.path.strip_prefix(prefix) {
                 let segments = value.split('/').collect::<Vec<_>>();
@@ -1480,21 +1473,19 @@ async fn route_dispatch_group_0(
         ("HEAD", "/health/mesh") => Ok(head_response(mesh_health_response(&state.config))),
         ("GET", "/api/version") => Ok(version_response()),
         ("GET", "/api/capabilities")
-            if state.config.controller_compatibility_target
-                == ControllerCompatibilityTarget::Slskdn
+            if state.config.controller_profile == ControllerProfile::Native
                 && matches!(
                     route.path,
                     "/api/slskdn/capabilities" | "/api/v0/slskdn/capabilities"
                 ) =>
         {
-            Ok(slskdn_capabilities_response(state).await)
+            Ok(native_capabilities_response(state).await)
         }
         ("GET", "/api/capabilities")
-            if state.config.controller_compatibility_target
-                == ControllerCompatibilityTarget::Slskdn
+            if state.config.controller_profile == ControllerProfile::Native
                 && route.path == "/api/v0/capabilities" =>
         {
-            Ok(slskdn_capability_controller_response(state).await)
+            Ok(native_capability_controller_response(state).await)
         }
         ("GET", "/api/capabilities") => Ok(capabilities_response()),
         ("GET", "/.well-known/webfinger") => {
@@ -1506,14 +1497,13 @@ async fn route_dispatch_group_0(
         ("GET", "/mesh/http/services") => Ok(mesh_http_services_response(state).await),
         ("GET", "/api/security/bans") if route.path.starts_with("/api/v0/") => {
             let security = state.security.read().await;
-            Ok(routing::ok_response(security.slskdn_bans_json()))
+            Ok(routing::ok_response(security.native_bans_json()))
         }
         ("GET", "/api/security/transports/status")
             if route.path.starts_with("/api/v0/")
-                && state.config.controller_compatibility_target
-                    == ControllerCompatibilityTarget::Slskdn =>
+                && state.config.controller_profile == ControllerProfile::Native =>
         {
-            // Matches slskdn's versioned TransportSelectorStatus contract.
+            // Matches the native profile's versioned TransportSelectorStatus contract.
             // The native slskR endpoint below intentionally retains its
             // historical selectedTransport/healthy shape.
             let configured = state
@@ -1539,13 +1529,12 @@ async fn route_dispatch_group_0(
                     .to_string(),
             ))
         }
-        // slskdN keeps the legacy /api/info compatibility controller as a
+        // native profile keeps the legacy /api/info compatibility controller as a
         // deliberately small projection.  Do not route it through slskR's
         // richer /api/application lifecycle DTO: clients use these fields to
         // identify the compatibility implementation and Soulseek state.
         ("GET", "/api/application")
-            if state.config.controller_compatibility_target
-                == ControllerCompatibilityTarget::Slskdn
+            if state.config.controller_profile == ControllerProfile::Native
                 && route.path == "/api/info" =>
         {
             let session = state.session.read().await;
@@ -1568,8 +1557,8 @@ async fn route_dispatch_group_0(
             };
             Ok(routing::ok_response(
                 serde_json::json!({
-                    "impl": "slskdn",
-                    "compat": "slskd",
+                    "impl": "slskr",
+                    "compat": "legacy",
                     "version": APP_VERSION,
                     "soulseek": {
                         "connected": connected,
@@ -1590,7 +1579,7 @@ async fn route_dispatch_group_0(
             let distributed_settings = *state.soulseek_distributed_settings.read().await;
             let runtime_credentials_configured = state.runtime_credentials.read().await.is_some();
             let connected_endpoint = connected_server_address(state);
-            let body = slskd_application_state_json(
+            let body = application_state_json(
                 &session,
                 &share_lifecycle,
                 &rooms,
@@ -1602,7 +1591,7 @@ async fn route_dispatch_group_0(
                 &state.config,
                 runtime_credentials_configured,
                 connected_endpoint.as_deref(),
-                slskd_version_json(state),
+                controller_version_json(state),
             );
             drop(runtime);
             drop(distributed_network);
@@ -1620,7 +1609,7 @@ async fn route_dispatch_group_0(
         ("GET", "/api/application/version/latest") => Ok(controller_version_latest_response(
             state,
             query_parameter(route.query, "forceCheck").as_deref() == Some("true"),
-            controller_releases_url(state.config.controller_compatibility_target),
+            controller_releases_url(state.config.controller_profile),
         )
         .await),
         ("GET", "/api/application/dump") => Ok(HttpResponse {
@@ -1677,7 +1666,7 @@ async fn route_dispatch_group_0(
             let session = state.session.read().await;
             let runtime_credentials_configured = state.runtime_credentials.read().await.is_some();
             let connected_endpoint = connected_server_address(state);
-            let body = slskd_server_state_json(
+            let body = controller_server_state_json(
                 &session,
                 &state.config,
                 runtime_credentials_configured,
@@ -1776,7 +1765,7 @@ async fn route_dispatch_group_0(
                     let runtime_credentials_configured =
                         state.runtime_credentials.read().await.is_some();
                     let connected_endpoint = connected_server_address(state);
-                    let body = slskd_server_state_json(
+                    let body = controller_server_state_json(
                         &session,
                         &state.config,
                         runtime_credentials_configured,
@@ -1815,7 +1804,7 @@ async fn route_dispatch_group_0(
             let session = state.session.read().await;
             let runtime_credentials_configured = state.runtime_credentials.read().await.is_some();
             let connected_endpoint = connected_server_address(state);
-            let body = slskd_server_state_json(
+            let body = controller_server_state_json(
                 &session,
                 &state.config,
                 runtime_credentials_configured,
@@ -1847,7 +1836,7 @@ async fn route_dispatch_group_0(
                     let runtime_credentials_configured =
                         state.runtime_credentials.read().await.is_some();
                     let connected_endpoint = connected_server_address(state);
-                    let body = slskd_server_state_json(
+                    let body = controller_server_state_json(
                         &session,
                         &state.config,
                         runtime_credentials_configured,
@@ -1882,7 +1871,7 @@ async fn route_dispatch_group_0(
             let session = state.session.read().await;
             let runtime_credentials_configured = state.runtime_credentials.read().await.is_some();
             let connected_endpoint = connected_server_address(state);
-            let body = slskd_server_state_json(
+            let body = controller_server_state_json(
                 &session,
                 &state.config,
                 runtime_credentials_configured,
@@ -2017,7 +2006,7 @@ async fn route_dispatch_group_0(
         }
         ("GET", "/api/capabilities/peers") => {
             // Matches the oracle's CapabilitiesController contract: known
-            // slskdn capability peers, not the generic connected-user list.
+            // Native capability peers, not the generic connected-user list.
             let mesh = state.mesh.read().await;
             let peers = mesh.capability_service_peers_json();
             let count = peers.len();
@@ -2078,11 +2067,11 @@ async fn route_dispatch_group_0(
                         .is_some_and(|status| status.eq_ignore_ascii_case("known"))
                 })
                 .count();
-            let slskdn_peers = state.mesh.read().await.capability_records.len();
+            let native_peers = state.mesh.read().await.capability_records.len();
             Ok(routing::ok_response(
                 serde_json::json!({
                     "totalPeers": peer_ids.len(),
-                    "slskdnPeers": slskdn_peers,
+                    "capabilityPeers": native_peers,
                     "totalFlacEntries": total_flac_entries,
                     "hashedFlacEntries": hashed_flac_entries,
                     "totalHashEntries": persisted_entries,
@@ -2452,8 +2441,7 @@ async fn route_dispatch_group_0(
             };
             let recording_id = decoded_path_segment(raw_recording_id);
             let discovery = state.content_discovery.read().await;
-            if state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
-            {
+            if state.config.controller_profile == ControllerProfile::Native {
                 return Ok(routing::ok_response(
                     serde_json::json!({
                         "variants": virtual_soulfind_legacy_variants(&discovery, &recording_id),
@@ -2735,7 +2723,7 @@ async fn route_dispatch_group_1(
                 ));
             }
             if let Some(response) =
-                controller_slskdn_backfill_file_write_failure_response(state, method, route.path)
+                controller_native_backfill_file_write_failure_response(state, method, route.path)
                     .await
             {
                 return Ok(response);
@@ -2844,9 +2832,9 @@ async fn route_dispatch_group_1(
                 spec["info"]["title"] = if state.config.current_upstream_behavior {
                     serde_json::json!("slskR API")
                 } else {
-                    serde_json::json!(match state.config.controller_compatibility_target {
-                        ControllerCompatibilityTarget::Slskd => "slskd",
-                        ControllerCompatibilityTarget::Slskdn => "slskdN API",
+                    serde_json::json!(match state.config.controller_profile {
+                        ControllerProfile::Legacy => "slskd",
+                        ControllerProfile::Native => "slskr API",
                     })
                 };
                 Ok(HttpResponse {
@@ -3028,13 +3016,12 @@ async fn route_dispatch_group_1(
                         capabilities_response().body,
                     ),
                     ("GET", "/api/v0/capabilities")
-                        if state.config.controller_compatibility_target
-                            == ControllerCompatibilityTarget::Slskdn =>
+                        if state.config.controller_profile == ControllerProfile::Native =>
                     {
                         batch::create_success_result(
                             operation.id,
                             200,
-                            slskdn_capability_controller_response(state).await.body,
+                            native_capability_controller_response(state).await.body,
                         )
                     }
                     ("GET", "/api/v0/capabilities") => batch::create_success_result(
@@ -3276,30 +3263,33 @@ async fn route_dispatch_group_1(
         }
         ("GET", "/api/telemetry/reports/transfers/summary") => {
             if let Some(response) =
-                controller_slskd_telemetry_report_read_failure_response(state, route.path).await
+                controller_telemetry_report_read_failure_response(state, route.path).await
             {
                 return Ok(response);
             }
             let transfers = state.transfers.read().await;
             let body = if route.path.starts_with("/api/v0/") {
-                slskd_versioned_transfer_summary_report(route.query, &transfers)
+                controller_versioned_transfer_summary_report(route.query, &transfers)
             } else {
-                slskd_transfer_summary_report(route.query, &transfers)
+                controller_transfer_summary_report(route.query, &transfers)
             };
             drop(transfers);
             Ok(routing::ok_response(body))
         }
         ("GET", "/api/telemetry/reports/transfers/histogram") => {
             if let Some(response) =
-                controller_slskd_telemetry_report_read_failure_response(state, route.path).await
+                controller_telemetry_report_read_failure_response(state, route.path).await
             {
                 return Ok(response);
             }
             let transfers = state.transfers.read().await;
             let body = if route.path.starts_with("/api/v0/") {
-                slskd_versioned_transfer_histogram_report(route.query, &transfers)
+                controller_versioned_transfer_histogram_report(route.query, &transfers)
             } else {
-                Ok(slskd_transfer_histogram_report(route.query, &transfers))
+                Ok(controller_transfer_histogram_report(
+                    route.query,
+                    &transfers,
+                ))
             };
             drop(transfers);
             Ok(match body {
@@ -3309,12 +3299,12 @@ async fn route_dispatch_group_1(
         }
         ("GET", "/api/telemetry/reports/transfers/leaderboard") => {
             if let Some(response) =
-                controller_slskd_telemetry_report_read_failure_response(state, route.path).await
+                controller_telemetry_report_read_failure_response(state, route.path).await
             {
                 return Ok(response);
             }
             let transfers = state.transfers.read().await;
-            let result = slskd_transfer_leaderboard_report(route.query, &transfers);
+            let result = controller_transfer_leaderboard_report(route.query, &transfers);
             drop(transfers);
             Ok(match result {
                 Ok(body) => routing::ok_response(body),
@@ -3329,23 +3319,23 @@ async fn route_dispatch_group_1(
             };
             let username = decoded_path_segment(username);
             if let Some(response) =
-                controller_slskd_telemetry_report_read_failure_response(state, route.path).await
+                controller_telemetry_report_read_failure_response(state, route.path).await
             {
                 return Ok(response);
             }
             let transfers = state.transfers.read().await;
-            let body = slskd_user_transfer_report(&username, &transfers);
+            let body = controller_user_transfer_report(&username, &transfers);
             drop(transfers);
             Ok(routing::ok_response(body))
         }
         ("GET", "/api/telemetry/reports/transfers/exceptions") => {
             if let Some(response) =
-                controller_slskd_telemetry_report_read_failure_response(state, route.path).await
+                controller_telemetry_report_read_failure_response(state, route.path).await
             {
                 return Ok(response);
             }
             let transfers = state.transfers.read().await;
-            let result = slskd_transfer_exceptions_report(route.query, &transfers);
+            let result = controller_transfer_exceptions_report(route.query, &transfers);
             drop(transfers);
             Ok(match result {
                 Ok(body) => routing::ok_response(body),
@@ -3354,12 +3344,12 @@ async fn route_dispatch_group_1(
         }
         ("GET", "/api/telemetry/reports/transfers/exceptions/pareto") => {
             if let Some(response) =
-                controller_slskd_telemetry_report_read_failure_response(state, route.path).await
+                controller_telemetry_report_read_failure_response(state, route.path).await
             {
                 return Ok(response);
             }
             let transfers = state.transfers.read().await;
-            let result = slskd_transfer_exceptions_pareto_report(route.query, &transfers);
+            let result = controller_transfer_exceptions_pareto_report(route.query, &transfers);
             drop(transfers);
             Ok(match result {
                 Ok(body) => routing::ok_response(body),
@@ -3368,12 +3358,12 @@ async fn route_dispatch_group_1(
         }
         ("GET", "/api/telemetry/reports/transfers/directories") => {
             if let Some(response) =
-                controller_slskd_telemetry_report_read_failure_response(state, route.path).await
+                controller_telemetry_report_read_failure_response(state, route.path).await
             {
                 return Ok(response);
             }
             let transfers = state.transfers.read().await;
-            let body = slskd_transfer_directories_report(route.query, &transfers);
+            let body = controller_transfer_directories_report(route.query, &transfers);
             drop(transfers);
             Ok(routing::ok_response(body))
         }
@@ -3564,7 +3554,7 @@ async fn route_dispatch_group_1(
             })
         }
         ("GET", "/api/events") | ("GET", "/api/events/slskd") => {
-            if state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
+            if state.config.controller_profile == ControllerProfile::Native
                 && route.path == "/api/v0/events"
             {
                 if let Some(raw) = query_parameter(route.query, "offset") {
@@ -3592,13 +3582,12 @@ async fn route_dispatch_group_1(
                     }
                 }
             }
-            if let Some(response) =
-                controller_slskd_events_read_failure_response(state, route.path).await
+            if let Some(response) = controller_events_read_failure_response(state, route.path).await
             {
                 return Ok(response);
             }
             if let Some(response) =
-                controller_slskdn_events_read_failure_response(state, route.path).await
+                controller_native_events_read_failure_response(state, route.path).await
             {
                 return Ok(response);
             }
@@ -3606,7 +3595,7 @@ async fn route_dispatch_group_1(
             Ok(HttpResponse {
                 status: "200 OK",
                 content_type: "application/json",
-                body: events.slskd_json(route.query),
+                body: events.controller_json(route.query),
             })
         }
         ("POST", path) if path.starts_with("/api/events/") => {
@@ -3662,9 +3651,7 @@ async fn route_dispatch_group_1(
             if let Err(error) = persist_event_record_checked(state, &record).await {
                 *events = previous;
                 return Ok(
-                    if state.config.controller_compatibility_target
-                        == ControllerCompatibilityTarget::Slskdn
-                    {
+                    if state.config.controller_profile == ControllerProfile::Native {
                         routing::internal_server_error_response("Failed to raise event")
                     } else {
                         routing::service_unavailable_response(&error)
@@ -3675,13 +3662,13 @@ async fn route_dispatch_group_1(
             scripts::dispatch(
                 state.integration_settings.read().await.scripts.clone(),
                 state.config.state_dir.join("scripts"),
-                state.config.controller_compatibility_target,
+                state.config.controller_profile,
                 kind,
                 &serde_json::json!({}),
             );
             let response_body = serde_json::json!({
                 "recorded": true,
-                "event": record.slskd_json(),
+                "event": record.controller_json(),
                 "count": count,
             })
             .to_string();
@@ -3930,15 +3917,13 @@ async fn route_dispatch_group_1(
             }
             let model = serde_json::from_str::<serde_json::Value>(body);
             if model.as_ref().is_ok_and(|value| !value.is_object()) {
-                return Ok(match state.config.controller_compatibility_target {
-                    ControllerCompatibilityTarget::Slskd => HttpResponse {
+                return Ok(match state.config.controller_profile {
+                    ControllerProfile::Legacy => HttpResponse {
                         status: "204 No Content",
                         content_type: "",
                         body: String::new(),
                     },
-                    ControllerCompatibilityTarget::Slskdn => {
-                        options_model_binding_problem_response()
-                    }
+                    ControllerProfile::Native => options_model_binding_problem_response(),
                 });
             }
             if model.is_err() {
@@ -4107,7 +4092,7 @@ async fn route_dispatch_group_1(
             let mut roots = shares
                 .roots
                 .iter()
-                .map(slskd_share_value)
+                .map(controller_share_value)
                 .collect::<Vec<_>>();
             if roots.is_empty() && !shares.entries.is_empty() {
                 roots.push(serde_json::json!({
@@ -4159,8 +4144,8 @@ async fn route_dispatch_group_1(
         | ("GET", "/api/v0/files/downloads/directories")
         | ("GET", "/api/v0/files/incomplete/directories") => {
             if matches!(
-                state.config.controller_compatibility_target,
-                ControllerCompatibilityTarget::Slskd | ControllerCompatibilityTarget::Slskdn
+                state.config.controller_profile,
+                ControllerProfile::Legacy | ControllerProfile::Native
             ) && query_bool_is_invalid(route.query, "recursive")
             {
                 return Ok(routing::bad_request_response(
@@ -4172,22 +4157,17 @@ async fn route_dispatch_group_1(
             } else {
                 effective_incomplete_dir(state)
             };
-            if state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskd
-                && !root.is_dir()
-            {
+            if state.config.controller_profile == ControllerProfile::Legacy && !root.is_dir() {
                 return Ok(file_storage_error_response(
                     STORAGE_DIRECTORY_NOT_FOUND_ERROR,
                 ));
             }
             let options = StorageDirectoryListOptions::from_query(route.query);
-            match slskd_storage_directory_json(&root, None, options) {
+            match controller_storage_directory_json(&root, None, options) {
                 Ok(json) => Ok(HttpResponse {
                     status: "200 OK",
                     content_type: "application/json; charset=utf-8",
-                    body: target_storage_directory_json(
-                        json,
-                        state.config.controller_compatibility_target,
-                    ),
+                    body: target_storage_directory_json(json, state.config.controller_profile),
                 }),
                 Err(error) => Ok(file_storage_error_response(&error)),
             }
@@ -4198,7 +4178,8 @@ async fn route_dispatch_group_1(
                 || path.starts_with("/api/v0/files/downloads/directories/")
                 || path.starts_with("/api/v0/files/incomplete/directories/")) =>
         {
-            let Some((storage, resource, encoded_name)) = slskd_file_storage_resource_path(path)
+            let Some((storage, resource, encoded_name)) =
+                controller_file_storage_resource_path(path)
             else {
                 return Ok(routing::not_found_response());
             };
@@ -4206,8 +4187,8 @@ async fn route_dispatch_group_1(
                 return Ok(routing::not_found_response());
             }
             if matches!(
-                state.config.controller_compatibility_target,
-                ControllerCompatibilityTarget::Slskd | ControllerCompatibilityTarget::Slskdn
+                state.config.controller_profile,
+                ControllerProfile::Legacy | ControllerProfile::Native
             ) && query_bool_is_invalid(route.query, "recursive")
             {
                 return Ok(routing::bad_request_response(
@@ -4220,14 +4201,11 @@ async fn route_dispatch_group_1(
                 effective_incomplete_dir(state)
             };
             let options = StorageDirectoryListOptions::from_query(route.query);
-            match slskd_storage_directory_json(&root, Some(encoded_name), options) {
+            match controller_storage_directory_json(&root, Some(encoded_name), options) {
                 Ok(json) => Ok(HttpResponse {
                     status: "200 OK",
                     content_type: "application/json; charset=utf-8",
-                    body: target_storage_directory_json(
-                        json,
-                        state.config.controller_compatibility_target,
-                    ),
+                    body: target_storage_directory_json(json, state.config.controller_profile),
                 }),
                 Err(error) => Ok(file_storage_error_response(&error)),
             }
@@ -4249,7 +4227,8 @@ async fn route_dispatch_group_1(
                     body: String::new(),
                 });
             }
-            let Some((storage, resource, encoded_name)) = slskd_file_storage_resource_path(path)
+            let Some((storage, resource, encoded_name)) =
+                controller_file_storage_resource_path(path)
             else {
                 return Ok(routing::not_found_response());
             };
@@ -4272,9 +4251,8 @@ async fn route_dispatch_group_1(
                 Ok(false)
                     if resource == "files"
                         && matches!(
-                            state.config.controller_compatibility_target,
-                            ControllerCompatibilityTarget::Slskd
-                                | ControllerCompatibilityTarget::Slskdn
+                            state.config.controller_profile,
+                            ControllerProfile::Legacy | ControllerProfile::Native
                         ) =>
                 {
                     Ok(HttpResponse {
@@ -4576,7 +4554,7 @@ async fn route_dispatch_group_2(
         ("GET", "/api/searches") => {
             let mut searches = state.searches.write().await;
             let expired = searches.expire_due();
-            let body = searches.slskd_list_json(route.query);
+            let body = searches.controller_list_json(route.query);
             drop(searches);
             persist_search_records(state, &expired).await?;
             Ok(HttpResponse {
@@ -4625,11 +4603,11 @@ async fn route_dispatch_group_2(
         ("GET", "/api/transfers") if route.path.starts_with("/api/v0/") => {
             let transfers = state.transfers.read().await;
             let downloads = serde_json::from_str::<Vec<serde_json::Value>>(
-                &transfers.slskd_transfers_json(0, None),
+                &transfers.controller_transfers_json(0, None),
             )
             .unwrap_or_default();
             let uploads = serde_json::from_str::<Vec<serde_json::Value>>(
-                &transfers.slskd_transfers_json(1, None),
+                &transfers.controller_transfers_json(1, None),
             )
             .unwrap_or_default();
             Ok(routing::ok_response(
@@ -4655,9 +4633,8 @@ async fn route_dispatch_group_2(
         }
         ("POST", "/api/searches") => {
             if route.path.starts_with("/api/v0/")
-                && extract_json_string_field(body, "acquisitionProfile").is_some_and(|profile| {
-                    !is_known_acquisition_profile(&profile)
-                })
+                && extract_json_string_field(body, "acquisitionProfile")
+                    .is_some_and(|profile| !is_known_acquisition_profile(&profile))
             {
                 return Ok(HttpResponse {
                     status: "400 Bad Request",
@@ -5261,10 +5238,10 @@ async fn route_dispatch_group_2(
                 .filter(|entry| entry.direction == 0)
                 .filter(|entry| {
                     requested_state.as_deref().is_none_or(|requested| {
-                        slskdn_download_status(entry.status.as_str()) == requested
+                        native_download_status(entry.status.as_str()) == requested
                     })
                 })
-                .map(slskdn_compatibility_download_json)
+                .map(native_compatibility_download_json)
                 .collect::<Vec<_>>();
             Ok(routing::ok_response(
                 serde_json::json!({"downloads": downloads}).to_string(),
@@ -5441,7 +5418,7 @@ async fn route_dispatch_group_2(
                         || !matches!(entry.status.as_str(), "succeeded" | "completed")
                 })
                 .filter(|entry| since.is_none_or(|since| entry.updated_at_ms > since))
-                .map(TransferEntry::slskd_file_json)
+                .map(TransferEntry::controller_file_json)
                 .collect::<Vec<_>>();
             let download = transfers
                 .entries
@@ -5510,7 +5487,7 @@ async fn route_dispatch_group_2(
             let rows = page
                 .into_iter()
                 .take(limit)
-                .map(TransferEntry::slskd_file_json)
+                .map(TransferEntry::controller_file_json)
                 .collect::<Vec<_>>();
             Ok(routing::ok_response(
                 serde_json::json!({
@@ -5524,11 +5501,11 @@ async fn route_dispatch_group_2(
         }
 
         ("POST", "/api/transfers/downloads/batches") => {
-            Ok(slskd_enqueue_download_batch(body, state).await)
+            Ok(controller_enqueue_download_batch(body, state).await)
         }
 
         ("POST", "/api/transfers") => {
-            if let Some((username, mut files)) = slskd_enqueue_request(body) {
+            if let Some((username, mut files)) = controller_enqueue_request(body) {
                 let exclusions = effective_download_exclusions(state).await;
                 let filenames = files
                     .iter()
@@ -5560,7 +5537,7 @@ async fn route_dispatch_group_2(
                             !crate::download_filter::is_excluded(filename, &exclusions)
                         })
                 });
-                let batch_id = slskd_transfer_batch_id(body)
+                let batch_id = controller_transfer_batch_id(body)
                     .or_else(|| (files.len() > 1).then(|| uuid::Uuid::new_v4().to_string()));
                 let mut transfers = state.transfers.write().await;
                 let mut created = Vec::new();
@@ -5603,7 +5580,7 @@ async fn route_dispatch_group_2(
                         batch_id.clone(),
                         details,
                     );
-                    created.push(entry.slskd_file_json());
+                    created.push(entry.controller_file_json());
                     created_entries.push(entry);
                 }
                 let count = created.len();
@@ -5634,7 +5611,7 @@ async fn route_dispatch_group_2(
             }
             let peer_username = extract_json_string_field(body, "peer_username");
             let supplied_local_path = extract_json_string_field(body, "local_path");
-            let batch_id = slskd_transfer_batch_id(body);
+            let batch_id = controller_transfer_batch_id(body);
             let size = extract_json_u64_field(body, "size");
             let payload =
                 serde_json::from_str::<serde_json::Value>(body).unwrap_or(serde_json::Value::Null);
@@ -5675,14 +5652,13 @@ async fn route_dispatch_group_2(
 
         ("GET", "/api/transfers/downloads") | ("GET", "/api/transfers/downloads/") => {
             if let Some(response) =
-                controller_slskd_transfer_storage_read_failure_response(state, route.path).await
+                controller_transfer_storage_read_failure_response(state, route.path).await
             {
                 return Ok(response);
             }
             let transfers = state.transfers.read().await;
             if route.path == "/api/downloads"
-                && state.config.controller_compatibility_target
-                    == ControllerCompatibilityTarget::Slskdn
+                && state.config.controller_profile == ControllerProfile::Native
             {
                 let requested_status = query_parameter(route.query, "status")
                     .map(|value| value.to_ascii_lowercase())
@@ -5698,37 +5674,36 @@ async fn route_dispatch_group_2(
                     .filter(|entry| entry.direction == 0)
                     .filter(|entry| {
                         requested_status.as_deref().is_none_or(|requested| {
-                            slskdn_download_status(entry.status.as_str()) == requested
+                            native_download_status(entry.status.as_str()) == requested
                         })
                     })
-                    .map(slskdn_compatibility_download_json)
+                    .map(native_compatibility_download_json)
                     .collect::<Vec<_>>();
                 drop(transfers);
                 return Ok(routing::ok_response(
                     serde_json::json!({"downloads": downloads}).to_string(),
                 ));
             }
-            let body = transfers.slskd_transfers_json(0, None);
+            let body = transfers.controller_transfers_json(0, None);
             drop(transfers);
             Ok(routing::ok_response(body))
         }
 
         ("GET", "/api/transfers/uploads") | ("GET", "/api/transfers/uploads/") => {
             if let Some(response) =
-                controller_slskd_transfer_storage_read_failure_response(state, route.path).await
+                controller_transfer_storage_read_failure_response(state, route.path).await
             {
                 return Ok(response);
             }
             let transfers = state.transfers.read().await;
-            let body = transfers.slskd_transfers_json(1, None);
+            let body = transfers.controller_transfers_json(1, None);
             drop(transfers);
             Ok(routing::ok_response(body))
         }
 
         ("GET", "/api/transfers/downloads/accelerated") => {
             if route.path.starts_with("/api/v0/")
-                && state.config.controller_compatibility_target
-                    == ControllerCompatibilityTarget::Slskdn
+                && state.config.controller_profile == ControllerProfile::Native
             {
                 let enabled = state.runtime.read().await.accelerated_downloads_enabled;
                 return Ok(routing::ok_response(
@@ -5742,7 +5717,7 @@ async fn route_dispatch_group_2(
             }
             let transfers = state.transfers.read().await;
             let mut value = serde_json::from_str::<serde_json::Value>(
-                &slskd_accelerated_downloads_json(route.query, &transfers),
+                &controller_accelerated_downloads_json(route.query, &transfers),
             )
             .unwrap_or_else(|_| serde_json::json!({}));
             value["updatedAt"] = serde_json::json!(unix_timestamp());
@@ -5753,8 +5728,7 @@ async fn route_dispatch_group_2(
 
         ("GET", "/api/transfers/downloads/auto-replace/status")
             if route.path.starts_with("/api/v0/")
-                && state.config.controller_compatibility_target
-                    == ControllerCompatibilityTarget::Slskdn =>
+                && state.config.controller_profile == ControllerProfile::Native =>
         {
             let stuck_count = state
                 .transfers
@@ -5780,10 +5754,9 @@ async fn route_dispatch_group_2(
 
         ("GET", "/api/transfers/downloads/stuck") => {
             let transfers = state.transfers.read().await;
-            let value = serde_json::from_str::<serde_json::Value>(&slskd_stuck_downloads_json(
-                route.query,
-                &transfers,
-            ))
+            let value = serde_json::from_str::<serde_json::Value>(
+                &controller_stuck_downloads_json(route.query, &transfers),
+            )
             .unwrap_or_else(|_| serde_json::json!({"stuck": []}));
             drop(transfers);
             Ok(routing::ok_response(value["stuck"].to_string()))
@@ -5823,14 +5796,14 @@ async fn route_dispatch_group_2(
 
         ("GET", "/api/transfers/downloads/user-stats") => {
             let transfers = state.transfers.read().await;
-            let body = slskd_download_user_stats_json(route.query, &transfers);
+            let body = controller_download_user_stats_json(route.query, &transfers);
             drop(transfers);
             Ok(routing::ok_response(body))
         }
 
         ("GET", "/api/transfers/downloads/stats") => {
             let transfers = state.transfers.read().await;
-            let json = slskd_download_stats_json(&transfers);
+            let json = controller_download_stats_json(&transfers);
             drop(transfers);
             Ok(routing::ok_response(json))
         }
@@ -5842,11 +5815,11 @@ async fn route_dispatch_group_2(
                 return Ok(routing::bad_request_response("invalid batch id"));
             }
             if let Some(response) =
-                controller_slskd_transfer_storage_read_failure_response(state, route.path).await
+                controller_transfer_storage_read_failure_response(state, route.path).await
             {
                 return Ok(response);
             }
-            let batch_record = match slskd_read_transfer_batch(state, &batch_id).await {
+            let batch_record = match controller_read_transfer_batch(state, &batch_id).await {
                 Ok(record) => record,
                 Err(error) => return Ok(routing::internal_server_error_response(&error)),
             };
@@ -5857,7 +5830,7 @@ async fn route_dispatch_group_2(
                 .filter(|entry| {
                     entry.direction == 0 && entry.batch_id.as_deref() == Some(batch_id.as_str())
                 })
-                .map(TransferEntry::slskd_file_json)
+                .map(TransferEntry::controller_file_json)
                 .collect::<Vec<_>>();
             if downloads.is_empty() && batch_record.is_none() {
                 drop(transfers);
@@ -5900,8 +5873,8 @@ async fn route_dispatch_group_2(
             ))
         }
 
-        ("GET", path) if slskd_transfer_user_path(path, "downloads").is_some() => {
-            let Some(username) = slskd_transfer_user_path(path, "downloads") else {
+        ("GET", path) if controller_transfer_user_path(path, "downloads").is_some() => {
+            let Some(username) = controller_transfer_user_path(path, "downloads") else {
                 return Ok(routing::not_found_response());
             };
             let username = decoded_path_segment(username);
@@ -5909,20 +5882,20 @@ async fn route_dispatch_group_2(
                 return Ok(routing::bad_request_response("username is required"));
             }
             if let Some(response) =
-                controller_slskd_transfer_storage_read_failure_response(state, route.path).await
+                controller_transfer_storage_read_failure_response(state, route.path).await
             {
                 return Ok(response);
             }
             let transfers = state.transfers.read().await;
-            let body = transfers.slskd_transfer_user_json(0, username.trim());
+            let body = transfers.controller_transfer_user_json(0, username.trim());
             drop(transfers);
             Ok(body
                 .map(routing::ok_response)
                 .unwrap_or_else(routing::not_found_response))
         }
 
-        ("GET", path) if slskd_transfer_user_path(path, "uploads").is_some() => {
-            let Some(username) = slskd_transfer_user_path(path, "uploads") else {
+        ("GET", path) if controller_transfer_user_path(path, "uploads").is_some() => {
+            let Some(username) = controller_transfer_user_path(path, "uploads") else {
                 return Ok(routing::not_found_response());
             };
             let username = decoded_path_segment(username);
@@ -5930,12 +5903,12 @@ async fn route_dispatch_group_2(
                 return Ok(routing::bad_request_response("username is required"));
             }
             if let Some(response) =
-                controller_slskd_transfer_storage_read_failure_response(state, route.path).await
+                controller_transfer_storage_read_failure_response(state, route.path).await
             {
                 return Ok(response);
             }
             let transfers = state.transfers.read().await;
-            let body = transfers.slskd_transfer_user_json(1, username.trim());
+            let body = transfers.controller_transfer_user_json(1, username.trim());
             drop(transfers);
             Ok(body
                 .map(routing::ok_response)
@@ -5943,21 +5916,21 @@ async fn route_dispatch_group_2(
         }
 
         ("GET", path)
-            if slskd_transfer_file_path(path, "downloads").is_some()
+            if controller_transfer_file_path(path, "downloads").is_some()
                 && !path.ends_with("/position") =>
         {
-            let Some((username, id)) = slskd_transfer_file_path(path, "downloads") else {
+            let Some((username, id)) = controller_transfer_file_path(path, "downloads") else {
                 return Ok(routing::not_found_response());
             };
             if let Some(response) =
-                controller_slskd_transfer_storage_read_failure_response(state, route.path).await
+                controller_transfer_storage_read_failure_response(state, route.path).await
             {
                 return Ok(response);
             }
             let username = decoded_path_segment(username);
             let transfers = state.transfers.read().await;
             let response = transfers
-                .slskd_transfer_json(0, &username, id)
+                .controller_transfer_json(0, &username, id)
                 .map(routing::ok_response)
                 .unwrap_or_else(routing::not_found_response);
             drop(transfers);
@@ -5965,33 +5938,33 @@ async fn route_dispatch_group_2(
         }
 
         ("GET", path)
-            if slskd_transfer_file_path(path, "uploads").is_some()
+            if controller_transfer_file_path(path, "uploads").is_some()
                 && !path.ends_with("/position") =>
         {
-            let Some((username, id)) = slskd_transfer_file_path(path, "uploads") else {
+            let Some((username, id)) = controller_transfer_file_path(path, "uploads") else {
                 return Ok(routing::not_found_response());
             };
             if let Some(response) =
-                controller_slskd_transfer_storage_read_failure_response(state, route.path).await
+                controller_transfer_storage_read_failure_response(state, route.path).await
             {
                 return Ok(response);
             }
             let username = decoded_path_segment(username);
             let transfers = state.transfers.read().await;
             let response = transfers
-                .slskd_transfer_json(1, &username, id)
+                .controller_transfer_json(1, &username, id)
                 .map(routing::ok_response)
                 .unwrap_or_else(routing::not_found_response);
             drop(transfers);
             Ok(response)
         }
 
-        ("GET", path) if slskd_transfer_position_path(path).is_some() => {
-            let Some((username, id)) = slskd_transfer_position_path(path) else {
+        ("GET", path) if controller_transfer_position_path(path).is_some() => {
+            let Some((username, id)) = controller_transfer_position_path(path) else {
                 return Ok(routing::not_found_response());
             };
             if let Some(response) =
-                controller_slskd_transfer_storage_read_failure_response(state, route.path).await
+                controller_transfer_storage_read_failure_response(state, route.path).await
             {
                 return Ok(response);
             }
@@ -6017,7 +5990,7 @@ async fn route_dispatch_group_2(
             {
                 // A test/in-process state without listener workers cannot
                 // service the asynchronous session endpoint lookup. Match
-                // slskd's empty queue-position contract immediately rather
+                // The legacy empty queue-position contract immediately rather
                 // than waiting for the network timeout; a live daemon still
                 // takes the discovery path below.
                 return Ok(routing::no_content_response());
@@ -6353,12 +6326,12 @@ async fn route_dispatch_group_2(
             ))
         }
 
-        ("POST", path) if slskd_transfer_user_path(path, "downloads").is_some() => {
-            let Some(username) = slskd_transfer_user_path(path, "downloads") else {
+        ("POST", path) if controller_transfer_user_path(path, "downloads").is_some() => {
+            let Some(username) = controller_transfer_user_path(path, "downloads") else {
                 return Ok(routing::not_found_response());
             };
             let username = decoded_path_segment(username);
-            let mut files = slskd_files_from_body(body);
+            let mut files = controller_files_from_body(body);
             if route.path.starts_with("/api/v0/") && files.is_empty() {
                 return Ok(HttpResponse {
                     status: "400 Bad Request",
@@ -6414,7 +6387,7 @@ async fn route_dispatch_group_2(
             } else {
                 None
             };
-            let batch_id = slskd_transfer_batch_id(body)
+            let batch_id = controller_transfer_batch_id(body)
                 .or_else(|| (files.len() > 1).then(|| uuid::Uuid::new_v4().to_string()));
             let mut transfers = state.transfers.write().await;
             let previous_entries = transfers.entries.clone();
@@ -6476,7 +6449,7 @@ async fn route_dispatch_group_2(
                     batch_id.clone(),
                     details,
                 );
-                created.push(entry.slskd_file_json());
+                created.push(entry.controller_file_json());
                 created_entries.push(entry);
             }
             let count = created.len();
@@ -6540,8 +6513,8 @@ async fn route_dispatch_group_2(
             }
         }
 
-        ("DELETE", path) if slskd_transfer_file_path(path, "downloads").is_some() => {
-            let Some((username, id)) = slskd_transfer_file_path(path, "downloads") else {
+        ("DELETE", path) if controller_transfer_file_path(path, "downloads").is_some() => {
+            let Some((username, id)) = controller_transfer_file_path(path, "downloads") else {
                 return Ok(routing::not_found_response());
             };
             let username = decoded_path_segment(username);
@@ -6588,8 +6561,8 @@ async fn route_dispatch_group_2(
             Ok(routing::no_content_response())
         }
 
-        ("DELETE", path) if slskd_transfer_file_path(path, "uploads").is_some() => {
-            let Some((username, id)) = slskd_transfer_file_path(path, "uploads") else {
+        ("DELETE", path) if controller_transfer_file_path(path, "uploads").is_some() => {
+            let Some((username, id)) = controller_transfer_file_path(path, "uploads") else {
                 return Ok(routing::not_found_response());
             };
             let username = decoded_path_segment(username);
@@ -6916,7 +6889,7 @@ async fn route_dispatch_group_2(
         // TRANSFER STATISTICS ENDPOINTS
         ("GET", "/api/transfers/speeds") => {
             let transfers = state.transfers.read().await;
-            let json = slskd_transfer_speeds_json(&transfers);
+            let json = controller_transfer_speeds_json(&transfers);
             drop(transfers);
             Ok(routing::ok_response(json))
         }
@@ -6927,16 +6900,13 @@ async fn route_dispatch_group_2(
                 return Ok(routing::not_found_response());
             };
             if let Some(response) =
-                controller_slskd_user_read_failure_response(state, route.path, &username, false)
-                    .await
+                controller_user_read_failure_response(state, route.path, &username, false).await
             {
                 return Ok(response);
             }
             let users = state.users.read().await;
             if let Some(record) = users.records.iter().find(|u| u.username == username) {
-                let json = if state.config.controller_compatibility_target
-                    == ControllerCompatibilityTarget::Slskd
-                {
+                let json = if state.config.controller_profile == ControllerProfile::Legacy {
                     serde_json::json!({
                         "description": "",
                         "hasFreeUploadSlot": true,
@@ -6947,15 +6917,13 @@ async fn route_dispatch_group_2(
                     })
                     .to_string()
                 } else {
-                    record.slskd_info_json().to_string()
+                    record.controller_info_json().to_string()
                 };
                 drop(users);
                 Ok(routing::ok_response(json))
             } else {
                 drop(users);
-                if state.config.controller_compatibility_target
-                    == ControllerCompatibilityTarget::Slskd
-                {
+                if state.config.controller_profile == ControllerProfile::Legacy {
                     return Ok(routing::not_found_response());
                 }
                 let record = UserRecord {
@@ -6969,9 +6937,7 @@ async fn route_dispatch_group_2(
                     directory_count: None,
                     updated_at: unix_timestamp(),
                 };
-                let json = if state.config.controller_compatibility_target
-                    == ControllerCompatibilityTarget::Slskd
-                {
+                let json = if state.config.controller_profile == ControllerProfile::Legacy {
                     serde_json::json!({
                         "description": "",
                         "hasFreeUploadSlot": true,
@@ -6982,7 +6948,7 @@ async fn route_dispatch_group_2(
                     })
                     .to_string()
                 } else {
-                    record.slskd_info_json().to_string()
+                    record.controller_info_json().to_string()
                 };
                 Ok(routing::ok_response(json))
             }
@@ -7023,7 +6989,7 @@ async fn route_dispatch_group_2(
                 .find(|record| record.username == username)
                 .map(|record| record.entries.as_slice())
                 .unwrap_or(&[]);
-            let json = slskd_user_directories_json(&directory, entries, route.query);
+            let json = controller_user_directories_json(&directory, entries, route.query);
             drop(browse);
             if let Some(session_command_permit) = session_command_permit {
                 session_command_permit.send(SessionCommand::BrowseFolder {
@@ -7042,16 +7008,13 @@ async fn route_dispatch_group_2(
         {
             let username = user_route_username(path, "/status").expect("guarded user status path");
             if let Some(response) =
-                controller_slskd_user_read_failure_response(state, route.path, &username, false)
-                    .await
+                controller_user_read_failure_response(state, route.path, &username, false).await
             {
                 return Ok(response);
             }
             let users = state.users.read().await;
             if let Some(record) = users.records.iter().find(|u| u.username == username) {
-                let json = if state.config.controller_compatibility_target
-                    == ControllerCompatibilityTarget::Slskd
-                {
+                let json = if state.config.controller_profile == ControllerProfile::Legacy {
                     let status = match record.status.as_deref() {
                         Some("online") | Some("Online") => "Online",
                         Some("away") | Some("Away") => "Away",
@@ -7063,15 +7026,13 @@ async fn route_dispatch_group_2(
                     })
                     .to_string()
                 } else {
-                    record.slskd_status_json().to_string()
+                    record.controller_status_json().to_string()
                 };
                 drop(users);
                 Ok(routing::ok_response(json))
             } else {
                 drop(users);
-                if state.config.controller_compatibility_target
-                    == ControllerCompatibilityTarget::Slskd
-                {
+                if state.config.controller_profile == ControllerProfile::Legacy {
                     return Ok(routing::not_found_response());
                 }
                 let record = UserRecord {
@@ -7085,24 +7046,21 @@ async fn route_dispatch_group_2(
                     directory_count: None,
                     updated_at: unix_timestamp(),
                 };
-                let json = if state.config.controller_compatibility_target
-                    == ControllerCompatibilityTarget::Slskd
-                {
+                let json = if state.config.controller_profile == ControllerProfile::Legacy {
                     serde_json::json!({
                         "isPrivileged": false,
                         "presence": "Offline",
                     })
                     .to_string()
                 } else {
-                    record.slskd_status_json().to_string()
+                    record.controller_status_json().to_string()
                 };
                 Ok(routing::ok_response(json))
             }
         }
 
         ("GET", "/api/users/groups") => {
-            if state.config.controller_compatibility_target != ControllerCompatibilityTarget::Slskdn
-            {
+            if state.config.controller_profile != ControllerProfile::Native {
                 return Ok(HttpResponse {
                     status: "404 Not Found",
                     content_type: "",
@@ -7145,8 +7103,7 @@ async fn route_dispatch_group_2(
         }
 
         ("GET", path) if path.starts_with("/api/users/") && path.ends_with("/group") => {
-            if state.config.controller_compatibility_target != ControllerCompatibilityTarget::Slskdn
-            {
+            if state.config.controller_profile != ControllerProfile::Native {
                 return Ok(HttpResponse {
                     status: "404 Not Found",
                     content_type: "",
@@ -7169,8 +7126,7 @@ async fn route_dispatch_group_2(
                 return Ok(routing::not_found_response());
             };
             if let Some(response) =
-                controller_slskd_user_read_failure_response(state, route.path, &username, false)
-                    .await
+                controller_user_read_failure_response(state, route.path, &username, false).await
             {
                 return Ok(response);
             }
@@ -7187,9 +7143,7 @@ async fn route_dispatch_group_2(
                     Err(_) => return Ok(routing::not_found_response()),
                 }
             };
-            let body = if state.config.controller_compatibility_target
-                == ControllerCompatibilityTarget::Slskd
-            {
+            let body = if state.config.controller_profile == ControllerProfile::Legacy {
                 serde_json::json!({
                     "addressFamily": "IPv4",
                     "address": address.ip.to_string(),
@@ -7326,13 +7280,13 @@ async fn route_dispatch_group_2(
                 return Ok(routing::not_found_response());
             };
             if let Some(response) =
-                controller_slskd_search_responses_read_failure_response(state, route.path, id).await
+                controller_search_responses_read_failure_response(state, route.path, id).await
             {
                 return Ok(response);
             }
             let searches = state.searches.read().await;
             if let Some(record) = searches.get_by_identifier(id) {
-                let json = record.slskd_responses_json_with_query(route.query);
+                let json = record.controller_responses_json_with_query(route.query);
                 drop(searches);
                 Ok(routing::ok_response(json))
             } else {
@@ -7379,8 +7333,8 @@ async fn route_dispatch_group_2(
             }
             if route.path.starts_with("/api/v0/")
                 && matches!(
-                    state.config.controller_compatibility_target,
-                    ControllerCompatibilityTarget::Slskd | ControllerCompatibilityTarget::Slskdn
+                    state.config.controller_profile,
+                    ControllerProfile::Legacy | ControllerProfile::Native
                 )
                 && removed.is_some()
             {
@@ -7629,7 +7583,9 @@ async fn route_dispatch_group_2(
                     .cloned()
                     .expect("joined room exists");
                 drop(rooms);
-                return Ok(routing::ok_response(existing.slskd_room_json().to_string()));
+                return Ok(routing::ok_response(
+                    existing.controller_room_json().to_string(),
+                ));
             }
             let previous = rooms.clone();
             let Some(record) = rooms.join(room_name.to_string()) else {
@@ -7743,7 +7699,7 @@ async fn route_dispatch_group_3(
         }
 
         ("GET", "/api/rooms/available") => {
-            if state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskd
+            if state.config.controller_profile == ControllerProfile::Legacy
                 && route.path.starts_with("/api/v0/")
                 && state.session.read().await.state != "connected"
             {
@@ -7751,14 +7707,14 @@ async fn route_dispatch_group_3(
                     "failed to retrieve available rooms",
                 ));
             }
-            if state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
+            if state.config.controller_profile == ControllerProfile::Native
                 && route.path.starts_with("/api/v0/")
                 && state.session.read().await.state != "connected"
             {
                 return Ok(routing::ok_response("[]".to_owned()));
             }
             let rooms = state.rooms.read().await;
-            let json = rooms.slskd_available_json();
+            let json = rooms.controller_available_json();
             drop(rooms);
             Ok(routing::ok_response(json))
         }
@@ -7799,7 +7755,7 @@ async fn route_dispatch_group_3(
                 let json = serde_json::Value::Array(
                     room.roster
                         .iter()
-                        .map(|user| user.slskd_json(&local_username))
+                        .map(|user| user.controller_json(&local_username))
                         .collect(),
                 )
                 .to_string();
@@ -7828,7 +7784,7 @@ async fn route_dispatch_group_3(
                     .messages
                     .iter()
                     .filter(|message| since.is_none_or(|since| message.created_at_ms > since))
-                    .map(|message| message.slskd_json(&room.name))
+                    .map(|message| message.controller_json(&room.name))
                     .collect::<Vec<_>>();
                 let json = serde_json::Value::Array(messages).to_string();
                 drop(rooms);
@@ -8006,7 +7962,7 @@ async fn route_dispatch_group_3(
                     "Soulseek server connection is not ready",
                 ));
             }
-            if state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
+            if state.config.controller_profile == ControllerProfile::Native
                 && !state.soulseek_safety.try_consume_browse("compatibility")
             {
                 return Ok(HttpResponse {
@@ -8212,8 +8168,7 @@ async fn route_dispatch_group_3(
         ("GET", path) if path.starts_with("/api/users/") && path.ends_with("/browse") => {
             if let Some(username) = user_route_username(path, "/browse") {
                 if let Some(response) =
-                    controller_slskd_user_read_failure_response(state, route.path, &username, true)
-                        .await
+                    controller_user_read_failure_response(state, route.path, &username, true).await
                 {
                     return Ok(response);
                 }
@@ -8222,9 +8177,7 @@ async fn route_dispatch_group_3(
                     .records
                     .iter()
                     .find(|record| record.username == username);
-                if state.config.controller_compatibility_target
-                    == ControllerCompatibilityTarget::Slskdn
-                    && record.is_none()
+                if state.config.controller_profile == ControllerProfile::Native && record.is_none()
                 {
                     drop(browse);
                     let session_state = state.session.read().await.state;
@@ -8240,9 +8193,7 @@ async fn route_dispatch_group_3(
                     }
                     return Ok(routing::not_found_response());
                 }
-                if state.config.controller_compatibility_target
-                    == ControllerCompatibilityTarget::Slskd
-                    && record.is_none()
+                if state.config.controller_profile == ControllerProfile::Legacy && record.is_none()
                 {
                     drop(browse);
                     let session_state = state.session.read().await.state;
@@ -8267,7 +8218,7 @@ async fn route_dispatch_group_3(
                 let entries = record
                     .map(|record| record.entries.as_slice())
                     .unwrap_or(&[]);
-                let body = slskd_user_root_json(entries, route.query);
+                let body = controller_user_root_json(entries, route.query);
                 drop(browse);
                 Ok(routing::ok_response(body))
             } else {
@@ -8531,7 +8482,7 @@ async fn route_dispatch_group_3(
                         body: String::new(),
                     }
                 } else {
-                    routing::ok_response(existing.slskd_room_json().to_string())
+                    routing::ok_response(existing.controller_room_json().to_string())
                 });
             }
             let previous = rooms.clone();
@@ -8540,11 +8491,10 @@ async fn route_dispatch_group_3(
                     "room capacity is full",
                 ));
             };
-            let body = record.slskd_room_json().to_string();
-            // The slskd compatibility contract persists this controller's
-            // subscription, while the slskdN fork keeps the tracker transient.
-            if state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskd
-            {
+            let body = record.controller_room_json().to_string();
+            // The legacy compatibility contract persists this controller's
+            // subscription, while the native profile fork keeps the tracker transient.
+            if state.config.controller_profile == ControllerProfile::Legacy {
                 if let Err(error) = persist_room_join_checked(state, &room_name).await {
                     *rooms = previous;
                     return Ok(routing::service_unavailable_response(&error));
@@ -8567,11 +8517,10 @@ async fn route_dispatch_group_3(
                 .iter()
                 .find(|r| {
                     r.name == room_name
-                        && (state.config.controller_compatibility_target
-                            != ControllerCompatibilityTarget::Slskd
+                        && (state.config.controller_profile != ControllerProfile::Legacy
                             || r.joined)
                 })
-                .map(|room| routing::ok_response(room.slskd_room_json().to_string()))
+                .map(|room| routing::ok_response(room.controller_room_json().to_string()))
                 .unwrap_or_else(routing::not_found_response);
             drop(rooms);
             Ok(response)
@@ -8629,8 +8578,7 @@ async fn route_dispatch_group_3(
                 .await;
                 Ok(
                     if route.path.starts_with("/api/v0/")
-                        || state.config.controller_compatibility_target
-                            == ControllerCompatibilityTarget::Slskd
+                        || state.config.controller_profile == ControllerProfile::Legacy
                     {
                         HttpResponse {
                             status: "201 Created",
@@ -8675,8 +8623,7 @@ async fn route_dispatch_group_3(
                 .set_ticker(&room_name, ticker.clone())
                 .map(|room| {
                     if route.path.starts_with("/api/v0/")
-                        || state.config.controller_compatibility_target
-                            == ControllerCompatibilityTarget::Slskd
+                        || state.config.controller_profile == ControllerProfile::Legacy
                     {
                         HttpResponse {
                             status: "201 Created",
@@ -8687,7 +8634,7 @@ async fn route_dispatch_group_3(
                         routing::ok_response(
                             serde_json::json!({
                                 "updated": true,
-                                "room": room.slskd_room_json(),
+                                "room": room.controller_room_json(),
                             })
                             .to_string(),
                         )
@@ -8731,8 +8678,7 @@ async fn route_dispatch_group_3(
             let response = match rooms.add_member(&room_name, username.clone()) {
                 Ok(Some(room)) => {
                     if route.path.starts_with("/api/v0/")
-                        || state.config.controller_compatibility_target
-                            == ControllerCompatibilityTarget::Slskd
+                        || state.config.controller_profile == ControllerProfile::Legacy
                     {
                         HttpResponse {
                             status: "201 Created",
@@ -8743,7 +8689,7 @@ async fn route_dispatch_group_3(
                         routing::ok_response(
                             serde_json::json!({
                                 "updated": true,
-                                "room": room.slskd_room_json(),
+                                "room": room.controller_room_json(),
                                 "userCount": room.user_count.unwrap_or(0),
                             })
                             .to_string(),
@@ -8779,8 +8725,7 @@ async fn route_dispatch_group_3(
             let previous = rooms.clone();
 
             if route.path.starts_with("/api/v0/")
-                && state.config.controller_compatibility_target
-                    == ControllerCompatibilityTarget::Slskdn
+                && state.config.controller_profile == ControllerProfile::Native
                 && !rooms
                     .records
                     .iter()
@@ -8803,8 +8748,7 @@ async fn route_dispatch_group_3(
 
                 Ok(
                     if route.path.starts_with("/api/v0/")
-                        || state.config.controller_compatibility_target
-                            == ControllerCompatibilityTarget::Slskd
+                        || state.config.controller_profile == ControllerProfile::Legacy
                     {
                         routing::no_content_response()
                     } else {
@@ -8835,7 +8779,7 @@ async fn route_dispatch_group_3(
 
         // WEBUI PARITY: Application/Server/Session status endpoints
         ("GET", "/api/application/build") => {
-            let mut value = slskd_version_json(state);
+            let mut value = controller_version_json(state);
             value["protocol"] = serde_json::json!({
                 "clientName": CLIENT_NAME,
                 "major": CLIENT_MAJOR_VERSION,
@@ -8930,7 +8874,7 @@ async fn route_dispatch_group_3(
                 return Ok(response);
             }
             let overlay = state.options_overlay.read().await;
-            let body = slskd_options_json(&state.config, &overlay, true);
+            let body = controller_options_json(&state.config, &overlay, true);
             drop(overlay);
             Ok(HttpResponse {
                 status: "200 OK",
@@ -8940,7 +8884,7 @@ async fn route_dispatch_group_3(
         }
         ("GET", "/api/options/startup") => {
             let overlay = state.options_overlay.read().await;
-            let body = slskd_options_json(&state.config, &overlay, false);
+            let body = controller_options_json(&state.config, &overlay, false);
             drop(overlay);
             Ok(HttpResponse {
                 status: "200 OK",
@@ -8952,7 +8896,7 @@ async fn route_dispatch_group_3(
             if !effective_remote_configuration(state) {
                 return Ok(controller_forbidden_response());
             }
-            Ok(slskd_options_config_text_response(&state.config))
+            Ok(controller_options_config_text_response(&state.config))
         }
         ("GET", "/api/options/debug") => {
             if let Some(response) = controller_options_validation_failure_response(state) {
@@ -8962,7 +8906,7 @@ async fn route_dispatch_group_3(
                 return Ok(controller_forbidden_response());
             }
             let overlay = state.options_overlay.read().await;
-            let debug_view = slskd_options_debug_view(state, &overlay);
+            let debug_view = controller_options_debug_view(state, &overlay);
             drop(overlay);
             Ok(HttpResponse {
                 status: "200 OK",
@@ -8980,7 +8924,7 @@ async fn route_dispatch_group_3(
             Ok(HttpResponse {
                 status: "200 OK",
                 content_type: "application/json; charset=utf-8",
-                body: slskd_options_config_location_json(&state.config),
+                body: controller_options_config_location_json(&state.config),
             })
         }
         ("GET", "/api/autoreplace") => {
@@ -9119,7 +9063,7 @@ async fn route_dispatch_group_4(
                         .filter(|record| {
                             !collection_owner_forbids(caller_id.as_deref(), &record.owner_user_id)
                         })
-                        .map(CollectionRecord::slskdn_json)
+                        .map(CollectionRecord::native_json)
                         .collect::<Vec<_>>()
                         .join(",")
                 )
@@ -9135,7 +9079,7 @@ async fn route_dispatch_group_4(
                 .roots
                 .iter()
                 .map(|root| {
-                    let mut value = slskd_share_value(root);
+                    let mut value = controller_share_value(root);
                     value["name"] = serde_json::json!(root.label);
                     value
                 })
@@ -9189,7 +9133,7 @@ async fn route_dispatch_group_4(
             };
             let mutated = collections.clone();
             let json = if compatibility_contract {
-                record.slskdn_json()
+                record.native_json()
             } else {
                 record.json()
             };
@@ -9220,7 +9164,7 @@ async fn route_dispatch_group_4(
                 !collection_owner_forbids(caller_id.as_deref(), &record.owner_user_id)
             }) {
                 let json = if route.path.starts_with("/api/v0/") {
-                    record.slskdn_json()
+                    record.native_json()
                 } else {
                     record.json()
                 };
@@ -9310,7 +9254,7 @@ async fn route_dispatch_group_4(
             if let Some(record) = updated {
                 let mutated = collections.clone();
                 let json = if compatibility_contract {
-                    record.slskdn_json()
+                    record.native_json()
                 } else {
                     record.json()
                 };
@@ -9405,7 +9349,7 @@ async fn route_dispatch_group_4(
                     .enumerate()
                     .map(|(ordinal, item)| {
                         if compatibility_contract {
-                            item.slskdn_json(&record.id, ordinal)
+                            item.native_json(&record.id, ordinal)
                         } else {
                             item.json()
                         }
@@ -9475,7 +9419,7 @@ async fn route_dispatch_group_4(
                         .expect("item was added to an existing collection");
                     let mutated = collections.clone();
                     let json = if compatibility_contract {
-                        item.slskdn_json(id, record.items.len().saturating_sub(1))
+                        item.native_json(id, record.items.len().saturating_sub(1))
                     } else {
                         item.json()
                     };
@@ -9509,9 +9453,9 @@ async fn route_dispatch_group_4(
             );
             let mut collections = state.collections.write().await;
             let collection_id = collections.collection_id_for_item(item_id);
-            if requested_collection_id.is_some_and(|expected| {
-                collection_id.as_deref() != Some(expected)
-            }) {
+            if requested_collection_id
+                .is_some_and(|expected| collection_id.as_deref() != Some(expected))
+            {
                 drop(collections);
                 return Ok(routing::not_found_response());
             }
@@ -9565,9 +9509,9 @@ async fn route_dispatch_group_4(
             );
             let mut collections = state.collections.write().await;
             let collection_id = collections.collection_id_for_item(item_id);
-            if requested_collection_id.is_some_and(|expected| {
-                collection_id.as_deref() != Some(expected)
-            }) {
+            if requested_collection_id
+                .is_some_and(|expected| collection_id.as_deref() != Some(expected))
+            {
                 drop(collections);
                 return Ok(routing::not_found_response());
             }
@@ -9612,7 +9556,7 @@ async fn route_dispatch_group_4(
                         .records
                         .iter()
                         .flat_map(|record| record.items.iter())
-                        .map(WishlistItem::slskdn_json)
+                        .map(WishlistItem::native_json)
                         .collect::<Vec<_>>()
                         .join(",")
                 )
@@ -9669,7 +9613,7 @@ async fn route_dispatch_group_4(
                 Ok(item) => {
                     let mutated = wishlist.clone();
                     let json = if compatibility_contract {
-                        item.slskdn_json()
+                        item.native_json()
                     } else {
                         item.json()
                     };
@@ -9714,7 +9658,7 @@ async fn route_dispatch_group_4(
             };
             Ok(routing::ok_response(
                 if route.path.starts_with("/api/v0/") {
-                    item.slskdn_json()
+                    item.native_json()
                 } else {
                     item.json()
                 },
@@ -9766,7 +9710,7 @@ async fn route_dispatch_group_4(
                     .iter()
                     .map(|rule| {
                         if compatibility_contract {
-                            rule.slskdn_json()
+                            rule.native_json()
                         } else {
                             rule.json()
                         }
@@ -9841,7 +9785,7 @@ async fn route_dispatch_group_4(
             }
             let compatibility_contract = route.path.starts_with("/api/v0/");
             let json = if compatibility_contract {
-                rule.slskdn_json()
+                rule.native_json()
             } else {
                 rule.json()
             }
@@ -9996,7 +9940,7 @@ async fn route_dispatch_group_4(
                     }
                 };
                 let mutated = contacts.clone();
-                let json = record.slskdn_json(&peer_id);
+                let json = record.native_json(&peer_id);
                 drop(contacts);
                 if added {
                     if let Err(error) = persist_contact_checked(state, &record).await {
@@ -10387,7 +10331,7 @@ async fn route_dispatch_group_4(
                 .records
                 .iter()
                 .filter_map(|record| {
-                    serde_json::from_str::<serde_json::Value>(&record.slskdn_json()).ok()
+                    serde_json::from_str::<serde_json::Value>(&record.native_json()).ok()
                 })
                 .collect::<Vec<_>>();
             Ok(routing::ok_response(serde_json::json!(value).to_string()))
@@ -10409,7 +10353,7 @@ async fn route_dispatch_group_4(
             let versioned =
                 route.path.starts_with("/api/v0/") || route.path.starts_with("/api/v1/");
             let record = if versioned {
-                notes.set_slskdn(
+                notes.set_versioned(
                     username,
                     note,
                     extract_json_string_field(body, "color").unwrap_or_default(),
@@ -10426,7 +10370,7 @@ async fn route_dispatch_group_4(
             };
             let mutated = notes.clone();
             let json = if versioned {
-                record.slskdn_json()
+                record.native_json()
             } else {
                 record.json()
             };
@@ -10459,7 +10403,7 @@ async fn route_dispatch_group_4(
             };
             if let Some(record) = record {
                 let json = if versioned {
-                    record.slskdn_json()
+                    record.native_json()
                 } else {
                     record.json()
                 };
@@ -11119,10 +11063,9 @@ async fn route_dispatch_group_5(
 
         // LIBRARY ITEMS ENDPOINTS
         ("GET", "/api/library/items") => {
-            if state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
-            {
+            if state.config.controller_profile == ControllerProfile::Native {
                 return Ok(routing::ok_response(
-                    slskdn_library_items_search_json(state, route.query).await,
+                    native_library_items_search_json(state, route.query).await,
                 ));
             }
             let library = state.library.read().await;
@@ -11292,7 +11235,7 @@ async fn route_dispatch_group_5(
                 .records
                 .iter()
                 .find(|record| record.username == username)
-                .map(BrowseRecord::slskd_status_json);
+                .map(BrowseRecord::controller_status_json);
             drop(browse);
             match tracked {
                 Some(body) => Ok(routing::ok_response(body)),
@@ -11443,7 +11386,7 @@ async fn route_dispatch_group_5(
                 return Ok(response);
             }
             let messages = state.messages.read().await;
-            let body = messages.slskd_conversations_json(route.query);
+            let body = messages.controller_conversations_json(route.query);
             drop(messages);
             Ok(routing::ok_response(body))
         }
@@ -11487,7 +11430,7 @@ async fn route_dispatch_group_5(
                 },
             };
             let messages = state.messages.read().await;
-            if state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskd
+            if state.config.controller_profile == ControllerProfile::Legacy
                 && !messages
                     .records
                     .iter()
@@ -11496,7 +11439,7 @@ async fn route_dispatch_group_5(
                 drop(messages);
                 return Ok(routing::not_found_response());
             }
-            let body = messages.slskd_messages_json(&username, unacknowledged_only);
+            let body = messages.controller_messages_json(&username, unacknowledged_only);
             drop(messages);
             Ok(routing::ok_response(body))
         }
@@ -11532,7 +11475,7 @@ async fn route_dispatch_group_5(
                 Err(error) => return Ok(routing::bad_request_response(&error)),
             };
             let messages = state.messages.read().await;
-            if state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskd
+            if state.config.controller_profile == ControllerProfile::Legacy
                 && !messages
                     .records
                     .iter()
@@ -11541,7 +11484,7 @@ async fn route_dispatch_group_5(
                 drop(messages);
                 return Ok(routing::not_found_response());
             }
-            let body = messages.slskd_conversation_json(&username, include_messages, since);
+            let body = messages.controller_conversation_json(&username, include_messages, since);
             drop(messages);
             Ok(routing::ok_response(body))
         }
@@ -11595,7 +11538,7 @@ async fn route_dispatch_group_5(
                 body: message_body,
             });
 
-            if state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
+            if state.config.controller_profile == ControllerProfile::Native
                 && route.path.starts_with("/api/v0/")
             {
                 Ok(HttpResponse {
@@ -11658,8 +11601,8 @@ async fn route_dispatch_group_5(
             });
             Ok(
                 if matches!(
-                    state.config.controller_compatibility_target,
-                    ControllerCompatibilityTarget::Slskd | ControllerCompatibilityTarget::Slskdn
+                    state.config.controller_profile,
+                    ControllerProfile::Legacy | ControllerProfile::Native
                 ) && route.path.starts_with("/api/v0/")
                 {
                     HttpResponse {
@@ -11869,7 +11812,7 @@ async fn route_dispatch_group_5(
             if let Some(job) = state.library.read().await.remediation_job(&job_id) {
                 return Ok(routing::ok_response(job.json().to_string()));
             }
-            if state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
+            if state.config.controller_profile == ControllerProfile::Native
                 && body.contains("\"status\":\"not_found\"")
             {
                 return Ok(routing::not_found_response());
@@ -12181,8 +12124,7 @@ async fn route_dispatch_group_5(
                 .values()
                 .cloned()
                 .collect::<Vec<_>>();
-            if state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
-            {
+            if state.config.controller_profile == ControllerProfile::Native {
                 drop(runtime);
                 return Ok(routing::ok_response(
                     serde_json::json!({"clients": clients}).to_string(),
@@ -12244,8 +12186,7 @@ async fn route_dispatch_group_5(
                 .sum::<u64>();
             let transfer_count = transfers.entries.len();
             drop(transfers);
-            if state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
-            {
+            if state.config.controller_profile == ControllerProfile::Native {
                 let started_at = runtime
                     .bridge_started_at
                     .map(bridge_started_at_string)
@@ -12348,8 +12289,7 @@ async fn route_dispatch_group_5(
                 .count();
             let total_requests = transfers.entries.len();
             drop(transfers);
-            if state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
-            {
+            if state.config.controller_profile == ControllerProfile::Native {
                 let uptime = runtime
                     .bridge_started_at
                     .map(|started| {
@@ -12406,8 +12346,7 @@ async fn route_dispatch_group_5(
             let transfers = state.transfers.read().await;
             let transfer_count = transfers.entries.len();
             drop(transfers);
-            if state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
-            {
+            if state.config.controller_profile == ControllerProfile::Native {
                 let started_at = runtime
                     .bridge_started_at
                     .map(bridge_started_at_string)
@@ -12454,7 +12393,7 @@ async fn route_dispatch_group_5(
         }
 
         ("POST", "/api/bridge/start") => {
-            if state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
+            if state.config.controller_profile == ControllerProfile::Native
                 && route.path.starts_with("/api/v0/")
             {
                 return Ok(routing::ok_response(
@@ -12491,7 +12430,7 @@ async fn route_dispatch_group_5(
         }
 
         ("POST", "/api/bridge/stop") => {
-            if state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
+            if state.config.controller_profile == ControllerProfile::Native
                 && route.path.starts_with("/api/v0/")
             {
                 return Ok(routing::ok_response(
@@ -12519,7 +12458,7 @@ async fn route_dispatch_group_5(
         }
 
         ("PUT", "/api/bridge/admin/config") => {
-            if state.config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
+            if state.config.controller_profile == ControllerProfile::Native
                 && route.path.starts_with("/api/v0/")
             {
                 if body.trim().is_empty()
@@ -12645,8 +12584,8 @@ async fn route_dispatch_group_5(
                     return Ok(routing::service_unavailable_response(&error));
                 }
                 if matches!(
-                    state.config.controller_compatibility_target,
-                    ControllerCompatibilityTarget::Slskd | ControllerCompatibilityTarget::Slskdn
+                    state.config.controller_profile,
+                    ControllerProfile::Legacy | ControllerProfile::Native
                 ) && route.path.starts_with("/api/v0/")
                 {
                     HttpResponse {
@@ -12703,8 +12642,8 @@ async fn route_dispatch_group_5(
             }
             Ok(
                 if matches!(
-                    state.config.controller_compatibility_target,
-                    ControllerCompatibilityTarget::Slskd | ControllerCompatibilityTarget::Slskdn
+                    state.config.controller_profile,
+                    ControllerProfile::Legacy | ControllerProfile::Native
                 ) && route.path.starts_with("/api/v0/")
                 {
                     HttpResponse {
@@ -12938,8 +12877,8 @@ async fn route_dispatch_group_5(
             };
             if route.path.starts_with("/api/v0/")
                 && matches!(
-                    state.config.controller_compatibility_target,
-                    ControllerCompatibilityTarget::Slskd | ControllerCompatibilityTarget::Slskdn
+                    state.config.controller_profile,
+                    ControllerProfile::Legacy | ControllerProfile::Native
                 )
             {
                 let mut searches = state.searches.write().await;
@@ -13005,8 +12944,7 @@ async fn route_dispatch_group_5(
 
         ("PUT", "/api/transfers/downloads/accelerated") => {
             if route.path.starts_with("/api/v0/")
-                && state.config.controller_compatibility_target
-                    == ControllerCompatibilityTarget::Slskdn
+                && state.config.controller_profile == ControllerProfile::Native
             {
                 let enabled = extract_json_bool_field(body, "enabled").unwrap_or(false);
                 {
@@ -13025,7 +12963,7 @@ async fn route_dispatch_group_5(
             }
             let transfers = state.transfers.read().await;
             let mut payload = serde_json::from_str::<serde_json::Value>(
-                &slskd_accelerated_downloads_json(route.query, &transfers),
+                &controller_accelerated_downloads_json(route.query, &transfers),
             )
             .map_err(|error| format!("accelerated json failed: {error}"))?;
             drop(transfers);
@@ -13132,7 +13070,7 @@ async fn route_dispatch_group_5(
             ) {
                 let mutated = wishlist.clone();
                 let json = if compatibility_contract {
-                    item.slskdn_json()
+                    item.native_json()
                 } else {
                     item.json()
                 };
@@ -14131,11 +14069,11 @@ async fn route_dispatch_group_6(
 
           // ADDITIONAL MISSING GET ENDPOINTS (Phase 6)
           ("GET", "/api/multisource/jobs") => {
-              let versioned_slskdn = route.path.starts_with("/api/v0/")
-                  && state.config.controller_compatibility_target
-                      == ControllerCompatibilityTarget::Slskdn;
-              let swarm = state.multisource.read().await;
-              let mut jobs = if versioned_slskdn {
+            let versioned_profile = route.path.starts_with("/api/v0/")
+                && state.config.controller_profile
+                    == ControllerProfile::Native;
+            let swarm = state.multisource.read().await;
+            let mut jobs = if versioned_profile {
                   swarm
                       .list()
                       .into_iter()
@@ -14163,7 +14101,7 @@ async fn route_dispatch_group_6(
                       .collect::<Vec<_>>()
               };
               drop(swarm);
-              if !versioned_slskdn {
+            if !versioned_profile {
                   let transfers = state.transfers.read().await;
                   jobs.extend(transfers
                       .entries
@@ -15193,12 +15131,12 @@ async fn route_dispatch_group_6(
                   return Ok(routing::not_found_response());
               };
               let job_id = decoded_path_segment(job_id);
-              let versioned_slskdn = route.path.starts_with("/api/v0/")
-                  && state.config.controller_compatibility_target
-                      == ControllerCompatibilityTarget::Slskdn;
+              let versioned_profile = route.path.starts_with("/api/v0/")
+                  && state.config.controller_profile
+                      == ControllerProfile::Native;
               let swarm = state.multisource.read().await;
               if let Some(job) = swarm.get(&job_id) {
-                  let body = if versioned_slskdn {
+                  let body = if versioned_profile {
                       serde_json::json!({
                           "jobId": job.id,
                           "state": job.status,
@@ -15528,9 +15466,9 @@ async fn route_dispatch_group_6(
               if !effective_remote_configuration(state) {
                   return Ok(controller_forbidden_response());
               }
-              match slskd_options_config_validate_response(
+              match controller_options_config_validate_response(
                   body,
-                  state.config.controller_compatibility_target,
+                  state.config.controller_profile,
               ) {
                   Ok(response) => Ok(response),
                   Err(error) => Ok(routing::bad_request_response(&error)),
@@ -15735,7 +15673,7 @@ async fn route_dispatch_group_6(
                       .and_then(|value| value.get("@context").cloned())
                       .is_some_and(|value| value.is_null())
               {
-                  return Ok(slskdn_model_validation_response());
+                  return Ok(native_model_validation_response());
               }
               let interests = state.interests.read().await;
               let graph_data = interests
@@ -15778,7 +15716,7 @@ async fn route_dispatch_group_6(
                       .and_then(|value| value.get("@context").cloned())
                       .is_some_and(|value| value.is_null())
               {
-                  return Ok(slskdn_model_validation_response());
+                  return Ok(native_model_validation_response());
               }
               let wishlist = state.wishlist.read().await;
               let recommendations = wishlist
@@ -15827,7 +15765,7 @@ async fn route_dispatch_group_6(
               if route.path.starts_with("/api/v0/")
                   && work_ref.get("@context").is_some_and(serde_json::Value::is_null)
               {
-                  return Ok(slskdn_model_validation_response());
+                  return Ok(native_model_validation_response());
               }
               // Matches the oracle's real PromoteToWishlistAsync: a
               // recommendable WorkRef either promotes to a real, honest
@@ -16332,7 +16270,7 @@ async fn route_dispatch_group_6(
                     "share browse unavailable",
                 ));
             }
-            let json = slskd_share_directories_json(&shares.entries, None);
+            let json = controller_share_directories_json(&shares.entries, None);
             drop(shares);
             Ok(HttpResponse {
                 status: "200 OK",
@@ -16359,7 +16297,7 @@ async fn route_dispatch_group_6(
                     "share browse unavailable",
                 ));
             }
-            let json = slskd_share_directories_json(&shares.entries, Some(&root.label));
+            let json = controller_share_directories_json(&shares.entries, Some(&root.label));
             drop(shares);
             Ok(HttpResponse {
                 status: "200 OK",
@@ -16380,7 +16318,7 @@ async fn route_dispatch_group_6(
             else {
                 return Ok(routing::not_found_response());
             };
-            let json = slskd_share_value(root).to_string();
+            let json = controller_share_value(root).to_string();
             drop(shares);
             Ok(HttpResponse {
                 status: "200 OK",
@@ -18195,8 +18133,7 @@ async fn route_dispatch_group_7(
 
         ("GET", "/api/mesh/health")
             if route.path.starts_with("/api/v0/")
-                && state.config.controller_compatibility_target
-                    == ControllerCompatibilityTarget::Slskdn =>
+                && state.config.controller_profile == ControllerProfile::Native =>
         {
             let routing_nodes = if let Some(dht) = state.dht.as_ref() {
                 serde_json::from_str::<serde_json::Value>(&dht.status_json().await)
@@ -18256,8 +18193,7 @@ async fn route_dispatch_group_7(
                     .is_some_and(|sources| !sources.is_empty()) =>
         {
             if route.path.starts_with("/api/v0/")
-                && state.config.controller_compatibility_target
-                    == ControllerCompatibilityTarget::Slskdn
+                && state.config.controller_profile == ControllerProfile::Native
             {
                 if normalized_path == "/api/multisource/download" {
                     return Ok(multisource_versioned_download_response(body));
@@ -18329,8 +18265,7 @@ async fn route_dispatch_group_7(
 
         ("POST", "/api/multisource/download") => {
             if route.path.starts_with("/api/v0/")
-                && state.config.controller_compatibility_target
-                    == ControllerCompatibilityTarget::Slskdn
+                && state.config.controller_profile == ControllerProfile::Native
             {
                 return Ok(multisource_versioned_download_response(body));
             }
@@ -18944,14 +18879,13 @@ async fn route_dispatch_group_7(
             ))
         }
 
-        // FairnessController.GetSummary is a versioned slskdN DTO, while the
+        // FairnessController.GetSummary is a versioned native profile DTO, while the
         // unversioned /api/fairness route remains slskR's legacy ranking
         // projection.  With no recorded traffic, the frozen guard returns a
         // neutral upload/download ratio, a zero overlay/Soulseek ratio, and
         // an explicit within-constraints reason.
         ("GET", "/api/fairness")
-            if state.config.controller_compatibility_target
-                == ControllerCompatibilityTarget::Slskdn
+            if state.config.controller_profile == ControllerProfile::Native
                 && route.path == "/api/v0/fairness/summary" =>
         {
             let totals = if let Some(db) = state.db.as_ref() {
@@ -19336,8 +19270,7 @@ async fn route_dispatch_group_7(
                 Err(error) => {
                     eprintln!("port forwarding start failed: {error}");
                     Ok(
-                        if state.config.controller_compatibility_target
-                            == ControllerCompatibilityTarget::Slskdn
+                        if state.config.controller_profile == ControllerProfile::Native
                             && route.path.starts_with("/api/v0/")
                         {
                             routing::internal_server_error_response(

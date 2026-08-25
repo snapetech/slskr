@@ -1,4 +1,4 @@
-//! Mesh transport security primitives matching the frozen slskdN contracts.
+//! Mesh transport security primitives matching the frozen native profile contracts.
 //!
 //! The HTTP rate limiter and the overlay certificate verifier cover separate
 //! concerns. This module keeps the mesh transport controls together so that

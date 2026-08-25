@@ -26,7 +26,7 @@ import React, { useEffect, useRef } from 'react';
 import { Navigate, useNavigate, useParams } from 'react-router-dom';
 import { Icon, Menu, Segment, Tab } from 'semantic-ui-react';
 
-const System = ({ compatibilityTarget, options = {}, state = {}, theme }) => {
+const System = ({ runtimeProfile, options = {}, state = {}, theme }) => {
   const navigate = useNavigate();
   const { tab } = useParams();
   const systemRef = useRef(null);
@@ -54,7 +54,7 @@ const System = ({ compatibilityTarget, options = {}, state = {}, theme }) => {
       render: () => (
         <Tab.Pane>
           <Info
-            compatibilityTarget={compatibilityTarget}
+            runtimeProfile={runtimeProfile}
             options={options}
             state={state}
             theme={theme}
@@ -92,7 +92,7 @@ const System = ({ compatibilityTarget, options = {}, state = {}, theme }) => {
       },
       render: () => (
         <Tab.Pane>
-          <Mesh compatibilityTarget={compatibilityTarget} />
+          <Mesh runtimeProfile={runtimeProfile} />
         </Tab.Pane>
       ),
       route: 'mesh',
@@ -380,14 +380,14 @@ const System = ({ compatibilityTarget, options = {}, state = {}, theme }) => {
   }, [activeIndex]);
 
   useEffect(() => {
-    if (!compatibilityTarget) {
+    if (!runtimeProfile) {
       return;
     }
 
     systemRef.current
       ?.querySelectorAll('.ui.tabular.menu [role="button"]')
       .forEach((item) => item.setAttribute('role', 'tab'));
-  }, [activeIndex, compatibilityTarget]);
+  }, [activeIndex, runtimeProfile]);
 
   const onTabChange = (_event, { activeIndex: newActiveIndex }) => {
     navigate(`/system/${panes[newActiveIndex].route}`);
@@ -404,7 +404,7 @@ const System = ({ compatibilityTarget, options = {}, state = {}, theme }) => {
             activeIndex={activeIndex > -1 ? activeIndex : 0}
             onTabChange={onTabChange}
             panes={panes}
-            renderActiveOnly={Boolean(compatibilityTarget)}
+            renderActiveOnly={Boolean(runtimeProfile)}
           />
       </Segment>
     </div>

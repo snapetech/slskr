@@ -25,7 +25,7 @@ describe('saved search filters', () => {
       { name: 'existing', value: 'new' },
     ]);
     expect(storage.setLocalStorageItem).toHaveBeenCalledWith(
-      'slskd-saved-search-filters',
+      'slskr-saved-search-filters',
       JSON.stringify([{ name: 'existing', value: 'new' }]),
     );
   });

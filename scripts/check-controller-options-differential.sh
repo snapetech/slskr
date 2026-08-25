@@ -12,6 +12,14 @@ fi
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
+runtime_profile_for_reference() {
+  case "$1" in
+    slskd) printf '%s\n' legacy ;;
+    slskdn) printf '%s\n' native ;;
+    *) return 1 ;;
+  esac
+}
+
 slskr_exec() {
   # The long-lived test service may own the default HTTPS port. Differential
   # cases must use the scenario's isolated HTTPS port while preserving HTTPS
@@ -884,7 +892,7 @@ run_directory_scenario() {
 
   (
     export SLSKR_AUTH_DISABLED=true
-    export SLSKR_CONTROLLER_COMPATIBILITY_TARGET="$target"
+    export SLSKR_CONTROLLER_PROFILE="$(runtime_profile_for_reference "$target")"
     slskr_exec serve \
       --app-dir "$slskr_state" \
       --http-ip-address 127.0.0.1 \
@@ -923,7 +931,7 @@ run_directory_scenario() {
 
   (
     export SLSKR_AUTH_DISABLED=true
-    export SLSKR_CONTROLLER_COMPATIBILITY_TARGET="$target"
+    export SLSKR_CONTROLLER_PROFILE="$(runtime_profile_for_reference "$target")"
     slskr_exec serve \
       --app-dir "$slskr_state" \
       --http-ip-address 127.0.0.1 \
@@ -1069,7 +1077,7 @@ run_share_watch_scenario() {
   write_share_watch_yaml "$slskr_state/slskd.yml" Old "$old_share"
   (
     export SLSKR_AUTH_DISABLED=true
-    export SLSKR_CONTROLLER_COMPATIBILITY_TARGET="$target"
+    export SLSKR_CONTROLLER_PROFILE="$(runtime_profile_for_reference "$target")"
     # The frozen slskdN profile enables its controller rate limiter by
     # default, but the reference fixture does not. This scenario intentionally
     # polls rapidly while waiting for watcher transitions; disable only the
@@ -1191,7 +1199,7 @@ run_no_watch_upload_scenario() {
   write_share_watch_yaml "$slskr_state/slskd.yml" Old "$old_share"
   (
     export SLSKR_AUTH_DISABLED=true
-    export SLSKR_CONTROLLER_COMPATIBILITY_TARGET="$target"
+    export SLSKR_CONTROLLER_PROFILE="$(runtime_profile_for_reference "$target")"
     slskr_exec serve \
       --app-dir "$slskr_state" \
       --http-ip-address 127.0.0.1 \
@@ -1218,7 +1226,7 @@ run_no_watch_upload_scenario() {
   stop_daemon
   (
     export SLSKR_AUTH_DISABLED=true
-    export SLSKR_CONTROLLER_COMPATIBILITY_TARGET="$target"
+    export SLSKR_CONTROLLER_PROFILE="$(runtime_profile_for_reference "$target")"
     slskr_exec serve \
       --app-dir "$slskr_state" \
       --http-ip-address 127.0.0.1 \
@@ -1338,7 +1346,7 @@ run_storage_restart_scenario() {
 
   write_storage_watch_yaml "$slskr_state/slskd.yml" "$old_downloads" "$old_incomplete"
   (
-    export SLSKR_AUTH_DISABLED=true SLSKR_CONTROLLER_COMPATIBILITY_TARGET="$target"
+    export SLSKR_AUTH_DISABLED=true SLSKR_CONTROLLER_PROFILE="$(runtime_profile_for_reference "$target")"
     slskr_exec serve --app-dir "$slskr_state" \
       --http-ip-address 127.0.0.1 --http-port "$port" --slsk-listen-port "$listen_port" --no-connect
   ) >"$slskr_log" 2>&1 & daemon_pid="$!"
@@ -1355,7 +1363,7 @@ run_storage_restart_scenario() {
   capture_get "$slskr_suite" restart-application-watched "$base_url/api/v0/application"
   stop_daemon
   (
-    export SLSKR_AUTH_DISABLED=true SLSKR_CONTROLLER_COMPATIBILITY_TARGET="$target"
+    export SLSKR_AUTH_DISABLED=true SLSKR_CONTROLLER_PROFILE="$(runtime_profile_for_reference "$target")"
     slskr_exec serve --app-dir "$slskr_state" \
       --http-ip-address 127.0.0.1 --http-port "$port" --slsk-listen-port "$listen_port" --no-connect
   ) >>"$slskr_log" 2>&1 & daemon_pid="$!"
@@ -1485,7 +1493,7 @@ run_remote_file_management_scenario() {
   printf 'denied restarted\n' >"$downloads/denied-restarted.flac"
   write_management_watch_yaml "$slskr_state/slskd.yml" false "$downloads" "$incomplete"
   (
-    export SLSKR_AUTH_DISABLED=true SLSKR_CONTROLLER_COMPATIBILITY_TARGET="$target"
+    export SLSKR_AUTH_DISABLED=true SLSKR_CONTROLLER_PROFILE="$(runtime_profile_for_reference "$target")"
     slskr_exec serve --app-dir "$slskr_state" \
       --http-ip-address 127.0.0.1 --http-port "$port" --slsk-listen-port "$listen_port" --no-connect
   ) >"$slskr_log" 2>&1 & daemon_pid="$!"
@@ -1500,7 +1508,7 @@ run_remote_file_management_scenario() {
   capture_delete "$slskr_suite" delete-allowed-watched "$base_url/api/v0/files/downloads/files/YWxsb3dlZC13YXRjaGVkLmZsYWM="
   stop_daemon
   (
-    export SLSKR_AUTH_DISABLED=true SLSKR_CONTROLLER_COMPATIBILITY_TARGET="$target"
+    export SLSKR_AUTH_DISABLED=true SLSKR_CONTROLLER_PROFILE="$(runtime_profile_for_reference "$target")"
     slskr_exec serve --app-dir "$slskr_state" \
       --http-ip-address 127.0.0.1 --http-port "$port" --slsk-listen-port "$listen_port" --no-connect
   ) >>"$slskr_log" 2>&1 & daemon_pid="$!"
@@ -1515,7 +1523,7 @@ run_remote_file_management_scenario() {
   capture_delete "$slskr_suite" delete-denied-watched "$base_url/api/v0/files/downloads/files/ZGVuaWVkLXdhdGNoZWQuZmxhYw=="
   stop_daemon
   (
-    export SLSKR_AUTH_DISABLED=true SLSKR_CONTROLLER_COMPATIBILITY_TARGET="$target"
+    export SLSKR_AUTH_DISABLED=true SLSKR_CONTROLLER_PROFILE="$(runtime_profile_for_reference "$target")"
     slskr_exec serve --app-dir "$slskr_state" \
       --http-ip-address 127.0.0.1 --http-port "$port" --slsk-listen-port "$listen_port" --no-connect
   ) >>"$slskr_log" 2>&1 & daemon_pid="$!"
@@ -1635,7 +1643,7 @@ start_remote_configuration_daemon() {
     fi
   elif [[ "$append" == true ]]; then
     (
-      export SLSKR_CONTROLLER_COMPATIBILITY_TARGET="$target"
+      export SLSKR_CONTROLLER_PROFILE="$(runtime_profile_for_reference "$target")"
       export SLSKD_APP_DIR="$state" SLSKD_NO_CONNECT=true SLSKD_NO_AUTH=true
       export SLSKD_HTTP_IP_ADDRESS=127.0.0.1 SLSKD_HTTP_PORT="$port" SLSKD_HTTPS_PORT="$https_port"
       export SLSKD_SLSK_LISTEN_PORT="$listen_port"
@@ -1643,7 +1651,7 @@ start_remote_configuration_daemon() {
     ) >>"$log" 2>&1 &
   else
     (
-      export SLSKR_CONTROLLER_COMPATIBILITY_TARGET="$target"
+      export SLSKR_CONTROLLER_PROFILE="$(runtime_profile_for_reference "$target")"
       export SLSKD_APP_DIR="$state" SLSKD_NO_CONNECT=true SLSKD_NO_AUTH=true
       export SLSKD_HTTP_IP_ADDRESS=127.0.0.1 SLSKD_HTTP_PORT="$port" SLSKD_HTTPS_PORT="$https_port"
       export SLSKD_SLSK_LISTEN_PORT="$listen_port"
@@ -1797,7 +1805,7 @@ start_debug_daemon() {
     ) >"$log" 2>&1 &
   else
     (
-      export SLSKR_AUTH_DISABLED=true SLSKR_CONTROLLER_COMPATIBILITY_TARGET="$target"
+      export SLSKR_AUTH_DISABLED=true SLSKR_CONTROLLER_PROFILE="$(runtime_profile_for_reference "$target")"
       export SLSKD_APP_DIR="$state" SLSKD_NO_CONNECT=true SLSKD_NO_AUTH=true
       export SLSKD_HTTP_IP_ADDRESS=127.0.0.1 SLSKD_HTTP_PORT="$port" SLSKD_HTTPS_PORT="$https_port"
       export SLSKD_SLSK_LISTEN_PORT="$listen_port"
@@ -2008,7 +2016,7 @@ start_server_endpoint_daemon() {
     fi
   elif [[ "$append" == true ]]; then
     (
-      export SLSKR_AUTH_DISABLED=true SLSKR_CONTROLLER_COMPATIBILITY_TARGET="$target"
+      export SLSKR_AUTH_DISABLED=true SLSKR_CONTROLLER_PROFILE="$(runtime_profile_for_reference "$target")"
       export SLSKD_HTTPS_PORT="$https_port"
       [[ -n "$environment_address" ]] && export SLSKD_SLSK_ADDRESS="$environment_address"
       [[ -n "$environment_port" ]] && export SLSKD_SLSK_PORT="$environment_port"
@@ -2017,7 +2025,7 @@ start_server_endpoint_daemon() {
     ) >>"$log" 2>&1 &
   else
     (
-      export SLSKR_AUTH_DISABLED=true SLSKR_CONTROLLER_COMPATIBILITY_TARGET="$target"
+      export SLSKR_AUTH_DISABLED=true SLSKR_CONTROLLER_PROFILE="$(runtime_profile_for_reference "$target")"
       export SLSKD_HTTPS_PORT="$https_port"
       [[ -n "$environment_address" ]] && export SLSKD_SLSK_ADDRESS="$environment_address"
       [[ -n "$environment_port" ]] && export SLSKD_SLSK_PORT="$environment_port"
@@ -2284,7 +2292,7 @@ start_credential_daemon() {
     fi
   elif [[ "$append" == true ]]; then
     (
-      export SLSKR_CONTROLLER_COMPATIBILITY_TARGET="$target"
+      export SLSKR_CONTROLLER_PROFILE="$(runtime_profile_for_reference "$target")"
       export SLSKD_APP_DIR="$state" SLSKD_NO_AUTH=true
       export SLSKD_HTTP_IP_ADDRESS=127.0.0.1 SLSKD_HTTP_PORT="$http_port" SLSKD_HTTPS_PORT="$https_port"
       [[ -n "$environment_username" ]] && export SLSKD_SLSK_USERNAME="$environment_username"
@@ -2293,7 +2301,7 @@ start_credential_daemon() {
     ) >>"$log" 2>&1 &
   else
     (
-      export SLSKR_CONTROLLER_COMPATIBILITY_TARGET="$target"
+      export SLSKR_CONTROLLER_PROFILE="$(runtime_profile_for_reference "$target")"
       export SLSKD_APP_DIR="$state" SLSKD_NO_AUTH=true
       export SLSKD_HTTP_IP_ADDRESS=127.0.0.1 SLSKD_HTTP_PORT="$http_port" SLSKD_HTTPS_PORT="$https_port"
       [[ -n "$environment_username" ]] && export SLSKD_SLSK_USERNAME="$environment_username"
@@ -2769,7 +2777,7 @@ start_no_connect_daemon() {
     fi
   elif [[ "$append" == true ]]; then
     (
-      export SLSKR_AUTH_DISABLED=true SLSKR_CONTROLLER_COMPATIBILITY_TARGET="$target"
+      export SLSKR_AUTH_DISABLED=true SLSKR_CONTROLLER_PROFILE="$(runtime_profile_for_reference "$target")"
       export SLSKD_HTTPS_PORT="$https_port"
       export SLSKR_DHT_PORT="$(pick_free_udp_port)"
       export SLSKR_OVERLAY_BIND="127.0.0.1:$(pick_free_port)"
@@ -2781,7 +2789,7 @@ start_no_connect_daemon() {
     ) >>"$log" 2>&1 &
   else
     (
-      export SLSKR_AUTH_DISABLED=true SLSKR_CONTROLLER_COMPATIBILITY_TARGET="$target"
+      export SLSKR_AUTH_DISABLED=true SLSKR_CONTROLLER_PROFILE="$(runtime_profile_for_reference "$target")"
       export SLSKD_HTTPS_PORT="$https_port"
       export SLSKR_DHT_PORT="$(pick_free_udp_port)"
       export SLSKR_OVERLAY_BIND="127.0.0.1:$(pick_free_port)"
@@ -2997,7 +3005,7 @@ start_swagger_daemon() {
       [[ "$command_line_swagger" == true ]] && args+=(--swagger)
       if [[ "$append" == true ]]; then exec "${args[@]}" >>"$log" 2>&1; else exec "${args[@]}" >"$log" 2>&1; fi
     else
-      export SLSKR_AUTH_DISABLED=true SLSKR_CONTROLLER_COMPATIBILITY_TARGET="$target"
+      export SLSKR_AUTH_DISABLED=true SLSKR_CONTROLLER_PROFILE="$(runtime_profile_for_reference "$target")"
       local args=(env "SLSKR_OVERLAY_BIND=127.0.0.1:${SLSKR_OPTIONS_DIFFERENTIAL_OVERLAY_PORT}" "$repo_root/target/debug/slskr" serve --app-dir "$state" --http-ip-address 127.0.0.1 --http-port "$http_port" --slsk-listen-port "$listen_port")
       [[ "$command_line_swagger" == true ]] && args+=(--swagger)
       if [[ "$append" == true ]]; then exec "${args[@]}" >>"$log" 2>&1; else exec "${args[@]}" >"$log" 2>&1; fi
@@ -3168,7 +3176,7 @@ start_metrics_daemon() {
       export SLSKD_SLSK_LISTEN_PORT="$listen_port"
       args=(dotnet "$root/src/slskd/bin/Release/net10.0/linux-x64/slskd.dll")
     else
-      export SLSKR_AUTH_DISABLED=true SLSKR_CONTROLLER_COMPATIBILITY_TARGET="$target"
+      export SLSKR_AUTH_DISABLED=true SLSKR_CONTROLLER_PROFILE="$(runtime_profile_for_reference "$target")"
       args=(env "SLSKR_OVERLAY_BIND=127.0.0.1:${SLSKR_OPTIONS_DIFFERENTIAL_OVERLAY_PORT}" "$repo_root/target/debug/slskr" serve --app-dir "$state" --http-ip-address 127.0.0.1 --http-port "$http_port" --slsk-listen-port "$listen_port")
     fi
     if [[ "$command_line_mode" == override ]]; then
@@ -3343,7 +3351,7 @@ start_headless_daemon() {
       export SLSKD_SLSK_LISTEN_PORT="$listen_port"
       args=(dotnet "$root/src/slskd/bin/Release/net10.0/linux-x64/slskd.dll")
     else
-      export SLSKR_AUTH_DISABLED=true SLSKR_CONTROLLER_COMPATIBILITY_TARGET="$target"
+      export SLSKR_AUTH_DISABLED=true SLSKR_CONTROLLER_PROFILE="$(runtime_profile_for_reference "$target")"
       args=(env "SLSKR_OVERLAY_BIND=127.0.0.1:${SLSKR_OPTIONS_DIFFERENTIAL_OVERLAY_PORT}" "$repo_root/target/debug/slskr" serve --app-dir "$state" --http-ip-address 127.0.0.1 --http-port "$http_port" --slsk-listen-port "$listen_port")
     fi
     [[ "$command_line_headless" == true ]] && args+=(--headless)
@@ -3501,7 +3509,7 @@ start_no_start_daemon() {
       export SLSKD_SLSK_LISTEN_PORT="$listen_port"
       args=(dotnet "$root/src/slskd/bin/Release/net10.0/linux-x64/slskd.dll")
     else
-      export SLSKR_AUTH_DISABLED=true SLSKR_CONTROLLER_COMPATIBILITY_TARGET="$target"
+      export SLSKR_AUTH_DISABLED=true SLSKR_CONTROLLER_PROFILE="$(runtime_profile_for_reference "$target")"
       export SLSKR_PERSISTENCE_ENABLED=true
       args=(env "SLSKR_OVERLAY_BIND=127.0.0.1:${SLSKR_OPTIONS_DIFFERENTIAL_OVERLAY_PORT}" "$repo_root/target/debug/slskr" serve --app-dir "$state" --http-ip-address 127.0.0.1 --http-port "$http_port" --slsk-listen-port "$listen_port")
     fi
@@ -3683,7 +3691,7 @@ start_no_logo_daemon() {
       export SLSKD_SLSK_LISTEN_PORT="$listen_port"
       args=(dotnet "$root/src/slskd/bin/Release/net10.0/linux-x64/slskd.dll")
     else
-      export SLSKR_AUTH_DISABLED=true SLSKR_CONTROLLER_COMPATIBILITY_TARGET="$target"
+      export SLSKR_AUTH_DISABLED=true SLSKR_CONTROLLER_PROFILE="$(runtime_profile_for_reference "$target")"
       args=(env "SLSKR_OVERLAY_BIND=127.0.0.1:${SLSKR_OPTIONS_DIFFERENTIAL_OVERLAY_PORT}" "$repo_root/target/debug/slskr" serve --app-dir "$state" --http-ip-address 127.0.0.1 --http-port "$http_port" --slsk-listen-port "$listen_port")
     fi
     [[ "$command_line_no_logo" == true ]] && args+=(--no-logo)
@@ -3856,7 +3864,7 @@ start_no_version_check_daemon() {
       export SLSKD_HTTP_PORT="$http_port" SLSKD_HTTPS_PORT="$https_port" SLSKD_SLSK_LISTEN_PORT="$listen_port"
       args=(dotnet "$root/src/slskd/bin/Release/net10.0/linux-x64/slskd.dll")
     else
-      export SLSKR_AUTH_DISABLED=true SLSKR_CONTROLLER_COMPATIBILITY_TARGET="$target"
+      export SLSKR_AUTH_DISABLED=true SLSKR_CONTROLLER_PROFILE="$(runtime_profile_for_reference "$target")"
       args=(env "SLSKR_OVERLAY_BIND=127.0.0.1:${SLSKR_OPTIONS_DIFFERENTIAL_OVERLAY_PORT}" "$repo_root/target/debug/slskr" serve --app-dir "$state" --http-ip-address 127.0.0.1 --http-port "$http_port" --slsk-listen-port "$listen_port" --no-logo)
     fi
     [[ "$command_line_disabled" == true ]] && args+=(--no-version-check)
@@ -3992,7 +4000,7 @@ start_experimental_daemon() {
       export SLSKD_HTTP_PORT="$http_port" SLSKD_HTTPS_PORT="$https_port" SLSKD_SLSK_LISTEN_PORT="$listen_port"
       args=(dotnet "$root/src/slskd/bin/Release/net10.0/linux-x64/slskd.dll")
     else
-      export SLSKR_AUTH_DISABLED=true SLSKR_CONTROLLER_COMPATIBILITY_TARGET="$target"
+      export SLSKR_AUTH_DISABLED=true SLSKR_CONTROLLER_PROFILE="$(runtime_profile_for_reference "$target")"
       args=(env "SLSKR_OVERLAY_BIND=127.0.0.1:${SLSKR_OPTIONS_DIFFERENTIAL_OVERLAY_PORT}" "$repo_root/target/debug/slskr" serve --app-dir "$state" --http-ip-address 127.0.0.1 --http-port "$http_port" --slsk-listen-port "$listen_port" --no-logo)
     fi
     [[ "$command_line_enabled" == true ]] && args+=(--experimental)
@@ -4131,7 +4139,7 @@ start_case_sensitive_regex_daemon() {
       export SLSKD_HTTP_PORT="$http_port" SLSKD_HTTPS_PORT="$https_port" SLSKD_SLSK_LISTEN_PORT="$listen_port"
       args=(dotnet "$root/src/slskd/bin/Release/net10.0/linux-x64/slskd.dll")
     else
-      export SLSKR_AUTH_DISABLED=true SLSKR_CONTROLLER_COMPATIBILITY_TARGET="$target"
+      export SLSKR_AUTH_DISABLED=true SLSKR_CONTROLLER_PROFILE="$(runtime_profile_for_reference "$target")"
       args=(env "SLSKR_OVERLAY_BIND=127.0.0.1:${SLSKR_OPTIONS_DIFFERENTIAL_OVERLAY_PORT}" "$repo_root/target/debug/slskr" serve --app-dir "$state" --http-ip-address 127.0.0.1 --http-port "$http_port" --slsk-listen-port "$listen_port" --no-logo)
     fi
     [[ "$command_line_enabled" == true ]] && args+=(--case-sensitive-regex)
@@ -4286,7 +4294,7 @@ start_regex_runtime_daemon() {
       export SLSKD_HTTP_PORT="$http_port" SLSKD_HTTPS_PORT="$https_port" SLSKD_SLSK_LISTEN_PORT="$listen_port"
       exec dotnet "$root/src/slskd/bin/Release/net10.0/linux-x64/slskd.dll"
     else
-      export SLSKR_AUTH_DISABLED=true SLSKR_CONTROLLER_COMPATIBILITY_TARGET="$target"
+      export SLSKR_AUTH_DISABLED=true SLSKR_CONTROLLER_PROFILE="$(runtime_profile_for_reference "$target")"
       export SLSKD_HTTPS_PORT="$https_port"
       export SLSKR_DHT_PORT="$(pick_free_udp_port)"
       export SLSKR_OVERLAY_BIND="127.0.0.1:$overlay_port"
@@ -4608,7 +4616,7 @@ start_share_scan_flags_daemon() {
       export SLSKD_SLSK_LISTEN_PORT="$listen_port"
       args=(dotnet "$root/src/slskd/bin/Release/net10.0/linux-x64/slskd.dll")
     else
-      export SLSKR_AUTH_DISABLED=true SLSKR_CONTROLLER_COMPATIBILITY_TARGET="$target"
+      export SLSKR_AUTH_DISABLED=true SLSKR_CONTROLLER_PROFILE="$(runtime_profile_for_reference "$target")"
       export SLSKR_PERSISTENCE_ENABLED=true
       args=(env "SLSKR_OVERLAY_BIND=127.0.0.1:${SLSKR_OPTIONS_DIFFERENTIAL_OVERLAY_PORT}" "$repo_root/target/debug/slskr" serve --app-dir "$state" --http-ip-address 127.0.0.1 --http-port "$http_port" --slsk-listen-port "$listen_port")
     fi
@@ -4804,7 +4812,7 @@ start_instance_daemon() {
         exec "${args[@]}" >"$log" 2>&1
       fi
     else
-      export SLSKR_AUTH_DISABLED=true SLSKR_CONTROLLER_COMPATIBILITY_TARGET="$target"
+      export SLSKR_AUTH_DISABLED=true SLSKR_CONTROLLER_PROFILE="$(runtime_profile_for_reference "$target")"
       local args=(env "SLSKR_OVERLAY_BIND=127.0.0.1:${SLSKR_OPTIONS_DIFFERENTIAL_OVERLAY_PORT}" "$repo_root/target/debug/slskr" serve --app-dir "$state" --http-ip-address 127.0.0.1 --http-port "$http_port" --slsk-listen-port "$listen_port")
       if [[ "$command_line_name" != __unset__ ]]; then
         args+=(-i "$command_line_name")
@@ -5008,7 +5016,7 @@ start_completed_template_daemon() {
     ) >>"$log" 2>&1 &
   else
     (
-      export SLSKR_CONTROLLER_COMPATIBILITY_TARGET=slskdn
+      export SLSKR_CONTROLLER_PROFILE=native
       export SLSKD_APP_DIR="$state" SLSKD_NO_AUTH=true
       export SLSKD_HTTP_IP_ADDRESS=127.0.0.1 SLSKD_HTTP_PORT="$http_port" SLSKD_HTTPS_PORT="$https_port"
       [[ -n "$environment_template" ]] && export SLSKD_DOWNLOAD_COMPLETED_PATH_TEMPLATE="$environment_template"
@@ -5168,7 +5176,7 @@ start_private_message_auto_response_daemon() {
     ) >>"$log" 2>&1 &
   else
     (
-      export SLSKR_CONTROLLER_COMPATIBILITY_TARGET=slskdn
+      export SLSKR_CONTROLLER_PROFILE=native
       export SLSKD_APP_DIR="$state" SLSKD_NO_AUTH=true
       export SLSKD_HTTP_IP_ADDRESS=127.0.0.1 SLSKD_HTTP_PORT="$http_port" SLSKD_HTTPS_PORT="$https_port"
       [[ -n "$environment_enabled" ]] && export SLSKD_SLSK_PRIVATE_MESSAGE_AUTO_RESPONSE="$environment_enabled"
@@ -5776,7 +5784,7 @@ start_blacklist_daemon() {
     fi
   elif [[ "$redirect" == '>>' ]]; then
     (
-      export SLSKR_CONTROLLER_COMPATIBILITY_TARGET="$target"
+      export SLSKR_CONTROLLER_PROFILE="$(runtime_profile_for_reference "$target")"
       export SLSKD_APP_DIR="$state" SLSKD_NO_AUTH=true
       export SLSKD_HTTP_IP_ADDRESS=127.0.0.1 SLSKD_HTTP_ADDRESS=127.0.0.1
       export SLSKD_HTTP_PORT="$http_port" SLSKD_HTTPS_PORT="$https_port"
@@ -5786,7 +5794,7 @@ start_blacklist_daemon() {
     ) >>"$log" 2>&1 &
   else
     (
-      export SLSKR_CONTROLLER_COMPATIBILITY_TARGET="$target"
+      export SLSKR_CONTROLLER_PROFILE="$(runtime_profile_for_reference "$target")"
       export SLSKD_APP_DIR="$state" SLSKD_NO_AUTH=true
       export SLSKD_HTTP_IP_ADDRESS=127.0.0.1 SLSKD_HTTP_ADDRESS=127.0.0.1
       export SLSKD_HTTP_PORT="$http_port" SLSKD_HTTPS_PORT="$https_port"
@@ -6156,7 +6164,7 @@ run_transfer_groups_scenario() {
       ) >"$log" 2>&1 &
     else
       (
-        export SLSKR_CONTROLLER_COMPATIBILITY_TARGET="$target" SLSKD_NO_AUTH=true
+        export SLSKR_CONTROLLER_PROFILE="$(runtime_profile_for_reference "$target")" SLSKD_NO_AUTH=true
         slskr_exec serve --app-dir "$state" \
           --http-ip-address 127.0.0.1 --http-port "$http_port" --slsk-listen-port "$listen_port"
       ) >"$log" 2>&1 &
@@ -6213,7 +6221,7 @@ run_transfer_groups_scenario() {
       ) >>"$log" 2>&1 &
     else
       (
-        export SLSKR_CONTROLLER_COMPATIBILITY_TARGET="$target" SLSKD_NO_AUTH=true
+        export SLSKR_CONTROLLER_PROFILE="$(runtime_profile_for_reference "$target")" SLSKD_NO_AUTH=true
         slskr_exec serve --app-dir "$state" \
           --http-ip-address 127.0.0.1 --http-port "$http_port" --slsk-listen-port "$listen_port"
       ) >>"$log" 2>&1 &
@@ -6269,7 +6277,7 @@ start_transfer_download_daemon() {
     ) >"$log" 2>&1 &
   else
     (
-      export SLSKR_CONTROLLER_COMPATIBILITY_TARGET="$target" SLSKD_NO_AUTH=true
+      export SLSKR_CONTROLLER_PROFILE="$(runtime_profile_for_reference "$target")" SLSKD_NO_AUTH=true
       slskr_exec serve --app-dir "$state" \
         --http-ip-address 127.0.0.1 --http-port "$http_port" --slsk-listen-port "$listen_port" --no-logo
     ) >"$log" 2>&1 &
@@ -6585,7 +6593,7 @@ start_dht_daemon() {
     ) >>"$log" 2>&1 &
   else
     (
-      export SLSKR_CONTROLLER_COMPATIBILITY_TARGET=slskdn
+      export SLSKR_CONTROLLER_PROFILE=native
       export SLSKD_APP_DIR="$state" SLSKD_NO_AUTH=true
       export SLSKD_HTTP_IP_ADDRESS=127.0.0.1 SLSKD_HTTP_PORT="$http_port" SLSKD_HTTPS_PORT="$https_port"
       slskr_exec serve
@@ -7005,7 +7013,7 @@ start_obfuscation_daemon() {
       [[ -n "$environment_prefer_outbound" ]] && export SLSKD_SLSK_OBFUSCATION_PREFER_OUTBOUND="$environment_prefer_outbound"
       exec dotnet "$dll" "${cli_args[@]}"
     else
-      export SLSKR_CONTROLLER_COMPATIBILITY_TARGET=slskdn
+      export SLSKR_CONTROLLER_PROFILE=native
       export SLSKD_APP_DIR="$state" SLSKD_NO_AUTH=true
       export SLSKD_HTTP_IP_ADDRESS=127.0.0.1 SLSKD_HTTP_PORT="$http_port" SLSKD_HTTPS_PORT="$https_port"
       [[ -n "$environment_enabled" ]] && export SLSKD_SLSK_OBFUSCATION="$environment_enabled"
@@ -7717,7 +7725,7 @@ start_web_listener_daemon() {
   elif [[ "$redirect" == '>>' ]]; then
     (
       unset SLSKD_HTTP_IP_ADDRESS SLSKD_HTTP_ADDRESS SLSKD_HTTP_PORT
-      export SLSKR_AUTH_DISABLED=true SLSKR_CONTROLLER_COMPATIBILITY_TARGET="$target"
+      export SLSKR_AUTH_DISABLED=true SLSKR_CONTROLLER_PROFILE="$(runtime_profile_for_reference "$target")"
       export SLSKD_SLSK_LISTEN_PORT="$soulseek_listen_port"
       [[ -n "$environment_address" ]] && export "$address_environment=$environment_address"
       [[ -n "$environment_port" ]] && export SLSKD_HTTP_PORT="$environment_port"
@@ -7726,7 +7734,7 @@ start_web_listener_daemon() {
   else
     (
       unset SLSKD_HTTP_IP_ADDRESS SLSKD_HTTP_ADDRESS SLSKD_HTTP_PORT
-      export SLSKR_AUTH_DISABLED=true SLSKR_CONTROLLER_COMPATIBILITY_TARGET="$target"
+      export SLSKR_AUTH_DISABLED=true SLSKR_CONTROLLER_PROFILE="$(runtime_profile_for_reference "$target")"
       export SLSKD_SLSK_LISTEN_PORT="$soulseek_listen_port"
       [[ -n "$environment_address" ]] && export "$address_environment=$environment_address"
       [[ -n "$environment_port" ]] && export SLSKD_HTTP_PORT="$environment_port"
@@ -8216,7 +8224,7 @@ run_script_scenario() {
       ) >"$log" 2>&1 &
     else
       (
-        export SLSKR_CONTROLLER_COMPATIBILITY_TARGET="$target" SLSKD_NO_AUTH=true
+        export SLSKR_CONTROLLER_PROFILE="$(runtime_profile_for_reference "$target")" SLSKD_NO_AUTH=true
         slskr_exec serve --app-dir "$state" \
           --http-ip-address 127.0.0.1 --http-port "$http_port" --slsk-listen-port "$listen_port"
       ) >"$log" 2>&1 &
@@ -8283,7 +8291,7 @@ run_integration_scenario() {
       ) >"$log" 2>&1 &
     else
       (
-        export SLSKR_CONTROLLER_COMPATIBILITY_TARGET=slskdn SLSKD_NO_AUTH=true
+        export SLSKR_CONTROLLER_PROFILE=native SLSKD_NO_AUTH=true
         slskr_exec serve --app-dir "$state" \
           --http-ip-address 127.0.0.1 --http-port "$http_port" \
           --slsk-listen-port "$listen_port"
@@ -8370,7 +8378,7 @@ run_integration_scenario() {
       ) >>"$log" 2>&1 &
     else
       (
-        export SLSKR_CONTROLLER_COMPATIBILITY_TARGET=slskdn SLSKD_NO_AUTH=true
+        export SLSKR_CONTROLLER_PROFILE=native SLSKD_NO_AUTH=true
         slskr_exec serve --app-dir "$state" \
           --http-ip-address 127.0.0.1 --http-port "$http_port" \
           --slsk-listen-port "$listen_port"
@@ -8407,7 +8415,7 @@ run_integration_scenario() {
       ) >>"$log" 2>&1 &
     else
       (
-        export SLSKR_CONTROLLER_COMPATIBILITY_TARGET=slskdn SLSKD_NO_AUTH=true
+        export SLSKR_CONTROLLER_PROFILE=native SLSKD_NO_AUTH=true
         export SLSKD_SPOTIFY=true SLSKD_SPOTIFY_CLIENT_ID=environment-client
         export SLSKD_SPOTIFY_CLIENT_SECRET=environment-secret
         export SLSKD_SPOTIFY_REDIRECT_URI=http://127.0.0.1/environment-callback
@@ -8458,7 +8466,7 @@ run_integration_scenario() {
       ) >>"$log" 2>&1 &
     else
       (
-        export SLSKR_CONTROLLER_COMPATIBILITY_TARGET=slskdn SLSKD_NO_AUTH=true
+        export SLSKR_CONTROLLER_PROFILE=native SLSKD_NO_AUTH=true
         export SLSKD_SPOTIFY_MAX_ITEMS_PER_IMPORT=4
         slskr_exec serve --app-dir "$state" \
           --http-ip-address 127.0.0.1 --http-port "$http_port" \
@@ -8552,7 +8560,7 @@ run_lidarr_runtime_scenario() {
       ) >"$log" 2>&1 &
     else
       (
-        export SLSKR_CONTROLLER_COMPATIBILITY_TARGET=slskdn SLSKD_NO_AUTH=true
+        export SLSKR_CONTROLLER_PROFILE=native SLSKD_NO_AUTH=true
         slskr_exec serve --app-dir "$state" \
           --http-ip-address 127.0.0.1 --http-port "$http_port" \
           --slsk-listen-port "$listen_port"
@@ -8694,7 +8702,7 @@ run_daemon_foundation_scenario() {
       mkdir -p "$repo_root/target/debug/wwwroot"
       printf '<html>foundation</html>' >"$repo_root/target/debug/wwwroot/index.html"
       (
-        export SLSKR_CONTROLLER_COMPATIBILITY_TARGET="$target"
+        export SLSKR_CONTROLLER_PROFILE="$(runtime_profile_for_reference "$target")"
         export SLSKD_APP_DIR="$state" SLSKD_NO_AUTH=true
         export SLSKD_HTTP_IP_ADDRESS=127.0.0.1 SLSKD_HTTP_ADDRESS=127.0.0.1
         export SLSKD_HTTP_PORT="$http_port" SLSKD_HTTPS_PORT="$https_port" SLSKD_SLSK_LISTEN_PORT="$listen_port"
@@ -8821,7 +8829,7 @@ run_core_workflow_scenario() {
       ) >"$log" 2>&1 &
     else
       (
-        export SLSKR_CONTROLLER_COMPATIBILITY_TARGET="$target"
+        export SLSKR_CONTROLLER_PROFILE="$(runtime_profile_for_reference "$target")"
         export SLSKD_APP_DIR="$state" SLSKD_NO_AUTH=true SLSKD_NO_CONNECT=true
         export SLSKD_HTTP_IP_ADDRESS=127.0.0.1 SLSKD_HTTP_PORT="$port"
         export SLSKD_HTTPS_PORT="$https_port" SLSKD_SLSK_LISTEN_PORT="$listen_port"
@@ -8991,7 +8999,7 @@ run_advanced_networking_security_scenario() {
       ) >"$log" 2>&1 &
     else
       (
-        export SLSKR_CONTROLLER_COMPATIBILITY_TARGET=slskdn
+        export SLSKR_CONTROLLER_PROFILE=native
         export SLSKD_APP_DIR="$state" SLSKD_NO_AUTH=true SLSKD_NO_CONNECT=true
         export SLSKD_HTTP_IP_ADDRESS=127.0.0.1 SLSKD_HTTP_PORT="$port"
         export SLSKD_HTTPS_PORT="$https_port" SLSKD_SLSK_LISTEN_PORT="$listen_port"
@@ -9133,7 +9141,7 @@ run_media_advanced_service_scenario() {
       ) >"$log" 2>&1 &
     else
       (
-        export SLSKR_CONTROLLER_COMPATIBILITY_TARGET=slskdn
+        export SLSKR_CONTROLLER_PROFILE=native
         export SLSKD_APP_DIR="$state" SLSKD_NO_AUTH=true SLSKD_NO_CONNECT=true
         export SLSKD_HTTP_IP_ADDRESS=127.0.0.1 SLSKD_HTTP_PORT="$port"
         export SLSKD_HTTPS_PORT="$https_port" SLSKD_SLSK_LISTEN_PORT="$listen_port"
@@ -9198,7 +9206,7 @@ run_target() {
 
   (
     export SLSKR_AUTH_DISABLED=true
-    export SLSKR_CONTROLLER_COMPATIBILITY_TARGET="$target"
+    export SLSKR_CONTROLLER_PROFILE="$(runtime_profile_for_reference "$target")"
     slskr_exec serve \
       --app-dir "$slskr_state" \
       --http-ip-address 127.0.0.1 \

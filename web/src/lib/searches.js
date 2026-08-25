@@ -70,11 +70,17 @@ export const getUserDownloadStats = () => {
 };
 
 // Blocked users management (localStorage-based)
-const BLOCKED_USERS_KEY = 'slskdn_blocked_users';
+const BLOCKED_USERS_KEY = 'slskr_blocked_users';
+const LEGACY_BLOCKED_USERS_KEY = 'slskdn_blocked_users';
 
 export const getBlockedUsers = () => {
   try {
-    const blocked = getLocalStorageItem(BLOCKED_USERS_KEY);
+    const current = getLocalStorageItem(BLOCKED_USERS_KEY);
+    const blocked =
+      current ?? getLocalStorageItem(LEGACY_BLOCKED_USERS_KEY);
+    if (current === null && blocked !== null) {
+      setLocalStorageItem(BLOCKED_USERS_KEY, blocked);
+    }
     const parsed = blocked ? JSON.parse(blocked) : [];
     return Array.isArray(parsed) ? parsed : [];
   } catch {

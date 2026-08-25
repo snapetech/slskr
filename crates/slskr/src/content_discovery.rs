@@ -39,7 +39,7 @@ struct QueryMetric {
 }
 
 /// Aggregated statistics for one query operation, grouped the same way the
-/// slskdN oracle groups its normalized query text.
+/// native profile oracle groups its normalized query text.
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SlowQueryInfo {
@@ -163,7 +163,7 @@ impl ContentDiscoveryStore {
     }
 
     /// Returns per-operation query statistics grouped the same way the
-    /// slskdN oracle groups normalized query text, slowest average first.
+    /// native profile oracle groups normalized query text, slowest average first.
     pub fn slow_queries(&self, limit: usize) -> Vec<SlowQueryInfo> {
         let Ok(metrics) = self.query_metrics.lock() else {
             return Vec::new();
@@ -381,7 +381,7 @@ impl ContentDiscoveryStore {
     }
 
     /// Returns the ordered hash delta after `since_seq`, together with the
-    /// target-style continuation flag.  The slskdN mesh controller asks the
+    /// target-style continuation flag.  The native profile mesh controller asks the
     /// HashDb for at most `max_entries + 1` rows ordered by sequence ID so it
     /// can report whether another page remains; returning a full snapshot
     /// here would make mesh peers resend the entire database on every sync.

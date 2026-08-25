@@ -1,5 +1,5 @@
-// <copyright file="swarmAnalytics.js" company="slskdN Team">
-// Copyright (c) slskdN Team. All rights reserved.
+// <copyright file="swarmAnalytics.js" company="slskr">
+// Copyright (c) slskr. All rights reserved.
 // </copyright>
 
 import api from './api';

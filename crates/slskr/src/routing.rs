@@ -4,7 +4,7 @@ use crate::utils::{
     authorize_controller_route_from, controller_route_requires_principal, csrf_origin_allowed,
     normalize_api_path, split_request_target, RequestSecurityHeaders,
 };
-use crate::{AppConfig, ControllerCompatibilityTarget};
+use crate::{AppConfig, ControllerProfile};
 
 // ============================================================================
 // HTTP Response Type
@@ -60,7 +60,7 @@ pub fn check_route_auth(
             && normalized.ends_with("/manifest"));
     let public_solid_client_id = method == "GET" && normalized == "/solid/clientid.jsonld";
 
-    if config.controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
+    if config.controller_profile == ControllerProfile::Native
         && !config.auth_required
         && controller_route_requires_principal(config, method, path)
         && !config.controller_passthrough_allows(headers.remote_addr)
@@ -81,7 +81,7 @@ pub fn check_route_auth(
 
     let bearer_or_api_key = auth
         .is_some_and(|value| value.starts_with("Bearer ") || value.starts_with("ApiKey "))
-        || headers.x_slskdn_api_key.is_some();
+        || headers.x_gateway_api_key.is_some();
     if !bearer_or_api_key && !csrf_origin_allowed(config, method, normalized, headers) {
         return Err("csrf");
     }

@@ -112,7 +112,7 @@ const CollapsibleSection = ({
   );
 };
 
-const Searches = ({ compatibilityTarget, server } = {}) => {
+const Searches = ({ runtimeProfile, server } = {}) => {
   const normalizedServer = server ?? { isConnected: false };
   const [connecting, setConnecting] = useState(true);
   const [error, setError] = useState(undefined);
@@ -203,7 +203,7 @@ const Searches = ({ compatibilityTarget, server } = {}) => {
     let mounted = true;
 
     const loadSearches = async () => {
-      if (compatibilityTarget) {
+      if (runtimeProfile) {
         return;
       }
 
@@ -295,14 +295,14 @@ const Searches = ({ compatibilityTarget, server } = {}) => {
       try {
         onConnecting();
         await searchHub.start();
-        if (compatibilityTarget) {
+        if (runtimeProfile) {
           onConnected();
         } else {
           await loadSearches();
         }
       } catch (connectionError) {
         toast.error(connectionError?.message ?? 'Failed to connect to search updates');
-        if (compatibilityTarget) {
+        if (runtimeProfile) {
           onConnected();
         } else {
           await loadSearches();
@@ -315,7 +315,7 @@ const Searches = ({ compatibilityTarget, server } = {}) => {
     // Scene ↔ Pod Bridging is opt-in. Do not infer it from generic capabilities,
     // otherwise ordinary searches silently leave the proven Soulseek path.
     const checkFeatureFlag = async () => {
-      if (compatibilityTarget === 'slskd') {
+      if (runtimeProfile === 'legacy') {
         return;
       }
 
@@ -340,7 +340,7 @@ const Searches = ({ compatibilityTarget, server } = {}) => {
       mounted = false;
       searchHub.stop();
     };
-  }, [compatibilityTarget]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [runtimeProfile]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // create a new search, and optionally navigate to it to display the details
   // we do this if the user clicks the search icon, or repeats an existing search
@@ -476,7 +476,7 @@ const Searches = ({ compatibilityTarget, server } = {}) => {
     routerNavigate('/searches', { replace: true });
   }
 
-  if (compatibilityTarget === 'slskd') {
+  if (runtimeProfile === 'legacy') {
     inputRef?.current?.inputRef?.current.focus();
 
     return (
@@ -670,7 +670,7 @@ const Searches = ({ compatibilityTarget, server } = {}) => {
               <Icon name={acquisitionProfile.icon} />
               Acquisition Profile
             </div>
-            {compatibilityTarget !== 'slskdn' && (
+            {runtimeProfile !== 'native' && (
               <Popup
                 content={`${acquisitionProfile.label}: ${acquisitionProfile.description}`}
                 position="top center"

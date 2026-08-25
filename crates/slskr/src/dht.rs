@@ -190,7 +190,7 @@ impl Rendezvous {
             .unwrap_or(false);
         // Publish readiness as soon as the bootstrap probe completes. The
         // rendezvous lookups below can each consume their full timeout, but
-        // frozen slskdN exposes DHT Ready independently of that refresh work.
+        // frozen native profile exposes DHT Ready independently of that refresh work.
         self.status.write().await.bootstrapped = bootstrapped;
         let mut discovered = BTreeSet::new();
         let mut last_error = None;

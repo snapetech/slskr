@@ -65,7 +65,7 @@ jobs:
       - run: scripts/check-public-posture.sh
       - run: scripts/validate-changelog.sh
       - run: python3 scripts/test_release_notes.py
-      - run: scripts/with-build-guard.sh cargo fmt --all --check
+      - run: scripts/check-rust-format.sh
       - run: scripts/with-build-guard.sh cargo clippy --workspace --all-targets -- -D warnings
       - run: scripts/with-build-guard.sh cargo check -p slskr-web --target wasm32-unknown-unknown
       - run: scripts/with-build-guard.sh cargo test --workspace

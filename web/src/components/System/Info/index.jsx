@@ -12,7 +12,7 @@ import React, { useEffect, useState } from 'react';
 import { Divider, Header, Modal } from 'semantic-ui-react';
 import YAML from 'yaml';
 
-const Info = ({ compatibilityTarget, options, state, theme }) => {
+const Info = ({ runtimeProfile, options, state, theme }) => {
   const [contents, setContents] = useState();
 
   useEffect(() => {
@@ -51,13 +51,13 @@ const Info = ({ compatibilityTarget, options, state, theme }) => {
           >
             Get Privileges
           </ShrinkableButton>
-          {compatibilityTarget !== 'slskd' && (
+          {runtimeProfile !== 'legacy' && (
             <DiagnosticBundleModal
               options={options}
               state={state}
             />
           )}
-          {compatibilityTarget !== 'slskd' && (
+          {runtimeProfile !== 'legacy' && (
             <SetupHealthCheckModal
               options={options}
               state={state}

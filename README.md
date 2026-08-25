@@ -14,8 +14,9 @@ transfer engine, API, event stream, and bundled Web UI.
 
 ## Project Status
 
-`slskr` is the Rust implementation target for the slskr/slskdN feature-parity
-work. The daemon already includes the main operating surfaces needed by a
+`slskr` is the Rust implementation target for slskr's native runtime and its
+external slskd/slskdN interoperability work. The daemon already includes the main
+operating surfaces needed by a
 browser client and API automation:
 
 - Soulseek login/session management, keepalive, reconnect, and listener state.
@@ -26,7 +27,7 @@ browser client and API automation:
 - Release, security, packaging, live-interop, and public-posture gates.
 
 The compatibility goal is behavioral and operational compatibility with useful
-slskd/slskdN workflows, not a copied implementation. Advanced discovery,
+external slskd/slskdN workflows, not a copied implementation. Advanced discovery,
 metadata, integrations, and mesh/federation surfaces should be treated as
 configuration-dependent or experimental unless the linked docs and tests say
 otherwise.
@@ -273,15 +274,15 @@ Common settings:
 | `SLSKR_API_READ_WRITE_TOKEN` | Optional non-administrator read/write token. |
 | `SLSKR_API_READ_ONLY_TOKEN` | Optional read-only token. |
 | `SLSKR_API_NOWPLAYING_TOKEN` | Optional token restricted to the scoped now-playing webhook. |
-| `SLSKR_CONTROLLER_COMPATIBILITY_TARGET` | Select frozen conflicting controller semantics: `slskd` or `slskdn` (default). |
-| `SLSKDN_POD_GOLD_STAR_CLUB_AUTOJOIN` | Gold Star Club auto-join; native/current launches are opt-in, while frozen compatibility launches default on for parity. TOML: `[podcore.gold_star_club].autojoin`. |
+| `SLSKR_CONTROLLER_PROFILE` | Select the generic controller runtime profile: `native` (default) or `legacy`. External differential harnesses map their reference fixtures to these names. |
+| `SLSKR_POD_GOLD_STAR_CLUB_AUTOJOIN` | Gold Star Club auto-join; native/current launches are opt-in, while frozen compatibility launches default on. TOML: `[podcore.gold_star_club].autojoin`. |
 | `SLSKR_REMOTE_CONFIGURATION` | Enable remote option overlays and configuration-file APIs; disabled by default. |
 | `SLSKR_SHARE_DIRS` | Semicolon-separated share roots. |
 | `SLSKR_LISTENER_BIND` | Regular peer listener bind address. |
 | `SLSKR_ADVERTISED_PORT` | Public regular peer port advertised to the network. |
-| `SLSKR_OBFUSCATED_LISTENER_BIND` | slskdN profile only: optional type-1 obfuscated peer listener bind address. |
-| `SLSKR_OBFUSCATED_ADVERTISED_PORT` | slskdN profile only: public type-1 obfuscated peer port. |
-| `SLSK_OBFUSCATION_MODE` | slskdN profile only: outbound dial posture, regular-first `compatibility` (default) or obfuscated-first `prefer`. |
+| `SLSKR_OBFUSCATED_LISTENER_BIND` | Native profile only: optional type-1 obfuscated peer listener bind address. |
+| `SLSKR_OBFUSCATED_ADVERTISED_PORT` | Native profile only: public type-1 obfuscated peer port. |
+| `SLSK_OBFUSCATION_MODE` | Native profile only: outbound dial posture, regular-first `compatibility` (default) or obfuscated-first `prefer`. |
 | `SLSKR_TRANSFER_MAX_ACTIVE` | Maximum active transfers. |
 | `SLSKR_TRANSFER_ALLOW_INBOUND` | Enable inbound shared-file serving. |
 | `SLSKR_TRANSFER_ALLOW_OUTBOUND` | Enable outbound downloads. |
@@ -383,7 +384,7 @@ behavior at a time before running broader live smoke or soak suites.
 Common local checks:
 
 ```bash
-scripts/with-build-guard.sh cargo fmt --all --check
+scripts/check-rust-format.sh
 scripts/with-build-guard.sh cargo test --workspace
 ```
 

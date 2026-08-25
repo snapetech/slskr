@@ -45,7 +45,7 @@ const saveTabsToStorage = (tabsToSave) => {
   );
 };
 
-const Rooms = ({ compatibilityTarget } = {}) => {
+const Rooms = ({ runtimeProfile } = {}) => {
   const navigate = useNavigate();
   const [tabs, setTabs] = useState(() => loadTabsFromStorage());
   const [activeIndex, setActiveIndex] = useState(0);
@@ -271,7 +271,7 @@ const Rooms = ({ compatibilityTarget } = {}) => {
     ),
   }));
 
-  if (compatibilityTarget === 'slskd') {
+  if (runtimeProfile === 'legacy') {
     return (
       <div className="rooms compatibility-rooms">
         <button

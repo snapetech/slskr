@@ -4,6 +4,14 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
+runtime_profile_for_reference() {
+  case "$1" in
+    slskd) printf '%s\n' legacy ;;
+    slskdn) printf '%s\n' native ;;
+    *) return 1 ;;
+  esac
+}
+
 work_dir="$(mktemp -d "${TMPDIR:-/tmp}/slskr-auth-profiles.XXXXXX")"
 daemon_pid=""
 
@@ -42,7 +50,7 @@ start_daemon() {
   (
     export SLSKR_HTTP_BIND="127.0.0.1:$port"
     export SLSKR_STATE_DIR="$state_dir"
-    export SLSKR_CONTROLLER_COMPATIBILITY_TARGET="$target"
+    export SLSKR_CONTROLLER_PROFILE="$(runtime_profile_for_reference "$target")"
     export SLSKR_AUTH_DISABLED=false
     export SLSKR_API_TOKEN=admin-token
     export SLSKR_API_READ_WRITE_TOKEN=write-token

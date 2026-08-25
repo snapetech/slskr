@@ -158,13 +158,13 @@ impl fmt::Debug for Gateway {
 fn overlay_service_enabled(
     service_name: &str,
     features: &crate::config::FeatureGateSettings,
-    target: crate::config::ControllerCompatibilityTarget,
+    target: crate::config::ControllerProfile,
 ) -> bool {
-    // The frozen slskdN application only registers DHT, hole-punch, and
+    // The frozen native profile application only registers DHT, hole-punch, and
     // MeshContent services with its remote mesh router.  Its local pods and
     // VirtualSoulfind HTTP controllers still exist, but remote calls to the
     // corresponding overlay services return the router's not-found contract.
-    if target == crate::config::ControllerCompatibilityTarget::Slskdn
+    if target == crate::config::ControllerProfile::Native
         && matches!(service_name, "pods" | "private-gateway" | "shadow-index")
     {
         return false;
@@ -387,7 +387,7 @@ impl Gateway {
         let bind = listener
             .local_addr()
             .map_err(|error| format!("overlay listener address failed: {error}"))?;
-        // slskdN's UDP control plane normally shares its public socket with
+        // native profile's UDP control plane normally shares its public socket with
         // DHT.  The public gateway owns that socket in shared mode and sends
         // only DHT-shaped datagrams to mainline's internal endpoint.
         let udp_listener = if let Some(shared_socket) = shared_udp_socket {
@@ -1531,7 +1531,7 @@ impl Gateway {
             overlay_service_enabled(
                 call.service_name.as_str(),
                 &media_services.features,
-                state.config.controller_compatibility_target,
+                state.config.controller_profile,
             )
         };
         let result = if !service_enabled {
@@ -2706,27 +2706,27 @@ mod tests {
         assert!(!overlay_service_enabled(
             "private-gateway",
             &features,
-            crate::config::ControllerCompatibilityTarget::Slskd
+            crate::config::ControllerProfile::Legacy
         ));
         assert!(!overlay_service_enabled(
             "MeshContent",
             &features,
-            crate::config::ControllerCompatibilityTarget::Slskd
+            crate::config::ControllerProfile::Legacy
         ));
         assert!(!overlay_service_enabled(
             "pods",
             &features,
-            crate::config::ControllerCompatibilityTarget::Slskd
+            crate::config::ControllerProfile::Legacy
         ));
         assert!(!overlay_service_enabled(
             "shadow-index",
             &features,
-            crate::config::ControllerCompatibilityTarget::Slskd
+            crate::config::ControllerProfile::Legacy
         ));
         assert!(overlay_service_enabled(
             "dht",
             &features,
-            crate::config::ControllerCompatibilityTarget::Slskd
+            crate::config::ControllerProfile::Legacy
         ));
 
         features.mesh = true;
@@ -2735,43 +2735,43 @@ mod tests {
         assert!(overlay_service_enabled(
             "private-gateway",
             &features,
-            crate::config::ControllerCompatibilityTarget::Slskd
+            crate::config::ControllerProfile::Legacy
         ));
         assert!(overlay_service_enabled(
             "MeshContent",
             &features,
-            crate::config::ControllerCompatibilityTarget::Slskd
+            crate::config::ControllerProfile::Legacy
         ));
         assert!(overlay_service_enabled(
             "pods",
             &features,
-            crate::config::ControllerCompatibilityTarget::Slskd
+            crate::config::ControllerProfile::Legacy
         ));
         assert!(overlay_service_enabled(
             "shadow-index",
             &features,
-            crate::config::ControllerCompatibilityTarget::Slskd
+            crate::config::ControllerProfile::Legacy
         ));
 
         assert!(!overlay_service_enabled(
             "private-gateway",
             &features,
-            crate::config::ControllerCompatibilityTarget::Slskdn
+            crate::config::ControllerProfile::Native
         ));
         assert!(!overlay_service_enabled(
             "pods",
             &features,
-            crate::config::ControllerCompatibilityTarget::Slskdn
+            crate::config::ControllerProfile::Native
         ));
         assert!(!overlay_service_enabled(
             "shadow-index",
             &features,
-            crate::config::ControllerCompatibilityTarget::Slskdn
+            crate::config::ControllerProfile::Native
         ));
         assert!(overlay_service_enabled(
             "MeshContent",
             &features,
-            crate::config::ControllerCompatibilityTarget::Slskdn
+            crate::config::ControllerProfile::Native
         ));
     }
 

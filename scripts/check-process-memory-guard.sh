@@ -64,6 +64,7 @@ for runner in \
   scripts/check-web-request-body-limit-differential.sh \
   scripts/check-slskdn-controller-parity.sh \
   scripts/build-release-archive.sh \
+  scripts/check-rust-format.sh \
   scripts/check-client-sdk-gates.sh \
   scripts/check-endpoint-parity-drift.sh \
   scripts/check-web-audit.sh \

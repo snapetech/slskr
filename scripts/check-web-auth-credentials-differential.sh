@@ -10,6 +10,15 @@ if [[ "${SLSKR_PROCESS_MEMORY_GUARD_HELD:-0}" != "1" ]]; then
 fi
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+runtime_profile_for_reference() {
+  case "$1" in
+    slskd) printf '%s\n' legacy ;;
+    slskdn) printf '%s\n' native ;;
+    *) return 1 ;;
+  esac
+}
+
 slskd_root="${SLSKR_SLSKD_ROOT:-/tmp/slskr-parity-slskd}"
 slskdn_root="${SLSKR_SLSKDN_ROOT:-/tmp/slskr-parity-slskdn-frozen}"
 work_dir="${SLSKR_AUTH_CREDENTIALS_DIFFERENTIAL_DIR:-$(mktemp -d "${TMPDIR:-/tmp}/slskr-auth-credentials.XXXXXX")}"
@@ -103,7 +112,7 @@ start_daemon() {
     ) >"$log" 2>&1 &
   else
     (
-      export SLSKR_CONTROLLER_COMPATIBILITY_TARGET="$target"
+      export SLSKR_CONTROLLER_PROFILE="$(runtime_profile_for_reference "$target")"
       export SLSKD_HTTPS_PORT="$https_port"
       export SLSKR_DHT_PORT="$(pick_free_udp_port)"
       export SLSKR_OVERLAY_BIND="127.0.0.1:$(pick_free_port)"

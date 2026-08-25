@@ -102,9 +102,9 @@ pub struct AppConfig {
     pub private_message_auto_response: PrivateMessageAutoResponseSettings,
     pub pod_join_signature_mode: PodSignatureMode,
     pub virtual_soulfind_v2_enabled: bool,
-    pub controller_compatibility_target: ControllerCompatibilityTarget,
-    /// Native launches follow current upstream behavior by default.  An
-    /// explicitly selected compatibility target retains its frozen behavior
+    pub controller_profile: ControllerProfile,
+    /// Native launches follow current upstream behavior by default. An
+    /// explicitly selected profile retains its frozen behavior
     /// unless `SLSKR_PARITY_PROFILE=current` overrides it.
     pub current_upstream_behavior: bool,
     pub controller_headless: bool,
@@ -929,9 +929,9 @@ pub struct TransferLimitSettings {
 }
 
 impl ControllerWebRateLimitingSettings {
-    fn defaults(target: ControllerCompatibilityTarget) -> Self {
+    fn defaults(target: ControllerProfile) -> Self {
         Self {
-            enabled: target == ControllerCompatibilityTarget::Slskdn,
+            enabled: target == ControllerProfile::Native,
             api_permit_limit: 200,
             api_window_seconds: 60,
             federation_permit_limit: 30,
@@ -952,12 +952,14 @@ impl AppConfig {
             .map(PathBuf::from)
             .or_else(|| file_config.app.state_dir.clone())
             .unwrap_or_else(default_state_dir);
-        let controller_compatibility_target = ControllerCompatibilityTarget::parse(
+        let profile_is_explicit = base_env.var("SLSKR_CONTROLLER_PROFILE").is_some()
+            || file_config.compatibility.profile.is_some();
+        let controller_profile = ControllerProfile::parse(
             base_env
-                .var("SLSKR_CONTROLLER_COMPATIBILITY_TARGET")
-                .or_else(|| file_config.compatibility.controller_target.clone())
+                .var("SLSKR_CONTROLLER_PROFILE")
+                .or_else(|| file_config.compatibility.profile.clone())
                 .as_deref()
-                .unwrap_or("slskdn"),
+                .unwrap_or("native"),
         )?;
         let current_upstream_behavior = match base_env
             .var("SLSKR_PARITY_PROFILE")
@@ -968,17 +970,10 @@ impl AppConfig {
             Some("current") => true,
             Some("frozen") => false,
             Some(_) => return Err("SLSKR_PARITY_PROFILE must be current or frozen".to_owned()),
-            None => {
-                base_env
-                    .var("SLSKR_CONTROLLER_COMPATIBILITY_TARGET")
-                    .is_none()
-                    && file_config.compatibility.controller_target.is_none()
-            }
+            None => !profile_is_explicit,
         };
-        let controller_yaml = controller_yaml_environment(
-            &state_dir.join("slskd.yml"),
-            controller_compatibility_target,
-        )?;
+        let controller_yaml =
+            controller_yaml_environment(&state_dir.join("slskd.yml"), controller_profile)?;
         let layered_env = ControllerYamlEnv {
             base: base_env,
             yaml: controller_yaml,
@@ -988,16 +983,13 @@ impl AppConfig {
         let advanced_networking = AdvancedNetworkingSettings::from_layers(
             &file_config,
             env,
-            controller_compatibility_target,
+            controller_profile,
             current_upstream_behavior,
             &state_dir,
         )?;
         let mesh_gateway = MeshGatewaySettings::from_layers(&file_config.mesh_gateway, env)?;
-        let media_services = MediaAdvancedServiceSettings::from_layers(
-            &file_config,
-            env,
-            controller_compatibility_target,
-        )?;
+        let media_services =
+            MediaAdvancedServiceSettings::from_layers(&file_config, env, controller_profile)?;
         let social_federation =
             SocialFederationSettings::from_layers(file_config.social_federation, env)?;
         let federation_publishing =
@@ -1008,9 +1000,10 @@ impl AppConfig {
         let controller_swagger = env_bool_layer(
             env,
             "SLSKD_SWAGGER",
-            file_config.feature.swagger.unwrap_or(
-                controller_compatibility_target == ControllerCompatibilityTarget::Slskdn,
-            ),
+            file_config
+                .feature
+                .swagger
+                .unwrap_or(controller_profile == ControllerProfile::Native),
         )?;
         let ControllerWebAuthSettings {
             controller_metrics_enabled,
@@ -1025,7 +1018,7 @@ impl AppConfig {
             controller_web_jwt_ttl_millis,
         } = resolve_controller_web_auth(
             env,
-            controller_compatibility_target,
+            controller_profile,
             !auth_disabled,
             file_config.metrics.enabled,
             file_config.metrics.url,
@@ -1048,7 +1041,7 @@ impl AppConfig {
         validate_controller_storage_directory(
             "Directories.Downloads",
             &downloads_dir,
-            controller_compatibility_target,
+            controller_profile,
             configured_downloads_dir.is_some(),
         )?;
         let configured_incomplete_dir =
@@ -1060,7 +1053,7 @@ impl AppConfig {
         validate_controller_storage_directory(
             "Directories.Incomplete",
             &incomplete_dir,
-            controller_compatibility_target,
+            controller_profile,
             configured_incomplete_dir.is_some(),
         )?;
         let ControllerWebResolution {
@@ -1070,7 +1063,7 @@ impl AppConfig {
             controller_web,
         } = resolve_controller_web(
             env,
-            controller_compatibility_target,
+            controller_profile,
             file_config.app.http_bind,
             file_config.web.socket,
             file_config.web.url_base,
@@ -1078,11 +1071,8 @@ impl AppConfig {
             file_config.web.logging,
             file_config.web.https,
         )?;
-        let controller_api_keys = resolve_controller_api_keys(
-            env,
-            controller_compatibility_target,
-            file_config.auth.api_keys,
-        )?;
+        let controller_api_keys =
+            resolve_controller_api_keys(env, controller_profile, file_config.auth.api_keys)?;
         let SoulseekIdentity {
             server_address,
             listen_port,
@@ -1152,9 +1142,7 @@ impl AppConfig {
                 "permissions.file.mode must be a three- or four-character chmod value".to_owned(),
             );
         }
-        if controller_compatibility_target == ControllerCompatibilityTarget::Slskd
-            && permissions_file_mode.is_some()
-        {
+        if controller_profile == ControllerProfile::Legacy && permissions_file_mode.is_some() {
             return Err("The 'permissions' keys have been moved under a new 'destination' key under transfers -> download, and the behavior has changed.  See https://github.com/slskd/slskd/pull/1756 for details".to_owned());
         }
         let telemetry_tracing = TelemetryTracingSettings::from_layers(
@@ -1200,7 +1188,7 @@ impl AppConfig {
             obfuscation_prefer_outbound,
         } = resolve_listener_and_obfuscation(
             env,
-            controller_compatibility_target,
+            controller_profile,
             current_upstream_behavior,
             &advanced_networking,
             listen_port,
@@ -1294,7 +1282,7 @@ impl AppConfig {
         let soulseek_connection = SoulseekConnectionSettings::from_layers(
             file_config.network.connection,
             env,
-            controller_compatibility_target,
+            controller_profile,
         )?;
         let controller_case_sensitive_regex = env_bool_layer(
             env,
@@ -1330,7 +1318,7 @@ impl AppConfig {
             None => canonical_groups.blacklisted.clone(),
         };
         let share_settings =
-            ShareSettings::from_layers(file_config.shares, env, controller_compatibility_target)?;
+            ShareSettings::from_layers(file_config.shares, env, controller_profile)?;
         let transfer_history_limit = env_parse_layer(
             env,
             "SLSKR_TRANSFER_HISTORY_LIMIT",
@@ -1359,14 +1347,14 @@ impl AppConfig {
             file_config.transfers.download,
             file_config.auto_replace,
             env,
-            controller_compatibility_target,
+            controller_profile,
             current_upstream_behavior,
         )?;
         let transfer_groups = TransferGroupsSettings::from_layers(
             canonical_groups,
             compatibility_groups,
             env,
-            controller_compatibility_target,
+            controller_profile,
         )?;
         let transfer_auto_retry =
             TransferAutoRetrySettings::from_layers(file_config.transfers.auto_retry, env)?;
@@ -1376,7 +1364,7 @@ impl AppConfig {
             file_config.blacklist,
             &user_blacklist_file_config,
             env,
-            controller_compatibility_target,
+            controller_profile,
         )?;
         let download_completed_path_template = optional_env_any(
             env,
@@ -1445,7 +1433,7 @@ impl AppConfig {
             controller_web_rate_limiting,
         } = resolve_api_and_web_hardening(
             env,
-            controller_compatibility_target,
+            controller_profile,
             file_config.auth.api_token,
             file_config.auth.read_write_token,
             file_config.auth.read_only_token,
@@ -1483,7 +1471,7 @@ impl AppConfig {
             "SLSKR_VIRTUAL_SOULFIND_V2_ENABLED",
             file_config.virtual_soulfind_v2.enabled.unwrap_or(true),
         )?;
-        // The current slskdN runtime exposes the v2 controller when its
+        // The current native profile runtime exposes the v2 controller when its
         // feature and v2 options are enabled.  Keep the setting live instead
         // of projecting the old frozen-target negative contract.
         let virtual_soulfind_v2_enabled = requested_virtual_soulfind_v2_enabled;
@@ -1566,7 +1554,7 @@ impl AppConfig {
             private_message_auto_response,
             pod_join_signature_mode,
             virtual_soulfind_v2_enabled,
-            controller_compatibility_target,
+            controller_profile,
             current_upstream_behavior,
             controller_headless,
             remote_configuration,
@@ -1641,7 +1629,7 @@ impl AppConfig {
     }
 
     pub fn validate_controller_startup_hardening(&self) -> Result<(), String> {
-        if self.controller_compatibility_target != ControllerCompatibilityTarget::Slskdn {
+        if self.controller_profile != ControllerProfile::Native {
             return Ok(());
         }
 
@@ -1709,7 +1697,7 @@ impl AppConfig {
 
     pub fn sanitized_json(&self) -> String {
         format!(
-            "{{\"config_file\":{},\"http_bind\":\"{}\",\"state_dir\":\"{}\",\"server_address\":\"{}\",\"listen_port\":{},\"advertised_port\":{},\"listener_bind\":{},\"obfuscated_listener_bind\":{},\"obfuscated_advertised_port\":{},\"overlay_bind\":{},\"dht_enabled\":{},\"dht_port\":{},\"trusted_mesh_peers\":{},\"obfuscation\":{},\"peer_host_override\":{},\"test_user_endpoint_overrides\":{},\"username\":{},\"credentials_configured\":{},\"credential_store\":\"{}\",\"credential_file\":\"{}\",\"auto_connect\":{},\"reconnect\":{},\"reconnect_seconds\":{},\"ping_seconds\":{},\"log_level\":\"{}\",\"peer_response_timeout_seconds\":{},\"share_roots\":{},\"share_follow_symlinks\":{},\"share_include_hidden\":{},\"share_scan_max_files\":{},\"share_cache_tsv_enabled\":{},\"transfer_history_limit\":{},\"transfer_max_active\":{},\"transfer_allow_inbound\":{},\"transfer_allow_outbound\":{},\"transfer_auto_retry\":{},\"transfer_rescue\":{},\"download_completed_path_template_configured\":{},\"private_message_auto_response\":{},\"pod_join_signature_mode\":\"{}\",\"virtual_soulfind_v2_enabled\":{},\"controller_compatibility_target\":\"{}\",\"parity_profile\":\"{}\",\"remote_configuration\":{},\"auth_required\":{},\"api_token_configured\":{},\"api_read_write_token_configured\":{},\"api_read_only_token_configured\":{},\"api_nowplaying_token_configured\":{},\"api_cookie_auth_enabled\":{},\"trusted_proxy_cidrs\":{},\"persistence_enabled\":{},\"integrations\":{}}}",
+            "{{\"config_file\":{},\"http_bind\":\"{}\",\"state_dir\":\"{}\",\"server_address\":\"{}\",\"listen_port\":{},\"advertised_port\":{},\"listener_bind\":{},\"obfuscated_listener_bind\":{},\"obfuscated_advertised_port\":{},\"overlay_bind\":{},\"dht_enabled\":{},\"dht_port\":{},\"trusted_mesh_peers\":{},\"obfuscation\":{},\"peer_host_override\":{},\"test_user_endpoint_overrides\":{},\"username\":{},\"credentials_configured\":{},\"credential_store\":\"{}\",\"credential_file\":\"{}\",\"auto_connect\":{},\"reconnect\":{},\"reconnect_seconds\":{},\"ping_seconds\":{},\"log_level\":\"{}\",\"peer_response_timeout_seconds\":{},\"share_roots\":{},\"share_follow_symlinks\":{},\"share_include_hidden\":{},\"share_scan_max_files\":{},\"share_cache_tsv_enabled\":{},\"transfer_history_limit\":{},\"transfer_max_active\":{},\"transfer_allow_inbound\":{},\"transfer_allow_outbound\":{},\"transfer_auto_retry\":{},\"transfer_rescue\":{},\"download_completed_path_template_configured\":{},\"private_message_auto_response\":{},\"pod_join_signature_mode\":\"{}\",\"virtual_soulfind_v2_enabled\":{},\"controller_profile\":\"{}\",\"parity_profile\":\"{}\",\"remote_configuration\":{},\"auth_required\":{},\"api_token_configured\":{},\"api_read_write_token_configured\":{},\"api_read_only_token_configured\":{},\"api_nowplaying_token_configured\":{},\"api_cookie_auth_enabled\":{},\"trusted_proxy_cidrs\":{},\"persistence_enabled\":{},\"integrations\":{}}}",
             json_option(
                 self.config_file
                     .as_ref()
@@ -1764,7 +1752,7 @@ impl AppConfig {
             self.private_message_auto_response.sanitized_json(),
             self.pod_join_signature_mode.as_str(),
             self.virtual_soulfind_v2_enabled,
-            self.controller_compatibility_target.as_str(),
+            self.controller_profile.as_str(),
             if self.current_upstream_behavior { "current" } else { "frozen" },
             self.remote_configuration,
             self.auth_required,
@@ -1866,24 +1854,32 @@ pub enum SoulseekObfuscationMode {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ControllerCompatibilityTarget {
-    Slskd,
-    Slskdn,
+pub enum ControllerProfile {
+    Legacy,
+    Native,
 }
 
-impl ControllerCompatibilityTarget {
+impl ControllerProfile {
     pub(crate) fn parse(value: &str) -> Result<Self, String> {
         match value.trim().to_ascii_lowercase().as_str() {
-            "slskd" => Ok(Self::Slskd),
-            "slskdn" => Ok(Self::Slskdn),
-            _ => Err("SLSKR_CONTROLLER_COMPATIBILITY_TARGET must be slskd or slskdn".to_owned()),
+            "legacy" => Ok(Self::Legacy),
+            "native" => Ok(Self::Native),
+            // The historical differential module still labels its two
+            // external reference fixtures by their upstream names. Those
+            // aliases are compiled only into proof/test builds and are not
+            // accepted by the slskr production binary.
+            #[cfg(any(test, feature = "bounded-differential"))]
+            "slskd" => Ok(Self::Legacy),
+            #[cfg(any(test, feature = "bounded-differential"))]
+            "slskdn" => Ok(Self::Native),
+            _ => Err("SLSKR_CONTROLLER_PROFILE must be legacy or native".to_owned()),
         }
     }
 
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Slskd => "slskd",
-            Self::Slskdn => "slskdn",
+            Self::Legacy => "legacy",
+            Self::Native => "native",
         }
     }
 }
@@ -1891,7 +1887,7 @@ impl ControllerCompatibilityTarget {
 fn validate_controller_storage_directory(
     field: &str,
     path: &std::path::Path,
-    target: ControllerCompatibilityTarget,
+    target: ControllerProfile,
     explicitly_configured: bool,
 ) -> Result<(), String> {
     if !explicitly_configured {
@@ -1900,9 +1896,9 @@ fn validate_controller_storage_directory(
     if path.as_os_str().is_empty() {
         return Err(format!("{field} must not be empty"));
     }
-    if target == ControllerCompatibilityTarget::Slskd && !path.is_absolute() {
+    if target == ControllerProfile::Legacy && !path.is_absolute() {
         return Err(format!(
-            "{field} must be an absolute path for the slskd compatibility target"
+            "{field} must be an absolute path for the legacy compatibility profile"
         ));
     }
     let metadata =
@@ -1994,7 +1990,7 @@ pub struct MeshRuntimeSettings {
 }
 
 impl MeshRuntimeSettings {
-    /// Match slskdN's MeshSecurityOptions effective cap.  Disabling the
+    /// Match native profile's MeshSecurityOptions effective cap.  Disabling the
     /// strict remote limit relaxes it by at most 10x, but never beyond 10 MiB;
     /// it does not remove the bound entirely.
     pub fn effective_max_remote_payload_size(&self) -> usize {
@@ -2778,7 +2774,7 @@ impl TransferAutoRetrySettings {
                     file.alternate_source_size_tolerance_percent,
                     5.0_f64,
                 )?;
-                // The frozen slskdN snapshot applies an integer-operand
+                // The frozen native profile snapshot applies an integer-operand
                 // RangeAttribute to this double.  Its conversion rounds
                 // fractional boundary values, accepting -0.5 through 100.5.
                 // Upstream correction: snapetech/slskdN#271.
@@ -2974,7 +2970,7 @@ impl ManagedBlacklistSettings {
         file: ManagedBlacklistFileConfig,
         users: &UserBlacklistFileConfig,
         env: &E,
-        target: ControllerCompatibilityTarget,
+        target: ControllerProfile,
     ) -> Result<Self, String> {
         let enabled = env_bool_layer(env, "SLSKD_BLACKLIST", file.enabled.unwrap_or(false))?;
         let path = env
@@ -2998,10 +2994,10 @@ impl ManagedBlacklistSettings {
         );
         for pattern in &patterns {
             crate::dotnet_regex::DotNetRegex::validate(pattern).map_err(|_| match target {
-                ControllerCompatibilityTarget::Slskd => {
+                ControllerProfile::Legacy => {
                     format!("Pattern '{pattern}' is not a valid regular expression")
                 }
-                ControllerCompatibilityTarget::Slskdn => {
+                ControllerProfile::Native => {
                     format!("Blacklist pattern {pattern} is invalid")
                 }
             })?;
@@ -3022,10 +3018,10 @@ impl ManagedBlacklistSettings {
                     format!("{cidr}/32")
                 };
                 TrustedProxyCidr::parse(&normalized).map_err(|error| match target {
-                    ControllerCompatibilityTarget::Slskd => {
+                    ControllerProfile::Legacy => {
                         format!("CIDR {cidr} is invalid: {error}")
                     }
-                    ControllerCompatibilityTarget::Slskdn => format!("CIDR {cidr} is invalid"),
+                    ControllerProfile::Native => format!("CIDR {cidr} is invalid"),
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -3068,7 +3064,7 @@ enum ManagedBlacklistFormat {
 
 pub fn validate_managed_blacklist_file_format(
     path: &std::path::Path,
-    target: ControllerCompatibilityTarget,
+    target: ControllerProfile,
 ) -> Result<(), String> {
     let body = fs::read_to_string(path)
         .map_err(|error| format!("failed to read blacklist file {}: {error}", path.display()))?;
@@ -3077,7 +3073,7 @@ pub fn validate_managed_blacklist_file_format(
 
 fn load_managed_blacklist_file(
     path: &std::path::Path,
-    target: ControllerCompatibilityTarget,
+    target: ControllerProfile,
 ) -> Result<Vec<ManagedBlacklistRange>, String> {
     let body = fs::read_to_string(path)
         .map_err(|error| format!("failed to read blacklist file {}: {error}", path.display()))?;
@@ -3107,7 +3103,7 @@ fn load_managed_blacklist_file(
 
 fn detect_managed_blacklist_format(
     body: &str,
-    target: ControllerCompatibilityTarget,
+    target: ControllerProfile,
 ) -> Result<ManagedBlacklistFormat, String> {
     for line in body.lines() {
         if line.trim().is_empty() || line.starts_with('#') {
@@ -3139,16 +3135,14 @@ fn detect_managed_blacklist_format(
 fn managed_blacklist_line_range(
     line: &str,
     format: ManagedBlacklistFormat,
-    target: ControllerCompatibilityTarget,
+    target: ControllerProfile,
 ) -> Result<String, String> {
     match format {
         ManagedBlacklistFormat::Cidr => Ok(line.to_owned()),
         ManagedBlacklistFormat::P2p => {
             let range = match target {
-                ControllerCompatibilityTarget::Slskd => line.split(':').nth(1),
-                ControllerCompatibilityTarget::Slskdn => {
-                    line.rsplit_once(':').map(|(_, range)| range)
-                }
+                ControllerProfile::Legacy => line.split(':').nth(1),
+                ControllerProfile::Native => line.rsplit_once(':').map(|(_, range)| range),
             }
             .map(str::trim)
             .filter(|range| !range.is_empty())
@@ -5038,7 +5032,7 @@ impl ShareSettings {
     pub fn from_layers<E: ConfigEnv>(
         file_config: ShareFileConfig,
         env: &E,
-        target: ControllerCompatibilityTarget,
+        target: ControllerProfile,
     ) -> Result<Self, String> {
         let fixture = env
             .var("SLSKR_SHARE_FIXTURE")
@@ -5090,7 +5084,7 @@ impl ShareSettings {
         let processor_count = std::thread::available_parallelism()
             .map(std::num::NonZeroUsize::get)
             .unwrap_or(1);
-        let default_workers = if target == ControllerCompatibilityTarget::Slskdn {
+        let default_workers = if target == ControllerProfile::Native {
             if processor_count <= 2 {
                 1
             } else {
@@ -5846,7 +5840,7 @@ pub struct ManagedBlacklistFileConfig {
 #[derive(Debug, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct CompatibilityFileConfig {
-    controller_target: Option<String>,
+    profile: Option<String>,
     remote_configuration: Option<bool>,
     debug: Option<bool>,
     no_config_watch: Option<bool>,
@@ -6309,7 +6303,7 @@ pub struct AdversarialFileConfig {
     privacy: AdversarialPrivacyFileConfig,
     anonymity: AdversarialAnonymityFileConfig,
     #[serde(flatten)]
-    _slskdn_compatibility: BTreeMap<String, serde_json::Value>,
+    _native_compatibility: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -6317,7 +6311,7 @@ pub struct AdversarialFileConfig {
 pub struct AdversarialPrivacyFileConfig {
     padding: AdversarialPaddingFileConfig,
     #[serde(flatten)]
-    _slskdn_compatibility: BTreeMap<String, serde_json::Value>,
+    _native_compatibility: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -6326,7 +6320,7 @@ pub struct AdversarialPaddingFileConfig {
     max_unpadded_bytes: Option<usize>,
     max_padded_bytes: Option<usize>,
     #[serde(flatten)]
-    _slskdn_compatibility: BTreeMap<String, serde_json::Value>,
+    _native_compatibility: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -6334,7 +6328,7 @@ pub struct AdversarialPaddingFileConfig {
 pub struct AdversarialAnonymityFileConfig {
     relay_only: AdversarialRelayOnlyFileConfig,
     #[serde(flatten)]
-    _slskdn_compatibility: BTreeMap<String, serde_json::Value>,
+    _native_compatibility: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -6343,7 +6337,7 @@ pub struct AdversarialRelayOnlyFileConfig {
     relay_peer_data_endpoints: Vec<String>,
     relay_authentication_token: Option<String>,
     #[serde(flatten)]
-    _slskdn_compatibility: BTreeMap<String, serde_json::Value>,
+    _native_compatibility: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -6432,11 +6426,11 @@ impl AdvancedNetworkingSettings {
     fn from_layers<E: ConfigEnv>(
         file: &FileConfig,
         env: &E,
-        target: ControllerCompatibilityTarget,
+        target: ControllerProfile,
         current_upstream_behavior: bool,
         _state_dir: &Path,
     ) -> Result<Self, String> {
-        let slskdn = target == ControllerCompatibilityTarget::Slskdn;
+        let native_profile = target == ControllerProfile::Native;
         let yaml_overlay = env
             .var("SLSKR_ADVANCED_NETWORKING_JSON")
             .map(|value| {
@@ -6460,19 +6454,22 @@ impl AdvancedNetworkingSettings {
         let relay_file = yaml_overlay.relay.as_ref().unwrap_or(&file.relay);
         let security_file = yaml_overlay.security.as_ref().unwrap_or(&file.security);
         let podcore_file = yaml_overlay.podcore.as_ref().unwrap_or(&file.podcore);
-        let dht_enabled =
-            env_bool_layer(env, "SLSKR_DHT_ENABLED", dht_file.enabled.unwrap_or(slskdn))?;
+        let dht_enabled = env_bool_layer(
+            env,
+            "SLSKR_DHT_ENABLED",
+            dht_file.enabled.unwrap_or(native_profile),
+        )?;
         let dht_port = env_parse_layer(
             env,
             "SLSKR_DHT_PORT",
             dht_file.dht_port,
-            if slskdn { 50_305_u16 } else { 0_u16 },
+            if native_profile { 50_305_u16 } else { 0_u16 },
         )?;
         if dht_enabled && dht_port == 0 {
             return Err("dht.dht_port must be between 1 and 65535 when DHT is enabled".to_owned());
         }
         let overlay_port = dht_file.overlay_port.unwrap_or(50_305);
-        if slskdn && overlay_port == 0 {
+        if native_profile && overlay_port == 0 {
             return Err("dht.overlay_port must be between 1 and 65535".to_owned());
         }
         let vpn_port_sync = dht_file
@@ -6547,7 +6544,7 @@ impl AdvancedNetworkingSettings {
         }
 
         let mesh = MeshRuntimeSettings {
-            enabled: mesh_file.enabled.unwrap_or(slskdn),
+            enabled: mesh_file.enabled.unwrap_or(native_profile),
             enable_overlay: mesh_file.enable_overlay.unwrap_or(true),
             enable_dht: mesh_file.enable_dht.unwrap_or(true),
             enable_stun: mesh_file.enable_stun.unwrap_or(true),
@@ -6587,7 +6584,7 @@ impl AdvancedNetworkingSettings {
         // .NET configuration keys are case-insensitive, so the documented
         // `Mesh:SyncSecurity` section and the lower-case YAML `mesh` section
         // are one logical tree. Accept the split spelling as well for older
-        // slskdN examples that emitted both roots.
+        // native profile examples that emitted both roots.
         let sync = if mesh_file.sync_security.is_configured() {
             &mesh_file.sync_security
         } else {
@@ -6915,7 +6912,7 @@ impl AdvancedNetworkingSettings {
             )?,
             gold_star_club_autojoin: env_bool_layer(
                 env,
-                "SLSKDN_POD_GOLD_STAR_CLUB_AUTOJOIN",
+                "SLSKR_POD_GOLD_STAR_CLUB_AUTOJOIN",
                 podcore_file
                     .gold_star_club
                     .autojoin
@@ -6933,7 +6930,7 @@ impl MediaAdvancedServiceSettings {
     fn from_layers<E: ConfigEnv>(
         file: &FileConfig,
         env: &E,
-        target: ControllerCompatibilityTarget,
+        target: ControllerProfile,
     ) -> Result<Self, String> {
         let yaml_overlay = env
             .var("SLSKR_ADVANCED_NETWORKING_JSON")
@@ -6951,7 +6948,7 @@ impl MediaAdvancedServiceSettings {
             .virtual_soulfind
             .as_ref()
             .unwrap_or(&file.virtual_soulfind);
-        let enabled_by_default = target == ControllerCompatibilityTarget::Slskdn;
+        let enabled_by_default = target == ControllerProfile::Native;
         let features = FeatureGateSettings {
             collections_sharing: feature.collections_sharing.unwrap_or(enabled_by_default),
             streaming: feature.streaming.unwrap_or(enabled_by_default),
@@ -7374,7 +7371,7 @@ impl SoulseekConnectionSettings {
     fn from_layers<E: ConfigEnv>(
         file: SoulseekConnectionFileConfig,
         env: &E,
-        target: ControllerCompatibilityTarget,
+        target: ControllerProfile,
     ) -> Result<Self, String> {
         let parse_bounded = |name: &str,
                              aliases: &[&str],
@@ -7471,7 +7468,7 @@ impl SoulseekConnectionSettings {
                 "SLSK_INACTIVITY_TIMEOUT",
             ],
             file.timeout.inactivity,
-            if target == ControllerCompatibilityTarget::Slskd {
+            if target == ControllerProfile::Legacy {
                 15_000
             } else {
                 60_000
@@ -7625,7 +7622,7 @@ impl TransferLimitsSettings {
         ) -> Result<Option<TransferLimitSettings>, String> {
             match value {
                 NullableConfig::Missing => Ok(Some(TransferLimitSettings::default())),
-                // Frozen slskd/slskdN treat an explicitly null limit window the
+                // Frozen slskd/native profile treat an explicitly null limit window the
                 // same as an omitted window and materialize the default object.
                 NullableConfig::Null => Ok(Some(TransferLimitSettings::default())),
                 NullableConfig::Value(value) => {
@@ -7646,7 +7643,7 @@ impl TransferGroupUploadSettings {
         value: TransferGroupUploadFileConfig,
         compatibility_limits: Option<TransferLimitsFileConfig>,
         path: &str,
-        target: ControllerCompatibilityTarget,
+        target: ControllerProfile,
     ) -> Result<Self, String> {
         let priority = value.priority.unwrap_or(1);
         let slots = value.slots.unwrap_or(i32::MAX as u32);
@@ -7665,7 +7662,7 @@ impl TransferGroupUploadSettings {
             .into_iter()
             .map(|entry| entry.trim().to_owned())
             .collect::<Vec<_>>();
-        if target == ControllerCompatibilityTarget::Slskd && !allowed_file_types.is_empty() {
+        if target == ControllerProfile::Legacy && !allowed_file_types.is_empty() {
             return Err(format!(
                 "{path}.allowed_file_types is not supported by slskd"
             ));
@@ -7691,7 +7688,7 @@ impl TransferGroupsSettings {
         canonical: GroupsFileConfig,
         compatibility: GroupsFileConfig,
         env: &E,
-        target: ControllerCompatibilityTarget,
+        target: ControllerProfile,
     ) -> Result<Self, String> {
         let groups = match env.var("SLSKR_FROZEN_TRANSFER_GROUPS_JSON") {
             Some(json) => serde_json::from_str::<GroupsFileConfig>(&json)
@@ -7752,7 +7749,7 @@ impl TransferGroupsSettings {
                 },
             );
         }
-        if target == ControllerCompatibilityTarget::Slskdn {
+        if target == ControllerProfile::Native {
             let mut memberships = BTreeMap::<String, String>::new();
             for member in &blacklisted_members {
                 let member = member.trim();
@@ -7853,7 +7850,7 @@ impl TransferDownloadSettings {
         mut file: TransferDownloadFileConfig,
         auto_replace: AutoReplaceFileConfig,
         env: &E,
-        target: ControllerCompatibilityTarget,
+        target: ControllerProfile,
         current_upstream_behavior: bool,
     ) -> Result<Self, String> {
         if let Some(json) = env.var("SLSKR_FROZEN_TRANSFER_DOWNLOAD_JSON") {
@@ -7877,8 +7874,8 @@ impl TransferDownloadSettings {
         }
 
         let incomplete = match target {
-            ControllerCompatibilityTarget::Slskd => file.retry.partial,
-            ControllerCompatibilityTarget::Slskdn => file.retry.incomplete,
+            ControllerProfile::Legacy => file.retry.partial,
+            ControllerProfile::Native => file.retry.incomplete,
         }
         .unwrap_or_else(|| "resume".to_owned())
         .to_ascii_lowercase();
@@ -7887,7 +7884,7 @@ impl TransferDownloadSettings {
                 "download retry strategy '{incomplete}' must be resume or overwrite"
             ));
         }
-        let default_attempts = if target == ControllerCompatibilityTarget::Slskd {
+        let default_attempts = if target == ControllerProfile::Legacy {
             3
         } else {
             1
@@ -7896,7 +7893,7 @@ impl TransferDownloadSettings {
         let delay_ms = file.retry.delay.unwrap_or(5_000);
         let max_delay_ms = file.retry.max_delay.unwrap_or(60_000);
         match target {
-            ControllerCompatibilityTarget::Slskd => {
+            ControllerProfile::Legacy => {
                 if attempts == 0 {
                     return Err(
                         "download retry attempts must be greater than or equal to 1".to_owned()
@@ -7914,7 +7911,7 @@ impl TransferDownloadSettings {
                     );
                 }
             }
-            ControllerCompatibilityTarget::Slskdn => {
+            ControllerProfile::Native => {
                 if !(1..=20).contains(&attempts) {
                     return Err("download retry attempts must be between 1 and 20".to_owned());
                 }
@@ -9318,7 +9315,7 @@ const CONTROLLER_YAML_CORE_MAPPINGS: &[(&str, &str)] = &[
 
 fn controller_yaml_environment(
     path: &std::path::Path,
-    target: ControllerCompatibilityTarget,
+    target: ControllerProfile,
 ) -> Result<BTreeMap<String, String>, String> {
     use std::io::Read;
 
@@ -9373,7 +9370,7 @@ fn controller_yaml_environment(
     validate_controller_yaml_shape(&root, 0, &mut normalized_nodes)?;
 
     let mut values = BTreeMap::new();
-    if target == ControllerCompatibilityTarget::Slskdn {
+    if target == ControllerProfile::Native {
         values.insert(
             "SLSKR_ADVANCED_NETWORKING_JSON".to_owned(),
             serde_json::to_string(&root)
@@ -9386,10 +9383,8 @@ fn controller_yaml_environment(
             "SLSKD_BLACKLISTED_MEMBERS" | "SLSKD_BLACKLISTED_PATTERNS" | "SLSKD_BLACKLISTED_CIDRS"
         ) {
             let target_path_matches = match target {
-                ControllerCompatibilityTarget::Slskd => {
-                    yaml_path.starts_with("transfers.groups.blacklisted.")
-                }
-                ControllerCompatibilityTarget::Slskdn => true,
+                ControllerProfile::Legacy => yaml_path.starts_with("transfers.groups.blacklisted."),
+                ControllerProfile::Native => true,
             };
             if !target_path_matches {
                 continue;
@@ -9486,8 +9481,8 @@ fn controller_yaml_environment(
         values.insert("SLSKR_FROZEN_SCRIPTS_JSON".to_owned(), json);
     }
     let groups = match target {
-        ControllerCompatibilityTarget::Slskd => controller_yaml_value(&root, "transfers.groups"),
-        ControllerCompatibilityTarget::Slskdn => controller_yaml_value(&root, "groups")
+        ControllerProfile::Legacy => controller_yaml_value(&root, "transfers.groups"),
+        ControllerProfile::Native => controller_yaml_value(&root, "groups")
             .or_else(|| controller_yaml_value(&root, "transfers.groups")),
     };
     if let Some(groups) = groups {
@@ -10083,7 +10078,7 @@ struct ControllerWebAuthSettings {
 #[allow(clippy::too_many_arguments)]
 fn resolve_controller_web_auth<E: ConfigEnv>(
     env: &E,
-    controller_compatibility_target: ControllerCompatibilityTarget,
+    controller_profile: ControllerProfile,
     auth_required: bool,
     metrics_enabled: Option<bool>,
     metrics_url: Option<String>,
@@ -10106,10 +10101,14 @@ fn resolve_controller_web_auth<E: ConfigEnv>(
         "SLSKD_METRICS_NO_AUTH",
         metrics_auth_disabled.unwrap_or(false),
     )?;
+    let default_identity = match controller_profile {
+        ControllerProfile::Legacy => "slskd",
+        ControllerProfile::Native => "slskr",
+    };
     let controller_metrics_username = env
         .var("SLSKD_METRICS_USERNAME")
         .or(metrics_username)
-        .unwrap_or_else(|| "slskd".to_owned());
+        .unwrap_or_else(|| default_identity.to_owned());
     let controller_metrics_password = env
         .var("SLSKD_METRICS_PASSWORD")
         .or(metrics_password)
@@ -10117,14 +10116,14 @@ fn resolve_controller_web_auth<E: ConfigEnv>(
     let controller_web_auth_username = env
         .var("SLSKD_USERNAME")
         .or(web_auth_username)
-        .unwrap_or_else(|| "slskd".to_owned());
+        .unwrap_or_else(|| default_identity.to_owned());
     let configured_web_auth_password = env.var("SLSKD_PASSWORD").or(web_auth_password);
     let controller_web_auth_password = configured_web_auth_password.clone().unwrap_or_else(|| {
         if auth_required {
-            // Both frozen profiles authenticate with the generated-config
-            // default when no password layer overrides it. No-auth mode
-            // keeps the credential empty because it is not used.
-            "slskd".to_owned()
+            // Preserve the profile's generated-config default when no
+            // password layer overrides it. No-auth mode keeps the credential
+            // empty because it is not used.
+            default_identity.to_owned()
         } else {
             String::new()
         }
@@ -10155,7 +10154,7 @@ fn resolve_controller_web_auth<E: ConfigEnv>(
         env,
         "SLSKD_JWT_TTL",
         web_jwt_ttl,
-        if controller_compatibility_target == ControllerCompatibilityTarget::Slskd {
+        if controller_profile == ControllerProfile::Legacy {
             604_800_000_u64
         } else {
             3_600_000_u64
@@ -10286,7 +10285,7 @@ fn resolve_misc_controller_flags<E: ConfigEnv>(
 
 fn resolve_controller_api_keys<E: ConfigEnv>(
     env: &E,
-    controller_compatibility_target: ControllerCompatibilityTarget,
+    controller_profile: ControllerProfile,
     auth_api_keys: BTreeMap<String, ControllerApiKeyFileConfig>,
 ) -> Result<BTreeMap<String, ControllerApiKeySettings>, String> {
     let controller_api_key_files = match env.var("SLSKD_API_KEYS_JSON") {
@@ -10308,12 +10307,11 @@ fn resolve_controller_api_keys<E: ConfigEnv>(
                 "web.authentication.api_keys.{name}.role must be readonly, readwrite, or administrator"
             ));
         }
-        let default_cidr =
-            if controller_compatibility_target == ControllerCompatibilityTarget::Slskdn {
-                "127.0.0.1/32,::1/128"
-            } else {
-                "0.0.0.0/0,::/0"
-            };
+        let default_cidr = if controller_profile == ControllerProfile::Native {
+            "127.0.0.1/32,::1/128"
+        } else {
+            "0.0.0.0/0,::/0"
+        };
         let cidrs = configured
             .cidr
             .split(',')
@@ -10463,7 +10461,7 @@ struct ListenerAndObfuscationResolution {
 #[allow(clippy::too_many_arguments)]
 fn resolve_listener_and_obfuscation<E: ConfigEnv>(
     env: &E,
-    controller_compatibility_target: ControllerCompatibilityTarget,
+    controller_profile: ControllerProfile,
     current_upstream_behavior: bool,
     advanced_networking: &AdvancedNetworkingSettings,
     listen_port: u32,
@@ -10507,7 +10505,7 @@ fn resolve_listener_and_obfuscation<E: ConfigEnv>(
             })?;
         }
     }
-    if controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
+    if controller_profile == ControllerProfile::Native
         && auto_connect
         && listener_bind.as_deref().is_some_and(|value| {
             value
@@ -10528,14 +10526,13 @@ fn resolve_listener_and_obfuscation<E: ConfigEnv>(
         listeners_advertised_port,
         listen_port,
     )?;
-    // Frozen slskd has no Soulseek type-1 obfuscation option or listener. The
-    // fields are accepted by the shared configuration model because they are
-    // part of the slskdN profile, but they must not silently turn the slskd
-    // replacement into a different network endpoint. Ignore those
-    // slskdN-only layers for the slskd profile and keep the runtime projection
+    // The legacy profile has no Soulseek type-1 obfuscation option or listener.
+    // The fields are accepted by the shared configuration model because they
+    // are part of the native profile, but they must not silently turn the
+    // legacy profile into a different network endpoint. Ignore those native
+    // profile-only layers for the legacy profile and keep the runtime projection
     // disabled below.
-    let supports_soulseek_obfuscation =
-        controller_compatibility_target == ControllerCompatibilityTarget::Slskdn;
+    let supports_soulseek_obfuscation = controller_profile == ControllerProfile::Native;
     let upstream_obfuscated_port = if supports_soulseek_obfuscation {
         env_parse_any_option(env, &["SLSKD_SLSK_OBFUSCATION_LISTEN_PORT"])?
     } else {
@@ -10598,8 +10595,7 @@ fn resolve_listener_and_obfuscation<E: ConfigEnv>(
         })
         .transpose()?
         .or_else(|| {
-            (controller_compatibility_target == ControllerCompatibilityTarget::Slskdn
-                && advanced_networking.overlay.enable)
+            (controller_profile == ControllerProfile::Native && advanced_networking.overlay.enable)
                 .then_some(SocketAddr::new(
                     IpAddr::V4(Ipv4Addr::UNSPECIFIED),
                     advanced_networking.dht.overlay_port,
@@ -10695,7 +10691,7 @@ struct ControllerWebResolution {
 #[allow(clippy::too_many_arguments)]
 fn resolve_controller_web<E: ConfigEnv>(
     env: &E,
-    controller_compatibility_target: ControllerCompatibilityTarget,
+    controller_profile: ControllerProfile,
     app_http_bind: Option<String>,
     web_socket: Option<PathBuf>,
     web_url_base: Option<String>,
@@ -10715,8 +10711,8 @@ fn resolve_controller_web<E: ConfigEnv>(
             .map_err(|error| format!("invalid SLSKR_HTTP_BIND: {error}"))?;
         (vec![address], Some(address.ip().to_string()))
     } else {
-        match controller_compatibility_target {
-            ControllerCompatibilityTarget::Slskd => {
+        match controller_profile {
+            ControllerProfile::Legacy => {
                 let configured = env.var("SLSKD_HTTP_IP_ADDRESS");
                 let ips = match configured.as_deref() {
                     Some(value) if !value.trim().is_empty() => value
@@ -10738,7 +10734,7 @@ fn resolve_controller_web<E: ConfigEnv>(
                     configured,
                 )
             }
-            ControllerCompatibilityTarget::Slskdn => {
+            ControllerProfile::Native => {
                 let configured = env.var("SLSKD_HTTP_ADDRESS");
                 let raw = configured
                     .clone()
@@ -10820,8 +10816,8 @@ fn resolve_controller_web<E: ConfigEnv>(
         env_bool_layer(env, "SLSKD_NO_HTTPS", web_https.disabled.unwrap_or(false))?;
     let https_port = env_parse_layer(env, "SLSKD_HTTPS_PORT", web_https.port, 5031_u16)?;
     let https_configured_ip_address = env.var("SLSKD_HTTPS_IP_ADDRESS").or(web_https.ip_address);
-    let https_ips = match controller_compatibility_target {
-        ControllerCompatibilityTarget::Slskd => match https_configured_ip_address.as_deref() {
+    let https_ips = match controller_profile {
+        ControllerProfile::Legacy => match https_configured_ip_address.as_deref() {
             Some(value) if !value.trim().is_empty() => value
                 .split(',')
                 .map(str::trim)
@@ -10829,7 +10825,7 @@ fn resolve_controller_web<E: ConfigEnv>(
                 .collect::<Result<Vec<_>, _>>()?,
             _ => vec![IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED)],
         },
-        ControllerCompatibilityTarget::Slskdn => vec![IpAddr::V4(Ipv4Addr::UNSPECIFIED)],
+        ControllerProfile::Native => vec![IpAddr::V4(Ipv4Addr::UNSPECIFIED)],
     };
     let https_certificate_pfx = env
         .var("SLSKD_HTTPS_CERT_PFX")
@@ -10894,7 +10890,7 @@ struct ApiAndWebHardeningSettings {
 #[allow(clippy::too_many_arguments)]
 fn resolve_api_and_web_hardening<E: ConfigEnv>(
     env: &E,
-    controller_compatibility_target: ControllerCompatibilityTarget,
+    controller_profile: ControllerProfile,
     auth_api_token: Option<String>,
     auth_read_write_token: Option<String>,
     auth_read_only_token: Option<String>,
@@ -10959,12 +10955,11 @@ fn resolve_api_and_web_hardening<E: ConfigEnv>(
         auth_rate_limit_authenticated,
         5000_u32,
     )?;
-    let web_max_request_body_size_default =
-        if controller_compatibility_target == ControllerCompatibilityTarget::Slskdn {
-            10 * 1024 * 1024
-        } else {
-            crate::http_server::BODY_SIZE_LIMIT as i64
-        };
+    let web_max_request_body_size_default = if controller_profile == ControllerProfile::Native {
+        10 * 1024 * 1024
+    } else {
+        crate::http_server::BODY_SIZE_LIMIT as i64
+    };
     let controller_web_max_request_body_size = env_parse_layer(
         env,
         "SLSKD_WEB_MAX_REQUEST_BODY_SIZE",
@@ -11028,7 +11023,7 @@ fn resolve_api_and_web_hardening<E: ConfigEnv>(
         ),
     };
     let web_rate_limiting_defaults =
-        ControllerWebRateLimitingSettings::defaults(controller_compatibility_target);
+        ControllerWebRateLimitingSettings::defaults(controller_profile);
     let controller_web_rate_limiting = ControllerWebRateLimitingSettings {
         enabled: env_bool_layer(
             env,
@@ -11422,7 +11417,7 @@ mod tests {
     }
 
     #[test]
-    fn controller_web_max_request_body_size_matches_slskdn_layers_and_bounds() {
+    fn controller_web_max_request_body_size_matches_native_layers_and_bounds() {
         let root = std::env::temp_dir().join(format!(
             "slskr-web-body-limit-config-{}-{}",
             std::process::id(),
@@ -11460,7 +11455,7 @@ mod tests {
             None,
             super::FileConfig::default(),
             &MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd")
+                .with("SLSKR_CONTROLLER_PROFILE", "legacy")
                 .with("SLSKR_AUTH_DISABLED", "true"),
         )
         .unwrap();
@@ -11650,7 +11645,7 @@ mod tests {
             super::FileConfig::default(),
             &MapEnv::default()
                 .with("SLSKD_APP_DIR", root.to_str().unwrap())
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+                .with("SLSKR_CONTROLLER_PROFILE", "native"),
         )
         .unwrap();
         assert!(config.controller_diagnostics_allow_memory_dump);
@@ -11660,7 +11655,7 @@ mod tests {
             super::FileConfig::default(),
             &MapEnv::default()
                 .with("SLSKD_APP_DIR", root.to_str().unwrap())
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn")
+                .with("SLSKR_CONTROLLER_PROFILE", "native")
                 .with("SLSKD_ALLOW_MEMORY_DUMP", "false")
                 .with("SLSKD_ALLOW_REMOTE_DUMP", "false"),
         )
@@ -11673,7 +11668,7 @@ mod tests {
             super::FileConfig::default(),
             &MapEnv::default()
                 .with("SLSKD_APP_DIR", root.to_str().unwrap())
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn")
+                .with("SLSKR_CONTROLLER_PROFILE", "native")
                 .with("SLSKD_ALLOW_MEMORY_DUMP", "true")
                 .with("SLSKD_ALLOW_REMOTE_DUMP", "true"),
         )
@@ -11686,7 +11681,7 @@ mod tests {
             None,
             super::FileConfig::default(),
             &MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn")
+                .with("SLSKR_CONTROLLER_PROFILE", "native")
                 .with("SLSKR_AUTH_DISABLED", "true")
                 .with("SLSKD_ENFORCE_SECURITY", "true")
                 .with("SLSKD_ALLOW_MEMORY_DUMP", "true"),
@@ -11704,7 +11699,7 @@ mod tests {
             None,
             super::FileConfig::default(),
             &MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn")
+                .with("SLSKR_CONTROLLER_PROFILE", "native")
                 .with("SLSKD_ENFORCE_SECURITY", "true")
                 .with("SLSKD_METRICS", "true")
                 .with("SLSKD_METRICS_USERNAME", "slskd")
@@ -11735,7 +11730,7 @@ mod tests {
             super::FileConfig::default(),
             &MapEnv::default()
                 .with("SLSKD_APP_DIR", root.to_str().unwrap())
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+                .with("SLSKR_CONTROLLER_PROFILE", "native"),
         )
         .unwrap();
         assert!(hash_from_audio.controller_hash_from_audio_file_enabled);
@@ -11794,7 +11789,7 @@ mod tests {
             None,
             super::FileConfig::default(),
             &MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd")
+                .with("SLSKR_CONTROLLER_PROFILE", "legacy")
                 .with("SLSKR_AUTH_DISABLED", "true"),
         )
         .unwrap();
@@ -11957,7 +11952,7 @@ mod tests {
             super::FileConfig::default(),
             &MapEnv::default()
                 .with("SLSKR_AUTH_DISABLED", "true")
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn")
+                .with("SLSKR_CONTROLLER_PROFILE", "native")
                 .with("LIDARR_IMPORT_DELAY", "19"),
         )
         .expect("frozen profile ignores current-only environment names");
@@ -11992,7 +11987,7 @@ mod tests {
                 &MapEnv::default()
                     .with("SLSKD_APP_DIR", root.to_str().unwrap())
                     .with("SLSKR_AUTH_DISABLED", "true")
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target),
+                    .with("SLSKR_CONTROLLER_PROFILE", target),
             )
             .unwrap();
             assert_eq!(config.managed_blacklist.patterns, vec![expected]);
@@ -12019,7 +12014,7 @@ mod tests {
             &MapEnv::default()
                 .with("SLSKD_APP_DIR", root.to_str().unwrap())
                 .with("SLSKR_AUTH_DISABLED", "true")
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+                .with("SLSKR_CONTROLLER_PROFILE", "native"),
         )
         .unwrap();
         assert_eq!(
@@ -12035,7 +12030,7 @@ mod tests {
             None,
             super::FileConfig::default(),
             &MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd")
+                .with("SLSKR_CONTROLLER_PROFILE", "legacy")
                 .with(
                     "SLSKR_FROZEN_TRANSFER_DOWNLOAD_JSON",
                     r#"{"slots":4,"speed_limit":777,"retry":{"partial":"overwrite","attempts":4,"delay":1200,"max_delay":31000},"destination":{"subdirectory":"Music/${SOURCE_USERNAME}","exists":"overwrite","permissions":{"mode":"0750"}}}"#,
@@ -12060,11 +12055,11 @@ mod tests {
             Some("0750")
         );
 
-        let slskdn = super::AppConfig::from_layers(
+        let native = super::AppConfig::from_layers(
             None,
             super::FileConfig::default(),
             &MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn")
+                .with("SLSKR_CONTROLLER_PROFILE", "native")
                 .with(
                     "SLSKR_FROZEN_TRANSFER_DOWNLOAD_JSON",
                     r#"{"slots":5,"speed_limit":888,"retry":{"incomplete":"overwrite","attempts":5,"delay":1300,"max_delay":32000},"completed_layout":"uploader_folder","auto_replace_stuck":true,"auto_replace_threshold":7.5,"auto_replace_interval":90}"#,
@@ -12073,13 +12068,13 @@ mod tests {
                 .with("SLSKD_AUTO_REPLACE_INTERVAL", "91"),
         )
         .unwrap();
-        assert_eq!(slskdn.transfer_download.slots, 6);
-        assert_eq!(slskdn.transfer_download.speed_limit_kib, 888);
-        assert_eq!(slskdn.transfer_download.retry.incomplete, "overwrite");
-        assert_eq!(slskdn.transfer_download.completed_layout, "uploader_folder");
-        assert!(slskdn.transfer_download.auto_replace_stuck);
-        assert_eq!(slskdn.transfer_download.auto_replace_threshold_percent, 7.5);
-        assert_eq!(slskdn.transfer_download.auto_replace_interval.as_secs(), 91);
+        assert_eq!(native.transfer_download.slots, 6);
+        assert_eq!(native.transfer_download.speed_limit_kib, 888);
+        assert_eq!(native.transfer_download.retry.incomplete, "overwrite");
+        assert_eq!(native.transfer_download.completed_layout, "uploader_folder");
+        assert!(native.transfer_download.auto_replace_stuck);
+        assert_eq!(native.transfer_download.auto_replace_threshold_percent, 7.5);
+        assert_eq!(native.transfer_download.auto_replace_interval.as_secs(), 91);
 
         for (target, json, expected) in [
             ("slskd", r#"{"retry":{"attempts":0}}"#, "attempts"),
@@ -12098,7 +12093,7 @@ mod tests {
                 None,
                 super::FileConfig::default(),
                 &MapEnv::default()
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                    .with("SLSKR_CONTROLLER_PROFILE", target)
                     .with("SLSKR_FROZEN_TRANSFER_DOWNLOAD_JSON", json),
             )
             .expect_err("invalid frozen transfer download setting must fail");
@@ -12182,31 +12177,31 @@ mod tests {
                 "second": {"members": ["alice"]}
             }
         }"#;
-        let slskdn = super::AppConfig::from_layers(
+        let native = super::AppConfig::from_layers(
             None,
             super::FileConfig::default(),
             &MapEnv::default().with("SLSKR_FROZEN_TRANSFER_GROUPS_JSON", duplicate),
         )
         .expect_err("slskdN rejects duplicate explicit group membership");
-        assert!(slskdn.contains("multiple groups"), "{slskdn}");
+        assert!(native.contains("multiple groups"), "{native}");
 
         let blacklist_duplicate = r#"{
             "blacklisted": {"members": ["alice"]},
             "user_defined": {"first": {"members": ["ALICE"]}}
         }"#;
-        let slskdn = super::AppConfig::from_layers(
+        let native_blacklist = super::AppConfig::from_layers(
             None,
             super::FileConfig::default(),
             &MapEnv::default().with("SLSKR_FROZEN_TRANSFER_GROUPS_JSON", blacklist_duplicate),
         )
         .expect_err("slskdN rejects blacklisted/user-defined duplicate membership");
-        assert!(slskdn.contains("multiple groups"), "{slskdn}");
+        assert!(native_blacklist.contains("multiple groups"), "{native_blacklist}");
 
         let slskd = super::AppConfig::from_layers(
             None,
             super::FileConfig::default(),
             &MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd")
+                .with("SLSKR_CONTROLLER_PROFILE", "legacy")
                 .with("SLSKR_AUTH_DISABLED", "true")
                 .with("SLSKR_FROZEN_TRANSFER_GROUPS_JSON", duplicate),
         )
@@ -12233,9 +12228,9 @@ mod tests {
     }
 
     #[test]
-    fn frozen_slskd_startup_aliases_drive_core_runtime_configuration() {
+    fn frozen_controller_startup_aliases_drive_core_runtime_configuration() {
         let env = MapEnv::default()
-            .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd")
+            .with("SLSKR_CONTROLLER_PROFILE", "legacy")
             .with("SLSKD_APP_DIR", "/tmp/slskd-compatible-state")
             .with("SLSKD_HTTP_IP_ADDRESS", "127.0.0.2")
             .with("SLSKD_HTTP_PORT", "55030")
@@ -12295,7 +12290,7 @@ mod tests {
                 None,
                 super::FileConfig::default(),
                 &MapEnv::default()
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", target)
+                    .with("SLSKR_CONTROLLER_PROFILE", target)
                     .with("SLSKD_NO_CONNECT", "true")
                     .with("SLSKR_AUTH_DISABLED", "true"),
             )
@@ -12307,7 +12302,7 @@ mod tests {
     }
 
     #[test]
-    fn native_startup_names_take_precedence_over_frozen_slskd_aliases() {
+    fn native_startup_names_take_precedence_over_frozen_controller_aliases() {
         let env = MapEnv::default()
             .with("SLSKR_HTTP_BIND", "127.0.0.1:51000")
             .with("SLSKD_HTTP_IP_ADDRESS", "127.0.0.2")
@@ -12337,7 +12332,7 @@ mod tests {
     }
 
     #[test]
-    fn invalid_frozen_slskd_alias_reports_the_exact_name() {
+    fn invalid_frozen_controller_alias_reports_the_exact_name() {
         let error = super::AppConfig::from_layers(
             None,
             super::FileConfig::default(),
@@ -12349,33 +12344,36 @@ mod tests {
 
     #[test]
     fn frozen_web_bind_profiles_preserve_multi_address_and_target_specific_names() {
-        let slskd_default = super::AppConfig::from_layers(
+        let controller_default = super::AppConfig::from_layers(
             None,
             super::FileConfig::default(),
             &MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd")
+                .with("SLSKR_CONTROLLER_PROFILE", "legacy")
                 .with("SLSKR_AUTH_DISABLED", "true"),
         )
         .expect("frozen slskd default web bind");
-        assert_eq!(slskd_default.controller_http_address, None);
-        assert_eq!(slskd_default.http_binds, vec!["[::]:5030".parse().unwrap()]);
+        assert_eq!(controller_default.controller_http_address, None);
+        assert_eq!(
+            controller_default.http_binds,
+            vec!["[::]:5030".parse().unwrap()]
+        );
 
-        let slskd_multi = super::AppConfig::from_layers(
+        let controller_multi = super::AppConfig::from_layers(
             None,
             super::FileConfig::default(),
             &MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd")
+                .with("SLSKR_CONTROLLER_PROFILE", "legacy")
                 .with("SLSKR_AUTH_DISABLED", "true")
                 .with("SLSKD_HTTP_IP_ADDRESS", "127.0.0.1, ::1")
                 .with("SLSKD_HTTP_PORT", "55440"),
         )
         .expect("frozen slskd comma-separated web binds");
         assert_eq!(
-            slskd_multi.controller_http_address.as_deref(),
+            controller_multi.controller_http_address.as_deref(),
             Some("127.0.0.1, ::1")
         );
         assert_eq!(
-            slskd_multi.http_binds,
+            controller_multi.http_binds,
             vec![
                 "127.0.0.1:55440".parse().unwrap(),
                 "[::1]:55440".parse().unwrap()
@@ -12386,7 +12384,7 @@ mod tests {
             None,
             super::FileConfig::default(),
             &MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn")
+                .with("SLSKR_CONTROLLER_PROFILE", "native")
                 .with("SLSKR_AUTH_DISABLED", "true")
                 .with("SLSKD_HTTP_IP_ADDRESS", "127.0.0.2")
                 .with("SLSKD_HTTP_ADDRESS", "*")
@@ -12400,7 +12398,7 @@ mod tests {
             None,
             super::FileConfig::default(),
             &MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd")
+                .with("SLSKR_CONTROLLER_PROFILE", "legacy")
                 .with("SLSKR_AUTH_DISABLED", "true")
                 .with("SLSKD_HTTP_IP_ADDRESS", "127.0.0.1,not-an-ip"),
         )
@@ -12446,7 +12444,7 @@ mod tests {
             &MapEnv::default()
                 .with("SLSKR_STATE_DIR", root.to_str().unwrap())
                 .with("SLSKR_AUTH_DISABLED", "true")
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd"),
+                .with("SLSKR_CONTROLLER_PROFILE", "legacy"),
         )
         .expect("directory YAML provider");
         assert_eq!(yaml.downloads_dir, yaml_downloads);
@@ -12462,7 +12460,7 @@ mod tests {
             &MapEnv::default()
                 .with("SLSKR_STATE_DIR", root.to_str().unwrap())
                 .with("SLSKR_AUTH_DISABLED", "true")
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd")
+                .with("SLSKR_CONTROLLER_PROFILE", "legacy")
                 .with("SLSKD_DOWNLOADS_DIR", env_downloads.to_str().unwrap()),
         )
         .expect("directory YAML precedence over frozen environment alias");
@@ -12495,22 +12493,25 @@ mod tests {
             .unwrap()
             .to_str()
             .unwrap();
-        let slskd_error = super::AppConfig::from_layers(
+        let controller_error = super::AppConfig::from_layers(
             None,
             super::FileConfig::default(),
             &MapEnv::default()
                 .with("SLSKR_STATE_DIR", root.to_str().unwrap())
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd")
+                .with("SLSKR_CONTROLLER_PROFILE", "legacy")
                 .with("SLSKR_DOWNLOADS_DIR", relative),
         )
         .expect_err("slskd rejects relative download directories");
-        assert!(slskd_error.contains("absolute path"), "{slskd_error}");
+        assert!(
+            controller_error.contains("absolute path"),
+            "{controller_error}"
+        );
         let slskdn = super::AppConfig::from_layers(
             None,
             super::FileConfig::default(),
             &MapEnv::default()
                 .with("SLSKR_STATE_DIR", root.to_str().unwrap())
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn")
+                .with("SLSKR_CONTROLLER_PROFILE", "native")
                 .with("SLSKR_DOWNLOADS_DIR", relative),
         )
         .expect("slskdN accepts an existing relative download directory");
@@ -12521,7 +12522,7 @@ mod tests {
     }
 
     #[test]
-    fn slskdn_rejects_loopback_listener_only_when_connecting() {
+    fn native_rejects_loopback_listener_only_when_connecting() {
         let root = std::env::temp_dir().join(format!(
             "slskr-no-connect-validation-{}-{}",
             std::process::id(),
@@ -12544,7 +12545,7 @@ mod tests {
             super::FileConfig::default(),
             &base
                 .clone()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd")
+                .with("SLSKR_CONTROLLER_PROFILE", "legacy")
                 .with("SLSKD_NO_CONNECT", "false"),
         )
         .expect("frozen slskd permits a loopback listener while connecting");
@@ -12555,7 +12556,7 @@ mod tests {
             super::FileConfig::default(),
             &base
                 .clone()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn")
+                .with("SLSKR_CONTROLLER_PROFILE", "native")
                 .with("SLSKD_NO_CONNECT", "true"),
         )
         .expect("frozen slskdN permits a loopback listener when no-connect is set");
@@ -12565,7 +12566,7 @@ mod tests {
             None,
             super::FileConfig::default(),
             &base
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn")
+                .with("SLSKR_CONTROLLER_PROFILE", "native")
                 .with("SLSKD_NO_CONNECT", "false"),
         )
         .expect_err("frozen slskdN rejects a loopback listener while connecting");
@@ -12597,7 +12598,7 @@ mod tests {
             super::FileConfig::default(),
             &MapEnv::default()
                 .with("SLSKR_STATE_DIR", root.to_str().unwrap())
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd"),
+                .with("SLSKR_CONTROLLER_PROFILE", "legacy"),
         )
         .expect("controller YAML startup provider");
 
@@ -12617,7 +12618,7 @@ mod tests {
         // type-1 obfuscation listener or parse its obfuscation settings, so
         // the YAML `soulseek.obfuscation` block above is ignored for this
         // target. See release-notes/20260817-slskd-obfuscation-profile.md
-        // and slskd_profile_does_not_expose_slskdn_type1_obfuscation_layers.
+        // and controller_profile_does_not_expose_native_type1_obfuscation_layers.
         assert!(config.obfuscated_listener_bind.is_none());
         assert_eq!(config.http_bind, "127.0.0.3:55102".parse().unwrap());
         assert!(!config.dht_enabled);
@@ -13151,37 +13152,31 @@ mod tests {
     }
 
     #[test]
-    fn controller_compatibility_target_is_explicit_bounded_and_projected() {
+    fn controller_profile_is_explicit_bounded_and_projected() {
         let default = super::AppConfig::from_layers(
             None,
             super::FileConfig::default(),
             &MapEnv::default().with("SLSKR_AUTH_DISABLED", "true"),
         )
         .expect("default controller compatibility target");
-        assert_eq!(
-            default.controller_compatibility_target,
-            super::ControllerCompatibilityTarget::Slskdn
-        );
+        assert_eq!(default.controller_profile, super::ControllerProfile::Native);
 
         let slskd = super::AppConfig::from_layers(
             None,
             super::FileConfig::default(),
             &MapEnv::default()
                 .with("SLSKR_AUTH_DISABLED", "true")
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd"),
+                .with("SLSKR_CONTROLLER_PROFILE", "legacy"),
         )
         .expect("slskd controller compatibility target");
-        assert_eq!(
-            slskd.controller_compatibility_target,
-            super::ControllerCompatibilityTarget::Slskd
-        );
+        assert_eq!(slskd.controller_profile, super::ControllerProfile::Legacy);
         assert!(slskd
             .sanitized_json()
-            .contains("\"controller_compatibility_target\":\"slskd\""));
+            .contains("\"controller_profile\":\"legacy\""));
 
         let file = super::FileConfig {
             compatibility: super::CompatibilityFileConfig {
-                controller_target: Some("slskd".to_owned()),
+                profile: Some("slskd".to_owned()),
                 ..Default::default()
             },
             ..Default::default()
@@ -13193,17 +13188,17 @@ mod tests {
         )
         .expect("file controller compatibility target");
         assert_eq!(
-            from_file.controller_compatibility_target,
-            super::ControllerCompatibilityTarget::Slskd
+            from_file.controller_profile,
+            super::ControllerProfile::Legacy
         );
 
         let error = super::AppConfig::from_layers(
             None,
             super::FileConfig::default(),
-            &MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "auto"),
+            &MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "auto"),
         )
         .expect_err("ambiguous compatibility target must fail");
-        assert!(error.contains("must be slskd or slskdn"));
+        assert!(error.contains("must be legacy or native"));
     }
 
     #[test]
@@ -13226,7 +13221,7 @@ mod tests {
             super::FileConfig::default(),
             &MapEnv::default()
                 .with("SLSKR_AUTH_DISABLED", "true")
-                .with("SLSKDN_POD_GOLD_STAR_CLUB_AUTOJOIN", "true"),
+                .with("SLSKR_POD_GOLD_STAR_CLUB_AUTOJOIN", "true"),
         )
         .expect("native/current Gold Star Club opt-in");
         assert!(current_enabled.advanced_networking.gold_star_club_autojoin);
@@ -13236,7 +13231,7 @@ mod tests {
             super::FileConfig::default(),
             &MapEnv::default()
                 .with("SLSKR_AUTH_DISABLED", "true")
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+                .with("SLSKR_CONTROLLER_PROFILE", "native"),
         )
         .expect("frozen Gold Star Club default");
         assert!(frozen.advanced_networking.gold_star_club_autojoin);
@@ -13255,7 +13250,7 @@ mod tests {
             file_disabled,
             &MapEnv::default()
                 .with("SLSKR_AUTH_DISABLED", "true")
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+                .with("SLSKR_CONTROLLER_PROFILE", "native"),
         )
         .expect("file-disabled Gold Star Club");
         assert!(!from_file.advanced_networking.gold_star_club_autojoin);
@@ -13273,8 +13268,8 @@ mod tests {
             },
             &MapEnv::default()
                 .with("SLSKR_AUTH_DISABLED", "true")
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn")
-                .with("SLSKDN_POD_GOLD_STAR_CLUB_AUTOJOIN", "true"),
+                .with("SLSKR_CONTROLLER_PROFILE", "native")
+                .with("SLSKR_POD_GOLD_STAR_CLUB_AUTOJOIN", "true"),
         )
         .expect("environment-enabled Gold Star Club");
         assert!(env_wins.advanced_networking.gold_star_club_autojoin);
@@ -13385,7 +13380,7 @@ mod tests {
             super::FileConfig::default(),
             &MapEnv::default()
                 .with("SLSKR_AUTH_DISABLED", "true")
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd"),
+                .with("SLSKR_CONTROLLER_PROFILE", "legacy"),
         )
         .expect("slskd connection defaults");
         assert_eq!(
@@ -13598,7 +13593,7 @@ mod tests {
                 None,
                 super::FileConfig::default(),
                 &MapEnv::default()
-                    .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn")
+                    .with("SLSKR_CONTROLLER_PROFILE", "native")
                     .with("SLSKD_BLACKLIST", "true")
                     .with("SLSKD_BLACKLIST_FILE", path.to_str().unwrap()),
             )
@@ -13636,7 +13631,7 @@ mod tests {
             None,
             super::FileConfig::default(),
             &MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn")
+                .with("SLSKR_CONTROLLER_PROFILE", "native")
                 .with("SLSKD_BLACKLIST", "true")
                 .with("SLSKD_BLACKLIST_FILE", path.to_str().unwrap()),
         )
@@ -13649,7 +13644,7 @@ mod tests {
             None,
             super::FileConfig::default(),
             &MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd")
+                .with("SLSKR_CONTROLLER_PROFILE", "legacy")
                 .with("SLSKD_BLACKLIST", "true")
                 .with("SLSKD_BLACKLIST_FILE", path.to_str().unwrap()),
         );
@@ -13665,7 +13660,7 @@ mod tests {
             super::FileConfig::default(),
             &MapEnv::default()
                 .with("SLSKR_AUTH_DISABLED", "true")
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd"),
+                .with("SLSKR_CONTROLLER_PROFILE", "legacy"),
         )
         .expect("slskd swagger default");
         assert!(!slskd.controller_swagger);
@@ -13675,7 +13670,7 @@ mod tests {
             super::FileConfig::default(),
             &MapEnv::default()
                 .with("SLSKR_AUTH_DISABLED", "true")
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+                .with("SLSKR_CONTROLLER_PROFILE", "native"),
         )
         .expect("slskdN swagger default");
         assert!(slskdn.controller_swagger);
@@ -13685,7 +13680,7 @@ mod tests {
             super::FileConfig::default(),
             &MapEnv::default()
                 .with("SLSKR_AUTH_DISABLED", "true")
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn")
+                .with("SLSKR_CONTROLLER_PROFILE", "native")
                 .with("SLSKD_SWAGGER", "false"),
         )
         .expect("slskdN swagger environment override");
@@ -13699,7 +13694,7 @@ mod tests {
             super::FileConfig::default(),
             &MapEnv::default()
                 .with("SLSKR_AUTH_DISABLED", "true")
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd"),
+                .with("SLSKR_CONTROLLER_PROFILE", "legacy"),
         )
         .expect("slskd metrics defaults");
         assert!(!slskd.controller_metrics_enabled);
@@ -13707,23 +13702,24 @@ mod tests {
         assert_eq!(slskd.controller_metrics_username, "slskd");
         assert!(slskd.controller_metrics_password.is_empty());
 
-        let slskdn = super::AppConfig::from_layers(
+        let native = super::AppConfig::from_layers(
             None,
             super::FileConfig::default(),
             &MapEnv::default()
                 .with("SLSKR_AUTH_DISABLED", "true")
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+                .with("SLSKR_CONTROLLER_PROFILE", "native"),
         )
-        .expect("slskdN disabled metrics defaults");
-        assert!(!slskdn.controller_metrics_enabled);
-        assert!(slskdn.controller_metrics_password.is_empty());
+        .expect("native disabled metrics defaults");
+        assert!(!native.controller_metrics_enabled);
+        assert_eq!(native.controller_metrics_username, "slskr");
+        assert!(native.controller_metrics_password.is_empty());
 
         let missing_password = super::AppConfig::from_layers(
             None,
             super::FileConfig::default(),
             &MapEnv::default()
                 .with("SLSKR_AUTH_DISABLED", "true")
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn")
+                .with("SLSKR_CONTROLLER_PROFILE", "native")
                 .with("SLSKD_METRICS", "true"),
         );
         assert!(missing_password.is_err());
@@ -13733,7 +13729,7 @@ mod tests {
             super::FileConfig::default(),
             &MapEnv::default()
                 .with("SLSKR_AUTH_DISABLED", "true")
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn")
+                .with("SLSKR_CONTROLLER_PROFILE", "native")
                 .with("SLSKD_METRICS", "true")
                 .with("SLSKD_METRICS_URL", "prometheus")
                 .with("SLSKD_METRICS_USERNAME", "metrics-user")
@@ -13748,28 +13744,29 @@ mod tests {
 
     #[test]
     fn controller_web_auth_defaults_match_frozen_profiles() {
-        let slskd_default = super::AppConfig::from_layers(
+        let controller_default = super::AppConfig::from_layers(
             None,
             super::FileConfig::default(),
-            &MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd"),
+            &MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "legacy"),
         )
         .expect("slskd compatibility default authentication");
-        assert_eq!(slskd_default.controller_web_auth_password, "slskd");
+        assert_eq!(controller_default.controller_web_auth_password, "slskd");
 
-        let slskdn_default = super::AppConfig::from_layers(
+        let native_default = super::AppConfig::from_layers(
             None,
             super::FileConfig::default(),
-            &MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+            &MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "native"),
         )
         .expect("slskdN compatibility default authentication");
-        assert_eq!(slskdn_default.controller_web_auth_password, "slskd");
+        assert_eq!(native_default.controller_web_auth_username, "slskr");
+        assert_eq!(native_default.controller_web_auth_password, "slskr");
 
         let disabled = super::AppConfig::from_layers(
             None,
             super::FileConfig::default(),
             &MapEnv::default()
                 .with("SLSKR_AUTH_DISABLED", "true")
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+                .with("SLSKR_CONTROLLER_PROFILE", "native"),
         )
         .expect("disabled web authentication does not need credentials");
         assert!(disabled.controller_web_auth_password.is_empty());
@@ -13778,7 +13775,7 @@ mod tests {
             None,
             super::FileConfig::default(),
             &MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn")
+                .with("SLSKR_CONTROLLER_PROFILE", "native")
                 .with("SLSKD_USERNAME", "admin")
                 .with("SLSKD_PASSWORD", "configured-secret"),
         )
@@ -13794,7 +13791,7 @@ mod tests {
             super::FileConfig::default(),
             &MapEnv::default()
                 .with("SLSKR_AUTH_DISABLED", "true")
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd"),
+                .with("SLSKR_CONTROLLER_PROFILE", "legacy"),
         )
         .expect("headless default");
         assert!(!default.controller_headless);
@@ -13804,7 +13801,7 @@ mod tests {
             super::FileConfig::default(),
             &MapEnv::default()
                 .with("SLSKR_AUTH_DISABLED", "true")
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn")
+                .with("SLSKR_CONTROLLER_PROFILE", "native")
                 .with("SLSKD_HEADLESS", "true"),
         )
         .expect("headless environment override");
@@ -13947,12 +13944,12 @@ mod tests {
     }
 
     #[test]
-    fn slskd_profile_does_not_expose_slskdn_type1_obfuscation_layers() {
+    fn controller_profile_does_not_expose_native_type1_obfuscation_layers() {
         let slskd = super::AppConfig::from_layers(
             None,
             super::FileConfig::default(),
             &MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd")
+                .with("SLSKR_CONTROLLER_PROFILE", "legacy")
                 // These are deliberately malformed slskdN-only layers. The
                 // frozen slskd profile does not parse or expose them.
                 .with("SLSKD_SLSK_OBFUSCATION", "not-a-boolean")
@@ -14012,7 +14009,7 @@ mod tests {
         let default = super::AppConfig::from_layers(
             None,
             super::FileConfig::default(),
-            &MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+            &MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "native"),
         )
         .expect("default slskdN VirtualSoulfind v2 config");
         assert!(default.virtual_soulfind_v2_enabled);
@@ -14025,7 +14022,7 @@ mod tests {
                 },
                 ..super::FileConfig::default()
             },
-            &MapEnv::default().with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskd"),
+            &MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "legacy"),
         )
         .expect("file-disabled VirtualSoulfind v2 config");
         assert!(!file_disabled.virtual_soulfind_v2_enabled);
@@ -14039,7 +14036,7 @@ mod tests {
                 ..super::FileConfig::default()
             },
             &MapEnv::default()
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn")
+                .with("SLSKR_CONTROLLER_PROFILE", "native")
                 .with("SLSKR_VIRTUAL_SOULFIND_V2_ENABLED", "true"),
         )
         .expect("environment-enabled VirtualSoulfind v2 config");
@@ -14555,7 +14552,7 @@ throttling:
             super::FileConfig::default(),
             &MapEnv::default()
                 .with("SLSKD_APP_DIR", root.to_str().unwrap())
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+                .with("SLSKR_CONTROLLER_PROFILE", "native"),
         )
         .unwrap();
         assert_eq!(config.core_workflow.rooms, ["Ambient", "Jazz"]);
@@ -14734,7 +14731,7 @@ security:
             super::FileConfig::default(),
             &MapEnv::default()
                 .with("SLSKD_APP_DIR", root.to_str().unwrap())
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+                .with("SLSKR_CONTROLLER_PROFILE", "native"),
         )
         .unwrap();
         let advanced = &config.advanced_networking;
@@ -14802,7 +14799,7 @@ security:
             super::FileConfig::default(),
             &MapEnv::default()
                 .with("SLSKD_APP_DIR", root.to_str().unwrap())
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+                .with("SLSKR_CONTROLLER_PROFILE", "native"),
         )
         .expect_err("inconsistent consensus must fail");
         assert!(error.contains("sync_security"), "{error}");
@@ -14940,7 +14937,7 @@ virtualSoulfind:
             super::FileConfig::default(),
             &MapEnv::default()
                 .with("SLSKD_APP_DIR", root.to_str().unwrap())
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+                .with("SLSKR_CONTROLLER_PROFILE", "native"),
         )
         .unwrap();
         let media = &config.media_services;
@@ -15028,7 +15025,7 @@ virtualSoulfind:
             super::FileConfig::default(),
             &MapEnv::default()
                 .with("SLSKD_APP_DIR", root.to_str().unwrap())
-                .with("SLSKR_CONTROLLER_COMPATIBILITY_TARGET", "slskdn"),
+                .with("SLSKR_CONTROLLER_PROFILE", "native"),
         )
         .expect_err("an enabled authenticated bridge requires a password");
         assert!(error.contains("virtualSoulfind.bridge"), "{error}");

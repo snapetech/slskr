@@ -464,19 +464,19 @@ const initialState = {
   themeMenuOpen: false,
 };
 
-const getCompatibilityTargetHint = () => {
+const getRuntimeProfileHint = () => {
   if (typeof document === 'undefined') {
     return undefined;
   }
 
   const target = document
-    .querySelector('meta[name="slskr-compatibility-target"]')
+    .querySelector('meta[name="slskr-runtime-profile"]')
     ?.getAttribute('content');
-  return ['slskd', 'slskdn'].includes(target) ? target : undefined;
+  return ['legacy', 'native'].includes(target) ? target : undefined;
 };
 
 const ModeSpecificConnectButton = ({
-  compatibilityTarget,
+  runtimeProfile,
   connectionWatchdog,
   controller = {},
   mode,
@@ -485,7 +485,7 @@ const ModeSpecificConnectButton = ({
   onConnect,
   user,
 }) => {
-  const compatibilityRole = compatibilityTarget ? 'presentation' : undefined;
+  const compatibilityRole = runtimeProfile ? 'presentation' : undefined;
 
   if (mode === 'Agent') {
     const isConnected = controller?.state === 'Connected';
@@ -657,11 +657,11 @@ class App extends Component {
   constructor(props) {
     super(props);
 
-    this.compatibilityTargetHint = getCompatibilityTargetHint();
+    this.runtimeProfileHint = getRuntimeProfileHint();
     this.state = {
       ...initialState,
-      applicationState: this.compatibilityTargetHint
-        ? { compatibilityTarget: this.compatibilityTargetHint }
+      applicationState: this.runtimeProfileHint
+        ? { runtimeProfile: this.runtimeProfileHint }
         : initialState.applicationState,
     };
     this.applicationHub = undefined;
@@ -790,7 +790,7 @@ class App extends Component {
   };
 
   refreshNavigationActivity = async () => {
-    if (['slskd', 'slskdn'].includes(this.compatibilityTargetHint)) {
+    if (['legacy', 'native'].includes(this.runtimeProfileHint)) {
       this.setState({
         navActivity: {
           chat: false,
@@ -905,7 +905,7 @@ class App extends Component {
           }
 
           const sessionValid =
-            !securityEnabled && this.compatibilityTargetHint === 'slskdn'
+            !securityEnabled && this.runtimeProfileHint === 'native'
               ? true
               : await session.check();
 
@@ -1190,13 +1190,13 @@ class App extends Component {
     const previousNetworkEndpointSnapshot = getStoredNetworkEndpointSnapshot();
 
     const { controller, mode } = relay;
-    const compatibilityTarget = ['slskd', 'slskdn'].includes(
-      applicationState.compatibilityTarget,
+    const runtimeProfile = ['legacy', 'native'].includes(
+      applicationState.runtimeProfile,
     )
-      ? applicationState.compatibilityTarget
+      ? applicationState.runtimeProfile
       : undefined;
-    const isSlskdProfile = compatibilityTarget === 'slskd';
-    const isSlskdnProfile = compatibilityTarget === 'slskdn';
+    const isLegacyProfile = runtimeProfile === 'legacy';
+    const isNativeProfile = runtimeProfile === 'native';
 
     if (!initialized) {
       return (
@@ -1341,7 +1341,7 @@ class App extends Component {
           <Sidebar.Pushable
             as={Segment}
             className="app"
-            data-compatibility-target={compatibilityTarget || 'unknown'}
+            data-runtime-profile={runtimeProfile || 'unknown'}
           >
             <Sidebar
               animation="overlay"
@@ -1370,7 +1370,7 @@ class App extends Component {
                   Agent Mode
                 </Menu.Item>
               ) : (
-                isSlskdProfile ? (
+                isLegacyProfile ? (
                 <>
                   <NavLink to="/dashboard">
                     <Menu.Item data-testid="nav-dashboard">
@@ -1429,7 +1429,7 @@ class App extends Component {
                     </Menu.Item>
                   </NavLink>
                 </>
-                ) : isSlskdnProfile ? (
+                ) : isNativeProfile ? (
                 <>
                   <NavLink to="/searches">
                     <Menu.Item data-testid="nav-search">
@@ -1652,7 +1652,7 @@ class App extends Component {
               inverted
             >
               <ModeSpecificConnectButton
-                compatibilityTarget={compatibilityTarget}
+                runtimeProfile={runtimeProfile}
                 connectionWatchdog={connectionWatchdog}
                 controller={controller}
                 mode={mode}
@@ -1674,7 +1674,7 @@ class App extends Component {
                   <Menu.Item
                     className={`theme-menu ${themeMenuOpen ? 'visible' : ''}`}
                     data-testid="theme-menu"
-                    role={compatibilityTarget ? 'presentation' : undefined}
+                    role={runtimeProfile ? 'presentation' : undefined}
                     title="Choose the web UI color theme"
                   >
                     <Icon name="paint brush" />
@@ -1848,17 +1848,17 @@ class App extends Component {
                     element={
                       <Navigate
                         replace
-                        to={isSlskdProfile ? '/dashboard' : '/searches'}
+                        to={isLegacyProfile ? '/dashboard' : '/searches'}
                       />
                     }
                   />
                   <Route
                     path="/dashboard"
                     element={
-                      isSlskdProfile ? (
+                      isLegacyProfile ? (
                         this.withTokenCheck(
                           <CompatibilityDashboard
-                            compatibilityTarget={compatibilityTarget}
+                            runtimeProfile={runtimeProfile}
                             server={applicationState.server}
                           />,
                         )
@@ -1945,7 +1945,7 @@ class App extends Component {
                       this.withTokenCheck(
                         <div className="view">
                           <Searches
-                            compatibilityTarget={compatibilityTarget}
+                            runtimeProfile={runtimeProfile}
                             server={applicationState.server}
                           />
                         </div>,
@@ -1958,7 +1958,7 @@ class App extends Component {
                       this.withTokenCheck(
                         <div className="view">
                           <Searches
-                            compatibilityTarget={compatibilityTarget}
+                            runtimeProfile={runtimeProfile}
                             server={applicationState.server}
                           />
                         </div>,
@@ -1978,7 +1978,7 @@ class App extends Component {
                   <Route
                     path="/browse"
                     element={this.withTokenCheck(
-                      <Browse compatibilityTarget={compatibilityTarget} />,
+                      <Browse runtimeProfile={runtimeProfile} />,
                     )}
                   />
                   <Route
@@ -2013,9 +2013,9 @@ class App extends Component {
                     path="/chat"
                     element={
                       this.withTokenCheck(
-                        isSlskdProfile ? (
+                        isLegacyProfile ? (
                           <Chat
-                            compatibilityTarget={compatibilityTarget}
+                            runtimeProfile={runtimeProfile}
                             state={applicationState}
                           />
                         ) : (
@@ -2032,7 +2032,7 @@ class App extends Component {
                     element={
                       this.withTokenCheck(
                           <Messaging
-                            compatibilityTarget={compatibilityTarget}
+                            runtimeProfile={runtimeProfile}
                             initialKind="pod"
                           state={applicationState}
                         />,
@@ -2051,11 +2051,11 @@ class App extends Component {
                     path="/rooms"
                     element={
                       this.withTokenCheck(
-                        isSlskdProfile ? (
-                          <Rooms compatibilityTarget={compatibilityTarget} />
+                        isLegacyProfile ? (
+                          <Rooms runtimeProfile={runtimeProfile} />
                         ) : (
                           <Messaging
-                            compatibilityTarget={compatibilityTarget}
+                            runtimeProfile={runtimeProfile}
                             initialKind="room"
                             state={applicationState}
                           />
@@ -2066,11 +2066,11 @@ class App extends Component {
                   <Route
                     path="/messages"
                     element={
-                      isSlskdProfile ? (
+                      isLegacyProfile ? (
                         <Navigate replace to="/chat" />
                       ) : this.withTokenCheck(
                         <Messaging
-                          compatibilityTarget={compatibilityTarget}
+                          runtimeProfile={runtimeProfile}
                           initialKind="mixed"
                           state={applicationState}
                         />,
@@ -2083,7 +2083,7 @@ class App extends Component {
                       this.withTokenCheck(
                         <div className="view">
                           <Transfers
-                            compatibilityTarget={compatibilityTarget}
+                            runtimeProfile={runtimeProfile}
                             direction="upload"
                           />
                         </div>,
@@ -2096,7 +2096,7 @@ class App extends Component {
                       this.withTokenCheck(
                         <div className="view">
                           <Transfers
-                            compatibilityTarget={compatibilityTarget}
+                            runtimeProfile={runtimeProfile}
                             direction="download"
                             server={applicationState.server}
                           />
@@ -2109,7 +2109,7 @@ class App extends Component {
                     element={
                       this.withTokenCheck(
                         <System
-                          compatibilityTarget={compatibilityTarget}
+                          runtimeProfile={runtimeProfile}
                           options={applicationOptions}
                           state={applicationState}
                           theme={semanticTheme}
@@ -2122,7 +2122,7 @@ class App extends Component {
                     element={
                       this.withTokenCheck(
                         <System
-                          compatibilityTarget={compatibilityTarget}
+                          runtimeProfile={runtimeProfile}
                           options={applicationOptions}
                           state={applicationState}
                           theme={semanticTheme}
@@ -2140,8 +2140,8 @@ class App extends Component {
               </AppContext.Provider>
             </Sidebar.Pusher>
           </Sidebar.Pushable>
-          {!isSlskdProfile && (
-            <PlayerBar compatibilityTarget={compatibilityTarget} />
+          {!isLegacyProfile && (
+            <PlayerBar runtimeProfile={runtimeProfile} />
           )}
         </PlayerProvider>
         <ToastContainer
@@ -2155,7 +2155,7 @@ class App extends Component {
           position="bottom-center"
           rtl={false}
         />
-        <Footer compatibilityTarget={compatibilityTarget} />
+        <Footer runtimeProfile={runtimeProfile} />
       </>
     );
   }
