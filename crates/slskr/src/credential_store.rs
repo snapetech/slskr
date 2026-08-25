@@ -536,6 +536,13 @@ mod tests {
         let root = test_dir("oversized-write");
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).expect("create fixture directory");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+
+            fs::set_permissions(&root, fs::Permissions::from_mode(0o700))
+                .expect("restrict fixture directory");
+        }
         let path = root.join("credentials.json");
         let credentials = LoginCredentials::default_client(
             "user".to_owned(),
