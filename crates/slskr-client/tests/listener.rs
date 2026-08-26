@@ -6,7 +6,7 @@ use slskr_client::{
     },
     listener::{
         demux_incoming, demux_obfuscated_incoming, demux_shared_incoming, IncomingConnection,
-        Listener,
+        Listener, SharedIncomingConnection,
     },
     peer_cache::MAX_PEER_USERNAME_BYTES,
     ClientError,
@@ -14,7 +14,7 @@ use slskr_client::{
 use slskr_protocol::{
     distributed::DistributedMessage, init::InitMessage, peer::PeerMessage, InitFrame,
 };
-use tokio::io::duplex;
+use tokio::io::{duplex, AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::time::Duration;
 
@@ -197,6 +197,70 @@ async fn shared_listener_accepts_raw_connection_kind() {
 
     let (incoming, _) = listener.accept_shared().await.unwrap();
     assert!(matches!(incoming, IncomingConnection::Distributed(_)));
+    client_task.await.unwrap();
+}
+
+#[tokio::test]
+async fn shared_mesh_listener_routes_tls_without_consuming_record_bytes() {
+    let listener = Listener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let client_task = tokio::spawn(async move {
+        let mut stream = TcpStream::connect(address).await.unwrap();
+        stream.write_all(&[0x16, 0x03]).await.unwrap();
+        stream
+    });
+
+    let (incoming, remote_addr) = listener.accept_shared_mesh().await.unwrap();
+    assert!(remote_addr.ip().is_loopback());
+    let SharedIncomingConnection::MeshOverlay(mut stream) = incoming else {
+        panic!("expected mesh overlay connection");
+    };
+    let mut prefix = [0_u8; 2];
+    stream.read_exact(&mut prefix).await.unwrap();
+    assert_eq!(prefix, [0x16, 0x03]);
+    drop(stream);
+    client_task.await.unwrap();
+}
+
+#[tokio::test]
+async fn shared_mesh_listener_preserves_soulseek_demux() {
+    let listener = Listener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let client_task = tokio::spawn(async move {
+        let mut stream = TcpStream::connect(address).await.unwrap();
+        write_connection_kind(&mut stream, ConnectionKind::Distributed)
+            .await
+            .unwrap();
+    });
+
+    let (incoming, _) = listener.accept_shared_mesh().await.unwrap();
+    assert!(matches!(
+        incoming,
+        SharedIncomingConnection::Soulseek(IncomingConnection::Distributed(_))
+    ));
+    client_task.await.unwrap();
+}
+
+#[tokio::test]
+async fn shared_mesh_listener_rejects_a_stalled_tls_prefix() {
+    let listener = Listener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let client_task = tokio::spawn(async move {
+        let mut stream = TcpStream::connect(address).await.unwrap();
+        stream.write_all(&[0x16]).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(400)).await;
+    });
+
+    let error = listener
+        .accept_shared_mesh_with_timeout(Duration::from_secs(1))
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        ClientError::TimedOut {
+            operation: "shared Soulseek/mesh TCP classification"
+        }
+    ));
     client_task.await.unwrap();
 }
 

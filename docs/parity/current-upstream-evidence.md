@@ -1,8 +1,9 @@
 # Current-upstream executable parity evidence
 
-Status: controlled-runtime and VPN-scoped public Soulseek acceptance complete
-for the available credential pool; third-party provider workflows remain
-environment-dependent.
+Status: current-target supported-transport acceptance complete, including
+QUIC with an official MsQuic runtime, plus VPN-scoped public Soulseek
+acceptance for the available credential pool; third-party provider workflows
+remain environment-dependent.
 
 This is the evidence ledger for the current-upstream parity plan. It records
 executable source, API, UI, protocol, persistence, and integration checks. A
@@ -32,6 +33,34 @@ are recorded in this ledger.
 
 The controller-run summary is also captured in
 [`current-upstream-controller-audit-green.json`](current-upstream-controller-audit-green.json).
+
+## Latest current-target shared-port run
+
+On 2026-08-26, the rebuilt slskR binary was run against current slskdN
+`1c172f4d278b983bc8c9151bdf30922a835af84e` with the current shared-TCP profile.
+The runner now defaults to that profile; a dedicated overlay listener is only
+selected by an explicit compatibility override.
+
+Artifact: `target/live-interop-current-shared-quic-rerun/slskr-slskdn-cross-client-interop.tsv`
+
+The 85-row result contains 85 `ok`, 0 `skip`, and 0 `fail` rows. It exercised
+listener metadata, plain and obfuscated Soulseek paths, browse, search, both
+file-transfer directions, messages, user watch, distributed parent/child
+propagation, rooms, capability exchange, pinned overlay services, exact mesh
+content bytes, PodCore workflows, private gateway echo, signed DHT Store, mesh
+health/statistics/tickets, UDP overlay, negative reverse routing, and the final
+soak. The shared-TCP diagnostic recorded slskR's Soulseek and mesh TCP endpoint
+as the same port, and the current slskdN log recorded inbound TLS mesh sessions
+on its shared Soulseek listener. The target log also recorded QUIC control and
+data listeners, shared UDP routing to both loopback backends, and receipt of
+both probes.
+
+The run used the official Microsoft MsQuic 2.6.0 Linux runtime. The official
+Ubuntu package was downloaded and verified at SHA-256
+`f4f035c674bc36deb43714fdfc26619b7e3c9bad886d36793ecac215d474bcf9`; the
+official v2.6.0 source was also built locally with OpenSSL 3.6.3, and the
+source-built library was loaded through `LD_LIBRARY_PATH` for this run. No
+system-wide library replacement was required.
 
 The separate all-phase certification run at
 `target/certify-vpn-full/summary-20260823-093737.json` remains a diagnostic
@@ -70,7 +99,9 @@ egress routes, or peer availability. The following remain environment-dependent:
 - external Lidarr, MusicBrainz, and SongID provider availability and operator
   credentials;
 - third-party VPN-provider login/renewal;
-- package-manager publication or installation against external registries.
+- package-manager publication or installation against external registries;
+- QUIC services on hosts that lack a usable MsQuic runtime. The current host's
+  controlled run is covered above with the official 2.6.0 runtime.
 
 Those checks require additional external service access. The public-network
 evidence above is the bounded acceptance result for the supplied credential

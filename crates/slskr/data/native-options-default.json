@@ -22,7 +22,7 @@
     ],
     "bootstrapTimeoutSeconds": 120,
     "coldBootstrapTimeoutSeconds": 180,
-    "dhtPort": 50305,
+    "dhtPort": 50300,
     "discoveryIntervalSeconds": 600,
     "effectiveOverlayPort": 50305,
     "enablePeerDiversity": true,

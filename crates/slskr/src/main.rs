@@ -131,7 +131,10 @@ use slskr_client::{
         MAX_PEER_CAPABILITY_RECORDS,
     },
     connection::ConnectionKind,
-    listener::{IncomingConnection, Listener},
+    listener::{
+        demux_shared_mesh_incoming, IncomingConnection, Listener, SharedIncomingConnection,
+        DEFAULT_INIT_HANDSHAKE_TIMEOUT,
+    },
     mesh::{MeshRendezvous, MeshRendezvousOptions, MESH_RENDEZVOUS_INTEREST_TAG},
     peer_connect::{send_obfuscated_peer_init, send_peer_init, send_pierce_firewall},
     protocol::{
@@ -12139,6 +12142,7 @@ fn restart_reload_fingerprint(config: &AppConfig) -> String {
         format!("{:?}", config.soulseek_diagnostic_level),
         format!("{:?}", config.integrations.vpn.enabled),
         format!("{:?}", config.integrations.vpn.polling_interval),
+        format!("{:?}", config.shared_mesh_tcp()),
         format!("{:?}", config.transfer_upload.slots),
         format!("{:?}", config.transfer_download.slots),
         format!("{:?}", config.core_workflow.incoming_search.concurrency),
@@ -39194,6 +39198,20 @@ fn apply_watched_controller_configuration<'a>(
         apply_distributed_settings(state, reloaded.soulseek_distributed).await;
         let regular_listener_result =
             reconfigure_regular_listener(state, reloaded.listener_bind.clone()).await;
+        if state.config.shared_mesh_tcp()
+            && reloaded.shared_mesh_tcp()
+            && regular_listener_result.is_ok()
+        {
+            if let (Some(gateway), Some(bind)) = (
+                state.private_gateway.as_ref(),
+                reloaded
+                    .listener_bind
+                    .as_deref()
+                    .and_then(|value| value.parse::<SocketAddr>().ok()),
+            ) {
+                gateway.set_bind(bind);
+            }
+        }
         let defer_obfuscated_listener = !reloaded.current_upstream_behavior
             && reloaded.controller_profile == ControllerProfile::Native;
         if defer_obfuscated_listener
@@ -71340,6 +71358,7 @@ async fn serve(invocation: ServeInvocation) -> Result<(), String> {
         &config.state_dir,
         config.advanced_networking.gold_star_club_autojoin,
     )?;
+    let shared_mesh_tcp = config.shared_mesh_tcp();
     let shared_dht_udp_bind = config.overlay_bind.and_then(|bind| {
         let dht = &config.advanced_networking.dht;
         let overlay = &config.advanced_networking.overlay;
@@ -71436,7 +71455,27 @@ async fn serve(invocation: ServeInvocation) -> Result<(), String> {
                     max_relay_duration: config.advanced_networking.overlay_data.max_relay_duration,
                 }
             });
-            Some(Arc::new(
+            let gateway = if shared_mesh_tcp {
+                private_gateway::Gateway::load_or_create_with_quic_and_data_policy_and_proxy_and_dht_socket_with_data_share_shared_tcp(
+                    bind,
+                    &config.state_dir,
+                    quic_bind,
+                    quic_data_bind,
+                    quic_proxy_bind,
+                    shared_dht_udp_bind,
+                    dht.as_ref()
+                        .and_then(|rendezvous| rendezvous.shared_udp_socket()),
+                    dht.as_ref()
+                        .and_then(|rendezvous| rendezvous.shared_udp_backend()),
+                    quic_data_policy,
+                    config
+                        .advanced_networking
+                        .overlay_data
+                        .max_concurrent_streams,
+                    quic_data_shared_with_dht,
+                )
+                .await?
+            } else {
                 private_gateway::Gateway::load_or_create_with_quic_and_data_policy_and_proxy_and_dht_socket_with_data_share(
                     bind,
                     &config.state_dir,
@@ -71455,8 +71494,9 @@ async fn serve(invocation: ServeInvocation) -> Result<(), String> {
                         .max_concurrent_streams,
                     quic_data_shared_with_dht,
                 )
-                .await?,
-            ))
+                .await?
+            };
+            Some(Arc::new(gateway))
         } else {
             None
         }
@@ -71715,6 +71755,7 @@ async fn serve(invocation: ServeInvocation) -> Result<(), String> {
         Arc::clone(&state),
         regular_listener_receiver,
         obfuscated_listener_receiver,
+        shared_mesh_tcp,
     );
     spawn_bridge_server(Arc::clone(&state));
     spawn_rate_limit_cleanup(Arc::clone(&state));
@@ -72208,6 +72249,7 @@ fn spawn_vpn_polling(state: Arc<AppState>) {
                     vpn::Status::default()
                 }
             };
+            synchronize_soulseek_advertised_port(&state, &status).await;
             if let Some(dht) = state.dht.as_ref() {
                 let dht_settings = state.advanced_networking.read().await.dht.clone();
                 let synchronized = match dht_settings.vpn_port_sync.as_str() {
@@ -72245,6 +72287,83 @@ fn spawn_vpn_polling(state: Arc<AppState>) {
             }
         }
     });
+}
+
+/// Keep the server's public Soulseek endpoint advertisement aligned with a
+/// VPN's forwarded port. The local listener remains bound to the configured
+/// port; only the metadata sent to the server changes, matching the current
+/// upstream VPN integration behavior.
+async fn synchronize_soulseek_advertised_port(state: &Arc<AppState>, status: &vpn::Status) {
+    let configured_port = state.config.advertised_port;
+    let desired_port = if status.is_ready {
+        status
+            .forwarded_port
+            .map(u32::from)
+            .unwrap_or(configured_port)
+    } else {
+        configured_port
+    };
+
+    let (regular_changed, obfuscated_changed) = {
+        let current_regular = *state
+            .advertised_port
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let current_obfuscated = *state
+            .obfuscated_advertised_port
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let obfuscated_shares_regular = state.config.obfuscation_enabled
+            && state.config.obfuscation_listen_port == 0
+            && state.config.obfuscated_listener_bind.is_none()
+            && current_obfuscated == Some(current_regular);
+
+        let regular_changed = current_regular != desired_port;
+        if regular_changed {
+            *state
+                .advertised_port
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = desired_port;
+        }
+
+        let obfuscated_changed = if obfuscated_shares_regular
+            && current_obfuscated != Some(desired_port)
+        {
+            *state
+                .obfuscated_advertised_port
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(desired_port);
+            true
+        } else {
+            false
+        };
+        (regular_changed, obfuscated_changed)
+    };
+
+    if !(regular_changed || obfuscated_changed)
+        || !status.is_ready
+        || state.session.read().await.state != "connected"
+    {
+        return;
+    }
+
+    if let Err(error) = send_session_command(
+        state,
+        SessionCommand::SetWaitPort {
+            port: desired_port,
+            obfuscated_port: effective_obfuscated_advertised_port(state),
+        },
+    )
+    .await
+    {
+        record_daemon_log(
+            state,
+            logging::LogLevel::Warn,
+            "vpn",
+            format!("failed to update the Soulseek VPN public port advertisement: {error}"),
+        )
+        .await;
+    }
 }
 
 enum ReconnectWake {
@@ -73262,6 +73381,7 @@ fn spawn_configured_listeners(
     state: Arc<AppState>,
     regular_commands: mpsc::Receiver<ListenerCommand>,
     obfuscated_commands: mpsc::Receiver<ListenerCommand>,
+    shared_mesh_tcp: bool,
 ) {
     let shared_obfuscation = state.config.obfuscation_enabled
         && state.config.obfuscation_listen_port == 0
@@ -73271,8 +73391,15 @@ fn spawn_configured_listeners(
         regular_commands,
         false,
         shared_obfuscation,
+        shared_mesh_tcp,
     ));
-    tokio::spawn(run_listener_manager(state, obfuscated_commands, true, false));
+    tokio::spawn(run_listener_manager(
+        state,
+        obfuscated_commands,
+        true,
+        false,
+        false,
+    ));
 }
 
 async fn record_listener_bound(
@@ -73455,6 +73582,7 @@ async fn run_listener_manager(
     mut commands: mpsc::Receiver<ListenerCommand>,
     obfuscated: bool,
     shared_obfuscation: bool,
+    shared_mesh_tcp: bool,
 ) {
     let mut active_bind = if obfuscated && state.config.obfuscation_enabled {
         state.config.obfuscated_listener_bind.clone()
@@ -73533,15 +73661,55 @@ async fn run_listener_manager(
                 accepted = async {
                     if obfuscated {
                         active_listener.accept_obfuscated().await
+                            .map(|(incoming, address)| ListenerAccept::Classified(
+                                SharedIncomingConnection::Soulseek(incoming),
+                                address,
+                            ))
+                    } else if shared_mesh_tcp {
+                        active_listener
+                            .accept_raw()
+                            .await
+                            .map(|(stream, address)| ListenerAccept::Raw(stream, address))
                     } else if shared_obfuscation {
-                        active_listener.accept_shared().await
+                        active_listener
+                            .accept_shared()
+                            .await
+                            .map(|(incoming, address)| {
+                                ListenerAccept::Classified(
+                                    SharedIncomingConnection::Soulseek(incoming),
+                                    address,
+                                )
+                            })
                     } else {
-                        active_listener.accept().await
+                        active_listener.accept().await.map(|(incoming, address)| {
+                            ListenerAccept::Classified(
+                                SharedIncomingConnection::Soulseek(incoming),
+                                address,
+                            )
+                        })
                     }
                 } => {
                     match accepted {
-                        Ok((incoming, remote_addr)) => {
-                            process_listener_incoming(&state, incoming, remote_addr, obfuscated).await;
+                        Ok(ListenerAccept::Classified(incoming, remote_addr)) => match incoming {
+                            SharedIncomingConnection::Soulseek(incoming) => {
+                                process_listener_incoming(&state, incoming, remote_addr, obfuscated)
+                                    .await;
+                            }
+                            SharedIncomingConnection::MeshOverlay(stream) => {
+                                process_shared_mesh_overlay_connection(
+                                    Arc::clone(&state),
+                                    stream,
+                                    remote_addr,
+                                )
+                                .await;
+                            }
+                        },
+                        Ok(ListenerAccept::Raw(stream, remote_addr)) => {
+                            let task_state = Arc::clone(&state);
+                            tokio::spawn(async move {
+                                process_shared_mesh_connection(task_state, stream, remote_addr)
+                                    .await;
+                            });
                         }
                         Err(error) => {
                             update_listeners(&state, |snapshot| {
@@ -73581,6 +73749,82 @@ async fn run_listener_manager(
                 }
             }
         }
+    }
+}
+
+enum ListenerAccept {
+    Classified(SharedIncomingConnection<TcpStream>, SocketAddr),
+    Raw(TcpStream, SocketAddr),
+}
+
+async fn process_shared_mesh_connection(
+    state: Arc<AppState>,
+    stream: TcpStream,
+    remote_addr: SocketAddr,
+) {
+    let incoming = match time::timeout(
+        DEFAULT_INIT_HANDSHAKE_TIMEOUT,
+        demux_shared_mesh_incoming(stream),
+    )
+    .await
+    {
+        Ok(Ok(incoming)) => incoming,
+        Ok(Err(error)) => {
+            update_listeners(&state, |snapshot| {
+                snapshot.errors += 1;
+                snapshot.last_error = Some(format!(
+                    "shared Soulseek/mesh TCP initialization failed: {error}"
+                ));
+            })
+            .await;
+            return;
+        }
+        Err(_) => {
+            update_listeners(&state, |snapshot| {
+                snapshot.errors += 1;
+                snapshot.last_error = Some(
+                    "shared Soulseek/mesh TCP initialization timed out".to_owned(),
+                );
+            })
+            .await;
+            return;
+        }
+    };
+
+    match incoming {
+        SharedIncomingConnection::Soulseek(incoming) => {
+            process_listener_incoming(&state, incoming, remote_addr, false).await;
+        }
+        SharedIncomingConnection::MeshOverlay(stream) => {
+            process_shared_mesh_overlay_connection(state, stream, remote_addr).await;
+        }
+    }
+}
+
+async fn process_shared_mesh_overlay_connection(
+    state: Arc<AppState>,
+    stream: TcpStream,
+    remote_addr: SocketAddr,
+) {
+    update_listeners(&state, |snapshot| {
+        snapshot.regular_accepts += 1;
+        snapshot.last_event = Some(format!(
+            "mesh_overlay from {}",
+            scrub_socket_addr(remote_addr)
+        ));
+        snapshot.last_error = None;
+    })
+    .await;
+    if let Some(gateway) = state.private_gateway.clone() {
+        gateway.handle_accepted_tcp(stream, Arc::clone(&state)).await;
+    } else {
+        update_listeners(&state, |snapshot| {
+            snapshot.errors += 1;
+            snapshot.last_error = Some(
+                "shared mesh connection received without an overlay gateway".to_owned(),
+            );
+        })
+        .await;
     }
 }
 

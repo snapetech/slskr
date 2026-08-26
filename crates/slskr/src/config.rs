@@ -980,7 +980,7 @@ impl AppConfig {
         };
         let env = &layered_env;
         let auth_disabled = resolve_auth_disabled(env, file_config.auth.disabled.unwrap_or(false))?;
-        let advanced_networking = AdvancedNetworkingSettings::from_layers(
+        let mut advanced_networking = AdvancedNetworkingSettings::from_layers(
             &file_config,
             env,
             controller_profile,
@@ -1204,6 +1204,29 @@ impl AppConfig {
             file_config.network.obfuscation.advertise_regular_port,
             file_config.network.obfuscation.prefer_outbound,
         )?;
+        let current_shared_mesh_tcp = controller_profile == ControllerProfile::Native
+            && current_upstream_behavior
+            && dht_enabled
+            && advanced_networking.mesh.enabled
+            && advanced_networking.mesh.enable_dht
+            && advanced_networking.mesh.enable_overlay
+            && listener_bind
+                .as_deref()
+                .and_then(|value| value.parse::<SocketAddr>().ok())
+                .is_some_and(|bind| overlay_bind == Some(bind));
+        if current_shared_mesh_tcp {
+            if let Some(bind) = listener_bind
+                .as_deref()
+                .and_then(|value| value.parse::<SocketAddr>().ok())
+            {
+                // The current upstream startup path mutates the DHT overlay
+                // option to the Soulseek listen port before any consumer
+                // reads it. Do the same so saved legacy overlay_port values
+                // cannot advertise a port that the shared listener does not
+                // own.
+                advanced_networking.dht.overlay_port = bind.port();
+            }
+        }
         let PeerProfileSettings {
             peer_host_override,
             distributed_parent_override,
@@ -1612,6 +1635,30 @@ impl AppConfig {
         ))
     }
 
+    /// Current upstream-style native deployments put Soulseek peer traffic and
+    /// the TLS mesh overlay on one public TCP listener. Keep an explicitly
+    /// configured legacy overlay bind as a supported dedicated-listener escape
+    /// hatch, while making the current/default projection share the endpoint.
+    pub fn shared_mesh_tcp(&self) -> bool {
+        if self.controller_profile != ControllerProfile::Native
+            || !self.current_upstream_behavior
+            || !self.dht_enabled
+            || !self.advanced_networking.mesh.enabled
+            || !self.advanced_networking.mesh.enable_dht
+            || !self.advanced_networking.mesh.enable_overlay
+        {
+            return false;
+        }
+        let Some(listener_bind) = self
+            .listener_bind
+            .as_deref()
+            .and_then(|value| value.parse::<SocketAddr>().ok())
+        else {
+            return false;
+        };
+        self.overlay_bind == Some(listener_bind)
+    }
+
     pub fn controller_passthrough_allows(&self, remote: Option<SocketAddr>) -> bool {
         let Some(remote) = remote else {
             return false;
@@ -1697,7 +1744,7 @@ impl AppConfig {
 
     pub fn sanitized_json(&self) -> String {
         format!(
-            "{{\"config_file\":{},\"http_bind\":\"{}\",\"state_dir\":\"{}\",\"server_address\":\"{}\",\"listen_port\":{},\"advertised_port\":{},\"listener_bind\":{},\"obfuscated_listener_bind\":{},\"obfuscated_advertised_port\":{},\"overlay_bind\":{},\"dht_enabled\":{},\"dht_port\":{},\"trusted_mesh_peers\":{},\"obfuscation\":{},\"peer_host_override\":{},\"test_user_endpoint_overrides\":{},\"username\":{},\"credentials_configured\":{},\"credential_store\":\"{}\",\"credential_file\":\"{}\",\"auto_connect\":{},\"reconnect\":{},\"reconnect_seconds\":{},\"ping_seconds\":{},\"log_level\":\"{}\",\"peer_response_timeout_seconds\":{},\"share_roots\":{},\"share_follow_symlinks\":{},\"share_include_hidden\":{},\"share_scan_max_files\":{},\"share_cache_tsv_enabled\":{},\"transfer_history_limit\":{},\"transfer_max_active\":{},\"transfer_allow_inbound\":{},\"transfer_allow_outbound\":{},\"transfer_auto_retry\":{},\"transfer_rescue\":{},\"download_completed_path_template_configured\":{},\"private_message_auto_response\":{},\"pod_join_signature_mode\":\"{}\",\"virtual_soulfind_v2_enabled\":{},\"controller_profile\":\"{}\",\"parity_profile\":\"{}\",\"remote_configuration\":{},\"auth_required\":{},\"api_token_configured\":{},\"api_read_write_token_configured\":{},\"api_read_only_token_configured\":{},\"api_nowplaying_token_configured\":{},\"api_cookie_auth_enabled\":{},\"trusted_proxy_cidrs\":{},\"persistence_enabled\":{},\"integrations\":{}}}",
+            "{{\"config_file\":{},\"http_bind\":\"{}\",\"state_dir\":\"{}\",\"server_address\":\"{}\",\"listen_port\":{},\"advertised_port\":{},\"listener_bind\":{},\"obfuscated_listener_bind\":{},\"obfuscated_advertised_port\":{},\"overlay_bind\":{},\"shared_mesh_tcp\":{},\"dht_enabled\":{},\"dht_port\":{},\"trusted_mesh_peers\":{},\"obfuscation\":{},\"peer_host_override\":{},\"test_user_endpoint_overrides\":{},\"username\":{},\"credentials_configured\":{},\"credential_store\":\"{}\",\"credential_file\":\"{}\",\"auto_connect\":{},\"reconnect\":{},\"reconnect_seconds\":{},\"ping_seconds\":{},\"log_level\":\"{}\",\"peer_response_timeout_seconds\":{},\"share_roots\":{},\"share_follow_symlinks\":{},\"share_include_hidden\":{},\"share_scan_max_files\":{},\"share_cache_tsv_enabled\":{},\"transfer_history_limit\":{},\"transfer_max_active\":{},\"transfer_allow_inbound\":{},\"transfer_allow_outbound\":{},\"transfer_auto_retry\":{},\"transfer_rescue\":{},\"download_completed_path_template_configured\":{},\"private_message_auto_response\":{},\"pod_join_signature_mode\":\"{}\",\"virtual_soulfind_v2_enabled\":{},\"controller_profile\":\"{}\",\"parity_profile\":\"{}\",\"remote_configuration\":{},\"auth_required\":{},\"api_token_configured\":{},\"api_read_write_token_configured\":{},\"api_read_only_token_configured\":{},\"api_nowplaying_token_configured\":{},\"api_cookie_auth_enabled\":{},\"trusted_proxy_cidrs\":{},\"persistence_enabled\":{},\"integrations\":{}}}",
             json_option(
                 self.config_file
                     .as_ref()
@@ -1713,6 +1760,7 @@ impl AppConfig {
             json_option(self.obfuscated_listener_bind.as_deref()),
             json_u32_option(self.obfuscated_advertised_port),
             json_option(self.overlay_bind.map(|bind| bind.to_string()).as_deref()),
+            self.shared_mesh_tcp(),
             self.dht_enabled,
             self.dht_port,
             self.trusted_mesh_peers.len(),
@@ -6454,6 +6502,16 @@ impl AdvancedNetworkingSettings {
         let relay_file = yaml_overlay.relay.as_ref().unwrap_or(&file.relay);
         let security_file = yaml_overlay.security.as_ref().unwrap_or(&file.security);
         let podcore_file = yaml_overlay.podcore.as_ref().unwrap_or(&file.podcore);
+        // Current upstream defaults the independent public UDP/QUIC socket
+        // family to 50300, which also happens to be the default Soulseek TCP
+        // port. A customized Soulseek TCP port does not move those UDP
+        // defaults; only the shared TCP overlay advertisement follows the
+        // customized listener after listener resolution below.
+        let current_public_port = if native_profile && current_upstream_behavior {
+            50_300_u16
+        } else {
+            50_305_u16
+        };
         let dht_enabled = env_bool_layer(
             env,
             "SLSKR_DHT_ENABLED",
@@ -6463,11 +6521,17 @@ impl AdvancedNetworkingSettings {
             env,
             "SLSKR_DHT_PORT",
             dht_file.dht_port,
-            if native_profile { 50_305_u16 } else { 0_u16 },
+            if native_profile {
+                current_public_port
+            } else {
+                0_u16
+            },
         )?;
         if dht_enabled && dht_port == 0 {
             return Err("dht.dht_port must be between 1 and 65535 when DHT is enabled".to_owned());
         }
+        // The upstream DHT overlay option remains 50305 until startup mutates
+        // it to the Soulseek listener port when shared TCP mode is active.
         let overlay_port = dht_file.overlay_port.unwrap_or(50_305);
         if native_profile && overlay_port == 0 {
             return Err("dht.overlay_port must be between 1 and 65535".to_owned());
@@ -6634,9 +6698,9 @@ impl AdvancedNetworkingSettings {
         )?;
         let overlay = OverlaySettings {
             enable: overlay_file.enable.unwrap_or(true),
-            listen_port: overlay_file.listen_port.unwrap_or(50_305),
+            listen_port: overlay_file.listen_port.unwrap_or(current_public_port),
             enable_quic: overlay_file.enable_quic.unwrap_or(true),
-            quic_listen_port: overlay_file.quic_listen_port.unwrap_or(50_305),
+            quic_listen_port: overlay_file.quic_listen_port.unwrap_or(current_public_port),
             share_quic_with_dht_port: overlay_file.share_quic_with_dht_port.unwrap_or(true),
             quic_backend_listen_port: overlay_file.quic_backend_listen_port.unwrap_or(55_305),
             trusted_certificate_pins: overlay_file.trusted_certificate_pins.clone(),
@@ -6655,7 +6719,13 @@ impl AdvancedNetworkingSettings {
         )?;
         let overlay_data = OverlayDataSettings {
             enable: overlay_data_file.enable.unwrap_or(false),
-            listen_port: overlay_data_file.listen_port.unwrap_or(50_401),
+            listen_port: overlay_data_file.listen_port.unwrap_or(
+                if native_profile && current_upstream_behavior {
+                    current_public_port
+                } else {
+                    50_401
+                },
+            ),
             share_with_dht_port: overlay_data_file.share_with_dht_port.unwrap_or(true),
             backend_listen_port: overlay_data_file.backend_listen_port.unwrap_or(55_401),
             max_concurrent_streams: overlay_data_file.max_concurrent_streams.unwrap_or(8),
@@ -10581,9 +10651,9 @@ fn resolve_listener_and_obfuscation<E: ConfigEnv>(
     } else {
         None
     };
-    let overlay_bind = env
-        .var("SLSKR_OVERLAY_BIND")
-        .or(listeners_overlay_bind)
+    let explicit_overlay_bind = env.var("SLSKR_OVERLAY_BIND").or(listeners_overlay_bind);
+    let overlay_bind = explicit_overlay_bind
+        .clone()
         .map(|value| {
             let address = value
                 .parse::<SocketAddr>()
@@ -10595,11 +10665,28 @@ fn resolve_listener_and_obfuscation<E: ConfigEnv>(
         })
         .transpose()?
         .or_else(|| {
-            (controller_profile == ControllerProfile::Native && advanced_networking.overlay.enable)
-                .then_some(SocketAddr::new(
-                    IpAddr::V4(Ipv4Addr::UNSPECIFIED),
-                    advanced_networking.dht.overlay_port,
-                ))
+            if controller_profile == ControllerProfile::Native
+                && current_upstream_behavior
+                && advanced_networking.dht.enabled
+                && advanced_networking.mesh.enabled
+                && advanced_networking.mesh.enable_dht
+                && advanced_networking.mesh.enable_overlay
+            {
+                // Current upstream owns the mesh TCP handshake on the
+                // Soulseek listen socket. Keep the legacy explicit
+                // `listeners.overlay_bind` escape hatch above, but make the
+                // stock/native projection use one public TCP endpoint.
+                listener_bind
+                    .as_deref()
+                    .and_then(|value| value.parse::<SocketAddr>().ok())
+            } else {
+                (controller_profile == ControllerProfile::Native
+                    && advanced_networking.overlay.enable)
+                    .then_some(SocketAddr::new(
+                        IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                        advanced_networking.dht.overlay_port,
+                    ))
+            }
         });
     let dht_enabled = advanced_networking.dht.enabled;
     let dht_port = advanced_networking.dht.dht_port;
@@ -12302,6 +12389,53 @@ mod tests {
             assert_eq!(config.listen_port, 50300);
             assert_eq!(config.listener_bind.as_deref(), Some("0.0.0.0:50300"));
         }
+    }
+
+    #[test]
+    fn current_native_networking_defaults_consolidate_the_public_tcp_endpoint() {
+        let env = MapEnv::default()
+            .with("SLSKR_CONTROLLER_PROFILE", "native")
+            .with("SLSKR_PARITY_PROFILE", "current")
+            .with("SLSKD_NO_CONNECT", "true")
+            .with("SLSKR_AUTH_DISABLED", "true");
+        let config = super::AppConfig::from_layers(None, super::FileConfig::default(), &env)
+            .expect("current native networking defaults");
+
+        assert!(config.current_upstream_behavior);
+        assert_eq!(config.listen_port, 50_300);
+        assert_eq!(config.listener_bind.as_deref(), Some("0.0.0.0:50300"));
+        assert_eq!(config.dht_port, 50_300);
+        assert_eq!(config.advanced_networking.dht.overlay_port, 50_300);
+        assert_eq!(config.advanced_networking.overlay.listen_port, 50_300);
+        assert_eq!(config.advanced_networking.overlay.quic_listen_port, 50_300);
+        assert_eq!(config.overlay_bind, Some("0.0.0.0:50300".parse().unwrap()));
+        assert!(config.shared_mesh_tcp());
+
+        let dedicated = super::AppConfig::from_layers(
+            None,
+            super::FileConfig::default(),
+            &env.clone().with("SLSKR_OVERLAY_BIND", "127.0.0.1:50305"),
+        )
+        .expect("explicit dedicated overlay bind");
+        assert_eq!(
+            dedicated.overlay_bind,
+            Some("127.0.0.1:50305".parse().unwrap())
+        );
+        assert_eq!(dedicated.advanced_networking.dht.overlay_port, 50_305);
+        assert!(!dedicated.shared_mesh_tcp());
+
+        let custom_tcp = super::AppConfig::from_layers(
+            None,
+            super::FileConfig::default(),
+            &env.with("SLSK_LISTEN_PORT", "51000"),
+        )
+        .expect("custom current Soulseek TCP port");
+        assert_eq!(custom_tcp.listen_port, 51_000);
+        assert_eq!(custom_tcp.listener_bind.as_deref(), Some("0.0.0.0:51000"));
+        assert_eq!(custom_tcp.advanced_networking.dht.dht_port, 50_300);
+        assert_eq!(custom_tcp.advanced_networking.dht.overlay_port, 51_000);
+        assert_eq!(custom_tcp.advanced_networking.overlay.listen_port, 50_300);
+        assert!(custom_tcp.shared_mesh_tcp());
     }
 
     #[test]

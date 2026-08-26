@@ -362,15 +362,14 @@ describe('App', () => {
     expect(screen.getByText('slskr ingress ports were reduced.')).toBeInTheDocument();
     expect(
       screen.getByText(
-        'Older builds needed five public forwards. Current builds need two: Soulseek peer/file transfers and the slskr mesh/DHT/QUIC overlay.',
+        'Older builds needed five public forwards. Current defaults need one public port number on both TCP and UDP: Soulseek peer/file transfers and the slskr mesh/DHT/QUIC overlay.',
       ),
     ).toBeInTheDocument();
-    expect(screen.getAllByText('Soulseek peer/file transfers')).toHaveLength(2);
+    expect(screen.getByText('Soulseek peer/file transfers, slskr mesh overlay, DHT rendezvous, and QUIC overlay')).toBeInTheDocument();
     expect(screen.getByText('Used to need')).toBeInTheDocument();
     expect(screen.getByText('Need now')).toBeInTheDocument();
-    expect(screen.getAllByText('TCP 50300')).toHaveLength(2);
-    expect(screen.getAllByText('TCP/UDP 50305')).toHaveLength(2);
-    expect(screen.getByText('slskr mesh overlay and DHT rendezvous')).toBeInTheDocument();
+    expect(screen.getByText('TCP/UDP 50300')).toBeInTheDocument();
+    expect(screen.getByText('TCP/UDP 50305')).toBeInTheDocument();
     expect(screen.getByText('slskr mesh, DHT rendezvous, and QUIC overlay')).toBeInTheDocument();
     expect(screen.getByText('legacy mesh UDP overlay')).toBeInTheDocument();
     expect(screen.getByText('UDP 50400')).toBeInTheDocument();
@@ -449,7 +448,7 @@ describe('App', () => {
     expect(screen.getByText('TCP 62000')).toBeInTheDocument();
     expect(screen.getByText('DHT rendezvous')).toBeInTheDocument();
     expect(screen.getByText('UDP 62010')).toBeInTheDocument();
-    expect(screen.getAllByText('TCP/UDP 50305')).toHaveLength(1);
+    expect(screen.getByText('TCP/UDP 50305')).toBeInTheDocument();
   });
 
   it('shows connecting state after a configured Soulseek connect request is accepted', async () => {

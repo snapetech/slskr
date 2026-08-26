@@ -6,7 +6,7 @@ use std::{
     path::Path,
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
-        Arc, Mutex as StdMutex,
+        Arc, Mutex as StdMutex, RwLock as StdRwLock,
     },
     time::{Duration, Instant},
 };
@@ -123,7 +123,7 @@ pub struct QuicDataPolicy {
 }
 
 pub struct Gateway {
-    bind: SocketAddr,
+    bind: StdRwLock<SocketAddr>,
     acceptor: TlsAcceptor,
     certificate_sha256: [u8; 32],
     listener: Mutex<Option<TcpListener>>,
@@ -149,7 +149,13 @@ impl fmt::Debug for Gateway {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("Gateway")
-            .field("bind", &self.bind)
+            .field(
+                "bind",
+                &self
+                    .bind
+                    .read()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner),
+            )
             .field("certificate_sha256", &hex::encode(self.certificate_sha256))
             .finish_non_exhaustive()
     }
@@ -243,6 +249,7 @@ impl Gateway {
             quic_data_policy,
             max_concurrent_streams,
             false,
+            false,
         )
         .await
     }
@@ -272,6 +279,7 @@ impl Gateway {
             dht_backend,
             quic_data_policy,
             max_concurrent_streams,
+            false,
             false,
         )
         .await
@@ -304,6 +312,7 @@ impl Gateway {
             quic_data_policy,
             max_concurrent_streams,
             false,
+            false,
         )
         .await
     }
@@ -333,6 +342,40 @@ impl Gateway {
             quic_data_policy,
             max_concurrent_streams,
             data_shared_with_dht,
+            false,
+        )
+        .await
+    }
+
+    /// Construct a gateway whose TLS TCP connections arrive through the
+    /// application's shared Soulseek/mesh listener. The gateway still owns
+    /// its UDP and QUIC services, but does not bind a second TCP socket.
+    pub async fn load_or_create_with_quic_and_data_policy_and_proxy_and_dht_socket_with_data_share_shared_tcp(
+        bind: SocketAddr,
+        state_dir: &Path,
+        quic_bind: Option<SocketAddr>,
+        quic_data_bind: Option<SocketAddr>,
+        quic_proxy_bind: Option<SocketAddr>,
+        shared_udp_bind: Option<SocketAddr>,
+        shared_udp_socket: Option<Arc<StdUdpSocket>>,
+        dht_backend: Option<SocketAddr>,
+        quic_data_policy: Option<QuicDataPolicy>,
+        max_concurrent_streams: usize,
+        data_shared_with_dht: bool,
+    ) -> Result<Self, String> {
+        Self::load_or_create_with_quic_and_data_policy_and_proxy_inner(
+            bind,
+            state_dir,
+            quic_bind,
+            quic_data_bind,
+            quic_proxy_bind,
+            shared_udp_bind,
+            shared_udp_socket,
+            dht_backend,
+            quic_data_policy,
+            max_concurrent_streams,
+            data_shared_with_dht,
+            true,
         )
         .await
     }
@@ -349,6 +392,7 @@ impl Gateway {
         quic_data_policy: Option<QuicDataPolicy>,
         max_concurrent_streams: usize,
         data_shared_with_dht: bool,
+        shared_tcp: bool,
     ) -> Result<Self, String> {
         let (certificate, private_key) = load_or_create_certificate(state_dir)?;
         let certificate_sha256 = Sha256::digest(certificate.as_ref()).into();
@@ -381,12 +425,21 @@ impl Gateway {
                 }
             }
         });
-        let listener = TcpListener::bind(bind)
-            .await
-            .map_err(|error| format!("overlay listener bind failed: {error}"))?;
+        let listener = if shared_tcp {
+            None
+        } else {
+            Some(
+                TcpListener::bind(bind)
+                    .await
+                    .map_err(|error| format!("overlay listener bind failed: {error}"))?,
+            )
+        };
         let bind = listener
-            .local_addr()
-            .map_err(|error| format!("overlay listener address failed: {error}"))?;
+            .as_ref()
+            .map(TcpListener::local_addr)
+            .transpose()
+            .map_err(|error| format!("overlay listener address failed: {error}"))?
+            .unwrap_or(bind);
         // native profile's UDP control plane normally shares its public socket with
         // DHT.  The public gateway owns that socket in shared mode and sends
         // only DHT-shaped datagrams to mainline's internal endpoint.
@@ -421,10 +474,10 @@ impl Gateway {
             None
         };
         Ok(Self {
-            bind,
+            bind: StdRwLock::new(bind),
             acceptor: TlsAcceptor::from(Arc::new(config)),
             certificate_sha256,
-            listener: Mutex::new(Some(listener)),
+            listener: Mutex::new(listener),
             udp_listener: Mutex::new(udp_listener),
             dht_forward_socket,
             dht_forward_target: dht_backend,
@@ -457,8 +510,56 @@ impl Gateway {
     }
 
     #[must_use]
-    pub const fn bind(&self) -> SocketAddr {
-        self.bind
+    pub fn bind(&self) -> SocketAddr {
+        *self
+            .bind
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    pub(crate) fn set_bind(&self, bind: SocketAddr) {
+        *self
+            .bind
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = bind;
+    }
+
+    /// Dispatch an already-accepted TLS connection through the gateway's
+    /// normal rate limits, connection semaphore, and handshake handler.
+    /// Shared TCP ownership lives in the Soulseek listener manager; this
+    /// method keeps all overlay admission behavior in one place.
+    pub(crate) async fn handle_accepted_tcp(
+        self: &Arc<Self>,
+        tcp: TcpStream,
+        state: Arc<super::AppState>,
+    ) {
+        let remote_address = match tcp.peer_addr() {
+            Ok(address) => address,
+            Err(error) => {
+                tracing::debug!(%error, "overlay shared TCP peer address unavailable");
+                return;
+            }
+        };
+        let remote_ip = remote_address.ip();
+        if !self
+            .overlay_rate_limiter
+            .check_connection(remote_ip)
+            .allowed
+        {
+            return;
+        }
+        let Ok(permit) = Arc::clone(&self.connections).try_acquire_owned() else {
+            self.overlay_rate_limiter.record_disconnection(remote_ip);
+            return;
+        };
+        let gateway = Arc::clone(self);
+        tokio::spawn(async move {
+            let _permit = permit;
+            if let Err(error) = gateway.handle_connection(tcp, &state).await {
+                tracing::debug!(%error, "overlay gateway connection closed");
+            }
+            gateway.overlay_rate_limiter.record_disconnection(remote_ip);
+        });
     }
 
     /// Real count of currently-open overlay tunnels -- backs the
@@ -534,12 +635,7 @@ impl Gateway {
     }
 
     pub async fn run(self: Arc<Self>, state: Arc<super::AppState>) -> Result<(), String> {
-        let listener = self
-            .listener
-            .lock()
-            .await
-            .take()
-            .ok_or_else(|| "overlay listener is already running".to_owned())?;
+        let listener = self.listener.lock().await.take();
         if let Some(udp_listener) = self.udp_listener.lock().await.take() {
             let gateway = Arc::clone(&self);
             let udp_state = Arc::clone(&state);
@@ -569,32 +665,17 @@ impl Gateway {
                 gateway.run_quic_data(quic_data_listener).await;
             });
         }
+        let Some(listener) = listener else {
+            // Shared TCP mode leaves the accept loop to the Soulseek listener
+            // manager. UDP/QUIC workers above are still owned by this gateway.
+            return Ok(());
+        };
         loop {
-            let (tcp, remote_address) = listener
+            let (tcp, _) = listener
                 .accept()
                 .await
                 .map_err(|error| format!("overlay listener accept failed: {error}"))?;
-            let remote_ip = remote_address.ip();
-            if !self
-                .overlay_rate_limiter
-                .check_connection(remote_ip)
-                .allowed
-            {
-                continue;
-            }
-            let Ok(permit) = Arc::clone(&self.connections).try_acquire_owned() else {
-                self.overlay_rate_limiter.record_disconnection(remote_ip);
-                continue;
-            };
-            let gateway = Arc::clone(&self);
-            let state = Arc::clone(&state);
-            tokio::spawn(async move {
-                let _permit = permit;
-                if let Err(error) = gateway.handle_connection(tcp, &state).await {
-                    tracing::debug!(%error, "overlay gateway connection closed");
-                }
-                gateway.overlay_rate_limiter.record_disconnection(remote_ip);
-            });
+            self.handle_accepted_tcp(tcp, Arc::clone(&state)).await;
         }
     }
 
@@ -1362,7 +1443,7 @@ impl Gateway {
             username: local_username,
             features,
             soulseek_ports: None,
-            overlay_port: Some(self.bind.port()),
+            overlay_port: Some(self.bind().port()),
             nonce_echo: hello.nonce,
         };
         self.overlay_connections.write().await.insert(
@@ -2939,6 +3020,32 @@ mod tests {
             .unwrap();
         assert_eq!(first.certificate_sha256(), second.certificate_sha256());
         drop((first, second));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn shared_tcp_gateway_does_not_bind_a_second_public_tcp_socket() {
+        let root = temporary_directory("gateway-shared-tcp");
+        let public_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let public_address = public_listener.local_addr().unwrap();
+        let gateway = Gateway::load_or_create_with_quic_and_data_policy_and_proxy_and_dht_socket_with_data_share_shared_tcp(
+            public_address,
+            &root,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            8,
+            false,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(gateway.bind(), public_address);
+        assert!(gateway.listener.lock().await.is_none());
         fs::remove_dir_all(root).unwrap();
     }
 

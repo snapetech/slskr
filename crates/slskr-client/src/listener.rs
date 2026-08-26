@@ -41,6 +41,18 @@ pub enum IncomingConnection<S> {
     },
 }
 
+/// A connection accepted by the current upstream-style shared TCP listener.
+///
+/// Mesh overlay connections are returned before TLS consumes the stream so the
+/// gateway can perform its normal handshake. Soulseek connections are already
+/// classified by the existing plain/type-1 demux and retain the exact stream
+/// semantics used by the dedicated listener.
+#[derive(Debug)]
+pub enum SharedIncomingConnection<S> {
+    Soulseek(IncomingConnection<S>),
+    MeshOverlay(S),
+}
+
 #[derive(Debug)]
 pub struct Listener {
     inner: TcpListener,
@@ -124,6 +136,31 @@ impl Listener {
         .await
         .map_err(|_| ClientError::TimedOut {
             operation: "shared plain/obfuscated peer initialization handshake",
+        })?
+    }
+
+    /// Accept a connection from a TCP port shared by Soulseek and the mesh
+    /// overlay. TLS ClientHello bytes are only peeked, never consumed, before
+    /// the stream is handed to the gateway.
+    pub async fn accept_shared_mesh(
+        &self,
+    ) -> Result<(SharedIncomingConnection<TcpStream>, SocketAddr), ClientError> {
+        self.accept_shared_mesh_with_timeout(DEFAULT_INIT_HANDSHAKE_TIMEOUT)
+            .await
+    }
+
+    pub async fn accept_shared_mesh_with_timeout(
+        &self,
+        timeout: Duration,
+    ) -> Result<(SharedIncomingConnection<TcpStream>, SocketAddr), ClientError> {
+        time::timeout(timeout, async {
+            let (stream, address) = self.inner.accept().await?;
+            let incoming = demux_shared_mesh_incoming(stream).await?;
+            Ok((incoming, address))
+        })
+        .await
+        .map_err(|_| ClientError::TimedOut {
+            operation: "shared Soulseek/mesh TCP initialization handshake",
         })?
     }
 
@@ -236,6 +273,53 @@ where
     let frame = InitFrame::decode(&decoded)?;
     let message = decode_obfuscated_init_message(frame)?;
     incoming_from_init_message(message, stream, true)
+}
+
+const SHARED_MESH_CLASSIFICATION_ATTEMPTS: usize = 5;
+const SHARED_MESH_CLASSIFICATION_RETRY_DELAY: Duration = Duration::from_millis(50);
+const TLS_HANDSHAKE_CONTENT_TYPE: u8 = 0x16;
+const TLS_MAJOR_VERSION: u8 = 0x03;
+
+/// Classify a stream for the current upstream shared TCP endpoint.
+///
+/// A mesh overlay connection starts with a TLS record header (`0x16, 0x03`).
+/// Soulseek plain and obfuscated traffic starts with different bytes and is
+/// passed to the existing bounded Soulseek demux. The peek is intentionally
+/// conservative: a partial TLS header is rejected after the bounded retry
+/// window, while non-TLS traffic is never guessed as mesh traffic.
+pub async fn demux_shared_mesh_incoming(
+    stream: TcpStream,
+) -> Result<SharedIncomingConnection<TcpStream>, ClientError> {
+    let mut prefix = [0_u8; 2];
+    for attempt in 0..SHARED_MESH_CLASSIFICATION_ATTEMPTS {
+        let peeked = stream.peek(&mut prefix).await?;
+        if peeked >= prefix.len() {
+            if prefix[0] == TLS_HANDSHAKE_CONTENT_TYPE && prefix[1] == TLS_MAJOR_VERSION {
+                return Ok(SharedIncomingConnection::MeshOverlay(stream));
+            }
+            break;
+        }
+        if peeked == 0 {
+            break;
+        }
+        // Soulseek's tagged connection kinds are one byte long. Only a
+        // leading TLS content byte is ambiguous and needs a bounded wait for
+        // the version byte.
+        if prefix[0] != TLS_HANDSHAKE_CONTENT_TYPE {
+            break;
+        }
+        if attempt + 1 < SHARED_MESH_CLASSIFICATION_ATTEMPTS {
+            time::sleep(SHARED_MESH_CLASSIFICATION_RETRY_DELAY).await;
+        } else {
+            return Err(ClientError::TimedOut {
+                operation: "shared Soulseek/mesh TCP classification",
+            });
+        }
+    }
+
+    Ok(SharedIncomingConnection::Soulseek(
+        demux_shared_incoming(stream).await?,
+    ))
 }
 
 fn incoming_from_init_message<S>(

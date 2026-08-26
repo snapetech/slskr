@@ -58,11 +58,14 @@ regular_bind = "0.0.0.0:2234"
 advertised_port = 2234
 # obfuscated_bind = "0.0.0.0:2235"
 # obfuscated_advertised_port = 2235
-# Enables the TLS 1.3 mesh-service/private-gateway listener.
+# Current native defaults share the Soulseek TCP listener with the TLS 1.3
+# mesh-service/private-gateway listener. Set this only for an explicit
+# dedicated compatibility listener, for example 0.0.0.0:50305.
 # overlay_bind = "0.0.0.0:50305"
 
 [dht]
-# Defaults to enabled when overlay_bind is configured. Port 0 selects an ephemeral UDP port.
+# Native/current defaults enable DHT and use UDP port 50300, independently of
+# a customized Soulseek TCP port. Port 0 is accepted only when DHT is disabled.
 # enabled = true
 # port = 0
 

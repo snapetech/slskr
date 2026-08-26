@@ -108,11 +108,11 @@ const buildForm = (options = {}) => {
   const sharesCache = getOption(getShareOptions(options), 'cache', 'Cache') || {};
   const webhooks = getOption(getIntegrationOptions(options), 'webhooks', 'Webhooks') || {};
   const scripts = getOption(getIntegrationOptions(options), 'scripts', 'Scripts') || {};
-  const firstWebhookName = Object.keys(webhooks)[0] || 'my_webhook';
+  const firstWebhookName = Object.keys(webhooks)[0] || '';
   const firstWebhook = webhooks[firstWebhookName] || {};
   const firstWebhookCall = getOption(firstWebhook, 'call', 'Call') || {};
   const firstWebhookRetry = getOption(firstWebhook, 'retry', 'Retry') || {};
-  const firstScriptName = Object.keys(scripts)[0] || 'my_script';
+  const firstScriptName = Object.keys(scripts)[0] || '';
   const firstScript = scripts[firstScriptName] || {};
   const firstScriptRun = getOption(firstScript, 'run', 'Run') || {};
   const firstApiKeyName = Object.keys(apiKeys)[0] || 'automation';
@@ -169,7 +169,7 @@ const buildForm = (options = {}) => {
     dhtBootstrapRouters: toLines(getOption(dht, 'bootstrapRouters', 'bootstrap_routers', 'BootstrapRouters') || []),
     dhtEnabled: getOption(dht, 'enabled', 'Enabled') ?? true,
     dhtLanOnly: Boolean(getOption(dht, 'lanOnly', 'lan_only', 'LanOnly')),
-    dhtPort: String(getOption(dht, 'dhtPort', 'dht_port', 'DhtPort') ?? 50305),
+    dhtPort: String(getOption(dht, 'dhtPort', 'dht_port', 'DhtPort') ?? 50300),
     dhtOverlayPort: String(getOption(dht, 'overlayPort', 'overlay_port', 'OverlayPort') ?? 50305),
     enforceSecurity: Boolean(getOption(web, 'enforceSecurity', 'enforce_security', 'EnforceSecurity')),
     eventsRetention: String(getOption(retention, 'events', 'Events') ?? 30),
@@ -284,15 +284,26 @@ const AdminPolicies = ({ options = {} }) => {
     form.webhookUrl.trim() &&
       !form.webhookName.trim() &&
       'Webhook settings need a stable name.',
+    form.webhookName.trim() &&
+      !form.webhookUrl.trim() &&
+      'Webhook settings need a target URL.',
     form.scriptCommand.trim() &&
       !form.scriptName.trim() &&
       'Script settings need a stable name.',
+    form.scriptExecutable.trim() &&
+      !form.scriptName.trim() &&
+      'Script settings need a stable name.',
+    form.scriptName.trim() &&
+      !form.scriptCommand.trim() &&
+      !form.scriptExecutable.trim() &&
+      'Script settings need either a command or an executable.',
+    form.scriptCommand.trim() &&
+      form.scriptExecutable.trim() &&
+      'Script settings must use either a command or an executable, not both.',
     form.noAuth &&
+      form.allowRemoteNoAuth &&
       !form.passthroughCidrs.trim() &&
-      'No-auth mode should keep an explicit loopback CIDR allowlist.',
-    !form.httpsDisabled &&
-      !form.httpsCertificatePfx.trim() &&
-      'HTTPS needs a certificate PFX path.',
+      'Remote no-auth mode needs an explicit CIDR allowlist.',
     form.blacklistEnabled &&
       !form.blacklistFile.trim() &&
       'Managed blacklist needs a file path.',
@@ -452,7 +463,7 @@ const AdminPolicies = ({ options = {} }) => {
       document.setIn(['dht', 'enabled'], form.dhtEnabled);
       document.setIn(['dht', 'lan_only'], form.dhtLanOnly);
       document.setIn(['dht', 'overlay_port'], toNumber(form.dhtOverlayPort, 50305));
-      document.setIn(['dht', 'dht_port'], toNumber(form.dhtPort, 50305));
+      document.setIn(['dht', 'dht_port'], toNumber(form.dhtPort, 50300));
       document.setIn(['dht', 'bootstrap_routers'], parseLines(form.dhtBootstrapRouters));
       document.setIn(
         ['dht', 'announce_interval_seconds'],
@@ -1108,7 +1119,7 @@ const AdminPolicies = ({ options = {} }) => {
                 <Form.Input
                   aria-label="HTTPS certificate PFX path"
                   disabled={!remoteConfiguration || saving}
-                  label="Certificate PFX"
+                  label="Certificate PFX (optional)"
                   onChange={(_, { value }) => update('httpsCertificatePfx', value)}
                   value={form.httpsCertificatePfx}
                 />

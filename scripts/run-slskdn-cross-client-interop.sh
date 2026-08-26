@@ -425,7 +425,41 @@ slskdn_overlay_port="${SLSKR_CROSS_CLIENT_SLSKDN_OVERLAY_PORT:-$(pick_port)}"
 slskdn_overlay_endpoint_port="$slskdn_overlay_port"
 slskdn_quic_backend_port="${SLSKR_CROSS_CLIENT_SLSKDN_QUIC_BACKEND_PORT:-$(pick_port)}"
 slskdn_quic_data_port="${SLSKR_CROSS_CLIENT_SLSKDN_QUIC_DATA_PORT:-$(pick_port)}"
-slskr_overlay_port="${SLSKR_CROSS_CLIENT_SLSKR_OVERLAY_PORT:-$(pick_port)}"
+slskr_overlay_port_override="${SLSKR_CROSS_CLIENT_SLSKR_OVERLAY_PORT:-}"
+slskr_shared_tcp="${SLSKR_CROSS_CLIENT_SHARED_TCP:-}"
+if [[ -z "$slskr_shared_tcp" ]]; then
+  # The current upstream profile shares the public TCP listener. Preserve the
+  # old isolated profile when a caller explicitly supplies a different overlay
+  # port, so frozen/diagnostic runs do not change topology accidentally.
+  if [[ -n "$slskr_overlay_port_override" && "$slskr_overlay_port_override" != "$slskr_listen_port" ]]; then
+    slskr_shared_tcp=0
+  else
+    slskr_shared_tcp=1
+  fi
+fi
+case "$slskr_shared_tcp" in
+  0|1) ;;
+  *)
+    echo "SLSKR_CROSS_CLIENT_SHARED_TCP must be 0 or 1" >&2
+    exit 2
+    ;;
+esac
+if [[ "$slskr_shared_tcp" == 1 ]]; then
+  if [[ -n "$slskr_overlay_port_override" && "$slskr_overlay_port_override" != "$slskr_listen_port" ]]; then
+    echo "SLSKR_CROSS_CLIENT_SLSKR_OVERLAY_PORT must equal SLSKR_CROSS_CLIENT_SLSKR_LISTEN_PORT when SLSKR_CROSS_CLIENT_SHARED_TCP=1; use SHARED_TCP=0 for a dedicated compatibility listener" >&2
+    exit 2
+  fi
+  slskr_overlay_tcp_port="$slskr_listen_port"
+  slskr_overlay_port="${slskr_overlay_port_override:-$(pick_port)}"
+else
+  slskr_overlay_port="${slskr_overlay_port_override:-$(pick_port)}"
+  if [[ "$slskr_overlay_port" == "$slskr_listen_port" ]]; then
+    echo "a dedicated slskR overlay port must differ from the Soulseek listen port" >&2
+    exit 2
+  fi
+  slskr_overlay_tcp_port="$slskr_overlay_port"
+fi
+slskr_dht_port="${SLSKR_CROSS_CLIENT_SLSKR_DHT_PORT:-$slskr_overlay_port}"
 slskr_quic_backend_port="${SLSKR_CROSS_CLIENT_SLSKR_QUIC_BACKEND_PORT:-$(pick_port)}"
 slskr_quic_data_port="${SLSKR_CROSS_CLIENT_SLSKR_QUIC_DATA_PORT:-$(pick_port)}"
 gateway_echo_port="$(pick_port)"
@@ -506,10 +540,24 @@ wait_slskr_connected() {
 }
 
 # Build before either daemon starts. slskdN's test endpoint overrides live in its
-# bounded endpoint cache, so compiling the daemon after launch can
-# consume their useful lifetime before the cross-client checks begin.
+# bounded endpoint cache, so compiling either daemon after launch can consume
+# their useful lifetime before the cross-client checks begin. A pre-existing
+# executable is only reusable when the slskR package inputs are older than it;
+# this prevents a live parity run from silently testing stale Rust code.
 slskr_binary="$repo_root/target/debug/slskr"
+slskr_build_required=0
 if [[ ! -x "$slskr_binary" ]]; then
+  slskr_build_required=1
+elif find \
+  "$repo_root/crates/slskr" \
+  "$repo_root/crates/slskr-client" \
+  "$repo_root/Cargo.toml" \
+  "$repo_root/Cargo.lock" \
+  -type f -newer "$slskr_binary" -print -quit | grep -q .; then
+  slskr_build_required=1
+fi
+if [[ "$slskr_build_required" -eq 1 ]]; then
+  echo "building slskR interop binary from current package inputs" >&2
   export CARGO_BUILD_JOBS=1
   export RUST_MIN_STACK="${RUST_MIN_STACK:-16777216}"
   export CARGO_NET_OFFLINE="${CARGO_NET_OFFLINE:-true}"
@@ -602,7 +650,9 @@ overlay:
   quic_backend_listen_port: $slskdn_quic_backend_port
 overlay_data:
   enable: true
-  listen_port: $slskdn_quic_data_port
+  listen_port: $slskdn_overlay_port
+  share_with_dht_port: true
+  backend_listen_port: $slskdn_quic_data_port
 flags:
   no_connect: false
 YAML
@@ -626,8 +676,8 @@ YAML
   export SLSKR_API_TOKEN="$api_token"
   export SLSKR_SHARE_DIRS="$slskr_share"
   export SLSKR_LISTENER_BIND="0.0.0.0:$slskr_listen_port"
-  export SLSKR_OVERLAY_BIND="0.0.0.0:$slskr_overlay_port"
-  export SLSKR_ADVANCED_NETWORKING_JSON="{\"dht\":{\"enabled\":true,\"dht_port\":$slskr_overlay_port,\"overlay_port\":$slskr_overlay_port,\"advertised_overlay_port\":$slskr_overlay_port,\"lan_only\":true},\"overlay\":{\"enable\":true,\"listen_port\":$slskr_overlay_port,\"enable_quic\":true,\"quic_listen_port\":$slskr_overlay_port,\"share_quic_with_dht_port\":true,\"quic_backend_listen_port\":$slskr_quic_backend_port},\"overlay_data\":{\"enable\":true,\"listen_port\":$slskr_quic_data_port}}"
+  export SLSKR_OVERLAY_BIND="0.0.0.0:$slskr_overlay_tcp_port"
+  export SLSKR_ADVANCED_NETWORKING_JSON="{\"dht\":{\"enabled\":true,\"dht_port\":$slskr_dht_port,\"overlay_port\":$slskr_overlay_tcp_port,\"advertised_overlay_port\":$slskr_overlay_tcp_port,\"lan_only\":true},\"overlay\":{\"enable\":true,\"listen_port\":$slskr_dht_port,\"enable_quic\":true,\"quic_listen_port\":$slskr_dht_port,\"share_quic_with_dht_port\":true,\"quic_backend_listen_port\":$slskr_quic_backend_port},\"overlay_data\":{\"enable\":true,\"listen_port\":$slskr_dht_port}}"
   export SLSKR_OBFUSCATED_LISTENER_BIND="0.0.0.0:$slskr_obfuscated_listen_port"
   export SLSK_LISTEN_PORT="$slskr_listen_port"
   export SLSKR_ADVERTISED_PORT="$slskr_listen_port"
@@ -684,6 +734,7 @@ slskdn_pid="$!"
   printf 'server_endpoint=%s\n' "$server_endpoint"
   printf 'slskr_http=127.0.0.1:%s slskr_listen=127.0.0.1:%s slskr_obfuscated=127.0.0.1:%s\n' "$slskr_http_port" "$slskr_listen_port" "$slskr_obfuscated_listen_port"
   printf 'slskdn_http=127.0.0.1:%s slskdn_listen=127.0.0.1:%s slskdn_obfuscated=127.0.0.1:%s\n' "$slskdn_http_port" "$slskdn_listen_port" "$slskdn_obfuscated_port"
+  printf 'slskr_shared_tcp=%s slskr_overlay_tcp=127.0.0.1:%s slskr_dht_udp=127.0.0.1:%s\n' "$slskr_shared_tcp" "$slskr_overlay_tcp_port" "$slskr_dht_port"
   printf 'slskr_overlay=127.0.0.1:%s\n' "$slskr_overlay_port"
   printf 'slskdn_overlay=127.0.0.1:%s\n' "$slskdn_overlay_port"
   printf 'slskdn_quic_backend=127.0.0.1:%s slskdn_quic_data=127.0.0.1:%s\n' "$slskdn_quic_backend_port" "$slskdn_quic_data_port"
@@ -1743,6 +1794,8 @@ run_advanced_transport_interop_checks() {
   local udp_needle='[Overlay] Using legacy envelope handling without peer validation - security reduced'
   local quic_control_needle='[Overlay-QUIC] Received control probe'
   local quic_data_needle='[Overlay-QUIC-DATA] Received '
+  local quic_control_unavailable='[DI] QUIC overlay requested but runtime/platform support is unavailable'
+  local quic_data_unavailable='[DI] QUIC data overlay requested but runtime/platform support is unavailable'
 
   before="$(target_log_count "$udp_needle")"
   if output="$(
@@ -1757,30 +1810,40 @@ run_advanced_transport_interop_checks() {
     transport_status=1
   fi
 
-  before="$(target_log_count "$quic_control_needle")"
-  if output="$(
-    SLSKR_OVERLAY_ENDPOINT="127.0.0.1:$slskdn_quic_backend_port" \
-      "$slskr_binary" probe overlay-quic-control 2>&1
-  )" && wait_target_log_delta "$quic_control_needle" "$before"; then
-    detail="target_log=quic-control-dispatch accepted endpoint=127.0.0.1:$slskdn_quic_backend_port probe=$(printf '%s' "$output" | tr '\n\t' ' ')"
-    record_check protocol-slskr-overlay-quic-control-slskdn ok "$detail"
+  if grep -Fq -- "$quic_control_unavailable" "$slskdn_log"; then
+    record_check protocol-slskr-overlay-quic-control-slskdn skip \
+      "target runtime reports QUIC control unavailable; no MsQuic listener is available for this environment"
   else
-    record_check protocol-slskr-overlay-quic-control-slskdn fail \
-      "target_log=quic-control-receipt not observed output=$(printf '%s' "${output:-none}" | tr '\n\t' ' ')"
-    transport_status=1
+    before="$(target_log_count "$quic_control_needle")"
+    if output="$(
+      SLSKR_OVERLAY_ENDPOINT="127.0.0.1:$slskdn_quic_backend_port" \
+        "$slskr_binary" probe overlay-quic-control 2>&1
+    )" && wait_target_log_delta "$quic_control_needle" "$before"; then
+      detail="target_log=quic-control-dispatch accepted endpoint=127.0.0.1:$slskdn_quic_backend_port probe=$(printf '%s' "$output" | tr '\n\t' ' ')"
+      record_check protocol-slskr-overlay-quic-control-slskdn ok "$detail"
+    else
+      record_check protocol-slskr-overlay-quic-control-slskdn fail \
+        "target_log=quic-control-receipt not observed output=$(printf '%s' "${output:-none}" | tr '\n\t' ' ')"
+      transport_status=1
+    fi
   fi
 
-  before="$(target_log_count "$quic_data_needle")"
-  if output="$(
-    SLSKR_OVERLAY_ENDPOINT="127.0.0.1:$slskdn_quic_data_port" \
-      "$slskr_binary" probe quic-data 2>&1
-  )" && wait_target_log_delta "$quic_data_needle" "$before"; then
-    detail="target_log=quic-data-server accepted endpoint=127.0.0.1:$slskdn_quic_data_port probe=$(printf '%s' "$output" | tr '\n\t' ' ')"
-    record_check protocol-slskr-quic-data-slskdn ok "$detail"
+  if grep -Fq -- "$quic_data_unavailable" "$slskdn_log"; then
+    record_check protocol-slskr-quic-data-slskdn skip \
+      "target runtime reports QUIC data unavailable; no MsQuic listener is available for this environment"
   else
-    record_check protocol-slskr-quic-data-slskdn fail \
-      "target_log=quic-data-receipt not observed output=$(printf '%s' "${output:-none}" | tr '\n\t' ' ')"
-    transport_status=1
+    before="$(target_log_count "$quic_data_needle")"
+    if output="$(
+      SLSKR_OVERLAY_ENDPOINT="127.0.0.1:$slskdn_overlay_port" \
+        "$slskr_binary" probe quic-data 2>&1
+    )" && wait_target_log_delta "$quic_data_needle" "$before"; then
+      detail="target_log=quic-data-server accepted shared-endpoint=127.0.0.1:$slskdn_overlay_port backend=127.0.0.1:$slskdn_quic_data_port probe=$(printf '%s' "$output" | tr '\n\t' ' ')"
+      record_check protocol-slskr-quic-data-slskdn ok "$detail"
+    else
+      record_check protocol-slskr-quic-data-slskdn fail \
+        "target_log=quic-data-receipt not observed output=$(printf '%s' "${output:-none}" | tr '\n\t' ' ')"
+      transport_status=1
+    fi
   fi
 
   local route_payload route_response route_ok
@@ -1932,7 +1995,12 @@ process.stdin.on("end", () => {
   # BranchRoot from target to replacement, which is the missing reverse
   # direction.  Require the target to report the replacement child and the
   # replacement to report a non-zero branch before recording the row.
-  for _ in $(seq 1 "${SLSKR_CROSS_CLIENT_DISTRIBUTED_REVERSE_ATTEMPTS:-30}"); do
+  # Target branch status is asynchronous: a successful distributed probe can
+  # return before the target has committed the child and sent BranchLevel and
+  # BranchRoot back to the replacement. Allow the normal parent-selection and
+  # child-registration work to settle before declaring reverse propagation
+  # broken.
+  for _ in $(seq 1 "${SLSKR_CROSS_CLIENT_DISTRIBUTED_REVERSE_ATTEMPTS:-90}"); do
     distributed_target_state="$(auth_get "http://127.0.0.1:$slskdn_http_port/api/v0/application" 2>/dev/null || true)"
     distributed_reverse_state="$(auth_get "http://127.0.0.1:$slskr_http_port/api/v0/application" 2>/dev/null || true)"
     if printf '%s' "$distributed_target_state" | node -e '
@@ -2063,7 +2131,7 @@ run_mesh_runtime_checks || status=1
 run_advanced_transport_interop_checks || status=1
 record_final_diagnostics
 
-failed_checks="$(awk -F '\t' 'NR > 1 && $3 != "ok" { print }' "$result_file")"
+failed_checks="$(awk -F '\t' 'NR > 1 && $3 == "fail" { print }' "$result_file")"
 if [[ -n "$failed_checks" ]]; then
   status=1
   echo "cross-client interop failed checks:" >&2
