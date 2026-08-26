@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "generated_utc": "2026-03-22T00:38:25.294Z",
+  "purpose": "E2E test fixtures manifest with checksums for offline validation",
+  "files": [
+    {
+      "path": "book/treasure_island_pg120.txt",
+      "sha256": "2e93caf3f954e8e8457d9846ad7756f74ccf192dab77b7247d48ba134a8e2c1b",
+      "bytes": 399906
+    },
+    {
+      "path": "movie/sintel_poster.jpg",
+      "sha256": "7bfeaaa9e69df11188d5520b002196ea127275c482880b84c5b875d5addcb67b",
+      "bytes": 457811
+    },
+    {
+      "path": "music/open_goldberg/cover.jpg",
+      "sha256": "f3934fbc5ce7d2a35e5d52185f1d0095b5c1e0dfce36e8490b05a9edfaf78dd4",
+      "bytes": 287069
+    },
+    {
+      "path": "tv/ClearBits.txt",
+      "sha256": "05f46e157ef40f02e239bf526a514c21f625db964267e89fb80396dd7111a99c",
+      "bytes": 376
+    },
+    {
+      "path": "tv/Description.txt",
+      "sha256": "35dc73b3090b03fd3dea4fcdc1c3203294c4d213e7f97fb3f07910bf558e1cfb",
+      "bytes": 225
+    },
+    {
+      "path": "tv/license.txt",
+      "sha256": "f7df9061d06b3485741f65cdd81fce3fa534032d228a4d3ff2712eed4c9a180b",
+      "bytes": 67
+    },
+    {
+      "path": "tv/pioneer_one_thumb.jpg",
+      "sha256": "e7cc958fd9feb2320ff1976fe317db519cd941ae489f3fd2df5931c25e87ca5d",
+      "bytes": 5620
+    }
+  ]
+}

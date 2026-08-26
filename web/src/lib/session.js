@@ -25,20 +25,10 @@ export const isLoggedIn = () => {
   );
 };
 
-export const login = async ({ username, password }) => {
-  const candidateToken = password?.trim();
-  if (!candidateToken) {
-    throw new Error('API token is required');
-  }
-
-  await api.post(
-    '/session',
-    { username },
-    { headers: { Authorization: `Bearer ${candidateToken}` } },
-  );
-  clearToken();
-  setToken(sessionStorage, candidateToken);
-  return candidateToken;
+export const login = async ({ username, password, rememberMe = false }) => {
+  const { token } = (await api.post('/session', { password, username })).data;
+  setToken(rememberMe ? localStorage : sessionStorage, token);
+  return token;
 };
 
 export const logout = () => {

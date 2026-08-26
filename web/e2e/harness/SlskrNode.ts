@@ -1,5 +1,4 @@
 import { type ChildProcess, execFile, spawn } from 'node:child_process';
-import * as crypto from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as net from 'node:net';
 import * as path from 'node:path';
@@ -106,15 +105,6 @@ async function runCommand(
   });
 }
 
-async function replaceDirectoryContents(
-  sourceDir: string,
-  destinationDir: string,
-): Promise<void> {
-  await fs.rm(destinationDir, { force: true, recursive: true });
-  await fs.mkdir(destinationDir, { recursive: true });
-  await fs.cp(sourceDir, destinationDir, { recursive: true });
-}
-
 async function getListenSummary(port: number): Promise<string> {
   return new Promise((resolve) => {
     execFile('ss', ['-ltnp'], (error, stdout, stderr) => {
@@ -166,13 +156,17 @@ async function getListenSummaryForPid(pid: number): Promise<string> {
 export class SlskrNode {
   private static webBuildPromise: Promise<void> | null = null;
 
+  private static binaryBuildPromise: Promise<void> | null = null;
+
   private process: ChildProcess | null = null;
 
   private apiPort: number = 0;
 
   private soulseekListenPort: number = 0;
 
-  private shareTokenKey: string = '';
+  private dhtPort: number = 0;
+
+  private overlayPort: number = 0;
 
   private appDir: string = '';
 
@@ -186,108 +180,90 @@ export class SlskrNode {
    * Get the repository root directory.
    */
   private getRepoRoot(): string {
-    // process.cwd() is src/web/e2e/ when running tests, so go up 3 levels
-    // But we need to be more robust - use __dirname if available, or calculate from cwd
+    // process.cwd() is web/e2e/ when running tests, so go up 2 levels.
+    // Use __dirname if available, or calculate from cwd for robustness.
     if (typeof __dirname !== 'undefined') {
-      // Running as compiled JS
-      return path.join(__dirname, '..', '..', '..', '..');
+      // Running as compiled JS: web/e2e/harness/SlskrNode.js -> repo root
+      return path.join(__dirname, '..', '..', '..');
     } else {
-      // Running as TS - process.cwd() is src/web/e2e/
-      return path.resolve(process.cwd(), '..', '..', '..');
+      // Running as TS - process.cwd() is web/e2e/
+      return path.resolve(process.cwd(), '..', '..');
     }
   }
 
-  private async getTargetFramework(repoRoot: string): Promise<string> {
-    const projectPath = path.join(repoRoot, 'src', 'slskr', 'slskr.csproj');
-    const projectXml = await fs.readFile(projectPath, 'utf8');
-    const match = projectXml.match(
-      /<TargetFramework>([^<]+)<\/TargetFramework>/,
-    );
-
-    if (!match || !match[1]) {
-      throw new Error(`TargetFramework not found in ${projectPath}`);
-    }
-
-    return match[1].trim();
-  }
-
-  private async getBuiltAppBaseDir(repoRoot: string): Promise<string> {
-    const targetFramework = await this.getTargetFramework(repoRoot);
-    const configuredPath = path.join(
-      repoRoot,
-      'src',
-      'slskr',
-      'bin',
-      'Release',
-      targetFramework,
-    );
+  /**
+   * Locate (or build) the real slskr binary. slskr is a Cargo workspace —
+   * there is no .NET project/DLL here, unlike slskd/slskdN.
+   */
+  private async getBinaryPath(repoRoot: string): Promise<string> {
+    const releasePath = path.join(repoRoot, 'target', 'release', 'slskr');
+    const debugPath = path.join(repoRoot, 'target', 'debug', 'slskr');
 
     try {
-      await fs.access(path.join(configuredPath, 'slskr.dll'));
-      return configuredPath;
+      await fs.access(releasePath);
+      return releasePath;
     } catch {
-      // Keep the harness resilient if the project moves to TargetFrameworks or
-      // the build output is restored from cache under a different framework.
+      // Fall through to debug, then to a fresh build.
     }
-
-    const releasePath = path.join(repoRoot, 'src', 'slskr', 'bin', 'Release');
-    const entries = await fs
-      .readdir(releasePath, { withFileTypes: true })
-      .catch(() => []);
-    for (const entry of entries) {
-      if (!entry.isDirectory() || !entry.name.startsWith('net')) {
-        continue;
-      }
-
-      const candidate = path.join(releasePath, entry.name);
-      try {
-        await fs.access(path.join(candidate, 'slskr.dll'));
-        return candidate;
-      } catch {
-        // Try the next framework directory.
-      }
-    }
-
-    return configuredPath;
-  }
-
-  private async syncWebUi(repoRoot: string): Promise<void> {
-    const webBuildPath = path.join(repoRoot, 'src', 'web', 'build');
 
     try {
-      await fs.access(webBuildPath);
+      await fs.access(debugPath);
+      return debugPath;
     } catch {
-      await this.ensureWebBuild(repoRoot);
+      // Fall through to building it.
     }
 
+    await this.ensureBinaryBuild(repoRoot);
+
     try {
-      await fs.access(webBuildPath);
+      await fs.access(releasePath);
+      return releasePath;
     } catch {
       throw new Error(
-        'Web build not found at src/web/build. Run `npm run build` first.',
+        `slskr binary not found at ${releasePath} after \`cargo build --release --bin slskr\`.`,
       );
-    }
-
-    const sourceWwwroot = path.join(repoRoot, 'src', 'slskr', 'wwwroot');
-    await replaceDirectoryContents(webBuildPath, sourceWwwroot);
-
-    const builtAppBaseDir = await this.getBuiltAppBaseDir(repoRoot);
-    try {
-      await fs.access(builtAppBaseDir);
-      await replaceDirectoryContents(
-        webBuildPath,
-        path.join(builtAppBaseDir, 'wwwroot'),
-      );
-    } catch {
-      // No built Release app yet; fallback launch will copy from src/slskr/wwwroot.
     }
   }
 
-  private async ensureWebBuild(repoRoot: string): Promise<void> {
+  private async ensureBinaryBuild(repoRoot: string): Promise<void> {
+    if (!SlskrNode.binaryBuildPromise) {
+      SlskrNode.binaryBuildPromise = (async () => {
+        try {
+          await runCommand(
+            'cargo',
+            ['build', '--release', '--bin', 'slskr'],
+            repoRoot,
+          );
+        } catch (error) {
+          // Allow a retry if the first attempt fails.
+          SlskrNode.binaryBuildPromise = null;
+          throw error;
+        }
+      })();
+    }
+
+    await SlskrNode.binaryBuildPromise;
+  }
+
+  /**
+   * Ensure the web frontend is built. Unlike slskd/slskdN, slskr serves
+   * static content straight from this directory via SLSKD_CONTENT_PATH —
+   * no copy into a framework-specific wwwroot is needed.
+   */
+  private async ensureWebBuild(repoRoot: string): Promise<string> {
+    const webBuildPath = path.join(repoRoot, 'web', 'build');
+
+    try {
+      await fs.access(webBuildPath);
+      return webBuildPath;
+    } catch {
+      // Fall through to building it.
+    }
+
     if (!SlskrNode.webBuildPromise) {
       SlskrNode.webBuildPromise = (async () => {
         try {
-          const webRoot = path.join(repoRoot, 'src', 'web');
+          const webRoot = path.join(repoRoot, 'web');
           const nodeModulesPath = path.join(webRoot, 'node_modules');
 
           try {
@@ -306,6 +282,16 @@ export class SlskrNode {
     }
 
     await SlskrNode.webBuildPromise;
+
+    try {
+      await fs.access(webBuildPath);
+    } catch {
+      throw new Error(
+        `Web build not found at ${webBuildPath} after \`npm run build\`.`,
+      );
+    }
+
+    return webBuildPath;
   }
 
   /**
@@ -313,7 +299,7 @@ export class SlskrNode {
    */
   async start(): Promise<void> {
     const repoRoot = this.getRepoRoot();
-    await this.syncWebUi(repoRoot);
+    const webBuildPath = await this.ensureWebBuild(repoRoot);
 
     // Enforce test fixtures exist and validate checksums (fail fast if missing/corrupt)
     // The shareDir is like 'test-data/slskr-test-fixtures/music'
@@ -357,8 +343,12 @@ export class SlskrNode {
 
     // Allocate a unique Soulseek listen port per node (multi-instance needs this)
     this.soulseekListenPort = await findFreePort();
-    // Token signing key for share-grants / streams (base64, 32 bytes decoded)
-    this.shareTokenKey = crypto.randomBytes(32).toString('base64');
+    // The DHT UDP socket and the TLS mesh overlay TCP listener both default
+    // to fixed well-known ports (50300/50305) regardless of the Soulseek
+    // listen port — give each test node its own, or it collides with any
+    // other slskr process already running on the host.
+    this.dhtPort = await findFreePort();
+    this.overlayPort = await findFreePort();
 
     // Create isolated app directory
     if (!this.config.appDir) {
@@ -380,20 +370,22 @@ export class SlskrNode {
     }
 
     // Create subdirectories
-    await fs.mkdir(path.join(this.appDir, 'downloads'), { recursive: true });
-    await fs.mkdir(path.join(this.appDir, 'incomplete'), { recursive: true });
-    await fs.mkdir(path.join(this.appDir, 'config'), { recursive: true });
+    const downloadsDir = path.join(this.appDir, 'downloads');
+    const incompleteDir = path.join(this.appDir, 'incomplete');
+    await fs.mkdir(downloadsDir, { recursive: true });
+    await fs.mkdir(incompleteDir, { recursive: true });
 
-    // Write minimal config (YAML format)
-    // Convert shareDir(s) to absolute paths (slskr requires absolute paths)
+    // Convert shareDir(s) to absolute paths (slskr requires absolute paths).
+    // Multiple shares are joined with ';', matching SLSKD_SHARED_DIR parsing.
     const shareDirectories = Array.isArray(this.config.shareDir)
       ? this.config.shareDir
       : [this.config.shareDir];
-    const shareDirectoriesAbsolute = shareDirectories.map((dir) =>
-      path.isAbsolute(dir) ? dir : path.join(repoRoot, dir),
-    );
+    const shareDirectoriesAbsolute = shareDirectories
+      .filter(Boolean)
+      .map((dir) => (path.isAbsolute(dir) ? dir : path.join(repoRoot, dir)));
 
-    // Get node credentials
+    // Get node credentials — shared by the web UI login and the Soulseek
+    // account, matching the slskdN harness convention.
     const nodeCreds = {
       A: { password: 'nodeA', username: 'nodeA' },
       B: { password: 'nodeB', username: 'nodeB' },
@@ -403,120 +395,43 @@ export class SlskrNode {
       username: this.config.nodeName,
     };
 
-    const configPath = path.join(this.appDir, 'config', 'slskr.yml');
+    // Launch the real slskr binary via `serve`, driven entirely by
+    // SLSKD_*-prefixed environment variables — the same mechanism a real
+    // deployment (Docker, systemd) uses. No config file, no .NET project.
+    const binaryPath = await this.getBinaryPath(repoRoot);
+    const noConnect =
+      this.config.flags?.noConnect ?? process.env.SLSKR_TEST_NO_CONNECT === 'true';
 
-    const webContentPath = 'wwwroot';
+    // web.content_path is resolved relative to the running executable's own
+    // directory (see config.rs), not the app dir or cwd — it must stay a
+    // relative path, so compute it from the binary's directory.
+    const contentPath = path.relative(path.dirname(binaryPath), webBuildPath);
 
-    // Note: YAML provider automatically prefixes with "slskr:" namespace, so DON'T wrap under slskr: here
-    // If we wrap it, we'd get slskr:slskr:web:port instead of slskr:web:port
-    const sharesYaml =
-      shareDirectoriesAbsolute.length > 0
-        ? `shares:
-  directories:
-${shareDirectoriesAbsolute.map((dir) => `    - ${dir}`).join('\n')}`
-        : `shares:
-  directories: []`;
-    const configYaml = `web:
-  port: ${this.apiPort}
-  host: 127.0.0.1
-  contentPath: ${webContentPath}
-  https:
-    disabled: true
-  authentication:
-    username: ${nodeCreds.username}
-    password: ${nodeCreds.password}
-  rateLimiting:
-    enabled: false
-  cors:
-    enabled: true
-    allowCredentials: false
-    allowedOrigins:
-      - "*"
-    allowedMethods:
-      - GET
-      - POST
-      - PUT
-      - DELETE
-      - OPTIONS
-      - HEAD
-      - PATCH
-soulseek:
-  username: ${nodeCreds.username}
-  password: ${nodeCreds.password}
-  listenPort: ${this.soulseekListenPort}
-sharing:
-  tokenSigningKey: ${this.shareTokenKey}
-directories:
-  downloads: ${path.join(this.appDir, 'downloads')}
-  incomplete: ${path.join(this.appDir, 'incomplete')}
-${sharesYaml}
-feature:
-  IdentityFriends: true
-  CollectionsSharing: true
-  Streaming: true
-  StreamingRelayFallback: true
-  MeshParallelSearch: true
-  MeshPublishAvailability: true
-  ScenePodBridge: true
-  Swagger: true
-overlay:
-  enable: false
-overlayData:
-  enable: false
-mesh:
-  enableDht: false
-  enableStun: false
-  stunServers: []
-  peerDescriptorRefresh:
-    enableIpChangeDetection: false
-flags:
-  no_connect: ${this.config.flags?.noConnect ?? process.env.SLSKR_TEST_NO_CONNECT === 'true'}
-`;
-
-    await fs.writeFile(configPath, configYaml, 'utf8');
-
-    // Launch slskr process
-    const projectPath = path.join(repoRoot, 'src', 'slskr', 'slskr.csproj');
-    const builtAppBaseDir = await this.getBuiltAppBaseDir(repoRoot);
-    const builtDllPath = path.join(builtAppBaseDir, 'slskr.dll');
-
-    // Verify project exists
-    try {
-      await fs.access(projectPath);
-    } catch {
-      throw new Error(`Project not found: ${projectPath}`);
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      SLSKD_APP_DIR: this.appDir,
+      SLSKD_CONTENT_PATH: contentPath,
+      SLSKD_DOWNLOADS_DIR: downloadsDir,
+      SLSKD_FORCE_SHARE_SCAN: 'true',
+      SLSKR_DHT_PORT: String(this.dhtPort),
+      SLSKD_HTTP_ADDRESS: '127.0.0.1',
+      SLSKD_HTTP_PORT: String(this.apiPort),
+      SLSKD_INCOMPLETE_DIR: incompleteDir,
+      SLSKD_INSTANCE_NAME: this.config.nodeName,
+      SLSKD_NO_HTTPS: 'true',
+      SLSKD_PASSWORD: nodeCreds.password,
+      SLSKD_SLSK_LISTEN_PORT: String(this.soulseekListenPort),
+      SLSKD_SLSK_PASSWORD: nodeCreds.password,
+      SLSKD_SLSK_USERNAME: nodeCreds.username,
+      SLSKD_USERNAME: nodeCreds.username,
+      SLSKR_OVERLAY_BIND: `127.0.0.1:${this.overlayPort}`,
+    };
+    if (shareDirectoriesAbsolute.length > 0) {
+      env.SLSKD_SHARED_DIR = shareDirectoriesAbsolute.join(';');
     }
-
-    let useBuiltRelease = false;
-    try {
-      await fs.access(builtDllPath);
-      useBuiltRelease = true;
-    } catch {
-      useBuiltRelease = false;
+    if (noConnect) {
+      env.SLSKD_NO_CONNECT = 'true';
     }
-
-    const args = useBuiltRelease
-      ? [
-          builtDllPath,
-          '--app-dir',
-          this.appDir,
-          '--config',
-          configPath,
-          '--force-share-scan',
-        ]
-      : [
-          'run',
-          '--project',
-          projectPath,
-          '-c',
-          'Release',
-          '--',
-          '--app-dir',
-          this.appDir,
-          '--config',
-          configPath,
-          '--force-share-scan',
-        ];
 
     // Write stdout/stderr to files for debugging
     const artifactsDir = path.join(this.appDir, 'artifacts');
@@ -526,18 +441,9 @@ flags:
     const stdoutFd = await fs.open(stdoutPath, 'w');
     const stderrFd = await fs.open(stderrPath, 'w');
 
-    // Force binding to harness port via ASPNETCORE_URLS (bypasses config binding issues)
-    this.process = spawn('dotnet', args, {
+    this.process = spawn(binaryPath, ['serve'], {
       cwd: repoRoot,
-      env: {
-        ...process.env,
-        ASPNETCORE_ENVIRONMENT: 'Development',
-        ASPNETCORE_URLS: `http://127.0.0.1:${this.apiPort}`,
-        SLSKR_E2E_CONCURRENT_START: '1',
-        SLSKR_E2E_SERVER_PROBE: '1',
-        SLSKR_E2E_SHARE_ANNOUNCE: '1',
-        SLSKR_E2E_SKIP_BRIDGE_PROXY: '1',
-      },
+      env,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 
@@ -554,9 +460,7 @@ flags:
       );
     };
 
-    logWithTimestamp(
-      `[start] Launch mode: ${useBuiltRelease ? `prebuilt ${builtDllPath}` : 'dotnet run -c Release'}`,
-    );
+    logWithTimestamp(`[start] Launch mode: prebuilt ${binaryPath}`);
 
     this.process.stdout?.on('data', async (data) => {
       const text = data.toString();

@@ -57,30 +57,39 @@ describe('session', () => {
     });
   });
 
-  it('verifies a user supplied token without accepting a token echo from the API', async () => {
-    localStorage.setItem('slskr-token', 'stale-persistent-token');
+  it('logs in with a username and password, storing the server-issued token', async () => {
     api.post.mockResolvedValue({
       data: {
-        name: 'slskr',
-        token: 'server-token-must-not-be-used',
-        tokenConfigured: true,
+        name: 'user',
+        token: 'server-issued-jwt',
+        tokenType: 'Bearer',
       },
     });
 
     await expect(
-      session.login({ username: 'user', password: 'user-token', rememberMe: false }),
-    ).resolves.toBe('user-token');
+      session.login({ password: 'user-password', rememberMe: false, username: 'user' }),
+    ).resolves.toBe('server-issued-jwt');
 
-    expect(api.post).toHaveBeenCalledWith(
-      '/session',
-      { username: 'user' },
-      { headers: { Authorization: 'Bearer user-token' } },
-    );
-    expect(sessionStorage.getItem('slskr-token')).toBe('user-token');
-    expect(localStorage.getItem('slskr-token')).toBeNull();
-    expect(sessionStorage.getItem('slskr-token')).not.toBe(
-      'server-token-must-not-be-used',
-    );
+    // POST /api/v0/session expects { username, password } in the body, and
+    // returns a signed JWT to use for subsequent requests — there is no
+    // Authorization header on this call, and the client trusts the token
+    // the server issues rather than reusing the password as a token.
+    expect(api.post).toHaveBeenCalledWith('/session', {
+      password: 'user-password',
+      username: 'user',
+    });
+    expect(sessionStorage.getItem('slskr-token')).toBe('server-issued-jwt');
+  });
+
+  it('remembers the session in persistent storage when rememberMe is set', async () => {
+    api.post.mockResolvedValue({
+      data: { token: 'server-issued-jwt' },
+    });
+
+    await session.login({ password: 'user-password', rememberMe: true, username: 'user' });
+
+    expect(localStorage.getItem('slskr-token')).toBe('server-issued-jwt');
+    expect(sessionStorage.getItem('slskr-token')).toBeNull();
   });
 
   it('rethrows network session-check errors without masking them', async () => {
