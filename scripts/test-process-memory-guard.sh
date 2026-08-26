@@ -27,6 +27,17 @@ if [[ "$fallback_limit" != "$expected_fallback_limit" ]]; then
   exit 1
 fi
 
+spoofed_marker_limit="$(
+  SLSKR_PROCESS_MEMORY_GUARD_DISABLE_SYSTEMD=1 \
+  SLSKR_PROCESS_MEMORY_MAX_KIB=262144 \
+  SLSKR_PROCESS_MEMORY_GUARD_HELD=1 \
+    "$guard" bash -c 'ulimit -v'
+)"
+if [[ "$spoofed_marker_limit" != "$expected_fallback_limit" ]]; then
+  printf 'Process memory guard test failed: externally supplied nesting marker bypassed the limit: %s\n' "$spoofed_marker_limit" >&2
+  exit 1
+fi
+
 fallback_marker="$(
   SLSKR_PROCESS_MEMORY_GUARD_DISABLE_SYSTEMD=1 \
     "$guard" bash -c 'printf "%s" "$SLSKR_PROCESS_MEMORY_GUARD_HELD"'

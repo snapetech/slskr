@@ -9,17 +9,10 @@ if [[ "$#" -eq 0 ]]; then
   exit 2
 fi
 
-# A guarded command may invoke another repository script which reaches this
-# wrapper again. The outer process owns the lock and the limits are inherited.
-if [[ "${SLSKR_BUILD_GUARD_HELD:-0}" == "1" ]]; then
-  exec "$@"
-fi
-
 lock_wait_seconds="${SLSKR_BUILD_LOCK_WAIT_SECONDS:-0}"
 virtual_memory_kib="${SLSKR_RUST_VIRTUAL_MEMORY_KIB:-12582912}"
 build_jobs="${SLSKR_RUST_BUILD_JOBS:-1}"
 max_virtual_memory_kib=12582912
-format_virtual_memory_kib=4194304
 host_platform="$(uname -s 2>/dev/null || printf 'unknown')"
 virtual_memory_limit_supported=1
 if [[ "$host_platform" == "Darwin" ]]; then
@@ -37,16 +30,83 @@ if [[ ! "$virtual_memory_kib" =~ ^[1-9][0-9]{0,7}$ || "$virtual_memory_kib" -gt 
   printf 'SLSKR_RUST_VIRTUAL_MEMORY_KIB must be between 1 and %s\n' "$max_virtual_memory_kib" >&2
   exit 2
 fi
-if [[ "$1" == "cargo" && "${2:-}" == "fmt" ]] \
-  && ((virtual_memory_kib > format_virtual_memory_kib)); then
-  # rustfmt's diff emitter can construct pathological in-memory diffs for the
-  # monolithic controller source. Keep formatting at the application guard's
-  # 4 GiB hard ceiling even when other Rust commands use the 12 GiB ceiling.
-  virtual_memory_kib="$format_virtual_memory_kib"
-fi
 if [[ "$build_jobs" != "1" ]]; then
   printf 'SLSKR_RUST_BUILD_JOBS must be exactly 1; parallel Rust builds are disabled\n' >&2
   exit 2
+fi
+
+# Cargo's `fmt --check` path invokes rustfmt's diff emitter over the entire
+# workspace. This repository contains a multi-megabyte monolithic controller
+# source whose diff path has previously attempted a host-sized allocation.
+# Refuse the subcommand before Cargo or rustfmt starts; the incremental checker
+# uses `--emit stdout` behind its dedicated formatter guard instead.
+cargo_fmt_requested=0
+if [[ "$1" == "cargo" ]]; then
+  cargo_argument_index=2
+  while ((cargo_argument_index <= $#)); do
+    cargo_argument="${!cargo_argument_index}"
+    case "$cargo_argument" in
+      +*)
+        ;;
+      --color|--config|--manifest-path|--jobs)
+        cargo_argument_index=$((cargo_argument_index + 1))
+        ;;
+      --color=*|--config=*|--manifest-path=*|--jobs=*|--locked|--offline|--frozen|--verbose|--quiet)
+        ;;
+      -*)
+        ;;
+      fmt)
+        cargo_fmt_requested=1
+        break
+        ;;
+      *)
+        break
+        ;;
+    esac
+    cargo_argument_index=$((cargo_argument_index + 1))
+  done
+fi
+if [[ "$cargo_fmt_requested" -eq 1 ]]; then
+  printf 'Rust build guard: cargo fmt is disabled for this repository\n' >&2
+  printf 'Rust build guard: use scripts/check-rust-format.sh; it formats one changed file at a time under a 1 GiB cap\n' >&2
+  exit 2
+fi
+
+# This marker is only a nesting hint. It must never let a caller skip the
+# limit, lock, Cargo-profile, or feature checks. Validate that the current
+# process is actually inside the bounded context before using it to suppress
+# setup. An environment variable by itself is not proof of an active guard.
+build_guard_context_active=0
+if [[ "${SLSKR_BUILD_GUARD_HELD:-0}" == "1" ]]; then
+  inherited_build_virtual_memory_kib="unlimited"
+  if [[ "$virtual_memory_limit_supported" -eq 1 ]]; then
+    inherited_build_virtual_memory_kib="$(ulimit -v)"
+  fi
+  if [[ "$inherited_build_virtual_memory_kib" =~ ^[0-9]+$ ]] \
+    && ((inherited_build_virtual_memory_kib <= virtual_memory_kib)); then
+    build_guard_context_active=1
+  elif grep -Eq '/slskr-rust-build-guard-[^/]+\.service' /proc/self/cgroup 2>/dev/null; then
+    build_guard_context_active=1
+  fi
+fi
+if [[ "$build_guard_context_active" -eq 1 ]]; then
+  nested_build_guard=1
+else
+  nested_build_guard=0
+fi
+
+process_memory_guard_context_active=0
+if [[ "${SLSKR_PROCESS_MEMORY_GUARD_HELD:-0}" == "1" ]]; then
+  inherited_process_virtual_memory_kib="unlimited"
+  if [[ "$virtual_memory_limit_supported" -eq 1 ]]; then
+    inherited_process_virtual_memory_kib="$(ulimit -v)"
+  fi
+  if [[ "$inherited_process_virtual_memory_kib" =~ ^[0-9]+$ ]] \
+    && ((inherited_process_virtual_memory_kib <= 4194304)); then
+    process_memory_guard_context_active=1
+  elif grep -Eq '/slskr-process-memory-guard-[^/]+\.service' /proc/self/cgroup 2>/dev/null; then
+    process_memory_guard_context_active=1
+  fi
 fi
 
 # The historical monolithic controller test target is known to exceed the
@@ -61,7 +121,7 @@ if [[ "$1" == "cargo" ]]; then
   legacy_route_dispatch_requested=0
   full_controller_tests_override=0
   if [[ "${SLSKR_ALLOW_FULL_CONTROLLER_TESTS:-0}" == "1" \
-    && "${SLSKR_PROCESS_MEMORY_GUARD_HELD:-0}" == "1" \
+    && "$process_memory_guard_context_active" -eq 1 \
     && "${SLSKR_BUILD_GUARD_AUTO_PROCESS_GUARD:-0}" != "1" ]]; then
     full_controller_tests_override=1
   fi
@@ -135,58 +195,85 @@ else
   done
 fi
 
-mkdir -p "$repo_root/target"
-lock_path="${SLSKR_BUILD_LOCK_PATH:-$repo_root/target/.slskr-rust-build.lock}"
-if command -v flock >/dev/null 2>&1; then
-  exec 9>"$lock_path"
-  if [[ "$lock_wait_seconds" == "0" ]]; then
-    if ! flock -n 9; then
-      printf 'Rust build guard: another guarded Rust command is active; refusing to overlap it\n' >&2
-      printf 'Rust build guard: retry after it exits or set SLSKR_BUILD_LOCK_WAIT_SECONDS to a bounded value\n' >&2
-      exit 75
-    fi
-  elif ! flock -w "$lock_wait_seconds" 9; then
-    printf 'Rust build guard: timed out waiting for the repository Rust lock\n' >&2
-    exit 75
+# Resolve Cargo before entering the guarded command. A workstation-level shim
+# routes bare `cargo` here, so invoking Cargo by name again would recurse into
+# the shim. rustup provides the canonical toolchain binary; a normal PATH
+# lookup remains available for minimal CI/container environments.
+guarded_command=("$@")
+if [[ "$1" == "cargo" ]]; then
+  cargo_binary=""
+  if command -v rustup >/dev/null 2>&1; then
+    cargo_binary="$(rustup which cargo 2>/dev/null || true)"
   fi
-else
-  # Git Bash on Windows may not provide flock. mkdir is atomic, so use it as
-  # the portable fallback and remove only a proven-dead owner lock.
-  lock_dir="$lock_path.d"
-  release_mkdir_lock() {
-    rm -f "$lock_dir/pid"
-    rmdir "$lock_dir" 2>/dev/null || true
-  }
-  acquired=0
-  deadline=$((SECONDS + lock_wait_seconds))
-  while [[ "$acquired" -eq 0 ]]; do
-    if mkdir "$lock_dir" 2>/dev/null; then
-      printf '%s\n' "$$" >"$lock_dir/pid"
-      trap release_mkdir_lock EXIT
-      trap 'release_mkdir_lock; exit 130' INT TERM
-      acquired=1
-    else
-      owner_pid=''
-      if [[ -f "$lock_dir/pid" ]]; then
-        owner_pid="$(<"$lock_dir/pid")"
-        if [[ "$owner_pid" =~ ^[0-9]+$ ]] && ! kill -0 "$owner_pid" 2>/dev/null; then
-          rm -f "$lock_dir/pid"
-          rmdir "$lock_dir" 2>/dev/null || true
-          continue
-        fi
-      fi
-      if [[ "$lock_wait_seconds" == "0" || "$SECONDS" -ge "$deadline" ]]; then
+  if [[ -z "$cargo_binary" ]]; then
+    cargo_binary="$(command -v cargo || true)"
+  fi
+  if [[ -z "$cargo_binary" || ! -x "$cargo_binary" ]]; then
+    printf 'Rust build guard: unable to resolve the real Cargo binary\n' >&2
+    exit 127
+  fi
+  resolved_cargo_binary="$(readlink -f "$cargo_binary" 2>/dev/null || printf '%s' "$cargo_binary")"
+  if [[ "$resolved_cargo_binary" == "$repo_root/scripts/rust-tool-shim.sh" ]]; then
+    printf 'Rust build guard: Cargo resolved to the repository shim instead of the toolchain binary\n' >&2
+    exit 127
+  fi
+  guarded_command=("$cargo_binary" "${@:2}")
+fi
+
+lock_path="${SLSKR_BUILD_LOCK_PATH:-$repo_root/target/.slskr-rust-build.lock}"
+if [[ "$nested_build_guard" -eq 0 ]]; then
+  mkdir -p "$repo_root/target"
+  if command -v flock >/dev/null 2>&1; then
+    exec 9>"$lock_path"
+    if [[ "$lock_wait_seconds" == "0" ]]; then
+      if ! flock -n 9; then
         printf 'Rust build guard: another guarded Rust command is active; refusing to overlap it\n' >&2
         printf 'Rust build guard: retry after it exits or set SLSKR_BUILD_LOCK_WAIT_SECONDS to a bounded value\n' >&2
         exit 75
       fi
-      sleep 1
+    elif ! flock -w "$lock_wait_seconds" 9; then
+      printf 'Rust build guard: timed out waiting for the repository Rust lock\n' >&2
+      exit 75
     fi
-  done
+  else
+    # Git Bash on Windows may not provide flock. mkdir is atomic, so use it as
+    # the portable fallback and remove only a proven-dead owner lock.
+    lock_dir="$lock_path.d"
+    release_mkdir_lock() {
+      rm -f "$lock_dir/pid"
+      rmdir "$lock_dir" 2>/dev/null || true
+    }
+    acquired=0
+    deadline=$((SECONDS + lock_wait_seconds))
+    while [[ "$acquired" -eq 0 ]]; do
+      if mkdir "$lock_dir" 2>/dev/null; then
+        printf '%s\n' "$$" >"$lock_dir/pid"
+        trap release_mkdir_lock EXIT
+        trap 'release_mkdir_lock; exit 130' INT TERM
+        acquired=1
+      else
+        owner_pid=''
+        if [[ -f "$lock_dir/pid" ]]; then
+          owner_pid="$(<"$lock_dir/pid")"
+          if [[ "$owner_pid" =~ ^[0-9]+$ ]] && ! kill -0 "$owner_pid" 2>/dev/null; then
+            rm -f "$lock_dir/pid"
+            rmdir "$lock_dir" 2>/dev/null || true
+            continue
+          fi
+        fi
+        if [[ "$lock_wait_seconds" == "0" || "$SECONDS" -ge "$deadline" ]]; then
+          printf 'Rust build guard: another guarded Rust command is active; refusing to overlap it\n' >&2
+          printf 'Rust build guard: retry after it exits or set SLSKR_BUILD_LOCK_WAIT_SECONDS to a bounded value\n' >&2
+          exit 75
+        fi
+        sleep 1
+      fi
+    done
+  fi
 fi
 
 printf '[rust-build-guard] lock=exclusive jobs=1 virtual-memory=%s KiB command=' "$virtual_memory_kib" >&2
-printf ' %q' "$@" >&2
+printf ' %q' "${guarded_command[@]}" >&2
 printf '\n' >&2
 
 # Export the bounded build profile before taking an environment snapshot for a
@@ -208,7 +295,7 @@ export RUST_MIN_STACK="${RUST_MIN_STACK:-16777216}"
 # application guard. The child inherits the build settings while marking the
 # guard held so compiler-wrapper calls do not recursively create units.
 if [[ "$1" == "cargo" \
-  && "${SLSKR_BUILD_GUARD_HELD:-0}" != "1" \
+  && "$nested_build_guard" -eq 0 \
   && "${SLSKR_PROCESS_MEMORY_GUARD_DISABLE_SYSTEMD:-0}" != "1" ]] \
   && command -v systemd-run >/dev/null 2>&1 \
   && command -v systemctl >/dev/null 2>&1 \
@@ -246,7 +333,7 @@ if [[ "$1" == "cargo" \
     --property="TasksMax=512" \
     --property="EnvironmentFile=$build_environment_file" \
     --setenv=SLSKR_BUILD_GUARD_HELD=1 \
-    "$@"
+    "${guarded_command[@]}"
   exit "$?"
 fi
 
@@ -260,7 +347,7 @@ if [[ "$virtual_memory_limit_supported" -eq 1 ]]; then
   inherited_virtual_memory_kib="$(ulimit -v)"
 fi
 if [[ "$1" == "cargo" \
-  && "${SLSKR_PROCESS_MEMORY_GUARD_HELD:-0}" == "1" \
+  && "$process_memory_guard_context_active" -eq 1 \
   && "$inherited_virtual_memory_kib" =~ ^[0-9]+$ \
   && "$inherited_virtual_memory_kib" -lt "$virtual_memory_kib" ]]; then
   printf 'Rust build guard: Cargo is inside a smaller process-memory limit (%s KiB); build before entering the application guard or use a systemd user manager\n' \
@@ -293,5 +380,5 @@ fi
   # production daemon is also a large single crate; a high codegen-unit count
   # keeps rustc's per-unit LLVM working set bounded during metadata checks.
   export SLSKR_BUILD_GUARD_HELD=1
-  exec "$@"
+  exec "${guarded_command[@]}"
 )

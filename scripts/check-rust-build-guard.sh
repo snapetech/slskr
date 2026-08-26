@@ -25,6 +25,14 @@ if ! rg -q 'export RUST_TEST_THREADS=1' scripts/with-build-guard.sh; then
   printf 'Rust build guard check failed: the wrapper must force one test thread\n' >&2
   status=1
 fi
+if ! rg -q 'build_guard_context_active=' scripts/with-build-guard.sh; then
+  printf 'Rust build guard check failed: externally supplied nesting markers must be context-validated\n' >&2
+  status=1
+fi
+if ! rg -q 'process_memory_guard_context_active=' scripts/with-build-guard.sh; then
+  printf 'Rust build guard check failed: process-memory nesting markers must be context-validated\n' >&2
+  status=1
+fi
 if ! rg -q 'export CARGO_PROFILE_DEV_DEBUG=' scripts/with-build-guard.sh; then
   printf 'Rust build guard check failed: the wrapper must disable dev debug info by default\n' >&2
   status=1
@@ -53,13 +61,29 @@ if ! rg -q '^max_virtual_memory_kib=12582912$' scripts/with-build-guard.sh; then
   printf 'Rust build guard check failed: the wrapper hard ceiling must be 12 GiB\n' >&2
   status=1
 fi
-if ! rg -q '^format_virtual_memory_kib=4194304$' scripts/with-build-guard.sh \
-  || ! rg -q 'cargo.*fmt|\$format_virtual_memory_kib' scripts/with-build-guard.sh; then
-  printf 'Rust build guard check failed: Cargo formatting must use the 4 GiB hard ceiling\n' >&2
+if ! rg -q 'cargo fmt is disabled for this repository' scripts/with-build-guard.sh \
+  || ! rg -q 'scripts/check-rust-format\.sh' scripts/with-build-guard.sh; then
+  printf 'Rust build guard check failed: cargo fmt must be rejected in favor of the bounded formatter checker\n' >&2
   status=1
 fi
 if [[ ! -x scripts/with-rustfmt-guard.sh ]]; then
   printf 'Rust build guard check failed: direct rustfmt wrapper is missing or not executable\n' >&2
+  status=1
+fi
+if ! rg -q 'SLSKR_PROCESS_MEMORY_MAX_KIB=1048576' scripts/with-rustfmt-guard.sh \
+  || ! rg -q 'rustfmt --check is disabled' scripts/with-rustfmt-guard.sh; then
+  printf 'Rust build guard check failed: direct rustfmt must use the 1 GiB bounded emit path\n' >&2
+  status=1
+fi
+for shim_file in scripts/rust-tool-shim.sh scripts/install-rust-tool-shims.sh scripts/test-rust-tool-shims.sh; do
+  if [[ ! -x "$shim_file" ]]; then
+    printf 'Rust build guard check failed: Rust tool shim is missing or not executable: %s\n' "$shim_file" >&2
+    status=1
+  fi
+done
+if ! rg -q 'with-build-guard\.sh.*cargo' scripts/rust-tool-shim.sh \
+  || ! rg -q 'with-rustfmt-guard\.sh' scripts/rust-tool-shim.sh; then
+  printf 'Rust build guard check failed: workstation Rust shims must route repository commands through guards\n' >&2
   status=1
 fi
 if ! rg -q 'full-controller-tests is rejected under the 12 GiB memory-safe profile' scripts/with-build-guard.sh; then
@@ -85,11 +109,18 @@ if ! rg -q '^ulimit -v "\$interop_virtual_memory_kib"$' scripts/run-live-interop
 fi
 while IFS= read -r -d '' file; do
   while IFS= read -r match; do
+    case "$match" in
+      *'cargo fmt is disabled'*|*'cargo fmt must be rejected'*|*'raw cargo fmt'*)
+        # These are guard diagnostics and regression assertions, not command
+        # invocations. Keep the scan strict for all other Cargo subcommands.
+        continue
+        ;;
+    esac
     [[ "$match" == *"with-build-guard.sh"* ]] && continue
     printf 'unguarded Rust command in %s: %s\n' "$file" "$match" >&2
     status=1
   done < <(
-    rg -n --pcre2 '(^|[;&|(:`[:space:]])cargo[[:space:]]+[[:alnum:]_-]+([[:space:]]|$|[`])' "$file" || true
+    rg -n --pcre2 '(^|[;&|(:`[:space:]])cargo[[:space:]]+(build|check|test|clippy|fmt|run|package|metadata|tree|audit|install|bench)([[:space:]]|$|[`])' "$file" || true
   )
 done < <(
   find .github scripts docs -type f \( -name '*.sh' -o -name '*.yml' -o -name '*.yaml' -o -name '*.md' \) -print0

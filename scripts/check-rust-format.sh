@@ -9,12 +9,17 @@ cd "$repo_root"
 # and disable child-module expansion so one pathological diff cannot allocate
 # unbounded host memory. Keep unrelated repository fixtures and pre-existing
 # formatting debt outside this incremental gate.
-if [[ "${SLSKR_RUST_FORMAT_GUARD_HELD:-0}" != "1" ]]; then
-  exec "$repo_root/scripts/with-process-memory-guard.sh" env \
-    SLSKR_RUST_FORMAT_GUARD_HELD=1 "$BASH_SOURCE" "$@"
+if ! "$repo_root/scripts/process-memory-guard-active.sh"; then
+  exec "$repo_root/scripts/with-process-memory-guard.sh" "$BASH_SOURCE" "$@"
 fi
 
 format_status=0
+format_tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/slskr-rust-format.XXXXXX")"
+cleanup_format_tmp_dir() {
+  rm -rf -- "$format_tmp_dir"
+}
+trap cleanup_format_tmp_dir EXIT INT TERM
+
 format_base="${SLSKR_RUST_FORMAT_BASE:-}"
 if [[ -n "$format_base" ]]; then
   mapfile -t rust_files < <(git diff --name-only "$format_base" HEAD -- 'crates/**/*.rs' | sort -u)
@@ -39,15 +44,23 @@ if [[ "${#rust_files[@]}" -eq 0 ]]; then
 fi
 
 for rust_file in "${rust_files[@]}"; do
-  file_bytes="$(wc -c <"$rust_file")"
-  if ((file_bytes > 2000000)); then
-    # Never ask rustfmt to diff a multi-megabyte source file. Its diff emitter
-    # has a pathological allocation path for main.rs; parsing and formatting
-    # to /dev/null still validates syntax while avoiding that diff entirely.
-    if ! rustfmt --emit stdout --edition 2021 --config skip_children=true "$rust_file" >/dev/null; then
-      format_status=1
+  formatted_file="$(mktemp "$format_tmp_dir/formatted.XXXXXX")"
+  # Never ask rustfmt to construct a diff. Emit the formatted source into a
+  # bounded temporary file and compare it ourselves; for the monolithic source
+  # suppress the diff because even diff generation can retain huge buffers.
+  if ! "$repo_root/scripts/with-rustfmt-guard.sh" \
+    --emit stdout --edition 2021 --config skip_children=true "$rust_file" \
+    >"$formatted_file"; then
+    format_status=1
+    continue
+  fi
+  if ! cmp -s "$rust_file" "$formatted_file"; then
+    file_bytes="$(wc -c <"$rust_file")"
+    if ((file_bytes <= 2000000)); then
+      diff -u -- "$rust_file" "$formatted_file" || true
+    else
+      printf 'Rust format check failed: %s requires formatting (diff suppressed for large source)\n' "$rust_file" >&2
     fi
-  elif ! rustfmt --check --edition 2021 --config skip_children=true "$rust_file"; then
     format_status=1
   fi
 done

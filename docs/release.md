@@ -24,8 +24,13 @@ scripts/with-build-guard.sh cargo test --workspace
 ```
 
 Rust formatting uses `scripts/check-rust-format.sh`, which checks source files
-individually under a separate hard 4 GiB no-swap process limit. This avoids
-letting the monolithic controller source trigger an unbounded rustfmt diff.
+individually through `scripts/with-rustfmt-guard.sh` under a separate hard 1 GiB
+no-swap process limit. It emits formatted output and compares it locally rather
+than asking rustfmt to construct the monolithic controller's unbounded diff.
+
+For local workstations, install the repository command shims once with
+`scripts/install-rust-tool-shims.sh`; bare `cargo`, `rustc`, and `rustfmt`
+commands launched from this checkout then enter the matching guards.
 
 The `slskr` package defaults to its bounded focused controller-test target.
 The historical monolithic controller suite is rejected by the guard when

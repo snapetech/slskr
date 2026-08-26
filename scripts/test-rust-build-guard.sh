@@ -50,6 +50,16 @@ if [[ "$guard_limits" != "$expected_virtual_memory 1 1 16777216 0 1024 0 256 fal
   exit 1
 fi
 
+spoofed_marker_limit="$({
+  SLSKR_BUILD_GUARD_HELD=1 \
+  SLSKR_BUILD_LOCK_PATH="$test_lock_path" \
+    scripts/with-build-guard.sh bash -c 'ulimit -v'
+} 2>/dev/null)"
+if [[ "$spoofed_marker_limit" != "$expected_virtual_memory" ]]; then
+  printf 'Rust build guard test failed: externally supplied nesting marker bypassed the limit: %s\n' "$spoofed_marker_limit" >&2
+  exit 1
+fi
+
 nested_guard_limit="$(
   SLSKR_PROCESS_MEMORY_GUARD_DISABLE_SYSTEMD=1 \
   SLSKR_PROCESS_MEMORY_MAX_KIB=262144 \
@@ -101,6 +111,15 @@ if SLSKR_BUILD_LOCK_PATH="$test_lock_path" \
   SLSKR_ALLOW_FULL_CONTROLLER_TESTS=1 \
   scripts/with-build-guard.sh cargo test -p slskr --features full-controller-tests --no-run >/dev/null 2>&1; then
   printf 'Rust build guard test failed: unguarded full-controller-tests opt-in was allowed\n' >&2
+  exit 1
+fi
+
+if SLSKR_BUILD_LOCK_PATH="$test_lock_path" \
+  SLSKR_BUILD_GUARD_HELD=1 \
+  SLSKR_PROCESS_MEMORY_GUARD_HELD=1 \
+  SLSKR_ALLOW_FULL_CONTROLLER_TESTS=1 \
+  scripts/with-build-guard.sh cargo test -p slskr --features full-controller-tests --no-run >/dev/null 2>&1; then
+  printf 'Rust build guard test failed: spoofed process nesting marker enabled full-controller-tests\n' >&2
   exit 1
 fi
 

@@ -58,6 +58,10 @@ jobs:
         shell: bash
         run: scripts/test-rust-build-guard.sh
 
+      - name: Rust tool shim regression
+        shell: bash
+        run: scripts/test-rust-tool-shims.sh
+
       - name: Process memory guard
         shell: bash
         run: scripts/check-process-memory-guard.sh

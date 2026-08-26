@@ -6,8 +6,13 @@ cd "$repo_root"
 
 status=0
 guard=scripts/with-process-memory-guard.sh
+context_helper=scripts/process-memory-guard-active.sh
 if [[ ! -x "$guard" ]]; then
   printf 'Process memory guard check failed: %s is missing or not executable\n' "$guard" >&2
+  status=1
+fi
+if [[ ! -x "$context_helper" ]]; then
+  printf 'Process memory guard check failed: %s is missing or not executable\n' "$context_helper" >&2
   status=1
 fi
 if ! rg -q '^hard_memory_kib=4194304$' "$guard"; then
@@ -24,6 +29,10 @@ if ! rg -q 'MemorySwapMax=0' "$guard"; then
 fi
 if ! rg -q 'ulimit -v' "$guard"; then
   printf 'Process memory guard check failed: portable virtual-memory fallback is missing\n' >&2
+  status=1
+fi
+if ! rg -q 'process_guard_context_active=' "$guard"; then
+  printf 'Process memory guard check failed: externally supplied nesting markers must be context-validated\n' >&2
   status=1
 fi
 if ! rg -q -- '--working-directory="\$repo_root"' "$guard"; then
@@ -70,7 +79,13 @@ for runner in \
   scripts/check-web-audit.sh \
   scripts/run-universal-lifecycle-matrix.sh \
   scripts/generate-release-manifests.sh; do
-  if ! rg -q 'with-process-memory-guard\.sh' "$runner"; then
+  required_guard='process-memory-guard-active\.sh'
+  if [[ "$runner" == scripts/run-release-gate.sh ]]; then
+    # The release gate wraps each non-Rust step individually so Cargo can use
+    # its larger Rust-specific guard.
+    required_guard='with-process-memory-guard\.sh'
+  fi
+  if ! rg -q "$required_guard" "$runner"; then
     printf 'Process memory guard check failed: heavy runner is unguarded: %s\n' "$runner" >&2
     status=1
   fi

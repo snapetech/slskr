@@ -37,16 +37,27 @@ if [[ ! "$tasks_max" =~ ^[1-9][0-9]{0,5}$ || "$tasks_max" -gt 512 ]]; then
   exit 2
 fi
 
-# A nested invocation is already inside the cgroup or fallback shell limit.
+process_guard_context_active=0
 if [[ "${SLSKR_PROCESS_MEMORY_GUARD_HELD:-0}" == "1" ]]; then
-  exec "$@"
+  inherited_process_virtual_memory_kib="unlimited"
+  if [[ "$virtual_memory_limit_supported" -eq 1 ]]; then
+    inherited_process_virtual_memory_kib="$(ulimit -v)"
+  fi
+  if [[ "$inherited_process_virtual_memory_kib" =~ ^[0-9]+$ ]] \
+    && ((inherited_process_virtual_memory_kib <= memory_kib)); then
+    process_guard_context_active=1
+  elif grep -Eq '/slskr-process-memory-guard-[^/]+\.service' /proc/self/cgroup 2>/dev/null; then
+    process_guard_context_active=1
+  fi
 fi
 
 # Cargo has a separate Rust build guard with a larger, serialized profile.
 # Do not create the 4 GiB application/browser cgroup around that guard; doing
 # so would make the Rust limit ineffective and can kill rustfmt or rustc even
 # when the host has ample available memory.
-if [[ "$(basename "$1")" == "with-build-guard.sh" && "${2:-}" == "cargo" ]]; then
+if [[ "$(basename "$1")" == "with-build-guard.sh" \
+  && "${2:-}" == "cargo" \
+  && "$process_guard_context_active" -eq 0 ]]; then
   exec "$@"
 fi
 
@@ -64,6 +75,7 @@ esac
 # and its renderer processes. The environment switch exists only for the
 # fallback regression test; production callers use systemd when available.
 if [[ "${SLSKR_PROCESS_MEMORY_GUARD_DISABLE_SYSTEMD:-0}" != "1" ]] \
+  && [[ "$process_guard_context_active" -eq 0 ]] \
   && command -v systemd-run >/dev/null 2>&1 \
   && command -v systemctl >/dev/null 2>&1 \
   && systemctl --user show-environment >/dev/null 2>&1; then

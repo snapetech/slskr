@@ -44,6 +44,7 @@ run_step "Remediation baseline" scripts/check-remediation-baseline.sh
 run_step "Public posture check" scripts/check-public-posture.sh
 run_step "Changelog validation" scripts/validate-changelog.sh
 run_step "Rust build guard check" scripts/check-rust-build-guard.sh
+run_step "Rust tool shim regression" scripts/test-rust-tool-shims.sh
 run_step "Shell syntax check" bash -n scripts/*.sh
 run_step "Release-note tooling tests" python3 scripts/test_release_notes.py
 run_optional_step shellcheck "Shell lint" shellcheck \

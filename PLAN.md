@@ -116,7 +116,7 @@ After init, message connections are tagged by a single character: `P` peer-messa
 - Git repo with dual-push remote (GitHub primary, gitlab.home mirror).
 - Workspace skeleton.
 - Empty `slskr-protocol` and `slskr-client` crates.
-- CI: `scripts/with-build-guard.sh cargo fmt --check`, `scripts/with-build-guard.sh cargo clippy -D warnings`, `scripts/with-build-guard.sh cargo test`.
+- CI: `scripts/check-rust-format.sh`, `scripts/with-build-guard.sh cargo clippy -D warnings`, `scripts/with-build-guard.sh cargo test`.
 
 ### Phase 1 — Protocol primitives *(done)*
 - Reader/writer for `u8`, `u32 LE`, `u64 LE`, length-prefixed UTF-8/Latin-1 strings, IPv4, bool. *(done)*
@@ -191,7 +191,7 @@ After init, message connections are tagged by a single character: `P` peer-messa
 ## Current verification
 
 - `scripts/check-public-posture.sh`
-- `scripts/with-build-guard.sh cargo fmt --all --check`
+- `scripts/check-rust-format.sh`
 - `scripts/with-build-guard.sh cargo clippy --workspace --all-targets -- -D warnings`
 - `scripts/with-build-guard.sh cargo test --workspace`
 - `SLSK_SOULFIND_DOCKER=1 scripts/with-build-guard.sh cargo test -p slskr-client --test soulfind_contract`

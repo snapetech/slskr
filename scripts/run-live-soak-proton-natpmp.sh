@@ -4,7 +4,7 @@ set -euo pipefail
 # NAT-PMP soak keeps the daemon alive for hours. Apply the hard process-memory
 # ceiling before any port-mapping or credential work, including direct calls.
 runner_repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-if [[ "${SLSKR_PROCESS_MEMORY_GUARD_HELD:-0}" != "1" ]]; then
+if ! "$runner_repo_root/scripts/process-memory-guard-active.sh"; then
     exec "$runner_repo_root/scripts/with-process-memory-guard.sh" "${BASH_SOURCE[0]}" "$@"
 fi
 
