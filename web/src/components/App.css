@@ -11,39 +11,51 @@
 }
 
 :root.dark {
-    --slskr-primary-background: #0e1012;
-    --slskr-secondary-background: #171615;
-    --slskr-overlay-background: #201b16;
-    --slskr-tertiary-background: #2a241d;
-    --slskr-tertiary-border-color: rgba(214, 168, 104, 0.24);
-    --slskr-subtle-background: rgba(214, 168, 104, 0.13);
-    --slskr-color: #f1eadf;
-    --slskr-color-subtle: #c5b7a7;
-    --slskr-hover-background: #372d23;
-    --slskr-color-inset: #070809;
-    --slskr-emphasis-background: #8a6338;
-    --slskr-accent-primary: #b89af6;
-    --slskr-accent-primary-hover: #d9c7ff;
-    --slskr-accent-primary-muted: rgba(184, 154, 246, 0.14);
-    --slskr-accent-primary-border: rgba(184, 154, 246, 0.26);
-    --slskr-accent-warm: #d7a16b;
-    --slskr-accent-warm-hover: #f0bc83;
-    --slskr-accent-warm-muted: rgba(215, 161, 107, 0.2);
-    --slskr-nav-background: #151210;
-    --slskr-nav-border: rgba(215, 161, 107, 0.34);
-    --slskr-theme-trigger-background: #2a241d;
-    --slskr-theme-trigger-hover-background: #3c3125;
-    --slskr-theme-menu-background: #201b16;
-    --slskr-theme-menu-active-background: #5d4328;
-    --slskr-theme-menu-shadow: 0 16px 38px rgba(0, 0, 0, 0.58), 0 0 22px rgba(215, 161, 107, 0.12);
-    --slskr-footer-background: linear-gradient(135deg, #0e1012 0%, #221b14 54%, #11100e 100%);
-    --slskr-footer-shadow: 0 -10px 30px rgba(0, 0, 0, 0.58), 0 -1px 0 rgba(215, 161, 107, 0.28);
-    --slskr-surface-shadow: 0 18px 46px rgba(0, 0, 0, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.045);
-    --slskr-surface-shadow-soft: 0 8px 24px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.035);
-    --slskr-focus-ring: 0 0 0 3px rgba(215, 161, 107, 0.26);
-    --slskr-affordance-hover-background: rgba(215, 161, 107, 0.14);
-    --slskr-affordance-active-background: rgba(215, 161, 107, 0.24);
-    --slskr-affordance-outline: #edc08f;
+    /* Oxide — one accent, cool slate neutrals. A rust/oxide hue on purpose:
+       slskr is the Rust rewrite. Deliberately not slskdN's violet+amber.
+       See docs/design/iris-oxide.md */
+    --slskr-primary-background: #12161b;
+    --slskr-secondary-background: #181d24;
+    --slskr-overlay-background: #1b2027;
+    --slskr-tertiary-background: #202730;
+    --slskr-tertiary-border-color: rgba(212, 106, 59, 0.22);
+    --slskr-subtle-background: rgba(212, 106, 59, 0.12);
+    --slskr-color: #e9edf0;
+    --slskr-color-subtle: #93a0ac;
+    --slskr-hover-background: #262e38;
+    --slskr-color-inset: #0a0d10;
+    --slskr-emphasis-background: #6b3a24;
+    --slskr-accent-primary: #d46a3b;
+    --slskr-accent-primary-hover: #e8804f;
+    --slskr-accent-primary-muted: rgba(212, 106, 59, 0.16);
+    --slskr-accent-primary-border: rgba(212, 106, 59, 0.28);
+    /* Kept as an alias of the single accent — nothing should introduce a second hue. */
+    --slskr-accent-warm: var(--slskr-accent-primary);
+    --slskr-accent-warm-hover: var(--slskr-accent-primary-hover);
+    --slskr-accent-warm-muted: var(--slskr-accent-primary-muted);
+    --slskr-success: #4fb477;
+    --slskr-success-muted: rgba(79, 180, 119, 0.16);
+    --slskr-warning: #d9a441;
+    --slskr-warning-muted: rgba(217, 164, 65, 0.16);
+    --slskr-danger: #e1594f;
+    --slskr-danger-muted: rgba(225, 89, 79, 0.16);
+    --slskr-info: #4c9fe0;
+    --slskr-info-muted: rgba(76, 159, 224, 0.16);
+    --slskr-nav-background: #14181d;
+    --slskr-nav-border: rgba(212, 106, 59, 0.24);
+    --slskr-theme-trigger-background: #202730;
+    --slskr-theme-trigger-hover-background: #2c343d;
+    --slskr-theme-menu-background: #1b2027;
+    --slskr-theme-menu-active-background: #4a2f22;
+    --slskr-theme-menu-shadow: 0 16px 38px rgba(0, 0, 0, 0.5);
+    --slskr-footer-background: var(--slskr-primary-background);
+    --slskr-footer-shadow: 0 -1px 0 rgba(212, 106, 59, 0.14);
+    --slskr-surface-shadow: 0 12px 28px rgba(0, 0, 0, 0.3);
+    --slskr-surface-shadow-soft: 0 6px 16px rgba(0, 0, 0, 0.24);
+    --slskr-focus-ring: 0 0 0 3px rgba(212, 106, 59, 0.32);
+    --slskr-affordance-hover-background: rgba(212, 106, 59, 0.12);
+    --slskr-affordance-active-background: rgba(212, 106, 59, 0.2);
+    --slskr-affordance-outline: #e8804f;
 
     --background-color: var(--slskr-primary-background) !important;
 
@@ -141,11 +153,11 @@
     --slskr-accent-primary-hover: #79c0ff;
     --slskr-accent-primary-muted: rgba(88, 166, 255, 0.15);
     --slskr-accent-primary-border: rgba(88, 166, 255, 0.2);
-    --slskr-accent-warm: #f0883e;
-    --slskr-accent-warm-hover: #ffa657;
-    --slskr-accent-warm-muted: rgba(240, 136, 62, 0.18);
-    --slskr-footer-background: linear-gradient(135deg, #0d1117 0%, #161b22 50%, #0d1117 100%);
-    --slskr-footer-shadow: 0 -4px 20px rgba(0, 0, 0, 0.5);
+    --slskr-accent-warm: var(--slskr-accent-primary);
+    --slskr-accent-warm-hover: var(--slskr-accent-primary-hover);
+    --slskr-accent-warm-muted: var(--slskr-accent-primary-muted);
+    --slskr-footer-background: var(--slskr-primary-background);
+    --slskr-footer-shadow: 0 -1px 0 rgba(88, 166, 255, 0.14);
     --smui-site-link-color: #58a6ff;
     --smui-table-row-warning-background-color:rgba(187,128,9,0.15);
     --smui-table-row-warning-border-color: rgba(187,128,9,0.4);
@@ -248,7 +260,6 @@ body {
 :root.dark .app-content a[href]:hover,
 :root.dark .app-content a[href]:focus-visible {
     color: var(--slskr-accent-primary-hover) !important;
-    text-shadow: 0 0 12px rgba(199, 167, 255, 0.28);
 }
 
 :root.dark .app-content .ui.selectable.table tbody tr:hover,
@@ -259,7 +270,6 @@ body {
 :root.dark .ui.dropdown:hover,
 :root.dark .ui.selection.dropdown:hover {
     border-color: var(--slskr-accent-primary-border) !important;
-    box-shadow: 0 0 0 1px rgba(199, 167, 255, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.04) !important;
 }
 
 :root.dark .ui.checkbox label:hover,
@@ -344,7 +354,7 @@ body {
 
 :root.dark .ui.table thead th,
 :root.dark .ui.table tfoot th {
-    background: linear-gradient(180deg, rgba(199, 167, 255, 0.18), rgba(199, 167, 255, 0.07)), var(--slskr-tertiary-background) !important;
+    background: var(--slskr-tertiary-background) !important;
     color: var(--slskr-color) !important;
 }
 
@@ -426,7 +436,7 @@ body {
 }
 
 :root.dark .ui.modal {
-    box-shadow: 0 30px 90px rgba(0, 0, 0, 0.68), 0 0 0 1px rgba(199, 167, 255, 0.22) !important;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5) !important;
 }
 
 :root.dark .ui.message:not(.inverted) {
@@ -470,9 +480,8 @@ body {
 
 :root.dark .ui.button:not(.red):not(.orange):not(.yellow):not(.olive):not(.green):not(.teal):not(.blue):not(.violet):not(.purple):not(.pink):not(.brown):not(.grey):not(.black):not(.basic):hover,
 :root.dark .ui.button:not(.red):not(.orange):not(.yellow):not(.olive):not(.green):not(.teal):not(.blue):not(.violet):not(.purple):not(.pink):not(.brown):not(.grey):not(.black):not(.basic):focus {
-    background: linear-gradient(180deg, rgba(199, 167, 255, 0.26), rgba(199, 167, 255, 0.08)), var(--slskr-hover-background) !important;
+    background: var(--slskr-hover-background) !important;
     border-color: var(--slskr-accent-primary-border) !important;
-    box-shadow: 0 9px 24px rgba(0, 0, 0, 0.34), var(--slskr-focus-ring) !important;
     color: var(--slskr-accent-primary-hover) !important;
 }
 

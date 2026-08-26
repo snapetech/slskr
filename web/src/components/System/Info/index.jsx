@@ -38,8 +38,9 @@ const Info = ({ runtimeProfile, options, state, theme }) => {
           >
             Check for Updates
           </ShrinkableButton>
+          {/* Neutral, not amber — this is an optional external upsell from
+              Soulseek itself, not an app action that needs to alarm anyone. */}
           <ShrinkableButton
-            color="yellow"
             disabled={!contents}
             icon="star"
             mediaQuery="(max-width: 686px)"

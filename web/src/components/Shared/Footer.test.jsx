@@ -91,7 +91,7 @@ describe('Footer', () => {
     );
   });
 
-  it('renders build info and checks for updates when logged out', async () => {
+  it('shows only attribution when logged out — no build badge, donation links, or telemetry', async () => {
     isLoggedIn.mockReturnValue(false);
     getBuild.mockResolvedValue({
       current: '0.0.0-slskr.manual.local',
@@ -104,9 +104,10 @@ describe('Footer', () => {
 
     render(<Footer />);
 
-    expect(await screen.findByText('0.0.0-slskr.manual.local')).toBeInTheDocument();
-    expect(screen.getByText('update 2026050500-slskr.221')).toBeInTheDocument();
-    expect(getBuild).toHaveBeenCalledWith({ checkForUpdates: true });
+    expect(await screen.findByText('slskr')).toBeInTheDocument();
+    expect(screen.queryByText('0.0.0-slskr.manual.local')).not.toBeInTheDocument();
+    expect(screen.queryByText(/PayPal/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Ko-fi/)).not.toBeInTheDocument();
     expect(getStats).not.toHaveBeenCalled();
     expect(getSlskrStats).not.toHaveBeenCalled();
     expect(getSpeeds).not.toHaveBeenCalled();

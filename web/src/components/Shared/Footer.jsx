@@ -183,6 +183,30 @@ class Footer extends Component {
     const year = new Date().getFullYear();
     const { buildInfo, slskrStats, speeds, stats } = this.state;
     const isLoggedIn = session.isLoggedIn();
+
+    if (!isLoggedIn) {
+      // Nothing here is real yet — no donation asks, build badge, or live
+      // telemetry before someone has even signed in. Just attribution.
+      return (
+        <footer
+          className="slskr-footer slskr-footer-minimal"
+          ref={this.footerRef}
+        >
+          <span className="slskr-footer-copyright">
+            © {year}{' '}
+            <a
+              href={GITHUB_BASE}
+              rel="noopener noreferrer"
+              target="_blank"
+              title="slskr project"
+            >
+              slskr
+            </a>
+          </span>
+        </footer>
+      );
+    }
+
     const currentBuild = buildInfo?.current || buildInfo?.full || 'unknown';
     const fullBuild = buildInfo?.full || currentBuild;
     const latestBuild = buildInfo?.latest || '';

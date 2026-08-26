@@ -26,6 +26,17 @@ import React, { useEffect, useRef } from 'react';
 import { Navigate, useNavigate, useParams } from 'react-router-dom';
 import { Icon, Menu, Segment, Tab } from 'semantic-ui-react';
 
+// Six named groups instead of one 22-item flat tab strip. Order here is the
+// order sections appear in; a pane's `section` field below assigns it to one.
+const SECTIONS = [
+  { icon: 'home', key: 'overview', title: 'Overview' },
+  { icon: 'share alternate', key: 'network', title: 'Network & Mesh' },
+  { icon: 'shield alternate', key: 'security', title: 'Security & Trust' },
+  { icon: 'magic', key: 'automation', title: 'Automation & Jobs' },
+  { icon: 'heartbeat', key: 'diagnostics', title: 'Diagnostics' },
+  { icon: 'options', key: 'advanced', title: 'Advanced' },
+];
+
 const System = ({ runtimeProfile, options = {}, state = {}, theme }) => {
   const navigate = useNavigate();
   const { tab } = useParams();
@@ -62,6 +73,7 @@ const System = ({ runtimeProfile, options = {}, state = {}, theme }) => {
         </Tab.Pane>
       ),
       route: 'info',
+      section: 'overview',
     },
     {
       menuItem: (
@@ -83,116 +95,7 @@ const System = ({ runtimeProfile, options = {}, state = {}, theme }) => {
         </Tab.Pane>
       ),
       route: 'network',
-    },
-    {
-      menuItem: {
-        content: 'Mesh',
-        icon: 'share alternate',
-        key: 'mesh',
-      },
-      render: () => (
-        <Tab.Pane>
-          <Mesh runtimeProfile={runtimeProfile} />
-        </Tab.Pane>
-      ),
-      route: 'mesh',
-    },
-    {
-      menuItem: {
-        content: 'Bridge',
-        icon: 'exchange',
-        key: 'bridge',
-      },
-      render: () => (
-        <Tab.Pane>
-          <Bridge />
-        </Tab.Pane>
-      ),
-      route: 'bridge',
-    },
-    {
-      menuItem: {
-        content: 'MediaCore',
-        icon: 'music',
-        key: 'mediacore',
-      },
-      render: () => (
-        <Tab.Pane>
-          <MediaCore />
-        </Tab.Pane>
-      ),
-      route: 'mediacore',
-    },
-    {
-      menuItem: {
-        content: 'Security',
-        icon: 'shield alternate',
-        key: 'security',
-      },
-      render: () => (
-        <Tab.Pane>
-          <Security />
-        </Tab.Pane>
-      ),
-      route: 'security',
-    },
-    {
-      menuItem: {
-        content: 'Policies',
-        icon: 'sliders horizontal',
-        key: 'policies',
-      },
-      render: () => (
-        <Tab.Pane className="full-height">
-          <AdminPolicies options={options} />
-        </Tab.Pane>
-      ),
-      route: 'policies',
-    },
-    {
-      menuItem: {
-        content: 'Experience',
-        icon: 'compass',
-        key: 'experience',
-      },
-      render: () => (
-        <Tab.Pane className="full-height">
-          <ExperienceSettings />
-        </Tab.Pane>
-      ),
-      route: 'experience',
-    },
-    {
-      menuItem: {
-        content: 'Integrations',
-        icon: 'plug',
-        key: 'integrations',
-      },
-      render: () => (
-        <Tab.Pane className="full-height">
-          <Integrations
-            options={options}
-            state={state}
-          />
-        </Tab.Pane>
-      ),
-      route: 'integrations',
-    },
-    {
-      menuItem: {
-        content: 'Options',
-        icon: 'options',
-        key: 'options',
-      },
-      render: () => (
-        <Tab.Pane className="full-height">
-          <Options
-            options={options}
-            theme={theme}
-          />
-        </Tab.Pane>
-      ),
-      route: 'options',
+      section: 'overview',
     },
     {
       menuItem: (
@@ -221,32 +124,49 @@ const System = ({ runtimeProfile, options = {}, state = {}, theme }) => {
         </Tab.Pane>
       ),
       route: 'shares',
+      section: 'overview',
     },
     {
       menuItem: {
-        content: 'Jobs',
-        icon: 'tasks',
-        key: 'jobs',
+        content: 'Mesh',
+        icon: 'share alternate',
+        key: 'mesh',
       },
       render: () => (
-        <Tab.Pane className="full-height">
-          <Jobs />
+        <Tab.Pane>
+          <Mesh runtimeProfile={runtimeProfile} />
         </Tab.Pane>
       ),
-      route: 'jobs',
+      route: 'mesh',
+      section: 'network',
     },
     {
       menuItem: {
-        content: 'Automations',
-        icon: 'magic',
-        key: 'automations',
+        content: 'Bridge',
+        icon: 'exchange',
+        key: 'bridge',
       },
       render: () => (
-        <Tab.Pane className="full-height">
-          <AutomationCenter />
+        <Tab.Pane>
+          <Bridge />
         </Tab.Pane>
       ),
-      route: 'automations',
+      route: 'bridge',
+      section: 'network',
+    },
+    {
+      menuItem: {
+        content: 'MediaCore',
+        icon: 'music',
+        key: 'mediacore',
+      },
+      render: () => (
+        <Tab.Pane>
+          <MediaCore />
+        </Tab.Pane>
+      ),
+      route: 'mediacore',
+      section: 'network',
     },
     {
       menuItem: {
@@ -260,6 +180,7 @@ const System = ({ runtimeProfile, options = {}, state = {}, theme }) => {
         </Tab.Pane>
       ),
       route: 'source-providers',
+      section: 'network',
     },
     {
       menuItem: {
@@ -273,19 +194,35 @@ const System = ({ runtimeProfile, options = {}, state = {}, theme }) => {
         </Tab.Pane>
       ),
       route: 'swarm-analytics',
+      section: 'network',
     },
     {
       menuItem: {
-        content: 'Library Health',
-        icon: 'heartbeat',
-        key: 'library-health',
+        content: 'Security',
+        icon: 'shield alternate',
+        key: 'security',
+      },
+      render: () => (
+        <Tab.Pane>
+          <Security />
+        </Tab.Pane>
+      ),
+      route: 'security',
+      section: 'security',
+    },
+    {
+      menuItem: {
+        content: 'Policies',
+        icon: 'sliders horizontal',
+        key: 'policies',
       },
       render: () => (
         <Tab.Pane className="full-height">
-          <LibraryHealth />
+          <AdminPolicies options={options} />
         </Tab.Pane>
       ),
-      route: 'library-health',
+      route: 'policies',
+      section: 'security',
     },
     {
       menuItem: {
@@ -299,6 +236,63 @@ const System = ({ runtimeProfile, options = {}, state = {}, theme }) => {
         </Tab.Pane>
       ),
       route: 'quarantine-jury',
+      section: 'security',
+    },
+    {
+      menuItem: {
+        content: 'Jobs',
+        icon: 'tasks',
+        key: 'jobs',
+      },
+      render: () => (
+        <Tab.Pane className="full-height">
+          <Jobs />
+        </Tab.Pane>
+      ),
+      route: 'jobs',
+      section: 'automation',
+    },
+    {
+      menuItem: {
+        content: 'Automations',
+        icon: 'magic',
+        key: 'automations',
+      },
+      render: () => (
+        <Tab.Pane className="full-height">
+          <AutomationCenter />
+        </Tab.Pane>
+      ),
+      route: 'automations',
+      section: 'automation',
+    },
+    {
+      menuItem: {
+        content: 'Events',
+        icon: 'calendar check',
+        key: 'events',
+      },
+      render: () => (
+        <Tab.Pane className="full-height">
+          <Events />
+        </Tab.Pane>
+      ),
+      route: 'events',
+      section: 'automation',
+    },
+    {
+      menuItem: {
+        content: 'Library Health',
+        icon: 'heartbeat',
+        key: 'library-health',
+      },
+      render: () => (
+        <Tab.Pane className="full-height">
+          <LibraryHealth />
+        </Tab.Pane>
+      ),
+      route: 'library-health',
+      section: 'diagnostics',
     },
     {
       menuItem: {
@@ -315,6 +309,7 @@ const System = ({ runtimeProfile, options = {}, state = {}, theme }) => {
         </Tab.Pane>
       ),
       route: 'files',
+      section: 'diagnostics',
     },
     {
       menuItem: {
@@ -328,19 +323,7 @@ const System = ({ runtimeProfile, options = {}, state = {}, theme }) => {
         </Tab.Pane>
       ),
       route: 'data',
-    },
-    {
-      menuItem: {
-        content: 'Events',
-        icon: 'calendar check',
-        key: 'events',
-      },
-      render: () => (
-        <Tab.Pane className="full-height">
-          <Events />
-        </Tab.Pane>
-      ),
-      route: 'events',
+      section: 'diagnostics',
     },
     {
       menuItem: {
@@ -354,6 +337,7 @@ const System = ({ runtimeProfile, options = {}, state = {}, theme }) => {
         </Tab.Pane>
       ),
       route: 'logs',
+      section: 'diagnostics',
     },
     {
       menuItem: {
@@ -367,6 +351,55 @@ const System = ({ runtimeProfile, options = {}, state = {}, theme }) => {
         </Tab.Pane>
       ),
       route: 'metrics',
+      section: 'diagnostics',
+    },
+    {
+      menuItem: {
+        content: 'Experience',
+        icon: 'compass',
+        key: 'experience',
+      },
+      render: () => (
+        <Tab.Pane className="full-height">
+          <ExperienceSettings />
+        </Tab.Pane>
+      ),
+      route: 'experience',
+      section: 'advanced',
+    },
+    {
+      menuItem: {
+        content: 'Integrations',
+        icon: 'plug',
+        key: 'integrations',
+      },
+      render: () => (
+        <Tab.Pane className="full-height">
+          <Integrations
+            options={options}
+            state={state}
+          />
+        </Tab.Pane>
+      ),
+      route: 'integrations',
+      section: 'advanced',
+    },
+    {
+      menuItem: {
+        content: 'Options',
+        icon: 'options',
+        key: 'options',
+      },
+      render: () => (
+        <Tab.Pane className="full-height">
+          <Options
+            options={options}
+            theme={theme}
+          />
+        </Tab.Pane>
+      ),
+      route: 'options',
+      section: 'advanced',
     },
   ];
 
@@ -377,7 +410,7 @@ const System = ({ runtimeProfile, options = {}, state = {}, theme }) => {
       '.ui.tabular.menu .active.item',
     );
     activeItem?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
-  }, [activeIndex]);
+  }, [tab]);
 
   useEffect(() => {
     if (!runtimeProfile) {
@@ -387,25 +420,56 @@ const System = ({ runtimeProfile, options = {}, state = {}, theme }) => {
     systemRef.current
       ?.querySelectorAll('.ui.tabular.menu [role="button"]')
       .forEach((item) => item.setAttribute('role', 'tab'));
-  }, [activeIndex, runtimeProfile]);
-
-  const onTabChange = (_event, { activeIndex: newActiveIndex }) => {
-    navigate(`/system/${panes[newActiveIndex].route}`);
-  };
+  }, [tab, runtimeProfile]);
 
   if (tab === undefined) {
     return <Navigate replace to={`/system/${panes[0].route}`} />;
   }
 
+  const activePane = activeIndex > -1 ? panes[activeIndex] : panes[0];
+  const sectionPanes = panes.filter(
+    (pane) => pane.section === activePane.section,
+  );
+  const sectionActiveIndex = sectionPanes.findIndex(
+    (pane) => pane.route === activePane.route,
+  );
+
+  const onSectionTabChange = (_event, { activeIndex: newIndex }) => {
+    navigate(`/system/${sectionPanes[newIndex].route}`);
+  };
+
+  const onSectionSelect = (sectionKey) => {
+    const firstRoute = panes.find((pane) => pane.section === sectionKey)?.route;
+    if (firstRoute) {
+      navigate(`/system/${firstRoute}`);
+    }
+  };
+
   return (
     <div className="system" ref={systemRef}>
+      <Menu
+        className="system-section-menu"
+        pointing
+        secondary
+      >
+        {SECTIONS.map((section) => (
+          <Menu.Item
+            active={activePane.section === section.key}
+            key={section.key}
+            onClick={() => onSectionSelect(section.key)}
+          >
+            <Icon name={section.icon} />
+            {section.title}
+          </Menu.Item>
+        ))}
+      </Menu>
       <Segment raised>
-          <Tab
-            activeIndex={activeIndex > -1 ? activeIndex : 0}
-            onTabChange={onTabChange}
-            panes={panes}
-            renderActiveOnly={Boolean(runtimeProfile)}
-          />
+        <Tab
+          activeIndex={sectionActiveIndex > -1 ? sectionActiveIndex : 0}
+          onTabChange={onSectionTabChange}
+          panes={sectionPanes}
+          renderActiveOnly={Boolean(runtimeProfile)}
+        />
       </Segment>
     </div>
   );

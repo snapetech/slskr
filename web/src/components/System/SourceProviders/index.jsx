@@ -39,17 +39,18 @@ const normalizeProfilePolicy = (policy) => ({
   providerPriority: policy.providerPriority ?? policy.ProviderPriority ?? [],
 });
 
+// A real risk gradient, not a different hue per category: safest to most
+// exposed maps onto the same four semantic colors used everywhere else.
 const riskColor = (riskLevel) => {
   switch (riskLevel) {
     case 'local':
-      return 'green';
     case 'trusted-mesh':
-      return 'teal';
-    case 'public-network':
-      return 'orange';
+      return 'green';
     case 'configured-network':
     case 'configured-lan':
       return 'blue';
+    case 'public-network':
+      return 'orange';
     case 'high-risk':
       return 'red';
     default:
@@ -190,7 +191,8 @@ const SourceProviders = () => {
                 <Label color={riskColor(provider.riskLevel)}>
                   {provider.riskLevel}
                 </Label>
-                <Label color={provider.registered ? 'blue' : 'grey'}>
+                {/* Registration is a fact, not a state that needs attention. */}
+                <Label basic>
                   {provider.registered ? 'Registered' : 'Not Registered'}
                 </Label>
                 {provider.requiresConfiguration && (

@@ -219,6 +219,9 @@ describe('PlayerBar', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     window.localStorage.clear();
+    // These tests exercise the expanded player UI; the collapsed-by-default
+    // behavior itself is covered separately below.
+    window.localStorage.setItem('slskr.player.collapsed', 'false');
     vi.stubGlobal('fetch', vi.fn(() => Promise.resolve({ ok: true })));
     searches.createBatch.mockResolvedValue(3);
     wishlistAPI.create.mockResolvedValue({ id: 'wishlist-seed' });
@@ -230,6 +233,21 @@ describe('PlayerBar', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+  });
+
+  it('collapses by default when no preference has ever been stored', () => {
+    window.localStorage.removeItem('slskr.player.collapsed');
+    renderPlayer();
+
+    expect(document.querySelector('.player-bar-collapsed')).not.toBeNull();
+    expect(screen.getByTestId('player-expand')).toBeInTheDocument();
+  });
+
+  it('stays expanded once the user has explicitly expanded it before', () => {
+    window.localStorage.setItem('slskr.player.collapsed', 'false');
+    renderPlayer();
+
+    expect(document.querySelector('.player-bar-collapsed')).toBeNull();
   });
 
   it('mutes local browser playback without clearing the stream source', async () => {

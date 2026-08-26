@@ -327,12 +327,21 @@ const buildCurrentIngressPorts = (options = {}) => {
   );
   const dhtOverlayPort = toConfiguredPort(
     getOption(dht, 'overlayPort', 'overlay_port', 'OverlayPort'),
-    50305,
+    50300,
   );
   const dhtPort = toConfiguredPort(
     getOption(dht, 'dhtPort', 'dht_port', 'DhtPort'),
-    50305,
+    50300,
   );
+  if (soulseekListenPort === dhtOverlayPort && soulseekListenPort === dhtPort) {
+    return [{
+      config: 'soulseek.listen_port + dht.overlay_port + dht.dht_port + overlay.quic_listen_port',
+      label: 'Soulseek peer/file transfers, slskr mesh overlay, DHT rendezvous, and QUIC overlay',
+      port: soulseekListenPort,
+      proto: 'TCP/UDP',
+    }];
+  }
+
   const ports = [{
     config: 'soulseek.listen_port',
     label: 'Soulseek peer/file transfers',
@@ -410,8 +419,9 @@ const VpnPortChangeNotice = ({ onDismiss, options, portForwards }) => {
         <div className="network-endpoint-change-notice-copy">
           <strong>slskr ingress ports were reduced.</strong>
           <span>
-            Older builds needed five public forwards. Current builds need two:
-            Soulseek peer/file transfers and the slskr mesh/DHT/QUIC overlay.
+            Older builds needed five public forwards. Current defaults need one
+            public port number on both TCP and UDP: Soulseek peer/file
+            transfers and the slskr mesh/DHT/QUIC overlay.
           </span>
           <IngressPortList
             expectedPorts={LEGACY_INGRESS_PORTS}
@@ -1437,30 +1447,6 @@ class App extends Component {
                       Search
                     </Menu.Item>
                   </NavLink>
-                  <NavLink to="/discovery-graph">
-                    <Menu.Item data-testid="nav-discovery-graph">
-                      <Icon name="crosshairs" />
-                      Discovery Graph
-                    </Menu.Item>
-                  </NavLink>
-                  <NavLink to="/playlist-intake">
-                    <Menu.Item data-testid="nav-playlist-intake">
-                      <Icon name="list alternate outline" />
-                      Playlist Intake
-                    </Menu.Item>
-                  </NavLink>
-                  <NavLink to="/wishlist">
-                    <Menu.Item data-testid="nav-wishlist">
-                      <Icon name="star" />
-                      Wishlist
-                    </Menu.Item>
-                  </NavLink>
-                  <NavLink to="/lidarr">
-                    <Menu.Item data-testid="nav-lidarr">
-                      <Icon name="music" />
-                      Lidarr
-                    </Menu.Item>
-                  </NavLink>
                   <NavLink to="/downloads">
                     <Menu.Item data-testid="nav-downloads">
                       <Icon name="download" />
@@ -1485,48 +1471,128 @@ class App extends Component {
                       Messages
                     </Menu.Item>
                   </NavLink>
-                  <NavLink to="/users">
-                    <Menu.Item data-testid="nav-users">
-                      <Icon name="users" />
-                      Users
-                    </Menu.Item>
-                  </NavLink>
-                  <NavLink to="/contacts">
-                    <Menu.Item data-testid="nav-contacts">
-                      <Icon name="address book" />
-                      Contacts
-                    </Menu.Item>
-                  </NavLink>
-                  <NavLink to="/solid">
-                    <Menu.Item data-testid="nav-solid">
-                      <Icon name="key" />
-                      Solid
-                    </Menu.Item>
-                  </NavLink>
-                  <NavLink to="/collections">
-                    <Menu.Item data-testid="nav-collections">
-                      <Icon name="list" />
-                      Collections
-                    </Menu.Item>
-                  </NavLink>
-                  <NavLink to="/sharegroups">
-                    <Menu.Item data-testid="nav-groups">
-                      <Icon name="users" />
-                      Share Groups
-                    </Menu.Item>
-                  </NavLink>
-                  <NavLink to="/shared">
-                    <Menu.Item data-testid="nav-shared-with-me">
-                      <Icon name="share" />
-                      Shared with Me
-                    </Menu.Item>
-                  </NavLink>
-                  <NavLink to="/browse">
-                    <Menu.Item data-testid="nav-browse">
-                      <Icon name="folder open" />
-                      Browse
-                    </Menu.Item>
-                  </NavLink>
+
+                  <Dropdown
+                    icon={null}
+                    item
+                    trigger={(
+                      <>
+                        <Icon name="compass outline" />
+                        Discover
+                        <Icon name="dropdown" />
+                      </>
+                    )}
+                  >
+                    <Dropdown.Menu>
+                      <Dropdown.Item
+                        as={NavLink}
+                        data-testid="nav-discovery-graph"
+                        icon="crosshairs"
+                        text="Discovery Graph"
+                        to="/discovery-graph"
+                      />
+                      <Dropdown.Item
+                        as={NavLink}
+                        data-testid="nav-playlist-intake"
+                        icon="list alternate outline"
+                        text="Playlist Intake"
+                        to="/playlist-intake"
+                      />
+                      <Dropdown.Item
+                        as={NavLink}
+                        data-testid="nav-wishlist"
+                        icon="star"
+                        text="Wishlist"
+                        to="/wishlist"
+                      />
+                      <Dropdown.Item
+                        as={NavLink}
+                        data-testid="nav-lidarr"
+                        icon="music"
+                        text="Lidarr"
+                        to="/lidarr"
+                      />
+                    </Dropdown.Menu>
+                  </Dropdown>
+
+                  <Dropdown
+                    icon={null}
+                    item
+                    trigger={(
+                      <>
+                        <Icon name="user circle outline" />
+                        Network
+                        <Icon name="dropdown" />
+                      </>
+                    )}
+                  >
+                    <Dropdown.Menu>
+                      <Dropdown.Item
+                        as={NavLink}
+                        data-testid="nav-users"
+                        icon="users"
+                        text="Users"
+                        to="/users"
+                      />
+                      <Dropdown.Item
+                        as={NavLink}
+                        data-testid="nav-contacts"
+                        icon="address book"
+                        text="Contacts"
+                        to="/contacts"
+                      />
+                      <Dropdown.Item
+                        as={NavLink}
+                        data-testid="nav-solid"
+                        icon="key"
+                        text="Solid"
+                        to="/solid"
+                      />
+                    </Dropdown.Menu>
+                  </Dropdown>
+
+                  <Dropdown
+                    icon={null}
+                    item
+                    trigger={(
+                      <>
+                        <Icon name="share alternate" />
+                        Sharing
+                        <Icon name="dropdown" />
+                      </>
+                    )}
+                  >
+                    <Dropdown.Menu>
+                      <Dropdown.Item
+                        as={NavLink}
+                        data-testid="nav-collections"
+                        icon="list"
+                        text="Collections"
+                        to="/collections"
+                      />
+                      <Dropdown.Item
+                        as={NavLink}
+                        data-testid="nav-groups"
+                        icon="users"
+                        text="Share Groups"
+                        to="/sharegroups"
+                      />
+                      <Dropdown.Item
+                        as={NavLink}
+                        data-testid="nav-shared-with-me"
+                        icon="share"
+                        text="Shared with Me"
+                        to="/shared"
+                      />
+                      <Dropdown.Item
+                        as={NavLink}
+                        data-testid="nav-browse"
+                        icon="folder open"
+                        text="Browse"
+                        to="/browse"
+                      />
+                    </Dropdown.Menu>
+                  </Dropdown>
                 </>
                 ) : (
                 <>
