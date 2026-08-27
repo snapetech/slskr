@@ -21,7 +21,8 @@ def download(url: str, out_path: Path, retries: int = 3) -> None:
         try:
             print(f"DL: {url}")
             req = Request(url, headers={"User-Agent": "slskdn-fixtures-fetch/1.0"})
-            with urlopen(req, timeout=60) as r:
+            # url comes from this repo's own committed meta/manifest.json, not untrusted input.
+            with urlopen(req, timeout=60) as r:  # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
                 data = r.read()
             out_path.write_bytes(data)
             return
