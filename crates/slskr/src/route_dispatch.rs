@@ -978,7 +978,9 @@ async fn route_http_request_inner(
             permissions,
             token: string_field("token"),
             expiry_utc: string_field("expiryUtc"),
-            max_bitrate_kbps: payload.get("maxBitrateKbps").and_then(serde_json::Value::as_u64),
+            max_bitrate_kbps: payload
+                .get("maxBitrateKbps")
+                .and_then(serde_json::Value::as_u64),
             max_concurrent_streams: payload
                 .get("maxConcurrentStreams")
                 .and_then(serde_json::Value::as_u64)
