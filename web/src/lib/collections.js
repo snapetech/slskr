@@ -35,6 +35,10 @@ export const reorderCollectionItems = (id, itemIds) =>
 
 // Share Grants (Shares)
 export const getShares = () => api.get('/share-grants');
+// Shares announced to this node by another node's owner (see
+// /api/v0/share-grants/announce) — distinct from getShares(), which lists
+// grants this node itself owns.
+export const getIncomingShares = () => api.get('/share-grants/incoming');
 export const getShare = (id) => api.get(`/share-grants/${id}`);
 export const getSharesByCollection = (collectionId) =>
   api.get(`/share-grants/by-collection/${encodeURIComponent(collectionId)}`);
@@ -58,6 +62,51 @@ export const shareGrantAllows = (permissions, token) =>
   String(permissions || '')
     .split(/[,\s]+/)
     .some((candidate) => candidate.toLowerCase() === token);
+
+// A share announced to this node lives on another node entirely — the
+// grant, its manifest, and its stream tickets all belong to the owner's own
+// API, reachable only via its ownerEndpoint and the share token issued for
+// it. The shared axios client always injects this node's own session
+// Bearer token and reloads the app on any 401, neither of which applies to
+// a cross-node share-token request, so these go through plain fetch.
+const shareFetch = async (ownerEndpoint, path, { method = 'GET', token, body } = {}) => {
+  const response = await fetch(`${ownerEndpoint}${path}`, {
+    body: body === undefined ? undefined : JSON.stringify(body),
+    headers: {
+      ...(token ? { 'X-Share-Token': token } : {}),
+      ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+    },
+    method,
+  });
+  const text = await response.text();
+  const data = text ? JSON.parse(text) : null;
+  if (!response.ok) {
+    const error = new Error(data?.error || `Request failed: ${response.status}`);
+    error.response = { data, status: response.status };
+    throw error;
+  }
+  return data;
+};
+
+export const fetchRemoteShareManifest = (ownerEndpoint, shareGrantId, token) =>
+  shareFetch(ownerEndpoint, `/api/v0/share-grants/${encodeURIComponent(shareGrantId)}/manifest`, {
+    token,
+  });
+
+export const remoteBackfillShare = (ownerEndpoint, shareGrantId) =>
+  shareFetch(ownerEndpoint, `/api/v0/share-grants/${encodeURIComponent(shareGrantId)}/backfill`, {
+    body: {},
+    method: 'POST',
+  });
+
+export const createRemoteShareStreamTicket = (ownerEndpoint, contentId, token) =>
+  shareFetch(ownerEndpoint, `/api/v0/streams/${encodeURIComponent(contentId)}/share-ticket`, {
+    method: 'POST',
+    token,
+  }).then((data) => data?.ticket);
+
+export const buildRemoteShareStreamUrl = (ownerEndpoint, contentId, ticket) =>
+  `${ownerEndpoint}/api/v0/streams/${encodeURIComponent(contentId)}?ticket=${encodeURIComponent(ticket)}`;
 
 // Library Items (for Collections picker)
 // Note: api baseURL already includes /api/v0, so use relative path

@@ -1,7 +1,5 @@
 import * as collectionsAPI from '../../lib/collections';
 import { toDisplayError } from '../../lib/errors';
-import * as identityAPI from '../../lib/identity';
-import * as streaming from '../../lib/streaming';
 import ErrorSegment from '../Shared/ErrorSegment';
 import LoaderSegment from '../Shared/LoaderSegment';
 import React, { Component } from 'react';
@@ -18,11 +16,13 @@ import {
   Table,
 } from 'semantic-ui-react';
 
+const isAuthOrFeatureErrorStatus = (status) =>
+  status === 401 || status === 403 || status === 404 || status === 400;
+
 export default class SharedWithMe extends Component {
   state = {
     backfilling: false,
     backfillResult: null,
-    contacts: [],
     error: null,
     loading: true,
     manifest: null,
@@ -39,57 +39,16 @@ export default class SharedWithMe extends Component {
   loadData = async () => {
     try {
       this.setState({ error: null, loading: true });
-      const [sharesRes, contactsRes] = await Promise.all([
-        collectionsAPI.getShares().catch((error) => {
-          // If 401/403/404/400, user isn't authenticated or feature not enabled - return empty list
-          if (
-            error.response?.status === 401 ||
-            error.response?.status === 403 ||
-            error.response?.status === 404 ||
-            error.response?.status === 400
-          ) {
-            return { data: [] };
-          }
-
-          // For other errors, rethrow to be caught below
-          throw error;
-        }),
-        identityAPI.getContacts().catch(() => ({ data: [] })), // Gracefully handle if Identity not enabled
-      ]);
-
-      // Fetch collection details for each share
-      const sharesWithCollections = await Promise.all(
-        (sharesRes.data || []).map(async (share) => {
-          try {
-            const collectionRes = await collectionsAPI.getCollection(
-              share.collectionId,
-            );
-            return { ...share, collection: collectionRes.data };
-          } catch (error) {
-            console.warn(
-              'Failed to load collection for share',
-              share.id,
-              error,
-            );
-            return share;
-          }
-        }),
-      );
-
-      this.setState({
-        contacts: contactsRes.data || [],
-        loading: false,
-        shares: sharesWithCollections,
+      const sharesRes = await collectionsAPI.getIncomingShares().catch((error) => {
+        if (isAuthOrFeatureErrorStatus(error.response?.status)) {
+          return { data: [] };
+        }
+        throw error;
       });
+      this.setState({ loading: false, shares: sharesRes.data || [] });
     } catch (error) {
-      // Only show error if it's not an auth/feature issue (which we handle above)
-      const isAuthOrFeatureError =
-        error.response?.status === 401 ||
-        error.response?.status === 403 ||
-        error.response?.status === 404 ||
-        error.response?.status === 400;
       this.setState({
-        error: isAuthOrFeatureError
+        error: isAuthOrFeatureErrorStatus(error.response?.status)
           ? null
           : toDisplayError(error),
         loading: false,
@@ -97,64 +56,49 @@ export default class SharedWithMe extends Component {
     }
   };
 
-  getContactNickname = (audienceId, audiencePeerId) => {
-    if (audiencePeerId) {
-      const contact = this.state.contacts.find(
-        (c) => c.peerId === audiencePeerId,
-      );
-      return contact?.nickname || null;
-    }
-
-    // For legacy UserId, try to find by matching (this is a best-effort)
-    return null;
-  };
-
-  getOwnerNickname = (collection) => {
-    // Try to get from manifest if available
-    if (collection?.ownerContactNickname) {
-      return collection.ownerContactNickname;
-    }
-
-    // Try to find contact by ownerUserId (best effort)
-    if (collection?.ownerUserId) {
-      // For now, we can't reliably map UserId to PeerId without additional data
-      // This would require storing PeerId in Collection or a lookup table
-      return null;
-    }
-
-    return null;
-  };
-
   handleViewManifest = async (share) => {
+    this.setState({
+      manifest: null,
+      manifestLoading: true,
+      manifestModalOpen: true,
+      selectedShare: share,
+    });
     try {
-      this.setState({
-        manifestLoading: true,
-        manifestModalOpen: true,
-        selectedShare: share,
-      });
-      const manifestRes = await collectionsAPI.getShareManifest(share.id);
-      this.setState({ manifest: manifestRes.data, manifestLoading: false });
+      // Fetched live from the owner's own node — it enforces the token's
+      // current validity (including expiry) and its up-to-date permissions,
+      // rather than trusting what was true when the share was announced.
+      const manifest = await collectionsAPI.fetchRemoteShareManifest(
+        share.ownerEndpoint,
+        share.shareGrantId,
+        share.token,
+      );
+      this.setState({ manifest, manifestLoading: false });
     } catch (error) {
       this.setState({
-        error: toDisplayError(error),
+        error: toDisplayError(error, 'Failed to load manifest'),
         manifestLoading: false,
       });
     }
   };
 
-  handleStreamItem = async (contentId, token) => {
+  handleStreamItem = async (contentId) => {
+    const { selectedShare } = this.state;
+    if (!selectedShare) return;
+
     try {
-      if (token) {
-        const ticket = await streaming.createShareStreamTicket(
+      const ticket = await collectionsAPI.createRemoteShareStreamTicket(
+        selectedShare.ownerEndpoint,
+        contentId,
+        selectedShare.token,
+      );
+      if (!ticket) throw new Error('Stream ticket missing from response');
+      safeOpenBlank(
+        collectionsAPI.buildRemoteShareStreamUrl(
+          selectedShare.ownerEndpoint,
           contentId,
-          token,
-        );
-        if (ticket) {
-          safeOpenBlank(streaming.buildTicketedStreamUrl(contentId, ticket));
-          return;
-        }
-      }
-      safeOpenBlank(streaming.buildDirectStreamUrl(contentId));
+          ticket,
+        ),
+      );
     } catch (error) {
       const message = toDisplayError(error, 'Failed to start stream');
       this.setState({ error: message });
@@ -168,19 +112,12 @@ export default class SharedWithMe extends Component {
 
     try {
       this.setState({ backfilling: true, backfillResult: null, error: null });
-      const result = await collectionsAPI.backfillShare(selectedShare.id);
-      this.setState({
-        backfilling: false,
-        backfillResult: result.data,
-      });
-
-      if (result.data.failed === 0) {
-        toast.success(result.data.message || 'Backfill started successfully');
-      } else {
-        toast.warning(
-          result.data.message || 'Backfill started with some failures',
-        );
-      }
+      const result = await collectionsAPI.remoteBackfillShare(
+        selectedShare.ownerEndpoint,
+        selectedShare.shareGrantId,
+      );
+      this.setState({ backfilling: false, backfillResult: result });
+      toast.success(result?.message || 'Backfill requested');
     } catch (error) {
       const errorMessage = toDisplayError(error, 'Failed to start backfill');
       this.setState({
@@ -237,68 +174,50 @@ export default class SharedWithMe extends Component {
               </Table.Row>
             </Table.Header>
             <Table.Body>
-              {shares.map((share) => {
-                const ownerNickname = this.getOwnerNickname(share.collection);
-                const displayName =
-                  ownerNickname || share.collection?.ownerUserId || 'Unknown';
-
-                return (
-                  <Table.Row
-                    data-testid={`incoming-share-row-${share.collection?.title || 'Untitled'}`}
-                    key={share.id}
-                  >
-                    <Table.Cell>
-                      <strong>{share.collection?.title || 'Untitled'}</strong>
-                      {share.collection?.description && (
-                        <div
-                          style={{
-                            color: '#666',
-                            fontSize: '0.9em',
-                            marginTop: '0.25em',
-                          }}
-                        >
-                          {share.collection.description}
-                        </div>
-                      )}
-                    </Table.Cell>
-                    <Table.Cell>
-                      {ownerNickname && (
-                        <Label
-                          color="blue"
-                          style={{ marginRight: '0.5em' }}
-                        >
-                          {ownerNickname}
-                        </Label>
-                      )}
-                      <span>{share.collection?.ownerUserId || 'Unknown'}</span>
-                    </Table.Cell>
-                    <Table.Cell>
-                      {share.collection?.type || 'ShareList'}
-                    </Table.Cell>
-                    <Table.Cell>
-                      {collectionsAPI.shareGrantAllows(share.permissions, 'stream') && (
-                        <Label color="green">Stream</Label>
-                      )}
-                      {collectionsAPI.shareGrantAllows(share.permissions, 'download') && (
-                        <Label color="blue">Download</Label>
-                      )}
-                      {collectionsAPI.shareGrantAllows(share.permissions, 'reshare') && (
-                        <Label>Reshare</Label>
-                      )}
-                    </Table.Cell>
-                    <Table.Cell>
-                      <Button
-                        data-testid="incoming-share-open"
-                        onClick={() => this.handleViewManifest(share)}
-                        primary
-                        size="small"
+              {shares.map((share) => (
+                <Table.Row
+                  data-testid={`incoming-share-row-${share.collectionTitle || 'Untitled'}`}
+                  key={share.id}
+                >
+                  <Table.Cell>
+                    <strong>{share.collectionTitle || 'Untitled'}</strong>
+                    {share.collectionDescription && (
+                      <div
+                        style={{
+                          color: '#666',
+                          fontSize: '0.9em',
+                          marginTop: '0.25em',
+                        }}
                       >
-                        View Contents
-                      </Button>
-                    </Table.Cell>
-                  </Table.Row>
-                );
-              })}
+                        {share.collectionDescription}
+                      </div>
+                    )}
+                  </Table.Cell>
+                  <Table.Cell>{share.ownerUserId || 'Unknown'}</Table.Cell>
+                  <Table.Cell>{share.collectionType || 'ShareList'}</Table.Cell>
+                  <Table.Cell>
+                    {collectionsAPI.shareGrantAllows(share.permissions, 'stream') && (
+                      <Label color="green">Stream</Label>
+                    )}
+                    {collectionsAPI.shareGrantAllows(share.permissions, 'download') && (
+                      <Label color="blue">Download</Label>
+                    )}
+                    {collectionsAPI.shareGrantAllows(share.permissions, 'reshare') && (
+                      <Label>Reshare</Label>
+                    )}
+                  </Table.Cell>
+                  <Table.Cell>
+                    <Button
+                      data-testid="incoming-share-open"
+                      onClick={() => this.handleViewManifest(share)}
+                      primary
+                      size="small"
+                    >
+                      View Contents
+                    </Button>
+                  </Table.Cell>
+                </Table.Row>
+              ))}
             </Table.Body>
           </Table>
         )}
@@ -316,28 +235,19 @@ export default class SharedWithMe extends Component {
           size="large"
         >
           <Modal.Header>
-            {selectedShare?.collection?.title ||
-              manifest?.title ||
+            {selectedShare?.collectionTitle ||
+              manifest?.collection?.title ||
               'Collection Contents'}
-            {manifest?.ownerContactNickname && (
-              <span
-                style={{
-                  fontSize: '0.8em',
-                  fontWeight: 'normal',
-                  marginLeft: '1em',
-                }}
-              >
-                by {manifest.ownerContactNickname}
-              </span>
-            )}
           </Modal.Header>
           <Modal.Content>
             {manifestLoading ? (
               <LoaderSegment />
             ) : manifest ? (
               <div data-testid="shared-manifest">
-                {manifest.description && (
-                  <p style={{ marginBottom: '1em' }}>{manifest.description}</p>
+                {manifest.collection?.description && (
+                  <p style={{ marginBottom: '1em' }}>
+                    {manifest.collection.description}
+                  </p>
                 )}
                 {manifest.items && manifest.items.length > 0 ? (
                   <Table>
@@ -372,17 +282,15 @@ export default class SharedWithMe extends Component {
                               {item.mediaKind || 'Unknown'}
                             </Table.Cell>
                             <Table.Cell>
-                              {item.streamUrl && (
+                              {collectionsAPI.shareGrantAllows(
+                                manifest.permissions,
+                                'stream',
+                              ) && (
                                 <Button
                                   data-testid={`incoming-stream-${sha256Prefix}`}
-                                  onClick={() => {
-                                    const url = item.streamUrl.startsWith(
-                                      'http',
-                                    )
-                                      ? item.streamUrl
-                                      : `${window.location.origin}${item.streamUrl}`;
-                                    safeOpenBlank(url);
-                                  }}
+                                  onClick={() =>
+                                    this.handleStreamItem(item.contentId)
+                                  }
                                   primary
                                   size="small"
                                 >
@@ -410,7 +318,7 @@ export default class SharedWithMe extends Component {
             )}
           </Modal.Content>
           <Modal.Actions>
-            {collectionsAPI.shareGrantAllows(selectedShare?.permissions, 'download') && (
+            {collectionsAPI.shareGrantAllows(manifest?.permissions, 'download') && (
               <Button
                 data-testid="incoming-backfill"
                 disabled={this.state.backfilling}
@@ -426,8 +334,8 @@ export default class SharedWithMe extends Component {
               <span
                 style={{ color: '#666', fontSize: '0.9em', marginRight: '1em' }}
               >
-                {this.state.backfillResult.enqueued} enqueued,{' '}
-                {this.state.backfillResult.failed} failed
+                {this.state.backfillResult.message ||
+                  `${this.state.backfillResult.backfilled ?? 0} items`}
               </span>
             )}
             <Button

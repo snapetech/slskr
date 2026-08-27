@@ -709,11 +709,15 @@ test.describe('policy enforcement', () => {
 
     await new Promise((resolve) => setTimeout(resolve, 2_000));
 
-    const streamRes = await request.get(
-      `${nodeA.baseUrl}/api/v0/streams/${encodeURIComponent(contentId)}?token=${encodeURIComponent(token)}`,
-      { failOnStatusCode: false },
+    // Share tokens are only ever accepted via X-Share-Token, exchanged for a
+    // short-lived stream ticket — a raw token in the URL is rejected outright
+    // (400) regardless of validity, so an expired token must be exercised
+    // through that exchange endpoint to get a meaningful 401/403.
+    const ticketRes = await request.post(
+      `${nodeA.baseUrl}/api/v0/streams/${encodeURIComponent(contentId)}/share-ticket`,
+      { failOnStatusCode: false, headers: { 'X-Share-Token': token } },
     );
-    expect([401, 403]).toContain(streamRes.status());
+    expect([401, 403]).toContain(ticketRes.status());
 
     await contextA.close();
     await contextB.close();

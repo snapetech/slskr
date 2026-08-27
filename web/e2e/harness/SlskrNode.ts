@@ -413,6 +413,10 @@ export class SlskrNode {
       SLSKD_CONTENT_PATH: contentPath,
       SLSKD_DOWNLOADS_DIR: downloadsDir,
       SLSKD_FORCE_SHARE_SCAN: 'true',
+      // The real transport for share announcements is the Soulseek/mesh
+      // network; this HTTP endpoint is a same-process stand-in for that
+      // push, so it stays off outside e2e runs.
+      SLSKDN_E2E_SHARE_ANNOUNCE: '1',
       SLSKR_DHT_PORT: String(this.dhtPort),
       SLSKD_HTTP_ADDRESS: '127.0.0.1',
       SLSKD_HTTP_PORT: String(this.apiPort),
@@ -425,6 +429,14 @@ export class SlskrNode {
       SLSKD_SLSK_USERNAME: nodeCreds.username,
       SLSKD_USERNAME: nodeCreds.username,
       SLSKR_OVERLAY_BIND: `127.0.0.1:${this.overlayPort}`,
+      // A recipient viewing a share owned by another node fetches its
+      // manifest/stream/backfill directly from that node's own API — a
+      // genuinely cross-origin request between two node ports. Each test
+      // run allocates fresh ports, so a fixed allowlist can't work here;
+      // credentials are never sent on these requests (only X-Share-Token),
+      // so a wildcard origin carries no CSRF/cookie exposure.
+      SLSKD_WEB_CORS_ALLOWED_ORIGINS: '*',
+      SLSKD_WEB_CORS_ENABLED: 'true',
     };
     if (shareDirectoriesAbsolute.length > 0) {
       env.SLSKD_SHARED_DIR = shareDirectoriesAbsolute.join(';');

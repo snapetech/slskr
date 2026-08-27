@@ -400,6 +400,8 @@ const MAX_SECURITY_BANS: usize = 4_096;
 const MAX_SECURITY_BAN_USERNAME_BYTES: usize = MAX_USER_USERNAME_BYTES;
 const MAX_SHARE_GRANTS: usize = 4_096;
 const MAX_SHARE_GRANT_PERMISSIONS_BYTES: usize = 256;
+const MAX_INCOMING_SHARES: usize = 4_096;
+const MAX_INCOMING_SHARE_ITEMS: usize = 10_000;
 const MAX_LIBRARY_ITEMS: usize = 10_000;
 const MAX_DESTINATIONS: usize = 256;
 const MAX_SEARCH_RESULTS_PER_SEARCH: usize = 10_000;
@@ -13333,12 +13335,16 @@ struct ShareGrantRecord {
 impl ShareGrantRecord {
     fn json(&self) -> String {
         format!(
-            "{{\"id\":\"{}\",\"collection_id\":\"{}\",\"username\":\"{}\",\"shared_at\":{},\"permissions\":\"{}\"}}",
+            "{{\"id\":\"{}\",\"collection_id\":\"{}\",\"collectionId\":\"{}\",\"username\":\"{}\",\"shared_at\":{},\"permissions\":\"{}\",\"allow_download\":{},\"allow_stream\":{},\"allow_reshare\":{}}}",
             json_escape(&self.id),
+            json_escape(&self.collection_id),
             json_escape(&self.collection_id),
             json_escape(&self.username),
             self.shared_at,
-            json_escape(&self.permissions)
+            json_escape(&self.permissions),
+            share_grant_allows_download(&self.permissions),
+            share_grant_allows_stream(&self.permissions),
+            share_grant_allows_reshare(&self.permissions)
         )
     }
 }
@@ -13636,9 +13642,21 @@ fn bounded_share_grant_permissions(permissions: &str) -> String {
 }
 
 fn share_grant_allows_download(permissions: &str) -> bool {
+    share_grant_allows(permissions, "download")
+}
+
+fn share_grant_allows_stream(permissions: &str) -> bool {
+    share_grant_allows(permissions, "stream")
+}
+
+fn share_grant_allows_reshare(permissions: &str) -> bool {
+    share_grant_allows(permissions, "reshare")
+}
+
+fn share_grant_allows(permissions: &str, token: &str) -> bool {
     permissions
         .split(|character: char| character == ',' || character.is_ascii_whitespace())
-        .any(|permission| permission.eq_ignore_ascii_case("download"))
+        .any(|permission| permission.eq_ignore_ascii_case(token))
 }
 
 fn share_grant_resource_id(path: &str) -> Option<&str> {
@@ -13665,6 +13683,91 @@ fn share_stream_content_id(path: &str) -> Option<String> {
     let path = path.strip_prefix("/api/streams/")?;
     let content_id = path.strip_suffix("/share-ticket")?;
     (!content_id.is_empty() && !content_id.contains('/')).then(|| decoded_path_segment(content_id))
+}
+
+/// A share announced by another node's owner. The real Soulseek/mesh
+/// transport is expected to deliver these; `/api/v0/share-grants/announce`
+/// is an HTTP stand-in for that push, gated behind
+/// `SLSKDN_E2E_SHARE_ANNOUNCE=1` since it trusts the payload's claims about
+/// who owns what rather than verifying them the way a peer-authenticated
+/// transport would.
+#[derive(Clone, Debug)]
+struct IncomingShareRecord {
+    id: String,
+    owner_endpoint: String,
+    owner_user_id: String,
+    recipient_user_id: String,
+    collection_id: String,
+    collection_title: String,
+    collection_description: String,
+    collection_type: String,
+    permissions: String,
+    token: String,
+    expiry_utc: String,
+    max_bitrate_kbps: Option<u64>,
+    max_concurrent_streams: u64,
+    items: Vec<serde_json::Value>,
+    received_at: u64,
+}
+
+impl IncomingShareRecord {
+    fn json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "id": self.id,
+            "shareGrantId": self.id,
+            "ownerEndpoint": self.owner_endpoint,
+            "ownerUserId": self.owner_user_id,
+            "recipientUserId": self.recipient_user_id,
+            "collectionId": self.collection_id,
+            "collectionTitle": self.collection_title,
+            "collectionDescription": self.collection_description,
+            "collectionType": self.collection_type,
+            "permissions": self.permissions,
+            "allowDownload": share_grant_allows_download(&self.permissions),
+            "allowStream": share_grant_allows_stream(&self.permissions),
+            "allowReshare": share_grant_allows_reshare(&self.permissions),
+            "token": self.token,
+            "expiryUtc": self.expiry_utc,
+            "maxBitrateKbps": self.max_bitrate_kbps,
+            "maxConcurrentStreams": self.max_concurrent_streams,
+            "items": self.items,
+            "receivedAt": self.received_at,
+        })
+    }
+}
+
+#[derive(Debug, Default)]
+struct IncomingShareStore {
+    records: Vec<IncomingShareRecord>,
+}
+
+impl IncomingShareStore {
+    /// Keyed by `shareGrantId` so a retried or repeated announce updates
+    /// the existing entry instead of duplicating it.
+    fn upsert(&mut self, record: IncomingShareRecord) {
+        if let Some(existing) = self
+            .records
+            .iter_mut()
+            .find(|candidate| candidate.id == record.id)
+        {
+            *existing = record;
+            return;
+        }
+        if self.records.len() >= MAX_INCOMING_SHARES {
+            self.records.remove(0);
+        }
+        self.records.push(record);
+    }
+
+    fn list(&self) -> &[IncomingShareRecord] {
+        &self.records
+    }
+}
+
+fn e2e_share_announce_enabled() -> bool {
+    std::env::var("SLSKDN_E2E_SHARE_ANNOUNCE")
+        .map(|value| value == "1")
+        .unwrap_or(false)
 }
 
 // Library Item Models
@@ -17048,6 +17151,7 @@ struct AppState {
     security: RwLock<SecurityState>,
     share_grants: RwLock<ShareGrantStore>,
     share_access_tokens: RwLock<ShareAccessTokenStore>,
+    incoming_shares: RwLock<IncomingShareStore>,
     library: RwLock<LibraryStore>,
     virtual_soulfind_v2: Arc<RwLock<virtual_soulfind_v2::State>>,
     source_discovery: RwLock<SourceDiscoveryState>,
@@ -18228,6 +18332,108 @@ async fn route_http_request_with_headers(
         if let Some(response) = mesh_gateway_auth_failure(state, &headers) {
             return Ok(response);
         }
+    }
+
+    if route.path == "/api/v0/share-grants/announce" && method == "POST" {
+        if !e2e_share_announce_enabled() {
+            return Ok(routing::not_found_response());
+        }
+        if !is_authorized(&state.config, authorization, headers.cookie.as_deref()) {
+            return Ok(routing::unauthorized_response());
+        }
+        let Ok(payload) = serde_json::from_str::<serde_json::Value>(body) else {
+            return Ok(routing::bad_request_response("invalid JSON body"));
+        };
+        let string_field = |field: &str| {
+            payload
+                .get(field)
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .trim()
+                .to_owned()
+        };
+        let share_grant_id = string_field("shareGrantId");
+        let collection_id = string_field("collectionId");
+        let recipient_user_id = string_field("recipientUserId");
+        let owner_endpoint = string_field("ownerEndpoint");
+        if share_grant_id.is_empty()
+            || collection_id.is_empty()
+            || recipient_user_id.is_empty()
+            || owner_endpoint.is_empty()
+        {
+            return Ok(routing::bad_request_response(
+                "shareGrantId, collectionId, recipientUserId, and ownerEndpoint are required",
+            ));
+        }
+        let allow_download = payload
+            .get("allowDownload")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        let allow_stream = payload
+            .get("allowStream")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        let allow_reshare = payload
+            .get("allowReshare")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        let permissions = [
+            allow_download.then_some("download"),
+            allow_stream.then_some("stream"),
+            allow_reshare.then_some("reshare"),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(",");
+        let items = payload
+            .get("items")
+            .and_then(serde_json::Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .take(MAX_INCOMING_SHARE_ITEMS)
+            .collect::<Vec<_>>();
+        let record = IncomingShareRecord {
+            id: share_grant_id,
+            owner_endpoint,
+            owner_user_id: string_field("ownerUserId"),
+            recipient_user_id,
+            collection_id,
+            collection_title: string_field("collectionTitle"),
+            collection_description: string_field("collectionDescription"),
+            collection_type: string_field("collectionType"),
+            permissions,
+            token: string_field("token"),
+            expiry_utc: string_field("expiryUtc"),
+            max_bitrate_kbps: payload.get("maxBitrateKbps").and_then(serde_json::Value::as_u64),
+            max_concurrent_streams: payload
+                .get("maxConcurrentStreams")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0),
+            items,
+            received_at: unix_timestamp(),
+        };
+        let json = record.json();
+        let mut incoming = state.incoming_shares.write().await;
+        incoming.upsert(record);
+        drop(incoming);
+        return Ok(routing::created_response(json.to_string()));
+    }
+    if route.path == "/api/v0/share-grants/incoming" && method == "GET" {
+        if !is_authorized(&state.config, authorization, headers.cookie.as_deref()) {
+            return Ok(routing::unauthorized_response());
+        }
+        let incoming = state.incoming_shares.read().await;
+        let records = incoming
+            .list()
+            .iter()
+            .map(IncomingShareRecord::json)
+            .collect::<Vec<_>>();
+        drop(incoming);
+        return Ok(routing::ok_response(
+            serde_json::to_string(&records).unwrap_or_else(|_| "[]".to_owned()),
+        ));
     }
 
     let controller_metrics_request =
@@ -34232,6 +34438,11 @@ async fn route_http_request_with_headers(
                 return Ok(routing::unauthorized_response());
             };
             drop(grants);
+            if !share_grant_allows_stream(&grant.permissions) {
+                return Ok(routing::forbidden_response(
+                    "Streaming not allowed for this share",
+                ));
+            }
             let collections = state.collections.read().await;
             let Some(collection) = collections.get(&grant.collection_id) else {
                 drop(collections);
@@ -36085,11 +36296,16 @@ fn web_static_csp_nonce() -> Result<String, String> {
 }
 
 fn web_static_content_security_policy(file: &Path) -> &'static str {
+    // connect-src allows any ws:/wss: target already (mesh/peer WebSocket
+    // connections aren't known in advance); http:/https: get the same trust
+    // level so a viewer can fetch a share's manifest/stream/backfill
+    // directly from the announcing peer's own node, whose address is
+    // likewise never known ahead of time.
     if is_rust_wasm_shell(file) {
-        return "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'sha256-4QRv9Rc4tDEpbP/UKi2dy9R69BTTCtbO26VNBih7vEw=' 'sha256-AVTm08UMHPqpttgoudpSsvenKKfidtwuSnUVJLIuqcA='; style-src-attr 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ws: wss:";
+        return "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'sha256-4QRv9Rc4tDEpbP/UKi2dy9R69BTTCtbO26VNBih7vEw=' 'sha256-AVTm08UMHPqpttgoudpSsvenKKfidtwuSnUVJLIuqcA='; style-src-attr 'unsafe-inline'; img-src 'self' data:; connect-src 'self' http: https: ws: wss:";
     }
 
-    "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self'; style-src 'self' https://fonts.googleapis.com 'sha256-4QRv9Rc4tDEpbP/UKi2dy9R69BTTCtbO26VNBih7vEw=' 'sha256-AVTm08UMHPqpttgoudpSsvenKKfidtwuSnUVJLIuqcA='; style-src-attr 'unsafe-inline'; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' ws: wss:"
+    "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self'; style-src 'self' https://fonts.googleapis.com 'sha256-4QRv9Rc4tDEpbP/UKi2dy9R69BTTCtbO26VNBih7vEw=' 'sha256-AVTm08UMHPqpttgoudpSsvenKKfidtwuSnUVJLIuqcA='; style-src-attr 'unsafe-inline'; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' http: https: ws: wss:"
 }
 
 fn is_rust_wasm_shell(file: &Path) -> bool {
@@ -71657,6 +71873,7 @@ async fn serve(invocation: ServeInvocation) -> Result<(), String> {
         security: RwLock::new(security_state),
         share_grants: RwLock::new(share_grant_store),
         share_access_tokens: RwLock::new(share_access_token_store),
+        incoming_shares: RwLock::new(IncomingShareStore::default()),
         library: RwLock::new(library_store),
         virtual_soulfind_v2: Arc::new(RwLock::new(virtual_soulfind_v2::State::default())),
         source_discovery: RwLock::new(SourceDiscoveryState::default()),
@@ -93494,6 +93711,7 @@ pub mod tests {
             security: RwLock::new(super::SecurityState::new()),
             share_grants: RwLock::new(super::ShareGrantStore::new()),
             share_access_tokens: RwLock::new(super::ShareAccessTokenStore::default()),
+            incoming_shares: RwLock::new(super::IncomingShareStore::default()),
             library: RwLock::new(super::LibraryStore::new()),
             virtual_soulfind_v2: Arc::new(
                 RwLock::new(super::virtual_soulfind_v2::State::default()),
@@ -190354,6 +190572,7 @@ pub mod tests {
             security: RwLock::new(super::SecurityState::new()),
             share_grants: RwLock::new(super::ShareGrantStore::new()),
             share_access_tokens: RwLock::new(super::ShareAccessTokenStore::default()),
+            incoming_shares: RwLock::new(super::IncomingShareStore::default()),
             library: RwLock::new(super::LibraryStore::new()),
             virtual_soulfind_v2: Arc::new(
                 RwLock::new(super::virtual_soulfind_v2::State::default()),
@@ -190685,6 +190904,7 @@ pub mod tests {
             security: RwLock::new(super::SecurityState::new()),
             share_grants: RwLock::new(super::ShareGrantStore::new()),
             share_access_tokens: RwLock::new(super::ShareAccessTokenStore::default()),
+            incoming_shares: RwLock::new(super::IncomingShareStore::default()),
             library: RwLock::new(super::LibraryStore::new()),
             virtual_soulfind_v2: Arc::new(
                 RwLock::new(super::virtual_soulfind_v2::State::default()),

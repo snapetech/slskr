@@ -193,6 +193,7 @@ fn test_state_with_env(
         security: RwLock::new(super::SecurityState::new()),
         share_grants: RwLock::new(super::ShareGrantStore::new()),
         share_access_tokens: RwLock::new(super::ShareAccessTokenStore::default()),
+        incoming_shares: RwLock::new(super::IncomingShareStore::default()),
         library: RwLock::new(super::LibraryStore::new()),
         virtual_soulfind_v2: Arc::new(RwLock::new(super::virtual_soulfind_v2::State::default())),
         source_discovery: RwLock::new(super::SourceDiscoveryState::default()),

@@ -906,6 +906,108 @@ async fn route_http_request_inner(
         }
     }
 
+    if route.path == "/api/v0/share-grants/announce" && method == "POST" {
+        if !e2e_share_announce_enabled() {
+            return Ok(routing::not_found_response());
+        }
+        if !is_authorized(&state.config, authorization, headers.cookie.as_deref()) {
+            return Ok(routing::unauthorized_response());
+        }
+        let Ok(payload) = serde_json::from_str::<serde_json::Value>(body) else {
+            return Ok(routing::bad_request_response("invalid JSON body"));
+        };
+        let string_field = |field: &str| {
+            payload
+                .get(field)
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .trim()
+                .to_owned()
+        };
+        let share_grant_id = string_field("shareGrantId");
+        let collection_id = string_field("collectionId");
+        let recipient_user_id = string_field("recipientUserId");
+        let owner_endpoint = string_field("ownerEndpoint");
+        if share_grant_id.is_empty()
+            || collection_id.is_empty()
+            || recipient_user_id.is_empty()
+            || owner_endpoint.is_empty()
+        {
+            return Ok(routing::bad_request_response(
+                "shareGrantId, collectionId, recipientUserId, and ownerEndpoint are required",
+            ));
+        }
+        let allow_download = payload
+            .get("allowDownload")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        let allow_stream = payload
+            .get("allowStream")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        let allow_reshare = payload
+            .get("allowReshare")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        let permissions = [
+            allow_download.then_some("download"),
+            allow_stream.then_some("stream"),
+            allow_reshare.then_some("reshare"),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(",");
+        let items = payload
+            .get("items")
+            .and_then(serde_json::Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .take(MAX_INCOMING_SHARE_ITEMS)
+            .collect::<Vec<_>>();
+        let record = IncomingShareRecord {
+            id: share_grant_id,
+            owner_endpoint,
+            owner_user_id: string_field("ownerUserId"),
+            recipient_user_id,
+            collection_id,
+            collection_title: string_field("collectionTitle"),
+            collection_description: string_field("collectionDescription"),
+            collection_type: string_field("collectionType"),
+            permissions,
+            token: string_field("token"),
+            expiry_utc: string_field("expiryUtc"),
+            max_bitrate_kbps: payload.get("maxBitrateKbps").and_then(serde_json::Value::as_u64),
+            max_concurrent_streams: payload
+                .get("maxConcurrentStreams")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0),
+            items,
+            received_at: unix_timestamp(),
+        };
+        let json = record.json();
+        let mut incoming = state.incoming_shares.write().await;
+        incoming.upsert(record);
+        drop(incoming);
+        return Ok(routing::created_response(json.to_string()));
+    }
+    if route.path == "/api/v0/share-grants/incoming" && method == "GET" {
+        if !is_authorized(&state.config, authorization, headers.cookie.as_deref()) {
+            return Ok(routing::unauthorized_response());
+        }
+        let incoming = state.incoming_shares.read().await;
+        let records = incoming
+            .list()
+            .iter()
+            .map(IncomingShareRecord::json)
+            .collect::<Vec<_>>();
+        drop(incoming);
+        return Ok(routing::ok_response(
+            serde_json::to_string(&records).unwrap_or_else(|_| "[]".to_owned()),
+        ));
+    }
+
     let controller_metrics_request =
         method == "GET" && route.path == controller_metrics_path(&state.config);
     if controller_metrics_request {
@@ -17947,6 +18049,11 @@ async fn route_dispatch_group_7(
                 return Ok(routing::unauthorized_response());
             };
             drop(grants);
+            if !share_grant_allows_stream(&grant.permissions) {
+                return Ok(routing::forbidden_response(
+                    "Streaming not allowed for this share",
+                ));
+            }
             let collections = state.collections.read().await;
             let Some(collection) = collections.get(&grant.collection_id) else {
                 drop(collections);

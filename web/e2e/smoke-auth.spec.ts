@@ -149,9 +149,12 @@ test.describe('smoke/auth', () => {
 
     await logoutMenuItem.click();
 
-    // Wait for modal to appear and confirm logout
-    // The modal has a button with text "Log Out" (case-sensitive in Semantic UI)
-    const confirmButton = page.getByRole('button', { name: /^log out$/i });
+    // Wait for modal to appear and confirm logout. Scoped to the modal
+    // itself — the trigger Menu.Item is also role="button" named "Log Out"
+    // and stays in the DOM while the modal is open.
+    const confirmButton = page
+      .locator('.ui.modal')
+      .getByRole('button', { name: /^log out$/i });
     await expect(confirmButton).toBeVisible({ timeout: 10_000 });
     await confirmButton.click();
 

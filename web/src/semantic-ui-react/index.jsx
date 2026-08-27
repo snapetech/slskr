@@ -1154,39 +1154,83 @@ Form.Checkbox = React.forwardRef((props, ref) => (
   </Form.Field>
 ));
 
+const renderModalAction = (action, index, close) => {
+  if (React.isValidElement(action)) {
+    return React.cloneElement(action, {
+      key: action.key ?? index,
+      onClick: callAll(action.props.onClick, close),
+    });
+  }
+  if (typeof action === 'object' && action != null) {
+    const { onClick, ...buttonProps } = action;
+    return (
+      <Button
+        {...buttonProps}
+        key={action.key ?? buttonProps.content ?? index}
+        onClick={(event) => {
+          if (onClick) onClick(event, action);
+          close(event);
+        }}
+      />
+    );
+  }
+  return (
+    <Button
+      key={index}
+      onClick={close}
+    >
+      {action}
+    </Button>
+  );
+};
+
 export const Modal = React.forwardRef((props, ref) => {
   const {
+    actions,
     children,
     className,
     closeIcon,
     content,
+    header,
     onClose,
     onOpen,
-    open,
+    open: controlledOpen,
     trigger,
     ...rest
   } = props;
 
+  // A modal used with `trigger` (the common case: a confirm dialog, an info
+  // popup) manages its own open state — real semantic-ui-react does the
+  // same. `open`/`onOpen`/`onClose` still work for callers that want to
+  // control it themselves.
+  const isControlled = controlledOpen !== undefined;
+  const [uncontrolledOpen, setUncontrolledOpen] = React.useState(false);
+  const open = isControlled ? controlledOpen : uncontrolledOpen;
+
+  const setOpen = (nextOpen, event) => {
+    if (!isControlled) setUncontrolledOpen(nextOpen);
+    if (nextOpen && onOpen) onOpen(event, props);
+    if (!nextOpen && onClose) onClose(event, props);
+  };
+  const close = (event) => setOpen(false, event);
+
   React.useEffect(() => {
-    if (!open || !onClose) {
-      return undefined;
-    }
+    if (!open) return undefined;
 
     const handleKeyDown = (event) => {
       if (event.key === 'Escape' && !event.defaultPrevented) {
-        onClose(event);
+        close(event);
       }
     };
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [onClose, open]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   const triggerElement = trigger
     ? cloneTrigger(trigger, {
-      onClick: (event) => {
-        if (onOpen) onOpen(event, props);
-      },
+      onClick: (event) => setOpen(true, event),
     })
     : null;
 
@@ -1197,18 +1241,22 @@ export const Modal = React.forwardRef((props, ref) => {
   const modal = (
     <div
       className="ui active visible dimmer modals page transition"
+      onClick={(event) => {
+        if (event.target === event.currentTarget) close(event);
+      }}
       style={{ zIndex: 2000 }}
     >
       <div
         {...cleanProps(rest)}
         className={cx('ui active visible modal', commonClasses(props), className)}
+        onClick={(event) => event.stopPropagation()}
         ref={ref}
       >
         {closeIcon ? (
           <button
             aria-label="Close"
             className="close icon"
-            onClick={(event) => onClose && onClose(event, props)}
+            onClick={close}
             style={{
               position: 'absolute',
               right: '0.5rem',
@@ -1218,7 +1266,14 @@ export const Modal = React.forwardRef((props, ref) => {
             type="button"
           />
         ) : null}
+        {header ? <Modal.Header>{header}</Modal.Header> : null}
         {childrenOrContent(children, content)}
+        {actions ? (
+          <Modal.Actions>
+            {(Array.isArray(actions) ? actions : [actions]).map((action, index) =>
+              renderModalAction(action, index, close))}
+          </Modal.Actions>
+        ) : null}
       </div>
     </div>
   );
