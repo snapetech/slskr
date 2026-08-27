@@ -295,20 +295,45 @@ export default class Collections extends Component {
       shareAllowDownload,
       shareAllowStream,
       shareAudienceId,
+      shareGroups,
     } = this.state;
     if (!selectedCollection || !shareAudienceId) return;
 
+    // The backend has no "share with a group" primitive: /api/share-grants
+    // only ever grants one Soulseek username access to one collection. A
+    // "ShareGroup" audience is resolved client-side into its member
+    // usernames and fanned out into one grant per member.
+    const audienceGroup = shareGroups.find(
+      (group) => String(group.id) === String(shareAudienceId),
+    );
+    const usernames = (audienceGroup?.members ?? []).map((member) => member.username);
+    if (usernames.length === 0) {
+      this.setState({ error: 'Selected group has no members to share with.' });
+      return;
+    }
+
+    // /api/share-grants only accepts collection_id + username at creation;
+    // the permission tokens it recognizes (download, stream) are only
+    // settable via a follow-up PUT.
+    const permissions = [
+      shareAllowDownload && 'download',
+      shareAllowStream && 'stream',
+    ].filter(Boolean).join(',');
+
     try {
-      await collectionsAPI.createShare({
-        allowDownload: shareAllowDownload,
-        allowStream: shareAllowStream,
-        audienceId:
-          typeof shareAudienceId === 'string'
-            ? shareAudienceId
-            : String(shareAudienceId),
-        audienceType: 'ShareGroup',
-        collectionId: selectedCollection.id,
-      });
+      const created = await Promise.all(
+        usernames.map((username) =>
+          collectionsAPI.createShare({
+            collectionId: selectedCollection.id,
+            username,
+          })),
+      );
+      if (permissions) {
+        await Promise.all(
+          created.map((response) =>
+            collectionsAPI.updateShare(response.data.id, { permissions })),
+        );
+      }
       this.setState({ error: null, shareModalOpen: false });
       await this.loadShares(selectedCollection.id);
     } catch (error) {
@@ -536,16 +561,12 @@ export default class Collections extends Component {
                             {share.collection?.title ||
                               selectedCollection.title}
                           </Table.Cell>
+                          <Table.Cell>{share.username}</Table.Cell>
                           <Table.Cell>
-                            {share.audienceType === 'ShareGroup'
-                              ? `Group ${share.audienceId}`
-                              : share.audienceId}
+                            {collectionsAPI.shareGrantAllows(share.permissions, 'stream') ? 'Yes' : 'No'}
                           </Table.Cell>
                           <Table.Cell>
-                            {share.allowStream ? 'Yes' : 'No'}
-                          </Table.Cell>
-                          <Table.Cell>
-                            {share.allowDownload ? 'Yes' : 'No'}
+                            {collectionsAPI.shareGrantAllows(share.permissions, 'download') ? 'Yes' : 'No'}
                           </Table.Cell>
                         </Table.Row>
                       ))}

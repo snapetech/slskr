@@ -119,7 +119,8 @@ systemTabShares: 'system-tab-shares',
   // Recipient
   incomingShareRow: (title: string) => `incoming-share-row-${title}`,
 
-  incomingStreamButton: 'incoming-stream',
+  // Rendered per-item as `incoming-stream-${sha256Prefix}`, not a fixed id
+  incomingStreamButton: /^incoming-stream-/,
 
   // Library/Browse
   libraryContent: 'library-content',

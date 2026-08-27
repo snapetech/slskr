@@ -146,6 +146,7 @@ const booleanClassProps = {
   icon: 'icon',
   info: 'info',
   inline: 'inline',
+  item: 'item',
   inverted: 'inverted',
   loading: 'loading',
   negative: 'negative',
@@ -661,91 +662,268 @@ export const TextArea = React.forwardRef((props, ref) => {
 
 const optionValue = (value) => value == null ? '' : String(value);
 
-const mapSelectedValue = (options, selectedValue) => {
-  const option = options.find((candidate) =>
-    optionValue(candidate.value) === selectedValue);
-  return option ? option.value : selectedValue;
-};
-
-const renderOptions = (options, placeholder, onOptionClick) => (
-  <>
-    {placeholder ? (
-      <option
-        disabled
-        value=""
-      >
-        {placeholder}
-      </option>
-    ) : null}
-    {options.map((option) => (
-      <option
-        disabled={option.disabled}
-        key={option.key ?? optionValue(option.value)}
-        onClick={(event) => onOptionClick(event, option.value)}
-        value={optionValue(option.value)}
-      >
-        {option.text ?? option.content ?? option.value}
-      </option>
-    ))}
-  </>
-);
+const optionLabel = (option) => option.text ?? option.content ?? option.value;
 
 export const Dropdown = React.forwardRef((props, ref) => {
   const {
     children,
     className,
+    clearable,
     content,
     disabled,
     icon,
     multiple,
     onChange,
+    onClick,
+    onClose,
+    onOpen,
+    open: controlledOpen,
     options = [],
     placeholder,
+    search,
     text,
     trigger,
     value,
     ...rest
   } = props;
 
+  const isControlled = controlledOpen !== undefined;
+  const [uncontrolledOpen, setUncontrolledOpen] = React.useState(false);
+  const open = isControlled ? controlledOpen : uncontrolledOpen;
+  const rootRef = React.useRef(null);
+  const setRootRef = (node) => {
+    rootRef.current = node;
+    if (typeof ref === 'function') ref(node);
+    else if (ref) ref.current = node;
+  };
+
+  const setOpen = (nextOpen) => {
+    if (!isControlled) setUncontrolledOpen(nextOpen);
+    if (nextOpen && onOpen) onOpen();
+    if (!nextOpen && onClose) onClose();
+  };
+
+  React.useEffect(() => {
+    if (!open) return undefined;
+    const closeIfOutside = (event) => {
+      if (rootRef.current && !rootRef.current.contains(event.target)) {
+        setOpen(false);
+      }
+    };
+    const closeOnEscape = (event) => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('mousedown', closeIfOutside);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('mousedown', closeIfOutside);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  const [searchText, setSearchText] = React.useState('');
+  React.useEffect(() => {
+    if (!open) setSearchText('');
+  }, [open]);
+
+  // Options-based dropdown: a searchable/selectable listbox, e.g. filters,
+  // system settings pickers, collection type selects. This used to render a
+  // native <select>, whose <option> elements live in OS-native chrome that
+  // neither automation nor custom styling can reach — replaced with a real
+  // interactive listbox built on the same open/close machinery as the
+  // trigger + Dropdown.Menu branch below.
   if (options.length > 0) {
-    const selectProps = cleanInputProps({ ...rest, disabled, multiple, value }, ['type']);
-    const emitChange = (event, nextValue) => {
-      if (onChange) onChange(event, { ...props, value: nextValue });
-    };
-    const handleChange = (event) => {
-      const nextValue = multiple
-        ? Array.from(event.target.selectedOptions).map((option) =>
-          mapSelectedValue(options, option.value))
-        : mapSelectedValue(options, event.target.value);
-      emitChange(event, nextValue);
-    };
-    const handleOptionClick = (event, nextValue) => {
-      if (!multiple) emitChange(event, nextValue);
+    const isMultiple = Boolean(multiple);
+    const selectedValues = isMultiple ? (Array.isArray(value) ? value : []) : undefined;
+    const selectedOption = !isMultiple
+      ? options.find((option) => optionValue(option.value) === optionValue(value))
+      : undefined;
+    const hasValue = isMultiple ? selectedValues.length > 0 : selectedOption !== undefined;
+
+    const visibleOptions = search && searchText
+      ? options.filter((option) =>
+        String(optionLabel(option) ?? '').toLowerCase().includes(searchText.toLowerCase()))
+      : options;
+
+    const emitChange = (nextValue) => {
+      if (onChange) onChange({ target: {} }, { ...props, value: nextValue });
     };
 
+    const selectOption = (option) => {
+      if (option.disabled) return;
+      if (isMultiple) {
+        const exists = selectedValues.some((entry) => optionValue(entry) === optionValue(option.value));
+        emitChange(exists
+          ? selectedValues.filter((entry) => optionValue(entry) !== optionValue(option.value))
+          : [...selectedValues, option.value]);
+      } else {
+        emitChange(option.value);
+        setOpen(false);
+      }
+      setSearchText('');
+    };
+
+    const handleClear = (event) => {
+      event.stopPropagation();
+      emitChange(isMultiple ? [] : '');
+    };
+
+    const handleRootClick = () => {
+      if (disabled) return;
+      setOpen(!open);
+    };
+
+    const handleRootKeyDown = (event) => {
+      if (disabled) return;
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        setOpen(!open);
+      }
+    };
+
+    const handleSearchClick = (event) => {
+      event.stopPropagation();
+      if (!disabled) setOpen(true);
+    };
+
+    const displayLabel = isMultiple
+      ? selectedValues
+        .map((entry) => {
+          const option = options.find((candidate) => optionValue(candidate.value) === optionValue(entry));
+          return option ? optionLabel(option) : null;
+        })
+        .filter((label) => label != null)
+        .join(', ')
+      : (selectedOption ? optionLabel(selectedOption) : null);
+
     return (
-      <select
-        {...selectProps}
-        className={cx('ui', commonClasses(props), 'dropdown', className)}
-        onChange={handleChange}
-        ref={ref}
-        role={selectProps.role || 'listbox'}
-        value={multiple ? (value || []).map(optionValue) : optionValue(value)}
+      <div
+        {...cleanProps(rest)}
+        aria-disabled={disabled || undefined}
+        aria-expanded={open}
+        className={cx(
+          'ui dropdown',
+          commonClasses(props),
+          search && 'search',
+          clearable && 'clearable',
+          open && 'active visible',
+          disabled && 'disabled',
+          className,
+        )}
+        onClick={handleRootClick}
+        onKeyDown={handleRootKeyDown}
+        ref={setRootRef}
+        role="listbox"
+        tabIndex={disabled ? undefined : 0}
       >
-        {renderOptions(options, placeholder, handleOptionClick)}
-      </select>
+        {search ? (
+          <input
+            className="search"
+            disabled={disabled}
+            onChange={(event) => {
+              setSearchText(event.target.value);
+              if (!open) setOpen(true);
+            }}
+            onClick={handleSearchClick}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: 'inherit',
+              cursor: 'text',
+              font: 'inherit',
+              outline: 'none',
+              padding: 0,
+              width: '100%',
+            }}
+            value={open ? searchText : (displayLabel || '')}
+          />
+        ) : (
+          <div className={cx('text', !hasValue && 'default')}>
+            {displayLabel || placeholder}
+          </div>
+        )}
+        {clearable && hasValue ? (
+          <Icon
+            name="close"
+            onClick={handleClear}
+          />
+        ) : null}
+        <Icon name="dropdown" />
+        {open ? (
+          <div
+            className="menu visible transition"
+            role="listbox"
+          >
+            {visibleOptions.length === 0 ? (
+              <div className="item disabled">No results found.</div>
+            ) : visibleOptions.map((option) => {
+              const isSelected = isMultiple
+                ? selectedValues.some((entry) => optionValue(entry) === optionValue(option.value))
+                : optionValue(option.value) === optionValue(value);
+              return (
+                <div
+                  aria-disabled={option.disabled || undefined}
+                  aria-selected={isSelected}
+                  className={cx('item', option.disabled && 'disabled', isSelected && 'active selected')}
+                  data-value={optionValue(option.value)}
+                  key={option.key ?? optionValue(option.value)}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    selectOption(option);
+                  }}
+                  role="option"
+                >
+                  {optionLabel(option)}
+                </div>
+              );
+            })}
+          </div>
+        ) : null}
+      </div>
     );
   }
+
+  // Compound (trigger + Dropdown.Menu children) dropdown: a click-to-open
+  // menu, e.g. nav overflow ("More"), context menus, room pickers.
+  const handleClick = (event) => {
+    if (disabled) return;
+    if (onClick) onClick(event);
+    setOpen(!open);
+  };
+
+  const handleKeyDown = (event) => {
+    if (disabled) return;
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      setOpen(!open);
+    }
+  };
+
+  const renderedContent = React.Children.map(
+    childrenOrContent(children, content),
+    (child) => (React.isValidElement(child) && child.type === Dropdown.Menu
+      ? React.cloneElement(child, {
+        className: cx(child.props.className, open && 'visible transition'),
+      })
+      : child),
+  );
 
   return (
     <div
       {...cleanProps(rest)}
-      className={cx('ui dropdown', commonClasses(props), className)}
-      ref={ref}
+      aria-disabled={disabled || undefined}
+      aria-expanded={open}
+      className={cx('ui dropdown', commonClasses(props), open && 'active', className)}
+      onClick={handleClick}
+      onKeyDown={handleKeyDown}
+      ref={setRootRef}
+      role="button"
+      tabIndex={disabled ? undefined : 0}
     >
       {trigger}
       {icon ? <Icon name={typeof icon === 'string' ? icon : 'dropdown'} /> : null}
-      {text || childrenOrContent(children, content)}
+      {text || renderedContent}
     </div>
   );
 });

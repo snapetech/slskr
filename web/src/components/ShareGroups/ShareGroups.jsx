@@ -160,12 +160,14 @@ export default class ShareGroups extends Component {
     if (!this.state.selectedGroup) return;
 
     try {
-      const data =
-        this.state.usePeerId && this.state.selectedContactId
-          ? { peerId: this.state.selectedContactId }
-          : {
-              userId: this.state.selectedUserId || this.state.selectedContactId,
-            };
+      // POST /sharegroups/:id/members only ever reads a "username" field
+      // (verified against the controller's own test suite) — there is no
+      // peerId-aware membership path on this endpoint. The legacy-username
+      // input is the one input that's actually a Soulseek username; wire it
+      // through under the field name the backend expects.
+      const data = {
+        username: this.state.selectedUserId || this.state.selectedContactId,
+      };
 
       await collectionsAPI.addShareGroupMember(
         this.state.selectedGroup.id,

@@ -276,11 +276,15 @@ export default class SharedWithMe extends Component {
                       {share.collection?.type || 'ShareList'}
                     </Table.Cell>
                     <Table.Cell>
-                      {share.allowStream && <Label color="green">Stream</Label>}
-                      {share.allowDownload && (
+                      {collectionsAPI.shareGrantAllows(share.permissions, 'stream') && (
+                        <Label color="green">Stream</Label>
+                      )}
+                      {collectionsAPI.shareGrantAllows(share.permissions, 'download') && (
                         <Label color="blue">Download</Label>
                       )}
-                      {share.allowReshare && <Label>Reshare</Label>}
+                      {collectionsAPI.shareGrantAllows(share.permissions, 'reshare') && (
+                        <Label>Reshare</Label>
+                      )}
                     </Table.Cell>
                     <Table.Cell>
                       <Button
@@ -406,7 +410,7 @@ export default class SharedWithMe extends Component {
             )}
           </Modal.Content>
           <Modal.Actions>
-            {selectedShare?.allowDownload && (
+            {collectionsAPI.shareGrantAllows(selectedShare?.permissions, 'download') && (
               <Button
                 data-testid="incoming-backfill"
                 disabled={this.state.backfilling}

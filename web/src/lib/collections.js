@@ -52,6 +52,13 @@ export const getShareManifest = (id, token) => {
 
 export const backfillShare = (id) => api.post(`/share-grants/${id}/backfill`);
 
+// The backend stores grant permissions as a single comma/whitespace-separated
+// string (e.g. "download,stream"), not boolean fields.
+export const shareGrantAllows = (permissions, token) =>
+  String(permissions || '')
+    .split(/[,\s]+/)
+    .some((candidate) => candidate.toLowerCase() === token);
+
 // Library Items (for Collections picker)
 // Note: api baseURL already includes /api/v0, so use relative path
 export const searchLibraryItems = (query, kinds, limit = 100) => {
