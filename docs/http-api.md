@@ -828,7 +828,7 @@ the route returns a structured skipped result instead of a hard-coded success.
 
 1. Build slskr with HTTP API support:
    ```bash
-   scripts/with-build-guard.sh cargo build --release
+   cargo build --release
    ```
 
 2. Configure your `slskr.config.toml`:
@@ -906,7 +906,7 @@ curl -H "Authorization: Bearer your-token" \
 Or use the provided test suite:
 
 ```bash
-scripts/with-build-guard.sh cargo test --test http_api
+cargo test --test http_api
 ```
 
 All 71 API tests pass with 100% coverage.

@@ -26,12 +26,12 @@ if rg -n "<script type=\"module\">|<script>" crates/slskr-web/static/index.html;
   status=1
 fi
 
-if ! rg -q "script-src 'self';" crates/slskr/src/main.rs; then
+if ! rg -q "script-src 'self';" crates/slskr/src/lib.rs; then
   printf 'csp policy failed: non-WASM static policy must keep script-src self-only\n' >&2
   status=1
 fi
 
-if ! rg -q "script-src 'self' 'wasm-unsafe-eval'" crates/slskr/src/main.rs; then
+if ! rg -q "script-src 'self' 'wasm-unsafe-eval'" crates/slskr/src/lib.rs; then
   printf 'csp policy failed: Rust WASM shell exception must be explicit and scoped\n' >&2
   status=1
 fi

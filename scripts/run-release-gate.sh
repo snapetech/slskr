@@ -2,8 +2,8 @@
 set -euo pipefail
 
 # The release gate includes dependency installs, browser audits, Rust builds,
-# and package builds. Keep the non-Rust steps inside the process-memory guard,
-# while allowing Cargo steps to use their separate Rust virtual-memory guard.
+# and package builds. Keep only Node/frontend steps inside the process-memory
+# guard; Cargo uses the workspace's normal build configuration.
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
@@ -43,8 +43,6 @@ run_optional_step() {
 run_step "Remediation baseline" scripts/check-remediation-baseline.sh
 run_step "Public posture check" scripts/check-public-posture.sh
 run_step "Changelog validation" scripts/validate-changelog.sh
-run_step "Rust build guard check" scripts/check-rust-build-guard.sh
-run_step "Rust tool shim regression" scripts/test-rust-tool-shims.sh
 run_step "Shell syntax check" bash -n scripts/*.sh
 run_step "Release-note tooling tests" python3 scripts/test_release_notes.py
 run_optional_step shellcheck "Shell lint" shellcheck \
@@ -53,12 +51,12 @@ run_optional_step shellcheck "Shell lint" shellcheck \
 run_optional_step actionlint "GitHub workflow lint" actionlint
 run_step "Security scans" scripts/run-security-scans.sh
 run_step "Rust formatting" scripts/check-rust-format.sh
-run_step "Rust clippy" scripts/with-build-guard.sh cargo clippy --workspace --all-targets -- -D warnings
-run_step "Rust wasm web check" scripts/with-build-guard.sh cargo check -p slskr-web --target wasm32-unknown-unknown
-run_step "Rust tests" scripts/with-build-guard.sh cargo test --workspace
+run_step "Rust clippy" cargo clippy --workspace --all-targets -- -D warnings
+run_step "Rust wasm web check" cargo check -p slskr-web --target wasm32-unknown-unknown
+run_step "Rust tests" cargo test --workspace
 
-if scripts/with-build-guard.sh cargo audit --version >/dev/null 2>&1; then
-  run_step "RustSec audit" scripts/with-build-guard.sh cargo audit
+if cargo audit --version >/dev/null 2>&1; then
+  run_step "RustSec audit" cargo audit
 else
   printf '\n==> RustSec audit\n'
   printf 'cargo-audit is not installed; skipping local advisory scan.\n'

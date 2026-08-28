@@ -26,14 +26,14 @@ live GET probes for its mapped API surface.
 
 ```bash
 rustup target add wasm32-unknown-unknown
-scripts/with-build-guard.sh cargo install wasm-bindgen-cli
+cargo install wasm-bindgen-cli
 scripts/build-rust-web.sh
 ```
 
 Serve the Rust build through the daemon with:
 
 ```bash
-SLSKR_WEB_BUILD_DIR=target/slskr-web scripts/with-build-guard.sh cargo run -p slskr --bin slskr -- serve
+SLSKR_WEB_BUILD_DIR=target/slskr-web cargo run -p slskr --bin slskr -- serve
 ```
 
 ## Migration Rules

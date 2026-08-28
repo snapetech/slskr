@@ -5,7 +5,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
 if [[ "${1:-}" != "--skip-package" ]]; then
-  scripts/with-build-guard.sh cargo package -p slskr-protocol -p slskr-client -p slskr --no-verify
+  cargo package -p slskr-protocol -p slskr-client -p slskr --no-verify
 fi
 
 python3 - <<'PY'
@@ -124,12 +124,23 @@ all = "warn"
         encoding="utf-8",
     )
 
+    # The extracted package is outside the checkout, so Cargo would otherwise
+    # miss the repository's pinned toolchain and normal build profile. Copy
+    # those project-level settings into the validation workspace instead of
+    # letting this helper silently fall back to host defaults.
+    source_toolchain = root / "rust-toolchain.toml"
+    if source_toolchain.exists():
+        shutil.copyfile(source_toolchain, workspace_root / "rust-toolchain.toml")
+    source_cargo_config = root / ".cargo" / "config.toml"
+    if source_cargo_config.exists():
+        (workspace_root / ".cargo").mkdir()
+        shutil.copyfile(source_cargo_config, workspace_root / ".cargo" / "config.toml")
+
     env = os.environ.copy()
     env.setdefault("SLSKR_BUILD_WEB", "")
     env.pop("SLSKR_BUILD_WEB", None)
     subprocess.check_call(
         [
-            str(root / "scripts" / "with-build-guard.sh"),
             "cargo",
             "check",
             "--workspace",

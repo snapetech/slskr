@@ -23,6 +23,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # actions/checkout@v6
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # dtolnay/rust-toolchain@stable
         with:
+          toolchain: 1.94.0
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@258712b0b7b1ddf8bddc9fc3b0faca682b2736c3 # Swatinem/rust-cache@v2
       - name: Prefer rustup toolchain binaries
@@ -39,7 +40,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ripgrep
-          scripts/with-build-guard.sh cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_CLI_VERSION" --locked --force
+          cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_CLI_VERSION" --locked --force
       - name: Install web dependencies
         run: npm --prefix web ci --allow-git=root --legacy-peer-deps
       - name: Install Playwright browsers
@@ -70,6 +71,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # actions/checkout@v6
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.94.0
       - uses: Swatinem/rust-cache@258712b0b7b1ddf8bddc9fc3b0faca682b2736c3 # Swatinem/rust-cache@v2
       - name: Prefer rustup toolchain binaries
         run: dirname "$(rustup which cargo)" >> "$GITHUB_PATH"

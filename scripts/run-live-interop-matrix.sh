@@ -1,14 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# This matrix starts long-lived daemons and may reuse a prebuilt binary. Put
-# the whole process tree under the hard resident-memory guard before any
-# credential, Node, or Cargo work begins.
-runner_repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-if ! "$runner_repo_root/scripts/process-memory-guard-active.sh"; then
-  exec "$runner_repo_root/scripts/with-process-memory-guard.sh" "${BASH_SOURCE[0]}" "$@"
-fi
-
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 env_file="${SLSKR_LIVE_ENV_FILE:-$repo_root/.env}"
 extra_env_file="${SLSKR_LIVE_EXTRA_ENV_FILE:-$repo_root/.secrets/generated-soulseek-accounts.env}"
@@ -16,18 +8,6 @@ pool_file="${SLSKR_PROTON_CREDENTIAL_POOL_FILE:-$repo_root/.secrets/proton-crede
 output_dir="${SLSKR_INTEROP_OUTPUT_DIR:-$repo_root/target/live-interop}"
 mkdir -p "$output_dir"
 
-# Keep the live runner bounded even when it reuses an already-built binary.
-# Preserve a stricter limit inherited from a parent guard.
-interop_virtual_memory_kib="${SLSKR_INTEROP_VIRTUAL_MEMORY_KIB:-12582912}"
-if [[ ! "$interop_virtual_memory_kib" =~ ^[1-9][0-9]{0,7}$ || "$interop_virtual_memory_kib" -gt 12582912 ]]; then
-  echo "SLSKR_INTEROP_VIRTUAL_MEMORY_KIB must be between 1 and 12582912" >&2
-  exit 2
-fi
-parent_virtual_memory_kib="$(ulimit -v)"
-if [[ "$parent_virtual_memory_kib" =~ ^[0-9]+$ && "$parent_virtual_memory_kib" -lt "$interop_virtual_memory_kib" ]]; then
-  interop_virtual_memory_kib="$parent_virtual_memory_kib"
-fi
-ulimit -v "$interop_virtual_memory_kib"
 export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=1024}"
 
 if [[ ! -f "$env_file" ]]; then
@@ -79,10 +59,8 @@ done
 
 slskr_binary="$repo_root/target/debug/slskr"
 if [[ ! -x "$slskr_binary" ]]; then
-  export CARGO_BUILD_JOBS=1
-  export RUST_MIN_STACK="${RUST_MIN_STACK:-16777216}"
   export CARGO_NET_OFFLINE="${CARGO_NET_OFFLINE:-true}"
-  scripts/with-build-guard.sh cargo build -q -p slskr
+  cargo build -q -p slskr
 fi
 
 run_sanitized() {

@@ -1,13 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Archive creation may install/build the web bundle and compile Rust. Guard
-# the complete direct invocation before either tool starts.
-runner_repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-if ! "$runner_repo_root/scripts/process-memory-guard-active.sh"; then
-  exec "$runner_repo_root/scripts/with-process-memory-guard.sh" "${BASH_SOURCE[0]}" "$@"
-fi
-
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
@@ -113,7 +106,7 @@ cargo_args=(build --release -p slskr)
 if [[ -n "$target" ]]; then
   cargo_args+=(--target "$target")
 fi
-scripts/with-build-guard.sh cargo "${cargo_args[@]}"
+cargo "${cargo_args[@]}"
 
 binary_path="target/$target/$profile/$binary_name"
 if [[ ! -f "$binary_path" ]]; then

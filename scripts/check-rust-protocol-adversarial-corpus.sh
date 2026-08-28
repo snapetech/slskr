@@ -20,6 +20,6 @@ for anchor in MAX_DECOMPRESSED_SEARCH_RESPONSE_BYTES decompress_zlib_with_limit 
   fi
 done
 
-scripts/with-build-guard.sh cargo test -p slskr-protocol adversarial_
+cargo test -p slskr-protocol adversarial_
 
 printf 'rust protocol adversarial corpus passed\n'

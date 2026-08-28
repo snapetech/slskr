@@ -29,6 +29,13 @@ the release is prepared. Do not rewrite audited release history.
   release and browser validation workflows.
 - Fixed release validation to resolve frozen slskd authentication checks
   against the renamed legacy policy registry.
+- Fixed options differential validation to ignore only known default product
+  identity fields while preserving strict checks for configured values.
+- Preserved the historical dedicated obfuscated listener for frozen native
+  compatibility profiles while keeping current native deployments on the
+  merged public listener.
+- Preserved frozen-profile Lidarr import request compatibility while retaining
+  the current upstream already-owned album pre-check in current native mode.
 
 ## [0.2.33] — 2026-08-23
 

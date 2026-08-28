@@ -31,13 +31,13 @@ requires a new pinned comparison boundary before it can be claimed.
    transports must be explicitly recorded as not applicable for slskd.
 4. Restart, corrupt state, cancellation, timeout, retry, resume, concurrent
    mutation, upgrade, rollback, permission, and clean-uninstall behavior match
-   the selected target profile. The guarded
+   the selected target profile. The
    `scripts/run-universal-lifecycle-matrix.sh` runner executes all 22
    target/scenario cases serially, rejects a replacement binary older than the
    current source, and requires independent per-case artifacts.
-5. Certification starts from a clean process state and runs under the
-   repository memory guard. No command may bypass the exclusive lock, one-job
-   Rust limit, or virtual-memory ceiling.
+5. Certification starts from a clean process state. Rust commands use the
+   pinned toolchain and workspace Cargo configuration; non-Rust browser and
+   Node helpers use the process-memory helper where their workloads require it.
 
 The strict auditor additionally requires `--transport-evidence` containing a
 fresh live JSON artifact. It must mark each applicable target/transport pair as
@@ -87,7 +87,7 @@ those scoped exceptions are part of the acceptance boundary, not open gaps.
 | Area | Evidence of the gap |
 | --- | --- |
 | React and Rust UI | Fresh live-backend artifacts contain all 82 React and 30 Rust route/viewport cases with zero recorded page errors across the required states. The current independent four-surface artifact `target/frozen-target-ui-comparison-universal-20260820-fresh12/audit.json` reaches 9/9 runtime workflow-health passes, uses separate replacement daemons for both profiles, observes live replacement event feeds, and reports zero semantic API/control inventory mismatches. |
-| Bounded Rust differentials | Complete in the ordinary ledger. Fresh guarded proof executes the controller API, persistence, file-lifecycle, protocol, security-control, and security-authorization slices through linked feature-specific runners. The historical monolithic full-controller compile is rejected under the 12 GiB virtual-memory guard and is not used as a certification path. |
+| Bounded Rust differentials | Complete in the ordinary ledger. Fresh proof executes the controller API, persistence, file-lifecycle, protocol, security-control, and security-authorization slices through linked feature-specific runners. The historical monolithic full-controller compile remains an explicit opt-in and is not used as a certification path. |
 | QUIC and DHT | The bounded `slskdn-overlay-data` transport, reusable stream client, daemon receiver, bounded public-QUIC proxy admission, and public shared-DHT/UDP request/response demux now exist with bounded proof; shared-mode mainline outbound source-port routing is wired and regression-tested. The exact target-pinned MsQuic package binds the frozen slskdN QUIC listeners in an isolated run. One-shot certificate-pin discovery captures the target's ephemeral control/data certificate for that connection only; ordinary pinned connections still require an expected endpoint pin. The fresh exact run passes UDP, QUIC control, and QUIC data replacement-to-target transactions. The frozen target's reverse peer-routing path remains source-bound unavailable: `PeerResolutionService` looks up 32-byte SHA-256 DHT keys, while its mesh `Store`/`FindValue` service rejects every key that is not 20 bytes, and no registration call site exists. The strict artifact records those reverse directions as explicit target-negative contracts. |
 | Relay | The exact frozen slskdN source contains the private-gateway implementation but does not register it with the mesh router. The fresh negative rows therefore close the relay/gateway transport as an explicit not-applicable target contract; this does not certify a positive relay data plane. |
 | Mesh sync | The base bidirectional live map passes in the strict artifact. The fresh source-pinned run `target/live-interop-exact-transport-probes-mesh-retry-msquic3-20260820/slskr-slskdn-cross-client-interop.failed-4153322.tsv` records repeated `/api/v0/mesh/sync/{username}` attempts against both target and replacement, each returning the exact target-negative `400 {"error":"Failed to sync with peer"}` contract twice. The focused row is retained in `target/live-interop-exact-transport-probes-mesh-retry-msquic3-20260820/slskr-slskdn-cross-client-interop.mesh-lifecycle-supplement-4153322.tsv`; frozen source confirms no outbound mesh transport exists. This closes reconnect/retry/failure as an explicit target-negative contract, not as a positive mesh data plane. |

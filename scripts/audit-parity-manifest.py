@@ -126,7 +126,6 @@ UNIVERSAL_UI_WORKFLOWS = frozenset(
 
 
 def run_json(command: list[str], cwd: Path) -> Any:
-    command = guarded_cargo_command(command, cwd)
     command = guarded_process_command(command, cwd)
     completed = subprocess.run(
         command,
@@ -141,7 +140,6 @@ def run_json(command: list[str], cwd: Path) -> Any:
 
 def run_logged(command: list[str], cwd: Path, env: dict[str, str] | None = None) -> None:
     """Run a proof command without contaminating the machine-readable manifest."""
-    command = guarded_cargo_command(command, cwd)
     command = guarded_process_command(command, cwd)
     completed = subprocess.run(
         command,
@@ -163,19 +161,6 @@ def run_logged(command: list[str], cwd: Path, env: dict[str, str] | None = None)
             output=completed.stdout,
             stderr=completed.stderr,
         )
-
-
-def guarded_cargo_command(command: list[str], cwd: Path) -> list[str]:
-    """Route every Cargo proof command through the Rust resource guard.
-
-    The process guard is for Node/browser and long-lived application trees. A
-    Cargo command has its separate 12 GiB Rust profile; nesting it in the
-    process guard's 4 GiB cgroup makes rustfmt/rustc fail before the host is
-    under pressure.
-    """
-    if not command or command[0] != "cargo":
-        return command
-    return [str(cwd / "scripts" / "with-build-guard.sh"), *command]
 
 
 def guarded_process_command(command: list[str], cwd: Path) -> list[str]:
@@ -270,7 +255,7 @@ SECURITY_AUTHORIZATION_TEST = (
 def security_authorization_ledger(
     root: Path, reuse_evidence: bool = False
 ) -> dict[tuple[str, str, str, str], bool]:
-    """Run the exhaustive in-process auth-gate differential (crates/slskr/src/main.rs)
+    """Run the exhaustive in-process auth-gate differential (crates/slskr/src/lib.rs)
     and return real, freshly executed pass/fail evidence keyed by
     (target, method, route, case). This is the only source that may promote a
     security-authorization manifest case out of ``needs-proof`` -- the test
@@ -319,7 +304,7 @@ def controller_api_ledger(
     slskdn_root: Path,
     reuse_evidence: bool = False,
 ) -> dict[tuple[str, str, str, str], bool]:
-    """Run every controller-api bulk differential test (crates/slskr/src/main.rs,
+    """Run every controller-api bulk differential test (crates/slskr/src/lib.rs,
     named `controller_api_differential_*` by convention) and union their
     evidence ledgers, keyed by (target, method, route, case). Each such test
     proves a real, executed behavioral case (not route presence alone) for a
@@ -1187,7 +1172,7 @@ def persistence_lifecycle_ledger(
     root: Path, reuse_evidence: bool = False
 ) -> dict[tuple[str, str, str], bool]:
     """Run every persistence-lifecycle bulk differential test (crates/slskr/
-    src/main.rs, named `persistence_lifecycle_differential_*` by convention)
+    src/lib.rs, named `persistence_lifecycle_differential_*` by convention)
     and union their evidence ledgers, keyed by (target, domain, case). Each
     such test independently re-verifies a real create/rehydrate/roundtrip
     behavior for a specific database domain against slskR's own real
@@ -4629,7 +4614,7 @@ def validate_live_interop_mapping_contracts(root: Path) -> None:
     promoting that row.
     """
     runner = root / "scripts/run-slskdn-cross-client-interop.sh"
-    rust_source = root / "crates/slskr/src/main.rs"
+    rust_source = root / "crates/slskr/src/lib.rs"
     runner_source = runner.read_text(encoding="utf-8") if runner.is_file() else ""
     rust_text = rust_source.read_text(encoding="utf-8") if rust_source.is_file() else ""
     required_runner_tokens = (

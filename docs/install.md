@@ -10,7 +10,7 @@ default; the fallback dashboard is also available at `/dashboard`.
 ## Build
 
 ```sh
-scripts/with-build-guard.sh cargo build --release -p slskr
+cargo build --release -p slskr
 ```
 
 The binary lands at `target/release/slskr`. For a local user install:

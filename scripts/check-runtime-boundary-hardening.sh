@@ -4,7 +4,7 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
-source_file="crates/slskr/src/main.rs"
+source_file="crates/slskr/src/lib.rs"
 http_source="crates/slskr/src/http_server.rs"
 credential_source="crates/slskr/src/credential_store.rs"
 config_source="crates/slskr/src/config.rs"
@@ -20,7 +20,7 @@ for anchor in \
   'state_directory_is_private_and_rejects_symlinks' \
   'wait_for_reconnect_or_command' \
   'reconnect_backoff_is_interrupted_by_session_commands' \
-  'slskd_storage_directory_json_unix' \
+  'controller_storage_directory_json_unix' \
   'storage directory confined open failed' \
   'scoped_storage_listing_rejects_symlinked_parent' \
   'open_shared_local_file_unix' \

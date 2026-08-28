@@ -1,13 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# A soak is intentionally long-lived. Keep the daemon and its build child in
-# the hard process-memory cgroup when this launcher is called directly.
-runner_repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-if ! "$runner_repo_root/scripts/process-memory-guard-active.sh"; then
-  exec "$runner_repo_root/scripts/with-process-memory-guard.sh" "${BASH_SOURCE[0]}" "$@"
-fi
-
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 credential_file="${SLSKR_SOAK_CREDENTIAL_FILE:-$repo_root/.secrets/live-soak-account.env}"
 log_file="${1:-$repo_root/target/live-soak/live-soak-24h-$(date +%Y%m%d-%H%M%S).log}"
@@ -31,7 +24,7 @@ export SLSK_SOAK_OBFUSCATED_LISTENER_BIND="${SLSK_SOAK_OBFUSCATED_LISTENER_BIND:
 
 cd "$repo_root"
 
-scripts/with-build-guard.sh cargo build -q -p slskr
+cargo build -q -p slskr
 slskr_bin="$repo_root/target/debug/slskr"
 
 {

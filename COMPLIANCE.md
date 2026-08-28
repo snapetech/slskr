@@ -57,7 +57,7 @@ This is an engineering compliance checklist, not legal advice.
 - Do not bundle, print, log, or commit Soulseek credentials.
 - Use `scripts/check-release-package.sh` as the Rust packaging release gate.
   The app crate depends on unpublished internal workspace crates, so
-  `scripts/with-build-guard.sh cargo package -p slskr` is intentionally not a valid standalone package
+  `cargo package -p slskr` is intentionally not a valid standalone package
   check.
 
 ## Current Status

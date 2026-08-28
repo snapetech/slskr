@@ -2,7 +2,7 @@
 #
 # Check slskR route coverage against the webui endpoint list.
 # Reads the canonical webui endpoint list from docs/webui-endpoints.txt
-# and counts how many are implemented in crates/slskr/src/main.rs.
+# and counts how many are implemented in crates/slskr/src/lib.rs.
 #
 # Usage: ./scripts/diff-webui-endpoints.sh
 
@@ -10,15 +10,15 @@ set -e
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WEBUI_ENDPOINTS="$REPO_ROOT/docs/webui-endpoints.txt"
-MAIN_RS="$REPO_ROOT/crates/slskr/src/main.rs"
+SOURCE_RS="$REPO_ROOT/crates/slskr/src/lib.rs"
 
 if [[ ! -f "$WEBUI_ENDPOINTS" ]]; then
     echo "Error: $WEBUI_ENDPOINTS not found"
     exit 1
 fi
 
-if [[ ! -f "$MAIN_RS" ]]; then
-    echo "Error: $MAIN_RS not found"
+if [[ ! -f "$SOURCE_RS" ]]; then
+    echo "Error: $SOURCE_RS not found"
     exit 1
 fi
 
@@ -49,17 +49,17 @@ while IFS=' ' read -r method path; do
         api_dynamic_prefix="${api_norm_path%%:var*}"
     fi
     
-    # Try different patterns in main.rs
-    if grep -q "\"$method\".*\"$path\"" "$MAIN_RS" || \
-       grep -q "\"$method\".*\"$norm_path\"" "$MAIN_RS" || \
-       grep -q "\"$method\".*\"$api_norm_path\"" "$MAIN_RS" || \
-       grep -q "\"$method\".*\"/api/v0$norm_path\"" "$MAIN_RS" || \
-       grep -q "starts_with.*\"$path\"" "$MAIN_RS" || \
-       grep -q "ends_with.*\"$path\"" "$MAIN_RS" || \
-       grep -q "path == \"$path\"" "$MAIN_RS" || \
-       { [[ -n "$api_dynamic_prefix" ]] && grep -q "path_segment_after(path, \"$api_dynamic_prefix" "$MAIN_RS"; } || \
-       { [[ -n "$api_dynamic_prefix" ]] && grep -q "starts_with.*\"$api_dynamic_prefix" "$MAIN_RS"; } || \
-       { [[ -n "$dynamic_prefix" ]] && grep -q "starts_with.*\"$dynamic_prefix" "$MAIN_RS"; }; then
+    # Try different patterns in the daemon implementation source.
+    if grep -q "\"$method\".*\"$path\"" "$SOURCE_RS" || \
+       grep -q "\"$method\".*\"$norm_path\"" "$SOURCE_RS" || \
+       grep -q "\"$method\".*\"$api_norm_path\"" "$SOURCE_RS" || \
+       grep -q "\"$method\".*\"/api/v0$norm_path\"" "$SOURCE_RS" || \
+       grep -q "starts_with.*\"$path\"" "$SOURCE_RS" || \
+       grep -q "ends_with.*\"$path\"" "$SOURCE_RS" || \
+       grep -q "path == \"$path\"" "$SOURCE_RS" || \
+       { [[ -n "$api_dynamic_prefix" ]] && grep -q "path_segment_after(path, \"$api_dynamic_prefix" "$SOURCE_RS"; } || \
+       { [[ -n "$api_dynamic_prefix" ]] && grep -q "starts_with.*\"$api_dynamic_prefix" "$SOURCE_RS"; } || \
+       { [[ -n "$dynamic_prefix" ]] && grep -q "starts_with.*\"$dynamic_prefix" "$SOURCE_RS"; }; then
         ((++IMPLEMENTED))
         echo "✓ $method $path"
     else
@@ -84,7 +84,7 @@ if [[ ${#MISSING[@]} -gt 0 ]]; then
         echo "  ${MISSING[$i]}"
     done
     echo ""
-    echo "To implement more endpoints, add handlers to crates/slskr/src/main.rs"
+    echo "To implement more endpoints, add handlers to crates/slskr/src/lib.rs"
     exit 1
 else
     echo "All webui endpoints are implemented! ✓"

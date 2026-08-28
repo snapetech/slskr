@@ -25,18 +25,12 @@ audience, product area, required action (or `none`), and breaking-change status.
 Internal-only work must be explicitly marked in the pull request. Preview the
 range with `python3 scripts/release_notes.py preview --base <base> --head <head>`.
 
-## Rust build resource guard
+## Rust build and tooling
 
-Every repository Cargo subcommand—including build, check, test, clippy, run,
-package, metadata, tree, audit, install, and bench—must run through
-`scripts/with-build-guard.sh`. `cargo fmt` is prohibited because its workspace
-diff path can allocate catastrophically on the monolithic controller source;
-use `scripts/check-rust-format.sh`, which formats changed files one at a time
-through `scripts/with-rustfmt-guard.sh` under a 1 GiB cap. Direct `rustfmt
---check` is prohibited for the same reason. Node/Python helpers that spawn
-Cargo must invoke the wrapper as well. The guard serializes Rust commands,
-forces one Cargo job, and applies a bounded virtual-memory limit. Do not invoke
-Cargo or unguarded rustfmt directly from scripts, workflows, documentation
-examples, or agent sessions. Install workstation command shims with
-`scripts/install-rust-tool-shims.sh` so bare `cargo`, `rustc`, and `rustfmt`
-commands from this checkout enter the same boundaries.
+Use Cargo and the pinned Rust toolchain directly. The workspace config keeps
+the large daemon crate on one Cargo build job, disables unnecessary dev debug
+metadata, and uses 16 codegen units plus ThinLTO for release builds. Do not add
+shell wrappers, compiler shims, virtual-memory limits, or forced test-thread
+settings around Rust commands. Run `scripts/check-rust-format.sh` for the
+changed-file formatter check; it intentionally leaves the historical
+multi-megabyte controller source alone.

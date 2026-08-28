@@ -54,7 +54,7 @@ public Soulseek network or a third-party VPN provider.
 | Live web UI | 23 route shapes, 391 links, 1,292 controls; 1,232 normal transitions, 8 drag transitions, 43 explicitly allowed local no-ops, 0 disabled controls, 0 failures. |
 | Semantic UI workflows | 13 checks green, including invite, nearby refresh, YAML validate/save, library scan/fix, wishlist import, share token/manifest/stream, and local report/plan actions. |
 | Protocol interoperability | Frozen credentialed v2 matrix: 85/85 pass; latest current-target shared-TCP matrix: 85 pass, 0 skip, 0 fail with QUIC control/data enabled by official MsQuic. The mesh-sync 400 case remains a documented target-negative contract. |
-| Rust regression suites | Recorded full guarded baseline: `slskr` 427-test daemon groups plus 2 integration tests, `slskr-client` 319, and `slskr-web` 86; current shared-port focus: listener 23/23, config 1/1, and gateway ownership 1/1. |
+| Rust regression suites | Recorded full baseline: `slskr` 427-test daemon groups plus 2 integration tests, `slskr-client` 319, and `slskr-web` 86; current shared-port focus: listener 23/23, config 1/1, and gateway ownership 1/1. |
 
 ## Current executable ledger
 
@@ -65,14 +65,14 @@ and operational contract; source-language identity is not a requirement.
 
 | Workstream | Executable closure | Fresh evidence |
 | --- | --- | --- |
-| Configuration and reload | Current canonical names, frozen aliases, YAML normalization, reload, validation, auto-replace, filters, Lidarr, overlay, and advertised-port settings are wired. | `audit-upstream-config-surface.py --require-complete`: 449/449 leaves implemented; recorded guarded `slskr` baseline passed. Current config regression: 1/1. |
-| Persistence and integrations | Additive migrations and restart hydration cover retry attempts, wishlist fallback state, Lidarr metadata/history, editions, and atomic bulk updates. | Recorded full guarded `slskr` baseline passed; persistence and integration cases are included in that run. |
-| Transfers and search | Filename policy is enforced at every enqueue/retry/auto-replace boundary; retries persist attempt/backoff state; wishlist search fallback, dedupe, quality/edition ranking, and bounded auto-download are live. | Recorded full guarded `slskr` baseline passed, including policy, fallback, ranking, and persistence tests. |
-| Soulseek and mesh transport | Shared plain/obfuscated TCP demultiplexing, shared UDP/QUIC routing, ALPN classification, self-certifying DHT store validation, and frozen/current listener profiles are implemented. | Recorded full guarded client and daemon suites passed; current listener focus: 23/23, config: 1/1, gateway ownership: 1/1. |
-| Media and SongID | MusicBrainz/discography targets, media descriptors, identity evidence, capability reporting, scored SongID consensus, and forensic API data are executable. | Recorded full guarded `slskr` baseline passed; live API/UI route probes exercised the exposed metadata surfaces. |
-| API and web UI | Native API controls and Rust UI actions cover destinations, exclusions, YAML validation/save, search bulk actions, transfer columns, history/retry, metadata/integration surfaces, share manifests/tickets, and error/reconnect states. | Guarded `slskr-web` library: 86 passed; live exhaustive audit: 23 route shapes, 391 links, 1,292 controls, 0 failures; semantic audit: 13/13 checks green. |
+| Configuration and reload | Current canonical names, frozen aliases, YAML normalization, reload, validation, auto-replace, filters, Lidarr, overlay, and advertised-port settings are wired. | `audit-upstream-config-surface.py --require-complete`: 449/449 leaves implemented; recorded `slskr` baseline passed. Current config regression: 1/1. |
+| Persistence and integrations | Additive migrations and restart hydration cover retry attempts, wishlist fallback state, Lidarr metadata/history, editions, and atomic bulk updates. | Recorded full `slskr` baseline passed; persistence and integration cases are included in that run. |
+| Transfers and search | Filename policy is enforced at every enqueue/retry/auto-replace boundary; retries persist attempt/backoff state; wishlist search fallback, dedupe, quality/edition ranking, and bounded auto-download are live. | Recorded full `slskr` baseline passed, including policy, fallback, ranking, and persistence tests. |
+| Soulseek and mesh transport | Shared plain/obfuscated TCP demultiplexing, shared UDP/QUIC routing, ALPN classification, self-certifying DHT store validation, and frozen/current listener profiles are implemented. | Recorded full client and daemon suites passed; current listener focus: 23/23, config: 1/1, gateway ownership: 1/1. |
+| Media and SongID | MusicBrainz/discography targets, media descriptors, identity evidence, capability reporting, scored SongID consensus, and forensic API data are executable. | Recorded full `slskr` baseline passed; live API/UI route probes exercised the exposed metadata surfaces. |
+| API and web UI | Native API controls and Rust UI actions cover destinations, exclusions, YAML validation/save, search bulk actions, transfer columns, history/retry, metadata/integration surfaces, share manifests/tickets, and error/reconnect states. | `slskr-web` library: 86 passed; live exhaustive audit: 23 route shapes, 391 links, 1,292 controls, 0 failures; semantic audit: 13/13 checks green. |
 | Identity and compatibility | Native runtime/UI/package identity is `slskR`; the frozen compatibility selector and legacy wire labels remain profile-gated. | Identity-leak gate passed; current and frozen profile tests passed. |
-| VPN, relay, and packaging executables | Current ingress renewal/reclaim behavior, WireGuard health checks, self-hosted relay API/systemd artifacts, packaging aliases, WASM, and package contents are wired. | `bash -n`, Python compilation, CSP/build-guard/identity gates passed; guarded package contents verification passed with `--allow-dirty`. |
+| VPN, relay, and packaging executables | Current ingress renewal/reclaim behavior, WireGuard health checks, self-hosted relay API/systemd artifacts, packaging aliases, WASM, and package contents are wired. | `bash -n`, Python compilation, CSP/identity gates passed; package contents verification passed with `--allow-dirty`. |
 
 The local fixture contains non-public test credentials only. No credential in
 this workspace has been validated against the public Soulseek service, and no
@@ -155,7 +155,7 @@ current-target runtime matrix below.
 ## Evidence and gates
 
 - Maintain a source-derived parity ledger with file/symbol/behavior evidence.
-- Run every Cargo command through `scripts/with-build-guard.sh`.
+- Run every Cargo command with the workspace configuration from `.cargo/config.toml`.
 - Add unit/property tests for parsers, policy, scoring, migrations, retries,
   state machines, and transport demultiplexing.
 - Run API differential tests for nominal, malformed, authorization, persistence,

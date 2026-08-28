@@ -1,18 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Public matrices start long-lived listeners and probe helpers. Keep direct
-# invocation inside the same hard process-memory ceiling as certification.
-runner_repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-if ! "$runner_repo_root/scripts/process-memory-guard-active.sh"; then
-    exec "$runner_repo_root/scripts/with-process-memory-guard.sh" "${BASH_SOURCE[0]}" "$@"
-fi
-
-# The listener soak is launched asynchronously and performs its own guarded
-# Cargo build while the first probe also builds/runs a probe command. Keep the
-# repository-wide Rust serialization, but wait for the bounded hand-off rather
-# than letting the listener fail before it claims its public ports.
-export SLSKR_BUILD_LOCK_WAIT_SECONDS="${SLSKR_BUILD_LOCK_WAIT_SECONDS:-180}"
+# The listener soak is launched asynchronously while the first probe also
+# builds/runs a probe command. Cargo's workspace job setting keeps those builds
+# from multiplying the compiler working set.
 # Keep the asynchronous listener build and the probe builds on one Cargo
 # fingerprint. Without this, the listener's warning-suppressed build forces
 # every first probe to compile the full binary again inside its case timeout.
@@ -173,7 +164,7 @@ fi
 
 slskr_binary="$repo_root/target/debug/slskr"
 if [[ ! -x "$slskr_binary" ]]; then
-    scripts/with-build-guard.sh cargo build -q -p slskr
+    cargo build -q -p slskr
 fi
 export SLSKR_MATRIX_BINARY="$slskr_binary"
 

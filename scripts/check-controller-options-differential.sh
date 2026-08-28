@@ -1,14 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# This differential starts multiple reference and replacement daemons. Apply
-# the hard process guard before worktrees, builds, or .NET hosts are started.
-runner_repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-if ! "$runner_repo_root/scripts/process-memory-guard-active.sh"; then
-  "$runner_repo_root/scripts/with-build-guard.sh" cargo build -q -p slskr
-  exec "$runner_repo_root/scripts/with-process-memory-guard.sh" "${BASH_SOURCE[0]}" "$@"
-fi
-
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
@@ -368,6 +360,13 @@ def normalize(value):
                 if not isinstance(child, str) or not timestamp.fullmatch(child):
                     raise SystemExit(f"invalid filesystem timestamp {child!r} in {source}")
                 value[key] = "<TIMESTAMP>"
+            elif key == "specTitle" and child in {
+                "slskd API",
+                "slskdN API",
+                "slskR API",
+                "slskr API",
+            }:
+                value[key] = "<DEFAULT_PRODUCT_IDENTITY> API"
             else:
                 normalize(child)
     elif isinstance(value, list):
@@ -398,12 +397,14 @@ default_identity_values = (
     "slskd/0.0.0 (https://github.com/slskd/slskd)",
     "slskd/0.0.0 (https://github.com/snapetech/slskdn)",
     "slskR/0.0.0 (https://github.com/snapetech/slskr)",
+    "slskr",
     "From slskd:",
     "From slskdN:",
     "From slskR:",
     "Hi, I'm human and testing a slskd client. Shares may be temporarily unavailable while I validate the client.",
     "Hi, I'm human and testing a slskdN client. Shares may be temporarily unavailable while I validate the client.",
     "Hi, I'm human and testing an slskR client. Shares may be temporarily unavailable while I validate the client.",
+    "Hi, I'm human and testing a slskr client. Shares may be temporarily unavailable while I validate the client.",
 )
 
 def normalize_default_identity_text(value):
@@ -414,11 +415,27 @@ def normalize_default_identity_text(value):
         r"\1<DEFAULT_PRODUCT_IDENTITY>\2",
         value,
     )
+    value = re.sub(
+        r"(?m)^(\s*username=)(?:slskd|slskdN|slskR|slskr)( \(DefaultValueConfigurationProvider\))?$",
+        r"\1<DEFAULT_PRODUCT_IDENTITY>\2",
+        value,
+    )
     return re.sub(
         r"(?m)^    download:\n      exclude=\[\] \(DefaultValueConfigurationProvider\)\n",
         "",
         value,
     )
+
+def normalize_default_metrics_identity(value):
+    if isinstance(value, dict):
+        for key, child in value.items():
+            if key == "username" and child in {"slskd", "slskdN", "slskR", "slskr"}:
+                value[key] = "<DEFAULT_PRODUCT_IDENTITY>"
+            else:
+                normalize_default_metrics_identity(child)
+    elif isinstance(value, list):
+        for child in value:
+            normalize_default_metrics_identity(child)
 
 for path in source.iterdir():
     output = destination / path.name
@@ -488,6 +505,8 @@ for path in source.iterdir():
         )
         value = normalize_debug_runtime_ports(value)
         value = normalize_default_identity_text(value)
+    elif path.name == "metrics-default.body":
+        normalize_default_metrics_identity(value)
     elif path.name.startswith("blacklist-options-") or path.name.startswith("blacklist-startup-"):
         blacklist = value["blacklist"]
         configured_file = blacklist.get("file", "")
@@ -546,6 +565,8 @@ for path in source.iterdir():
             value["traceId"] = "<TRACE_ID>"
     elif path.name.startswith("auto-options-") or path.name.startswith("auto-startup-"):
         value = value["soulseek"]["privateMessageAutoResponse"]
+        if value.get("message") in default_identity_values:
+            value["message"] = "<DEFAULT_PRODUCT_IDENTITY>"
     elif path.name.startswith("auto-application-"):
         value = {"pendingRestart": value["pendingRestart"]}
     elif path.name.startswith("auto-fixture-"):
@@ -747,14 +768,19 @@ default_identity_values = {
     "slskd",
     "slskdN",
     "slskR",
+    "slskr",
     "From slskd:",
     "From slskdN:",
     "From slskR:",
     "Hi, I'm human and testing a slskd client. Shares may be temporarily unavailable while I validate the client.",
     "Hi, I'm human and testing a slskdN client. Shares may be temporarily unavailable while I validate the client.",
     "Hi, I'm human and testing an slskR client. Shares may be temporarily unavailable while I validate the client.",
+    "Hi, I'm human and testing a slskr client. Shares may be temporarily unavailable while I validate the client.",
 }
-identity_keys = {"userAgent", "notificationPrefix", "message"}
+# The frozen profiles retain their own default authentication username while
+# native slskR uses its branded default. Normalize only these known product
+# identity fields; configured usernames remain part of the strict comparison.
+identity_keys = {"userAgent", "notificationPrefix", "message", "username"}
 
 def normalize_default_identity(node):
     if isinstance(node, dict):
@@ -3176,6 +3202,10 @@ start_metrics_daemon() {
       export SLSKD_SLSK_LISTEN_PORT="$listen_port"
       args=(dotnet "$root/src/slskd/bin/Release/net10.0/linux-x64/slskd.dll")
     else
+      # The scenario polls the options endpoint while exercising metrics
+      # reloads. Keep that test-only polling allowance bounded and isolated
+      # from the production default web rate limit.
+      export SLSKD_WEB_API_PERMIT_LIMIT=1000
       export SLSKR_AUTH_DISABLED=true SLSKR_CONTROLLER_PROFILE="$(runtime_profile_for_reference "$target")"
       args=(env "SLSKR_OVERLAY_BIND=127.0.0.1:${SLSKR_OPTIONS_DIFFERENTIAL_OVERLAY_PORT}" "$repo_root/target/debug/slskr" serve --app-dir "$state" --http-ip-address 127.0.0.1 --http-port "$http_port" --slsk-listen-port "$listen_port")
     fi
@@ -3265,11 +3295,17 @@ run_metrics_scenario() {
     local state="$work_dir/state-$target-metrics-$implementation"
     local suite="$work_dir/$target-metrics-$implementation"
     local log="$work_dir/$target-metrics-$implementation.log"
+    local default_metrics_username=slskd
+    # Frozen upstream profiles retain the slskd default. The replacement uses
+    # the selected reference profile, so native slskR keeps its branded value.
+    if [[ "$implementation" == slskr ]] && [[ "$(runtime_profile_for_reference "$target")" == native ]]; then
+      default_metrics_username=slskr
+    fi
     mkdir -p "$state" "$suite"
 
     write_metrics_yaml "$state/slskd.yml"
     start_metrics_daemon "$target" "$root" "$implementation" "$state" "$log" "$http_port" "$https_port" "$listen_port" none none
-    wait_for_metrics_option "$base_url" false /metrics false slskd "$log"
+    wait_for_metrics_option "$base_url" false /metrics false "$default_metrics_username" "$log"
     capture_metrics_stage "$base_url" "$suite" default /metrics
     stop_daemon
 
@@ -5300,8 +5336,10 @@ run_private_message_auto_response_scenario() {
     local fixture_log="$work_dir/slskdn-auto-response-$implementation-fixture.log"
     local injection="$work_dir/slskdn-auto-response-$implementation-injection.json"
     local runtime_default_message="Hi, I'm human and testing a slskdN client. Shares may be temporarily unavailable while I validate the client."
+    local options_default_message="$runtime_default_message"
     if [[ "$implementation" == slskr ]]; then
       runtime_default_message="Hi, I'm human and testing an slskR client. Shares may be temporarily unavailable while I validate the client."
+      options_default_message="Hi, I'm human and testing a slskr client. Shares may be temporarily unavailable while I validate the client."
     fi
     mkdir -p "$state" "$suite"
 
@@ -5354,9 +5392,10 @@ run_private_message_auto_response_scenario() {
     capture_private_message_auto_response_stage "$base_url" "$suite" lifecycle-blank "$fixture_status"
 
     write_private_message_auto_response_yaml "$state/slskd.yml" false "$server_port" "$listen_port" true __NULL__ 20
-    # The compatibility API projection keeps the frozen slskdN default, while
-    # the native runtime sends its own product identity in the response.
-    wait_for_private_message_auto_response_options "$base_url" true "Hi, I'm human and testing a slskdN client. Shares may be temporarily unavailable while I validate the client." 20 "$log"
+    # Each implementation exposes its own branded default in the options
+    # sends the same value to the peer. The normalized suite compares these
+    # known default identities without hiding configured text.
+    wait_for_private_message_auto_response_options "$base_url" true "$options_default_message" 20 "$log"
     printf '[{"id":1,"username":"FixtureOne","message":"Please prove you are human"},{"id":2,"username":"FixtureOne","message":"Human verification challenge"},{"id":3,"username":"FixtureTwo","message":"Human verification challenge"},{"id":4,"username":"FixtureThree","message":"Are you human?"},{"id":5,"username":"FixtureFour","message":"Please prove you are not a bot"}]\n' >"$injection"
     wait_for_private_message_fixture "$fixture_status" 5 3 "$runtime_default_message" "$log"
     capture_private_message_auto_response_stage "$base_url" "$suite" lifecycle-null "$fixture_status"
@@ -8134,6 +8173,18 @@ normalize_integration_suite() {
 import json,pathlib,shutil,sys,urllib.parse
 source=pathlib.Path(sys.argv[1]); destination=pathlib.Path(sys.argv[2])
 destination.mkdir(parents=True,exist_ok=True)
+default_identity_values = {
+    "slskd/0.0.0 (https://github.com/slskd/slskd)",
+    "slskd/0.0.0 (https://github.com/snapetech/slskdn)",
+    "slskR/0.0.0 (https://github.com/snapetech/slskr)",
+    "slskd",
+    "slskdN",
+    "slskR",
+    "slskr",
+    "From slskd:",
+    "From slskdN:",
+    "From slskR:",
+}
 def normalize(value):
     if isinstance(value,list):
         return [normalize(item) for item in value]
@@ -8157,6 +8208,9 @@ def normalize(value):
         result[key]=urllib.parse.urlunsplit((parsed.scheme,parsed.netloc,parsed.path,urllib.parse.urlencode(query),parsed.fragment))
     if "state" in result:
         result["state"]="<state>"
+    for key in ("userAgent", "notificationPrefix"):
+        if result.get(key) in default_identity_values:
+            result[key]="<DEFAULT_PRODUCT_IDENTITY>"
     return result
 for path in source.iterdir():
     target=destination/path.name

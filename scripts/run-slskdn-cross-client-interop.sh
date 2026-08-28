@@ -1,26 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Enter the repository-wide resident-memory guard even when this runner is
-# invoked directly.  The held marker prevents recursion when the guard
-# re-executes this script.
-runner_repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-if ! "$runner_repo_root/scripts/process-memory-guard-active.sh"; then
-  exec "$runner_repo_root/scripts/with-process-memory-guard.sh" "${BASH_SOURCE[0]}" "$@"
-fi
-
-# Keep every live interop child bounded by the stricter virtual-memory ceiling
-# as well.  A stricter parent limit is preserved rather than raised.
-interop_virtual_memory_kib="${SLSKR_INTEROP_VIRTUAL_MEMORY_KIB:-12582912}"
-if [[ ! "$interop_virtual_memory_kib" =~ ^[1-9][0-9]{0,7}$ || "$interop_virtual_memory_kib" -gt 12582912 ]]; then
-  echo "SLSKR_INTEROP_VIRTUAL_MEMORY_KIB must be between 1 and 12582912" >&2
-  exit 2
-fi
-parent_virtual_memory_kib="$(ulimit -v)"
-if [[ "$parent_virtual_memory_kib" =~ ^[0-9]+$ && "$parent_virtual_memory_kib" -lt "$interop_virtual_memory_kib" ]]; then
-  interop_virtual_memory_kib="$parent_virtual_memory_kib"
-fi
-ulimit -v "$interop_virtual_memory_kib"
 export NODE_OPTIONS='--max-old-space-size=1024'
 export DOTNET_GCHeapHardLimit=1073741824
 export COMPlus_GCHeapHardLimit=1073741824
@@ -558,10 +538,8 @@ elif find \
 fi
 if [[ "$slskr_build_required" -eq 1 ]]; then
   echo "building slskR interop binary from current package inputs" >&2
-  export CARGO_BUILD_JOBS=1
-  export RUST_MIN_STACK="${RUST_MIN_STACK:-16777216}"
   export CARGO_NET_OFFLINE="${CARGO_NET_OFFLINE:-true}"
-  scripts/with-build-guard.sh cargo build -q -p slskr
+  cargo build -q -p slskr
 fi
 
 node -e '

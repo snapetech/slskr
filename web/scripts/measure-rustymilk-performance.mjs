@@ -3,8 +3,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-const result = spawnSync(resolve(repoRoot, 'scripts/with-build-guard.sh'), [
-  'cargo',
+const result = spawnSync('cargo', [
   'test',
   '-p',
   'slskr-web',

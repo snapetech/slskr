@@ -10609,9 +10609,10 @@ fn resolve_listener_and_obfuscation<E: ConfigEnv>(
         None
     };
     let obfuscated_listener_bind = if supports_soulseek_obfuscation {
-        // A zero obfuscation port is the shared-listener sentinel. Keep the
-        // dedicated bind absent in that mode so the runtime can demultiplex
-        // plain and type-1 framed connections on the regular socket.
+        // Current upstream uses a zero obfuscation port as the shared-listener
+        // sentinel. Frozen slskdN compatibility retains the historical
+        // adjacent dedicated listener when no explicit obfuscation bind was
+        // configured.
         env.var("SLSKR_OBFUSCATED_LISTENER_BIND")
             .or(listeners_obfuscated_bind)
             .or_else(|| {
@@ -10624,6 +10625,15 @@ fn resolve_listener_and_obfuscation<E: ConfigEnv>(
                             .map_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED), |bind| bind.ip());
                         SocketAddr::new(host, port).to_string()
                     })
+            })
+            .or_else(|| {
+                (!current_upstream_behavior && listen_port < 65_535).then(|| {
+                    let host = listener_bind
+                        .as_deref()
+                        .and_then(|value| value.parse::<SocketAddr>().ok())
+                        .map_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED), |bind| bind.ip());
+                    SocketAddr::new(host, (listen_port + 1) as u16).to_string()
+                })
             })
     } else {
         None
@@ -10646,7 +10656,13 @@ fn resolve_listener_and_obfuscation<E: ConfigEnv>(
                         .and_then(|value| value.parse::<SocketAddr>().ok())
                         .map(|address| u32::from(address.port()))
                 })
-                .or_else(|| (listen_port < 65_535).then_some(listen_port))
+                .or_else(|| {
+                    if current_upstream_behavior {
+                        Some(listen_port)
+                    } else {
+                        (listen_port < 65_535).then_some(listen_port + 1)
+                    }
+                })
         }
     } else {
         None
@@ -12410,6 +12426,23 @@ mod tests {
         assert_eq!(config.advanced_networking.overlay.quic_listen_port, 50_300);
         assert_eq!(config.overlay_bind, Some("0.0.0.0:50300".parse().unwrap()));
         assert!(config.shared_mesh_tcp());
+        assert!(config.obfuscated_listener_bind.is_none());
+        assert_eq!(config.obfuscated_advertised_port, Some(50_300));
+        assert_eq!(config.obfuscation_listen_port, 0);
+
+        let frozen = super::AppConfig::from_layers(
+            None,
+            super::FileConfig::default(),
+            &env.clone().with("SLSKR_PARITY_PROFILE", "frozen"),
+        )
+        .expect("frozen native networking defaults");
+        assert!(!frozen.current_upstream_behavior);
+        assert_eq!(
+            frozen.obfuscated_listener_bind.as_deref(),
+            Some("0.0.0.0:50301")
+        );
+        assert_eq!(frozen.obfuscated_advertised_port, Some(50_301));
+        assert_eq!(frozen.obfuscation_listen_port, 0);
 
         let dedicated = super::AppConfig::from_layers(
             None,

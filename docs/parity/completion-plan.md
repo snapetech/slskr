@@ -259,23 +259,23 @@ passing tests, and the refreshed authoritative audit reports
 14,144/19,282 complete (73.35%), with 5,138 needs-proof and
 slskdn-controller-api at 3,959/4,704.
 
-**2026-08-16 bounded controller recheck**: the guarded
+**2026-08-16 bounded controller recheck**: the
 `scripts/check-slskdn-controller-parity.sh` gate rebuilt the production daemon
-with one Rust job and a 12 GiB per-process virtual-memory ceiling, then
+with the workspace's one-job Cargo profile, then
 materialized and handled all 779 frozen routes (683 slskdN and 96 slskd) with
 zero generic 404s, HTML fallbacks, compatibility fallbacks, or probe errors.
 The refreshed evidence snapshot therefore closes route-presence for both
 targets; with the existing behavioral ledger, slskdN controller behavior is
 4,704/4,704 complete and slskd is 607/656 complete, leaving 49 slskd behavior
 cases concentrated in file-storage, transfer, and room contracts. A full
-`slskr` test-binary rebuild was not used for this batch: LLVM hit the guard's
-12 GiB ceiling during test-target compilation, while the host remained healthy.
-The remaining cases require focused production or split-test evidence rather
-than another full test-target build.
+`slskr` test-binary rebuild was not used for this batch: LLVM exceeded the
+available working-set budget during test-target compilation while the host
+remained healthy. The remaining cases require focused production or split-test
+evidence rather than another full test-target build.
 
 **2026-08-16 focused controller residual batch**: the new
 `focused-controller-tests` feature builds only the bounded residual test
-target, under the same one-job/12 GiB guard. Its single executable
+target under the workspace's one-job Cargo profile. Its single executable
 `slskd` file-transfer/room test passed all 51 emitted contract rows; 49 of
 those rows were the remaining behavioral gaps and the other two refreshed
 already-covered rows. The focused evidence closes slskd controller behavior
@@ -312,7 +312,7 @@ replacement contract.
 was no code path that could ever mark one complete, regardless of how much
 real test evidence existed. Added an exhaustive in-process differential test
 (`security_authorization_matrix_matches_declared_policy_for_every_frozen_route`
-in `crates/slskr/src/main.rs`) that drives all 769 declared routes across
+in `crates/slskr/src/lib.rs`) that drives all 769 declared routes across
 both frozen controller-auth-policy registries (`crates/slskr/data/slskd(n)-
 controller-auth-policy.json`) through all 10 manifest credential profiles via
 the real `route_http_request`/`check_route_auth` dispatch path -- the exact
@@ -324,7 +324,7 @@ mismatches): the `security-authorization` workstream moved from 0/7,690 to
 deliberate negative control that the harness does detect real mismatches),
 not a route-presence shortcut. Followed immediately by a first
 controller-api batch: 5 more `controller_api_differential_*` tests
-(`crates/slskr/src/main.rs`) crediting 123 of the 5,300 controller-api
+(`crates/slskr/src/lib.rs`) crediting 123 of the 5,300 controller-api
 cases (74 of which matched a real manifest entry after the frozen-registry
 re-run) via the same pattern, reusing the shared production contract
 `versioned_get_failure_contract` and independently re-verified real

@@ -25,9 +25,14 @@ def main() -> None:
         (source / "Cargo.lock").write_text("", encoding="utf-8")
         (source / ".cargo").mkdir()
         (source / ".cargo" / "config.toml").write_text("", encoding="utf-8")
-        for relative in ("crates/slskr", "crates/slskr-client", "crates/slskr-web"):
+        for relative in ("crates/slskr/src", "crates/slskr-client/src", "crates/slskr-web/src"):
             (source / relative).mkdir(parents=True)
-        (source / "crates/slskr" / "main.rs").write_text("fn main() {}\n", encoding="utf-8")
+        (source / "crates/slskr/src" / "lib.rs").write_text(
+            "pub fn run() {}\n", encoding="utf-8"
+        )
+        (source / "crates/slskr/src" / "main.rs").write_text(
+            "fn main() {}\n", encoding="utf-8"
+        )
         binary = root / "slskr"
         binary.write_bytes(b"test binary\n")
         binary.chmod(binary.stat().st_mode | stat.S_IXUSR)

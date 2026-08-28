@@ -26,5 +26,5 @@ The script writes browser-loadable assets to `target/slskr-web`.
 To serve the Rust build from the daemon instead of the current React bundle:
 
 ```bash
-SLSKR_WEB_BUILD_DIR=target/slskr-web scripts/with-build-guard.sh cargo run -p slskr --bin slskr -- serve
+SLSKR_WEB_BUILD_DIR=target/slskr-web cargo run -p slskr --bin slskr -- serve
 ```

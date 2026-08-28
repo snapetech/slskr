@@ -7,7 +7,7 @@ This page is current release guidance. Older `http_api_*` and `SLSKR_BEARER_TOKE
 `slskr serve` binds to `127.0.0.1:5030` by default. Loopback-only binds may run without API auth when no token is configured.
 
 ```bash
-SLSKR_HTTP_BIND=127.0.0.1:5030 scripts/with-build-guard.sh cargo run -p slskr --bin slskr -- serve
+SLSKR_HTTP_BIND=127.0.0.1:5030 cargo run -p slskr --bin slskr -- serve
 curl http://127.0.0.1:5030/api/health
 ```
 

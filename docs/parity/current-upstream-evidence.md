@@ -27,9 +27,9 @@ are recorded in this ledger.
 | Soulseek and mesh wire behavior | `target/evidence/credentialed-v2-all-green-rerun/slskr-slskdn-cross-client-interop.tsv` | 85 rows; 0 non-pass rows. Browse, search, transfer, message, DHT store, pods, gateway echo, QUIC directions, exact mesh bytes, and VirtualSoulfind v2 were exercised. The mesh-sync 400 is target-negative evidence, not a positive sync result. |
 | Public Soulseek credential pool and VPN routing | `target/live-interop-all-accounts/slskr-login-smoke.tsv`, `target/live-interop-all-accounts/proton-public-cycle-*.tsv` | All eight available accounts logged in through Proton WireGuard isolation. Eight rotated public-server pair runs closed 64/64 required checks: listener metadata, plain, obfuscated, distributed, file-transfer, indirect, metadata relogin, and negative-indirect behavior. Six transient metadata-wait observations retried before the required checks passed. |
 | VPN-scoped HTTP/API transfer | `target/live-interop-all-accounts/live-http-transfer-vpn-10.stdout.log` | Both authenticated public sessions connected; listeners advertised; peer address and browse completed; unauthenticated API access returned 401; the API queued and completed a real 52-byte transfer with matching SHA-256; both sessions stayed connected through a 10-second soak. |
-| Rust backend | `scripts/with-build-guard.sh cargo test -q -p slskr` | Both 427-test daemon groups and the 2 integration tests passed; 0 failures. |
-| Rust client transport | `scripts/with-build-guard.sh cargo test -q -p slskr-client` | 319 tests across the client transport/protocol groups passed; 0 failures. |
-| Rust web rendering/actions | `scripts/with-build-guard.sh cargo test -q -p slskr-web` | 86/86 passed. |
+| Rust backend | `cargo test -q -p slskr` | Both 427-test daemon groups and the 2 integration tests passed; 0 failures. |
+| Rust client transport | `cargo test -q -p slskr-client` | 319 tests across the client transport/protocol groups passed; 0 failures. |
+| Rust web rendering/actions | `cargo test -q -p slskr-web` | 86/86 passed. |
 
 The controller-run summary is also captured in
 [`current-upstream-controller-audit-green.json`](current-upstream-controller-audit-green.json).
@@ -109,12 +109,12 @@ pool and the VPN routes used in that run.
 
 ## Reproduction commands
 
-Run Rust commands through the repository guard:
+Run Rust commands with the pinned repository toolchain:
 
 ```sh
-./scripts/with-build-guard.sh cargo test -p slskr --lib -- --nocapture
-./scripts/with-build-guard.sh cargo test -p slskr-client --lib -- --nocapture
-./scripts/with-build-guard.sh cargo test -p slskr-web --lib -- --nocapture
+cargo test -p slskr --lib -- --nocapture
+cargo test -p slskr-client --lib -- --nocapture
+cargo test -p slskr-web --lib -- --nocapture
 ```
 
 Run the exhaustive UI audit against a fixture daemon and use

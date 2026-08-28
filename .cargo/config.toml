@@ -1,18 +1,21 @@
 [build]
-# Cargo itself must never fan out multiple rustc processes in this repository.
+# The daemon is intentionally a large crate. Keep Cargo from compiling several
+# Rust crates at once and multiplying LLVM's working set on smaller machines.
 jobs = 1
-# Direct Cargo invocations still pass every compiler process through the same
-# lock and virtual-memory ceiling.
-rustc-wrapper = "scripts/with-build-guard.sh"
 
-[env]
-# Test harness fan-out is part of the memory budget and cannot be overridden.
-RUST_TEST_THREADS = { value = "1", force = true }
+[profile.dev]
+# The controller source is large enough that retaining full debug metadata is
+# needlessly expensive during ordinary edit/test cycles.
+debug = 0
 
 [profile.release]
 opt-level = 3
-lto = true
-codegen-units = 1
+# Thin LTO keeps cross-crate optimization without asking LLVM to hold the
+# entire dependency graph in one fat-LTO job.
+lto = "thin"
+codegen-units = 16
+debug = 0
+strip = "symbols"
 
 # The daemon's startup graph exceeds the PE default stack reserve on Windows
 # before its HTTP listener is created.  Reserve the same stack size used by

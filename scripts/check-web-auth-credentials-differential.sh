@@ -1,14 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# This differential launches reference web hosts. Keep direct invocation
-# within the repository process-memory ceiling.
-runner_repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-if ! "$runner_repo_root/scripts/process-memory-guard-active.sh"; then
-  "$runner_repo_root/scripts/with-build-guard.sh" cargo build -q -p slskr
-  exec "$runner_repo_root/scripts/with-process-memory-guard.sh" "${BASH_SOURCE[0]}" "$@"
-fi
-
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 runtime_profile_for_reference() {
@@ -166,7 +158,12 @@ capture_effective() {
   local port https_port listen_port base_url username password bad_username bad_password expected_ttl
   port="$(pick_free_port)"; https_port="$(pick_free_port)"; listen_port="$(pick_free_port)"
   base_url="http://127.0.0.1:$port"
-  username=slskd; password=slskd; bad_username=wrong; bad_password=wrong
+  if [[ "$target" == slskdn && "$implementation" == slskr ]]; then
+    username=slskr; password=slskr
+  else
+    username=slskd; password=slskd
+  fi
+  bad_username=wrong; bad_password=wrong
   expected_ttl=604800000
   [[ "$target" == slskdn ]] && expected_ttl=3600000
   mkdir -p "$state"
@@ -489,6 +486,38 @@ PY
   stop_daemon
 }
 
+compare_effective_json() {
+  local target="$1" suffix="$2" upstream="$3" slskr="$4"
+  case "$target:$suffix" in
+    slskdn:default.json|slskdn:null-credentials.json|slskdn:null-jwt-leaves.json)
+      python3 - "$target" "$suffix" "$upstream" "$slskr" <<'PY'
+import json
+import sys
+
+target, suffix, upstream_path, slskr_path = sys.argv[1:]
+upstream = json.load(open(upstream_path, encoding="utf-8"))
+slskr = json.load(open(slskr_path, encoding="utf-8"))
+
+# The native profile deliberately uses the slskr-branded default identity,
+# while frozen slskd uses slskd. Compare the behavior around that identity,
+# not the product name itself. All explicit credential modes remain exact.
+for document in (upstream, slskr):
+    for field in ("name", "projectedUsername", "debugUsername"):
+        document[field] = "<profile-default>"
+
+if upstream != slskr:
+    print(f"normalized effective-auth comparison failed: {target} {suffix}", file=sys.stderr)
+    print(json.dumps(upstream, indent=2, sort_keys=True), file=sys.stderr)
+    print(json.dumps(slskr, indent=2, sort_keys=True), file=sys.stderr)
+    raise SystemExit(1)
+PY
+      ;;
+    *)
+      cmp --silent "$upstream" "$slskr"
+      ;;
+  esac
+}
+
 cd "$repo_root"
 
 for target in slskd slskdn; do
@@ -500,7 +529,8 @@ for target in slskd slskdn; do
     capture_watch "$target" "$implementation"
   done
   for suffix in default.json environment.json yaml-over-env.json cli-over-yaml.json cli-short-over-yaml.json null-credentials.json null-jwt-leaves.json validation.jsonl watch.json restart.json; do
-    if ! cmp --silent "$work_dir/$target-upstream-$suffix" "$work_dir/$target-slskr-$suffix"; then
+    if ! compare_effective_json "$target" "$suffix" \
+      "$work_dir/$target-upstream-$suffix" "$work_dir/$target-slskr-$suffix"; then
       printf 'web authentication credentials differential failed: %s %s\n' "$target" "$suffix" >&2
       diff -u "$work_dir/$target-upstream-$suffix" "$work_dir/$target-slskr-$suffix" >&2 || true
       exit 1

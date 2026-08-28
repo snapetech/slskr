@@ -11,7 +11,7 @@ If you find yourself writing `FINAL_*.md`, `*_COMPLETION_*.md`, or
 
 ## 0. Snapshot (2026-05-13)
 
-- `scripts/with-build-guard.sh cargo test --workspace` passes.
+- `cargo test --workspace` passes.
 - `scripts/check-remediation-baseline.sh` passes.
 - `scripts/run-bug-council-all-phases.sh` passes and all current council
   candidate classes are classified/guarded at the fresh scan counts.
@@ -107,13 +107,13 @@ This is the contract we owe consumers. Everything outside it can be cut.
 
 | #  | Decision                                                                                       | Rationale                                                                                  |
 | -- | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| D1 | **Keep the manual HTTP server in `main.rs`. Drop Axum/Tower entirely.**                        | Manual server is what's actually wired; Axum router is 495 lines of `{"created": true}`.  |
+| D1 | **Keep the manual HTTP server in `lib.rs`. Drop Axum/Tower entirely.**                            | Manual server is what's actually wired; Axum router is 495 lines of `{"created": true}`.  |
 | D2 | **Finish the manual server**: fix Content-Length-driven body reads, keep-alive, headers.       | The 4 KB single-read in `handle_http_connection` truncates real bodies.                    |
-| D3 | **Fold `http_server.rs` into `main.rs` as `mod http_server` (committed).**                     | It's the right idea, just untracked and uncompilable. Track it, fix it, use it.            |
+| D3 | **Fold `http_server.rs` into `lib.rs` as `mod http_server` (committed).**                       | It's the right idea, just untracked and uncompilable. Track it, fix it, use it.            |
 | D4 | **Implement `/api/events/ws` with `tokio-tungstenite`. Delete `websocket.rs`.**                 | Three SDKs already point at it; current `websocket.rs` is a fake-handshake toy.            |
 | D5 | **SignalR: replace UI's SignalR usage with plain WebSocket. Delete `signalr_hub.rs`.**          | A real SignalR server is months of work; the UI hubs are thin and easy to repoint at WS.   |
-| D6 | **Delete GraphQL, SSE, middleware, filters, enrichment, versioning, response_cache, observability, rate_limiter (the duplicate), api_keys, api_integration, openapi, docs (the module), validation, pagination, compression, security, metrics, websocket_handler, axum_router, caching.** | All have **zero `module::` call sites** in `main.rs`. They're dead weight. |
-| D7 | **Keep `webhooks`, `batch`, `tracing`, `logging`, `routing`, `utils`, `storage`, `config`, `persistence`, `rate_limit`.** | These are the modules `main.rs` actually calls.                                            |
+| D6 | **Delete GraphQL, SSE, middleware, filters, enrichment, versioning, response_cache, observability, rate_limiter (the duplicate), api_keys, api_integration, openapi, docs (the module), validation, pagination, compression, security, metrics, websocket_handler, axum_router, caching.** | All have **zero `module::` call sites** in `lib.rs`. They're dead weight. |
+| D7 | **Keep `webhooks`, `batch`, `tracing`, `logging`, `routing`, `utils`, `storage`, `config`, `persistence`, `rate_limit`.** | These are the modules `lib.rs` actually calls.                                            |
 | D8 | **Persistence: keep `persistence.rs`, gate behind a config flag (default off).**               | SQLite write-through now covers the major app stores, but the default stays off until migration/backfill policy and production durability are ready. |
 | D9 | **Delete `tests/integration_tests.rs` entirely. Replace with one real e2e test.**              | Current 689 lines compare a string formatter to itself.                                    |
 | D10| **Strip `tonic`, `prost`, `sea-orm`, `deadpool-postgres`, `redis`, `moka`, `dashmap`, `axum`, `tower`, `tower-http`, `flate2`, `http`, `tokio-util`, `bytes` from the bin crate.** | Every one is either unused or used only by a module being deleted. (Keep `tokio-tungstenite` for D4.) |
@@ -124,7 +124,7 @@ This is the contract we owe consumers. Everything outside it can be cut.
 
 ## 5. Phased plan
 
-Each phase ends with `scripts/with-build-guard.sh cargo check --workspace`, `scripts/with-build-guard.sh cargo test --workspace
+Each phase ends with `cargo check --workspace`, `cargo test --workspace
 --exclude slskr` (until slskr tests are real), and a single commit. No
 intermediate "phase complete" docs.
 
@@ -133,17 +133,17 @@ intermediate "phase complete" docs.
 - [x] **0.1** `http_server.rs` was already tracked and compiling (no action needed).
 - [x] **0.2** Build was already clean; no `RequestSecurityHeaders` fix required.
 - [x] **0.3** Skipped — `response_cache.rs` deleted in Phase 1.
-- [x] **0.4** `scripts/with-build-guard.sh cargo check -p slskr` green.
+- [x] **0.4** `cargo check -p slskr` green.
 - [x] **0.5** 49 prior-agent docs moved to `archive/`. Commit: `c06d35df`.
 - [x] **0.6** `README.md` Status paragraph rewritten honestly.
 
-**Definition of done:** `scripts/with-build-guard.sh cargo build --workspace` succeeds. Root `ls *.md`
+**Definition of done:** `cargo build --workspace` succeeds. Root `ls *.md`
 returns ≤6 entries. No commit message contains the words "FINAL", "COMPLETE",
 or "100%".
 
 ### Phase 1 — Quarantine ghost modules
 
-Delete the modules with **zero `<module>::` call sites in `main.rs`**, plus
+Delete the modules with **zero `<module>::` call sites in `lib.rs`**, plus
 their `mod` declarations and any `use` statements. No replacements yet.
 
 | Module                         | Decision  | Notes                                                |
@@ -154,13 +154,13 @@ their `mod` declarations and any `use` statements. No replacements yet.
 | `middleware.rs`                | DELETE    | Never imported.                                      |
 | `filters.rs`                   | DELETE    | Never imported.                                      |
 | `enrichment.rs`                | DELETE    | Never imported.                                      |
-| `versioning.rs`                | DELETE    | Never imported. URL `v0/` is normalized in `main.rs`.|
+| `versioning.rs`                | DELETE    | Never imported. URL `v0/` is normalized in `lib.rs`.|
 | `response_cache.rs`            | DELETE    | Never imported.                                      |
 | `observability.rs`             | DELETE    | Never imported. Metrics live in `tracing.rs`.        |
 | `rate_limiter.rs`              | DELETE    | Duplicate of wired-up `rate_limit.rs`.               |
-| `api_keys.rs`                  | DELETE    | Never imported. Auth is bearer-token in `main.rs`.   |
+| `api_keys.rs`                  | DELETE    | Never imported. Auth is bearer-token in `lib.rs`.   |
 | `api_integration.rs`           | DELETE    | Never imported.                                      |
-| `openapi.rs`                   | AUDIT     | 2 call sites — verify both, then fold into `main.rs` if it's just a static-doc handler. |
+| `openapi.rs`                   | AUDIT     | 2 call sites — verify both, then fold into `lib.rs` if it's just a static-doc handler. |
 | `docs.rs`                      | DELETE    | Never imported (the module; `docs/` directory stays).|
 | `validation.rs`                | DELETE    | Never imported.                                      |
 | `pagination.rs`                | DELETE    | Never imported.                                      |
@@ -175,22 +175,22 @@ their `mod` declarations and any `use` statements. No replacements yet.
 
 - [x] **1.1** Deleted 23 ghost modules; removed `mod` declarations.
 - [x] **1.2** `openapi.rs` audited — 2 call sites serve real swagger UI + JSON spec. Kept standalone.
-- [x] **1.3** `scripts/with-build-guard.sh cargo check -p slskr` green.
-- [x] **1.4** `#![allow(dead_code, unused_imports)]` removed. All warnings in `main.rs` fixed
+- [x] **1.3** `cargo check -p slskr` green.
+- [x] **1.4** `#![allow(dead_code, unused_imports)]` removed. All warnings in `lib.rs` fixed
       (unused imports, dead constants/methods/structs, 10 unreachable route arms). 37 warnings
       remain in kept modules (batch, logging, rate_limit, tracing, webhooks, storage,
       http_server) — these will disappear when wired in Phase 3+.
 
 **Expected delta:** ~7,500 LOC removed from `crates/slskr/src/`. Module count
-in `main.rs` header drops from ~30 to ~10.
+in `lib.rs` header drops from ~30 to ~10.
 
 ### Phase 2 — Strip cargo-cult dependencies
 
-After Phase 1, run `scripts/with-build-guard.sh cargo machete` (or by inspection) and remove every
+After Phase 1, run `cargo machete` (or by inspection) and remove every
 dependency that has zero `use` sites:
 
 - [x] **2.1** Dropped all listed deps. Cargo.lock shrunk by 135 packages. Commit: `aecd46fb`.
-- [x] **2.2** `scripts/with-build-guard.sh cargo check --workspace` clean.
+- [x] **2.2** `cargo check --workspace` clean.
 - [x] **2.3** Done.
 
 ### Phase 3 — Honest HTTP server
@@ -205,7 +205,7 @@ dependency that has zero `use` sites:
 - [x] **3.3** Streaming response writer (no `format!` of full body for large
       responses — the share catalog endpoint is the obvious offender).
 - [x] **3.4** Move parsing/IO into `mod http_server` (already drafted). Have
-      `main.rs` call into it. Trim duplicate parsing helpers from `main.rs`.
+      `lib.rs` call into it. Trim duplicate parsing helpers from `lib.rs`.
 - [x] **3.5** Add real tests inside http_server.rs (duplex + real TCP): bind
       to `127.0.0.1:0`, 100KB POST, oversized reject, malformed, roundtrip.
       (Binary crate precludes external tests/ importing; sham integration_tests.rs remains for now.)
@@ -215,7 +215,7 @@ dependency that has zero `use` sites:
 - [x] **4.1** New module `events_ws.rs`: tokio-tungstenite-based handler for
       `/api/events/ws`. On connect, subscribe to the existing event bus
       (whatever `record_event` writes to) and forward as JSON frames.
-- [x] **4.2** Wire `/api/events/ws` route in `main.rs` to upgrade the
+- [x] **4.2** Wire `/api/events/ws` route in `lib.rs` to upgrade the
       connection and hand off to `events_ws`.
 - [x] **4.3** Add `tests/events_ws.rs`: connect with a real ws client, observe
       that `record_event` triggers a frame. Implemented as an in-module
@@ -292,7 +292,7 @@ blocker on review:
 
 - New file named `*_FINAL.md`, `*_COMPLETION_*.md`, `PHASE_N_*.md`,
   `*_SUMMARY.md`.
-- New module added to `main.rs` `mod` block with no call site in the same PR.
+- New module added to `lib.rs` `mod` block with no call site in the same PR.
 - `#![allow(dead_code, unused_imports)]` reintroduced anywhere.
 - A handler that returns a hardcoded JSON shape with no read of `state`.
 - Comments saying "in production, this would …" or "simplified for now".
@@ -308,9 +308,9 @@ blocker on review:
 
 Source: `crates/slskr/src/`, line counts as of 2026-05-04.
 
-| File                         | Lines | `module::` refs in `main.rs` | Decision  |
+| File                         | Lines | `module::` refs in `lib.rs` | Decision  |
 | ---------------------------- | ----- | ----------------------------:| --------- |
-| `main.rs`                    | 14301 | n/a                          | TRIM (Phase 3 + 1.4 dead-code pass) |
+| `lib.rs`                     | 14301 | n/a                          | TRIM (Phase 3 + 1.4 dead-code pass) |
 | `persistence.rs`             |   933 | 6 (all `let _ =`)            | KEEP, wire (Phase 6) |
 | `utils.rs`                   |   798 | many                         | KEEP, audit during Phase 1.4 |
 | `graphql.rs`                 |   789 | 2                            | DELETE |
@@ -411,7 +411,7 @@ existing rows; add a new dated entry.
 - **2026-05-04** — Initial decisions D1–D12 set above. Drafted by Claude during
   state-of-the-project review at user's request. Author: keith@snape.tech.
 - **2026-05-04** — Phase 0–2 complete. `openapi.rs` kept standalone (2 real call sites,
-  363 LOC of swagger UI + spec generation — not worth inlining into main.rs). 37
+  363 LOC of swagger UI + spec generation — not worth inlining into lib.rs). 37
   dead-code warnings remain in kept modules; accepted as "unwired but real" pending Phase 3+.
 - **2026-05-04** — Phase 4.1–4.2 complete. Added `events_ws.rs`, backed
   `record_event` with a broadcast channel, and wired `/api/events/ws` to perform
@@ -430,7 +430,7 @@ existing rows; add a new dated entry.
 - **2026-05-04** — Phase 7 complete. Deleted the tautological external
   integration test, added `tests/api_smoke.rs` that spawns `slskr serve` and
   hits real HTTP endpoints with `reqwest`, and confirmed existing CI already
-  runs it through `scripts/with-build-guard.sh cargo test --workspace`.
+  runs it through `cargo test --workspace`.
 - **2026-05-04** — Phase 8.1–8.3 complete. README/PLAN/docs now describe the
   current single-node daemon reality: plain WebSocket events, partial web UI,
   default-off SQLite search persistence, configurable rate limits, and descoped
@@ -439,5 +439,5 @@ existing rows; add a new dated entry.
   lake after the one-week cooldown elapsed.
 - **2026-05-04** — Follow-up cleanup. Removed the remaining fake SSE route
   responses, retired `/hub/*` SignalR compatibility stubs, and removed no-op
-  persistence record assignments for transfers/messages. `scripts/with-build-guard.sh cargo test -p slskr`
+  persistence record assignments for transfers/messages. `cargo test -p slskr`
   still passes.

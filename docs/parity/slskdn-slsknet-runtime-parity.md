@@ -101,7 +101,7 @@ executed and recorded" rather than genuine absence:
   authorization bypasses found. High confidence (~90%+) the remaining
   unsampled cases are correctly enforced by the same table-driven auth-policy
   mechanism (`crates/slskr/src/utils.rs` + `data/slskd(n)-controller-auth-policy.json`),
-  not silently broken. One non-security defect noted: `main.rs` maps every
+not silently broken. One non-security defect noted: `lib.rs` maps every
   `Err("forbidden")` (CSRF rejection *and* plain role-insufficiency) to the
   same hardcoded `"cross-site mutating request rejected"` body, which is a
   misleading diagnostic, not a security hole.
@@ -121,7 +121,7 @@ Discovered and fixed two **real bugs**, both introduced by commit `70a004b8`
    (matches what slskdN's own generated config already does for the same
    reason, and is not loopback so the validation no longer fires) -- a
    one-line test-script fix, not a product change.
-2. A **stub handler** for `GET /api/v0/session` in `main.rs` that returned an
+2. A **stub handler** for `GET /api/v0/session` in `lib.rs` that returned an
    empty 200 OK, shadowing the real handler in the same match block. This is
    the exact endpoint slskR's own WebUI polls for connection status
    (`web/src/lib/session.js`), so the WebUI session display has been silently
@@ -471,7 +471,7 @@ any evidence source -- the manifest builder hardcoded every case as
 `needs-proof` unconditionally, with no classifier at all (unlike
 `configuration`, which reads a real implemented/partial/missing mapping).
 Added an exhaustive in-process differential test in `crates/slskr/src/
-main.rs` (`security_authorization_matrix_matches_declared_policy_for_every_
+lib.rs` (`security_authorization_matrix_matches_declared_policy_for_every_
 frozen_route`) that, for every declared rule in `crates/slskr/data/
 slskd-controller-auth-policy.json` / `slskdn-controller-auth-policy.json`,
 independently reconstructs the expected outcome (allowed / unauthorized /
@@ -514,7 +514,7 @@ public key (reusing the same DNS-resolve-then-pin pattern already proven
 for Lidarr/Spotify integration URLs), PKIX SubjectPublicKeyInfo decode,
 and `IsActivityActorBoundToSignature`-equivalent actor binding. Outbox is
 unaffected (a local, already-authenticated action, not a federation-facing
-signature surface). See `crates/slskr/src/main.rs`
+signature surface). See `crates/slskr/src/lib.rs`
 `verify_activitypub_inbox_signature` and its neighboring functions.
 
 ## 2026-07-15 Upstream Delta Audit
@@ -728,7 +728,7 @@ Required classification values:
 - `scripts/check-openapi-docs-drift.sh`
 - `scripts/check-upstream-parity-classification.sh`
 - `scripts/check-remediation-baseline.sh`
-- `scripts/with-build-guard.sh cargo test --workspace`
+- `cargo test --workspace`
 - Rust WebUI audit when UI behavior changes
 - Live bidirectional interop matrices against both frozen daemons
 - `scripts/audit-upstream-config-surface.py --require-complete`

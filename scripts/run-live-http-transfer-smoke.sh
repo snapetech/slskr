@@ -1,14 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Bound both daemon processes and all short-lived helpers when this smoke is
-# launched directly. Rust children add the build guard themselves; this outer
-# guard also covers the resident runtime pair and Node helpers.
-runner_repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-if ! "$runner_repo_root/scripts/process-memory-guard-active.sh"; then
-  exec "$runner_repo_root/scripts/with-process-memory-guard.sh" "${BASH_SOURCE[0]}" "$@"
-fi
-
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
@@ -25,7 +17,7 @@ serve_slskr() {
   if [[ -n "$live_binary" ]]; then
     exec "$live_binary" serve
   fi
-  exec scripts/with-build-guard.sh cargo run -q -p slskr --bin slskr -- serve
+  exec cargo run -q -p slskr --bin slskr -- serve
 }
 
 if [[ -f .env ]]; then
@@ -304,7 +296,7 @@ wait_peer_address() {
       if [[ -n "$live_binary" ]]; then
         exec "$live_binary" probe peer-address
       fi
-      exec scripts/with-build-guard.sh cargo run -q -p slskr --bin slskr -- probe peer-address
+      exec cargo run -q -p slskr --bin slskr -- probe peer-address
     ) >"$stdout_file" 2>"$stderr_file"; then
       if rg -q 'port=[1-9][0-9]*' "$stdout_file"; then
         echo "source peer address advertised"

@@ -17,7 +17,7 @@ for expected in \
   'rotate_transfer_events_if_needed' \
   'transfer_event_append_rotates_oversized_event_file'
 do
-  if ! rg -n -F "$expected" crates/slskr/src/main.rs >/dev/null; then
+  if ! rg -n -F "$expected" crates/slskr/src/lib.rs >/dev/null; then
     printf 'transfer event growth check failed: expected rotation token missing: %s\n' "$expected" >&2
     status=1
   fi

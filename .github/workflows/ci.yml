@@ -25,6 +25,7 @@ jobs:
           fetch-depth: 2
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # dtolnay/rust-toolchain@stable
         with:
+          toolchain: 1.94.0
           components: clippy, rustfmt
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@258712b0b7b1ddf8bddc9fc3b0faca682b2736c3 # Swatinem/rust-cache@v2
@@ -59,20 +60,17 @@ jobs:
           key: cargo-audit-${{ runner.os }}-${{ runner.arch }}-${{ env.CARGO_AUDIT_VERSION }}
       - name: Install cargo-audit
         if: steps.cargo-audit-cache.outputs.cache-hit != 'true'
-        run: scripts/with-build-guard.sh cargo install cargo-audit --version "$CARGO_AUDIT_VERSION" --locked
-      - run: scripts/check-rust-build-guard.sh
-      - run: scripts/test-rust-build-guard.sh
-      - run: scripts/test-rust-tool-shims.sh
+        run: cargo install cargo-audit --version "$CARGO_AUDIT_VERSION" --locked
       - run: scripts/check-process-memory-guard.sh
       - run: scripts/test-process-memory-guard.sh
       - run: scripts/check-public-posture.sh
       - run: scripts/validate-changelog.sh
       - run: python3 scripts/test_release_notes.py
       - run: scripts/check-rust-format.sh
-      - run: scripts/with-build-guard.sh cargo clippy --workspace --all-targets -- -D warnings
-      - run: scripts/with-build-guard.sh cargo check -p slskr-web --target wasm32-unknown-unknown
-      - run: scripts/with-build-guard.sh cargo test --workspace
-      - run: scripts/with-build-guard.sh cargo audit
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo check -p slskr-web --target wasm32-unknown-unknown
+      - run: cargo test --workspace
+      - run: cargo audit
       - run: scripts/run-security-scans.sh
       - run: scripts/check-client-sdk-gates.sh
       - run: npm --prefix web ci --allow-git=root --legacy-peer-deps
@@ -102,6 +100,7 @@ jobs:
           fetch-depth: 2
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # dtolnay/rust-toolchain@stable
         with:
+          toolchain: 1.94.0
           targets: aarch64-unknown-linux-musl
       - uses: Swatinem/rust-cache@258712b0b7b1ddf8bddc9fc3b0faca682b2736c3 # Swatinem/rust-cache@v2
       - name: Prefer rustup toolchain binaries
@@ -111,6 +110,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y musl-tools
       - name: Check native GNU build
-        run: scripts/with-build-guard.sh cargo check --workspace --all-targets
+        run: cargo check --workspace --all-targets
       - name: Check static musl build
-        run: scripts/with-build-guard.sh cargo check -p slskr --target aarch64-unknown-linux-musl
+        run: cargo check -p slskr --target aarch64-unknown-linux-musl

@@ -98,7 +98,7 @@ expect_status() {
   fi
 }
 
-scripts/with-build-guard.sh cargo build -q -p slskr
+cargo build -q -p slskr
 
 slskd_port="$(pick_free_port)"
 start_daemon slskd "$slskd_port"

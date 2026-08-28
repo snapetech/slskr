@@ -1,14 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# The diagnostic differential hosts a reference daemon and exercises dump
-# endpoints. Bound the full process tree even when called directly.
-runner_repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-if ! "$runner_repo_root/scripts/process-memory-guard-active.sh"; then
-  "$runner_repo_root/scripts/with-build-guard.sh" cargo build -p slskr --manifest-path "$runner_repo_root/Cargo.toml" >/dev/null
-  exec "$runner_repo_root/scripts/with-process-memory-guard.sh" "${BASH_SOURCE[0]}" "$@"
-fi
-
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 slskdn_root="${SLSKR_SLSKDN_ROOT:-/tmp/slskr-parity-slskdn-frozen}"
 dll="$slskdn_root/src/slskd/bin/Release/net10.0/linux-x64/slskd.dll"

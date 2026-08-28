@@ -60,7 +60,7 @@ Scope: current `slskR` checkout, including Rust daemon/API, Rust WASM UI, React 
 | Low | Language accounting | `.gitattributes` marked `web/`, `dashboard/`, and `client-ts/` as vendored, hiding maintained JavaScript/TypeScript source from GitHub language stats. | Fixed by counting maintained source and excluding only generated build, coverage, dependency, and lockfile artifacts. |
 | Low | Config file type | Config loading capped config file size but did not reject non-regular paths before reading. | Fixed by requiring regular files and adding directory rejection coverage. |
 | Low | HTTP 413 reason phrase | Oversized request bodies were rejected with non-standard `413 Content Too Large`. | Fixed by returning `413 Payload Too Large`, matching static asset oversize responses. |
-| Medium | API pagination | Earlier audit notes listed unbounded list limits, but `RecordListFilter` now defaults and clamps requested limits to `DEFAULT_LIST_LIMIT` (`crates/slskr/src/main.rs:845`, `crates/slskr/src/main.rs:864`) with regression coverage for omitted, huge, and zero limits. | Verified as fixed; keep route-family regression tests in place when adding new list endpoints. |
+| Medium | API pagination | Earlier audit notes listed unbounded list limits, but `RecordListFilter` now defaults and clamps requested limits to `DEFAULT_LIST_LIMIT` (`crates/slskr/src/lib.rs:845`, `crates/slskr/src/lib.rs:864`) with regression coverage for omitted, huge, and zero limits. | Verified as fixed; keep route-family regression tests in place when adding new list endpoints. |
 | Medium | Webhook secrets | Webhook creation accepted caller-supplied signing secrets without minimum strength checks. | Fixed by requiring supplied secrets to be at least 32 bytes, printable, and have basic character variety on public/admin creation routes while preserving generated secrets by default. |
 | Medium | Frontend auth passthrough | `session.authHeaders()` emitted `Authorization: Bearer n/a` in passthrough mode. | Fixed by omitting Authorization for passthrough tokens and adding regression coverage. |
 | Medium | Vite Less alias traversal | The Less alias file manager resolved `~` imports without checking that the result stayed under `node_modules`. | Fixed by rejecting absolute and escaping alias imports before reading. |
@@ -180,7 +180,7 @@ Scope: current `slskR` checkout, including Rust daemon/API, Rust WASM UI, React 
 | Severity | Area | Finding | Proposed fix |
 | --- | --- | --- | --- |
 | Medium | OpenAPI drift | Runtime `/api/openapi.json` and checked-in `docs/openapi.json` could drift because they were generated through separate paths. | Fixed by serving the checked-in OpenAPI spec at runtime, packaging an identical crate-local OpenAPI copy, adding an equality regression test, and strengthening the OpenAPI drift gate. |
-| Medium | Rust dependency hygiene | `scripts/with-build-guard.sh cargo tree -d -p slskr` shows reviewed transitive duplicate roots for digest-family crypto crates plus `getrandom` and `hashbrown` in the release graph. | Fixed by documenting the current duplicate-root set and adding a remediation gate that fails when new duplicate roots enter the release binary graph without review. |
+| Medium | Rust dependency hygiene | `cargo tree -d -p slskr` shows reviewed transitive duplicate roots for digest-family crypto crates plus `getrandom` and `hashbrown` in the release graph. | Fixed by documenting the current duplicate-root set and adding a remediation gate that fails when new duplicate roots enter the release binary graph without review. |
 | Medium | GitHub Actions supply chain | CI/release workflows used mutable action tags such as `actions/checkout@v4`, `actions/setup-node@v4`, and `softprops/action-gh-release@v2`. | Fixed by pinning first-party and third-party workflow actions to reviewed commit SHAs, documenting the update ledger in `docs/dev/github-actions-pin-policy.md`, and gating future workflow edits with `scripts/check-workflow-release-policy.sh`. |
 | Low | Rust module hygiene | Broad crate/module-level `#![allow(dead_code)]` previously hid unused backend compatibility surfaces from compiler review. | Fixed by removing broad allowances from backend Rust modules, keeping only narrow item-level exceptions, and gating against broad suppressions with `scripts/check-rust-module-hygiene.sh`. |
 | Low | Deprecated npm transitive deps | Web install warns on deprecated `lodash.get`, old core-js, and Babel proposal packages. | Upgrade or replace transitive owners where practical. |
@@ -188,15 +188,15 @@ Scope: current `slskR` checkout, including Rust daemon/API, Rust WASM UI, React 
 
 ## Scans Run
 
-- `scripts/with-build-guard.sh cargo audit`
+- `cargo audit`
 - `npm --prefix web audit --audit-level=high`
 - `npm --prefix dashboard audit --audit-level=high`
 - `npm --prefix client-ts audit --audit-level=high`
 - `npm --prefix web audit --audit-level=moderate`
 - `npm --prefix dashboard audit --audit-level=moderate`
 - `npm --prefix client-ts audit --audit-level=moderate`
-- `scripts/with-build-guard.sh cargo metadata --format-version 1 --no-deps`
-- `scripts/with-build-guard.sh cargo tree -d`
+- `cargo metadata --format-version 1 --no-deps`
+- `cargo tree -d`
 - `scripts/check-release-version-metadata.sh`
 - `scripts/check-secret-scanning.sh`
 - `scripts/check-python-client-quality.sh`
@@ -205,13 +205,13 @@ Scope: current `slskR` checkout, including Rust daemon/API, Rust WASM UI, React 
 - `scripts/check-docs-freshness.sh`
 - `scripts/run-council-scan.sh`
 - `scripts/check-council-loop.sh`
-- `scripts/with-build-guard.sh cargo outdated --workspace` was attempted but blocked because `cargo-outdated` is not installed in this environment.
-- `scripts/with-build-guard.sh cargo +stable udeps --workspace --all-targets` was attempted but blocked because `cargo-udeps` is not installed in this environment.
+- `cargo outdated --workspace` was attempted but blocked because `cargo-outdated` is not installed in this environment.
+- `cargo +stable udeps --workspace --all-targets` was attempted but blocked because `cargo-udeps` is not installed in this environment.
 - `npm --prefix web outdated --json`
 - `npm --prefix dashboard outdated --json`
 - `npm --prefix client-ts outdated --json`
 - `scripts/check-rust-format.sh`
-- `scripts/with-build-guard.sh cargo clippy --workspace --all-targets -- -D warnings`
+- `cargo clippy --workspace --all-targets -- -D warnings`
 - `python3 -m compileall -q client-python`
 - `npm --prefix web run lint`
 - `npm --prefix web test`
@@ -229,6 +229,6 @@ Scope: current `slskR` checkout, including Rust daemon/API, Rust WASM UI, React 
 - `scripts/diff-webui-endpoints.sh` was rerun and reported 287/291 implemented; the four reported misses are now tracked as endpoint tooling/manifest drift because conversation routes are present in the router and tests.
 - Source grep passes for secrets, auth/CORS/CSRF, process execution, path handling, URL fetches, docs/deployment exposure, and frontend storage/navigation sinks.
 - Focused Rust tests, formatting, clippy, shell syntax checks, and diff whitespace checks passed after the latest fixes.
-- `scripts/with-build-guard.sh cargo test -p slskr config_file_reader_`
+- `cargo test -p slskr config_file_reader_`
 - `git check-ignore -v .env web/.env.local .secrets`
 - `go test ./...` was attempted in `client-go` but blocked because `go` is not installed in this environment.

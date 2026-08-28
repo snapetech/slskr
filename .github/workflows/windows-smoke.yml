@@ -32,6 +32,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # dtolnay/rust-toolchain@stable
         with:
+          toolchain: 1.94.0
           components: clippy,rustfmt
           targets: wasm32-unknown-unknown
 
@@ -50,18 +51,6 @@ jobs:
             dashboard/package-lock.json
             client-ts/package-lock.json
 
-      - name: Rust build guard
-        shell: bash
-        run: scripts/check-rust-build-guard.sh
-
-      - name: Rust build guard lock regression
-        shell: bash
-        run: scripts/test-rust-build-guard.sh
-
-      - name: Rust tool shim regression
-        shell: bash
-        run: scripts/test-rust-tool-shims.sh
-
       - name: Process memory guard
         shell: bash
         run: scripts/check-process-memory-guard.sh
@@ -76,11 +65,11 @@ jobs:
 
       - name: Rust tests
         shell: bash
-        run: scripts/with-build-guard.sh cargo test --workspace
+        run: cargo test --workspace
 
       - name: WASM check
         shell: bash
-        run: scripts/with-build-guard.sh cargo check -p slskr-web --target wasm32-unknown-unknown
+        run: cargo check -p slskr-web --target wasm32-unknown-unknown
 
       - name: Web build
         run: |

@@ -9,5 +9,5 @@ cd "$repo_root"
 # crates from crates.io and is not a valid release gate for this repository.
 # slskr-web is a WASM migration target with git-only UI dependencies and is
 # covered by the wasm build gate rather than the Cargo crate package gate.
-scripts/with-build-guard.sh cargo package -p slskr-protocol -p slskr-client -p slskr --no-verify
+cargo package -p slskr-protocol -p slskr-client -p slskr --no-verify
 scripts/verify-cargo-package-contents.sh --skip-package

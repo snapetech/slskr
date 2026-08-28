@@ -109,6 +109,7 @@ jobs:
             '16e5d86ec9a91120f3ef40b85cb22036566b788a^{commit}'
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # dtolnay/rust-toolchain@stable
         with:
+          toolchain: 1.94.0
           components: clippy, rustfmt
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@258712b0b7b1ddf8bddc9fc3b0faca682b2736c3 # Swatinem/rust-cache@v2
@@ -143,9 +144,9 @@ jobs:
           key: cargo-audit-${{ runner.os }}-${{ runner.arch }}-${{ env.CARGO_AUDIT_VERSION }}
       - name: Install cargo-audit
         if: steps.cargo-audit-cache.outputs.cache-hit != 'true'
-        run: scripts/with-build-guard.sh cargo install cargo-audit --version "$CARGO_AUDIT_VERSION" --locked
+        run: cargo install cargo-audit --version "$CARGO_AUDIT_VERSION" --locked
       - name: Install wasm-bindgen CLI
-        run: scripts/with-build-guard.sh cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_CLI_VERSION" --locked --force
+        run: cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_CLI_VERSION" --locked --force
       - name: Install Playwright browsers
         run: |
           npm --prefix web ci --allow-git=root --legacy-peer-deps
@@ -195,6 +196,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # actions/checkout@v6
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # dtolnay/rust-toolchain@stable
         with:
+          toolchain: 1.94.0
           targets: |
             ${{ matrix.target }}
             wasm32-unknown-unknown
@@ -254,7 +256,7 @@ jobs:
           sudo apt-get install -y ${{ matrix.apt }}
       - name: Install wasm-bindgen CLI
         shell: bash
-        run: scripts/with-build-guard.sh cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_CLI_VERSION" --locked --force
+        run: cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_CLI_VERSION" --locked --force
       - name: Build archive
         shell: bash
         env:

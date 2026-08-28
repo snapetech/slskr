@@ -1,14 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# This differential launches reference web hosts. Keep direct invocation
-# within the repository process-memory ceiling.
-runner_repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-if ! "$runner_repo_root/scripts/process-memory-guard-active.sh"; then
-  "$runner_repo_root/scripts/with-build-guard.sh" cargo build -p slskr --manifest-path "$runner_repo_root/Cargo.toml" >/dev/null
-  exec "$runner_repo_root/scripts/with-process-memory-guard.sh" "${BASH_SOURCE[0]}" "$@"
-fi
-
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 slskdn_root="${SLSKR_SLSKDN_ROOT:-/tmp/slskr-parity-slskdn-frozen}"
 dll="$slskdn_root/src/slskd/bin/Release/net10.0/linux-x64/slskd.dll"

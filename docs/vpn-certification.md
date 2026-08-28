@@ -83,7 +83,7 @@ to maintain IP isolation without reusing account IPs.
    its own `wg0` interface.
 3. **Split routing**: Default route goes through `wg0`; the Proton endpoint IP
    is routed via the host's default gateway to prevent routing loops.
-4. **Command execution**: The guarded Rust probe command executes inside the namespace
+4. **Command execution**: The Rust probe command executes inside the namespace
    with test credentials as environment variables.
 5. **Cleanup**: On exit, the namespace, routes, and iptables rules are removed.
 

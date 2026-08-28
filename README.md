@@ -179,7 +179,7 @@ Build and install locally with the React Web UI used in the screenshots:
 ```bash
 npm --prefix web ci
 npm --prefix web run build
-scripts/with-build-guard.sh cargo build --release -p slskr
+cargo build --release -p slskr
 install -Dm755 target/release/slskr "$HOME/.local/bin/slskr"
 mkdir -p "$HOME/.local/share/slskr/web"
 cp -R web/build "$HOME/.local/share/slskr/web/build"
@@ -385,7 +385,7 @@ Common local checks:
 
 ```bash
 scripts/check-rust-format.sh
-scripts/with-build-guard.sh cargo test --workspace
+cargo test --workspace
 ```
 
 Web checks:
@@ -411,7 +411,7 @@ SLSKR_A_PASSWORD=<pass-a> \
 SLSKR_B_USERNAME=<user-b> \
 SLSKR_B_PASSWORD=<pass-b> \
 SLSKR_INDIRECT_HOST_OVERRIDE=127.0.0.1 \
-scripts/with-build-guard.sh cargo run -p slskr --bin slskr -- smoke local-peer
+cargo run -p slskr --bin slskr -- smoke local-peer
 ```
 
 Live interop and soak scripts are under [scripts](./scripts). They use real

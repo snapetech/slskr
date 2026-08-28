@@ -10,13 +10,6 @@
 #
 set -euo pipefail
 
-# Certification starts multiple daemons, Cargo probes, and network helpers.
-# Enter the hard repository process guard before any phase can launch a child.
-runner_repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-if ! "$runner_repo_root/scripts/process-memory-guard-active.sh"; then
-    exec "$runner_repo_root/scripts/with-process-memory-guard.sh" "${BASH_SOURCE[0]}" "$@"
-fi
-
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 output_dir="${SLSKR_CERTIFY_OUTPUT_DIR:-$repo_root/target/certify}"
 env_file="${SLSKR_CERTIFY_ENV_FILE:-$repo_root/.env}"
@@ -327,16 +320,11 @@ run_vpn_cargo() {
     fi
 
     # Older certification call sites put KEY=VALUE arguments after the `--`
-    # separator. Normalize that form before executing so every direct Cargo
-    # command still inherits the repository build guard.
+    # separator. Normalize that form before executing.
     while [[ ${#cmd_args[@]} -gt 0 && "${cmd_args[0]}" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; do
         env_args+=("${cmd_args[0]}")
         cmd_args=("${cmd_args[@]:1}")
     done
-    if [[ "${cmd_args[0]:-}" == "cargo" ]]; then
-        cmd_args=("$repo_root/scripts/with-build-guard.sh" "${cmd_args[@]}")
-    fi
-
     local output status duration_ms
     local t0 t1
 
@@ -359,7 +347,7 @@ run_probe() {
 
     t0="$(date +%s%N)"
     set +e
-    output="$(timeout 60 scripts/with-build-guard.sh cargo run -q -p slskr --bin slskr -- "${cmd[@]}" 2>&1)"
+    output="$(timeout 60 cargo run -q -p slskr --bin slskr -- "${cmd[@]}" 2>&1)"
     status=$?
     set -e
     t1="$(date +%s%N)"
@@ -377,7 +365,7 @@ run_vpn_probe() {
 
     t0="$(date +%s%N)"
     set +e
-    output="$(run_netns_command "$namespace" "$config" timeout 60 scripts/with-build-guard.sh cargo run -q -p slskr --bin slskr -- "${cmd[@]}" 2>&1)"
+    output="$(run_netns_command "$namespace" "$config" timeout 60 cargo run -q -p slskr --bin slskr -- "${cmd[@]}" 2>&1)"
     status=$?
     set -e
     t1="$(date +%s%N)"
@@ -436,7 +424,7 @@ run_phase_a() {
                 SLSK_PASSWORD="$password" \
                 SLSK_SERVER="$server_address" \
                 SLSKR_PROBE_OUTPUT=json \
-                scripts/with-build-guard.sh cargo run -q -p slskr --bin slskr -- login smoke 2>&1)"
+                cargo run -q -p slskr --bin slskr -- login smoke 2>&1)"
             status=$?
             set -e
             [[ $status -eq 0 ]] && break
@@ -526,7 +514,7 @@ run_phase_a() {
         SLSK_SERVER="$server_address" \
         SLSK_PEER_USERNAME="$listener_username" \
         SLSKR_PROBE_OUTPUT=json \
-        scripts/with-build-guard.sh cargo run -q -p slskr --bin slskr -- probe peer-address 2>&1)"
+        cargo run -q -p slskr --bin slskr -- probe peer-address 2>&1)"
     status=$?
     set -e
     t1="$(date +%s%N)"
@@ -548,7 +536,7 @@ run_phase_a() {
         SLSK_SERVER="$server_address" \
         SLSK_PLAIN_PEER_USERNAME="$listener_username" \
         SLSKR_PROBE_OUTPUT=json \
-        scripts/with-build-guard.sh cargo run -q -p slskr --bin slskr -- probe plain-peer 2>&1)"
+        cargo run -q -p slskr --bin slskr -- probe plain-peer 2>&1)"
     status=$?
     set -e
     t1="$(date +%s%N)"
@@ -570,7 +558,7 @@ run_phase_a() {
         SLSK_SERVER="$server_address" \
         SLSK_OBFUSCATED_PEER_USERNAME="$listener_username" \
         SLSKR_PROBE_OUTPUT=json \
-        scripts/with-build-guard.sh cargo run -q -p slskr --bin slskr -- probe obfuscated-peer 2>&1)"
+        cargo run -q -p slskr --bin slskr -- probe obfuscated-peer 2>&1)"
     status=$?
     set -e
     t1="$(date +%s%N)"
@@ -603,7 +591,7 @@ run_phase_a() {
             fi
             export SLSK_INDIRECT_LISTENER_BIND="0.0.0.0:$private_port"
             export SLSK_INDIRECT_ADVERTISED_PORT="$public_port"
-            exec scripts/with-build-guard.sh cargo run -q -p slskr --bin slskr -- probe indirect-peer
+            exec cargo run -q -p slskr --bin slskr -- probe indirect-peer
         ' 2>&1)"
     status=$?
     set -e
@@ -652,10 +640,10 @@ run_phase_b() {
             SLSK_USERNAME="$username1" \
             SLSK_PASSWORD="$password1" \
             SLSKR_PROBE_OUTPUT=json \
-            scripts/with-build-guard.sh cargo run -q -p slskr --bin slskr -- smoke fixture-peer 2>&1)"
+            cargo run -q -p slskr --bin slskr -- smoke fixture-peer 2>&1)"
     else
         output="$(SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" SLSKR_PROBE_OUTPUT=json \
-            timeout 30 scripts/with-build-guard.sh cargo run -q -p slskr --bin slskr -- smoke fixture-peer 2>&1)"
+            timeout 30 cargo run -q -p slskr --bin slskr -- smoke fixture-peer 2>&1)"
     fi
     status=$?
     set -e
@@ -681,11 +669,11 @@ run_phase_b() {
             SLSK_PASSWORD="$password1" \
             SLSKR_LARGE_TRANSFER_SIZE=100000 \
             SLSKR_PROBE_OUTPUT=json \
-            scripts/with-build-guard.sh cargo run -q -p slskr --bin slskr -- smoke fixture-peer 2>&1)"
+            cargo run -q -p slskr --bin slskr -- smoke fixture-peer 2>&1)"
     else
         output="$(SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" \
             SLSKR_LARGE_TRANSFER_SIZE=100000 SLSKR_PROBE_OUTPUT=json \
-            timeout 30 scripts/with-build-guard.sh cargo run -q -p slskr --bin slskr -- smoke fixture-peer 2>&1)"
+            timeout 30 cargo run -q -p slskr --bin slskr -- smoke fixture-peer 2>&1)"
     fi
     status=$?
     set -e
@@ -707,11 +695,11 @@ run_phase_b() {
             SLSK_USERNAME="$username1" \
             SLSK_PASSWORD="$password1" \
             SLSKR_PROBE_OUTPUT=json \
-            scripts/with-build-guard.sh cargo run -q -p slskr --bin slskr -- smoke fixture-peer 2>&1)"
+            cargo run -q -p slskr --bin slskr -- smoke fixture-peer 2>&1)"
     else
         output="$(SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" \
             SLSKR_PROBE_OUTPUT=json \
-            timeout 30 scripts/with-build-guard.sh cargo run -q -p slskr --bin slskr -- smoke fixture-peer 2>&1)"
+            timeout 30 cargo run -q -p slskr --bin slskr -- smoke fixture-peer 2>&1)"
     fi
     status=$?
     set -e
@@ -734,11 +722,11 @@ run_phase_b() {
             SLSK_PASSWORD="$password1" \
             SLSKR_FIXTURE_PEER_USERNAME=slskr-cert-b4 \
             SLSKR_PROBE_OUTPUT=json \
-            scripts/with-build-guard.sh cargo run -q -p slskr --bin slskr -- smoke transfer-resume 2>&1)"
+            cargo run -q -p slskr --bin slskr -- smoke transfer-resume 2>&1)"
     else
         output="$(env SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" \
             SLSKR_FIXTURE_PEER_USERNAME=slskr-cert-b4 SLSKR_PROBE_OUTPUT=json \
-            timeout 30 scripts/with-build-guard.sh cargo run -q -p slskr --bin slskr -- smoke transfer-resume 2>&1)"
+            timeout 30 cargo run -q -p slskr --bin slskr -- smoke transfer-resume 2>&1)"
     fi
     status=$?
     set -e
@@ -761,11 +749,11 @@ run_phase_b() {
             SLSK_PASSWORD="$password1" \
             SLSKR_FIXTURE_PEER_USERNAME=slskr-cert-b5 \
             SLSKR_PROBE_OUTPUT=json \
-            scripts/with-build-guard.sh cargo run -q -p slskr --bin slskr -- smoke transfer-reject 2>&1)"
+            cargo run -q -p slskr --bin slskr -- smoke transfer-reject 2>&1)"
     else
         output="$(env SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" \
             SLSKR_FIXTURE_PEER_USERNAME=slskr-cert-b5 SLSKR_PROBE_OUTPUT=json \
-            timeout 30 scripts/with-build-guard.sh cargo run -q -p slskr --bin slskr -- smoke transfer-reject 2>&1)"
+            timeout 30 cargo run -q -p slskr --bin slskr -- smoke transfer-reject 2>&1)"
     fi
     status=$?
     set -e
@@ -821,11 +809,11 @@ run_phase_c() {
             SLSK_MESSAGE_USERNAME="$username2" \
             SLSK_MESSAGE_PASSWORD="$password2" \
             SLSKR_PROBE_OUTPUT=json \
-            scripts/with-build-guard.sh cargo run -q -p slskr --bin slskr -- probe private-message 2>&1)"
+            cargo run -q -p slskr --bin slskr -- probe private-message 2>&1)"
     else
         output="$(env SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" \
             SLSK_MESSAGE_USERNAME="$username2" SLSK_MESSAGE_PASSWORD="$password2" \
-            SLSKR_PROBE_OUTPUT=json timeout 30 scripts/with-build-guard.sh cargo run -q -p slskr --bin slskr -- probe private-message 2>&1)"
+            SLSKR_PROBE_OUTPUT=json timeout 30 cargo run -q -p slskr --bin slskr -- probe private-message 2>&1)"
     fi
     status=$?
     set -e
@@ -848,10 +836,10 @@ run_phase_c() {
             SLSK_USERNAME="$username1" \
             SLSK_PASSWORD="$password1" \
             SLSKR_PROBE_OUTPUT=json \
-            scripts/with-build-guard.sh cargo run -q -p slskr --bin slskr -- probe room-message 2>&1)"
+            cargo run -q -p slskr --bin slskr -- probe room-message 2>&1)"
     else
         output="$(env SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" \
-            SLSKR_PROBE_OUTPUT=json timeout 30 scripts/with-build-guard.sh cargo run -q -p slskr --bin slskr -- probe room-message 2>&1)"
+            SLSKR_PROBE_OUTPUT=json timeout 30 cargo run -q -p slskr --bin slskr -- probe room-message 2>&1)"
     fi
     status=$?
     set -e
@@ -868,7 +856,7 @@ run_phase_c() {
     t0="$(date +%s%N)"
     set +e
     output="$(SLSKR_PROBE_OUTPUT=json timeout 15 \
-        scripts/with-build-guard.sh cargo run -q -p slskr --bin slskr -- smoke room-create 2>&1)"
+        cargo run -q -p slskr --bin slskr -- smoke room-create 2>&1)"
     status=$?
     set -e
     t1="$(date +%s%N)"
@@ -890,10 +878,10 @@ run_phase_c() {
             SLSK_USERNAME="$username1" \
             SLSK_PASSWORD="$password1" \
             SLSKR_PROBE_OUTPUT=json \
-            scripts/with-build-guard.sh cargo run -q -p slskr --bin slskr -- probe wishlist-interval 2>&1)"
+            cargo run -q -p slskr --bin slskr -- probe wishlist-interval 2>&1)"
     else
         output="$(env SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" \
-            SLSKR_PROBE_OUTPUT=json timeout 45 scripts/with-build-guard.sh cargo run -q -p slskr --bin slskr -- probe wishlist-interval 2>&1)"
+            SLSKR_PROBE_OUTPUT=json timeout 45 cargo run -q -p slskr --bin slskr -- probe wishlist-interval 2>&1)"
     fi
     status=$?
     set -e
@@ -917,11 +905,11 @@ run_phase_c() {
             SLSK_PASSWORD="$password1" \
             SLSK_PEER_USERNAME="$username2" \
             SLSKR_PROBE_OUTPUT=json \
-            scripts/with-build-guard.sh cargo run -q -p slskr --bin slskr -- probe user-watch 2>&1)"
+            cargo run -q -p slskr --bin slskr -- probe user-watch 2>&1)"
     else
         output="$(env SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" \
             SLSK_PEER_USERNAME="$username2" \
-            SLSKR_PROBE_OUTPUT=json timeout 30 scripts/with-build-guard.sh cargo run -q -p slskr --bin slskr -- probe user-watch 2>&1)"
+            SLSKR_PROBE_OUTPUT=json timeout 30 cargo run -q -p slskr --bin slskr -- probe user-watch 2>&1)"
     fi
     status=$?
     set -e
@@ -948,11 +936,11 @@ run_phase_c() {
             SLSK_PASSWORD="$password1" \
             SLSKR_FIXTURE_PEER_FILE="$fixture_path" \
             SLSKR_PROBE_OUTPUT=json \
-            scripts/with-build-guard.sh cargo run -q -p slskr --bin slskr -- smoke fixture-peer 2>&1)"
+            cargo run -q -p slskr --bin slskr -- smoke fixture-peer 2>&1)"
     else
         output="$(env SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" \
             SLSKR_FIXTURE_PEER_FILE="$fixture_path" \
-            SLSKR_PROBE_OUTPUT=json timeout 30 scripts/with-build-guard.sh cargo run -q -p slskr --bin slskr -- smoke fixture-peer 2>&1)"
+            SLSKR_PROBE_OUTPUT=json timeout 30 cargo run -q -p slskr --bin slskr -- smoke fixture-peer 2>&1)"
     fi
     status=$?
     set -e
@@ -974,7 +962,7 @@ run_phase_d() {
     t0="$(date +%s%N)"
     set +e
     output="$(SLSKR_PROBE_OUTPUT=json timeout 30 \
-        scripts/with-build-guard.sh cargo run -q -p slskr --bin slskr -- smoke distributed-tree 2>&1)"
+        cargo run -q -p slskr --bin slskr -- smoke distributed-tree 2>&1)"
     status=$?
     set -e
     t1="$(date +%s%N)"
@@ -1201,11 +1189,11 @@ run_phase_g() {
             SLSK_PASSWORD="$password1" \
             SLSK_SOAK_SECONDS=10 \
             SLSKR_PROBE_OUTPUT=json \
-            scripts/with-build-guard.sh cargo run -q -p slskr --bin slskr -- soak live 2>&1)"
+            cargo run -q -p slskr --bin slskr -- soak live 2>&1)"
     else
         output="$(timeout 20 env SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" \
             SLSK_SOAK_SECONDS=10 SLSKR_PROBE_OUTPUT=json \
-            scripts/with-build-guard.sh cargo run -q -p slskr --bin slskr -- soak live 2>&1)"
+            cargo run -q -p slskr --bin slskr -- soak live 2>&1)"
     fi
     status=$?
     set -e
@@ -1232,11 +1220,11 @@ run_phase_g() {
             SLSK_LISTEN_PORT=2239 \
             SLSK_SOAK_OBFUSCATED_LISTEN_PORT=2240 \
             SLSKR_PROBE_OUTPUT=json \
-            scripts/with-build-guard.sh cargo run -q -p slskr --bin slskr -- soak live 2>&1)"
+            cargo run -q -p slskr --bin slskr -- soak live 2>&1)"
     else
         output="$(timeout 15 env SLSK_USERNAME="$username1" SLSK_PASSWORD="$password1" \
             SLSK_SOAK_SECONDS=5 SLSK_LISTEN_PORT=2239 SLSK_SOAK_OBFUSCATED_LISTEN_PORT=2240 \
-            SLSKR_PROBE_OUTPUT=json scripts/with-build-guard.sh cargo run -q -p slskr --bin slskr -- soak live 2>&1)"
+            SLSKR_PROBE_OUTPUT=json cargo run -q -p slskr --bin slskr -- soak live 2>&1)"
     fi
     status=$?
     set -e
@@ -1340,11 +1328,11 @@ run_phase_h() {
             SLSK_USERNAME="${SLSKR_TEST_1_USERNAME:-}" \
             SLSK_PASSWORD="wrong_password_123" \
             SLSKR_PROBE_OUTPUT=json \
-            scripts/with-build-guard.sh cargo run -q -p slskr --bin slskr -- login smoke 2>&1)"
+            cargo run -q -p slskr --bin slskr -- login smoke 2>&1)"
     else
         output="$(SLSK_USERNAME="${SLSKR_TEST_1_USERNAME:-}" SLSK_PASSWORD="wrong_password_123" \
             SLSKR_PROBE_OUTPUT=json \
-            timeout 30 scripts/with-build-guard.sh cargo run -q -p slskr --bin slskr -- login smoke 2>&1)"
+            timeout 30 cargo run -q -p slskr --bin slskr -- login smoke 2>&1)"
     fi
     status=$?
     set -e
@@ -1371,11 +1359,11 @@ run_phase_h() {
                 SLSK_USERNAME="$relogin_username" \
                 SLSK_PASSWORD="$relogin_password" \
                 SLSKR_PROBE_OUTPUT=json \
-                -- scripts/with-build-guard.sh cargo run -q -p slskr --bin slskr -- smoke server-relogin 2>&1)"
+                -- cargo run -q -p slskr --bin slskr -- smoke server-relogin 2>&1)"
         else
             output="$(SLSK_USERNAME="$relogin_username" SLSK_PASSWORD="$relogin_password" \
                 SLSKR_PROBE_OUTPUT=json timeout 45 \
-                scripts/with-build-guard.sh cargo run -q -p slskr --bin slskr -- smoke server-relogin 2>&1)"
+                cargo run -q -p slskr --bin slskr -- smoke server-relogin 2>&1)"
         fi
         status=$?
         set -e
@@ -1404,12 +1392,12 @@ run_phase_h() {
                 SLSK_PASSWORD="$password" \
                 SLSK_PEER_USERNAME="nonexistent_peer_xyz_12345" \
                 SLSKR_PROBE_OUTPUT=json \
-                scripts/with-build-guard.sh cargo run -q -p slskr --bin slskr -- probe peer-address 2>&1)"
+                cargo run -q -p slskr --bin slskr -- probe peer-address 2>&1)"
         else
             output="$(SLSK_USERNAME="$username" SLSK_PASSWORD="$password" \
                 SLSK_PEER_USERNAME="nonexistent_peer_xyz_12345" \
                 SLSKR_PROBE_OUTPUT=json \
-                timeout 30 scripts/with-build-guard.sh cargo run -q -p slskr --bin slskr -- probe peer-address 2>&1)"
+                timeout 30 cargo run -q -p slskr --bin slskr -- probe peer-address 2>&1)"
         fi
         status=$?
         set -e
@@ -1429,7 +1417,7 @@ run_phase_h() {
     t0="$(date +%s%N)"
     set +e
     output="$(SLSKR_PROBE_OUTPUT=json timeout 15 \
-        scripts/with-build-guard.sh cargo run -q -p slskr --bin slskr -- smoke closed-listener 2>&1)"
+        cargo run -q -p slskr --bin slskr -- smoke closed-listener 2>&1)"
     status=$?
     set -e
     t1="$(date +%s%N)"
@@ -1444,7 +1432,7 @@ run_phase_h() {
     t0="$(date +%s%N)"
     set +e
     output="$(SLSKR_PROBE_OUTPUT=json timeout 15 \
-        scripts/with-build-guard.sh cargo run -q -p slskr --bin slskr -- smoke bad-obfuscation-type 2>&1)"
+        cargo run -q -p slskr --bin slskr -- smoke bad-obfuscation-type 2>&1)"
     status=$?
     set -e
     t1="$(date +%s%N)"
@@ -1465,11 +1453,11 @@ run_phase_h() {
                 SLSK_USERNAME="$relogin_username" \
                 SLSK_PASSWORD="$relogin_password" \
                 SLSKR_PROBE_OUTPUT=json \
-                -- scripts/with-build-guard.sh cargo run -q -p slskr --bin slskr -- smoke server-reconnect 2>&1)"
+                -- cargo run -q -p slskr --bin slskr -- smoke server-reconnect 2>&1)"
         else
             output="$(SLSK_USERNAME="$relogin_username" SLSK_PASSWORD="$relogin_password" \
                 SLSKR_PROBE_OUTPUT=json timeout 60 \
-                scripts/with-build-guard.sh cargo run -q -p slskr --bin slskr -- smoke server-reconnect 2>&1)"
+                cargo run -q -p slskr --bin slskr -- smoke server-reconnect 2>&1)"
         fi
         status=$?
         set -e
@@ -1513,7 +1501,7 @@ run_phase_h() {
     t0="$(date +%s%N)"
     set +e
     output="$(SLSKR_PROBE_OUTPUT=json timeout 15 \
-        scripts/with-build-guard.sh cargo run -q -p slskr --bin slskr -- smoke malformed-peer-response 2>&1)"
+        cargo run -q -p slskr --bin slskr -- smoke malformed-peer-response 2>&1)"
     status=$?
     set -e
     t1="$(date +%s%N)"

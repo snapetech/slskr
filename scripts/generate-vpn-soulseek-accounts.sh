@@ -81,7 +81,7 @@ for label in "${labels[@]}"; do
   SLSK_SERVER="$server_address" \
     timeout "${SLSKR_ACCOUNT_GENERATOR_TIMEOUT_SECONDS:-90}" \
       "$repo_root/scripts/run-in-proton-wg-netns.sh" "$namespace" "$config" \
-      scripts/with-build-guard.sh cargo run -q -p slskr --bin slskr -- login smoke >"$stdout_file" 2>"$stderr_file"
+      cargo run -q -p slskr --bin slskr -- login smoke >"$stdout_file" 2>"$stderr_file"
   status=$?
   set -e
 

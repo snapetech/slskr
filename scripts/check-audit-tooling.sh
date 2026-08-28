@@ -28,8 +28,8 @@ if ! rg -n '^\| BUG-022 .* \| Verified \|$' "$ledger" >/dev/null; then
   status=1
 fi
 
-scripts/with-build-guard.sh cargo metadata --format-version 1 --no-deps >/dev/null
-scripts/with-build-guard.sh cargo tree -d >/dev/null
+cargo metadata --format-version 1 --no-deps >/dev/null
+cargo tree -d >/dev/null
 
 for expected in 'cargo metadata --format-version 1 --no-deps' 'cargo tree -d' 'cargo audit'; do
   if ! rg -n -F "$expected" scripts docs .github >/dev/null; then

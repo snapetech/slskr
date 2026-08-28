@@ -14,7 +14,7 @@ for id in BUG-005 BUG-006 BUG-007; do
   fi
 done
 
-if ! rg -n 'validate_webhook_url_for_registration\(&url\)' crates/slskr/src/main.rs >/dev/null; then
+if ! rg -n 'validate_webhook_url_for_registration\(&url\)' crates/slskr/src/lib.rs >/dev/null; then
   printf 'webhook outbound policy check failed: registration routes must validate webhook URLs before saving\n' >&2
   status=1
 fi
@@ -43,7 +43,7 @@ if ! rg -n --fixed-strings -- 'nat64_embedded_ipv4' crates/slskr/src/webhooks.rs
   status=1
 fi
 
-if ! rg -n 'MAX_WEBHOOK_DELIVERY_TASKS|webhook_deliveries' crates/slskr/src/main.rs >/dev/null; then
+if ! rg -n 'MAX_WEBHOOK_DELIVERY_TASKS|webhook_deliveries' crates/slskr/src/lib.rs >/dev/null; then
   printf 'webhook outbound policy check failed: bounded manual delivery pool is missing\n' >&2
   status=1
 fi

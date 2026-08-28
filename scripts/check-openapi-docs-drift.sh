@@ -43,7 +43,7 @@ for expected in 'generate_openapi_json' 'CHECKED_IN_OPENAPI_JSON' 'include_str!(
 done
 
 for expected in 'non-persisted' 'read-only' 'compatibility'; do
-  if ! rg -n -F "$expected" docs/security-bug-burndown.md docs/dev/bug-burndown-ledger.md crates/slskr/src/openapi.rs crates/slskr/src/main.rs >/dev/null; then
+  if ! rg -n -F "$expected" docs/security-bug-burndown.md docs/dev/bug-burndown-ledger.md crates/slskr/src/openapi.rs crates/slskr/src/lib.rs >/dev/null; then
     printf 'openapi/docs drift check failed: expected compatibility docs token missing: %s\n' "$expected" >&2
     status=1
   fi

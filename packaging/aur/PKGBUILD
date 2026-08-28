@@ -20,7 +20,7 @@ build() {
   cd "${srcdir}/slskR-release-v${pkgver}"
   npm --prefix web ci
   npm --prefix web run build
-  scripts/with-build-guard.sh cargo build --release -p slskr --locked
+  cargo build --release -p slskr --locked
 }
 
 package() {

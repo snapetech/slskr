@@ -14,41 +14,29 @@ workspace tests, RustSec audit when `cargo-audit` is installed, workspace
 packaging, web tests, Rust/WASM web checks, the Rust web UI headless parity
 audit, and subpath smoke checks.
 
-All compile-capable Cargo commands in this repository must use
-`scripts/with-build-guard.sh`. The wrapper serializes Rust commands, forces one
-Cargo job, and caps virtual memory at 12 GiB:
+All compile-capable Cargo commands in this repository use the normal Rust
+toolchain. The workspace config keeps the large daemon crate on one Cargo job,
+turns off unnecessary dev debug metadata, and uses 16 codegen units with
+ThinLTO for release builds:
 
 ```sh
-scripts/with-build-guard.sh cargo build --release -p slskr
-scripts/with-build-guard.sh cargo test --workspace
+cargo build --release -p slskr
+cargo test --workspace
 ```
 
-Rust formatting uses `scripts/check-rust-format.sh`, which checks source files
-individually through `scripts/with-rustfmt-guard.sh` under a separate hard 1 GiB
-no-swap process limit. It emits formatted output and compares it locally rather
-than asking rustfmt to construct the monolithic controller's unbounded diff.
+Rust formatting uses `scripts/check-rust-format.sh`, which checks changed source
+files individually and compares emitted output locally rather than asking
+rustfmt to construct the monolithic controller's full diff.
 
-For local workstations, install the repository command shims once with
-`scripts/install-rust-tool-shims.sh`; bare `cargo`, `rustc`, and `rustfmt`
-commands launched from this checkout then enter the matching guards.
-
-The `slskr` package defaults to its bounded focused controller-test target.
-The historical monolithic controller suite is rejected by the guard when
-requested with `--features full-controller-tests` or `--all-features`, because
-that profile previously exceeded the safe LLVM memory envelope. An explicit
-`SLSKR_ALLOW_FULL_CONTROLLER_TESTS=1` opt-in is accepted only inside
-`scripts/with-process-memory-guard.sh`, which adds the hard 4 GiB process cap;
-direct or unguarded requests remain rejected. The default focused controller
-test target remains the normal workspace test path.
+The `slskr` package defaults to its focused controller-test target. The
+historical monolithic controller suite remains an explicit opt-in with
+`--features full-controller-tests`; the default workspace test path keeps that
+large proof module out of ordinary edit/test cycles.
 
 Browser and frontend Node subprocesses in the parity and release gates use
-`scripts/with-process-memory-guard.sh`. That guard applies a hard 4 GiB
-resident-memory cgroup limit with swap disabled when a user systemd manager is
-available and a 4 GiB virtual-memory limit otherwise. The release gate applies
-that guard to each non-Rust step; its Cargo steps use the separate 12 GiB Rust
-virtual-memory ceiling above, so a Rust formatter or compiler cannot inherit
-the browser/Node process cap. This keeps browser, Node, and other heavy
-non-Rust processes bounded without imposing their smaller limit on LLVM.
+`scripts/with-process-memory-guard.sh`; Rust commands do not. This keeps the
+non-Rust browser tooling bounded without imposing its smaller process cap on
+LLVM.
 
 The live slskd automation-client compatibility smoke is opt-in because it starts
 a local daemon and may install the Python `slskd-api` package:

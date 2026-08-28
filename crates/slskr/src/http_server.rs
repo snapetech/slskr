@@ -1,5 +1,5 @@
 //! Optimized HTTP server with keep-alive, proper parsing, and streaming responses
-//! Replaces manual HTTP parsing in main.rs
+//! Replaces manual HTTP parsing in lib.rs
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use rand::{rngs::SysRng, TryRng};

@@ -19,7 +19,7 @@ RUN apt-get update \
 
 COPY . .
 COPY --from=web-builder /src/web/build web/build
-RUN SLSKR_RELEASE_VERSION="${VERSION}" scripts/with-build-guard.sh cargo build --release -p slskr
+RUN SLSKR_RELEASE_VERSION="${VERSION}" cargo build --release -p slskr
 
 FROM debian:bookworm-slim
 

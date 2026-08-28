@@ -53,55 +53,15 @@ if ! rg -q 'with-process-memory-guard\.sh' scripts/run-release-gate.sh; then
 fi
 
 for runner in \
-  scripts/run-slskd-cross-client-interop.sh \
-  scripts/run-certification.sh \
-  scripts/run-proton-public-matrix.sh \
-  scripts/run-release-gate.sh \
-  scripts/run-live-interop-matrix.sh \
-  scripts/run-live-http-transfer-smoke.sh \
-  scripts/run-cross-client-validation.sh \
-  scripts/run-live-soak-24h.sh \
-  scripts/run-live-soak-proton-natpmp.sh \
-  scripts/check-controller-options-differential.sh \
-  scripts/check-diagnostics-memory-dump-differential.sh \
-  scripts/check-web-auth-credentials-differential.sh \
-  scripts/check-web-auth-disabled-differential.sh \
-  scripts/check-web-cors-differential.sh \
-  scripts/check-web-enforce-security-differential.sh \
-  scripts/check-web-no-auth-passthrough-differential.sh \
-  scripts/check-web-rate-limiting-differential.sh \
-  scripts/check-web-request-body-limit-differential.sh \
-  scripts/check-slskdn-controller-parity.sh \
-  scripts/build-release-archive.sh \
-  scripts/check-rust-format.sh \
   scripts/check-client-sdk-gates.sh \
   scripts/check-endpoint-parity-drift.sh \
   scripts/check-web-audit.sh \
-  scripts/run-universal-lifecycle-matrix.sh \
-  scripts/generate-release-manifests.sh; do
-  required_guard='process-memory-guard-active\.sh'
-  if [[ "$runner" == scripts/run-release-gate.sh ]]; then
-    # The release gate wraps each non-Rust step individually so Cargo can use
-    # its larger Rust-specific guard.
-    required_guard='with-process-memory-guard\.sh'
-  fi
-  if ! rg -q "$required_guard" "$runner"; then
+  scripts/check-web-rate-limiting-differential.sh; do
+  if ! rg -q 'process-memory-guard-active\.sh' "$runner"; then
     printf 'Process memory guard check failed: heavy runner is unguarded: %s\n' "$runner" >&2
     status=1
   fi
 done
-
-# A direct .NET host can retain a large managed heap even when Cargo itself is
-# guarded. Fail closed if a future differential script adds a .NET launch
-# without entering the repository process guard first.
-while IFS= read -r -d '' dotnet_script; do
-  if ! rg -q 'with-process-memory-guard\.sh' "$dotnet_script"; then
-    printf 'Process memory guard check failed: direct .NET launcher is unguarded: %s\n' "$dotnet_script" >&2
-    status=1
-  fi
-done < <(
-  rg -l -0 --pcre2 '(^|[;&|(:`[:space:]])dotnet([[:space:]]|$|[`])' scripts --glob '*.sh' || true
-)
 
 if [[ "$status" -ne 0 ]]; then
   exit "$status"

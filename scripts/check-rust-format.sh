@@ -6,12 +6,8 @@ cd "$repo_root"
 
 # Cargo's formatter path can ask rustfmt to diff the 234k-line controller
 # source as one giant unit. Check changed workspace Rust files independently
-# and disable child-module expansion so one pathological diff cannot allocate
-# unbounded host memory. Keep unrelated repository fixtures and pre-existing
-# formatting debt outside this incremental gate.
-if ! "$repo_root/scripts/process-memory-guard-active.sh"; then
-  exec "$repo_root/scripts/with-process-memory-guard.sh" "$BASH_SOURCE" "$@"
-fi
+# and disable child-module expansion. Keep unrelated repository fixtures and
+# pre-existing formatting debt outside this incremental gate.
 
 format_status=0
 format_tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/slskr-rust-format.XXXXXX")"
@@ -48,16 +44,16 @@ for rust_file in "${rust_files[@]}"; do
   if ((file_bytes > 2000000)); then
     # The monolithic controller source predates the current rustfmt version
     # and has repository-wide formatting debt. Formatting it as one unit is
-    # both expensive and noisy, so leave this file to the guarded compiler
-    # checks and keep the incremental formatter gate for bounded files.
+    # both expensive and noisy, so keep this incremental gate for bounded
+    # files only.
     printf 'Rust format check skipped for large pre-existing source: %s\n' "$rust_file"
     continue
   fi
   formatted_file="$(mktemp "$format_tmp_dir/formatted.XXXXXX")"
-  # Never ask rustfmt to construct a diff. Emit the formatted source into a
-  # bounded temporary file and compare it ourselves; for the monolithic source
+  # Never ask rustfmt to construct a diff. Emit formatted source into a
+  # temporary file and compare it ourselves; for the monolithic source
   # suppress the diff because even diff generation can retain huge buffers.
-  if ! "$repo_root/scripts/with-rustfmt-guard.sh" \
+  if ! rustfmt \
     --emit stdout --edition 2021 --config skip_children=true \
     >"$formatted_file" <"$rust_file"; then
     format_status=1

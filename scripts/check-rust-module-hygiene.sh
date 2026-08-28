@@ -12,7 +12,7 @@ if rg -n '^#!\[allow\([^]]*dead_code' crates --glob '!target/**'; then
   status=1
 fi
 
-for file in crates/slskr/src/main.rs crates/slskr/src/webhooks.rs crates/slskr/src/routing.rs; do
+for file in crates/slskr/src/lib.rs crates/slskr/src/webhooks.rs crates/slskr/src/routing.rs; do
   if rg -n '^#!\[allow\([^]]*dead_code' "$file" >/dev/null; then
     printf 'rust module hygiene failed: broad dead_code allow remains in %s\n' "$file" >&2
     status=1

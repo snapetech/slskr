@@ -48,7 +48,7 @@ The historical dashboard connected to the API at `http://127.0.0.1:5030`
 ### API Endpoints to Add
 
 ```rust
-// In main.rs routing:
+// In lib.rs routing:
 ("POST", "/api/admin/webhooks") => handle_create_webhook(body),
 ("GET", "/api/admin/webhooks") => handle_list_webhooks(),
 ("GET", path) if path.starts_with("/api/admin/webhooks/") => handle_get_webhook(path),
@@ -231,7 +231,7 @@ The CLI tool already has full async/HTTP implementation using `reqwest`. Just en
 
 ```bash
 # Terminal 1: API Server
-scripts/with-build-guard.sh cargo run -p slskr --bin slskr --release
+cargo run -p slskr --bin slskr --release
 
 # Terminal 2: Dashboard
 cd dashboard && npm run dev  # http://localhost:5173

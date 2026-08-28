@@ -9,7 +9,7 @@ slskr already has a mature live-interop harness: VPN-isolated Proton WireGuard n
 ### 2.1 What works today
 | Component | Coverage | Evidence |
 |-----------|----------|----------|
-| Protocol unit tests | All 102 server codes, ~18 peer codes, ~6 distributed codes, 2 init codes, obfuscation type 1 | `scripts/with-build-guard.sh cargo test --workspace` |
+| Protocol unit tests | All 102 server codes, ~18 peer codes, ~6 distributed codes, 2 init codes, obfuscation type 1 | `cargo test --workspace` |
 | Live login | 4–8 accounts via `.env` / generated accounts / credential pool | `run-live-interop-matrix.sh` |
 | VPN harness | 8 Proton WireGuard configs in isolated netns with veth routing, per-account IP isolation | `run-in-proton-wg-netns.sh` |
 | Certification runner | 7 phases (A-H), 39 tests, per-account VPN routing, JSON/text output, auto-detect VPN configs | `run-certification.sh` |
@@ -343,8 +343,8 @@ Could be a simple static HTML page generated from the JSON reports, served from 
 
 ### Build & Unit Tests
 ```
-Guarded command: `scripts/with-build-guard.sh cargo test --workspace` — 562 tests passed, 0 failed
-Guarded command: `scripts/with-build-guard.sh cargo check -p slskr` — compiled successfully
+Command: `cargo test --workspace` — 562 tests passed, 0 failed
+Command: `cargo check -p slskr` — compiled successfully
 ```
 
 ### Live Network Tests (no VPN)
