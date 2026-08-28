@@ -17,9 +17,10 @@ const target = option('--target') ?? 'slskdn';
 if (!['slskd', 'slskdn'].includes(target)) {
   throw new Error('--target must be slskd or slskdn');
 }
+const defaultRegistryName = target === 'slskd' ? 'legacy' : 'native';
 const registryPath = path.resolve(
   option('--registry') ??
-    path.join(repoRoot, `crates/slskr/data/${target}-controller-auth-policy.json`),
+    path.join(repoRoot, `crates/slskr/data/${defaultRegistryName}-controller-auth-policy.json`),
 );
 const rootIndex = args.indexOf('--slskdn-root');
 const auditArgs = [auditScript];

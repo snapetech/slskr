@@ -27,6 +27,8 @@ the release is prepared. Do not rewrite audited release history.
   Modal behavior, sharing access, stream permissions, and grant contracts.
 - Hardened Rust and process memory guards, formatting/build tooling, and
   release and browser validation workflows.
+- Fixed release validation to resolve frozen slskd authentication checks
+  against the renamed legacy policy registry.
 
 ## [0.2.33] — 2026-08-23
 
