@@ -18,6 +18,16 @@ the release is prepared. Do not rewrite audited release history.
 
 ## [Unreleased]
 
+## [0.2.34] — 2026-08-28
+
+- Aligned native/current networking with current upstream shared-port behavior,
+  including bounded Soulseek/TLS mesh TCP demultiplexing and VPN-forwarded
+  port updates.
+- Improved Web UI identity and interactions, including login, Dropdown and
+  Modal behavior, sharing access, stream permissions, and grant contracts.
+- Hardened Rust and process memory guards, formatting/build tooling, and
+  release and browser validation workflows.
+
 ## [0.2.33] — 2026-08-23
 
 - Fixed share scanning for large libraries with thousands of top-level
