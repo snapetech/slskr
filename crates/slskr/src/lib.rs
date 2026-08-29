@@ -159,6 +159,7 @@ use slskr_client::{
         ServerConnection,
     },
     version::{CLIENT_MAJOR_VERSION, CLIENT_MINOR_VERSION, CLIENT_NAME},
+    ClientError,
 };
 use socket2::{Domain, Protocol, SockRef, Socket, Type};
 use tokio::{
@@ -72391,6 +72392,31 @@ fn spawn_session_manager(state: Arc<AppState>, mut receiver: mpsc::Receiver<Sess
                                 .await;
                                 reconnect_requested = false;
                             }
+                        }
+                        Ok(Err(ClientError::ConnectionClosed)) => {
+                            session = None;
+                            clear_connected_server_address(&state);
+                            reset_distributed_network(&state, None).await;
+                            let reconnect = state.config.reconnect;
+                            update_session(&state, |snapshot| {
+                                snapshot.state = "disconnected";
+                                snapshot.last_error = None;
+                                snapshot.supporter = None;
+                                snapshot.connected_at = None;
+                            })
+                            .await;
+                            record_daemon_log(
+                                &state,
+                                logging::LogLevel::Info,
+                                "session",
+                                if reconnect {
+                                    "Soulseek server closed the connection; reconnect pending"
+                                } else {
+                                    "Soulseek server closed the connection"
+                                },
+                            )
+                            .await;
+                            reconnect_requested = reconnect;
                         }
                         Ok(Err(error)) => {
                             eprintln!("server receive failed: {error}");

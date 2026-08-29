@@ -123,7 +123,7 @@ const LoginForm = ({ error, loading, onLoginAttempt }) => {
               disabled={!ready || loading}
               fluid
               loading={loading}
-              onClick={() => onLoginAttempt(username, password, false)}
+              onClick={() => onLoginAttempt(username, password)}
               primary
               size="large"
             >

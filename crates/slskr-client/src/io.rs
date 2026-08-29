@@ -80,11 +80,7 @@ where
         let mut chunk = [0_u8; 8192];
         let read = reader.read(&mut chunk).await?;
         if read == 0 {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::UnexpectedEof,
-                "connection closed while reading a message frame",
-            )
-            .into());
+            return Err(ClientError::ConnectionClosed);
         }
         buffer.extend_from_slice(&chunk[..read]);
     }

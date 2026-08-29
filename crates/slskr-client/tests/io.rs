@@ -1,10 +1,10 @@
 use slskr_client::{
     connection::ConnectionKind,
     io::{
-        read_connection_kind, read_init_frame, read_message_frame_with_max, read_raw_frame,
-        read_raw_frame_with_max, write_connection_kind, write_init_frame,
-        write_init_frame_with_max, write_message_frame, write_message_frame_with_max,
-        write_obfuscated_init_frame_with_key_and_max,
+        read_connection_kind, read_init_frame, read_message_frame_buffered,
+        read_message_frame_with_max, read_raw_frame, read_raw_frame_with_max,
+        write_connection_kind, write_init_frame, write_init_frame_with_max, write_message_frame,
+        write_message_frame_with_max, write_obfuscated_init_frame_with_key_and_max,
         write_obfuscated_message_frame_with_key_and_max, write_raw_frame, write_raw_frame_with_max,
     },
     ClientError,
@@ -53,6 +53,18 @@ async fn message_frame_round_trips() {
             .unwrap(),
         frame
     );
+}
+
+#[tokio::test]
+async fn buffered_message_frame_reports_clean_connection_close() {
+    let (client, mut server) = duplex(64);
+    drop(client);
+    let mut buffer = Vec::new();
+
+    let error = read_message_frame_buffered(&mut server, &mut buffer, 1024)
+        .await
+        .unwrap_err();
+    assert!(matches!(error, ClientError::ConnectionClosed));
 }
 
 #[tokio::test]

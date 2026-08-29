@@ -241,11 +241,17 @@ assert_authenticated_bypass() {
 
 admin_bearer_token() {
   local base_url="$1"
+  local implementation="${2:-upstream}"
+  local username="slskd"
   local password="slskd"
+  if [[ "$implementation" == slskr ]]; then
+    username=slskr
+    password=slskr
+  fi
   local response
   response="$(curl --silent --show-error --max-time 10 --interface 127.0.0.7 \
     -H 'Content-Type: application/json' \
-    --data-binary "{\"username\":\"slskd\",\"password\":\"$password\"}" \
+    --data-binary "{\"username\":\"$username\",\"password\":\"$password\"}" \
     "$base_url/api/v0/session")"
   python3 - "$response" <<'PY'
 import json, sys

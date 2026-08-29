@@ -67,7 +67,7 @@ describe('session', () => {
     });
 
     await expect(
-      session.login({ password: 'user-password', rememberMe: false, username: 'user' }),
+      session.login({ password: 'user-password', username: 'user' }),
     ).resolves.toBe('server-issued-jwt');
 
     // POST /api/v0/session expects { username, password } in the body, and
@@ -81,15 +81,15 @@ describe('session', () => {
     expect(sessionStorage.getItem('slskr-token')).toBe('server-issued-jwt');
   });
 
-  it('remembers the session in persistent storage when rememberMe is set', async () => {
+  it('keeps the session token in session storage even when a legacy rememberMe value is supplied', async () => {
     api.post.mockResolvedValue({
       data: { token: 'server-issued-jwt' },
     });
 
     await session.login({ password: 'user-password', rememberMe: true, username: 'user' });
 
-    expect(localStorage.getItem('slskr-token')).toBe('server-issued-jwt');
-    expect(sessionStorage.getItem('slskr-token')).toBeNull();
+    expect(localStorage.getItem('slskr-token')).toBeNull();
+    expect(sessionStorage.getItem('slskr-token')).toBe('server-issued-jwt');
   });
 
   it('rethrows network session-check errors without masking them', async () => {

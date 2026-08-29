@@ -25,9 +25,10 @@ export const isLoggedIn = () => {
   );
 };
 
-export const login = async ({ username, password, rememberMe = false }) => {
+export const login = async ({ username, password }) => {
   const { token } = (await api.post('/session', { password, username })).data;
-  setToken(rememberMe ? localStorage : sessionStorage, token);
+  clearToken();
+  setToken(sessionStorage, token);
   return token;
 };
 

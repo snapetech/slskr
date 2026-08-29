@@ -1132,14 +1132,14 @@ class App extends Component {
     this.forceUpdate();
   };
 
-  handleLogin = (username, password, rememberMe) => {
+  handleLogin = (username, password) => {
     this.setState(
       (previousState) => ({
         login: { ...previousState.login, error: undefined, pending: true },
       }),
       async () => {
         try {
-          await session.login({ password, rememberMe, username });
+          await session.login({ password, username });
           this.setState(
             (previousState) => ({
               login: { ...previousState.login, error: false, pending: false },

@@ -2540,7 +2540,7 @@ write_description_yaml() {
   local listen_port="$4"
   local picture="$5"
   local temporary="$path.tmp"
-  printf 'flags:\n  no_connect: false\nsoulseek:\n  address: 127.0.0.1\n  port: %s\n  username: fixture-user\n  password: fixture-password\n  description: "%s"\n  picture: "%s"\n  listen_ip_address: 0.0.0.0\n  listen_port: %s\n' \
+  printf 'flags:\n  no_connect: false\ndht:\n  enabled: false\nsoulseek:\n  address: 127.0.0.1\n  port: %s\n  username: fixture-user\n  password: fixture-password\n  description: "%s"\n  picture: "%s"\n  listen_ip_address: 0.0.0.0\n  listen_port: %s\n' \
     "$server_port" "$description" "$picture" "$listen_port" >"$temporary"
   mv "$temporary" "$path"
 }

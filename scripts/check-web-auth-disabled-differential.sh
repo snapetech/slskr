@@ -148,7 +148,7 @@ capture_default() {
   local implementation="$2"
   local state="$work_dir/$target-$implementation-default-state"
   local log="$work_dir/$target-$implementation-default.log"
-  local port https_port listen_port base_url login_body login_status token
+  local port https_port listen_port base_url login_body login_status token username password
   port="$(pick_free_port)"
   https_port="$(pick_free_port)"
   listen_port="$(pick_free_port)"
@@ -157,12 +157,22 @@ capture_default() {
   start_daemon "$target" "$implementation" "$state" "$port" "$https_port" "$listen_port" "$log"
   wait_ready "$base_url" "$log"
   login_body="$work_dir/$target-$implementation-login.json"
-  login_status="$(login "$base_url" slskd slskd "$login_body")"
+  username=slskd
+  password=slskd
+  if [[ "$target" == slskdn && "$implementation" == slskr ]]; then
+    username=slskr
+    password=slskr
+  fi
+  login_status="$(login "$base_url" "$username" "$password" "$login_body")"
   token="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("token", ""))' "$login_body")"
-  python3 - "$base_url" "$login_body" "$login_status" "$token" >"$work_dir/$target-$implementation-default.json" <<'PY'
+  python3 - "$base_url" "$login_body" "$login_status" "$token" "$target" >"$work_dir/$target-$implementation-default.json" <<'PY'
 import json, subprocess, sys
-base, login_path, login_status, token = sys.argv[1:]
+base, login_path, login_status, token, target = sys.argv[1:]
 login = json.load(open(login_path, encoding="utf-8"))
+if target == "slskdn":
+    # The native profile intentionally uses a slskr-branded default identity;
+    # compare the authentication behavior rather than the product name.
+    login["name"] = "<profile-default>"
 def curl(path, authorization=None):
     command = ["curl", "--silent", "--output", "/dev/null", "--write-out", "%{http_code}", "--max-time", "10"]
     if authorization:

@@ -40,6 +40,7 @@ run_optional_step() {
   fi
 }
 
+run_step "Rust debug build" cargo build -q -p slskr
 run_step "Remediation baseline" scripts/check-remediation-baseline.sh
 run_step "Public posture check" scripts/check-public-posture.sh
 run_step "Changelog validation" scripts/validate-changelog.sh

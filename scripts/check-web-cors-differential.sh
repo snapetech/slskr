@@ -121,11 +121,17 @@ wait_ready() {
 
 authenticate_admin() {
   local base_url="$1"
+  local implementation="${2:-upstream}"
+  local username="slskd"
   local password="slskd"
+  if [[ "$implementation" == slskr ]]; then
+    username=slskr
+    password=slskr
+  fi
   local response
   response="$(curl --silent --show-error --max-time 10 \
     -H 'Content-Type: application/json' \
-    --data-binary "{\"username\":\"slskd\",\"password\":\"$password\"}" \
+    --data-binary "{\"username\":\"$username\",\"password\":\"$password\"}" \
     "$base_url/api/v0/session")"
   local token
   token="$(python3 - "$response" <<'PY'

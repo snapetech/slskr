@@ -6,6 +6,8 @@ use slskr_protocol::{server::ServerMessage, DecodeError, EncodeError};
 pub enum ClientError {
     #[error("I/O error: {0}")]
     Io(#[from] io::Error),
+    #[error("connection closed while reading a message frame")]
+    ConnectionClosed,
     #[error("decode error: {0}")]
     Decode(#[from] DecodeError),
     #[error("encode error: {0}")]
