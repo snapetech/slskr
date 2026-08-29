@@ -9,13 +9,23 @@ keep_artifacts="${SLSKR_CORS_DIFFERENTIAL_KEEP:-0}"
 api_key="differential-controller-token-32"
 daemon_pid=""
 request_auth_header="X-API-Key: $api_key"
+daemon_base_url=""
 
 pick_free_port() {
-  python3 - <<'PY'
+  python3 - "$@" <<'PY'
 import socket
-with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-    sock.bind(("127.0.0.1", 0))
-    print(sock.getsockname()[1])
+import sys
+
+excluded = {int(value) for value in sys.argv[1:]}
+for _ in range(20):
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+    if port not in excluded:
+        print(port)
+        break
+else:
+    raise SystemExit("unable to find a free TCP port outside the excluded set")
 PY
 }
 
@@ -87,7 +97,7 @@ start_daemon() {
     ) >"$log" 2>&1 &
   else
     local overlay_port
-    overlay_port="$(pick_free_port)"
+    overlay_port="$(pick_free_port "$port" "$https_port" "$listen_port")"
     (
       export SLSKR_AUTH_DISABLED=false SLSKR_API_TOKEN="$api_key"
       export SLSKR_CONTROLLER_PROFILE=native
@@ -100,6 +110,31 @@ start_daemon() {
     ) >"$log" 2>&1 &
   fi
   daemon_pid="$!"
+}
+
+start_daemon_with_retry() {
+  local implementation="$1"
+  local state="$2"
+  local log="$3"
+  local port https_port listen_port base_url attempt
+  for attempt in $(seq 1 5); do
+    port="$(pick_free_port)"
+    https_port="$(pick_free_port "$port")"
+    listen_port="$(pick_free_port "$port" "$https_port")"
+    base_url="http://127.0.0.1:$port"
+    : >"$log"
+    start_daemon "$implementation" "$state" "$port" "$https_port" "$listen_port" "$log"
+    if wait_ready "$base_url" "$log"; then
+      daemon_base_url="$base_url"
+      return 0
+    fi
+    if ! rg -qi 'address already in use' "$log"; then
+      return 1
+    fi
+    stop_daemon
+  done
+  tail -120 "$log" >&2 || true
+  return 1
 }
 
 wait_ready() {
@@ -290,14 +325,10 @@ run_mode() {
   esac
   local state="$work_dir/$implementation-$mode-state"
   local log="$work_dir/$implementation-$mode.log"
-  local port https_port listen_port base_url
-  port="$(pick_free_port)"
-  https_port="$(pick_free_port)"
-  listen_port="$(pick_free_port)"
-  base_url="http://127.0.0.1:$port"
+  local base_url
   write_config "$state" "$enabled" "$credentials" "$origins" "$headers" "$methods" "$enforce_security"
-  start_daemon "$implementation" "$state" "$port" "$https_port" "$listen_port" "$log"
-  wait_ready "$base_url" "$log"
+  start_daemon_with_retry "$implementation" "$state" "$log"
+  base_url="$daemon_base_url"
   capture_matrix "$base_url" "$implementation" "$mode"
   if [[ "$mode" == explicit ]]; then
     authenticate_admin "$base_url" "$implementation"
@@ -312,8 +343,8 @@ run_enforced_wildcard_rejection() {
   local log="$work_dir/$implementation-enforced-wildcard.log"
   local port https_port listen_port
   port="$(pick_free_port)"
-  https_port="$(pick_free_port)"
-  listen_port="$(pick_free_port)"
+  https_port="$(pick_free_port "$port")"
+  listen_port="$(pick_free_port "$port" "$https_port")"
   write_config "$state" true true '["*"]' '[]' '[]' true
   start_daemon "$implementation" "$state" "$port" "$https_port" "$listen_port" "$log"
   local exited=false
@@ -342,14 +373,10 @@ run_watch_restart() {
   local implementation="$1"
   local state="$work_dir/$implementation-watch-state"
   local log="$work_dir/$implementation-watch.log"
-  local port https_port listen_port base_url current application
-  port="$(pick_free_port)"
-  https_port="$(pick_free_port)"
-  listen_port="$(pick_free_port)"
-  base_url="http://127.0.0.1:$port"
+  local base_url current application
   write_config "$state" true false '[https://allowed.example]' '[]' '[]'
-  start_daemon "$implementation" "$state" "$port" "$https_port" "$listen_port" "$log"
-  wait_ready "$base_url" "$log"
+  start_daemon_with_retry "$implementation" "$state" "$log"
+  base_url="$daemon_base_url"
   authenticate_admin "$base_url" "$implementation"
 
   write_config "$state" true false '[https://replacement.example]' '[X-Replacement]' '[PATCH]'
@@ -390,8 +417,8 @@ PY
   stop_daemon
 
   request_auth_header="X-API-Key: $api_key"
-  start_daemon "$implementation" "$state" "$port" "$https_port" "$listen_port" "$log"
-  wait_ready "$base_url" "$log"
+  start_daemon_with_retry "$implementation" "$state" "$log"
+  base_url="$daemon_base_url"
   local after="$work_dir/$implementation-watch-after.jsonl"
   : >"$after"
   probe "$base_url" watch-old-after GET https://allowed.example none none "$after"
