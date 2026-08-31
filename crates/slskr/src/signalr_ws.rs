@@ -100,7 +100,9 @@ pub(crate) fn auth_path(hub: &str) -> &'static str {
 }
 
 /// Build the response consumed by the JavaScript SignalR client before it
-/// upgrades the connection to WebSockets.
+/// upgrades the connection to WebSockets. WebSockets are the only transport
+/// implemented by this raw HTTP server, so do not advertise fallbacks that
+/// would fail after negotiation.
 pub(crate) fn negotiate_response() -> routing::HttpResponse {
     let connection_id = format!("slskr-{}", Uuid::new_v4().simple());
     routing::HttpResponse {
@@ -113,14 +115,6 @@ pub(crate) fn negotiate_response() -> routing::HttpResponse {
             "availableTransports": [
                 {
                     "transport": "WebSockets",
-                    "transferFormats": ["Text"],
-                },
-                {
-                    "transport": "ServerSentEvents",
-                    "transferFormats": ["Text"],
-                },
-                {
-                    "transport": "LongPolling",
                     "transferFormats": ["Text"],
                 },
             ],
@@ -255,21 +249,23 @@ where
             let Some(invocation_id) = value.get("invocationId").and_then(Value::as_str) else {
                 return Ok(());
             };
-            if hub == "listening-party" {
-                let target = value
-                    .get("target")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default();
-                let arguments = value
-                    .get("arguments")
-                    .and_then(Value::as_array)
-                    .map(Vec::as_slice)
-                    .unwrap_or(&[]);
-                if let Err(error) =
-                    update_listening_party_membership(listening_party_groups, target, arguments)
-                {
-                    return write_invocation_error(writer, invocation_id, error).await;
-                }
+            let target = value
+                .get("target")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let arguments = value
+                .get("arguments")
+                .and_then(Value::as_array)
+                .map(Vec::as_slice)
+                .unwrap_or(&[]);
+            let result = if hub == "listening-party" && matches!(target, "JoinParty" | "LeaveParty")
+            {
+                update_listening_party_membership(listening_party_groups, target, arguments)
+            } else {
+                Err("Unknown hub method")
+            };
+            if let Err(error) = result {
+                return write_invocation_error(writer, invocation_id, error).await;
             }
             relay_ws::write_signalr_json(
                 writer,
@@ -294,7 +290,10 @@ fn update_listening_party_membership(
     let is_join = target == "JoinParty";
     let is_leave = target == "LeaveParty";
     if !is_join && !is_leave {
-        return Ok(());
+        return Err("Unknown hub method");
+    }
+    if arguments.len() != 2 {
+        return Err("podId and channelId are required");
     }
     let group = arguments
         .first()
@@ -422,7 +421,8 @@ async fn initial_hub_messages(state: &AppState, hub: &str) -> Vec<(String, Value
             let records = searches
                 .records
                 .iter()
-                .filter_map(|record| serde_json::from_str::<Value>(&record.json()).ok())
+                .rev()
+                .filter_map(search_hub_payload)
                 .collect::<Vec<_>>();
             vec![("LIST".to_owned(), Value::Array(records))]
         }
@@ -472,7 +472,7 @@ async fn event_hub_messages(
                 .find(|search| {
                     search.id == record.resource || search.token.to_string() == record.resource
                 })
-                .and_then(|search| serde_json::from_str::<Value>(&search.json()).ok());
+                .and_then(search_hub_payload);
             match (record.kind.as_str(), search) {
                 ("search.started" | "search.created", Some(search)) => {
                     vec![("CREATE".to_owned(), search)]
@@ -523,6 +523,17 @@ fn transfer_hub_payload(record: &EventRecord) -> Option<Value> {
         .as_deref()
         .and_then(|detail| serde_json::from_str::<Value>(detail).ok())
         .filter(Value::is_object)
+}
+
+fn search_hub_payload(search: &crate::SearchRecord) -> Option<Value> {
+    let mut payload = serde_json::from_str::<Value>(&search.json()).ok()?;
+    if let Some(object) = payload.as_object_mut() {
+        // Target SearchHub broadcasts are deliberately response-free. The
+        // response collection is fetched from the REST endpoint once a search
+        // completes, so never leak the potentially large collection here.
+        object.insert("responses".to_owned(), Value::Array(Vec::new()));
+    }
+    Some(payload)
 }
 
 async fn application_state_json(state: &AppState) -> String {
@@ -579,6 +590,16 @@ fn transfer_metrics(transfers: &crate::TransferQueue) -> Value {
                 )
             })
             .collect::<Vec<_>>();
+        let now = crate::unix_timestamp();
+        let total_speed = in_progress
+            .iter()
+            .map(|entry| entry.average_speed_at(now))
+            .sum::<f64>();
+        let average_speed = if in_progress.is_empty() {
+            0.0
+        } else {
+            total_speed / in_progress.len() as f64
+        };
         let users = |items: &[&crate::TransferEntry]| {
             items
                 .iter()
@@ -587,28 +608,28 @@ fn transfer_metrics(transfers: &crate::TransferQueue) -> Value {
                 .len()
         };
         json!({
-            "InProgress": {
-                "Files": in_progress.len(),
-                "Users": users(&in_progress),
-                "AverageSpeed": 0,
-                "TotalSpeed": 0,
+            "inProgress": {
+                "files": in_progress.len(),
+                "users": users(&in_progress),
+                "averageSpeed": average_speed,
+                "totalSpeed": total_speed,
             },
-            "Queued": {
-                "Files": queued.len(),
-                "Users": users(&queued),
-                "Bytes": queued.iter().filter_map(|entry| entry.size).sum::<u64>(),
+            "queued": {
+                "files": queued.len(),
+                "users": users(&queued),
+                "bytes": queued.iter().filter_map(|entry| entry.size).sum::<u64>(),
             },
-            "Completed": {
-                "Succeeded": completed.iter().filter(|entry| entry.status == "succeeded").count(),
-                "Failed": completed.iter().filter(|entry| matches!(entry.status.as_str(), "failed" | "rejected")).count(),
-                "Bytes": completed.iter().map(|entry| entry.bytes_transferred).sum::<u64>(),
+            "completed": {
+                "succeeded": completed.iter().filter(|entry| entry.status == "succeeded").count(),
+                "failed": completed.iter().filter(|entry| matches!(entry.status.as_str(), "failed" | "rejected")).count(),
+                "bytes": completed.iter().map(|entry| entry.bytes_transferred).sum::<u64>(),
             },
         })
     }
 
     json!({
-        "Downloads": direction_metrics(transfers, 0),
-        "Uploads": direction_metrics(transfers, 1),
+        "downloads": direction_metrics(transfers, 0),
+        "uploads": direction_metrics(transfers, 1),
     })
 }
 
@@ -617,10 +638,20 @@ mod tests {
     use std::collections::HashSet;
 
     use super::{
-        hub_name, hub_name_for_target, listening_party_event_group, listening_party_group_key,
-        negotiate_hub_name, negotiate_hub_name_for_target, negotiate_response,
+        handle_client_message, hub_name, hub_name_for_target, listening_party_event_group,
+        listening_party_group_key, negotiate_hub_name, negotiate_hub_name_for_target,
+        negotiate_response, search_hub_payload, transfer_metrics,
         update_listening_party_membership, EventRecord, MAX_LISTENING_PARTY_GROUPS_PER_CONNECTION,
     };
+    use crate::{SearchRecord, TransferQueue};
+
+    fn signalr_payload(frame: &[u8]) -> serde_json::Value {
+        assert_eq!(frame[0], 0x81);
+        let length = usize::from(frame[1] & 0x7f);
+        assert_eq!(frame.len(), 2 + length);
+        let text = std::str::from_utf8(&frame[2..]).expect("signalr text frame");
+        serde_json::from_str(text.trim_end_matches('\x1e')).expect("signalr json")
+    }
 
     #[test]
     fn target_hub_routes_are_explicitly_bounded() {
@@ -650,13 +681,107 @@ mod tests {
     }
 
     #[test]
-    fn negotiation_advertises_json_websocket_transport() {
+    fn negotiation_advertises_only_implemented_json_websocket_transport() {
         let response = negotiate_response();
         let body = serde_json::from_str::<serde_json::Value>(&response.body).expect("json");
         assert_eq!(response.status, "200 OK");
         assert_eq!(body["negotiateVersion"], 1);
+        assert_eq!(
+            body["availableTransports"].as_array().map(Vec::len),
+            Some(1)
+        );
         assert_eq!(body["availableTransports"][0]["transport"], "WebSockets");
         assert_eq!(body["availableTransports"][0]["transferFormats"][0], "Text");
+    }
+
+    #[test]
+    fn search_hub_payload_omits_response_records() {
+        let search = SearchRecord {
+            id: "search-1".to_owned(),
+            token: 1,
+            query: "parity".to_owned(),
+            target: "global",
+            target_name: None,
+            status: "active",
+            results: Vec::new(),
+            raw_response_count: 0,
+            filtered_out_count: 0,
+            ignored_result_count: 0,
+            hidden_locked_count: 0,
+            fallback_attempts: 0,
+            expires_at: 1,
+            created_at: 1,
+            updated_at: 1,
+        };
+        let payload = search_hub_payload(&search).expect("search hub payload");
+        assert_eq!(payload["responses"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn metrics_match_target_json_naming() {
+        let transfers = TransferQueue {
+            entries: Vec::new(),
+            next_id: 1,
+            next_token: 1,
+            history_limit: 0,
+            events_path: std::path::PathBuf::new(),
+            state_path: std::path::PathBuf::new(),
+            events_error: None,
+            state_error: None,
+            updated_at: 0,
+        };
+        let metrics = transfer_metrics(&transfers);
+        assert!(metrics.get("Downloads").is_none());
+        assert_eq!(metrics["downloads"]["inProgress"]["files"], 0);
+        assert_eq!(metrics["downloads"]["queued"]["bytes"], 0);
+        assert_eq!(metrics["uploads"]["completed"]["failed"], 0);
+    }
+
+    #[tokio::test]
+    async fn hub_actions_match_signalr_invocation_contract() {
+        let mut groups = HashSet::new();
+        let mut writer = Vec::new();
+        handle_client_message(
+            &mut writer,
+            "application",
+            &mut groups,
+            r#"{"type":1,"invocationId":"1","target":"Refresh","arguments":[]}"#,
+        )
+        .await
+        .expect("unknown action response");
+        let payload = signalr_payload(&writer);
+        assert_eq!(payload["type"], 3);
+        assert_eq!(payload["invocationId"], "1");
+        assert_eq!(payload["error"], "Unknown hub method");
+
+        let mut writer = Vec::new();
+        handle_client_message(
+            &mut writer,
+            "listening-party",
+            &mut groups,
+            r#"{"type":1,"invocationId":"2","target":"JoinParty","arguments":[" pod "," channel "]}"#,
+        )
+        .await
+        .expect("join action response");
+        let payload = signalr_payload(&writer);
+        assert_eq!(payload["type"], 3);
+        assert_eq!(payload["invocationId"], "2");
+        assert!(payload["result"].is_null());
+        assert!(groups.contains("party:pod:channel"));
+
+        let mut writer = Vec::new();
+        handle_client_message(
+            &mut writer,
+            "listening-party",
+            &mut groups,
+            r#"{"type":1,"invocationId":"3","target":"JoinParty","arguments":["pod"]}"#,
+        )
+        .await
+        .expect("invalid action response");
+        let payload = signalr_payload(&writer);
+        assert_eq!(payload["type"], 3);
+        assert_eq!(payload["invocationId"], "3");
+        assert_eq!(payload["error"], "podId and channelId are required");
     }
 
     #[test]

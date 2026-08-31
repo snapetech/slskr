@@ -306,6 +306,18 @@ relay certification, and the remaining target-specific workflow validations
 are still required. Parity is **not achieved** under the universal
 replacement contract.
 
+**2026-08-31 SignalR hub parity slice**: the replacement now uses the real
+ `@microsoft/signalr` client for target hub topics instead of routing those
+ topics through the native event-feed shim. The server implements the frozen
+ legacy metrics hub and native SongID, listening-party, and transfer hubs with
+ explicit profile routing; listening-party Join/Leave completions and unknown
+ method errors are covered by Rust tests; search hub updates are response-free;
+ metrics use the target's camelCase JSON shape; token-authenticated startup,
+ profile-specific initial events, live search creation, and daemon replacement
+ reconnect all pass with the actual SignalR client. This closes the former hub
+ implementation gap but does not by itself close the universal replacement
+ contract's complete fresh transport/lifecycle/UI evidence gate.
+
 **2026-08-03 reclassification**: `scripts/audit-parity-manifest.py`'s
 `api_entries()` hardcoded every `security-authorization` case as
 `needs-proof` unconditionally -- unlike the `configuration` workstream, there

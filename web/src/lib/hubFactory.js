@@ -1,9 +1,24 @@
-import { rootUrl } from '../config';
+import { hubBaseUrl, rootUrl } from '../config';
 import { getToken, isPassthroughEnabled } from './token';
+import {
+  HubConnectionBuilder,
+  JsonHubProtocol,
+  LogLevel,
+} from '@microsoft/signalr';
 
 const RECONNECT_DELAYS_MS = [
   0, 100, 250, 500, 1_000, 2_000, 3_000, 5_000, 5_000, 5_000, 5_000, 5_000,
 ];
+
+const SIGNALR_HUB_TOPICS = new Set([
+  'application',
+  'logs',
+  'search',
+  'metrics',
+  'songid',
+  'listening-party',
+  'transfers',
+]);
 
 const topicAliases = {
   application: new Set(['application', 'session']),
@@ -224,7 +239,21 @@ class WebSocketHubConnection {
   }
 }
 
-export const createHubConnection = ({ topic }) => new WebSocketHubConnection(topic);
+const createSignalRHubConnection = (topic) =>
+  new HubConnectionBuilder()
+    .withUrl(`${hubBaseUrl}/${topic}`, {
+      accessTokenFactory: isPassthroughEnabled() ? undefined : getToken,
+      withCredentials: true,
+    })
+    .withAutomaticReconnect(RECONNECT_DELAYS_MS)
+    .withHubProtocol(new JsonHubProtocol())
+    .configureLogging(LogLevel.Warning)
+    .build();
+
+export const createHubConnection = ({ topic }) =>
+  SIGNALR_HUB_TOPICS.has(topic)
+    ? createSignalRHubConnection(topic)
+    : new WebSocketHubConnection(topic);
 
 export const createApplicationHubConnection = () =>
   createHubConnection({ topic: 'application' });
@@ -238,6 +267,9 @@ export const createRoomsHubConnection = () => createHubConnection({ topic: 'room
 
 export const createSearchHubConnection = () =>
   createHubConnection({ topic: 'search' });
+
+export const createMetricsHubConnection = () =>
+  createHubConnection({ topic: 'metrics' });
 
 export const createSongIdHubConnection = () =>
   createHubConnection({ topic: 'songid' });

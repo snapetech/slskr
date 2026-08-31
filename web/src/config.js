@@ -8,6 +8,7 @@ const rootUrl =
       ? `http://localhost:${developmentPort}${urlBase}`
       : urlBase;
 const apiBaseUrl = `${rootUrl}/api/v0`;
+const hubBaseUrl = `${rootUrl}/hub`;
 const tokenKey = 'slskr-token';
 const tokenPassthroughValue = 'n/a';
 const activeChatKey = 'slskr-active-chat';
@@ -19,6 +20,7 @@ export {
   activeRoomKey,
   activeUserInfoKey,
   apiBaseUrl,
+  hubBaseUrl,
   rootUrl,
   tokenKey,
   tokenPassthroughValue,

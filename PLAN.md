@@ -16,10 +16,16 @@ server, bundled local dashboard, bearer-token/browser-cookie auth, CSRF origin
 checks for protected mutating routes, share/search/browse/transfer/message/
 room/user/social/library/runtime projections, `/api/events` polling, and
 `/api/events/ws` WebSocket events. The web UI and SDKs use the REST API and the
-plain WebSocket event feed. Target-compatible SignalR JSON hubs are being
-backfilled for frozen slskd/slskdN clients; exact hub event/action parity remains
-a release gate. GraphQL, SSE fallback, clustering, sharding, gRPC, Redis/Postgres
-cache layers, and HTTP/2 performance claims are descoped.
+plain WebSocket event feed for native messages and rooms. Target-compatible
+SignalR JSON WebSocket hubs are implemented for the frozen slskd/slskdN
+application, logs, search, metrics, SongID, listening-party, and transfer
+surfaces; profile routing, hub actions/errors, response-free search broadcasts,
+metrics naming, token authentication, and automatic reconnect have live proof.
+The broader universal replacement gate still requires the complete fresh
+transport, lifecycle, and side-by-side UI evidence described in
+`docs/parity/universal-replacement-acceptance.md`. GraphQL, SSE fallback,
+clustering, sharding, gRPC, Redis/Postgres cache layers, and HTTP/2 performance
+claims are descoped.
 
 Persistence is intentionally default-off, but no longer only proof-of-life.
 SQLite write-through and startup hydration exist for search lifecycle/results,
