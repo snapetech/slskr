@@ -17,7 +17,7 @@ use std::sync::{Mutex, OnceLock};
 
 use aes::Aes256;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
-use cbc::cipher::{block_padding::Pkcs7, BlockEncryptMut, KeyIvInit};
+use cbc::cipher::{block_padding::Pkcs7, BlockModeEncrypt, KeyIvInit};
 use ring::{hmac, pbkdf2};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -1263,7 +1263,7 @@ fn credential_for_aes(secret: &str, agent_name: &str, token: &str) -> String {
     let key = derive_relay_key(secret, agent_name);
     let encrypted = Aes256CbcEnc::new_from_slices(&key[..32], &key[32..])
         .expect("relay credential key and IV have fixed valid lengths")
-        .encrypt_padded_vec_mut::<Pkcs7>(token.as_bytes());
+        .encrypt_padded_vec::<Pkcs7>(token.as_bytes());
     base62_encode(&encrypted)
 }
 
