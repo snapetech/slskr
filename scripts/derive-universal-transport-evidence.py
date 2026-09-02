@@ -232,7 +232,7 @@ def transport_lifecycle_result(
     passed = [
         candidate
         for candidate in observed
-        if rows[candidate].get("status") == "fail"
+        if rows[candidate].get("status") in {"ok", "fail"}
         and TRANSPORT_LIFECYCLE_DETAIL_TOKENS.get(candidate, "")
         in rows[candidate].get("detail", "")
     ]
@@ -443,10 +443,16 @@ def derive(
             target_records: dict[str, Any] = {}
             for scenario, candidates in scenarios.items():
                 passed, observed, detail = transport_lifecycle_result(rows, candidates)
+                lifecycle_detail = detail
+                if observed:
+                    lifecycle_detail = "; ".join(
+                        [detail]
+                        + [rows[check].get("detail", "") for check in observed]
+                    )
                 target_records[scenario] = {
                     "status": "pass" if passed else "fail",
                     "evidenceChecks": observed,
-                    "detail": detail,
+                    "detail": lifecycle_detail,
                 }
                 lifecycle_complete = lifecycle_complete and passed
                 details.append(f"{target}/{scenario}: {detail}")

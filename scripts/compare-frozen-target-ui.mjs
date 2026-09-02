@@ -11,7 +11,7 @@
 
 import { createServer } from 'node:http';
 import { existsSync, createReadStream } from 'node:fs';
-import { access, mkdir, stat } from 'node:fs/promises';
+import { access, mkdir, readFile, stat } from 'node:fs/promises';
 import { extname, join, normalize, resolve } from 'node:path';
 import { createRequire } from 'node:module';
 
@@ -143,12 +143,14 @@ const surfaces = {
     sameOrigin: process.env.SLSKR_REPLACEMENT_SLSKD_UI_SAME_ORIGIN === '1',
     uiRoot: process.env.SLSKR_REPLACEMENT_SLSKD_UI_ROOT,
     profile: 'slskd',
+    runtimeProfile: 'legacy',
   },
   'replacement-slskdn': {
     backendUrl: process.env.SLSKR_REPLACEMENT_SLSKDN_BACKEND_URL,
     sameOrigin: process.env.SLSKR_REPLACEMENT_SLSKDN_UI_SAME_ORIGIN === '1',
     uiRoot: process.env.SLSKR_REPLACEMENT_SLSKDN_UI_ROOT,
     profile: 'slskdn',
+    runtimeProfile: 'native',
   },
 };
 
@@ -224,7 +226,7 @@ const safePath = (root, requestPath) => {
   return join(root, 'index.html');
 };
 
-const startStaticServer = async (root) => {
+const startStaticServer = async (root, runtimeProfile) => {
   const server = createServer(async (request, response) => {
     const url = new URL(request.url || '/', 'http://127.0.0.1');
     let filePath = safePath(root, url.pathname);
@@ -236,6 +238,18 @@ const startStaticServer = async (root) => {
     }
     try {
       const details = await stat(filePath);
+      if (runtimeProfile && filePath === join(root, 'index.html')) {
+        const html = await readFile(filePath, 'utf8');
+        const profileMeta = `<meta name="slskr-runtime-profile" content="${runtimeProfile}">`;
+        const body = html.replace('<head>', `<head>${profileMeta}`);
+        response.writeHead(200, {
+          'cache-control': 'no-store',
+          'content-type': 'text/html; charset=utf-8',
+          'content-length': Buffer.byteLength(body),
+        });
+        response.end(body);
+        return;
+      }
       response.writeHead(200, {
         'cache-control': 'no-store',
         'content-type': contentTypes.get(extname(filePath)) || 'application/octet-stream',
@@ -250,6 +264,45 @@ const startStaticServer = async (root) => {
   await new Promise((resolveListen) => server.listen(0, '127.0.0.1', resolveListen));
   const address = server.address();
   return { origin: `http://127.0.0.1:${address.port}`, server };
+};
+
+const inspectRendered = async (page) => {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return await page.evaluate(() => {
+        const visible = (element) => {
+          const style = window.getComputedStyle(element);
+          const box = element.getBoundingClientRect();
+          return style.visibility !== 'hidden' && style.display !== 'none' && box.width > 0 && box.height > 0;
+        };
+        const text = document.body?.innerText?.replace(/\s+/gu, ' ').trim() || '';
+        const headings = [...document.querySelectorAll('h1,h2,h3,[role="heading"]')]
+          .filter(visible)
+          .map((element) => element.textContent?.replace(/\s+/gu, ' ').trim())
+          .filter(Boolean)
+          .slice(0, 12);
+        const buttons = [...document.querySelectorAll('button,[role="button"]')].filter(visible);
+        const inputs = [...document.querySelectorAll('input,textarea,select')].filter(visible);
+        const links = [...document.querySelectorAll('a[href]')].filter(visible);
+        return {
+          bodyTextPreview: text.slice(0, 1200),
+          buttonCount: buttons.length,
+          headingCount: headings.length,
+          headings,
+          inputCount: inputs.length,
+          linkCount: links.length,
+          pathname: window.location.pathname,
+          title: document.title,
+        };
+      });
+    } catch (error) {
+      if (attempt === 2 || !String(error?.message || error).includes('Execution context was destroyed')) {
+        throw error;
+      }
+      await page.waitForTimeout(100);
+    }
+  }
+  throw new Error('render inspection did not complete');
 };
 
 const responseShape = (method, url, status, contentType) => ({
@@ -271,6 +324,18 @@ const captureSurface = async (browser, surface, workflow, server) => {
     viewport: { width: 1440, height: 1000 },
   });
   const page = await context.newPage();
+  if (surface.runtimeProfile) {
+    await page.addInitScript((runtimeProfile) => {
+      const meta = document.createElement('meta');
+      meta.name = 'slskr-runtime-profile';
+      meta.content = runtimeProfile;
+      const nativeQuerySelector = Document.prototype.querySelector;
+      Document.prototype.querySelector = function querySelector(selector) {
+        const result = nativeQuerySelector.call(this, selector);
+        return result || selector !== 'meta[name="slskr-runtime-profile"]' ? result : meta;
+      };
+    }, surface.runtimeProfile);
+  }
   const apiResponses = [];
   const pendingApiRequests = new Set();
   let lastApiActivityAt = Date.now();
@@ -431,32 +496,7 @@ const captureSurface = async (browser, surface, workflow, server) => {
     navigationError = error.message;
   }
 
-  const rendered = await page.evaluate(() => {
-    const visible = (element) => {
-      const style = window.getComputedStyle(element);
-      const box = element.getBoundingClientRect();
-      return style.visibility !== 'hidden' && style.display !== 'none' && box.width > 0 && box.height > 0;
-    };
-    const text = document.body?.innerText?.replace(/\s+/gu, ' ').trim() || '';
-    const headings = [...document.querySelectorAll('h1,h2,h3,[role="heading"]')]
-      .filter(visible)
-      .map((element) => element.textContent?.replace(/\s+/gu, ' ').trim())
-      .filter(Boolean)
-      .slice(0, 12);
-    const buttons = [...document.querySelectorAll('button,[role="button"]')].filter(visible);
-    const inputs = [...document.querySelectorAll('input,textarea,select')].filter(visible);
-    const links = [...document.querySelectorAll('a[href]')].filter(visible);
-    return {
-      bodyTextPreview: text.slice(0, 1200),
-      buttonCount: buttons.length,
-      headingCount: headings.length,
-      headings,
-      inputCount: inputs.length,
-      linkCount: links.length,
-      pathname: window.location.pathname,
-      title: document.title,
-    };
-  });
+  const rendered = await inspectRendered(page);
 
   const errors = [...pageErrors, ...consoleErrors];
   const actions = [
@@ -606,7 +646,7 @@ const main = async () => {
   for (const [name, surface] of Object.entries(surfaces)) {
     servers[name] = surface.sameOrigin
       ? { origin: surface.backendUrl, server: null }
-      : await startStaticServer(resolve(surface.uiRoot));
+      : await startStaticServer(resolve(surface.uiRoot), surface.profile);
   }
   let browser;
   try {

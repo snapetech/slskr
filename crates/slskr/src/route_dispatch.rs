@@ -45,6 +45,35 @@ fn parse_download_filter_update(body: &str) -> Result<Vec<String>, String> {
     Ok(normalized)
 }
 
+fn share_grant_permissions_from_request(body: &str, versioned: bool) -> String {
+    let payload = serde_json::from_str::<serde_json::Value>(body).unwrap_or_default();
+    if !versioned {
+        return extract_json_string_field(body, "permissions")
+            .unwrap_or_else(|| "download,stream".to_owned());
+    }
+
+    let bool_field = |camel: &str, snake: &str, default: bool| {
+        payload
+            .get(camel)
+            .or_else(|| payload.get(snake))
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(default)
+    };
+    let permissions = [
+        bool_field("allowDownload", "allow_download", true).then_some("download"),
+        bool_field("allowStream", "allow_stream", true).then_some("stream"),
+        bool_field("allowReshare", "allow_reshare", false).then_some("reshare"),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>();
+    if permissions.is_empty() {
+        "none".to_owned()
+    } else {
+        permissions.join(",")
+    }
+}
+
 async fn update_download_filter(state: &AppState, body: &str) -> HttpResponse {
     if !effective_remote_configuration(state) {
         return controller_forbidden_response();
@@ -1661,8 +1690,8 @@ async fn route_dispatch_group_0(
             };
             Ok(routing::ok_response(
                 serde_json::json!({
-                    "impl": "slskr",
-                    "compat": "legacy",
+                    "impl": "slskdn",
+                    "compat": "slskd",
                     "version": APP_VERSION,
                     "soulseek": {
                         "connected": connected,
@@ -9591,7 +9620,11 @@ async fn route_dispatch_group_4(
                     rollback_collections_if_unchanged(state, previous, &mutated).await;
                     return Ok(routing::service_unavailable_response(&error));
                 }
-                Ok(routing::ok_response(json))
+                if route.path.starts_with("/api/v0/") {
+                    Ok(routing::no_content_response())
+                } else {
+                    Ok(routing::ok_response(json))
+                }
             } else {
                 drop(collections);
                 Ok(routing::not_found_response())
@@ -9600,10 +9633,17 @@ async fn route_dispatch_group_4(
         ("PUT", path) if collection_item_action_ids(path).is_some() => {
             let (item_id, requested_collection_id) =
                 collection_item_action_ids(path).expect("guarded collection item path");
+            let compatibility_contract = route.path.starts_with("/api/v0/");
+            let content_id = extract_json_string_field(body, "contentId")
+                .or_else(|| extract_json_string_field(body, "content_id"));
             let artist = extract_json_string_field(body, "artist");
             let title = extract_json_string_field(body, "title");
             let kind = extract_json_string_field(body, "kind")
                 .or_else(|| extract_json_string_field(body, "mediaKind"));
+            let file_name = extract_json_string_field(body, "fileName");
+            let album = extract_json_string_field(body, "album");
+            let content_hash = extract_json_string_field(body, "contentHash")
+                .or_else(|| extract_json_string_field(body, "sha256"));
 
             let caller_id = utils::authenticated_caller_id(
                 &state.config,
@@ -9630,13 +9670,36 @@ async fn route_dispatch_group_4(
                 return Ok(routing::not_found_response());
             }
             let previous = collections.clone();
-            if let Some(item) = collections.update_item(item_id, artist, title, kind) {
+            let updated = if compatibility_contract {
+                collections.update_item_contract(
+                    item_id,
+                    content_id,
+                    artist,
+                    title,
+                    kind,
+                    file_name,
+                    album,
+                    content_hash,
+                )
+            } else {
+                collections.update_item(item_id, artist, title, kind)
+            };
+            if let Some(item) = updated {
                 let record = collection_id
                     .as_deref()
                     .and_then(|id| collections.get(id))
                     .expect("updated item belonged to an existing collection");
                 let mutated = collections.clone();
-                let json = item.json();
+                let json = if compatibility_contract {
+                    let ordinal = record
+                        .items
+                        .iter()
+                        .position(|candidate| candidate.id == item.id)
+                        .unwrap_or_default();
+                    item.native_json(&record.id, ordinal)
+                } else {
+                    item.json()
+                };
                 drop(collections);
                 if let Err(error) = persist_collection_checked(state, &record).await {
                     rollback_collections_if_unchanged(state, previous, &mutated).await;
@@ -9740,24 +9803,31 @@ async fn route_dispatch_group_4(
             }
         }
         ("GET", path) if wishlist_item_action_id(path, "/searches").is_some() => {
-            let item_id =
+            let requested_item_id =
                 wishlist_item_action_id(path, "/searches").expect("guarded wishlist history path");
-            if state.wishlist.read().await.get_item(item_id).is_none() {
+            let native = route.path.starts_with("/api/v0/");
+            let wishlist = state.wishlist.read().await;
+            let Some(item_id) = wishlist.resolve_item_id(requested_item_id, native) else {
                 return Ok(routing::not_found_response());
-            }
+            };
+            drop(wishlist);
             let searches = state.searches.read().await;
-            let json = searches.wishlist_history_json(item_id, route.query);
+            let json = searches.wishlist_history_json(&item_id, route.query);
             drop(searches);
             Ok(routing::ok_response(json))
         }
         ("GET", path)
             if path.starts_with("/api/wishlist/") && !path.contains("/ignored-results") =>
         {
-            let Some(item_id) = path_segment_after(path, "/api/wishlist/") else {
+            let Some(requested_item_id) = path_segment_after(path, "/api/wishlist/") else {
                 return Ok(routing::not_found_response());
             };
+            let native = route.path.starts_with("/api/v0/");
             let wishlist = state.wishlist.read().await;
-            let Some(item) = wishlist.get_item(item_id) else {
+            let Some(item_id) = wishlist.resolve_item_id(requested_item_id, native) else {
+                return Ok(routing::not_found_response());
+            };
+            let Some(item) = wishlist.get_item(&item_id) else {
                 return Ok(routing::not_found_response());
             };
             Ok(routing::ok_response(
@@ -9784,11 +9854,15 @@ async fn route_dispatch_group_4(
             Ok(routing::no_content_response())
         }
         ("POST", path) if wishlist_item_action_id(path, "/mark-viewed").is_some() => {
-            let item_id = wishlist_item_action_id(path, "/mark-viewed")
+            let requested_item_id = wishlist_item_action_id(path, "/mark-viewed")
                 .expect("guarded wishlist viewed path");
+            let native = route.path.starts_with("/api/v0/");
             let mut wishlist = state.wishlist.write().await;
+            let Some(item_id) = wishlist.resolve_item_id(requested_item_id, native) else {
+                return Ok(routing::not_found_response());
+            };
             let previous = wishlist.clone();
-            let Some(item) = wishlist.mark_viewed(item_id) else {
+            let Some(item) = wishlist.mark_viewed(&item_id) else {
                 return Ok(routing::not_found_response());
             };
             let mutated = wishlist.clone();
@@ -9803,12 +9877,17 @@ async fn route_dispatch_group_4(
             Ok(routing::no_content_response())
         }
         ("GET", path) if wishlist_ignored_results_item_id(path).is_some() => {
-            let item_id = wishlist_ignored_results_item_id(path).expect("guarded ignored path");
+            let requested_item_id =
+                wishlist_ignored_results_item_id(path).expect("guarded ignored path");
+            let compatibility_contract = route.path.starts_with("/api/v0/");
             let wishlist = state.wishlist.read().await;
-            let Some(rules) = wishlist.list_ignored_results(item_id) else {
+            let Some(item_id) = wishlist.resolve_item_id(requested_item_id, compatibility_contract)
+            else {
                 return Ok(routing::not_found_response());
             };
-            let compatibility_contract = route.path.starts_with("/api/v0/");
+            let Some(rules) = wishlist.list_ignored_results(&item_id) else {
+                return Ok(routing::not_found_response());
+            };
             let json = serde_json::Value::Array(
                 rules
                     .iter()
@@ -9825,7 +9904,9 @@ async fn route_dispatch_group_4(
             Ok(routing::ok_response(json))
         }
         ("POST", path) if wishlist_ignored_results_item_id(path).is_some() => {
-            let item_id = wishlist_ignored_results_item_id(path).expect("guarded ignored path");
+            let requested_item_id =
+                wishlist_ignored_results_item_id(path).expect("guarded ignored path");
+            let compatibility_contract = route.path.starts_with("/api/v0/");
             let username = extract_json_string_field(body, "username").unwrap_or_default();
             let directory = extract_json_string_field(body, "directory").unwrap_or_default();
             if username.trim().is_empty() || normalize_wishlist_directory(&directory).is_empty() {
@@ -9839,8 +9920,17 @@ async fn route_dispatch_group_4(
             }
 
             let mut wishlist = state.wishlist.write().await;
+            let Some(item_id) = wishlist.resolve_item_id(requested_item_id, compatibility_contract)
+            else {
+                return Ok(routing::not_found_response());
+            };
             let previous = wishlist.clone();
-            let (rule, created) = match wishlist.ignore_result(item_id, &username, &directory) {
+            let (rule, created) = match wishlist.ignore_result(
+                &item_id,
+                &username,
+                &directory,
+                compatibility_contract,
+            ) {
                 Ok(result) => result,
                 Err("not_found") => return Ok(routing::not_found_response()),
                 Err("capacity") => {
@@ -9887,7 +9977,6 @@ async fn route_dispatch_group_4(
                     ));
                 }
             }
-            let compatibility_contract = route.path.starts_with("/api/v0/");
             let json = if compatibility_contract {
                 rule.native_json()
             } else {
@@ -9901,17 +9990,22 @@ async fn route_dispatch_group_4(
             }
         }
         ("DELETE", path) if wishlist_ignored_result_ids(path).is_some() => {
-            let (item_id, rule_id) =
+            let (requested_item_id, rule_id) =
                 wishlist_ignored_result_ids(path).expect("guarded ignored rule path");
+            let compatibility_contract = route.path.starts_with("/api/v0/");
             let mut wishlist = state.wishlist.write().await;
+            let Some(item_id) = wishlist.resolve_item_id(requested_item_id, compatibility_contract)
+            else {
+                return Ok(routing::not_found_response());
+            };
             let previous = wishlist.clone();
-            if !wishlist.delete_ignored_result(item_id, rule_id) {
+            if !wishlist.delete_ignored_result(&item_id, rule_id) {
                 return Ok(routing::not_found_response());
             }
             let mutated = wishlist.clone();
             drop(wishlist);
             if let Err(error) =
-                persist_wishlist_ignored_result_delete_checked(state, item_id, rule_id).await
+                persist_wishlist_ignored_result_delete_checked(state, &item_id, rule_id).await
             {
                 rollback_wishlist_if_unchanged(state, previous, &mutated).await;
                 return Ok(wishlist_storage_error_response(
@@ -9922,22 +10016,31 @@ async fn route_dispatch_group_4(
             Ok(routing::no_content_response())
         }
         ("DELETE", path) if path.starts_with("/api/wishlist/") => {
-            let Some(item_id) = path_segment_after(path, "/api/wishlist/") else {
+            let Some(requested_item_id) = path_segment_after(path, "/api/wishlist/") else {
                 return Ok(routing::not_found_response());
             };
+            let compatibility_contract = route.path.starts_with("/api/v0/");
             let mut wishlist = state.wishlist.write().await;
+            let Some(item_id) = wishlist.resolve_item_id(requested_item_id, compatibility_contract)
+            else {
+                return Ok(if compatibility_contract {
+                    routing::no_content_response()
+                } else {
+                    routing::not_found_response()
+                });
+            };
             let previous = wishlist.clone();
-            if let Some(record) = wishlist.remove_item(item_id) {
+            if let Some(record) = wishlist.remove_item(&item_id) {
                 let mutated = wishlist.clone();
                 let json = serde_json::json!({
                     "deleted": true,
-                    "item_id": item_id,
+                    "item_id": requested_item_id,
                     "remaining": record.items.len(),
                     "updated_at": record.updated_at,
                 })
                 .to_string();
                 drop(wishlist);
-                if let Err(error) = persist_wishlist_item_delete_checked(state, item_id).await {
+                if let Err(error) = persist_wishlist_item_delete_checked(state, &item_id).await {
                     rollback_wishlist_if_unchanged(state, previous, &mutated).await;
                     return Ok(wishlist_storage_error_response(
                         route.path.starts_with("/api/v0/"),
@@ -10931,10 +11034,15 @@ async fn route_dispatch_group_4(
             }
             let compatibility_contract = route.path.starts_with("/api/v0/");
             let id = compatibility_contract.then(|| uuid::Uuid::new_v4().to_string());
+            let permissions = share_grant_permissions_from_request(body, compatibility_contract);
             let mut grants = state.share_grants.write().await;
             let previous = grants.clone();
-            let Some((record, created)) = grants.create_with_contract(id, collection_id, username)
-            else {
+            let Some((record, created)) = grants.create_with_contract_and_permissions(
+                id,
+                collection_id,
+                username,
+                &permissions,
+            ) else {
                 return Ok(routing::service_unavailable_response(
                     "share grant capacity is full",
                 ));
@@ -13076,16 +13184,26 @@ async fn route_dispatch_group_5(
         }
 
         ("PUT", "/api/wishlist/bulk-filter") => {
-            let ids = extract_json_string_array_field(body, "ids")
+            let requested_ids = extract_json_string_array_field(body, "ids")
                 .or_else(|| extract_json_string_array_field(body, "itemIds"))
                 .unwrap_or_default();
-            if ids.is_empty() {
+            if requested_ids.is_empty() {
                 return Ok(routing::bad_request_response(
                     "At least one wishlist item ID is required",
                 ));
             }
             let filter = extract_json_string_field(body, "filter").unwrap_or_default();
+            let compatibility_contract = route.path.starts_with("/api/v0/");
             let mut wishlist = state.wishlist.write().await;
+            let ids = requested_ids
+                .iter()
+                .map(|id| wishlist.resolve_item_id(id, compatibility_contract))
+                .collect::<Option<Vec<_>>>()
+                .unwrap_or_default();
+            if ids.is_empty() {
+                drop(wishlist);
+                return Ok(routing::not_found_response());
+            }
             let previous = wishlist.clone();
             let updated = match wishlist.update_filters(&ids, filter) {
                 Ok(items) => items,
@@ -13114,7 +13232,7 @@ async fn route_dispatch_group_5(
         }
 
         ("PUT", path) if path.starts_with("/api/wishlist/") => {
-            let Some(item_id) = path_segment_after(path, "/api/wishlist/") else {
+            let Some(requested_item_id) = path_segment_after(path, "/api/wishlist/") else {
                 return Ok(routing::not_found_response());
             };
             let compatibility_contract = route.path.starts_with("/api/v0/");
@@ -13160,9 +13278,13 @@ async fn route_dispatch_group_5(
                 ));
             }
             let mut wishlist = state.wishlist.write().await;
+            let Some(item_id) = wishlist.resolve_item_id(requested_item_id, compatibility_contract)
+            else {
+                return Ok(routing::not_found_response());
+            };
             let previous = wishlist.clone();
             if let Some(item) = wishlist.update_item(
-                item_id,
+                &item_id,
                 artist,
                 title,
                 kind,
@@ -13492,7 +13614,7 @@ async fn route_dispatch_group_6(
 
          // ADDITIONAL MISSING GET ENDPOINTS (Phase 5)
          ("GET", "/api/source-providers") => Ok(routing::ok_response(
-             source_provider_catalog_json(state.config.virtual_soulfind_v2_enabled),
+             source_provider_catalog_json(state.config.acquisition_planning_enabled),
          )),
 
          ("GET", "/api/discovery") => {
@@ -17449,19 +17571,6 @@ async fn route_dispatch_group_7(
         }
 
         ("POST", "/api/musicbrainz/targets") => {
-            if route.path.starts_with("/api/v0/")
-                && extract_json_string_field(body, "target").is_none()
-                && extract_json_string_field(body, "mbid").is_none()
-                && extract_json_string_field(body, "artist").is_none()
-                && extract_json_string_field(body, "title").is_none()
-                && extract_json_string_field(body, "release").is_none()
-                && extract_json_string_field(body, "releaseId").is_none()
-                && extract_json_string_field(body, "recordingId").is_none()
-                && extract_json_string_field(body, "discogsReleaseId").is_none()
-            {
-                return Ok(routing::not_found_response());
-            }
-
             if route.path.starts_with("/api/v0/") {
                 let request = match serde_json::from_str::<serde_json::Value>(body) {
                     Ok(serde_json::Value::Object(request)) => request,
@@ -17485,6 +17594,11 @@ async fn route_dispatch_group_7(
                     .map(str::trim)
                     .filter(|value| !value.is_empty())
                     .map(str::to_owned);
+                if release_id.is_none() && recording_id.is_none() && discogs_release_id.is_none() {
+                    return Ok(routing::bad_request_response(
+                        "Provide at least one identifier (release, recording, or discogs).",
+                    ));
+                }
                 let settings = state.integration_settings.read().await.musicbrainz.clone();
 
                 let mut album = None;
@@ -17508,9 +17622,12 @@ async fn route_dispatch_group_7(
                                 );
                                 cached_album.clone()
                             } else {
-                                return Ok(routing::service_unavailable_response(&format!(
-                                    "MusicBrainz lookup failed: {error}"
-                                )));
+                                ::tracing::warn!(
+                                    release_id,
+                                    error = %error,
+                                    "MusicBrainz release lookup failed; treating target as unresolved"
+                                );
+                                None
                             }
                         }
                     };
@@ -17552,9 +17669,12 @@ async fn route_dispatch_group_7(
                                     );
                                     cached_track.clone()
                                 } else {
-                                    return Ok(routing::service_unavailable_response(&format!(
-                                        "MusicBrainz lookup failed: {error}"
-                                    )));
+                                    ::tracing::warn!(
+                                        recording_id,
+                                        error = %error,
+                                        "MusicBrainz recording lookup failed; treating target as unresolved"
+                                    );
+                                    None
                                 }
                             }
                         }
@@ -17639,9 +17759,14 @@ async fn route_dispatch_group_7(
                 && path.ends_with("/search")
                 && wishlist_search_item_id(path).is_some() =>
         {
-            let item_id = wishlist_search_item_id(path).expect("guarded wishlist search path");
+            let requested_item_id =
+                wishlist_search_item_id(path).expect("guarded wishlist search path");
+            let native = route.path.starts_with("/api/v0/");
             let wishlist = state.wishlist.read().await;
-            let Some(item) = wishlist.get_item(item_id) else {
+            let Some(item_id) = wishlist.resolve_item_id(requested_item_id, native) else {
+                return Ok(routing::not_found_response());
+            };
+            let Some(item) = wishlist.get_item(&item_id) else {
                 drop(wishlist);
                 return Ok(routing::not_found_response());
             };
@@ -17664,7 +17789,7 @@ async fn route_dispatch_group_7(
             let previous_searches = searches.clone();
             let outcome = match searches.create_scheduled_wishlist_for_item(
                 query,
-                Some(item_id.to_owned()),
+                Some(item_id.clone()),
                 DEFAULT_SEARCH_TTL_SECONDS,
             ) {
                 Ok(outcome) => outcome,
@@ -17673,7 +17798,11 @@ async fn route_dispatch_group_7(
             let record = outcome.record;
             let evicted = outcome.evicted;
             let response = serde_json::json!({
-                "item_id": item_id,
+                "item_id": if native {
+                    native_wishlist_item_id(&item_id)
+                } else {
+                    item_id.clone()
+                },
                 "search_started": true,
                 "status": "searching",
                 "search_id": record.id,

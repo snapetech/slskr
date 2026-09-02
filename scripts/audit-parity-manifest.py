@@ -42,6 +42,9 @@ EXPECTED = {
     "live-interop-target-features": 62,
 }
 
+REACT_WEB_UI_ROUTE_COUNT = 42
+REACT_WEB_UI_CASE_COUNT = REACT_WEB_UI_ROUTE_COUNT * 2
+
 UNMATERIALIZED_WORKSTREAMS: list[dict[str, str]] = []
 
 UNIVERSAL_BIDIRECTIONAL_TRANSPORTS = (
@@ -5097,7 +5100,8 @@ def universal_transport_failures(
                         token = UNIVERSAL_TRANSPORT_LIFECYCLE_DETAIL_TOKENS.get(
                             evidence_check, ""
                         )
-                        if not token or token not in record.get("detail", ""):
+                        lifecycle_detail = case.get("detail", "") if isinstance(case, dict) else ""
+                        if not token or token not in lifecycle_detail:
                             failures.append(
                                 f"transport evidence check {check_id} has unverified lifecycle detail {evidence_check}"
                             )
@@ -5461,9 +5465,9 @@ def strict_universal_failures(
                 for route in react_routes
                 if isinstance(route, dict)
             }
-            if len(react_routes) != 82 or len(route_pairs) != 82:
+            if len(react_routes) != REACT_WEB_UI_CASE_COUNT or len(route_pairs) != REACT_WEB_UI_CASE_COUNT:
                 failures.append(
-                    "React UI live evidence must cover all 41 routes at desktop and mobile viewports"
+                    f"React UI live evidence must cover all {REACT_WEB_UI_ROUTE_COUNT} routes at desktop and mobile viewports"
                 )
             react_statuses = [
                 response
@@ -5527,7 +5531,7 @@ def strict_universal_failures(
             ([react_ui_evidence] if react_ui_evidence else [])
             + (react_ui_scenario_evidence or []),
             label="React",
-            expected_routes=82,
+            expected_routes=REACT_WEB_UI_CASE_COUNT,
         )
     )
     failures.extend(universal_target_ui_comparison_failures(target_ui_comparison_evidence))
@@ -5723,7 +5727,7 @@ def main() -> None:
         type=Path,
         help=(
             "Explicit React UI audit JSON for --strict-universal. It must be a "
-            "fresh live-backend audit covering all 41 routes at both viewports."
+            f"fresh live-backend audit covering all {REACT_WEB_UI_ROUTE_COUNT} routes at both viewports."
         ),
     )
     parser.add_argument(

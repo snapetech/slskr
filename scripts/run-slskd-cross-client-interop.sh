@@ -212,8 +212,12 @@ for _ in $(seq 1 "${SLSKR_CROSS_CLIENT_DISTRIBUTED_READY_ATTEMPTS:-30}"); do
   sleep "${SLSKR_CROSS_CLIENT_DISTRIBUTED_READY_DELAY_SECONDS:-1}"
 done
 
+# The cross-client proof uses the plain local controller endpoint.  Disable
+# the default HTTPS listener so its fixed 5031 fallback cannot collide with a
+# separately running slskR instance.
 SLSK_SERVER="$server_endpoint" \
 SLSKR_HTTP_BIND="127.0.0.1:$slskr_http_port" \
+SLSKD_NO_HTTPS=true \
 SLSKR_STATE_DIR="$slskr_state" \
 SLSK_USERNAME="$slskr_username" \
 SLSK_PASSWORD="$slskr_password" \
@@ -349,6 +353,67 @@ elif [[ "$distributed_target_ready" != true ]]; then
   record_check protocol-slskr-distributed-peer-slskd fail "detail=target distributed network not ready after ${SLSKR_CROSS_CLIENT_DISTRIBUTED_READY_ATTEMPTS:-30}s state=${distributed_target_state:0:240}"
 else
   record_check protocol-slskr-distributed-peer-slskd fail "detail=$(tail -n 4 "$distributed_peer_log" 2>/dev/null | tr '\n\t' '  ')"
+fi
+
+# The direct probe above covers replacement -> frozen-target distributed
+# traffic.  The target is also the replacement's configured parent, so its
+# BranchLevel/BranchRoot update is the target -> replacement direction.  Wait
+# for both sides to commit that state before recording the reverse transaction.
+distributed_reverse_ready=false
+for _ in $(seq 1 "${SLSKR_CROSS_CLIENT_DISTRIBUTED_REVERSE_ATTEMPTS:-90}"); do
+  distributed_target_state="$(auth_slskd "http://127.0.0.1:$slskd_http_port/api/v0/application" 2>/dev/null || true)"
+  distributed_reverse_state="$(auth_rust "http://127.0.0.1:$slskr_http_port/api/v0/application" 2>/dev/null || true)"
+  if printf '%s' "$distributed_target_state" | node -e '
+const username = process.argv[1];
+let input = "";
+process.stdin.on("data", chunk => input += chunk);
+process.stdin.on("end", () => {
+  try {
+    const state = JSON.parse(input);
+    const distributed = state.distributedNetwork || state.DistributedNetwork || {};
+    const children = distributed.children || distributed.Children;
+    process.exit(Array.isArray(children) && children.some(child => String(child).toLowerCase() === username.toLowerCase()) ? 0 : 1);
+  } catch {
+    process.exit(1);
+  }
+});
+' "$slskr_username" 2>/dev/null \
+    && printf '%s' "$distributed_reverse_state" | node -e '
+let input = "";
+process.stdin.on("data", chunk => input += chunk);
+process.stdin.on("end", () => {
+  try {
+    const state = JSON.parse(input);
+    const distributed = state.distributedNetwork || state.DistributedNetwork || {};
+    const branchLevel = distributed.branchLevel ?? distributed.BranchLevel;
+    process.exit(Number.isInteger(branchLevel) && branchLevel > 0 ? 0 : 1);
+  } catch {
+    process.exit(1);
+  }
+});
+'; then
+    distributed_reverse_ready=true
+    break
+  fi
+  sleep 1
+done
+if [[ "$distributed_reverse_ready" == true ]]; then
+  distributed_reverse_branch="$(printf '%s' "$distributed_reverse_state" | node -e '
+let input = "";
+process.stdin.on("data", chunk => input += chunk);
+process.stdin.on("end", () => {
+  try {
+    const state = JSON.parse(input);
+    const distributed = state.distributedNetwork || state.DistributedNetwork || {};
+    process.stdout.write(String(distributed.branchLevel ?? distributed.BranchLevel));
+  } catch {}
+});
+')"
+  record_check protocol-slskd-distributed-peer-slskr ok \
+    "target-child=$slskr_username response=branch-info branch-level=$distributed_reverse_branch"
+else
+  record_check protocol-slskd-distributed-peer-slskr fail \
+    "target-child-or-branch-info-not-observed target=$(printf '%s' "$distributed_target_state" | tr '\n\t' ' ' | cut -c1-700) replacement=$(printf '%s' "$distributed_reverse_state" | tr '\n\t' ' ' | cut -c1-700)"
 fi
 
 target_browse="$(auth_slskd "http://127.0.0.1:$slskd_http_port/api/v0/users/$slskr_username/browse" 2>/dev/null || true)"

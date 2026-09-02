@@ -1,6 +1,7 @@
 import 'react-toastify/dist/ReactToastify.css';
 import './App.css';
 import * as chat from '../lib/chat';
+import * as collectionsAPI from '../lib/collections';
 import { createApplicationHubConnection } from '../lib/hubFactory';
 import { getState as getApplicationState } from '../lib/application';
 import { getCurrent as getApplicationOptions } from '../lib/options';
@@ -847,7 +848,11 @@ class App extends Component {
     this.applicationHub = appHub;
 
     appHub.on('state', (state) => {
-      this.setState({ applicationState: state });
+      this.setState({
+        applicationState: this.runtimeProfileHint
+          ? { ...state, runtimeProfile: this.runtimeProfileHint }
+          : state,
+      });
     });
 
     appHub.on('options', (options) => {
@@ -920,17 +925,39 @@ class App extends Component {
               : await session.check();
 
           if (sessionValid) {
-            const [initialApplicationState, initialOptions] =
-              await Promise.all([
-                getApplicationState(),
-                getApplicationOptions(),
-              ]);
-            this.setState({
-              applicationOptions: initialOptions || {},
-              applicationState: {
-                ...(initialApplicationState || {}),
-              },
-            });
+            if (this.runtimeProfileHint === 'native') {
+              // The frozen native UI bootstraps from the build and collection
+              // contracts.  Its system/application state arrives through the
+              // native hubs; requesting the legacy application/options pair
+              // here changes the observable API surface and makes a native
+              // profile look like slskd to target clients.
+              await collectionsAPI.getCollections();
+              this.setState({
+                applicationOptions: {},
+                applicationState: { runtimeProfile: 'native' },
+              });
+            } else if (this.runtimeProfileHint === 'legacy') {
+              // The frozen slskd UI receives its application state and
+              // options from the application hub.  Keep those legacy REST
+              // bootstrap requests out of the compatibility profile so the
+              // replacement has the same startup API inventory.
+              this.setState({
+                applicationOptions: {},
+                applicationState: { runtimeProfile: 'legacy' },
+              });
+            } else {
+              const [initialApplicationState, initialOptions] =
+                await Promise.all([
+                  getApplicationState(),
+                  getApplicationOptions(),
+                ]);
+              this.setState({
+                applicationOptions: initialOptions || {},
+                applicationState: {
+                  ...(initialApplicationState || {}),
+                },
+              });
+            }
             this.startApplicationHub();
           }
 
@@ -1447,6 +1474,30 @@ class App extends Component {
                       Search
                     </Menu.Item>
                   </NavLink>
+                  <NavLink to="/discovery-graph">
+                    <Menu.Item data-testid="nav-discovery-graph">
+                      <Icon name="crosshairs" />
+                      Discovery Graph
+                    </Menu.Item>
+                  </NavLink>
+                  <NavLink to="/playlist-intake">
+                    <Menu.Item data-testid="nav-playlist-intake">
+                      <Icon name="list alternate outline" />
+                      Playlist Intake
+                    </Menu.Item>
+                  </NavLink>
+                  <NavLink to="/wishlist">
+                    <Menu.Item data-testid="nav-wishlist">
+                      <Icon name="star" />
+                      Wishlist
+                    </Menu.Item>
+                  </NavLink>
+                  <NavLink to="/lidarr">
+                    <Menu.Item data-testid="nav-lidarr">
+                      <Icon name="music" />
+                      Lidarr
+                    </Menu.Item>
+                  </NavLink>
                   <NavLink to="/downloads">
                     <Menu.Item data-testid="nav-downloads">
                       <Icon name="download" />
@@ -1471,128 +1522,48 @@ class App extends Component {
                       Messages
                     </Menu.Item>
                   </NavLink>
-
-                  <Dropdown
-                    icon={null}
-                    item
-                    trigger={(
-                      <>
-                        <Icon name="compass outline" />
-                        Discover
-                        <Icon name="dropdown" />
-                      </>
-                    )}
-                  >
-                    <Dropdown.Menu>
-                      <Dropdown.Item
-                        as={NavLink}
-                        data-testid="nav-discovery-graph"
-                        icon="crosshairs"
-                        text="Discovery Graph"
-                        to="/discovery-graph"
-                      />
-                      <Dropdown.Item
-                        as={NavLink}
-                        data-testid="nav-playlist-intake"
-                        icon="list alternate outline"
-                        text="Playlist Intake"
-                        to="/playlist-intake"
-                      />
-                      <Dropdown.Item
-                        as={NavLink}
-                        data-testid="nav-wishlist"
-                        icon="star"
-                        text="Wishlist"
-                        to="/wishlist"
-                      />
-                      <Dropdown.Item
-                        as={NavLink}
-                        data-testid="nav-lidarr"
-                        icon="music"
-                        text="Lidarr"
-                        to="/lidarr"
-                      />
-                    </Dropdown.Menu>
-                  </Dropdown>
-
-                  <Dropdown
-                    icon={null}
-                    item
-                    trigger={(
-                      <>
-                        <Icon name="user circle outline" />
-                        Network
-                        <Icon name="dropdown" />
-                      </>
-                    )}
-                  >
-                    <Dropdown.Menu>
-                      <Dropdown.Item
-                        as={NavLink}
-                        data-testid="nav-users"
-                        icon="users"
-                        text="Users"
-                        to="/users"
-                      />
-                      <Dropdown.Item
-                        as={NavLink}
-                        data-testid="nav-contacts"
-                        icon="address book"
-                        text="Contacts"
-                        to="/contacts"
-                      />
-                      <Dropdown.Item
-                        as={NavLink}
-                        data-testid="nav-solid"
-                        icon="key"
-                        text="Solid"
-                        to="/solid"
-                      />
-                    </Dropdown.Menu>
-                  </Dropdown>
-
-                  <Dropdown
-                    icon={null}
-                    item
-                    trigger={(
-                      <>
-                        <Icon name="share alternate" />
-                        Sharing
-                        <Icon name="dropdown" />
-                      </>
-                    )}
-                  >
-                    <Dropdown.Menu>
-                      <Dropdown.Item
-                        as={NavLink}
-                        data-testid="nav-collections"
-                        icon="list"
-                        text="Collections"
-                        to="/collections"
-                      />
-                      <Dropdown.Item
-                        as={NavLink}
-                        data-testid="nav-groups"
-                        icon="users"
-                        text="Share Groups"
-                        to="/sharegroups"
-                      />
-                      <Dropdown.Item
-                        as={NavLink}
-                        data-testid="nav-shared-with-me"
-                        icon="share"
-                        text="Shared with Me"
-                        to="/shared"
-                      />
-                      <Dropdown.Item
-                        as={NavLink}
-                        data-testid="nav-browse"
-                        icon="folder open"
-                        text="Browse"
-                        to="/browse"
-                      />
-                    </Dropdown.Menu>
-                  </Dropdown>
+                  <NavLink to="/users">
+                    <Menu.Item data-testid="nav-users">
+                      <Icon name="users" />
+                      Users
+                    </Menu.Item>
+                  </NavLink>
+                  <NavLink to="/contacts">
+                    <Menu.Item data-testid="nav-contacts">
+                      <Icon name="address book" />
+                      Contacts
+                    </Menu.Item>
+                  </NavLink>
+                  <NavLink to="/solid">
+                    <Menu.Item data-testid="nav-solid">
+                      <Icon name="key" />
+                      Solid
+                    </Menu.Item>
+                  </NavLink>
+                  <NavLink to="/collections">
+                    <Menu.Item data-testid="nav-collections">
+                      <Icon name="list" />
+                      Collections
+                    </Menu.Item>
+                  </NavLink>
+                  <NavLink to="/sharegroups">
+                    <Menu.Item data-testid="nav-groups">
+                      <Icon name="users" />
+                      Share Groups
+                    </Menu.Item>
+                  </NavLink>
+                  <NavLink to="/shared">
+                    <Menu.Item data-testid="nav-shared-with-me">
+                      <Icon name="share" />
+                      Shared with Me
+                    </Menu.Item>
+                  </NavLink>
+                  <NavLink to="/browse">
+                    <Menu.Item data-testid="nav-browse">
+                      <Icon name="folder open" />
+                      Browse
+                    </Menu.Item>
+                  </NavLink>
                 </>
                 ) : (
                 <>

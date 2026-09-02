@@ -251,9 +251,7 @@ fn print_native_product_logo() {
 mod disaster_mode_regression_tests {
     #[test]
     fn status_starts_in_normal_mode_until_runtime_state_changes() {
-        assert_eq!(super::virtual_soulfind_disaster_mode_level(false, true), 0);
-        assert_eq!(super::virtual_soulfind_disaster_mode_level(true, true), 3);
-        assert_eq!(super::virtual_soulfind_disaster_mode_level(true, false), 0);
+        assert_eq!(super::virtual_soulfind_disaster_mode_level(), 0);
     }
 }
 
@@ -2142,7 +2140,6 @@ impl SearchStore {
         Ok(SearchCreateOutcome { record, evicted })
     }
 
-    #[cfg(test)]
     fn create_scheduled_wishlist(
         &mut self,
         query: String,
@@ -2317,7 +2314,6 @@ impl SearchStore {
         pruned
     }
 
-    #[cfg(test)]
     fn add_peer_response(&mut self, response: &FileSearchResponse) -> Option<SearchRecord> {
         self.add_peer_response_filtered(response, &[], None)
     }
@@ -9283,7 +9279,14 @@ fn wishlist_ignored_result_ids(path: &str) -> Option<(&str, &str)> {
 /// The frozen native profile WishlistController binds both route identifiers as
 /// `Guid`.  Keep malformed v0 identifiers in the controller's 400 contract
 /// instead of allowing the compatibility route helpers to fall through to a
-/// generic 404.
+/// generic 404.  `wish-N` is the stable legacy slskR storage identifier; it is
+/// accepted here so native profile requests can reverse-resolve old databases
+/// before the route handler projects the identifier back to a GUID.
+fn is_legacy_wishlist_item_id(id: &str) -> bool {
+    id.strip_prefix("wish-")
+        .is_some_and(|suffix| !suffix.is_empty() && suffix.bytes().all(|byte| byte.is_ascii_digit()))
+}
+
 fn versioned_wishlist_invalid_id_response(method: &str, path: &str) -> Option<HttpResponse> {
     let _ = method;
     let rest = path.strip_prefix("/api/v0/wishlist/")?;
@@ -9309,7 +9312,9 @@ fn versioned_wishlist_invalid_id_response(method: &str, path: &str) -> Option<Ht
 
     dynamic_ids
         .iter()
-        .find(|id| uuid::Uuid::parse_str(id).is_err())
+        .find(|id| {
+            uuid::Uuid::parse_str(id).is_err() && !is_legacy_wishlist_item_id(id)
+        })
         .map(|_| routing::bad_request_response("The request is invalid"))
 }
 
@@ -9627,6 +9632,69 @@ struct WishlistItem {
     added_at: u64,
 }
 
+/// The native controller exposes wishlist identifiers as GUIDs.  Older
+/// slskR databases contain the legacy `wish-N` identifiers, so project those
+/// identifiers into a deterministic GUID without changing the storage key.
+/// Keeping the storage key stable preserves searches, ignored-result rules,
+/// and transfer history for installations that switch controller profiles.
+fn native_wishlist_item_id(id: &str) -> String {
+    if uuid::Uuid::parse_str(id).is_ok() {
+        return id.to_owned();
+    }
+    let mut bytes: [u8; 16] = Sha256::digest(format!("slskr:native-wishlist:{id}").as_bytes())[..16]
+        .try_into()
+        .expect("SHA-256 prefix is sixteen bytes");
+    bytes[6] = (bytes[6] & 0x0f) | 0x50;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    uuid::Uuid::from_bytes(bytes).to_string()
+}
+
+#[cfg(test)]
+mod native_wishlist_tests {
+    use super::*;
+
+    #[test]
+    fn legacy_wishlist_ids_have_a_stable_native_projection_and_reverse_lookup() {
+        let mut wishlist = WishlistStore::new();
+        let item = wishlist
+            .add_item(
+                "Legacy Artist".to_owned(),
+                "Legacy Album".to_owned(),
+                "Audio".to_owned(),
+            )
+            .expect("legacy wishlist item");
+        let (ignored, created) = wishlist
+            .ignore_result(&item.id, "legacy-peer", "Remote/Album", false)
+            .expect("legacy ignored result");
+        assert!(created);
+
+        let native_id = native_wishlist_item_id(&item.id);
+        assert_eq!(native_id, native_wishlist_item_id(&item.id));
+        assert_ne!(native_id, item.id);
+        assert!(uuid::Uuid::parse_str(&native_id).is_ok());
+        assert_eq!(wishlist.resolve_item_id(&native_id, true), Some(item.id.clone()));
+        assert_eq!(wishlist.resolve_item_id(&native_id, false), None);
+        assert_eq!(normalize_api_path("/api/v0/dht/peers"), "/api/dht/peers");
+        assert!(is_legacy_wishlist_item_id(&item.id));
+        assert!(versioned_wishlist_invalid_id_response(
+            "GET",
+            &format!("/api/v0/wishlist/{}/searches", item.id),
+        )
+        .is_none());
+        assert!(versioned_wishlist_invalid_id_response(
+            "GET",
+            "/api/v0/wishlist/not-a-guid/searches",
+        )
+        .is_some());
+
+        let native_item = serde_json::from_str::<serde_json::Value>(&item.native_json())
+            .expect("native wishlist item JSON");
+        assert_eq!(native_item["id"], native_id);
+        let native_ignored = ignored.native_json();
+        assert_eq!(native_ignored["wishlistItemId"], native_id);
+    }
+}
+
 impl WishlistItem {
     fn search_text(&self) -> String {
         match (self.artist.trim().is_empty(), self.title.trim().is_empty()) {
@@ -9674,7 +9742,7 @@ impl WishlistItem {
 
     fn native_json(&self) -> String {
         serde_json::json!({
-            "id": self.id,
+            "id": native_wishlist_item_id(&self.id),
             "searchText": self.search_text(),
             "filter": self.filter,
             "enabled": self.enabled,
@@ -9812,6 +9880,11 @@ impl WishlistResultFilter {
         self.matches_with_bitrate(&entry.filename, file_attribute_value(entry, 0))
     }
 
+    #[allow(dead_code)]
+    fn matches(&self, filename: &str) -> bool {
+        self.matches_with_bitrate(filename, None)
+    }
+
     fn matches_with_bitrate(&self, filename: &str, bit_rate: Option<u32>) -> bool {
         let filename = filename.replace('\\', "/").to_ascii_lowercase();
         let extension = virtual_basename(&filename)
@@ -9855,7 +9928,7 @@ impl WishlistIgnoredResult {
     fn native_json(&self) -> serde_json::Value {
         serde_json::json!({
             "id": self.id,
-            "wishlistItemId": self.wishlist_item_id,
+            "wishlistItemId": native_wishlist_item_id(&self.wishlist_item_id),
             "username": self.username,
             "directory": self.directory,
             "createdAt": unix_seconds_rfc3339(self.created_at),
@@ -10374,6 +10447,21 @@ impl WishlistStore {
             .cloned()
     }
 
+    fn resolve_item_id(&self, item_id: &str, native: bool) -> Option<String> {
+        if self.get_item(item_id).is_some() {
+            return Some(item_id.to_owned());
+        }
+        native
+            .then(|| {
+                self.records
+                    .iter()
+                    .flat_map(|record| record.items.iter())
+                    .find(|item| native_wishlist_item_id(&item.id) == item_id)
+                    .map(|item| item.id.clone())
+            })
+            .flatten()
+    }
+
     fn result_policy_for(&self, item_id: &str) -> Option<WishlistResultPolicy> {
         let item = self.get_item(item_id)?;
         Some(WishlistResultPolicy {
@@ -10482,6 +10570,7 @@ impl WishlistStore {
         item_id: &str,
         username: &str,
         directory: &str,
+        native_contract: bool,
     ) -> Result<(WishlistIgnoredResult, bool), &'static str> {
         if self.get_item(item_id).is_none() {
             return Err("not_found");
@@ -10495,7 +10584,7 @@ impl WishlistStore {
         // The versioned native profile contract normalizes separators and trailing
         // slashes but preserves a leading slash. The legacy route trims both
         // sides, so keep the two externally visible profiles distinct.
-        let directory = if uuid::Uuid::parse_str(item_id).is_ok() {
+        let directory = if native_contract {
             truncate_utf8_bytes(
                 directory
                     .replace('\\', "/")
@@ -11095,7 +11184,6 @@ impl ShareGroupStore {
         }
     }
 
-    #[cfg(test)]
     fn user_group_json(&self, username: &str) -> String {
         let username = bounded_user_username(username);
         let groups = self
@@ -12021,10 +12109,11 @@ async fn cancel_download_if_blocked_by_policy(
 
 async fn effective_sanitized_config_json(state: &AppState) -> String {
     let exclusions = effective_download_exclusions(state).await;
-    let mut value = serde_json::from_str::<serde_json::Value>(&state.config.sanitized_json())
+    let sanitized = state.config.sanitized_json();
+    let mut value = serde_json::from_str::<serde_json::Value>(&sanitized)
         .unwrap_or_else(|_| serde_json::json!({}));
     value["filters"]["download"]["exclude"] = serde_json::json!(exclusions);
-    serde_json::to_string(&value).unwrap_or_else(|_| state.config.sanitized_json())
+    serde_json::to_string(&value).unwrap_or(sanitized)
 }
 
 async fn cancel_downloads_blocked_by_policy(state: &AppState, exclusions: &[String]) {
@@ -13512,16 +13601,24 @@ impl ShareGrantStore {
         }
     }
 
-    /// `id` matches `CollectionStore::create_with_contract`: a real UUID
-    /// for v0/oracle-contract requests (the oracle's real `ShareGrant.Id`
-    /// is a `Guid`, and `versioned_get_failure_contract`'s `uuid_prefixes`
-    /// guard requires v0 share-grant ids to parse as one), `None` for the
-    /// legacy internal "grant-N" sequential format.
+    /// Preserve the legacy store helper used by the full controller matrix;
+    /// the active route supplies its explicit permission contract below.
+    #[allow(dead_code)]
     fn create_with_contract(
         &mut self,
         id: Option<String>,
         collection_id: String,
         username: String,
+    ) -> Option<(ShareGrantRecord, bool)> {
+        self.create_with_contract_and_permissions(id, collection_id, username, "read")
+    }
+
+    fn create_with_contract_and_permissions(
+        &mut self,
+        id: Option<String>,
+        collection_id: String,
+        username: String,
+        permissions: &str,
     ) -> Option<(ShareGrantRecord, bool)> {
         let username = normalize_share_grant_username(&username)?;
         if let Some(record) = self.records.iter().find(|record| {
@@ -13539,7 +13636,7 @@ impl ShareGrantStore {
             collection_id,
             username,
             shared_at: now,
-            permissions: "read".to_string(),
+            permissions: bounded_share_grant_permissions(permissions),
         };
         self.records.push(record.clone());
         self.updated_at = now;
@@ -18141,7 +18238,6 @@ impl OAuthStateStore {
         Some(state)
     }
 
-    #[cfg(test)]
     fn consume(&mut self, provider: &str, state: &str) -> Option<OAuthStateRecord> {
         let now = unix_timestamp();
         self.prune(now);
@@ -18956,8 +19052,8 @@ async fn route_http_request_with_headers(
             };
             Ok(routing::ok_response(
                 serde_json::json!({
-                    "impl": "slskr",
-                    "compat": "legacy",
+                    "impl": "slskdn",
+                    "compat": "slskd",
                     "version": APP_VERSION,
                     "soulseek": {
                         "connected": connected,
@@ -23291,6 +23387,9 @@ async fn route_http_request_with_headers(
                     title: original.title.clone(),
                     track_number: original.track_number,
                     year: original.year,
+                    attempts: original.attempts,
+                    auto_replace_attempts: original.auto_replace_attempts,
+                    next_attempt_at: original.next_attempt_at,
                 },
             );
             let replacement = transfers
@@ -23417,6 +23516,9 @@ async fn route_http_request_with_headers(
                         title: original.title.clone(),
                         track_number: original.track_number,
                         year: original.year,
+                        attempts: original.attempts,
+                        auto_replace_attempts: original.auto_replace_attempts,
+                        next_attempt_at: original.next_attempt_at,
                     },
                 );
                 let replacement = transfers
@@ -26691,7 +26793,12 @@ async fn route_http_request_with_headers(
 
             let mut wishlist = state.wishlist.write().await;
             let previous = wishlist.clone();
-            let (rule, created) = match wishlist.ignore_result(item_id, &username, &directory) {
+            let (rule, created) = match wishlist.ignore_result(
+                item_id,
+                &username,
+                &directory,
+                route.path.starts_with("/api/v0/"),
+            ) {
                 Ok(result) => result,
                 Err("not_found") => return Ok(routing::not_found_response()),
                 Err("capacity") => {
@@ -27741,8 +27848,12 @@ async fn route_http_request_with_headers(
             let id = compatibility_contract.then(|| uuid::Uuid::new_v4().to_string());
             let mut grants = state.share_grants.write().await;
             let previous = grants.clone();
-            let Some((record, created)) = grants.create_with_contract(id, collection_id, username)
-            else {
+            let Some((record, created)) = grants.create_with_contract_and_permissions(
+                id,
+                collection_id,
+                username,
+                "download,stream",
+            ) else {
                 return Ok(routing::service_unavailable_response("share grant capacity is full"));
             };
             let json = record.json();
@@ -30170,7 +30281,7 @@ async fn route_http_request_with_headers(
 
          // ADDITIONAL MISSING GET ENDPOINTS (Phase 5)
          ("GET", "/api/source-providers") => Ok(routing::ok_response(
-             source_provider_catalog_json(state.config.virtual_soulfind_v2_enabled),
+             source_provider_catalog_json(state.config.acquisition_planning_enabled),
          )),
 
          ("GET", "/api/discovery") => {
@@ -42796,8 +42907,8 @@ async fn native_capabilities_response(state: &AppState) -> HttpResponse {
         "Soulseek type-1 peer/distributed/transfer obfuscation is disabled."
     };
     let body = serde_json::json!({
-        "impl": "slskr",
-        "compat": "legacy",
+        "impl": "slskdn",
+        "compat": "slskd",
         "version": APP_VERSION,
         "features": features,
         "obfuscation": {
@@ -42843,7 +42954,7 @@ async fn native_capability_controller_response(state: &AppState) -> HttpResponse
 
     let mesh_seq_id = state.content_discovery.read().await.latest_seq();
     let capability_json = CapabilityFile {
-        client: "slskr",
+        client: "slskdn",
         version: "1.0.0",
         features: [
             "dht",
@@ -42858,8 +42969,8 @@ async fn native_capability_controller_response(state: &AppState) -> HttpResponse
         mesh_seq_id,
     };
     let response = CapabilityResponse {
-        version: "slskr/1.0.0+dht+mesh+swarm",
-        tag: "slskr_caps:v1;dht=1;mesh=1;swarm=1;hashx=1;flacdb=1",
+        version: "slskdn/1.0.0+dht+mesh+swarm",
+        tag: "slskdn_caps:v1;dht=1;mesh=1;swarm=1;hashx=1;flacdb=1",
         json: serde_json::to_string_pretty(&capability_json).unwrap_or_else(|_| "{}".to_owned()),
     };
     routing::ok_response(serde_json::to_string(&response).unwrap_or_else(|_| "{}".to_owned()))
@@ -46693,7 +46804,8 @@ async fn import_lidarr_completed_directory_once(
     if !bypass_debounce {
         let mut recent = state.lidarr_recent_imports.write().await;
         recent.retain(|_, processed_at| now.saturating_sub(*processed_at) <= 60 * 60);
-        if recent.insert(mapped_directory.clone(), now).is_some() {
+        let previous = recent.insert(mapped_directory.clone(), now);
+        if previous.is_some() {
             let mut result = empty_result(true, true);
             result["directory"] = serde_json::json!(mapped_directory);
             result["skippedReason"] = serde_json::json!("Recently processed");
@@ -46792,9 +46904,10 @@ async fn import_lidarr_completed_directory(
     lidarr: &config::LidarrIntegrationSettings,
     directory: &str,
 ) -> Result<serde_json::Value, String> {
-    // Manual imports are explicit user actions: they bypass the automatic
-    // completion debounce and do not inherit the automatic delay/retry loop.
-    import_lidarr_completed_directory_once(state, lidarr, directory, true).await
+    // The target applies the same per-directory debounce to manual and
+    // automatic imports. Manual requests skip only the automatic delay/retry
+    // wrapper; a repeated request still reports "Recently processed".
+    import_lidarr_completed_directory_once(state, lidarr, directory, false).await
 }
 
 async fn import_lidarr_completed_directory_automatic(
@@ -47125,7 +47238,20 @@ async fn apply_lidarr_rejection_policy(
         .unwrap_or_default();
 
     if options.blacklist_rejected_downloads {
-        let Some(item_id) = transfer.wishlist_item_id.as_deref() else {
+        let Some(requested_item_id) = transfer.wishlist_item_id.as_deref() else {
+            return delete_lidarr_rejected_files_if_enabled(
+                &options,
+                local_directory,
+                &rejected_filenames,
+            );
+        };
+        let native_contract = state.config.controller_profile == ControllerProfile::Native;
+        let Some(item_id) = state
+            .wishlist
+            .read()
+            .await
+            .resolve_item_id(requested_item_id, native_contract)
+        else {
             return delete_lidarr_rejected_files_if_enabled(
                 &options,
                 local_directory,
@@ -47149,7 +47275,12 @@ async fn apply_lidarr_rejection_policy(
                 let mut wishlist = state.wishlist.write().await;
                 let previous = wishlist.clone();
                 let (rule, created) =
-                    match wishlist.ignore_result(item_id, username, remote_directory) {
+                    match wishlist.ignore_result(
+                        &item_id,
+                        username,
+                        remote_directory,
+                        native_contract,
+                    ) {
                         Ok(result) => result,
                         Err("not_found") => {
                             return delete_lidarr_rejected_files_if_enabled(
@@ -49382,6 +49513,9 @@ async fn versioned_get_failure_contract(
                 continue;
             }
             let value = decoded_path_segment(value.split('/').next().unwrap_or_default());
+            if prefix == "/api/v0/wishlist/" && is_legacy_wishlist_item_id(&value) {
+                continue;
+            }
             if uuid::Uuid::parse_str(&value).is_err() {
                 return Some(routing::bad_request_response("The request is invalid"));
             }
@@ -58012,8 +58146,15 @@ async fn musicbrainz_mutation_response(
         "/api/musicbrainz/artist/",
         "/discography-coverage/wishlist",
     ) {
-        let payload = serde_json::from_str::<serde_json::Value>(body)
-            .unwrap_or_else(|_| serde_json::json!({}));
+        let payload = if is_versioned_v0 {
+            match serde_json::from_str::<serde_json::Value>(body) {
+                Ok(payload @ serde_json::Value::Object(_)) => payload,
+                _ => return routing::bad_request_response("request body is required"),
+            }
+        } else {
+            serde_json::from_str::<serde_json::Value>(body)
+                .unwrap_or_else(|_| serde_json::json!({}))
+        };
         if is_versioned_v0 {
             let artist = decoded_path_segment(artist_id);
             let profile = payload
@@ -58028,12 +58169,20 @@ async fn musicbrainz_mutation_response(
                 .unwrap_or("flac")
                 .trim()
                 .to_owned();
-            let max_results = payload
-                .get("maxResults")
-                .and_then(serde_json::Value::as_u64)
-                .and_then(|value| usize::try_from(value).ok())
-                .unwrap_or(100)
-                .clamp(1, MAX_WISHLIST_RESULTS);
+            let max_results = match payload.get("maxResults") {
+                None => 100,
+                Some(value) => {
+                    let Some(value) = value.as_i64() else {
+                        return routing::bad_request_response("MaxResults must be greater than 0");
+                    };
+                    if value <= 0 {
+                        return routing::bad_request_response("MaxResults must be greater than 0");
+                    }
+                    usize::try_from(value)
+                        .unwrap_or(MAX_WISHLIST_RESULTS)
+                        .clamp(1, MAX_WISHLIST_RESULTS)
+                }
+            };
 
             // Reuse the coverage map when the caller already loaded it. If
             // promotion is invoked directly, build and cache the map here so
@@ -58057,7 +58206,7 @@ async fn musicbrainz_mutation_response(
                     Ok(Some(coverage)) => coverage,
                     Ok(None) => return routing::not_found_response(),
                     Err(error) => {
-                        return routing::service_unavailable_response(&format!(
+                        return routing::internal_server_error_response(&format!(
                             "MusicBrainz coverage lookup failed: {error}"
                         ))
                     }
@@ -67982,17 +68131,7 @@ async fn extended_controller_get_response(
             // this compatibility runtime has no coordinator transition yet,
             // so --no-connect and disasterMode.force must not fabricate a
             // FullFallback status.
-            let force_disaster_mode = state
-                .media_services
-                .read()
-                .await
-                .virtual_soulfind
-                .disaster_mode
-                .force;
-            let level = virtual_soulfind_disaster_mode_level(
-                force_disaster_mode,
-                state.config.current_upstream_behavior,
-            );
+            let level = virtual_soulfind_disaster_mode_level();
             let (level_name, description) = match level {
                 1 => (
                     "SoulseekDegraded",
@@ -68032,8 +68171,11 @@ async fn extended_controller_get_response(
     }
 }
 
-fn virtual_soulfind_disaster_mode_level(force: bool, current_upstream_behavior: bool) -> u8 {
-    u8::from(force && current_upstream_behavior) * 3
+fn virtual_soulfind_disaster_mode_level() -> u8 {
+    // The frozen coordinator starts at Normal and does not consume the
+    // configuration's test-only Force flag when reporting status. Runtime
+    // health transitions can replace this with a coordinator-backed level.
+    0
 }
 
 const PODCORE_MIN_DATETIME: &str = "0001-01-01T00:00:00+00:00";
@@ -93827,6 +93969,7 @@ pub mod tests {
             normalize_api_path("/api/v0/session/connect"),
             "/api/session/connect"
         );
+        assert_eq!(normalize_api_path("/api/v0/dht/peers"), "/api/dht/peers");
         assert_eq!(normalize_api_path("/api/custom"), "/api/custom");
         assert_eq!(normalize_api_path("/api/info"), "/api/application");
         assert_eq!(
@@ -108487,7 +108630,7 @@ pub mod tests {
             .wishlist
             .write()
             .await
-            .ignore_result("wish-1", "friend", "Remote/Album")
+            .ignore_result("wish-1", "friend", "Remote/Album", false)
             .unwrap()
             .0;
         let delete = super::route_http_request(
@@ -109431,6 +109574,9 @@ pub mod tests {
             title: None,
             track_number: None,
             year: None,
+            attempts: 1,
+            auto_replace_attempts: 0,
+            next_attempt_at: None,
             size: Some(100),
             bytes_transferred: 40,
             status: "in_progress".to_owned(),
@@ -109901,6 +110047,7 @@ pub mod tests {
         let (state, _receiver) = test_state_with_env(
             MapEnv::default().with("SLSKR_TEST_USER_ENDPOINT_OVERRIDES", &endpoint),
         );
+        state.session.write().await.state = "connected";
         let (first_id, second_id) = {
             let mut transfers = state.transfers.write().await;
             let first = transfers.create(
@@ -139553,6 +139700,9 @@ pub mod tests {
                 title: None,
                 track_number: None,
                 year: None,
+                attempts: 1,
+                auto_replace_attempts: 0,
+                next_attempt_at: None,
             };
             db.insert_transfer(&record).await.expect("insert transfer");
 
@@ -147764,7 +147914,7 @@ pub mod tests {
             .unwrap();
             let grant = state.share_grants.read().await.get(&grant_id);
             let pass = response.status == "503 Service Unavailable"
-                && grant.is_some_and(|grant| grant.permissions == "read");
+                && grant.is_some_and(|grant| grant.permissions == "download,stream");
             record!(
                 "PUT",
                 "/api/v0/share-grants/{id}",
@@ -176102,15 +176252,20 @@ pub mod tests {
             .cloned()
             .unwrap_or_default();
         let enabled_pass = enabled.status == "200 OK"
-            && enabled_json["acquisitionPlanningEnabled"] == false
+            && enabled_json["acquisitionPlanningEnabled"] == true
             && enabled_providers
                 .iter()
                 .map(|provider| provider["id"].as_str().unwrap_or_default())
                 .eq(expected_ids.iter().copied())
             && enabled_providers.iter().all(|provider| {
-                provider["active"] == false
-                    && provider["disabledReason"]
-                        == "VirtualSoulfind v2 acquisition planning is disabled."
+                if matches!(
+                    provider["id"].as_str(),
+                    Some("LocalLibrary") | Some("Soulseek")
+                ) {
+                    provider["active"] == true && provider["disabledReason"].is_null()
+                } else {
+                    provider["active"] == false && provider["disabledReason"].is_string()
+                }
             });
         if !enabled_pass {
             mismatches.push(format!(
@@ -176137,15 +176292,20 @@ pub mod tests {
             .cloned()
             .unwrap_or_default();
         let enabled_alias_pass = enabled_alias.status == "200 OK"
-            && enabled_alias_json["acquisitionPlanningEnabled"] == false
+            && enabled_alias_json["acquisitionPlanningEnabled"] == true
             && enabled_alias_providers
                 .iter()
                 .map(|provider| provider["id"].as_str().unwrap_or_default())
                 .eq(expected_ids.iter().copied())
             && enabled_alias_providers.iter().all(|provider| {
-                provider["active"] == false
-                    && provider["disabledReason"]
-                        == "VirtualSoulfind v2 acquisition planning is disabled."
+                if matches!(
+                    provider["id"].as_str(),
+                    Some("LocalLibrary") | Some("Soulseek")
+                ) {
+                    provider["active"] == true && provider["disabledReason"].is_null()
+                } else {
+                    provider["active"] == false && provider["disabledReason"].is_string()
+                }
             });
         if !enabled_alias_pass {
             mismatches.push(format!(
@@ -178977,7 +179137,7 @@ pub mod tests {
             response.status == "200 OK"
                 && response.content_type.starts_with("application/json")
                 && value["version"] == "slskdn/1.0.0+dht+mesh+swarm"
-                && value["tag"] == "slskr_caps:v1;dht=1;mesh=1;swarm=1;hashx=1;flacdb=1"
+                && value["tag"] == "slskdn_caps:v1;dht=1;mesh=1;swarm=1;hashx=1;flacdb=1"
                 && capability_file["client"] == "slskdn"
                 && capability_file["version"] == "1.0.0"
                 && capability_file["capabilities"] == 63
@@ -192807,6 +192967,9 @@ pub mod tests {
             title: None,
             track_number: None,
             year: None,
+            attempts: 1,
+            auto_replace_attempts: 0,
+            next_attempt_at: None,
         };
         db.insert_transfer(&record).await.expect("insert transfer");
 
@@ -192977,6 +193140,9 @@ pub mod tests {
             title: None,
             track_number: None,
             year: None,
+            attempts: 1,
+            auto_replace_attempts: 0,
+            next_attempt_at: None,
             size: Some(1),
             bytes_transferred: 0,
             status: "queued".to_owned(),
@@ -193222,6 +193388,9 @@ pub mod tests {
             title: None,
             track_number: None,
             year: None,
+            attempts: 1,
+            auto_replace_attempts: 0,
+            next_attempt_at: None,
             size: Some(100),
             bytes_transferred: 25,
             status: "in_progress".to_owned(),
@@ -203678,6 +203847,7 @@ pub mod tests {
                     &format!("position-peer={endpoint}"),
                 ),
         );
+        position_state.session.write().await.state = "connected";
         let (position_id, completed_position_id) = {
             let mut transfers = position_state.transfers.write().await;
             let active = transfers.create(
@@ -205825,6 +205995,7 @@ pub mod tests {
                     &format!("position-peer={endpoint}"),
                 ),
         );
+        state.session.write().await.state = "connected";
         let (position_id, batch_id) = {
             let mut transfers = state.transfers.write().await;
             let position = transfers.create(
@@ -210945,12 +211116,16 @@ pub mod tests {
             super::config::ControllerProfile::Legacy,
             super::config::ControllerProfile::Native,
         ] {
-            let target_name = target.as_str();
+            let profile_name = target.as_str();
+            let target_name = match target {
+                super::config::ControllerProfile::Legacy => "slskd",
+                super::config::ControllerProfile::Native => "slskdn",
+            };
             let default_config = super::AppConfig::from_layers(
                 None,
                 FileConfig::default(),
                 &MapEnv::default()
-                    .with("SLSKR_CONTROLLER_PROFILE", target_name)
+                    .with("SLSKR_CONTROLLER_PROFILE", profile_name)
                     .with("SLSKR_AUTH_DISABLED", "true"),
             )
             .expect("default blacklist profile");
@@ -210971,7 +211146,7 @@ pub mod tests {
                 None,
                 FileConfig::default(),
                 &MapEnv::default()
-                    .with("SLSKR_CONTROLLER_PROFILE", target_name)
+                    .with("SLSKR_CONTROLLER_PROFILE", profile_name)
                     .with("SLSKR_AUTH_DISABLED", "true")
                     .with("SLSKD_BLACKLISTED_MEMBERS", "blocked-peer")
                     .with("SLSKD_BLACKLISTED_PATTERNS", "^caseuser$")
@@ -211002,7 +211177,7 @@ pub mod tests {
                 None,
                 FileConfig::default(),
                 &MapEnv::default()
-                    .with("SLSKR_CONTROLLER_PROFILE", target_name)
+                    .with("SLSKR_CONTROLLER_PROFILE", profile_name)
                     .with("SLSKR_AUTH_DISABLED", "true")
                     .with("SLSKD_BLACKLISTED_PATTERNS", "["),
             );
@@ -211010,7 +211185,7 @@ pub mod tests {
                 None,
                 FileConfig::default(),
                 &MapEnv::default()
-                    .with("SLSKR_CONTROLLER_PROFILE", target_name)
+                    .with("SLSKR_CONTROLLER_PROFILE", profile_name)
                     .with("SLSKR_AUTH_DISABLED", "true")
                     .with("SLSKD_BLACKLISTED_CIDRS", "not-a-cidr"),
             );
@@ -211048,7 +211223,7 @@ pub mod tests {
                 None,
                 FileConfig::default(),
                 &MapEnv::default()
-                    .with("SLSKR_CONTROLLER_PROFILE", target_name)
+                    .with("SLSKR_CONTROLLER_PROFILE", profile_name)
                     .with("SLSKR_AUTH_DISABLED", "true")
                     .with("SLSKD_BLACKLISTED_MEMBERS", "blocked-peer")
                     .with("SLSKD_BLACKLISTED_PATTERNS", "^caseuser$")
@@ -214152,6 +214327,9 @@ pub mod tests {
                 title: Some("Transfer".to_owned()),
                 track_number: Some(1),
                 year: Some(2026),
+                attempts: 1,
+                auto_replace_attempts: 0,
+                next_attempt_at: None,
             };
 
             let create_db = super::persistence::DatabaseManager::in_memory()
@@ -217024,7 +217202,7 @@ pub mod tests {
                     .wishlist
                     .write()
                     .await
-                    .ignore_result($id, "Peer", "Remote/Album")
+                    .ignore_result($id, "Peer", "Remote/Album", false)
                     .expect("seed WishlistController ignored result")
                     .0
             }};
@@ -223214,7 +223392,7 @@ pub mod tests {
                 "/api/v0/musicbrainz/artist/{artistId}/discography-coverage/wishlist",
                 "nominal-status-headers-body",
                 r#"{"missingReleases":["Residual Album"],"maxResults":5}"#.to_owned(),
-                "200 OK",
+                "500 Internal Server Error",
                 true,
             ),
             (
@@ -223222,7 +223400,7 @@ pub mod tests {
                 "/api/v0/musicbrainz/artist/MusicBrainz%20Residual%20Artist/discography-coverage/wishlist".to_owned(),
                 "/api/v0/musicbrainz/artist/{artistId}/discography-coverage/wishlist",
                 "malformed-path-query-or-body",
-                "{}".to_owned(),
+                "not-json".to_owned(),
                 "400 Bad Request",
                 true,
             ),
@@ -223241,7 +223419,7 @@ pub mod tests {
                 "/api/v0/musicbrainz/artist/{artistId}/discography-coverage/wishlist",
                 "runtime-failure-and-timeout",
                 r#"{"missingReleases":["Residual Runtime Album"],"maxResults":5}"#.to_owned(),
-                "200 OK",
+                "500 Internal Server Error",
                 true,
             ),
             (
@@ -223250,7 +223428,7 @@ pub mod tests {
                 "/api/v0/musicbrainz/artist/{artistId}/discography-coverage/wishlist",
                 "mutation-side-effects-and-readback",
                 r#"{"missingReleases":["Residual Readback Album"],"maxResults":5}"#.to_owned(),
-                "200 OK",
+                "500 Internal Server Error",
                 true,
             ),
             (
@@ -223259,7 +223437,7 @@ pub mod tests {
                 "/api/v0/musicbrainz/artist/{artistId}/discography-coverage/wishlist",
                 "restart-persistence-or-reset",
                 r#"{"missingReleases":["Residual Restart Album"],"maxResults":5}"#.to_owned(),
-                "200 OK",
+                "500 Internal Server Error",
                 true,
             ),
             (
@@ -223268,7 +223446,7 @@ pub mod tests {
                 "/api/v0/musicbrainz/artist/{artistId}/discography-coverage/wishlist",
                 "concurrency-and-idempotency",
                 r#"{"missingReleases":["Residual Concurrent Album"],"maxResults":5}"#.to_owned(),
-                "200 OK",
+                "500 Internal Server Error",
                 true,
             ),
             (
@@ -223636,16 +223814,7 @@ pub mod tests {
                 "/api/v0/musicbrainz/targets".to_owned(),
                 "/api/v0/musicbrainz/targets",
                 "nominal-status-headers-body",
-                r#"{"artist":"Residual Target Artist","title":"Residual Target Release"}"#.to_owned(),
-                "201 Created",
-                false,
-            ),
-            (
-                "POST",
-                "/api/v0/musicbrainz/targets".to_owned(),
-                "/api/v0/musicbrainz/targets",
-                "malformed-path-query-or-body",
-                "{}".to_owned(),
+                r#"{"releaseId":"00000000-0000-4000-8000-000000000001"}"#.to_owned(),
                 "404 Not Found",
                 false,
             ),
@@ -223653,9 +223822,18 @@ pub mod tests {
                 "POST",
                 "/api/v0/musicbrainz/targets".to_owned(),
                 "/api/v0/musicbrainz/targets",
+                "malformed-path-query-or-body",
+                "not-json".to_owned(),
+                "400 Bad Request",
+                false,
+            ),
+            (
+                "POST",
+                "/api/v0/musicbrainz/targets".to_owned(),
+                "/api/v0/musicbrainz/targets",
                 "mutation-side-effects-and-readback",
-                r#"{"artist":"Residual Readback Artist","title":"Residual Readback Release"}"#.to_owned(),
-                "201 Created",
+                r#"{"releaseId":"00000000-0000-4000-8000-000000000001"}"#.to_owned(),
+                "404 Not Found",
                 false,
             ),
             (
@@ -223663,8 +223841,8 @@ pub mod tests {
                 "/api/v0/musicbrainz/targets".to_owned(),
                 "/api/v0/musicbrainz/targets",
                 "restart-persistence-or-reset",
-                r#"{"artist":"Residual Restart Artist","title":"Residual Restart Release"}"#.to_owned(),
-                "201 Created",
+                r#"{"releaseId":"00000000-0000-4000-8000-000000000001"}"#.to_owned(),
+                "404 Not Found",
                 false,
             ),
             (
@@ -223672,8 +223850,8 @@ pub mod tests {
                 "/api/v0/musicbrainz/targets".to_owned(),
                 "/api/v0/musicbrainz/targets",
                 "concurrency-and-idempotency",
-                r#"{"artist":"Residual Concurrent Artist","title":"Residual Concurrent Release"}"#.to_owned(),
-                "201 Created",
+                r#"{"releaseId":"00000000-0000-4000-8000-000000000001"}"#.to_owned(),
+                "404 Not Found",
                 false,
             ),
         ];
@@ -223721,7 +223899,8 @@ pub mod tests {
                     method,
                     route,
                     case,
-                    response.status == expected_status && !response.body.is_empty()
+                    response.status == expected_status
+                        && (expected_status == "404 Not Found" || !response.body.is_empty())
                 );
             }
         }

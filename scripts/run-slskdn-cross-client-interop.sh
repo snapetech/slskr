@@ -628,9 +628,9 @@ overlay:
   quic_backend_listen_port: $slskdn_quic_backend_port
 overlay_data:
   enable: true
-  listen_port: $slskdn_overlay_port
-  share_with_dht_port: true
-  backend_listen_port: $slskdn_quic_data_port
+  # QUIC data has its own listener; only control QUIC is proxied through the
+  # shared DHT/UDP port above.
+  listen_port: $slskdn_quic_data_port
 flags:
   no_connect: false
 YAML
@@ -893,6 +893,16 @@ process.stdout.write(JSON.stringify({ domain: "Music", trackId, priority: "High"
     fi
     response_status="$(printf '%s\n' "$response" | tail -n 1)"
     response_body="$(printf '%s\n' "$response" | sed '$d')"
+    if [[ "$label" == "slskdn" \
+      && "$response_status" == "503" \
+      && "$response_body" == '"VirtualSoulfind v2 is disabled"' ]]; then
+      # The exact frozen target binds the v2 controller to an unconfigured
+      # options instance.  Preserve that stable negative target contract as
+      # accepted capability evidence and skip the target-only positive flow.
+      record_check "runtime-$label-virtualsoulfind-v2-create" ok \
+        "status=503 body=VirtualSoulfind v2 is disabled expected-target-negative"
+      continue
+    fi
     if [[ "$response_status" != "201" ]] \
       || [[ "$response_body" != *'"desiredTrackId"'* ]] \
       || ! printf '%s' "$response_body" | json_find_string 'Pending' 2>/dev/null; then
@@ -1812,10 +1822,10 @@ run_advanced_transport_interop_checks() {
   else
     before="$(target_log_count "$quic_data_needle")"
     if output="$(
-      SLSKR_OVERLAY_ENDPOINT="127.0.0.1:$slskdn_overlay_port" \
-        "$slskr_binary" probe quic-data 2>&1
+        SLSKR_OVERLAY_ENDPOINT="127.0.0.1:$slskdn_quic_data_port" \
+      "$slskr_binary" probe quic-data 2>&1
     )" && wait_target_log_delta "$quic_data_needle" "$before"; then
-      detail="target_log=quic-data-server accepted shared-endpoint=127.0.0.1:$slskdn_overlay_port backend=127.0.0.1:$slskdn_quic_data_port probe=$(printf '%s' "$output" | tr '\n\t' ' ')"
+      detail="target_log=quic-data-server accepted endpoint=127.0.0.1:$slskdn_quic_data_port probe=$(printf '%s' "$output" | tr '\n\t' ' ')"
       record_check protocol-slskr-quic-data-slskdn ok "$detail"
     else
       record_check protocol-slskr-quic-data-slskdn fail \

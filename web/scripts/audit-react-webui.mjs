@@ -554,6 +554,19 @@ const fallback = (url, method = 'GET') => {
   return json([]);
 };
 
+const signalRNegotiateFallback = () => ({
+  body: JSON.stringify({
+    availableTransports: [
+      { transport: 'WebSockets', transferFormats: ['Text', 'Binary'] },
+    ],
+    connectionId: 'audit-connection',
+    connectionToken: 'audit-connection',
+    negotiateVersion: 1,
+  }),
+  contentType: 'application/json',
+  status: 200,
+});
+
 const startStaticServer = async () => {
   const server = createServer(async (request, response) => {
     try {
@@ -691,6 +704,10 @@ const installMocks = async (page, { activeUser, browseTabs, onApiResponse } = {}
 
   await page.route('**/*', async (route) => {
     const url = route.request().url();
+    const requestUrl = new URL(url);
+    if (!liveBackendUrl && requestUrl.pathname.startsWith('/hub/')) {
+      return route.fulfill(signalRNegotiateFallback());
+    }
     if (!liveBackendUrl && (url.includes('/api/v0/') || url.includes('/api/'))) {
       const mockResponse = fallback(url, route.request().method());
       onApiResponse?.({
@@ -704,7 +721,10 @@ const installMocks = async (page, { activeUser, browseTabs, onApiResponse } = {}
 
     const request = route.request();
     const requestedUrl = new URL(request.url());
-    if (!requestedUrl.pathname.startsWith('/api/')) return route.continue();
+    if (
+      !requestedUrl.pathname.startsWith('/api/')
+      && !requestedUrl.pathname.startsWith('/hub/')
+    ) return route.continue();
     const targetUrl = `${liveBackendUrl}${requestedUrl.pathname}${requestedUrl.search}`;
     const headers = Object.fromEntries(
       Object.entries(request.headers()).filter(
@@ -772,19 +792,28 @@ const installMocks = async (page, { activeUser, browseTabs, onApiResponse } = {}
 const slugFor = (route) =>
   route === '/' ? 'root' : route.replace(/^\//u, '').replace(/[^\w-]+/gu, '-');
 
-const visibleInternalHrefs = async (page) =>
-  page
-    .locator('a[href]')
-    .evaluateAll((anchors) =>
-      anchors
-        .filter((anchor) => {
-          const style = window.getComputedStyle(anchor);
-          const box = anchor.getBoundingClientRect();
-          return style.visibility !== 'hidden' && style.display !== 'none' && box.width > 0 && box.height > 0;
-        })
-        .map((anchor) => anchor.getAttribute('href'))
-        .filter((href) => href && href.startsWith('/')),
-    );
+const visibleInternalHrefs = async (page) => {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return await page.locator('a[href]').evaluateAll((anchors) =>
+        anchors
+          .filter((anchor) => {
+            const style = window.getComputedStyle(anchor);
+            const box = anchor.getBoundingClientRect();
+            return style.visibility !== 'hidden' && style.display !== 'none' && box.width > 0 && box.height > 0;
+          })
+          .map((anchor) => anchor.getAttribute('href'))
+          .filter((href) => href && href.startsWith('/')),
+      );
+    } catch (error) {
+      if (attempt === 2 || !String(error?.message || error).includes('Execution context was destroyed')) {
+        throw error;
+      }
+      await page.waitForTimeout(100);
+    }
+  }
+  return [];
+};
 
 const assertNoOverlap = async (page) =>
   page.evaluate(() => {
@@ -846,7 +875,10 @@ await fs.mkdir(outputDir, { recursive: true });
 
 const server = await startStaticServer();
 const { port } = server.address();
-const baseUrl = `http://127.0.0.1:${port}`;
+// A live audit must load from the daemon's own origin so SignalR/WebSocket
+// origin checks observe the same origin an operator uses. Mock audits retain
+// the isolated static server.
+const baseUrl = liveBackendUrl || `http://127.0.0.1:${port}`;
 const browser = await chromium.launch({
   executablePath: browserExecutablePath,
   headless: process.env.HEADLESS !== 'false',
@@ -1020,7 +1052,18 @@ try {
       }
       if (rootChildCount < 1) audit.errors.push(`${route} ${viewport.name}: React root did not mount`);
       if (bodyText.length < 100) audit.errors.push(`${route} ${viewport.name}: page looks blank`);
-      if (/not found|cannot get|404/iu.test(bodyText)) audit.errors.push(`${route} ${viewport.name}: visible 404 text`);
+      // Data-heavy pages legitimately render status text such as "404" from
+      // historical logs or remote messages. Treat only a short standalone
+      // error document as a navigation failure; API failures are recorded
+      // separately from the live response listener above.
+      const normalizedBody = bodyText.trim().toLowerCase();
+      if (
+        normalizedBody === 'not found'
+        || normalizedBody === '404'
+        || normalizedBody.startsWith('cannot get ')
+      ) {
+        audit.errors.push(`${route} ${viewport.name}: visible 404 text`);
+      }
       if (bodyText.includes('Rust Web')) audit.errors.push(`${route} ${viewport.name}: Rust migration UI leaked into React audit`);
       if (visibleButtonCount + visibleInputCount < 1 && route !== '/') {
         audit.errors.push(`${route} ${viewport.name}: no visible controls`);

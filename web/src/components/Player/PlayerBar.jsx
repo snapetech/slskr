@@ -2120,10 +2120,11 @@ const PlayerBar = ({ runtimeProfile } = {}) => {
     readStoredBoolean(localMuteStorageKey),
   );
   const [collapsed, setCollapsed] = useState(() => {
-    // Auto-hide by default: an unset preference collapses the player so it
-    // doesn't dominate the layout before the user has ever played anything.
     const stored = getLocalStorageItem(collapsedStorageKey);
-    return stored === null ? true : stored === 'true';
+    // The frozen native profile opens its player drawer by default.  Keep the
+    // compact default for the general slskR surface, while preserving an
+    // explicit preference for either profile.
+    return stored === null ? runtimeProfile !== 'native' : stored === 'true';
   });
   const [playing, setPlaying] = useState(false);
   const [visualizerMode, setVisualizerMode] = useState(() =>

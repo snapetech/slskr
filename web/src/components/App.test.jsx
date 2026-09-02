@@ -2,13 +2,14 @@ import '@testing-library/jest-dom';
 import App from './App';
 import React from 'react';
 import { MemoryRouter } from 'react-router-dom';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { vi } from 'vitest';
 
 const {
   check,
   connectServer,
   createApplicationHubConnection,
+  getCollections,
   getApplicationOptions,
   getApplicationState,
   getSecurityEnabled,
@@ -20,6 +21,7 @@ const {
   check: vi.fn(),
   connectServer: vi.fn(),
   createApplicationHubConnection: vi.fn(),
+  getCollections: vi.fn(),
   getConversations: vi.fn(),
   getSecurityEnabled: vi.fn(),
   getApplicationOptions: vi.fn(),
@@ -39,6 +41,10 @@ vi.mock('../lib/hubFactory', () => ({
 
 vi.mock('../lib/application', () => ({
   getState: getApplicationState,
+}));
+
+vi.mock('../lib/collections', () => ({
+  getCollections,
 }));
 
 vi.mock('../lib/options', () => ({
@@ -131,6 +137,7 @@ describe('App', () => {
     getConversations.mockResolvedValue([]);
     getApplicationOptions.mockResolvedValue({});
     getApplicationState.mockResolvedValue({});
+    getCollections.mockResolvedValue({ data: [] });
     getJoinedRooms.mockResolvedValue([]);
     getRoomMessages.mockResolvedValue([]);
     isLoggedIn.mockReturnValue(true);
@@ -155,6 +162,9 @@ describe('App', () => {
   afterEach(() => {
     vi.clearAllMocks();
     document.documentElement.className = '';
+    document
+      .querySelectorAll('meta[name="slskr-runtime-profile"]')
+      .forEach((element) => element.remove());
   });
 
   it('redirects the root route to searches without logging a route miss', async () => {
@@ -211,6 +221,58 @@ describe('App', () => {
 
     expect(await screen.findByText('Connected')).toBeInTheDocument();
     expect(getApplicationState).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses the native bootstrap contracts when the daemon selects the native profile', async () => {
+    const profileMeta = document.createElement('meta');
+    profileMeta.name = 'slskr-runtime-profile';
+    profileMeta.content = 'native';
+    document.head.append(profileMeta);
+
+    render(
+      <MemoryRouter initialEntries={['/searches']}>
+        <App />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Searches')).toBeInTheDocument();
+    });
+
+    expect(getCollections).toHaveBeenCalled();
+    expect(getApplicationState).not.toHaveBeenCalled();
+    expect(getApplicationOptions).not.toHaveBeenCalled();
+    profileMeta.remove();
+  });
+
+  it('keeps an explicit compatibility profile after the application hub sends state', async () => {
+    const profileMeta = document.createElement('meta');
+    profileMeta.name = 'slskr-runtime-profile';
+    profileMeta.content = 'legacy';
+    document.head.append(profileMeta);
+
+    render(
+      <MemoryRouter initialEntries={['/dashboard']}>
+        <App />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('History')).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      hubHandlers.state({
+        runtimeProfile: undefined,
+        server: { state: 'Disconnected' },
+      });
+    });
+
+    expect(document.querySelector('[data-runtime-profile]')).toHaveAttribute(
+      'data-runtime-profile',
+      'legacy',
+    );
+    profileMeta.remove();
   });
 
   it('opens the theme menu and applies the selected theme', async () => {

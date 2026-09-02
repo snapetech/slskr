@@ -102,6 +102,7 @@ pub struct AppConfig {
     pub private_message_auto_response: PrivateMessageAutoResponseSettings,
     pub pod_join_signature_mode: PodSignatureMode,
     pub virtual_soulfind_v2_enabled: bool,
+    pub acquisition_planning_enabled: bool,
     pub controller_profile: ControllerProfile,
     /// Native launches follow current upstream behavior by default. An
     /// explicitly selected profile retains its frozen behavior
@@ -1489,15 +1490,24 @@ impl AppConfig {
                 .unwrap_or_else(|| "off".to_owned())
                 .as_str(),
         )?;
+        let virtual_soulfind_v2_explicit = file_config.virtual_soulfind_v2.enabled.is_some()
+            || env.var("SLSKR_VIRTUAL_SOULFIND_V2_ENABLED").is_some();
         let requested_virtual_soulfind_v2_enabled = env_bool_layer(
             env,
             "SLSKR_VIRTUAL_SOULFIND_V2_ENABLED",
-            file_config.virtual_soulfind_v2.enabled.unwrap_or(true),
+            file_config.virtual_soulfind_v2.enabled.unwrap_or(false),
         )?;
-        // The current native profile runtime exposes the v2 controller when its
-        // feature and v2 options are enabled.  Keep the setting live instead
-        // of projecting the old frozen-target negative contract.
+        // The frozen native controller registers the v2 routes but keeps their
+        // API option disabled by default. Its source-provider controller reads a
+        // separate options type whose acquisition-planning option defaults to
+        // enabled. Preserve both target defaults while allowing an explicit
+        // file or environment value to control both contracts.
         let virtual_soulfind_v2_enabled = requested_virtual_soulfind_v2_enabled;
+        let acquisition_planning_enabled = if virtual_soulfind_v2_explicit {
+            requested_virtual_soulfind_v2_enabled
+        } else {
+            true
+        };
         let mut integrations = IntegrationSettings::from_layers(
             file_config.integrations,
             env,
@@ -1577,6 +1587,7 @@ impl AppConfig {
             private_message_auto_response,
             pod_join_signature_mode,
             virtual_soulfind_v2_enabled,
+            acquisition_planning_enabled,
             controller_profile,
             current_upstream_behavior,
             controller_headless,
@@ -3686,8 +3697,8 @@ impl MusicBrainzIntegrationSettings {
     pub fn sanitized_json(&self) -> String {
         format!(
             "{{\"base_url\":{},\"user_agent\":{},\"timeout_seconds\":{},\"retry_attempts\":{}}}",
-            json_escape(&self.base_url),
-            json_escape(&self.user_agent),
+            json_option(Some(&self.base_url)),
+            json_option(Some(&self.user_agent)),
             self.timeout_seconds,
             self.retry_attempts,
         )
@@ -3829,7 +3840,7 @@ impl NtfyIntegrationSettings {
     }
 
     fn sanitized_json(&self) -> String {
-        format!("{{\"enabled\":{},\"url\":{},\"access_token_configured\":{},\"notification_prefix\":{},\"notify_on_private_message\":{},\"notify_on_room_mention\":{}}}", self.enabled, json_escape(&self.url), !self.access_token.is_empty(), json_escape(&self.notification_prefix), self.notify_on_private_message, self.notify_on_room_mention)
+        format!("{{\"enabled\":{},\"url\":{},\"access_token_configured\":{},\"notification_prefix\":{},\"notify_on_private_message\":{},\"notify_on_room_mention\":{}}}", self.enabled, json_option(Some(&self.url)), !self.access_token.is_empty(), json_option(Some(&self.notification_prefix)), self.notify_on_private_message, self.notify_on_room_mention)
     }
 }
 
@@ -3899,7 +3910,7 @@ impl PushoverIntegrationSettings {
     }
 
     fn sanitized_json(&self) -> String {
-        format!("{{\"enabled\":{},\"user_key_configured\":{},\"token_configured\":{},\"notification_prefix\":{},\"notify_on_private_message\":{},\"notify_on_room_mention\":{}}}", self.enabled, !self.user_key.is_empty(), !self.token.is_empty(), json_escape(&self.notification_prefix), self.notify_on_private_message, self.notify_on_room_mention)
+        format!("{{\"enabled\":{},\"user_key_configured\":{},\"token_configured\":{},\"notification_prefix\":{},\"notify_on_private_message\":{},\"notify_on_room_mention\":{}}}", self.enabled, !self.user_key.is_empty(), !self.token.is_empty(), json_option(Some(&self.notification_prefix)), self.notify_on_private_message, self.notify_on_room_mention)
     }
 }
 
@@ -3973,7 +3984,7 @@ impl PushbulletIntegrationSettings {
         Ok(settings)
     }
     fn sanitized_json(&self) -> String {
-        format!("{{\"enabled\":{},\"access_token_configured\":{},\"notification_prefix\":{},\"notify_on_private_message\":{},\"notify_on_room_mention\":{},\"retry_attempts\":{},\"cooldown_time\":{}}}", self.enabled, !self.access_token.is_empty(), json_escape(&self.notification_prefix), self.notify_on_private_message, self.notify_on_room_mention, self.retry_attempts, self.cooldown_time)
+        format!("{{\"enabled\":{},\"access_token_configured\":{},\"notification_prefix\":{},\"notify_on_private_message\":{},\"notify_on_room_mention\":{},\"retry_attempts\":{},\"cooldown_time\":{}}}", self.enabled, !self.access_token.is_empty(), json_option(Some(&self.notification_prefix)), self.notify_on_private_message, self.notify_on_room_mention, self.retry_attempts, self.cooldown_time)
     }
 }
 
@@ -4078,13 +4089,13 @@ impl FtpIntegrationSettings {
         format!(
             "{{\"enabled\":{},\"address\":{},\"port\":{},\"encryption_mode\":{},\"ignore_certificate_errors\":{},\"username\":{},\"password_configured\":{},\"remote_path\":{},\"overwrite_existing\":{},\"connection_timeout\":{},\"retry_attempts\":{}}}",
             self.enabled,
-            json_escape(&self.address),
+            json_option(Some(&self.address)),
             self.port,
-            json_escape(&self.encryption_mode),
+            json_option(Some(&self.encryption_mode)),
             self.ignore_certificate_errors,
-            json_escape(&self.username),
+            json_option(Some(&self.username)),
             !self.password.is_empty(),
-            json_escape(&self.remote_path),
+            json_option(Some(&self.remote_path)),
             self.overwrite_existing,
             self.connection_timeout,
             self.retry_attempts,
@@ -4209,10 +4220,10 @@ impl VpnIntegrationSettings {
             self.port_forwarding,
             self.self_hosted_relay,
             self.polling_interval,
-            json_escape(&self.gluetun.url),
+            json_option(Some(&self.gluetun.url)),
             self.gluetun.timeout,
-            json_escape(&self.gluetun.auth),
-            json_escape(&self.gluetun.username),
+            json_option(Some(&self.gluetun.auth)),
+            json_option(Some(&self.gluetun.username)),
             !self.gluetun.password.is_empty(),
             !self.gluetun.api_key.is_empty(),
         )
@@ -13322,6 +13333,19 @@ mod tests {
     }
 
     #[test]
+    fn sanitized_config_is_valid_json() {
+        let config = super::AppConfig::from_layers(
+            None,
+            super::FileConfig::default(),
+            &MapEnv::default().with("SLSKR_AUTH_DISABLED", "true"),
+        )
+        .expect("default config");
+
+        serde_json::from_str::<serde_json::Value>(&config.sanitized_json())
+            .expect("sanitized config must remain valid JSON");
+    }
+
+    #[test]
     fn controller_profile_is_explicit_bounded_and_projected() {
         let default = super::AppConfig::from_layers(
             None,
@@ -14175,14 +14199,15 @@ mod tests {
     }
 
     #[test]
-    fn virtual_soulfind_v2_defaults_enabled_and_honors_explicit_disable() {
+    fn virtual_soulfind_v2_defaults_disabled_and_honors_explicit_enable() {
         let default = super::AppConfig::from_layers(
             None,
             super::FileConfig::default(),
             &MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "native"),
         )
         .expect("default slskdN VirtualSoulfind v2 config");
-        assert!(default.virtual_soulfind_v2_enabled);
+        assert!(!default.virtual_soulfind_v2_enabled);
+        assert!(default.acquisition_planning_enabled);
 
         let file_disabled = super::AppConfig::from_layers(
             None,
@@ -14196,6 +14221,7 @@ mod tests {
         )
         .expect("file-disabled VirtualSoulfind v2 config");
         assert!(!file_disabled.virtual_soulfind_v2_enabled);
+        assert!(!file_disabled.acquisition_planning_enabled);
 
         let env_enabled = super::AppConfig::from_layers(
             None,
@@ -14211,6 +14237,7 @@ mod tests {
         )
         .expect("environment-enabled VirtualSoulfind v2 config");
         assert!(env_enabled.virtual_soulfind_v2_enabled);
+        assert!(env_enabled.acquisition_planning_enabled);
         assert!(env_enabled
             .sanitized_json()
             .contains("\"virtual_soulfind_v2_enabled\":true"));

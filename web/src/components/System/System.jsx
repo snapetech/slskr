@@ -37,6 +37,16 @@ const SECTIONS = [
   { icon: 'options', key: 'advanced', title: 'Advanced' },
 ];
 
+const LEGACY_SYSTEM_ROUTES = [
+  'info',
+  'options',
+  'shares',
+  'files',
+  'data',
+  'events',
+  'logs',
+];
+
 const System = ({ runtimeProfile, options = {}, state = {}, theme }) => {
   const navigate = useNavigate();
   const { tab } = useParams();
@@ -403,6 +413,14 @@ const System = ({ runtimeProfile, options = {}, state = {}, theme }) => {
     },
   ];
 
+  // The two controller profiles have established flat System tab surfaces.
+  // Keep the grouped layout for the general slskR surface, but preserve the
+  // target profile contracts so a drop-in replacement does not add a second
+  // navigation layer or change the visible control inventory.
+  const profilePanes = runtimeProfile === 'legacy'
+    ? panes.filter((pane) => LEGACY_SYSTEM_ROUTES.includes(pane.route))
+    : panes;
+
   const activeIndex = panes.findIndex((pane) => pane.route === tab);
 
   useEffect(() => {
@@ -423,7 +441,30 @@ const System = ({ runtimeProfile, options = {}, state = {}, theme }) => {
   }, [tab, runtimeProfile]);
 
   if (tab === undefined) {
-    return <Navigate replace to={`/system/${panes[0].route}`} />;
+    return <Navigate replace to={`/system/${profilePanes[0].route}`} />;
+  }
+
+  if (runtimeProfile === 'legacy' || runtimeProfile === 'native') {
+    const profileActiveIndex = profilePanes.findIndex(
+      (pane) => pane.route === tab,
+    );
+    const activeProfileIndex = profileActiveIndex > -1
+      ? profileActiveIndex
+      : 0;
+
+    return (
+      <div className="system" ref={systemRef}>
+        <Segment raised>
+          <Tab
+            activeIndex={activeProfileIndex}
+            onTabChange={(_event, { activeIndex: newIndex }) =>
+              navigate(`/system/${profilePanes[newIndex].route}`)}
+            panes={profilePanes}
+            renderActiveOnly
+          />
+        </Segment>
+      </div>
+    );
   }
 
   const activePane = activeIndex > -1 ? panes[activeIndex] : panes[0];

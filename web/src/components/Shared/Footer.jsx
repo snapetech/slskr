@@ -184,7 +184,7 @@ class Footer extends Component {
     const { buildInfo, slskrStats, speeds, stats } = this.state;
     const isLoggedIn = session.isLoggedIn();
 
-    if (!isLoggedIn) {
+    if (!isLoggedIn && this.props.runtimeProfile !== 'native') {
       // Nothing here is real yet — no donation asks, build badge, or live
       // telemetry before someone has even signed in. Just attribution.
       return (

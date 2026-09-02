@@ -810,6 +810,7 @@ pub fn normalize_api_path(path: &str) -> &str {
         "/api/v0/rooms/refresh" => "/api/rooms/refresh",
         "/api/v0/transfers" => "/api/transfers",
         "/api/v0/transfers/stats" => "/api/transfers/stats",
+        "/api/v0/dht/peers" => "/api/dht/peers",
         "/api/info" => "/api/application",
         "/api/downloads" => "/api/transfers/downloads",
         "/api/server/status" => "/api/server",
