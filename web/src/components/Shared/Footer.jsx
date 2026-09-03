@@ -5,6 +5,7 @@ import * as session from '../../lib/session';
 import * as slskrAPI from '../../lib/slskr';
 import { getLocalStorageItem } from '../../lib/storage';
 import * as transfers from '../../lib/transfers';
+import { createPollingController } from '../../lib/usePolling';
 import { urlBase } from '../../config';
 import React, { Component } from 'react';
 import { Icon } from 'semantic-ui-react';
@@ -57,13 +58,13 @@ class Footer extends Component {
     super(props);
     this.state = {
       buildInfo: null,
-      interval: null,
       slskrStats: null,
       speeds: null,
       stats: null,
     };
     this.footerRef = React.createRef();
     this.footerResizeObserver = null;
+    this.pollController = null;
   }
 
   componentDidMount() {
@@ -82,20 +83,18 @@ class Footer extends Component {
     this.fetchBuildInfo();
 
     if (session.isLoggedIn()) {
-      this.fetchStats();
-      this.fetchSpeeds();
-      const interval = setInterval(() => {
-        this.fetchStats();
-        this.fetchSpeeds();
-      }, 2_000); // Every 2s for real-time feel
-      this.setState({ interval });
+      this.pollController = createPollingController(
+        async () => {
+          await Promise.all([this.fetchStats(), this.fetchSpeeds()]);
+        },
+        2_000,
+      );
     }
   }
 
   componentWillUnmount() {
-    if (this.state.interval) {
-      clearInterval(this.state.interval);
-    }
+    this.pollController?.stop();
+    this.pollController = null;
     if (this.footerResizeObserver) {
       this.footerResizeObserver.disconnect();
       this.footerResizeObserver = null;

@@ -10,7 +10,8 @@ import {
 } from '../../../lib/libraryHealthReport';
 import { LoaderSegment } from '../../Shared';
 import * as searches from '../../../lib/searches';
-import React, { useEffect, useState } from 'react';
+import { usePolling } from '../../../lib/usePolling';
+import React, { useRef, useState } from 'react';
 import {
   Button,
   Grid,
@@ -41,6 +42,8 @@ const LibraryHealth = () => {
   const [reportMessage, setReportMessage] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [scanId, setScanId] = useState(null);
+  const scanStartedAtRef = useRef(null);
 
   const loadSummary = async (path) => {
     if (!path) return;
@@ -71,6 +74,47 @@ const LibraryHealth = () => {
     }
   };
 
+  usePolling(
+    async () => {
+      if (!scanId) return;
+
+      if (
+        scanStartedAtRef.current &&
+        Date.now() - scanStartedAtRef.current >= 60_000
+      ) {
+        setScanId(null);
+        scanStartedAtRef.current = null;
+        setScanning(false);
+        await loadSummary(libraryPath);
+        return;
+      }
+
+      try {
+        const statusResp = await libraryHealth.getScanStatus(scanId);
+        if (
+          statusResp.data.status === 'Completed' ||
+          statusResp.data.status === 'Failed'
+        ) {
+          setScanId(null);
+          scanStartedAtRef.current = null;
+          setScanning(false);
+          await loadSummary(libraryPath);
+        }
+      } catch (error_) {
+        setError(
+          error_.response?.data?.message ||
+            error_.message ||
+            'Failed to check library health scan status',
+        );
+        setScanId(null);
+        scanStartedAtRef.current = null;
+        setScanning(false);
+      }
+    },
+    2_000,
+    { enabled: Boolean(scanId), resetKey: scanId },
+  );
+
   const handleStartScan = async () => {
     if (!libraryPath) {
       setError('Please enter a library path');
@@ -81,32 +125,17 @@ const LibraryHealth = () => {
       setScanning(true);
       setError(null);
       const response = await libraryHealth.startScan(libraryPath);
-      const scanId = response.data.scanId;
-
-      // Poll for completion
-      const poll = setInterval(async () => {
-        const statusResp = await libraryHealth.getScanStatus(scanId);
-        if (
-          statusResp.data.status === 'Completed' ||
-          statusResp.data.status === 'Failed'
-        ) {
-          clearInterval(poll);
-          setScanning(false);
-          loadSummary(libraryPath);
-        }
-      }, 2_000);
-
-      setTimeout(() => {
-        clearInterval(poll);
-        setScanning(false);
-        loadSummary(libraryPath);
-      }, 60_000); // Max 1 minute polling
+      const startedScanId = response.data.scanId;
+      scanStartedAtRef.current = Date.now();
+      setScanId(startedScanId);
     } catch (error_) {
       setError(
         error_.response?.data?.message ||
           error_.message ||
           'Failed to start scan',
       );
+      setScanId(null);
+      scanStartedAtRef.current = null;
       setScanning(false);
     }
   };

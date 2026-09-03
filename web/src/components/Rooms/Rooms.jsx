@@ -2,6 +2,7 @@ import './Rooms.css';
 import { createRoomsHubConnection } from '../../lib/hubFactory';
 import { getLocalStorageItem, setLocalStorageItem } from '../../lib/storage';
 import * as rooms from '../../lib/rooms';
+import { usePolling } from '../../lib/usePolling';
 import PlaceholderSegment from '../Shared/PlaceholderSegment';
 import RoomCreateModal from './RoomCreateModal';
 import RoomSession from './RoomSession';
@@ -142,9 +143,9 @@ const Rooms = ({ runtimeProfile } = {}) => {
     }
   }, [createTab]);
 
+  usePolling(hydrateJoinedRooms, 60_000);
+
   useEffect(() => {
-    hydrateJoinedRooms();
-    const interval = window.setInterval(hydrateJoinedRooms, 60_000);
     const roomsHub = createRoomsHubConnection();
     roomsHub.on('changed', () => {
       hydrateJoinedRooms();
@@ -153,7 +154,6 @@ const Rooms = ({ runtimeProfile } = {}) => {
       console.error('Failed to start rooms event feed:', error);
     });
     return () => {
-      window.clearInterval(interval);
       roomsHub.stop().catch(() => {});
     };
   }, [hydrateJoinedRooms]);

@@ -9,6 +9,7 @@ import {
 } from '../../lib/storage';
 import * as userNotes from '../../lib/userNotes';
 import * as users from '../../lib/users';
+import { createPollingController } from '../../lib/usePolling';
 import PlaceholderSegment from '../Shared/PlaceholderSegment';
 import UserCard from '../Shared/UserCard';
 import UserNoteModal from '../Users/UserNoteModal';
@@ -101,7 +102,7 @@ class BrowseSession extends Component {
     super(props);
 
     this.state = initialState;
-    this.pollInterval = null;
+    this.pollController = null;
   }
 
   componentDidMount() {
@@ -129,16 +130,11 @@ class BrowseSession extends Component {
     }
 
     document.addEventListener('keyup', this.keyUp, false);
-    document.addEventListener('visibilitychange', this.handleVisibilityChange);
   }
 
   componentWillUnmount() {
     this.stopPolling();
     document.removeEventListener('keyup', this.keyUp, false);
-    document.removeEventListener(
-      'visibilitychange',
-      this.handleVisibilityChange,
-    );
   }
 
   fetchUserNote = async (username) => {
@@ -152,25 +148,18 @@ class BrowseSession extends Component {
 
   // Start polling only when needed (during active browse)
   startPolling = () => {
-    if (!this.pollInterval) {
-      this.pollInterval = window.setInterval(this.fetchStatus, 500);
+    if (!this.pollController) {
+      this.pollController = createPollingController(this.fetchStatus, 500, {
+        immediate: false,
+      });
     }
   };
 
   // Stop polling when not needed
   stopPolling = () => {
-    if (this.pollInterval) {
-      clearInterval(this.pollInterval);
-      this.pollInterval = null;
-    }
-  };
-
-  // Pause polling when page is hidden to save resources
-  handleVisibilityChange = () => {
-    if (document.hidden) {
-      this.stopPolling();
-    } else if (this.state.browseState === 'pending') {
-      this.startPolling();
+    if (this.pollController) {
+      this.pollController.stop();
+      this.pollController = null;
     }
   };
 
@@ -320,20 +309,18 @@ class BrowseSession extends Component {
     return false;
   };
 
-  fetchStatus = () => {
+  fetchStatus = async () => {
     const { browseState, username } = this.state;
     // Only poll status when actively browsing AND we have a username
     if (browseState === 'pending' && username) {
-      users
-        .getBrowseStatus({ username })
-        .then((response) =>
-          this.setState({
-            browseStatus: response.data,
-          }),
-        )
-        .catch(() => {
-          // Ignore 404s during status polling
+      try {
+        const response = await users.getBrowseStatus({ username });
+        this.setState({
+          browseStatus: response.data,
         });
+      } catch {
+        // Ignore 404s during status polling
+      }
     }
   };
 

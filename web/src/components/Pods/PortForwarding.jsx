@@ -1,6 +1,7 @@
 import { urlBase } from '../../config';
 import * as pods from '../../lib/pods';
 import * as portForwarding from '../../lib/portForwarding';
+import { createPollingController } from '../../lib/usePolling';
 import React, { Component } from 'react';
 import {
   Button,
@@ -34,10 +35,6 @@ const initialState = {
   creatingForwarding: false,
   error: null,
   forwardingStatus: [],
-  intervals: {
-    stats: undefined,
-    status: undefined,
-  },
   loading: false,
   pods: [],
   selectedPodDetail: null,
@@ -53,25 +50,44 @@ class PortForwarding extends Component {
   constructor(props) {
     super(props);
     this.state = initialState;
+    this.pollControllers = {
+      stats: null,
+      status: null,
+    };
   }
 
   componentDidMount() {
-    this.setState({
-      intervals: {
-        stats: window.setInterval(this.fetchTunnelStats, 10_000),
-        status: window.setInterval(this.fetchForwardingStatus, 5_000), // More frequent stats updates
-      },
-    });
-
+    this.startPolling();
     this.initializeComponent();
   }
 
   componentWillUnmount() {
-    const { stats, status } = this.state.intervals;
-    clearInterval(status);
-    clearInterval(stats);
-    this.setState({ intervals: initialState.intervals });
+    this.stopPolling();
   }
+
+  startPolling = () => {
+    if (!this.pollControllers.stats) {
+      this.pollControllers.stats = createPollingController(
+        this.fetchTunnelStats,
+        10_000,
+        { immediate: false },
+      );
+    }
+    if (!this.pollControllers.status) {
+      this.pollControllers.status = createPollingController(
+        this.fetchForwardingStatus,
+        5_000,
+        { immediate: false },
+      );
+    }
+  };
+
+  stopPolling = () => {
+    this.pollControllers.stats?.stop();
+    this.pollControllers.status?.stop();
+    this.pollControllers.stats = null;
+    this.pollControllers.status = null;
+  };
 
   initializeComponent = async () => {
     this.setState({ error: null, loading: true });

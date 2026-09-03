@@ -1,6 +1,7 @@
 import './Pods.css';
 import { urlBase } from '../../config';
 import * as pods from '../../lib/pods';
+import { createPollingController } from '../../lib/usePolling';
 import PlaceholderSegment from '../Shared/PlaceholderSegment';
 import PodListenAlongPanel from '../Player/PodListenAlongPanel';
 import PortForwarding from './PortForwarding';
@@ -30,10 +31,6 @@ const initialState = {
   activeChannelId: null,
   activeDetailTab: 0,
   activePodId: null,
-  intervals: {
-    messages: undefined,
-    pods: undefined,
-  },
   loading: false,
   members: [],
   messageInput: '',
@@ -78,6 +75,10 @@ class Pods extends Component {
     super(props);
 
     this.state = initialState;
+    this.pollControllers = {
+      messages: null,
+      pods: null,
+    };
   }
 
   componentDidMount() {
@@ -88,12 +89,9 @@ class Pods extends Component {
       {
         activeChannelId: channelId || null,
         activePodId: podId || null,
-        intervals: {
-          messages: window.setInterval(this.fetchMessages, 2_000),
-          pods: window.setInterval(this.fetchPods, 5_000),
-        },
       },
       async () => {
+        this.startPolling();
         await this.fetchPods();
         if (podId) {
           await this.selectPod(podId, channelId);
@@ -120,14 +118,30 @@ class Pods extends Component {
   }
 
   componentWillUnmount() {
-    const { messages: messagesInterval, pods: podsInterval } =
-      this.state.intervals;
-
-    clearInterval(podsInterval);
-    clearInterval(messagesInterval);
-
-    this.setState({ intervals: initialState.intervals });
+    this.stopPolling();
   }
+
+  startPolling = () => {
+    if (!this.pollControllers.messages) {
+      this.pollControllers.messages = createPollingController(
+        this.fetchMessages,
+        2_000,
+        { immediate: false },
+      );
+    }
+    if (!this.pollControllers.pods) {
+      this.pollControllers.pods = createPollingController(this.fetchPods, 5_000, {
+        immediate: false,
+      });
+    }
+  };
+
+  stopPolling = () => {
+    this.pollControllers.messages?.stop();
+    this.pollControllers.pods?.stop();
+    this.pollControllers.messages = null;
+    this.pollControllers.pods = null;
+  };
 
   fetchPods = async () => {
     try {
@@ -271,7 +285,7 @@ class Pods extends Component {
         senderPeerId,
       );
       this.setState({ messageInput: '' });
-      // Messages will be refreshed by interval
+      // Messages will be refreshed by the shared non-overlapping poller.
     } catch (error) {
       console.error('Failed to send message:', error);
       toast.error(`Failed to send message: ${error.message}`);

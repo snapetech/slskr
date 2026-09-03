@@ -1,5 +1,6 @@
 import './Chat.css';
 import * as chat from '../../lib/chat';
+import { createPollingController } from '../../lib/usePolling';
 import PlaceholderSegment from '../Shared/PlaceholderSegment';
 import UserCard from '../Shared/UserCard';
 import React, { Component, createRef } from 'react';
@@ -20,13 +21,13 @@ class ChatSession extends Component {
 
     this.state = {
       conversation: null,
-      interval: undefined,
       loading: false,
       message: '',
     };
 
     this.listRef = createRef();
     this.messageRef = undefined;
+    this.pollController = null;
   }
 
   componentDidMount() {
@@ -38,25 +39,23 @@ class ChatSession extends Component {
   }
 
   startPolling = () => {
-    if (this.state.interval) {
+    if (this.pollController) {
       return;
     }
 
-    const interval = window.setInterval(this.fetchConversation, 5_000);
-    this.setState({ interval }, () => {
-      this.fetchConversation();
-    });
+    this.pollController = createPollingController(
+      this.fetchConversation,
+      5_000,
+    );
   };
 
-  stopPolling = (updateState = true) => {
-    if (!this.state.interval) {
+  stopPolling = () => {
+    if (!this.pollController) {
       return;
     }
 
-    clearInterval(this.state.interval);
-    if (updateState) {
-      this.setState({ interval: undefined });
-    }
+    this.pollController.stop();
+    this.pollController = null;
   };
 
   componentDidUpdate(previousProps) {
@@ -67,7 +66,11 @@ class ChatSession extends Component {
     ) {
       const usernameChanged = previousProps.username !== this.props.username;
       this.setState(usernameChanged ? { message: '' } : {}, () => {
-        this.fetchConversation();
+        if (this.pollController) {
+          this.pollController.refresh();
+        } else {
+          this.fetchConversation();
+        }
         if (this.props.active !== false) {
           this.focusInput();
         }
@@ -84,7 +87,7 @@ class ChatSession extends Component {
   }
 
   componentWillUnmount() {
-    this.stopPolling(false);
+    this.stopPolling();
   }
 
   fetchConversation = async () => {
@@ -128,7 +131,11 @@ class ChatSession extends Component {
     this.setState({ message: '' });
 
     // Refresh to show new message
-    await this.fetchConversation();
+    if (this.pollController) {
+      await this.pollController.refresh();
+    } else {
+      await this.fetchConversation();
+    }
   };
 
   sendReply = async () => {

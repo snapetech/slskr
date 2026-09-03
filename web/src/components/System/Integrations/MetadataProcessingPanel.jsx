@@ -1,6 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { Card, Header, Icon, Label, Message, Table } from 'semantic-ui-react';
 import { getMetadataProcessingStatus } from '../../../lib/slskr';
+import { usePolling } from '../../../lib/usePolling';
 
 const labelColor = (status) =>
   ({ complete: 'green', failed: 'red', running: 'blue', skipped: 'grey' })[
@@ -10,19 +11,10 @@ const labelColor = (status) =>
 const MetadataProcessingPanel = () => {
   const [status, setStatus] = useState({ active: [], history: [] });
 
-  useEffect(() => {
-    let mounted = true;
-    const refresh = async () => {
-      const next = await getMetadataProcessingStatus(50);
-      if (mounted) setStatus(next || { active: [], history: [] });
-    };
-    refresh();
-    const timer = window.setInterval(refresh, 5000);
-    return () => {
-      mounted = false;
-      window.clearInterval(timer);
-    };
-  }, []);
+  usePolling(async () => {
+    const next = await getMetadataProcessingStatus(50);
+    setStatus(next || { active: [], history: [] });
+  }, 5_000);
 
   const rows = [...(status.active || []), ...(status.history || [])];
   return (

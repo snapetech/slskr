@@ -7,6 +7,7 @@ import {
 import * as pods from '../../lib/pods';
 import * as rooms from '../../lib/rooms';
 import { getLocalStorageItem, setLocalStorageItem } from '../../lib/storage';
+import { usePolling } from '../../lib/usePolling';
 import ChatSession from '../Chat/ChatSession';
 import PodListenAlongPanel from '../Player/PodListenAlongPanel';
 import PlaceholderSegment from '../Shared/PlaceholderSegment';
@@ -117,18 +118,17 @@ const PodChannelSession = ({ channel, state }) => {
     setMembers(podMembers || []);
   }, [channel?.channelId, channel?.podId]);
 
-  useEffect(() => {
-    refresh().catch((error) => {
-      console.error('Failed to load pod channel messages:', error);
-    });
-    const interval = window.setInterval(() => {
+  usePolling(
+    () =>
       refresh().catch((error) => {
         console.error('Failed to load pod channel messages:', error);
-      });
-    }, 2_000);
-
-    return () => window.clearInterval(interval);
-  }, [refresh]);
+      }),
+    2_000,
+    {
+      enabled: Boolean(channel?.podId && channel?.channelId),
+      resetKey: `${channel?.podId || ''}:${channel?.channelId || ''}`,
+    },
+  );
 
   const send = async () => {
     const trimmed = body.trim();
@@ -472,15 +472,15 @@ const Messaging = ({ runtimeProfile, initialKind = 'mixed', state }) => {
     [podChannels],
   );
 
-  useEffect(() => {
-    hydrate().catch((error) => {
-      console.error('Failed to hydrate messaging workspace:', error);
-    });
-    const interval = window.setInterval(() => {
+  usePolling(
+    () =>
       hydrate().catch((error) => {
         console.error('Failed to hydrate messaging workspace:', error);
-      });
-    }, 60_000);
+      }),
+    60_000,
+  );
+
+  useEffect(() => {
     const messagesHub = createMessagesHubConnection();
     const roomsHub = createRoomsHubConnection();
     const refresh = () => {
@@ -497,7 +497,6 @@ const Messaging = ({ runtimeProfile, initialKind = 'mixed', state }) => {
       console.error('Failed to start rooms event feed:', error);
     });
     return () => {
-      window.clearInterval(interval);
       messagesHub.stop().catch(() => {});
       roomsHub.stop().catch(() => {});
     };

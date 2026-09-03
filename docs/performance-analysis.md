@@ -53,6 +53,12 @@ python3 scripts/compare-benchmark.py \
 The comparison checks the aggregate and each endpoint case. Missing metrics
 and workload drift are invalid results, not successful comparisons.
 
+The Web UI's shared polling controller is used for periodic refreshes that
+remain active while a screen is mounted. It waits for each request to finish,
+pauses timers while the document is hidden, and owns cleanup on route or
+component teardown. Event-driven refreshes remain separate so they can still
+react immediately to hub notifications.
+
 Mutation and SignalR performance scenarios must remain explicit lifecycle
 scenarios. They are not hidden in a generic load test because event ordering,
 side effects, and reconnect behavior are compatibility contracts.

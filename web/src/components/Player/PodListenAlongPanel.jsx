@@ -1,7 +1,8 @@
 import { createListeningPartyHubConnection } from '../../lib/hubFactory';
 import * as listeningParty from '../../lib/listeningParty';
 import { usePlayer } from './PlayerContext';
-import React, { useEffect, useRef, useState } from 'react';
+import { usePolling } from '../../lib/usePolling';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Button, Checkbox, Icon, Label, List, Popup, Segment } from 'semantic-ui-react';
 
 const applyPartyState = (state, player) => {
@@ -90,19 +91,15 @@ const PodListenAlongPanel = ({ channelId, compact = false, podId, user }) => {
     };
   }, [channelId, podId]);
 
-  const refreshDirectory = async () => {
+  const refreshDirectory = useCallback(async () => {
     try {
       setDirectory(await listeningParty.getPartyDirectory());
     } catch {
       setDirectory([]);
     }
-  };
-
-  useEffect(() => {
-    refreshDirectory();
-    const id = window.setInterval(refreshDirectory, 30_000);
-    return () => window.clearInterval(id);
   }, []);
+
+  usePolling(refreshDirectory, 30_000);
 
   const publish = async (action) => {
     const current = player.current;

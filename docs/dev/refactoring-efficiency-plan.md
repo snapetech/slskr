@@ -20,8 +20,10 @@ The first execution batch is complete and verified on `main`:
 - bounded event history and its compatibility projections now have one owned
   module instead of living in the controller source;
 - bulk transfer deletion uses bounded parameter chunks inside one transaction;
-- the high-frequency functional Web UI refreshes use non-overlapping polling
-  that pauses hidden documents and refreshes once when visible again.
+- the high-frequency Web UI refreshes use shared non-overlapping polling that
+  pauses hidden documents and refreshes once when visible again, including the
+  remaining class-based chat, browse, room, pod, footer, and port-forwarding
+  surfaces.
 
 The historical controller test relocation, wider route-domain split, and
 instrumented persistence/query baselines remain open. They require mechanical

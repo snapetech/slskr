@@ -1,5 +1,6 @@
 import * as rooms from '../../lib/rooms';
 import { createRoomsHubConnection } from '../../lib/hubFactory';
+import { createPollingController } from '../../lib/usePolling';
 import React, { Component, createRef } from 'react';
 import UserCard from '../Shared/UserCard';
 import {
@@ -38,6 +39,7 @@ class RoomSession extends Component {
     this.listRef = createRef();
     this.messageRef = undefined;
     this.roomsHub = undefined;
+    this.pollController = null;
   }
 
   componentDidMount() {
@@ -57,7 +59,11 @@ class RoomSession extends Component {
     if (previousProps.roomName !== this.props.roomName) {
       this.setState(initialState, () => {
         if (this.props.active !== false) {
-          this.fetchRoom();
+          if (this.pollController) {
+            this.pollController.refresh();
+          } else {
+            this.fetchRoom();
+          }
           this.focusInput();
         }
       });
@@ -74,17 +80,16 @@ class RoomSession extends Component {
   }
 
   startPolling = () => {
-    if (this.interval) {
+    if (this.pollController) {
       return;
     }
 
-    this.fetchRoom();
-    this.interval = window.setInterval(this.fetchRoom, 60_000);
+    this.pollController = createPollingController(this.fetchRoom, 60_000);
     this.roomsHub = createRoomsHubConnection();
     this.roomsHub.on('changed', (event) => {
       const roomName = event?.resource || event?.data?.resource;
       if (!roomName || roomName === this.props.roomName || roomName === 'rooms') {
-        this.fetchRoom();
+        this.pollController?.refresh();
       }
     });
     this.roomsHub.start().catch((error) => {
@@ -93,12 +98,12 @@ class RoomSession extends Component {
   };
 
   stopPolling = () => {
-    if (!this.interval) {
+    if (!this.pollController && !this.roomsHub) {
       return;
     }
 
-    clearInterval(this.interval);
-    this.interval = undefined;
+    this.pollController?.stop();
+    this.pollController = null;
     if (this.roomsHub) {
       this.roomsHub.stop().catch(() => {});
       this.roomsHub = undefined;

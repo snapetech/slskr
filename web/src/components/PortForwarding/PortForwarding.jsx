@@ -1,6 +1,7 @@
 import { urlBase } from '../../config';
 import * as pods from '../../lib/pods';
 import * as portForwarding from '../../lib/portForwarding';
+import { createPollingController } from '../../lib/usePolling';
 import React, { Component } from 'react';
 import {
   Button,
@@ -35,9 +36,6 @@ const initialState = {
   creatingForwarding: false,
   error: null,
   forwardingStatus: [],
-  intervals: {
-    status: undefined,
-  },
   loading: false,
   pods: [],
   selectedPodDetail: null,
@@ -50,23 +48,32 @@ class PortForwarding extends Component {
   constructor(props) {
     super(props);
     this.state = initialState;
+    this.pollController = null;
   }
 
   componentDidMount() {
-    this.setState({
-      intervals: {
-        status: window.setInterval(this.fetchForwardingStatus, 5_000),
-      },
-    });
-
+    this.startPolling();
     this.initializeComponent();
   }
 
   componentWillUnmount() {
-    const { status } = this.state.intervals;
-    clearInterval(status);
-    this.setState({ intervals: initialState.intervals });
+    this.stopPolling();
   }
+
+  startPolling = () => {
+    if (!this.pollController) {
+      this.pollController = createPollingController(
+        this.fetchForwardingStatus,
+        5_000,
+        { immediate: false },
+      );
+    }
+  };
+
+  stopPolling = () => {
+    this.pollController?.stop();
+    this.pollController = null;
+  };
 
   initializeComponent = async () => {
     this.setState({ error: null, loading: true });
