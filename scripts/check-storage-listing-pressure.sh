@@ -5,6 +5,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
 status=0
+controller_sources=(crates/slskr/src/lib.rs crates/slskr/src/controller_tests.rs)
 
 if ! rg -n 'SLSKD_STORAGE_RECURSIVE_LIST_DEFAULT_ENTRIES|SLSKD_STORAGE_RECURSIVE_LIST_MAX_ENTRIES' crates/slskr/src/lib.rs >/dev/null; then
   printf 'storage listing pressure check failed: recursive storage listing budget constants are missing\n' >&2
@@ -46,7 +47,7 @@ if ! rg -n 'truncated|entryCount' crates/slskr/src/lib.rs >/dev/null; then
   status=1
 fi
 
-if ! rg -n 'controller_recursive_storage_listing_has_lower_budget|controller_storage_directory_routes_ignore_unknown_pagination_parameters' crates/slskr/src/lib.rs >/dev/null; then
+if ! rg -n 'controller_recursive_storage_listing_has_lower_budget|controller_storage_directory_routes_ignore_unknown_pagination_parameters' "${controller_sources[@]}" >/dev/null; then
   printf 'storage listing pressure check failed: recursive budget and pagination regression tests are missing\n' >&2
   status=1
 fi
