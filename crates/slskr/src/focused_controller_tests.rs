@@ -175,6 +175,7 @@ fn test_state_with_env(
         songid_run_slots: Arc::new(super::Semaphore::new(
             config.media_services.song_id_max_concurrent_runs,
         )),
+        songid_jobs: None,
         collections: RwLock::new(super::CollectionStore::new()),
         wishlist: RwLock::new(super::WishlistStore::new()),
         contacts: RwLock::new(super::ContactStore::new()),

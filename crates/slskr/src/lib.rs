@@ -58,7 +58,8 @@ mod realm_subject_index;
 mod relay;
 mod relay_agent;
 mod relay_ws;
-#[cfg(not(feature = "legacy-route-dispatch"))]
+// Shared route helpers are used by both the bounded dispatcher and the
+// historical compatibility dispatcher.
 mod route_dispatch;
 #[allow(
     dead_code,
@@ -3279,6 +3280,11 @@ struct TransferEntry {
     updated_at: u64,
     #[serde(default)]
     updated_at_ms: u64,
+    // SignalR's transfer activity DTO includes the state before the
+    // transition. This is process-local metadata and is intentionally not
+    // persisted; a rehydrated transfer has no in-process transition to report.
+    #[serde(skip)]
+    previous_status: Option<String>,
 }
 
 fn default_transfer_attempts() -> u32 {
@@ -3728,6 +3734,11 @@ fn transfer_hub_activity_json(entry: &TransferEntry) -> serde_json::Value {
         ((entry.bytes_transferred as f64 / size as f64) * 100.0).min(100.0)
     };
     let state = controller_transfer_state(&entry.status);
+    let previous_state = entry
+        .previous_status
+        .as_deref()
+        .map(controller_transfer_state)
+        .unwrap_or(state);
     serde_json::json!({
         "timestamp": unix_seconds_rfc3339(unix_timestamp()),
         "id": entry.id.to_string(),
@@ -3735,7 +3746,7 @@ fn transfer_hub_activity_json(entry: &TransferEntry) -> serde_json::Value {
         "direction": if entry.direction == 0 { "Download" } else { "Upload" },
         "username": entry.peer_username.as_deref().unwrap_or_default(),
         "filename": entry.filename,
-        "previousState": state,
+        "previousState": previous_state,
         "state": state,
         "size": i64::try_from(size).unwrap_or(i64::MAX),
         "bytesTransferred": i64::try_from(entry.bytes_transferred).unwrap_or(i64::MAX),
@@ -3756,17 +3767,63 @@ fn transfer_hub_removed_json(entry: &TransferEntry) -> serde_json::Value {
 }
 
 fn publish_transfer_hub_event(state: &AppState, kind: &str, entry: &TransferEntry) {
-    if state.event_tx.receiver_count() == 0 {
-        return;
-    }
     let detail = match kind {
         "removed" => transfer_hub_removed_json(entry),
         _ => transfer_hub_activity_json(entry),
     };
+    publish_signalr_hub_event(
+        state,
+        &format!("transfer.hub.{kind}"),
+        entry.id.to_string(),
+        detail,
+    );
+}
+
+fn publish_search_hub_event(state: &AppState, kind: &str, search: &SearchRecord) {
+    let Some(detail) = signalr_ws::search_hub_payload(
+        search,
+        state.config.controller_profile == config::ControllerProfile::Native,
+    ) else {
+        return;
+    };
+    publish_signalr_hub_event(
+        state,
+        &format!("search.hub.{kind}"),
+        search.id.clone(),
+        detail,
+    );
+}
+
+fn publish_songid_hub_event(state: &AppState, kind: &str, run: &serde_json::Value) {
+    if !run.is_object() {
+        return;
+    }
+    let resource = run
+        .get("id")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    publish_signalr_hub_event(
+        state,
+        &format!("songid.hub.{kind}"),
+        resource,
+        run.clone(),
+    );
+}
+
+fn publish_signalr_hub_event(
+    state: &AppState,
+    kind: &str,
+    resource: String,
+    detail: serde_json::Value,
+) {
+    if state.event_tx.receiver_count() == 0 {
+        return;
+    }
     let record = EventRecord {
         id: 0,
-        kind: format!("transfer.hub.{kind}"),
-        resource: entry.id.to_string(),
+        kind: kind.to_owned(),
+        resource,
         detail: Some(detail.to_string()),
         created_at: unix_timestamp(),
     };
@@ -3953,6 +4010,7 @@ impl TransferQueue {
                     requested_at: record.started_at as u64,
                     start_offset: 0,
                     updated_at_ms: 0,
+                    previous_status: None,
                 })
             })
             .collect();
@@ -4055,6 +4113,7 @@ impl TransferQueue {
             start_offset: 0,
             updated_at: now,
             updated_at_ms: now_ms,
+            previous_status: None,
         };
         self.push_entry(entry)
     }
@@ -4104,6 +4163,7 @@ impl TransferQueue {
             start_offset: 0,
             updated_at: now,
             updated_at_ms: now_ms,
+            previous_status: None,
         };
         self.push_entry(entry)
     }
@@ -4228,6 +4288,7 @@ impl TransferQueue {
             start_offset: 0,
             updated_at: now,
             updated_at_ms: now_ms,
+            previous_status: None,
         };
         self.push_entry(entry)
     }
@@ -4265,6 +4326,7 @@ impl TransferQueue {
     ) -> Option<TransferEntry> {
         let entry = self.entries.iter_mut().find(|entry| entry.id == id)?;
         let now = unix_timestamp();
+        entry.previous_status = Some(entry.status.clone());
         if status == "in_progress" && entry.started_at.is_none() {
             entry.started_at = Some(now);
             entry.start_offset = entry.bytes_transferred;
@@ -4298,6 +4360,7 @@ impl TransferQueue {
     ) -> Option<TransferEntry> {
         let entry = self.entries.iter_mut().find(|entry| entry.id == id)?;
         let now = unix_timestamp();
+        entry.previous_status = Some(entry.status.clone());
         if entry.started_at.is_none() && bytes_transferred > entry.bytes_transferred {
             entry.started_at = Some(now);
             entry.start_offset = entry.bytes_transferred;
@@ -4324,6 +4387,7 @@ impl TransferQueue {
 
     fn update_local_path(&mut self, id: u64, local_path: String) -> Option<TransferEntry> {
         let entry = self.entries.iter_mut().find(|entry| entry.id == id)?;
+        entry.previous_status = None;
         entry.local_path = Some(truncate_utf8_bytes(
             local_path,
             MAX_TRANSFER_LOCAL_PATH_BYTES,
@@ -4339,6 +4403,7 @@ impl TransferQueue {
     fn update_progress(&mut self, id: u64, bytes_transferred: u64) -> Option<TransferEntry> {
         let entry = self.entries.iter_mut().find(|entry| entry.id == id)?;
         let now = unix_timestamp();
+        entry.previous_status = Some(entry.status.clone());
         if entry.started_at.is_none() {
             entry.started_at = Some(now);
             entry.start_offset = entry.bytes_transferred;
@@ -4367,6 +4432,7 @@ impl TransferQueue {
         reason: Option<String>,
     ) -> Option<TransferEntry> {
         let entry = self.entries.iter_mut().find(|entry| entry.id == id)?;
+        entry.previous_status = Some(entry.status.clone());
         entry.attempts = attempt.max(1);
         entry.next_attempt_at = next_attempt_at;
         entry.status = truncate_utf8_bytes(status.to_owned(), MAX_TRANSFER_STATUS_BYTES);
@@ -4456,6 +4522,7 @@ impl TransferQueue {
         }) else {
             return Ok(None);
         };
+        entry.previous_status = Some(entry.status.clone());
         entry.token = token;
         if size.is_some() {
             entry.size = size;
@@ -4494,6 +4561,7 @@ impl TransferQueue {
                     .map(is_remote_queue_response)
                     .unwrap_or(false)
         })?;
+        entry.previous_status = Some(entry.status.clone());
         entry.token = token;
         if size.is_some() {
             entry.size = size;
@@ -4532,6 +4600,7 @@ impl TransferQueue {
                     .map(is_remote_queue_response)
                     .unwrap_or(false)
         })?;
+        entry.previous_status = Some(entry.status.clone());
         entry.token = token;
         if size.is_some() {
             entry.size = size;
@@ -12017,6 +12086,14 @@ struct RuntimeCompatState {
     updated_at: u64,
 }
 
+struct SongIdJob {
+    run_id: String,
+    source: String,
+    source_type: String,
+    requested_query: Option<String>,
+    match_query: bool,
+}
+
 #[derive(Clone, Debug, Default)]
 struct ControllerOptionsOverlayState {
     yaml_effective: serde_json::Value,
@@ -12811,6 +12888,120 @@ impl RuntimeCompatState {
         }
         self.songid_run_records.push(record.clone());
         Some(record)
+    }
+
+    fn queue_songid_run(
+        &mut self,
+        source: &str,
+        source_type: &str,
+        library_items: usize,
+        shared_files: usize,
+    ) -> Option<serde_json::Value> {
+        let record = self.record_songid_run(Vec::new(), library_items, shared_files)?;
+        let id = record.get("id")?.as_str()?.to_owned();
+        self.update_songid_run(&id, |run| {
+            run["source"] = serde_json::json!(source);
+            run["sourceType"] = serde_json::json!(source_type);
+            run["status"] = serde_json::json!("queued");
+            run["query"] = serde_json::json!("");
+            run["summary"] = serde_json::json!("Queued for SongID analysis.");
+            run["currentStage"] = serde_json::json!("queued");
+            run["percentComplete"] = serde_json::json!(0.05);
+        })
+    }
+
+    fn update_songid_run(
+        &mut self,
+        id: &str,
+        update: impl FnOnce(&mut serde_json::Value),
+    ) -> Option<serde_json::Value> {
+        let now = unix_timestamp();
+        let updated = {
+            let run = self.songid_run_records.iter_mut().find(|run| {
+                run.get("id")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|run_id| run_id == id)
+            })?;
+            update(run);
+            if let Some(object) = run.as_object_mut() {
+                object.insert("updated_at".to_owned(), serde_json::json!(now));
+            }
+            run.clone()
+        };
+        self.updated_at = now;
+        Some(updated)
+    }
+
+    fn complete_songid_run(
+        &mut self,
+        id: &str,
+        source: &str,
+        source_type: &str,
+        query: &str,
+        matches: Vec<serde_json::Value>,
+        library_items: usize,
+        shared_files: usize,
+        summary: &str,
+        evidence: Vec<String>,
+        metadata: serde_json::Value,
+        full_source_fingerprint: Option<serde_json::Value>,
+        acoustid_finding: Option<serde_json::Value>,
+    ) -> Option<serde_json::Value> {
+        let match_count = matches.len();
+        self.update_songid_run(id, |run| {
+            run["source"] = serde_json::json!(source);
+            run["sourceType"] = serde_json::json!(source_type);
+            run["query"] = serde_json::json!(query);
+            run["status"] = serde_json::json!("completed");
+            run["summary"] = serde_json::json!(summary);
+            run["currentStage"] = serde_json::json!("completed");
+            run["percentComplete"] = serde_json::json!(1.0);
+            run["libraryItems"] = serde_json::json!(library_items);
+            run["sharedFiles"] = serde_json::json!(shared_files);
+            run["matches"] = serde_json::Value::Array(matches);
+            run["matchCount"] = serde_json::json!(match_count);
+            run["evidence"] = serde_json::Value::Array(
+                evidence
+                    .into_iter()
+                    .map(serde_json::Value::String)
+                    .collect(),
+            );
+            run["metadata"] = metadata;
+            if let Some(fingerprint) = full_source_fingerprint {
+                run["fullSourceFingerprint"] = fingerprint;
+            }
+            if let Some(finding) = acoustid_finding {
+                run["clips"] = serde_json::json!([{
+                    "clipId": "full-source",
+                    "acoustId": finding,
+                }]);
+                run["scorecard"] = serde_json::json!({
+                    "acoustIdHitCount": 1,
+                    "rawAcoustIdHitCount": 1,
+                });
+            }
+        })
+    }
+
+    fn fail_songid_run(&mut self, id: &str) -> Option<serde_json::Value> {
+        self.update_songid_run(id, |run| {
+            run["status"] = serde_json::json!("failed");
+            run["summary"] = serde_json::json!("SongID analysis failed.");
+            run["currentStage"] = serde_json::json!("failed");
+            if let Some(evidence) = run.get_mut("evidence").and_then(|value| value.as_array_mut())
+            {
+                evidence.push(serde_json::json!("Analysis could not be queued."));
+            }
+        })
+    }
+
+    fn requeue_songid_run(&mut self, id: &str) -> Option<serde_json::Value> {
+        self.update_songid_run(id, |run| {
+            run["status"] = serde_json::json!("queued");
+            run["summary"] = serde_json::json!("Queued for SongID analysis.");
+            run["currentStage"] = serde_json::json!("queued");
+            run["percentComplete"] = serde_json::json!(0.05);
+        })
     }
 
     fn allocate_songid_run_id(&self) -> u64 {
@@ -15484,6 +15675,237 @@ async fn songid_source_analysis(
     )
 }
 
+async fn enqueue_songid_job(
+    state: &AppState,
+    source: String,
+    source_type: &str,
+    requested_query: Option<String>,
+    match_query: bool,
+) -> Result<Option<routing::HttpResponse>, String> {
+    let Some(sender) = state.songid_jobs.as_ref().cloned() else {
+        return Ok(None);
+    };
+
+    let library = state.library.read().await;
+    let shares = state.shares.read().await;
+    let library_items = library.records.len();
+    let shared_files = shares.entries.len();
+    drop(shares);
+    drop(library);
+
+    let run = match mutate_runtime_compat_state(state, |runtime, _| {
+        runtime.queue_songid_run(&source, source_type, library_items, shared_files)
+    })
+    .await
+    {
+        Ok(Some(run)) => run,
+        Ok(None) => {
+            return Ok(Some(routing::service_unavailable_response(
+                "song id run space exhausted",
+            )))
+        }
+        Err(error) => return Err(error),
+    };
+    let Some(run_id) = run.get("id").and_then(serde_json::Value::as_str) else {
+        return Ok(Some(routing::service_unavailable_response(
+            "song id run has no id",
+        )));
+    };
+    publish_songid_hub_event(state, "create", &run);
+
+    let job = SongIdJob {
+        run_id: run_id.to_owned(),
+        source,
+        source_type: source_type.to_owned(),
+        requested_query,
+        match_query,
+    };
+    if sender.try_send(job).is_err() {
+        if let Ok(Some(failed)) =
+            mutate_runtime_compat_state(state, |runtime, _| runtime.fail_songid_run(run_id)).await
+        {
+            publish_songid_hub_event(state, "update", &failed);
+        }
+        return Ok(Some(routing::service_unavailable_response(
+            "SongID run queue is unavailable",
+        )));
+    }
+    Ok(Some(routing::accepted_response(run.to_string())))
+}
+
+fn spawn_songid_workers(state: Arc<AppState>, receiver: mpsc::Receiver<SongIdJob>) {
+    let receiver = Arc::new(tokio::sync::Mutex::new(receiver));
+    let worker_count = state
+        .config
+        .media_services
+        .song_id_max_concurrent_runs
+        .max(1);
+    for _ in 0..worker_count {
+        let state = Arc::clone(&state);
+        let receiver = Arc::clone(&receiver);
+        tokio::spawn(async move {
+            loop {
+                let job = receiver.lock().await.recv().await;
+                let Some(job) = job else {
+                    break;
+                };
+                let Ok(_permit) = Arc::clone(&state.songid_run_slots).acquire_owned().await else {
+                    break;
+                };
+                process_songid_job(&state, job).await;
+            }
+        });
+    }
+}
+
+async fn process_songid_job(state: &AppState, job: SongIdJob) {
+    if let Ok(Some(run)) = mutate_runtime_compat_state(state, |runtime, _| {
+        runtime.update_songid_run(&job.run_id, |run| {
+            run["status"] = serde_json::json!("running");
+            run["summary"] = serde_json::json!("Starting SongID source analysis.");
+            run["currentStage"] = serde_json::json!("source_analysis");
+            run["percentComplete"] = serde_json::json!(0.12);
+        })
+    })
+    .await
+    {
+        publish_songid_hub_event(state, "update", &run);
+    }
+
+    let integrations = state.integration_settings.read().await.clone();
+    let (fallback_query, metadata, evidence, full_source_fingerprint, acoustid_finding) =
+        songid_source_analysis(&job.source, &job.source_type, &integrations).await;
+    let query = job
+        .requested_query
+        .filter(|query| !query.trim().is_empty())
+        .unwrap_or(fallback_query);
+
+    let library = state.library.read().await;
+    let shares = state.shares.read().await;
+    let runs = songid_runs_value(
+        &library,
+        &shares,
+        job.match_query.then_some(query.as_str()),
+    );
+    let matches = runs
+        .iter()
+        .flat_map(|run| {
+            run.get("matches")
+                .and_then(serde_json::Value::as_array)
+                .cloned()
+                .unwrap_or_default()
+        })
+        .collect::<Vec<_>>();
+    let library_items = library.records.len();
+    let shared_files = shares.entries.len();
+    drop(shares);
+    drop(library);
+
+    let spotify_metadata_loaded = metadata
+        .pointer("/extra/analysisAudioSource")
+        .and_then(serde_json::Value::as_str)
+        == Some("spotify_page");
+    let summary = match job.source_type.as_str() {
+        "local_file" if full_source_fingerprint.is_some() && acoustid_finding.is_some() => {
+            "Analyzed local file with Chromaprint and AcoustID metadata."
+        }
+        "local_file" if full_source_fingerprint.is_some() => {
+            "Analyzed local file with Chromaprint and filename metadata."
+        }
+        "local_file" => "Analyzed local file with filename fallback metadata.",
+        "youtube_url" => "Classified YouTube URL; optional metadata tools may enrich the run.",
+        "spotify_url" if spotify_metadata_loaded => {
+            "Analyzed Spotify page metadata for SongID query generation."
+        }
+        "spotify_url" => "Spotify metadata fetch failed; using source query fallback.",
+        "url" => "Classified URL; optional source metadata may enrich the run.",
+        _ => "Using free-text SongID query.",
+    };
+    match mutate_runtime_compat_state(state, |runtime, _| {
+        runtime.complete_songid_run(
+            &job.run_id,
+            &job.source,
+            &job.source_type,
+            &query,
+            matches,
+            library_items,
+            shared_files,
+            summary,
+            evidence,
+            metadata,
+            full_source_fingerprint,
+            acoustid_finding,
+        )
+    })
+    .await
+    {
+        Ok(Some(run)) => publish_songid_hub_event(state, "update", &run),
+        Ok(None) => {}
+        Err(error) => {
+            record_daemon_log(
+                state,
+                logging::LogLevel::Warn,
+                "songid",
+                format!("SongID run {} completion persistence failed: {error}", job.run_id),
+            )
+            .await;
+        }
+    }
+}
+
+async fn requeue_persisted_songid_runs(state: &Arc<AppState>) {
+    let Some(sender) = state.songid_jobs.as_ref().cloned() else {
+        return;
+    };
+    let pending = {
+        let runtime = state.runtime.read().await;
+        runtime
+            .songid_run_records
+            .iter()
+            .filter(|run| {
+                matches!(
+                    run.get("status").and_then(serde_json::Value::as_str),
+                    Some("queued" | "running")
+                )
+            })
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    for run in pending {
+        let Some(run_id) = run.get("id").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        let Some(source) = run.get("source").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        if source.trim().is_empty() {
+            continue;
+        }
+        if run.get("status").and_then(serde_json::Value::as_str) == Some("running") {
+            let _ = mutate_runtime_compat_state(state, |runtime, _| {
+                runtime.requeue_songid_run(run_id)
+            })
+            .await;
+        }
+        let job = SongIdJob {
+            run_id: run_id.to_owned(),
+            source: source.to_owned(),
+            source_type: run
+                .get("sourceType")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("text_query")
+                .to_owned(),
+            requested_query: run
+                .get("query")
+                .and_then(serde_json::Value::as_str)
+                .filter(|query| !query.trim().is_empty())
+                .map(str::to_owned),
+            match_query: state.config.controller_profile != ControllerProfile::Native,
+        };
+        let _ = sender.try_send(job);
+    }
+}
+
 fn songid_path_is_within_root(path: &Path, root: &Path) -> bool {
     let Some(path) = normalize_absolute_path(path) else {
         return false;
@@ -17231,6 +17653,7 @@ struct AppState {
     websocket_connections: Arc<Semaphore>,
     external_visualizer_processes: Arc<Semaphore>,
     songid_run_slots: Arc<Semaphore>,
+    songid_jobs: Option<mpsc::Sender<SongIdJob>>,
     collections: RwLock<CollectionStore>,
     wishlist: RwLock<WishlistStore>,
     contacts: RwLock<ContactStore>,
@@ -22236,6 +22659,7 @@ async fn route_http_request_with_headers(
                 drop(searches);
                 if transitioned {
                     persist_search_record(state, &record).await?;
+                    publish_search_hub_event(state, "update", &record);
                 }
                 if transitioned && record.wishlist_item_id().is_some() {
                     let mut wishlist = state.wishlist.write().await;
@@ -22318,6 +22742,7 @@ async fn route_http_request_with_headers(
             drop(searches);
             for record in &pruned_records {
                 delete_persisted_search(state, record).await?;
+                publish_search_hub_event(state, "delete", record);
             }
             Ok(routing::ok_response(format!("{{\"pruned\":{},\"remaining\":{}}}", pruned, remaining)))
         }
@@ -22494,6 +22919,7 @@ async fn route_http_request_with_headers(
                 let record = record.clone();
                 drop(searches);
                 persist_search_record(state, &record).await?;
+                publish_search_hub_event(state, "update", &record);
                 Ok(routing::ok_response(response_json))
             } else {
                 drop(searches);
@@ -23808,6 +24234,7 @@ async fn route_http_request_with_headers(
                  let mut transfers = state.transfers.write().await;
                  let previous = transfers.entries.iter().find(|entry| entry.id == id).cloned();
                  if let Some(entry) = transfers.entries.iter_mut().find(|t| t.id == id) {
+                     entry.previous_status = Some(entry.status.clone());
                      entry.status = "cancelled".to_owned();
                      entry.updated_at = unix_timestamp();
                      entry.updated_at_ms = unix_timestamp_millis();
@@ -23923,6 +24350,7 @@ async fn route_http_request_with_headers(
                                 return Ok(routing::conflict_response("outbound transfers are disabled"));
                             }
 
+                            entry.previous_status = Some(entry.status.clone());
                             entry.status = "peer_lookup".to_owned();
                             entry.reason = None;
                             entry.updated_at = unix_timestamp();
@@ -23949,6 +24377,7 @@ async fn route_http_request_with_headers(
 
                             Ok(routing::ok_response(json_response))
                         } else {
+                            entry.previous_status = Some(entry.status.clone());
                             entry.status = "in_progress".to_owned();
                             entry.reason = None;
 
@@ -23967,6 +24396,7 @@ async fn route_http_request_with_headers(
                 } else if action == "progress" {
                     let bytes_transferred = extract_json_u64_field(body, "bytes_transferred").unwrap_or(0);
                     if let Some(entry) = transfers.entries.iter_mut().find(|t| t.id == id) {
+                        entry.previous_status = Some(entry.status.clone());
                         entry.status = "in_progress".to_owned();
                         entry.bytes_transferred = bytes_transferred;
                         entry.updated_at = unix_timestamp();
@@ -23980,16 +24410,17 @@ async fn route_http_request_with_headers(
                         drop(transfers);
                         Ok(routing::not_found_response())
                     }
-                 } else if action == "complete" {
-                     let bytes_transferred = extract_json_u64_field(body, "bytes_transferred").unwrap_or(0);
-                     let status_str = extract_json_string_field(body, "status").unwrap_or_else(|| "succeeded".to_string());
-                     if let Some(entry) = transfers.entries.iter_mut().find(|t| t.id == id) {
-                         entry.bytes_transferred = bytes_transferred;
-                         entry.status = status_str.clone();
-                         entry.updated_at = unix_timestamp();
-                         entry.updated_at_ms = unix_timestamp_millis();
-                         let json_response = entry.json();
-                         let entry_for_persistence = entry.clone();
+                } else if action == "complete" {
+                    let bytes_transferred = extract_json_u64_field(body, "bytes_transferred").unwrap_or(0);
+                    let status_str = extract_json_string_field(body, "status").unwrap_or_else(|| "succeeded".to_string());
+                    if let Some(entry) = transfers.entries.iter_mut().find(|t| t.id == id) {
+                        entry.previous_status = Some(entry.status.clone());
+                        entry.bytes_transferred = bytes_transferred;
+                        entry.status = status_str.clone();
+                        entry.updated_at = unix_timestamp();
+                        entry.updated_at_ms = unix_timestamp_millis();
+                        let json_response = entry.json();
+                        let entry_for_persistence = entry.clone();
 
                          // Prepare webhook dispatch
                          let webhook_event = if status_str == "succeeded" {
@@ -24510,6 +24941,7 @@ async fn route_http_request_with_headers(
                         .await;
                     return Ok(routing::service_unavailable_response(&error));
                 }
+                publish_search_hub_event(state, "delete", record);
             }
             if route.path.starts_with("/api/v0/")
                 && matches!(
@@ -26843,6 +27275,9 @@ async fn route_http_request_with_headers(
                         route.path.starts_with("/api/v0/"),
                         &error,
                     ));
+                }
+                for search in &changed_searches {
+                    publish_search_hub_event(state, "update", search);
                 }
             }
             let compatibility_contract = route.path.starts_with("/api/v0/");
@@ -29843,6 +30278,7 @@ async fn route_http_request_with_headers(
                         .await;
                         return Ok(routing::service_unavailable_response(&error));
                     }
+                    publish_search_hub_event(state, "update", &record);
                 }
                 return Ok(routing::ok_response(String::new()));
             }
@@ -29878,6 +30314,9 @@ async fn route_http_request_with_headers(
                         )
                         .await;
                         return Ok(routing::service_unavailable_response(&error));
+                    }
+                    if updated {
+                        publish_search_hub_event(state, "update", &record);
                     }
                     Ok(routing::ok_response(value.to_string()))
                 }
@@ -30639,6 +31078,18 @@ async fn route_http_request_with_headers(
                      "SongID analysis could not be queued.",
                  ));
              }
+             if let Some(response) = enqueue_songid_job(
+                 state,
+                 source.clone(),
+                 source_type,
+                 extract_json_string_field(body, "query")
+                     .filter(|query| !query.trim().is_empty()),
+                 state.config.controller_profile != ControllerProfile::Native,
+             )
+             .await?
+             {
+                 return Ok(response);
+             }
              let Ok(_songid_permit) = Arc::clone(&state.songid_run_slots).try_acquire_owned()
              else {
                  return Ok(routing::service_unavailable_response(
@@ -30726,6 +31177,7 @@ async fn route_http_request_with_headers(
                  }
                  Err(error) => return Ok(routing::service_unavailable_response(&error)),
              };
+             publish_songid_hub_event(state, "create", &run);
              Ok(routing::accepted_response(run.to_string()))
          }
 
@@ -47322,6 +47774,9 @@ async fn apply_lidarr_rejection_policy(
                     }
                     return Err(error);
                 }
+                for search in &changed_searches {
+                    publish_search_hub_event(state, "update", search);
+                }
             }
         }
     }
@@ -53486,6 +53941,7 @@ async fn extended_controller_mutation_response(
                 rollback_searches_if_unchanged(state, previous_searches, &mutated_searches).await;
                 return routing::service_unavailable_response(&error);
             }
+            publish_search_hub_event(state, "delete", record);
         }
         let applied_max_age_days = query_parameter(query, "maxAgeDays")
             .and_then(|value| value.parse::<i32>().ok())
@@ -60451,6 +60907,7 @@ async fn extended_controller_search_response(
         query,
         target: SearchDispatchTarget::Global,
     });
+    publish_search_hub_event(state, "create", &record);
     Ok(record)
 }
 
@@ -71332,6 +71789,7 @@ async fn serve(invocation: ServeInvocation) -> Result<(), String> {
         .is_none()
         .then_some(lifecycle_commands);
     let (event_tx, _) = broadcast::channel(EVENT_HISTORY_LIMIT);
+    let (songid_job_sender, songid_job_receiver) = mpsc::channel(4096);
     let db = if config.daemon_flags.volatile {
         Some(
             crate::persistence::DatabaseManager::in_memory()
@@ -72007,6 +72465,7 @@ async fn serve(invocation: ServeInvocation) -> Result<(), String> {
         songid_run_slots: Arc::new(Semaphore::new(
             config.media_services.song_id_max_concurrent_runs,
         )),
+        songid_jobs: Some(songid_job_sender),
         collections: RwLock::new(collection_store),
         wishlist: RwLock::new(wishlist_store),
         contacts: RwLock::new(contact_store),
@@ -72077,6 +72536,8 @@ async fn serve(invocation: ServeInvocation) -> Result<(), String> {
             .rehydrate_from_database(db)
             .await;
     }
+    spawn_songid_workers(Arc::clone(&state), songid_job_receiver);
+    requeue_persisted_songid_runs(&state).await;
     start_controller_version_check(Arc::clone(&state)).await;
     match credential_store::load(&state.config) {
         Ok(Some(stored)) => {
@@ -73068,6 +73529,7 @@ async fn create_rescue_search(state: &AppState, query: String) -> Result<SearchR
         );
         return Err(error);
     }
+    publish_search_hub_event(state, "create", &record);
     Ok(record)
 }
 
@@ -73663,6 +74125,7 @@ async fn run_download_auto_retry_cycle_with_settings(
                 );
                 return Err(error);
             }
+            publish_search_hub_event(state, "create", &record);
             permit.send(SessionCommand::Search {
                 token: record.token,
                 query,
@@ -76886,6 +77349,7 @@ async fn open_remote_peer_preview_stream(
         start_offset: 0,
         updated_at: now,
         updated_at_ms: unix_timestamp_millis(),
+        previous_status: None,
     };
     let length = match negotiate_peer_transfer(state, &address, &transfer).await? {
         PeerTransferNegotiation::Allowed { token, size } if token == transfer_token => size
@@ -78461,7 +78925,7 @@ where
                 } else {
                     (Vec::new(), None)
                 };
-            let accepted = {
+            let updated_record = {
                 let mut searches = state.searches.write().await;
                 searches
                     .add_peer_response_filtered(
@@ -78469,7 +78933,11 @@ where
                         &ignored_results,
                         wishlist_policy.as_ref(),
                     )
-                    .is_some()
+            };
+            let accepted = updated_record.is_some();
+            if let Some(record) = updated_record.as_ref() {
+                persist_search_record(state, record).await?;
+                publish_search_hub_event(state, "update", record);
             };
             update_listeners(state, |snapshot| {
                 snapshot.file_search_responses += 1;
@@ -80998,6 +81466,7 @@ async fn read_remote_flac_header(
         start_offset: 0,
         updated_at: now,
         updated_at_ms: unix_timestamp_millis(),
+        previous_status: None,
     };
     let (remote_size, queued_token) =
         match negotiate_peer_transfer(state, &address, &transfer).await? {
@@ -93867,6 +94336,7 @@ pub mod tests {
             songid_run_slots: Arc::new(super::Semaphore::new(
                 config.media_services.song_id_max_concurrent_runs,
             )),
+            songid_jobs: None,
             collections: RwLock::new(super::CollectionStore::new()),
             wishlist: RwLock::new(super::WishlistStore::new()),
             contacts: RwLock::new(super::ContactStore::new()),
@@ -109586,6 +110056,7 @@ pub mod tests {
             start_offset: 0,
             updated_at: 2,
             updated_at_ms: 2_000,
+            previous_status: None,
         };
 
         super::persist_transfer_projection(&state, &entry).await;
@@ -190746,6 +191217,7 @@ pub mod tests {
             songid_run_slots: Arc::new(super::Semaphore::new(
                 config.media_services.song_id_max_concurrent_runs,
             )),
+            songid_jobs: None,
             collections: RwLock::new(super::CollectionStore::new()),
             wishlist: RwLock::new(super::WishlistStore::new()),
             contacts: RwLock::new(super::ContactStore::new()),
@@ -191078,6 +191550,7 @@ pub mod tests {
                     .media_services
                     .song_id_max_concurrent_runs,
             )),
+            songid_jobs: None,
             collections: RwLock::new(super::CollectionStore::new()),
             wishlist: RwLock::new(super::WishlistStore::new()),
             contacts: RwLock::new(super::ContactStore::new()),
@@ -193152,6 +193625,7 @@ pub mod tests {
             start_offset: 0,
             updated_at: 1,
             updated_at_ms: 1_000,
+            previous_status: None,
         };
         let error =
             super::append_transfer_event(&events_path, &entry).expect_err("reject event symlink");
@@ -193400,6 +193874,7 @@ pub mod tests {
             start_offset: 0,
             updated_at: 12,
             updated_at_ms: 12_000,
+            previous_status: None,
         };
         super::append_transfer_event(&events_path, &entry).expect("append rotated event");
 

@@ -5071,6 +5071,7 @@ async fn route_dispatch_group_2(
                 drop(searches);
                 if transitioned {
                     persist_search_record(state, &record).await?;
+                    publish_search_hub_event(state, "update", &record);
                 }
                 if transitioned && record.wishlist_item_id().is_some() {
                     let mut wishlist = state.wishlist.write().await;
@@ -5147,6 +5148,7 @@ async fn route_dispatch_group_2(
             drop(searches);
             for record in &pruned_records {
                 delete_persisted_search(state, record).await?;
+                publish_search_hub_event(state, "delete", record);
             }
             Ok(routing::ok_response(format!(
                 "{{\"pruned\":{},\"remaining\":{}}}",
@@ -5346,6 +5348,7 @@ async fn route_dispatch_group_2(
                 let record = record.clone();
                 drop(searches);
                 persist_search_record(state, &record).await?;
+                publish_search_hub_event(state, "update", &record);
                 Ok(routing::ok_response(response_json))
             } else {
                 drop(searches);
@@ -6785,6 +6788,7 @@ async fn route_dispatch_group_2(
                     .find(|entry| entry.id == id)
                     .cloned();
                 if let Some(entry) = transfers.entries.iter_mut().find(|t| t.id == id) {
+                    entry.previous_status = Some(entry.status.clone());
                     entry.status = "cancelled".to_owned();
                     entry.updated_at = unix_timestamp();
                     entry.updated_at_ms = unix_timestamp_millis();
@@ -6904,6 +6908,7 @@ async fn route_dispatch_group_2(
                                 ));
                             }
 
+                            entry.previous_status = Some(entry.status.clone());
                             entry.status = "peer_lookup".to_owned();
                             entry.reason = None;
                             entry.updated_at = unix_timestamp();
@@ -6931,6 +6936,7 @@ async fn route_dispatch_group_2(
 
                             Ok(routing::ok_response(json_response))
                         } else {
+                            entry.previous_status = Some(entry.status.clone());
                             entry.status = "in_progress".to_owned();
                             entry.reason = None;
 
@@ -6950,6 +6956,7 @@ async fn route_dispatch_group_2(
                     let bytes_transferred =
                         extract_json_u64_field(body, "bytes_transferred").unwrap_or(0);
                     if let Some(entry) = transfers.entries.iter_mut().find(|t| t.id == id) {
+                        entry.previous_status = Some(entry.status.clone());
                         entry.status = "in_progress".to_owned();
                         entry.bytes_transferred = bytes_transferred;
                         entry.updated_at = unix_timestamp();
@@ -6969,6 +6976,7 @@ async fn route_dispatch_group_2(
                     let status_str = extract_json_string_field(body, "status")
                         .unwrap_or_else(|| "succeeded".to_string());
                     if let Some(entry) = transfers.entries.iter_mut().find(|t| t.id == id) {
+                        entry.previous_status = Some(entry.status.clone());
                         entry.bytes_transferred = bytes_transferred;
                         entry.status = status_str.clone();
                         entry.updated_at = unix_timestamp();
@@ -7388,6 +7396,7 @@ async fn route_dispatch_group_2(
         ("DELETE", "/api/searches") => {
             let mut searches = state.searches.write().await;
             let previous_searches = searches.clone();
+            let cleared_records = searches.records.clone();
             let cleared_count = searches.records.len();
             searches.records.clear();
             let mutated_searches = searches.clone();
@@ -7395,6 +7404,9 @@ async fn route_dispatch_group_2(
             if let Err(error) = clear_persisted_searches(state).await {
                 rollback_searches_if_unchanged(state, previous_searches, &mutated_searches).await;
                 return Ok(routing::service_unavailable_response(&error));
+            }
+            for record in &cleared_records {
+                publish_search_hub_event(state, "delete", record);
             }
             let json = if route.path.starts_with("/api/v0/") {
                 format!("{{\"deleted\":{cleared_count}}}")
@@ -7463,6 +7475,7 @@ async fn route_dispatch_group_2(
                         .await;
                     return Ok(routing::service_unavailable_response(&error));
                 }
+                publish_search_hub_event(state, "delete", record);
             }
             if route.path.starts_with("/api/v0/")
                 && matches!(
@@ -13972,6 +13985,18 @@ async fn route_dispatch_group_6(
                      "SongID analysis could not be queued.",
                  ));
              }
+             if let Some(response) = enqueue_songid_job(
+                 state,
+                 source.clone(),
+                 source_type,
+                 extract_json_string_field(body, "query")
+                     .filter(|query| !query.trim().is_empty()),
+                 state.config.controller_profile != ControllerProfile::Native,
+             )
+             .await?
+             {
+                 return Ok(response);
+             }
              let Ok(_songid_permit) = Arc::clone(&state.songid_run_slots).try_acquire_owned()
              else {
                  return Ok(routing::service_unavailable_response(
@@ -14059,6 +14084,7 @@ async fn route_dispatch_group_6(
                  }
                  Err(error) => return Ok(routing::service_unavailable_response(&error)),
              };
+             publish_songid_hub_event(state, "create", &run);
              Ok(routing::accepted_response(run.to_string()))
          }
 

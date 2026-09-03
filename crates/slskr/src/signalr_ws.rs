@@ -407,14 +407,10 @@ async fn initial_hub_messages(state: &AppState, hub: &str) -> Vec<(String, Value
         }
         "logs" => {
             let events = state.events.read().await;
-            let logs = events
-                .records
-                .iter()
-                .rev()
-                .filter(|event| event.kind == "log.created")
-                .map(EventRecord::data_json)
-                .collect::<Vec<_>>();
-            vec![("BUFFER".to_owned(), Value::Array(logs))]
+            vec![(
+                "BUFFER".to_owned(),
+                Value::Array(log_buffer(&events.records)),
+            )]
         }
         "search" => {
             let searches = state.searches.read().await;
@@ -422,7 +418,12 @@ async fn initial_hub_messages(state: &AppState, hub: &str) -> Vec<(String, Value
                 .records
                 .iter()
                 .rev()
-                .filter_map(search_hub_payload)
+                .filter_map(|search| {
+                    search_hub_payload(
+                        search,
+                        state.config.controller_profile == crate::config::ControllerProfile::Native,
+                    )
+                })
                 .collect::<Vec<_>>();
             vec![("LIST".to_owned(), Value::Array(records))]
         }
@@ -430,7 +431,13 @@ async fn initial_hub_messages(state: &AppState, hub: &str) -> Vec<(String, Value
             let transfers = state.transfers.read().await;
             vec![("Update".to_owned(), transfer_metrics(&transfers))]
         }
-        "songid" => vec![("LIST".to_owned(), Value::Array(Vec::new()))],
+        "songid" => {
+            let runtime = state.runtime.read().await;
+            vec![(
+                "LIST".to_owned(),
+                Value::Array(songid_hub_list(&runtime.songid_run_records)),
+            )]
+        }
         _ => Vec::new(),
     }
 }
@@ -441,6 +448,11 @@ async fn event_hub_messages(
     listening_party_groups: &HashSet<String>,
     record: &EventRecord,
 ) -> Vec<(String, Value)> {
+    if let Some(target) = explicit_hub_target(hub, &record.kind) {
+        return hub_event_payload(record)
+            .map(|payload| vec![(target.to_owned(), payload)])
+            .unwrap_or_default();
+    }
     match hub {
         "application" if matches!(record.topic(), "application" | "settings") => {
             let application_state = application_state_json(state).await;
@@ -472,9 +484,14 @@ async fn event_hub_messages(
                 .find(|search| {
                     search.id == record.resource || search.token.to_string() == record.resource
                 })
-                .and_then(search_hub_payload);
+                .and_then(|search| {
+                    search_hub_payload(
+                        search,
+                        state.config.controller_profile == crate::config::ControllerProfile::Native,
+                    )
+                });
             match (record.kind.as_str(), search) {
-                ("search.started" | "search.created", Some(search)) => {
+                ("search.started" | "search.created" | "wishlist.search.started", Some(search)) => {
                     vec![("CREATE".to_owned(), search)]
                 }
                 (_, Some(search)) => vec![("UPDATE".to_owned(), search)],
@@ -517,6 +534,40 @@ async fn event_hub_messages(
     }
 }
 
+fn explicit_hub_target(hub: &str, kind: &str) -> Option<&'static str> {
+    match (hub, kind) {
+        ("search", "search.hub.create") => Some("CREATE"),
+        ("search", "search.hub.update") => Some("UPDATE"),
+        ("search", "search.hub.delete") => Some("DELETE"),
+        ("songid", "songid.hub.create") => Some("CREATE"),
+        ("songid", "songid.hub.update") => Some("UPDATE"),
+        _ => None,
+    }
+}
+
+fn hub_event_payload(record: &EventRecord) -> Option<Value> {
+    record
+        .detail
+        .as_deref()
+        .and_then(|detail| serde_json::from_str::<Value>(detail).ok())
+        .filter(Value::is_object)
+}
+
+fn log_buffer(events: &[EventRecord]) -> Vec<Value> {
+    events
+        .iter()
+        .filter(|event| event.kind == "log.created")
+        .map(EventRecord::data_json)
+        .collect()
+}
+
+fn songid_hub_list(records: &[Value]) -> Vec<Value> {
+    let mut records = records.to_vec();
+    records.reverse();
+    records.truncate(15);
+    records
+}
+
 fn transfer_hub_payload(record: &EventRecord) -> Option<Value> {
     record
         .detail
@@ -525,13 +576,21 @@ fn transfer_hub_payload(record: &EventRecord) -> Option<Value> {
         .filter(Value::is_object)
 }
 
-fn search_hub_payload(search: &crate::SearchRecord) -> Option<Value> {
+pub(crate) fn search_hub_payload(
+    search: &crate::SearchRecord,
+    include_empty_responses: bool,
+) -> Option<Value> {
     let mut payload = serde_json::from_str::<Value>(&search.json()).ok()?;
     if let Some(object) = payload.as_object_mut() {
         // Target SearchHub broadcasts are deliberately response-free. The
-        // response collection is fetched from the REST endpoint once a search
-        // completes, so never leak the potentially large collection here.
-        object.insert("responses".to_owned(), Value::Array(Vec::new()));
+        // response collection is never sent with real records. The legacy
+        // target serializes a null response collection away, while the native
+        // target sends an explicit empty array.
+        if include_empty_responses {
+            object.insert("responses".to_owned(), Value::Array(Vec::new()));
+        } else {
+            object.remove("responses");
+        }
     }
     Some(payload)
 }
@@ -638,10 +697,11 @@ mod tests {
     use std::collections::HashSet;
 
     use super::{
-        handle_client_message, hub_name, hub_name_for_target, listening_party_event_group,
-        listening_party_group_key, negotiate_hub_name, negotiate_hub_name_for_target,
-        negotiate_response, search_hub_payload, transfer_metrics,
-        update_listening_party_membership, EventRecord, MAX_LISTENING_PARTY_GROUPS_PER_CONNECTION,
+        explicit_hub_target, handle_client_message, hub_name, hub_name_for_target,
+        listening_party_event_group, listening_party_group_key, log_buffer, negotiate_hub_name,
+        negotiate_hub_name_for_target, negotiate_response, search_hub_payload, songid_hub_list,
+        transfer_metrics, update_listening_party_membership, EventRecord,
+        MAX_LISTENING_PARTY_GROUPS_PER_CONNECTION,
     };
     use crate::{SearchRecord, TransferQueue};
 
@@ -713,8 +773,83 @@ mod tests {
             created_at: 1,
             updated_at: 1,
         };
-        let payload = search_hub_payload(&search).expect("search hub payload");
-        assert_eq!(payload["responses"], serde_json::json!([]));
+        let payload = search_hub_payload(&search, false).expect("search hub payload");
+        assert!(payload.get("responses").is_none());
+        let native_payload = search_hub_payload(&search, true).expect("native hub payload");
+        assert_eq!(native_payload["responses"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn explicit_hub_events_keep_target_method_names_and_payloads() {
+        let record = EventRecord {
+            id: 0,
+            kind: "search.hub.update".to_owned(),
+            resource: "search-1".to_owned(),
+            detail: Some(serde_json::json!({"id": "search-1", "status": "completed"}).to_string()),
+            created_at: 1,
+        };
+        assert_eq!(explicit_hub_target("search", &record.kind), Some("UPDATE"));
+        assert_eq!(
+            explicit_hub_target("songid", "songid.hub.create"),
+            Some("CREATE")
+        );
+        assert_eq!(explicit_hub_target("transfers", &record.kind), None);
+        assert_eq!(
+            super::hub_event_payload(&record).unwrap()["status"],
+            "completed"
+        );
+    }
+
+    #[test]
+    fn initial_log_buffer_preserves_target_insertion_order() {
+        let events = [
+            EventRecord {
+                id: 1,
+                kind: "log.created".to_owned(),
+                resource: "audit".to_owned(),
+                detail: Some(serde_json::json!({"message": "first"}).to_string()),
+                created_at: 1,
+            },
+            EventRecord {
+                id: 2,
+                kind: "log.created".to_owned(),
+                resource: "audit".to_owned(),
+                detail: Some(serde_json::json!({"message": "second"}).to_string()),
+                created_at: 2,
+            },
+        ];
+        let buffer = log_buffer(&events);
+        assert_eq!(buffer[0]["message"], "first");
+        assert_eq!(buffer[1]["message"], "second");
+    }
+
+    #[test]
+    fn initial_songid_list_is_newest_first_and_bounded() {
+        let records = (0..20)
+            .map(|id| serde_json::json!({"id": id}))
+            .collect::<Vec<_>>();
+        let list = songid_hub_list(&records);
+        assert_eq!(list.len(), 15);
+        assert_eq!(list[0]["id"], 19);
+        assert_eq!(list[14]["id"], 5);
+    }
+
+    #[test]
+    fn transfer_activity_reports_the_state_before_a_transition() {
+        let mut transfers = TransferQueue::new_in_memory(8);
+        let entry = transfers.create(
+            0,
+            Some("peer".to_owned()),
+            "Remote/Song.flac".to_owned(),
+            None,
+            Some(100),
+        );
+        let updated = transfers
+            .update_status(entry.id, "in_progress", Some(25), None)
+            .expect("transfer update");
+        let payload = crate::transfer_hub_activity_json(&updated);
+        assert_eq!(payload["previousState"], "Queued");
+        assert_eq!(payload["state"], "InProgress");
     }
 
     #[test]
