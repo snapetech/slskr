@@ -1,5 +1,6 @@
 import ErrorSegment from '../../Shared/ErrorSegment';
 import Switch from '../../Shared/Switch';
+import { searchDateValue } from '../../../lib/searchState';
 import SearchListRow from './SearchListRow';
 import React from 'react';
 import { Button, Card, Icon, Loader, Popup, Table } from 'semantic-ui-react';
@@ -82,7 +83,12 @@ const SearchList = ({
               </Table.Header>
               <Table.Body>
                 {Object.values(searches)
-                  .sort((a, b) => new Date(b.startedAt) - new Date(a.startedAt))
+                  .filter(Boolean)
+                  .sort(
+                    (a, b) =>
+                      searchDateValue(b.startedAt ?? b.created_at) -
+                      searchDateValue(a.startedAt ?? a.created_at),
+                  )
                   .map((search) => (
                     <SearchListRow
                       key={search.id}

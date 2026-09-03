@@ -164,12 +164,15 @@ async fn route_dispatch_group_0(context: &RouteDispatchContext<'_, '_>) -> Route
                 Ok(body) => body,
                 Err(error) => return Ok(routing::service_unavailable_response(&error)),
             };
-            let _ = body;
-            Ok(HttpResponse {
-                status: "200 OK",
-                content_type: "",
-                body: String::new(),
-            })
+            if route.path.starts_with("/api/v0/") {
+                Ok(HttpResponse {
+                    status: "200 OK",
+                    content_type: "",
+                    body: String::new(),
+                })
+            } else {
+                Ok(routing::ok_response(body))
+            }
         }
         ("GET", "/api/server") => {
             let session = state.session.read().await;

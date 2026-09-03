@@ -7,6 +7,7 @@ use sqlx_core::{
     from_row::FromRow, query::query, query_as::query_as, row::Row, sql_str::AssertSqlSafe, Error,
 };
 use sqlx_sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions, SqliteRow};
+use std::collections::BTreeMap;
 #[cfg(unix)]
 use std::fs::OpenOptions;
 #[cfg(unix)]
@@ -1088,6 +1089,7 @@ impl DatabaseManager {
         )
         .execute(&self.pool)
         .await?;
+
         Ok(())
     }
 
@@ -1155,6 +1157,17 @@ impl DatabaseManager {
                 room TEXT,
                 target TEXT
                 , fallback_attempts INTEGER NOT NULL DEFAULT 0
+            )
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
+        query(
+            r#"
+            CREATE TABLE IF NOT EXISTS search_identities (
+                search_id TEXT PRIMARY KEY,
+                external_id TEXT NOT NULL
             )
             "#,
         )
@@ -2264,6 +2277,34 @@ impl DatabaseManager {
         Ok(())
     }
 
+    /// Persist the stable public identifier associated with a protocol token.
+    pub async fn upsert_search_identity(
+        &self,
+        search_id: &str,
+        external_id: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        query("INSERT OR REPLACE INTO search_identities (search_id, external_id) VALUES (?, ?)")
+            .bind(search_id)
+            .bind(external_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Load stable public identifiers associated with protocol tokens.
+    pub async fn list_search_identities(
+        &self,
+    ) -> Result<BTreeMap<String, String>, Box<dyn std::error::Error>> {
+        let rows = query("SELECT search_id, external_id FROM search_identities")
+            .fetch_all(&self.pool)
+            .await?;
+        let mut identities = BTreeMap::new();
+        for row in rows {
+            identities.insert(row.try_get("search_id")?, row.try_get("external_id")?);
+        }
+        Ok(identities)
+    }
+
     /// Get search record
     pub async fn get_search(
         &self,
@@ -2423,6 +2464,10 @@ impl DatabaseManager {
             .bind(id)
             .execute(&mut *transaction)
             .await?;
+        query("DELETE FROM search_identities WHERE search_id = ?")
+            .bind(id)
+            .execute(&mut *transaction)
+            .await?;
         transaction.commit().await?;
         Ok(())
     }
@@ -2434,6 +2479,9 @@ impl DatabaseManager {
             .execute(&mut *transaction)
             .await?;
         query("DELETE FROM searches")
+            .execute(&mut *transaction)
+            .await?;
+        query("DELETE FROM search_identities")
             .execute(&mut *transaction)
             .await?;
         transaction.commit().await?;
@@ -5445,15 +5493,25 @@ mod tests {
         };
 
         db.insert_search(&record).await.unwrap();
+        db.upsert_search_identity("search_1", "external-search-1")
+            .await
+            .unwrap();
         let retrieved = db.get_search("search_1").await.unwrap().unwrap();
         assert_eq!(retrieved.query, "test query");
         assert_eq!(retrieved.result_count, 42);
+        assert_eq!(
+            db.list_search_identities().await.unwrap().get("search_1"),
+            Some(&"external-search-1".to_owned())
+        );
 
         db.update_search_status("search_1", "archived")
             .await
             .unwrap();
         let updated = db.get_search("search_1").await.unwrap().unwrap();
         assert_eq!(updated.status, "archived");
+
+        db.delete_search("search_1").await.unwrap();
+        assert!(db.list_search_identities().await.unwrap().is_empty());
     }
 
     #[tokio::test]

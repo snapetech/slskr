@@ -2218,6 +2218,7 @@ async fn route_dispatch_group_6(context: &RouteDispatchContext<'_, '_>) -> Route
               };
               let record = outcome.record;
               let evicted = outcome.evicted;
+              let expired = outcome.expired;
               let job_projection = serde_json::json!({
                   "jobId": record.id,
                   "type": "discography",
@@ -2252,6 +2253,8 @@ async fn route_dispatch_group_6(context: &RouteDispatchContext<'_, '_>) -> Route
                   "results": [],
               }).to_string();
               drop(searches);
+              persist_expired_searches(state, &expired).await?;
+              persist_search_record(state, &record).await?;
               delete_persisted_searches(state, &evicted).await?;
               Ok(routing::accepted_response(response))
           }
@@ -2331,6 +2334,7 @@ async fn route_dispatch_group_6(context: &RouteDispatchContext<'_, '_>) -> Route
               };
               let record = outcome.record;
               let evicted = outcome.evicted;
+              let expired = outcome.expired;
               let job_projection = serde_json::json!({
                   "jobId": record.id,
                   "type": "mb-release",
@@ -2366,6 +2370,8 @@ async fn route_dispatch_group_6(context: &RouteDispatchContext<'_, '_>) -> Route
                   "results": [],
               }).to_string();
               drop(searches);
+              persist_expired_searches(state, &expired).await?;
+              persist_search_record(state, &record).await?;
               delete_persisted_searches(state, &evicted).await?;
               Ok(routing::accepted_response(response))
           }

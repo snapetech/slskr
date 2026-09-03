@@ -183,6 +183,19 @@ fn overlay_service_enabled(
     }
 }
 
+fn local_service_enabled(
+    service_name: &str,
+    features: &crate::config::FeatureGateSettings,
+) -> bool {
+    match service_name {
+        "private-gateway" | "MeshContent" => features.mesh,
+        "pods" => features.pods,
+        "shadow-index" => features.virtual_soulfind,
+        "dht" => features.dht,
+        _ => true,
+    }
+}
+
 #[allow(dead_code, clippy::too_many_arguments)]
 impl Gateway {
     pub async fn load_or_create_with_quic(
@@ -1607,13 +1620,29 @@ impl Gateway {
         connection_id: &str,
         state: &super::AppState,
     ) -> MeshServiceReply {
+        self.handle_call_with_mode(call, remote_username, connection_id, state, false)
+            .await
+    }
+
+    async fn handle_call_with_mode(
+        &self,
+        call: MeshServiceCall,
+        remote_username: &str,
+        connection_id: &str,
+        state: &super::AppState,
+        local_http: bool,
+    ) -> MeshServiceReply {
         let service_enabled = {
             let media_services = state.media_services.read().await;
-            overlay_service_enabled(
-                call.service_name.as_str(),
-                &media_services.features,
-                state.config.controller_profile,
-            )
+            if local_http {
+                local_service_enabled(call.service_name.as_str(), &media_services.features)
+            } else {
+                overlay_service_enabled(
+                    call.service_name.as_str(),
+                    &media_services.features,
+                    state.config.controller_profile,
+                )
+            }
         };
         let result = if !service_enabled {
             Err((2, format!("Service '{}' not found", call.service_name)))
@@ -1684,7 +1713,7 @@ impl Gateway {
         connection_id: &str,
         state: &super::AppState,
     ) -> MeshServiceReply {
-        self.handle_call(call, remote_username, connection_id, state)
+        self.handle_call_with_mode(call, remote_username, connection_id, state, true)
             .await
     }
 

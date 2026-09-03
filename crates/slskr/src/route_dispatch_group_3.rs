@@ -858,9 +858,9 @@ async fn route_dispatch_group_3(context: &RouteDispatchContext<'_, '_>) -> Route
                 ));
             };
             let body = record.controller_room_json().to_string();
-            // The legacy compatibility contract persists this controller's
-            // subscription, while the native profile fork keeps the tracker transient.
-            if state.config.controller_profile == ControllerProfile::Legacy {
+            let should_persist = !route.path.starts_with("/api/v0/")
+                || state.config.controller_profile == ControllerProfile::Legacy;
+            if should_persist {
                 if let Err(error) = persist_room_join_checked(state, &room_name).await {
                     *rooms = previous;
                     return Ok(routing::service_unavailable_response(&error));

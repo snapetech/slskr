@@ -1,25 +1,18 @@
+import { getSearchStateKind } from '../../lib/searchState';
 import React from 'react';
 import { Icon, Popup } from 'semantic-ui-react';
 
-// as of 3/26/25 states are:
-// transient:
-//   None, Queued, Requested, InProgress
-// terminal:
-//   good: Completed, [TimedOut | ResponseLimitReached | FileLimitReached]
-//   bad: Completed, [Errored | Cancelled]
-
 const getIcon = ({ state, ...props }) => {
-  switch (state) {
-    case 'None':
-    case 'Queued':
-    case 'Requested':
-      return (
-        <Icon
-          name="time"
-          {...props}
-        />
-      );
-    case 'InProgress':
+  switch (getSearchStateKind({ state })) {
+    case 'active':
+      if (['none', 'queued', 'requested'].includes(String(state ?? '').trim().toLowerCase())) {
+        return (
+          <Icon
+            name="time"
+            {...props}
+          />
+        );
+      }
       return (
         <Icon
           color="green"
@@ -28,9 +21,7 @@ const getIcon = ({ state, ...props }) => {
           {...props}
         />
       );
-    case 'Completed, TimedOut':
-    case 'Completed, ResponseLimitReached':
-    case 'Completed, FileLimitReached':
+    case 'completed':
       return (
         <Icon
           color="green"
@@ -38,7 +29,7 @@ const getIcon = ({ state, ...props }) => {
           {...props}
         />
       );
-    case 'Completed, Cancelled':
+    case 'cancelled':
       return (
         <Icon
           color="green"
@@ -46,7 +37,7 @@ const getIcon = ({ state, ...props }) => {
           {...props}
         />
       );
-    case 'Completed, Errored':
+    case 'failed':
       return (
         <Icon
           color="red"
@@ -67,7 +58,7 @@ const getIcon = ({ state, ...props }) => {
 
 const SearchStatusIcon = ({ state, ...props }) => (
   <Popup
-    content={state}
+    content={state ?? 'Unknown'}
     trigger={getIcon({ state, ...props })}
   />
 );

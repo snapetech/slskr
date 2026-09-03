@@ -4,9 +4,9 @@ Generated from local source patterns. Counts are candidate lines, not confirmed 
 
 | Candidate Class | Count |
 | --- | ---: |
-| Constructor/mutable collection candidates | 7 |
-| Protocol count/length candidates | 46 |
-| Protocol scalar emission candidates | 42 |
-| Resolver/raw stream candidates | 225 |
-| Task/cancellation/lifecycle candidates | 246 |
-| Example Web API candidates | 287 |
+| Constructor/mutable collection candidates | 8 |
+| Protocol count/length candidates | 134 |
+| Protocol scalar emission candidates | 194 |
+| Resolver/raw stream candidates | 881 |
+| Task/cancellation/lifecycle candidates | 993 |
+| Example Web API candidates | 275 |

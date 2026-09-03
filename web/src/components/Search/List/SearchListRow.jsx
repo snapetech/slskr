@@ -1,5 +1,6 @@
 import SearchStatusIcon from '../SearchStatusIcon';
 import { buildDiscoveryGraph } from '../../../lib/discoveryGraph';
+import { formatSearchTime } from '../../../lib/searchState';
 import DiscoveryGraphModal from '../DiscoveryGraphModal';
 import * as searches from '../../../lib/searches';
 import SearchActionIcon from './SearchActionIcon';
@@ -47,9 +48,9 @@ const SearchListRow = ({ onRemove, onStop, search }) => {
 
   const handleOpenGraph = async () => {
     await openDiscoveryGraph({
-      artist: search.searchText,
+      artist: search.searchText ?? search.query ?? '',
       scope: 'songid_run',
-      title: search.searchText,
+      title: search.searchText ?? search.query ?? '',
     });
   };
 
@@ -123,7 +124,7 @@ const SearchListRow = ({ onRemove, onStop, search }) => {
         </Table.Cell>
         <Table.Cell>
           <Link to={`/searches/${encodeURIComponent(search.id)}`}>
-            {search.searchText}
+            {search.searchText ?? search.query ?? ''}
           </Link>
           <Popup
             content="Open a Discovery Graph for this search phrase so the query history becomes a browsable neighborhood."
@@ -150,7 +151,7 @@ const SearchListRow = ({ onRemove, onStop, search }) => {
         </Table.Cell>
         <Table.Cell>{search.responseCount}</Table.Cell>
         <Table.Cell>
-          {search.endedAt ? new Date(search.endedAt).toLocaleTimeString() : '-'}
+          {formatSearchTime(search.endedAt)}
         </Table.Cell>
         <Table.Cell>
           <SearchActionIcon

@@ -1,4 +1,5 @@
 import React from 'react';
+import { isSearchComplete } from '../../../lib/searchState';
 import { Icon } from 'semantic-ui-react';
 
 const SearchActionIcon = ({ loading, onRemove, onStop, search, ...props }) => {
@@ -12,7 +13,7 @@ const SearchActionIcon = ({ loading, onRemove, onStop, search, ...props }) => {
     );
   }
 
-  if (search.state.includes('Completed')) {
+  if (isSearchComplete(search)) {
     return (
       <Icon
         color="red"

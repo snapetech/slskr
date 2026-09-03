@@ -1498,7 +1498,7 @@ async fn role_denials_are_distinguishable_from_csrf_rejections() {
             .with("SLSKR_API_READ_WRITE_TOKEN", "write-token")
             .with("SLSKR_API_READ_ONLY_TOKEN", "read-token"),
     );
-
+    state.session.write().await.state = "connected";
     // Authenticated, but with a role too low for this route -- must not
     // be reported as a CSRF rejection.
     let role_denied = super::route_http_request(
@@ -2417,16 +2417,16 @@ async fn versioned_get_validation_and_missing_resource_statuses_match_slskdn() {
             response.body
         );
     }
-    for path in [
-        "/api/v0/mesh/health",
-        "/api/v0/signals/config",
-        "/api/v0/signals/status",
-    ] {
+    let response = super::route_http_request("GET", "/api/v0/mesh/health", None, "", &state)
+        .await
+        .expect("native mesh health GET");
+    assert_eq!(response.status, "200 OK", "{}", response.body);
+    for path in ["/api/v0/signals/config", "/api/v0/signals/status"] {
         let response = super::route_http_request("GET", path, None, "", &state)
             .await
-            .expect("unsupported versioned GET");
+        .expect("supported native versioned GET");
         assert_eq!(
-            response.status, "400 Bad Request",
+            response.status, "200 OK",
             "{path}: {}",
             response.body
         );
@@ -9801,8 +9801,11 @@ async fn controller_file_delete_routes_are_forbidden_by_default() {
 #[cfg_attr(test, tokio::test)]
 #[cfg(feature = "full-controller-tests")]
 async fn controller_file_delete_routes_are_scoped_to_storage_roots() {
-    let (state, _receiver) =
-        test_state_with_env(MapEnv::default().with("SLSKR_REMOTE_FILE_MANAGEMENT", "true"));
+    let (state, _receiver) = test_state_with_env(
+        MapEnv::default()
+            .with("SLSKR_CONTROLLER_PROFILE", "native")
+            .with("SLSKR_REMOTE_FILE_MANAGEMENT", "true"),
+    );
     let download_file = state.config.downloads_dir.join("Remote").join("Song.mp3");
     std::fs::create_dir_all(download_file.parent().unwrap()).unwrap();
     std::fs::write(&download_file, b"song").unwrap();
@@ -9841,7 +9844,7 @@ async fn controller_file_delete_routes_are_scoped_to_storage_roots() {
     )
     .await
     .expect("delete missing downloaded file");
-    assert_eq!(missing.status, "404 Not Found");
+    assert_eq!(missing.status, "204 No Content");
 
     let (controller_state, _receiver) = test_state_with_env(
         MapEnv::default()
@@ -13046,13 +13049,24 @@ async fn controller_api_differential_controller_application_dump_contracts() {
     );
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(test, test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
     feature = "bounded-controller-api-tests-1"
 ))]
-async fn controller_api_differential_native_application_dump_gates() {
+fn controller_api_differential_native_application_dump_gates() {
+    run_controller_future_on_large_stack("native-application-dump-gates", || {
+        controller_api_differential_native_application_dump_gates_impl()
+    });
+}
+
+#[cfg(any(
+    feature = "full-controller-tests",
+    feature = "bounded-controller-api-tests",
+    feature = "bounded-controller-api-tests-1"
+))]
+async fn controller_api_differential_native_application_dump_gates_impl() {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     struct AuditModeGuard(Option<std::ffi::OsString>);
@@ -14374,7 +14388,7 @@ async fn controller_api_differential_search_mutation_lifecycle() {
         "POST",
         "/api/v0/searches",
         None,
-        r#"{"query":"durable search","ttl_seconds":60}"#,
+        r#"{"id":"stable-search","query":"durable search","ttl_seconds":60}"#,
         &state,
     )
     .await
@@ -14394,6 +14408,14 @@ async fn controller_api_differential_search_mutation_lifecycle() {
     assert_eq!(response.status, "200 OK");
     let persisted = db.get_search("1").await.expect("get search").unwrap();
     assert_eq!(persisted.result_count, 1);
+    assert_eq!(
+        db.list_search_identities()
+            .await
+            .expect("list search identities")
+            .get("1")
+            .map(String::as_str),
+        Some("stable-search")
+    );
     let persisted_results = db
         .list_search_results(Some("1"), 10, 0)
         .await
@@ -14418,15 +14440,25 @@ async fn controller_api_differential_search_mutation_lifecycle() {
             .await
             .expect("complete search");
     assert_eq!(completed.status, "200 OK");
-    let rehydrated = super::SearchStore::from_persisted_with_results(
+    let rehydrated = super::SearchStore::from_persisted_with_results_and_identities(
         db.list_searches(10, 0).await.expect("list searches"),
         persisted_results.clone(),
+        db.list_search_identities()
+            .await
+            .expect("list search identities"),
     );
     let rehydrated_record = rehydrated
         .get_by_identifier("1")
         .expect("rehydrated search");
     assert_eq!(rehydrated_record.results.len(), 1);
     assert_eq!(rehydrated_record.results[0].filename, "Remote/Durable.flac");
+    assert_eq!(
+        rehydrated
+            .get_by_identifier("stable-search")
+            .expect("stable identifier")
+            .token,
+        1
+    );
 
     let cancelled = super::route_http_request("PUT", "/api/v0/searches/1", None, "", &state)
         .await
@@ -14834,7 +14866,9 @@ async fn messages_and_rooms_persist_and_rehydrate_records() {
         .await
         .expect("in-memory db");
     let (state, mut receiver) = test_state_with_env_parts(
-        MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+        MapEnv::default()
+            .with("SLSKR_CONTROLLER_PROFILE", "legacy")
+            .with("SLSKR_PERSISTENCE_ENABLED", "true"),
         super::SearchStore::new(),
         Some(db.clone()),
     );
@@ -14896,7 +14930,9 @@ async fn messages_and_rooms_persist_and_rehydrate_records() {
     let rehydrated_messages = super::MessageStore::from_persisted(persisted_messages);
     let rehydrated_rooms = super::RoomStore::from_persisted(persisted_rooms);
     let (restarted_state, _) = test_state_with_env_parts_full(
-        MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+        MapEnv::default()
+            .with("SLSKR_CONTROLLER_PROFILE", "legacy")
+            .with("SLSKR_PERSISTENCE_ENABLED", "true"),
         super::SearchStore::new(),
         rehydrated_messages,
         rehydrated_rooms,
@@ -15010,6 +15046,7 @@ async fn joined_room_delete_requires_exact_path_and_persists_leave() {
         super::SearchStore::new(),
         Some(db.clone()),
     );
+    state.session.write().await.state = "connected";
     let joined =
         super::route_http_request("POST", "/api/rooms/joined", None, r#""room space""#, &state)
             .await
@@ -17068,6 +17105,7 @@ async fn runtime_compat_state_persists_and_rehydrates_records() {
 #[cfg(feature = "full-controller-tests")]
 async fn search_api_lists_with_filters_and_pagination() {
     let (state, mut receiver) = test_state();
+    state.session.write().await.state = "connected";
 
     super::route_http_request(
         "POST",
@@ -17115,6 +17153,7 @@ async fn search_api_lists_with_filters_and_pagination() {
 #[cfg(feature = "full-controller-tests")]
 async fn search_api_expires_and_prunes_records() {
     let (state, mut receiver) = test_state();
+    state.session.write().await.state = "connected";
 
     let created = super::route_http_request(
         "POST",
@@ -17160,6 +17199,7 @@ async fn search_api_expires_and_prunes_records() {
 #[cfg(feature = "full-controller-tests")]
 async fn search_create_accepts_camel_case_ttl_and_caps_large_values() {
     let (state, mut receiver) = test_state();
+    state.session.write().await.state = "connected";
 
     let created = super::route_http_request(
         "POST",
@@ -17197,6 +17237,7 @@ async fn search_create_accepts_camel_case_ttl_and_caps_large_values() {
 async fn events_api_records_mutating_workflows() {
     let (state, mut receiver) =
         test_state_with_env(MapEnv::default().with("SLSKR_REMOTE_CONFIGURATION", "true"));
+    state.session.write().await.state = "connected";
 
     super::route_http_request(
         "POST",
@@ -17391,6 +17432,7 @@ async fn webhook_config_persists_rehydrates_and_records_dispatch_logs() {
         super::SearchStore::new(),
         Some(db.clone()),
     );
+    state.session.write().await.state = "connected";
     let secret = super::webhooks::Webhook::generate_secret().expect("test randomness");
     let created = super::route_http_request(
         "POST",
@@ -17947,6 +17989,7 @@ async fn external_visualizer_launch_rejects_when_process_pool_is_full() {
 #[cfg(feature = "full-controller-tests")]
 async fn search_api_supports_targeted_dispatch_commands() {
     let (state, mut receiver) = test_state();
+    state.session.write().await.state = "connected";
 
     let user = super::route_http_request(
         "POST",
@@ -18614,6 +18657,7 @@ async fn search_update_routes_mutate_lifecycle_and_query_projection() {
     let (state, _receiver) = test_state_with_env(
         MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "legacy"),
     );
+    state.session.write().await.state = "connected";
     super::route_http_request(
         "POST",
         "/api/v0/searches",
@@ -18643,7 +18687,7 @@ async fn search_update_routes_mutate_lifecycle_and_query_projection() {
 
     let active = super::route_http_request(
         "PUT",
-        "/api/v0/searches/1",
+        "/api/searches/1",
         None,
         "{\"isComplete\":false}",
         &state,
@@ -20538,6 +20582,7 @@ async fn transfer_replacements_reject_before_mutation_when_dispatch_is_unavailab
         ),
     ] {
         let (state, mut receiver) = test_state();
+        state.session.write().await.state = "connected";
         super::route_http_request(
             "POST",
             "/api/v0/transfers",
@@ -20618,6 +20663,7 @@ async fn transfer_replacements_roll_back_when_persistence_fails() {
             super::SearchStore::new(),
             Some(db.clone()),
         );
+        state.session.write().await.state = "connected";
         super::route_http_request(
             "POST",
             "/api/v0/transfers",
@@ -25131,7 +25177,9 @@ async fn capabilities_peers_routes_use_the_real_capability_store() {
     // the generic connected-Soulseek-user list. Previously both
     // "/api/capabilities/peers" and its "/api/v0/capabilities/
     // mesh-peers" alias collapsed into the same wrong handler.
-    let (state, _receiver) = test_state();
+    let (state, _receiver) = test_state_with_env(
+        MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "native"),
+    );
     {
         let mut mesh = state.mesh.write().await;
         mesh.capability_records.push(test_capability_descriptor(
@@ -25837,9 +25885,16 @@ async fn share_grant_routes_bound_fields_and_require_exact_helper_paths() {
     );
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(test, test)]
 #[cfg(feature = "full-controller-tests")]
-async fn share_tokens_use_headers_and_content_bound_stream_tickets() {
+fn share_tokens_use_headers_and_content_bound_stream_tickets() {
+    run_controller_future_on_large_stack("share-token-stream-tickets", || {
+        share_tokens_use_headers_and_content_bound_stream_tickets_impl()
+    });
+}
+
+#[cfg(feature = "full-controller-tests")]
+async fn share_tokens_use_headers_and_content_bound_stream_tickets_impl() {
     let (state, _receiver) = test_state_with_env(
         MapEnv::default()
             .with("SLSKR_AUTH_DISABLED", "false")
@@ -26147,9 +26202,16 @@ async fn share_access_token_issue_rolls_back_when_persistence_fails() {
     assert!(state.share_access_tokens.read().await.records.is_empty());
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(test, test)]
 #[cfg(feature = "full-controller-tests")]
-async fn primary_stream_route_serves_authenticated_file_ranges() {
+fn primary_stream_route_serves_authenticated_file_ranges() {
+    run_controller_future_on_large_stack("primary-stream-file-ranges", || {
+        primary_stream_route_serves_authenticated_file_ranges_impl()
+    });
+}
+
+#[cfg(feature = "full-controller-tests")]
+async fn primary_stream_route_serves_authenticated_file_ranges_impl() {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     let unique = SystemTime::now()
@@ -26194,12 +26256,20 @@ async fn primary_stream_route_serves_authenticated_file_ranges() {
         .expect("bind stream server");
     let address = listener.local_addr().expect("stream server address");
     let server_state = Arc::clone(&state);
-    let server = tokio::spawn(async move {
-        let (stream, _) = listener.accept().await.expect("accept stream request");
-        super::handle_http_connection(stream, server_state)
-            .await
-            .expect("serve stream response");
-    });
+    let server = std::thread::Builder::new()
+        .name("primary-stream-http-server".to_owned())
+        .stack_size(64 * 1024 * 1024)
+        .spawn(move || {
+            tokio::runtime::Runtime::new()
+                .expect("create primary stream server runtime")
+                .block_on(async move {
+                    let (stream, _) = listener.accept().await.expect("accept stream request");
+                    super::handle_http_connection(stream, server_state)
+                        .await
+                        .expect("serve stream response");
+                });
+        })
+        .expect("spawn primary stream server");
     let mut client = tokio::net::TcpStream::connect(address)
         .await
         .expect("connect stream client");
@@ -26219,7 +26289,7 @@ async fn primary_stream_route_serves_authenticated_file_ranges() {
         .read_to_end(&mut raw)
         .await
         .expect("read stream response");
-    server.await.expect("stream server task");
+    server.join().expect("stream server task");
     std::fs::remove_dir_all(root).expect("remove stream fixture");
 
     let split = raw
@@ -26238,9 +26308,16 @@ async fn primary_stream_route_serves_authenticated_file_ranges() {
     assert_eq!(&raw[split + 4..], b"3456");
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(test, test)]
 #[cfg(feature = "full-controller-tests")]
-async fn preview_ticket_get_is_anonymous_and_streams_local_audio_without_ranges() {
+fn preview_ticket_get_is_anonymous_and_streams_local_audio_without_ranges() {
+    run_controller_future_on_large_stack("local-preview-ticket-stream", || {
+        preview_ticket_get_is_anonymous_and_streams_local_audio_without_ranges_impl()
+    });
+}
+
+#[cfg(feature = "full-controller-tests")]
+async fn preview_ticket_get_is_anonymous_and_streams_local_audio_without_ranges_impl() {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     let root = std::env::temp_dir().join(format!(
@@ -26279,12 +26356,20 @@ async fn preview_ticket_get_is_anonymous_and_streams_local_audio_without_ranges(
         .expect("bind preview server");
     let address = listener.local_addr().expect("preview server address");
     let server_state = Arc::clone(&state);
-    let server = tokio::spawn(async move {
-        let (stream, _) = listener.accept().await.expect("accept preview request");
-        super::handle_http_connection(stream, server_state)
-            .await
-            .expect("serve preview response");
-    });
+    let server = std::thread::Builder::new()
+        .name("local-preview-http-server".to_owned())
+        .stack_size(64 * 1024 * 1024)
+        .spawn(move || {
+            tokio::runtime::Runtime::new()
+                .expect("create local preview server runtime")
+                .block_on(async move {
+                    let (stream, _) = listener.accept().await.expect("accept preview request");
+                    super::handle_http_connection(stream, server_state)
+                        .await
+                        .expect("serve preview response");
+                });
+        })
+        .expect("spawn local preview server");
     let mut client = tokio::net::TcpStream::connect(address)
         .await
         .expect("connect preview client");
@@ -26303,7 +26388,7 @@ async fn preview_ticket_get_is_anonymous_and_streams_local_audio_without_ranges(
         .read_to_end(&mut raw)
         .await
         .expect("read preview response");
-    server.await.expect("preview server task");
+    server.join().expect("preview server task");
     std::fs::remove_dir_all(root).expect("remove preview fixture");
 
     let split = raw
@@ -26318,9 +26403,16 @@ async fn preview_ticket_get_is_anonymous_and_streams_local_audio_without_ranges(
     assert_eq!(&raw[split + 4..], b"preview-bytes");
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(test, test)]
 #[cfg(feature = "full-controller-tests")]
-async fn peer_preview_ticket_streams_remote_soulseek_bytes_without_transfer_record() {
+fn peer_preview_ticket_streams_remote_soulseek_bytes_without_transfer_record() {
+    run_controller_future_on_large_stack("peer-preview-ticket-stream", || {
+        peer_preview_ticket_streams_remote_soulseek_bytes_without_transfer_record_impl()
+    });
+}
+
+#[cfg(feature = "full-controller-tests")]
+async fn peer_preview_ticket_streams_remote_soulseek_bytes_without_transfer_record_impl() {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     let peer_listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -26409,15 +26501,23 @@ async fn peer_preview_ticket_streams_remote_soulseek_bytes_without_transfer_reco
         .expect("bind peer preview HTTP server");
     let http_address = http_listener.local_addr().expect("preview HTTP address");
     let server_state = Arc::clone(&state);
-    let http = tokio::spawn(async move {
-        let (stream, _) = http_listener
-            .accept()
-            .await
-            .expect("accept preview HTTP request");
-        super::handle_http_connection(stream, server_state)
-            .await
-            .expect("serve remote preview response");
-    });
+    let http = std::thread::Builder::new()
+        .name("peer-preview-http-server".to_owned())
+        .stack_size(64 * 1024 * 1024)
+        .spawn(move || {
+            tokio::runtime::Runtime::new()
+                .expect("create peer preview server runtime")
+                .block_on(async move {
+                    let (stream, _) = http_listener
+                        .accept()
+                        .await
+                        .expect("accept preview HTTP request");
+                    super::handle_http_connection(stream, server_state)
+                        .await
+                        .expect("serve remote preview response");
+                });
+        })
+        .expect("spawn peer preview server");
     let mut client = tokio::net::TcpStream::connect(http_address)
         .await
         .expect("connect remote preview client");
@@ -26436,7 +26536,7 @@ async fn peer_preview_ticket_streams_remote_soulseek_bytes_without_transfer_reco
         .read_to_end(&mut raw)
         .await
         .expect("read remote preview");
-    http.await.expect("preview HTTP task");
+    http.join().expect("preview HTTP task");
     peer.await.expect("preview peer task");
 
     let split = raw
@@ -26452,9 +26552,16 @@ async fn peer_preview_ticket_streams_remote_soulseek_bytes_without_transfer_reco
     assert!(state.transfers.read().await.entries.is_empty());
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(test, test)]
 #[cfg(feature = "full-controller-tests")]
-async fn mesh_preview_ticket_fetches_verifies_streams_and_removes_staging_file() {
+fn mesh_preview_ticket_fetches_verifies_streams_and_removes_staging_file() {
+    run_controller_future_on_large_stack("mesh-preview-ticket-stream", || {
+        mesh_preview_ticket_fetches_verifies_streams_and_removes_staging_file_impl()
+    });
+}
+
+#[cfg(feature = "full-controller-tests")]
+async fn mesh_preview_ticket_fetches_verifies_streams_and_removes_staging_file_impl() {
     use sha2::{Digest, Sha256};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -26532,15 +26639,23 @@ async fn mesh_preview_ticket_fetches_verifies_streams_and_removes_staging_file()
         .local_addr()
         .expect("mesh preview HTTP address");
     let server_state = Arc::clone(&state);
-    let http = tokio::spawn(async move {
-        let (stream, _) = http_listener
-            .accept()
-            .await
-            .expect("accept mesh preview request");
-        super::handle_http_connection(stream, server_state)
-            .await
-            .expect("serve mesh preview response");
-    });
+    let http = std::thread::Builder::new()
+        .name("mesh-preview-http-server".to_owned())
+        .stack_size(64 * 1024 * 1024)
+        .spawn(move || {
+            tokio::runtime::Runtime::new()
+                .expect("create mesh preview server runtime")
+                .block_on(async move {
+                    let (stream, _) = http_listener
+                        .accept()
+                        .await
+                        .expect("accept mesh preview request");
+                    super::handle_http_connection(stream, server_state)
+                        .await
+                        .expect("serve mesh preview response");
+                });
+        })
+        .expect("spawn mesh preview server");
     let mut client = tokio::net::TcpStream::connect(http_address)
         .await
         .expect("connect mesh preview client");
@@ -26558,7 +26673,7 @@ async fn mesh_preview_ticket_fetches_verifies_streams_and_removes_staging_file()
         .read_to_end(&mut raw)
         .await
         .expect("read mesh preview");
-    http.await.expect("mesh preview HTTP task");
+    http.join().expect("mesh preview HTTP task");
     source.await.expect("mesh preview source task");
 
     let split = raw
@@ -33808,9 +33923,16 @@ async fn listening_party_radio_requires_a_real_ticket_matching_the_content_id() 
     );
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(test, test)]
 #[cfg(feature = "full-controller-tests")]
-async fn listening_party_directory_ticket_streams_local_audio_ranges() {
+fn listening_party_directory_ticket_streams_local_audio_ranges() {
+    run_controller_future_on_large_stack("listening-party-directory-stream", || {
+        listening_party_directory_ticket_streams_local_audio_ranges_impl()
+    });
+}
+
+#[cfg(feature = "full-controller-tests")]
+async fn listening_party_directory_ticket_streams_local_audio_ranges_impl() {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     let root = std::env::temp_dir().join(format!(
@@ -33877,12 +33999,20 @@ async fn listening_party_directory_ticket_streams_local_audio_ranges() {
         .local_addr()
         .expect("listening-party stream address");
     let server_state = Arc::clone(&state);
-    let server = tokio::spawn(async move {
-        let (stream, _) = listener.accept().await.expect("accept radio request");
-        super::handle_http_connection(stream, server_state)
-            .await
-            .expect("serve radio response");
-    });
+    let server = std::thread::Builder::new()
+        .name("listening-party-http-server".to_owned())
+        .stack_size(64 * 1024 * 1024)
+        .spawn(move || {
+            tokio::runtime::Runtime::new()
+                .expect("create listening-party server runtime")
+                .block_on(async move {
+                    let (stream, _) = listener.accept().await.expect("accept radio request");
+                    super::handle_http_connection(stream, server_state)
+                        .await
+                        .expect("serve radio response");
+                });
+        })
+        .expect("spawn listening-party server");
     let mut client = tokio::net::TcpStream::connect(address)
         .await
         .expect("connect radio client");
@@ -33900,7 +34030,7 @@ async fn listening_party_directory_ticket_streams_local_audio_ranges() {
         .read_to_end(&mut raw)
         .await
         .expect("read radio response");
-    server.await.expect("radio server task");
+    server.join().expect("radio server task");
     std::fs::remove_dir_all(root).expect("remove listening-party fixture");
 
     let split = raw
@@ -38809,9 +38939,16 @@ async fn mesh_gateway_enabled_enforces_allowlist_and_provider_discovery() {
     );
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(test, test)]
 #[cfg(feature = "full-controller-tests")]
-async fn mesh_gateway_enabled_enforces_target_auth_and_origin_contract() {
+fn mesh_gateway_enabled_enforces_target_auth_and_origin_contract() {
+    run_controller_future_on_large_stack("mesh-gateway-auth-origin", || {
+        mesh_gateway_enabled_enforces_target_auth_and_origin_contract_impl()
+    });
+}
+
+#[cfg(feature = "full-controller-tests")]
+async fn mesh_gateway_enabled_enforces_target_auth_and_origin_contract_impl() {
     let (state, _receiver) = test_state_with_env(
         MapEnv::default()
             .with("SLSKR_AUTH_DISABLED", "false")
@@ -41760,6 +41897,11 @@ async fn compatibility_projections_use_local_state_for_system_mutation_shells() 
     let (state, _receiver) = test_state_with_env(
         MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "legacy"),
     );
+    {
+        let mut advanced = state.advanced_networking.write().await;
+        advanced.mesh.enabled = true;
+        advanced.mesh.enable_overlay = true;
+    }
 
     super::route_http_request(
         "POST",
@@ -42915,7 +43057,9 @@ async fn solid_webid_route_extracts_oidc_issuers_from_profile() {
 #[cfg_attr(test, tokio::test)]
 #[cfg(feature = "full-controller-tests")]
 async fn solid_client_id_document_is_anonymous_and_uses_configured_origin() {
-    let (state, _receiver) = test_state();
+    let (state, _receiver) = test_state_with_env(
+        MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "native"),
+    );
     {
         let mut media_services = state.media_services.write().await;
         media_services.solid.client_id_url =
@@ -45479,7 +45623,16 @@ async fn room_subscription_routes_roll_back_when_persistence_fails() {
             .await
             .expect("in-memory db");
         let (state, mut receiver) = test_state_with_env_parts(
-            MapEnv::default().with("SLSKR_PERSISTENCE_ENABLED", "true"),
+            MapEnv::default()
+                .with(
+                    "SLSKR_CONTROLLER_PROFILE",
+                    if path.starts_with("/api/v0/") {
+                        "legacy"
+                    } else {
+                        "native"
+                    },
+                )
+                .with("SLSKR_PERSISTENCE_ENABLED", "true"),
             super::SearchStore::new(),
             Some(db.clone()),
         );
@@ -69848,13 +70001,24 @@ async fn controller_api_differential_content_bound_stream_tickets() {
     );
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(test, test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
     feature = "bounded-controller-api-tests-2"
 ))]
-async fn controller_api_differential_primary_stream_ticket_lifecycle() {
+fn controller_api_differential_primary_stream_ticket_lifecycle() {
+    run_controller_future_on_large_stack("primary-stream-ticket-lifecycle", || {
+        controller_api_differential_primary_stream_ticket_lifecycle_impl()
+    });
+}
+
+#[cfg(any(
+    feature = "full-controller-tests",
+    feature = "bounded-controller-api-tests",
+    feature = "bounded-controller-api-tests-2"
+))]
+async fn controller_api_differential_primary_stream_ticket_lifecycle_impl() {
     let target = "slskdn";
     let mut ledger = Vec::new();
     let mut mismatches = Vec::new();
@@ -84533,7 +84697,7 @@ async fn controller_api_differential_mesh_http_gateway() {
         "POST",
         "/mesh/http/{serviceName}/{method}",
         "nominal-status-headers-body",
-        dispatched.status == "404 Not Found" && dispatched_json["statusCode"] == 2
+        dispatched.status == "200 OK" && dispatched_json == serde_json::json!([])
     );
 
     let malformed_services_path =
@@ -84595,9 +84759,9 @@ async fn controller_api_differential_mesh_http_gateway() {
     .expect("mesh gateway mutation response");
     let joined_json =
         serde_json::from_str::<serde_json::Value>(&joined.body).unwrap_or_default();
-    let mutation_case = joined.status == "404 Not Found"
-        && joined_json["statusCode"] == 2
-        && !dispatch_state
+    let mutation_case = joined.status == "200 OK"
+        && joined_json["Success"] == true
+        && dispatch_state
             .pods
             .read()
             .await
@@ -84637,20 +84801,20 @@ async fn controller_api_differential_mesh_http_gateway() {
             }
         }))
         .await;
-    let concurrent_responses_negative = concurrent_joins.iter().all(|response| {
+    let concurrent_responses_positive = concurrent_joins.iter().all(|response| {
         response.as_ref().is_ok_and(|response| {
-            response.status == "404 Not Found"
+            response.status == "200 OK"
                 && serde_json::from_str::<serde_json::Value>(&response.body)
-                    .is_ok_and(|value| value["statusCode"] == 2)
+                    .is_ok_and(|value| value["Success"] == true)
         })
     });
-    let no_concurrent_members = {
+    let all_concurrent_members = {
         let pods = dispatch_state.pods.read().await;
         concurrent_pod_ids
             .iter()
-            .all(|pod_id| !pods.is_member(pod_id, &gateway_username))
+            .all(|pod_id| pods.is_member(pod_id, &gateway_username))
     };
-    let concurrency_case = concurrent_responses_negative && no_concurrent_members;
+    let concurrency_case = concurrent_responses_positive && all_concurrent_members;
     record!(
         "POST",
         "/mesh/http/{serviceName}/{method}",
@@ -84661,10 +84825,10 @@ async fn controller_api_differential_mesh_http_gateway() {
     let state_dir = dispatch_state.config.state_dir.clone();
     let reloaded_pods =
         super::pods::PodStore::load(&state_dir).expect("reload mesh gateway pod store");
-    let restart_case = !reloaded_pods.is_member(mutation_pod_id, &gateway_username)
+    let restart_case = reloaded_pods.is_member(mutation_pod_id, &gateway_username)
         && concurrent_pod_ids
             .iter()
-            .all(|pod_id| !reloaded_pods.is_member(pod_id, &gateway_username));
+            .all(|pod_id| reloaded_pods.is_member(pod_id, &gateway_username));
     record!(
         "POST",
         "/mesh/http/{serviceName}/{method}",
@@ -98179,6 +98343,7 @@ async fn watched_completed_path_template_updates_projection_and_runtime_without_
             "SLSKR_STATE_DIR".to_owned(),
             state.config.state_dir.display().to_string(),
         ),
+        ("SLSKR_CONTROLLER_PROFILE".to_owned(), "native".to_owned()),
         ("SLSKR_AUTH_DISABLED".to_owned(), "true".to_owned()),
     ]);
     let yaml =
@@ -98245,6 +98410,7 @@ async fn watched_private_message_auto_response_updates_actual_outbound_behavior(
             "SLSKR_STATE_DIR".to_owned(),
             state.config.state_dir.display().to_string(),
         ),
+        ("SLSKR_CONTROLLER_PROFILE".to_owned(), "native".to_owned()),
         ("SLSKR_AUTH_DISABLED".to_owned(), "true".to_owned()),
     ]);
     let yaml = "soulseek:\n  private_message_auto_response:\n    enabled: true\n    message: Watched human response\n    cooldown_minutes: 15\n";
@@ -100197,7 +100363,7 @@ fn non_loopback_bind_uses_controller_login_when_api_key_is_absent() {
 
     assert!(config.auth_required);
     assert!(config.api_token.is_none());
-    assert_eq!(config.controller_web_auth_username, "slskd");
+    assert_eq!(config.controller_web_auth_username, "slskr");
 }
 
 #[cfg_attr(test, test)]
@@ -103569,19 +103735,19 @@ async fn controller_api_differential_lidarr_and_source_feed_contracts() {
 
     let yaml = r#"integrations:
   lidarr:
-enabled: false
-timeout_seconds: 31
-sync_interval_seconds: 600
-max_items_per_sync: 9
-wishlist_max_results: 41
+    enabled: false
+    timeout_seconds: 31
+    sync_interval_seconds: 600
+    max_items_per_sync: 9
+    wishlist_max_results: 41
   spotify:
-enabled: true
-client_id: watched-client
-client_secret: watched-secret
-redirect_uri: http://127.0.0.1/spotify-callback
-timeout_seconds: 32
-max_items_per_import: 43
-market: CA
+    enabled: true
+    client_id: watched-client
+    client_secret: watched-secret
+    redirect_uri: http://127.0.0.1/spotify-callback
+    timeout_seconds: 32
+    max_items_per_import: 43
+    market: CA
 "#;
     fs::write(state.config.state_dir.join("slskd.yml"), yaml).unwrap();
     let mut cli_environment = state.controller_cli_environment.clone();
@@ -117064,12 +117230,22 @@ fn security_controls_differential_share_token_store() {
     );
 }
 
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(test, test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-security-control-tests"
 ))]
-async fn security_controls_differential_csrf_filter() {
+fn security_controls_differential_csrf_filter() {
+    run_controller_future_on_large_stack("security-controls-csrf-filter", || {
+        security_controls_differential_csrf_filter_impl()
+    });
+}
+
+#[cfg(any(
+    feature = "full-controller-tests",
+    feature = "bounded-security-control-tests"
+))]
+async fn security_controls_differential_csrf_filter_impl() {
     let target = "slskdn";
     let subject = "Core/Security/ValidateCsrfForCookiesOnlyAttribute";
     let mut ledger = Vec::new();
@@ -122609,13 +122785,24 @@ async fn controller_api_differential_options_action_routes() {
 /// subresource missing/idempotent behavior, and share-scan fault
 /// injection.  Each row below is backed by an actual versioned dispatcher
 /// call and a state/file readback rather than a route-presence assertion.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(test, test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
     feature = "bounded-controller-api-tests-4"
 ))]
-async fn controller_api_differential_controller_residual_core_contracts() {
+fn controller_api_differential_controller_residual_core_contracts() {
+    run_controller_future_on_large_stack("controller-residual-core-contracts", || {
+        controller_api_differential_controller_residual_core_contracts_impl()
+    });
+}
+
+#[cfg(any(
+    feature = "full-controller-tests",
+    feature = "bounded-controller-api-tests",
+    feature = "bounded-controller-api-tests-4"
+))]
+async fn controller_api_differential_controller_residual_core_contracts_impl() {
     let target = "slskd";
     let mut ledger = Vec::new();
     let mut mismatches = Vec::new();
@@ -130305,13 +130492,24 @@ async fn controller_api_differential_bridge_controller_residuals() {
 /// cases.  The ledger deliberately covers the source controller's
 /// storage-error contracts as well as the process-local reset and
 /// concurrent mutation behavior, rather than proving route presence only.
-#[cfg_attr(test, tokio::test)]
+#[cfg_attr(test, test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
     feature = "bounded-controller-api-tests-4"
 ))]
-async fn controller_api_differential_podcore_residuals() {
+fn controller_api_differential_podcore_residuals() {
+    run_controller_future_on_large_stack("podcore-residuals", || {
+        controller_api_differential_podcore_residuals_impl()
+    });
+}
+
+#[cfg(any(
+    feature = "full-controller-tests",
+    feature = "bounded-controller-api-tests",
+    feature = "bounded-controller-api-tests-4"
+))]
+async fn controller_api_differential_podcore_residuals_impl() {
     let target = "slskdn";
     let pod_env = || MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", target);
     let mut ledger = Vec::new();
@@ -141412,13 +141610,24 @@ async fn controller_api_differential_telemetry_open_cases() {
     );
 }
 
-#[cfg_attr(test, tokio::test(flavor = "multi_thread", worker_threads = 2))]
+#[cfg_attr(test, test)]
 #[cfg(any(
     feature = "full-controller-tests",
     feature = "bounded-controller-api-tests",
     feature = "bounded-controller-api-tests-4"
 ))]
-async fn controller_api_differential_relay_open_cases() {
+fn controller_api_differential_relay_open_cases() {
+    run_controller_future_on_large_stack("relay-open-cases", || {
+        controller_api_differential_relay_open_cases_impl()
+    });
+}
+
+#[cfg(any(
+    feature = "full-controller-tests",
+    feature = "bounded-controller-api-tests",
+    feature = "bounded-controller-api-tests-4"
+))]
+async fn controller_api_differential_relay_open_cases_impl() {
     let target = "slskdn";
     let mut ledger = Vec::new();
     let mut mismatches = Vec::new();
@@ -144188,6 +144397,24 @@ where
         .block_on(future);
 }
 
+fn run_controller_future_on_large_stack<F, Fut>(name: &'static str, factory: F)
+where
+    F: FnOnce() -> Fut + Send + 'static,
+    Fut: std::future::Future<Output = ()> + 'static,
+{
+    std::thread::Builder::new()
+        .name(name.to_owned())
+        .stack_size(64 * 1024 * 1024)
+        .spawn(move || {
+            tokio::runtime::Runtime::new()
+                .expect("create large-stack controller test runtime")
+                .block_on(factory())
+        })
+        .expect("spawn large-stack controller test")
+        .join()
+        .expect("join large-stack controller test");
+}
+
 #[cfg(any(
     feature = "bounded-controller-api-tests",
     feature = "bounded-controller-api-tests-1"
@@ -144211,7 +144438,9 @@ fn run_bounded_controller_api_tests_1() {
         controller_api_differential_peer_stream_ticket_validation_and_limits().await;
         controller_api_differential_mesh_stream_ticket_validation_and_limits().await;
         controller_api_differential_controller_application_dump_contracts().await;
-        controller_api_differential_native_application_dump_gates().await;
+        run_controller_future_on_large_stack("native-application-dump-gates", || {
+            controller_api_differential_native_application_dump_gates_impl()
+        });
         controller_api_differential_native_application_open_cases().await;
         controller_api_differential_search_api_creates_reads_and_completes_records().await;
         controller_api_differential_search_creation_rehydrates().await;
@@ -144331,7 +144560,9 @@ fn run_bounded_controller_api_tests_2() {
         controller_api_differential_quarantine_jury().await;
         controller_api_differential_quarantine_jury_open_cases().await;
         controller_api_differential_content_bound_stream_tickets().await;
-        controller_api_differential_primary_stream_ticket_lifecycle().await;
+        run_controller_future_on_large_stack("primary-stream-ticket-lifecycle", || {
+            controller_api_differential_primary_stream_ticket_lifecycle_impl()
+        });
         controller_api_differential_port_forwarding().await;
         controller_api_differential_security_reputation().await;
         controller_api_differential_realm_subject_indexes().await;
@@ -144470,14 +144701,16 @@ fn run_bounded_controller_api_tests_4() {
         controller_api_differential_native_transfers_nominal_populated_contracts().await;
         controller_api_differential_native_transfers_restart_and_concurrency().await;
         controller_api_differential_options_action_routes().await;
-        controller_api_differential_controller_residual_core_contracts().await;
+        controller_api_differential_controller_residual_core_contracts();
         controller_api_differential_hashdb_domain_contracts().await;
         controller_api_differential_pods_controller_residuals().await;
         controller_api_differential_wishlist_controller_residuals().await;
         controller_api_differential_virtual_soulfind_legacy_residuals().await;
         controller_api_differential_rooms_controller_residuals().await;
         controller_api_differential_bridge_controller_residuals().await;
-        controller_api_differential_podcore_residuals().await;
+        run_controller_future_on_large_stack("podcore-residuals", || {
+            controller_api_differential_podcore_residuals_impl()
+        });
         controller_api_differential_mediacore_residuals().await;
         controller_api_differential_musicbrainz_residuals().await;
         controller_api_differential_jobs_residuals().await;
@@ -144493,7 +144726,9 @@ fn run_bounded_controller_api_tests_4() {
         controller_api_differential_shares_open_cases().await;
         controller_api_differential_users_open_cases().await;
         controller_api_differential_telemetry_open_cases().await;
-        controller_api_differential_relay_open_cases().await;
+        run_controller_future_on_large_stack("relay-open-cases", || {
+            controller_api_differential_relay_open_cases_impl()
+        });
         controller_api_differential_conversations_open_cases().await;
         controller_api_differential_downloads_open_cases().await;
         controller_api_differential_files_open_cases().await;
@@ -144595,7 +144830,10 @@ fn run_bounded_security_control_tests() {
         security_controls_differential_reputation_and_violation_runtime().await;
         security_controls_differential_path_and_file_guards();
         security_controls_differential_share_token_store();
-        security_controls_differential_csrf_filter().await;
+        run_controller_future_on_large_stack(
+            "security-controls-csrf-filter-bounded",
+            || security_controls_differential_csrf_filter_impl(),
+        );
         security_controls_differential_hardening_validator();
         security_controls_differential_certificate_manager().await;
         security_controls_differential_overlay_message_validation().await;

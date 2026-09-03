@@ -1,4 +1,5 @@
 import SearchStatusIcon from '../SearchStatusIcon';
+import { isSearchComplete } from '../../../lib/searchState';
 import React from 'react';
 import { useMediaQuery } from 'react-responsive';
 import { Button, Header, Icon, Popup, Segment } from 'semantic-ui-react';
@@ -65,7 +66,9 @@ const SearchDetailHeader = ({
   const isSmallScreen = useMediaQuery({ query: '(max-width: 899px)' });
   const isTinyScreen = useMediaQuery({ query: '(max-width: 684px)' });
 
-  const { isComplete, searchText, state } = search;
+  const { searchText: rawSearchText, state } = search;
+  const isComplete = isSearchComplete(search);
+  const searchText = rawSearchText ?? search.query ?? '';
   const working = loading || creating || removing || stopping;
 
   const stopOrRemove = () => {

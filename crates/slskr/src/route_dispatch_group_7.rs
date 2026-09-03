@@ -650,6 +650,7 @@ async fn route_dispatch_group_7(context: &RouteDispatchContext<'_, '_>) -> Route
             };
             let record = outcome.record;
             let evicted = outcome.evicted;
+            let expired = outcome.expired;
             let response = serde_json::json!({
                 "item_id": if native {
                     native_wishlist_item_id(&item_id)
@@ -666,6 +667,14 @@ async fn route_dispatch_group_7(context: &RouteDispatchContext<'_, '_>) -> Route
             .to_string();
             let mutated_searches = searches.clone();
             drop(searches);
+            if let Err(error) = persist_expired_searches(state, &expired).await {
+                rollback_searches_if_unchanged(state, previous_searches.clone(), &mutated_searches)
+                    .await;
+                return Ok(wishlist_storage_error_response(
+                    route.path.starts_with("/api/v0/"),
+                    &error,
+                ));
+            }
             if let Err(error) = delete_persisted_searches(state, &evicted).await {
                 rollback_searches_if_unchanged(state, previous_searches.clone(), &mutated_searches)
                     .await;

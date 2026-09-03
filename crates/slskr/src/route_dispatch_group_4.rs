@@ -418,7 +418,9 @@ async fn route_dispatch_group_4(context: &RouteDispatchContext<'_, '_>) -> Route
                 }
             }
         }
-        ("DELETE", path) if collection_item_action_ids(path).is_some() => {
+        ("DELETE", path)
+            if !path.ends_with("/items/reorder") && collection_item_action_ids(path).is_some() =>
+        {
             let (item_id, requested_collection_id) =
                 collection_item_action_ids(path).expect("guarded collection item path");
             let caller_id = utils::authenticated_caller_id(
@@ -473,7 +475,9 @@ async fn route_dispatch_group_4(context: &RouteDispatchContext<'_, '_>) -> Route
                 Ok(routing::not_found_response())
             }
         }
-        ("PUT", path) if collection_item_action_ids(path).is_some() => {
+        ("PUT", path)
+            if !path.ends_with("/items/reorder") && collection_item_action_ids(path).is_some() =>
+        {
             let (item_id, requested_collection_id) =
                 collection_item_action_ids(path).expect("guarded collection item path");
             let compatibility_contract = route.path.starts_with("/api/v0/");

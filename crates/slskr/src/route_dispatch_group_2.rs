@@ -61,10 +61,18 @@ async fn route_dispatch_group_2(context: &RouteDispatchContext<'_, '_>) -> Route
         }
         ("GET", "/api/searches/records") => {
             let mut searches = state.searches.write().await;
+            let previous_searches = searches.clone();
             let expired = searches.expire_due();
             let body = searches.json(route.query);
+            let mutated_searches = searches.clone();
             drop(searches);
-            persist_search_records(state, &expired).await?;
+            persist_expired_searches_with_rollback(
+                state,
+                previous_searches,
+                &mutated_searches,
+                &expired,
+            )
+            .await?;
             Ok(HttpResponse {
                 status: "200 OK",
                 content_type: "application/json",
@@ -73,10 +81,18 @@ async fn route_dispatch_group_2(context: &RouteDispatchContext<'_, '_>) -> Route
         }
         ("GET", "/api/searches") => {
             let mut searches = state.searches.write().await;
+            let previous_searches = searches.clone();
             let expired = searches.expire_due();
             let body = searches.controller_list_json(route.query);
+            let mutated_searches = searches.clone();
             drop(searches);
-            persist_search_records(state, &expired).await?;
+            persist_expired_searches_with_rollback(
+                state,
+                previous_searches,
+                &mutated_searches,
+                &expired,
+            )
+            .await?;
             Ok(HttpResponse {
                 status: "200 OK",
                 content_type: "application/json",
@@ -88,19 +104,34 @@ async fn route_dispatch_group_2(context: &RouteDispatchContext<'_, '_>) -> Route
                 return Ok(routing::not_found_response());
             };
             let mut searches = state.searches.write().await;
+            let previous_searches = searches.clone();
             let expired = searches.expire_due();
             if let Some(record) = searches.get(token) {
                 let body = record.json_with_query(route.query);
+                let mutated_searches = searches.clone();
                 drop(searches);
-                persist_search_records(state, &expired).await?;
+                persist_expired_searches_with_rollback(
+                    state,
+                    previous_searches,
+                    &mutated_searches,
+                    &expired,
+                )
+                .await?;
                 Ok(HttpResponse {
                     status: "200 OK",
                     content_type: "application/json",
                     body,
                 })
             } else {
+                let mutated_searches = searches.clone();
                 drop(searches);
-                persist_search_records(state, &expired).await?;
+                persist_expired_searches_with_rollback(
+                    state,
+                    previous_searches,
+                    &mutated_searches,
+                    &expired,
+                )
+                .await?;
                 Ok(routing::not_found_response())
             }
         }
@@ -168,7 +199,12 @@ async fn route_dispatch_group_2(context: &RouteDispatchContext<'_, '_>) -> Route
             let query = match extract_json_string_field(body, "query")
                 .or_else(|| extract_json_string_field(body, "searchText"))
             {
-                Some(q) => q,
+                Some(q) if !q.trim().is_empty() => q.trim().to_owned(),
+                Some(_) => {
+                    return Ok(routing::bad_request_response(
+                        "search query must not be blank",
+                    ))
+                }
                 None => {
                     return Ok(routing::bad_request_response(
                         "query/searchText is required",
@@ -235,12 +271,18 @@ async fn route_dispatch_group_2(context: &RouteDispatchContext<'_, '_>) -> Route
                     };
                     let token = outcome.record.token;
                     let evicted = outcome.evicted;
+                    let expired = outcome.expired;
                     let mutated_searches = searches.clone();
                     let Some((failed_record, _)) = searches.set_status_by_token(token, "failed")
                     else {
                         return Ok(disconnected_search_conflict_response(state, display_state));
                     };
                     drop(searches);
+                    if let Err(error) = persist_expired_searches(state, &expired).await {
+                        rollback_searches_if_unchanged(state, previous_searches, &mutated_searches)
+                            .await;
+                        return Ok(routing::service_unavailable_response(&error));
+                    }
                     if let Err(error) = delete_persisted_searches(state, &evicted).await {
                         rollback_searches_if_unchanged(state, previous_searches, &mutated_searches)
                             .await;
@@ -295,6 +337,7 @@ async fn route_dispatch_group_2(context: &RouteDispatchContext<'_, '_>) -> Route
             };
             let record = outcome.record;
             let evicted = outcome.evicted;
+            let expired = outcome.expired;
             let token = record.token;
             let mutated_searches = searches.clone();
 
@@ -306,6 +349,11 @@ async fn route_dispatch_group_2(context: &RouteDispatchContext<'_, '_>) -> Route
             };
             drop(searches);
 
+            if let Err(error) = persist_expired_searches(state, &expired).await {
+                rollback_searches_if_unchanged(state, previous_searches.clone(), &mutated_searches)
+                    .await;
+                return Ok(routing::service_unavailable_response(&error));
+            }
             if let Err(error) = delete_persisted_searches(state, &evicted).await {
                 rollback_searches_if_unchanged(state, previous_searches.clone(), &mutated_searches)
                     .await;
@@ -401,13 +449,25 @@ async fn route_dispatch_group_2(context: &RouteDispatchContext<'_, '_>) -> Route
             };
 
             if let Some(fallback_query) = fallback_query {
-                let fallback_record = {
+                let (previous_record, fallback_record) = {
                     let mut searches = state.searches.write().await;
-                    searches.reset_for_fallback(token, fallback_query, 5)
+                    let previous_record = searches.get(token);
+                    let fallback_record = searches.reset_for_fallback(token, fallback_query, 5);
+                    (previous_record, fallback_record)
                 };
                 if let Some(fallback_record) = fallback_record {
                     let body_json = fallback_record.json();
-                    persist_search_record(state, &fallback_record).await?;
+                    if let Err(error) = persist_search_record(state, &fallback_record).await {
+                        if let Some(previous_record) = previous_record.as_ref() {
+                            rollback_search_record_if_unchanged(
+                                state,
+                                previous_record,
+                                &fallback_record,
+                            )
+                            .await;
+                        }
+                        return Err(error);
+                    }
                     record_event(
                         state,
                         "wishlist.search.fallback_started",
@@ -529,12 +589,18 @@ async fn route_dispatch_group_2(context: &RouteDispatchContext<'_, '_>) -> Route
 
         ("POST", "/api/searches/prune") => {
             let mut searches = state.searches.write().await;
+            let previous_searches = searches.clone();
             let pruned_records = searches.prune_expired();
             let pruned = pruned_records.len();
             let remaining = searches.records.len();
+            let mutated_searches = searches.clone();
             drop(searches);
             for record in &pruned_records {
-                delete_persisted_search(state, record).await?;
+                if let Err(error) = delete_persisted_search(state, record).await {
+                    rollback_searches_if_unchanged(state, previous_searches, &mutated_searches)
+                        .await;
+                    return Err(error);
+                }
                 publish_search_hub_event(state, "delete", record);
             }
             Ok(routing::ok_response(format!(

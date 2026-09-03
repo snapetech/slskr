@@ -112,6 +112,9 @@ const CollapsibleSection = ({
   );
 };
 
+const searchEventIdentifier = (eventOrSearch) =>
+  eventOrSearch?.resource ?? eventOrSearch?.id ?? eventOrSearch?.token;
+
 const Searches = ({ runtimeProfile, server } = {}) => {
   const normalizedServer = server ?? { isConnected: false };
   const [connecting, setConnecting] = useState(true);
@@ -168,7 +171,7 @@ const Searches = ({ runtimeProfile, server } = {}) => {
       // Automatically create a search from the URL query parameter
       create({
         navigate: false,
-        search: decodeURIComponent(queryParameter),
+        search: queryParameter,
       }).then((id) => {
         if (id) {
           routerNavigate(`/searches/${id}`, { replace: true });
@@ -212,9 +215,13 @@ const Searches = ({ runtimeProfile, server } = {}) => {
         if (!mounted) {
           return;
         }
+        const searchRecords = Array.isArray(records) ? records : [];
         onUpdate(
-          records.reduce((accumulator, search) => {
-            accumulator[search.id] = search;
+          searchRecords.reduce((accumulator, search) => {
+            const id = searchEventIdentifier(search);
+            if (id !== undefined && id !== null) {
+              accumulator[id] = { ...search, id };
+            }
             return accumulator;
           }, {}),
         );
@@ -227,13 +234,20 @@ const Searches = ({ runtimeProfile, server } = {}) => {
     };
 
     const refreshSearch = async (eventOrSearch) => {
+      const id = searchEventIdentifier(eventOrSearch);
       if (eventOrSearch?.searchText || eventOrSearch?.query) {
-        onUpdate((old) => ({ ...old, [eventOrSearch.id]: eventOrSearch }));
+        if (id === undefined || id === null) {
+          await loadSearches();
+          return;
+        }
+        onUpdate((old) => ({
+          ...old,
+          [id]: { ...old[id], ...eventOrSearch, id },
+        }));
         return;
       }
 
-      const id = eventOrSearch?.resource ?? eventOrSearch?.id;
-      if (!id) {
+      if (id === undefined || id === null) {
         await loadSearches();
         return;
       }
@@ -243,7 +257,11 @@ const Searches = ({ runtimeProfile, server } = {}) => {
         if (!mounted) {
           return;
         }
-        onUpdate((old) => ({ ...old, [search.id]: search }));
+        const searchId = searchEventIdentifier(search) ?? id;
+        onUpdate((old) => ({
+          ...old,
+          [searchId]: { ...old[searchId], ...search, id: searchId },
+        }));
       } catch (refreshError) {
         console.debug('failed to refresh search event payload', refreshError);
         await loadSearches();
@@ -261,7 +279,10 @@ const Searches = ({ runtimeProfile, server } = {}) => {
       }
       onUpdate(
         searchesEvent.reduce((accumulator, search) => {
-          accumulator[search.id] = search;
+          const id = searchEventIdentifier(search);
+          if (id !== undefined && id !== null) {
+            accumulator[id] = { ...search, id };
+          }
           return accumulator;
         }, {}),
       );
@@ -273,9 +294,14 @@ const Searches = ({ runtimeProfile, server } = {}) => {
     });
 
     searchHub.on('delete', (search) => {
+      const id = searchEventIdentifier(search);
+      if (id === undefined || id === null) {
+        return;
+      }
       onUpdate((old) => {
-        delete old[search.id ?? search.resource];
-        return { ...old };
+        const next = { ...old };
+        delete next[id];
+        return next;
       });
     });
 
@@ -346,7 +372,7 @@ const Searches = ({ runtimeProfile, server } = {}) => {
   // we do this if the user clicks the search icon, or repeats an existing search
   const create = async ({ navigate = false, search } = {}) => {
     const ref = inputRef?.current?.inputRef?.current;
-    const searchText = search || ref?.value;
+    const searchText = (search ?? ref?.value ?? '').trim();
     const id = uuidv4();
 
     if (!searchText) {
@@ -369,12 +395,27 @@ const Searches = ({ runtimeProfile, server } = {}) => {
         searchText,
       });
 
+      setSearches((old) => ({
+        ...old,
+        [id]: {
+          endedAt: null,
+          fileCount: 0,
+          id,
+          isComplete: false,
+          lockedFileCount: 0,
+          query: searchText,
+          responseCount: 0,
+          responsesAvailable: false,
+          searchText,
+          startedAt: new Date().toISOString(),
+          state: 'InProgress',
+          status: 'active',
+        },
+      }));
+
       if (ref) {
         ref.value = '';
-        ref.focus();
       }
-
-      setCreating(false);
 
       if (navigate) {
         routerNavigate(`/searches/${id}`);
@@ -386,6 +427,7 @@ const Searches = ({ runtimeProfile, server } = {}) => {
       toast.error(
         createError?.response?.data ?? createError?.message ?? createError,
       );
+    } finally {
       setCreating(false);
     }
   };
@@ -397,14 +439,14 @@ const Searches = ({ runtimeProfile, server } = {}) => {
 
       await library.remove({ id: search.id });
       setSearches((old) => {
-        delete old[search.id];
-        return { ...old };
+        const next = { ...old };
+        delete next[search.id];
+        return next;
       });
-
-      setRemoving(false);
     } catch (error_) {
       console.error(error_);
-      toast.error(error?.response?.data ?? error?.message ?? error);
+      toast.error(error_?.response?.data ?? error_?.message ?? error_);
+    } finally {
       setRemoving(false);
     }
   };
@@ -416,7 +458,6 @@ const Searches = ({ runtimeProfile, server } = {}) => {
       const result = await library.removeAll();
       setSearches({});
       toast.success(`Cleared ${result?.data?.deleted ?? 'all'} searches`);
-      setRemovingAll(false);
     } catch (removeAllError) {
       console.error(removeAllError);
       toast.error(
@@ -424,6 +465,7 @@ const Searches = ({ runtimeProfile, server } = {}) => {
           removeAllError?.message ??
           removeAllError,
       );
+    } finally {
       setRemovingAll(false);
     }
   };
@@ -433,7 +475,17 @@ const Searches = ({ runtimeProfile, server } = {}) => {
     try {
       setStopping(true);
       await library.stop({ id: search.id });
-      setStopping(false);
+      setSearches((old) => ({
+        ...old,
+        [search.id]: {
+          ...old[search.id],
+          ...search,
+          endedAt: new Date().toISOString(),
+          isComplete: true,
+          state: 'Cancelled',
+          status: 'cancelled',
+        },
+      }));
     } catch (stoppingError) {
       console.error(stoppingError);
       toast.error(
@@ -441,9 +493,18 @@ const Searches = ({ runtimeProfile, server } = {}) => {
           stoppingError?.message ??
           stoppingError,
       );
+    } finally {
       setStopping(false);
     }
   };
+
+  useEffect(() => {
+    if (searchId || connecting || error || creating) {
+      return;
+    }
+
+    inputRef?.current?.inputRef?.current?.focus();
+  }, [connecting, creating, error, runtimeProfile, searchId]);
 
   if (connecting) {
     return <LoaderSegment />;
@@ -473,12 +534,14 @@ const Searches = ({ runtimeProfile, server } = {}) => {
 
     // if the searchId doesn't match a search we know about, chop
     // the id off of the url and force navigation back to the list
+    if (creating) {
+      return <LoaderSegment />;
+    }
+
     routerNavigate('/searches', { replace: true });
   }
 
   if (runtimeProfile === 'legacy') {
-    inputRef?.current?.inputRef?.current.focus();
-
     return (
       <>
         <Segment className="search-segment">
@@ -538,8 +601,6 @@ const Searches = ({ runtimeProfile, server } = {}) => {
       </>
     );
   }
-
-  inputRef?.current?.inputRef?.current.focus();
 
   return (
     <>

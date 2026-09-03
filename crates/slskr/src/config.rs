@@ -10758,7 +10758,7 @@ fn resolve_listener_and_obfuscation<E: ConfigEnv>(
         )?;
         if enabled && !advertise_regular_port && current_upstream_behavior {
             return Err(
-                "Soulseek obfuscation requires the regular peer port to remain advertised for legacy compatibility"
+                "The regular peer port must be advertised when peer obfuscation is enabled"
                     .to_owned(),
             );
         }

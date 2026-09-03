@@ -1592,7 +1592,7 @@ async fn route_dispatch_group_5(context: &RouteDispatchContext<'_, '_>) -> Route
             Ok(routing::ok_response(body))
         }
 
-        ("PUT", path)
+        ("POST" | "PUT", path)
             if path.starts_with("/api/collections/") && path.contains("/items/reorder") =>
         {
             let collection_id = path
@@ -1629,15 +1629,19 @@ async fn route_dispatch_group_5(context: &RouteDispatchContext<'_, '_>) -> Route
                     rollback_collections_if_unchanged(state, previous, &mutated).await;
                     return Ok(routing::service_unavailable_response(&error));
                 }
-                Ok(routing::ok_response(
-                    serde_json::json!({
-                        "reordered": true,
-                        "collection_id": collection_id,
-                        "items": items,
-                        "itemCount": item_count,
-                    })
-                    .to_string(),
-                ))
+                Ok(if request_is_versioned_v0 {
+                    routing::no_content_response()
+                } else {
+                    routing::ok_response(
+                        serde_json::json!({
+                            "reordered": true,
+                            "collection_id": collection_id,
+                            "items": items,
+                            "itemCount": item_count,
+                        })
+                        .to_string(),
+                    )
+                })
             } else {
                 drop(collections);
                 Ok(routing::not_found_response())

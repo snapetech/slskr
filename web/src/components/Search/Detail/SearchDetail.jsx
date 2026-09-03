@@ -16,6 +16,7 @@ import { saveAlbumDecisionRule } from '../../../lib/albumDecisionRules';
 import { buildDiscoveryGraph } from '../../../lib/discoveryGraph';
 import { rankSearchResponses } from '../../../lib/searchCandidateRanking';
 import { deduplicateSearchResponses } from '../../../lib/searchResultDeduplication';
+import { isSearchComplete } from '../../../lib/searchState';
 import {
   getSavedSearchFilters,
   removeSavedSearchFilter,
@@ -95,8 +96,9 @@ const SearchDetail = ({
   search,
   stopping,
 }) => {
-  const { fileCount, id, isComplete, lockedFileCount, responseCount, state } =
-    search;
+  const { fileCount, id, lockedFileCount, responseCount, state } = search;
+  const isComplete = isSearchComplete(search);
+  const searchText = search.searchText ?? search.query ?? '';
   const acquisitionProfile = search.acquisitionProfile || 'lossless-exact';
 
   const [loading, setLoading] = useState(false);
@@ -313,7 +315,7 @@ const SearchDetail = ({
       uploadSpeed: { field: 'uploadSpeed', order: 'desc' },
     };
 
-    const { field, order } = sortOptions[resultSort];
+    const { field, order } = sortOptions[resultSort] ?? sortOptions.smart;
 
     const filters = parseFiltersFromString(resultFilters);
 
@@ -355,7 +357,7 @@ const SearchDetail = ({
           acquisitionProfile,
           preferredConditions: filters,
           responses: [r],
-          searchText: search.searchText,
+          searchText,
           userStats,
         })[0],
       )
@@ -379,7 +381,7 @@ const SearchDetail = ({
     resultFilters,
     resultSort,
     results,
-    search.searchText,
+    searchText,
     search.wishlistItemId,
     userStats,
     qualitySignalVersion,
@@ -402,9 +404,9 @@ const SearchDetail = ({
     () =>
       buildAlbumCandidates({
         responses: sortedAndFilteredResults,
-        searchText: search.searchText,
+        searchText,
       }),
-    [search.searchText, sortedAndFilteredResults],
+    [searchText, sortedAndFilteredResults],
   );
 
   // when a user uses the action buttons, we will *probably* re-use this component,
@@ -463,9 +465,9 @@ const SearchDetail = ({
 
   const openSearchGraph = async () => {
     await openDiscoveryGraph({
-      artist: search.searchText,
+      artist: searchText,
       scope: 'songid_run',
-      title: search.searchText,
+      title: searchText,
     });
   };
 
@@ -549,7 +551,7 @@ const SearchDetail = ({
   };
 
   const saveNamedFilter = () => {
-    const name = window.prompt('Filter name', search.searchText || 'Search filter');
+    const name = window.prompt('Filter name', searchText || 'Search filter');
     const next = saveSearchFilter({ name, value: resultFilters });
     setSavedFilters(next);
 
@@ -593,7 +595,7 @@ const SearchDetail = ({
   const saveAlbumCandidateRule = (candidate) => {
     const { rule } = saveAlbumDecisionRule({
       candidate,
-      searchText: search.searchText,
+      searchText,
     });
 
     toast.success(`Saved local album rule for ${rule.albumTitle}`);
@@ -601,7 +603,7 @@ const SearchDetail = ({
 
   const filteredCount = results?.length - sortedAndFilteredResults.length;
   const remainingCount = sortedAndFilteredResults.length - displayCount;
-  const loaded = !removing && !creating && !loading && results;
+  const loaded = !removing && !creating && !loading && Boolean(results);
 
   if (error) {
     return <ErrorSegment caption={error?.message ?? error} />;
@@ -662,7 +664,8 @@ const SearchDetail = ({
               onChange={(_event, { value }) => setResultSort(value)}
               options={sortDropdownOptions}
               text={
-                sortDropdownOptions.find((o) => o.value === resultSort).text
+                (sortDropdownOptions.find((o) => o.value === resultSort) ??
+                  sortDropdownOptions[0]).text
               }
             />
             <Dropdown

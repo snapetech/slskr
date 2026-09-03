@@ -1721,8 +1721,8 @@ impl SearchRecord {
             "ignoredResultCount": self.ignored_result_count,
             "hiddenLockedCount": self.hidden_locked_count,
             "fallbackAttempts": self.fallback_attempts,
-            "startedAt": self.created_at.to_string(),
-            "endedAt": (self.status != "active").then(|| self.updated_at.to_string()),
+            "startedAt": unix_seconds_rfc3339(self.created_at),
+            "endedAt": (self.status != "active").then(|| unix_seconds_rfc3339(self.updated_at)),
             "expires_at": self.expires_at,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
@@ -1752,10 +1752,11 @@ impl SearchRecord {
             .len();
         let locked_file_count = self.results.iter().filter(|entry| entry.locked).count();
         let state = search_state_for_status(self.status);
+        let started_at = unix_seconds_rfc3339(self.created_at);
         let ended_at = if self.status == "active" {
             "null".to_owned()
         } else {
-            format!("\"{}\"", self.updated_at)
+            format!("\"{}\"", json_escape(&unix_seconds_rfc3339(self.updated_at)))
         };
         format!(
             "{{\"id\":\"{}\",\"token\":{},\"query\":\"{}\",\"searchText\":\"{}\",\"target\":\"{}\",\"target_name\":{},\"wishlistItemId\":{},\"status\":\"{}\",\"state\":\"{}\",\"isComplete\":{},\"result_count\":{},\"fileCount\":{},\"lockedFileCount\":{},\"responseCount\":{},\"responsesAvailable\":{},\"rawResponseCount\":{},\"filteredOutCount\":{},\"ignoredResultCount\":{},\"hiddenLockedCount\":{},\"fallbackAttempts\":{},\"responses\":{},\"results\":[{}],\"resultOffset\":{},\"resultLimit\":{},\"startedAt\":\"{}\",\"endedAt\":{},\"expires_at\":{},\"created_at\":{},\"updated_at\":{}}}",
@@ -1783,7 +1784,7 @@ impl SearchRecord {
             results,
             offset,
             json_usize_option(limit),
-            self.created_at,
+            started_at,
             ended_at,
             self.expires_at,
             self.created_at,
@@ -1858,6 +1859,14 @@ impl SearchRecord {
         record: &persistence::SearchRecord,
         result_records: Vec<persistence::SearchResultRecord>,
     ) -> Option<Self> {
+        Self::from_persisted_with_results_and_id(record, result_records, None)
+    }
+
+    fn from_persisted_with_results_and_id(
+        record: &persistence::SearchRecord,
+        result_records: Vec<persistence::SearchResultRecord>,
+        external_id: Option<&str>,
+    ) -> Option<Self> {
         let token = record.id.parse::<u32>().ok()?;
         let target = persisted_target(record.target.as_deref());
         let target_name = match target {
@@ -1867,7 +1876,10 @@ impl SearchRecord {
             _ => None,
         };
         Some(Self {
-            id: record.id.clone(),
+            id: external_id
+                .filter(|id| !id.trim().is_empty())
+                .unwrap_or(&record.id)
+                .to_owned(),
             token,
             query: truncate_utf8_bytes(record.query.clone(), MAX_SEARCH_QUERY_BYTES),
             target,
@@ -1991,6 +2003,7 @@ struct SearchStore {
 enum SearchCreateError {
     CapacityFull,
     DuplicateId,
+    InvalidQuery,
     TokenSpaceExhausted,
 }
 
@@ -1998,6 +2011,7 @@ enum SearchCreateError {
 struct SearchCreateOutcome {
     record: SearchRecord,
     evicted: Vec<SearchRecord>,
+    expired: Vec<SearchRecord>,
 }
 
 fn next_search_token_hint(records: &[SearchRecord]) -> u32 {
@@ -2013,6 +2027,9 @@ fn next_search_token_hint(records: &[SearchRecord]) -> u32 {
 fn search_create_error_response(error: SearchCreateError) -> HttpResponse {
     match error {
         SearchCreateError::DuplicateId => routing::conflict_response("search id already exists"),
+        SearchCreateError::InvalidQuery => {
+            routing::bad_request_response("search query must not be blank")
+        }
         SearchCreateError::CapacityFull => {
             routing::service_unavailable_response("active search capacity is full")
         }
@@ -2055,6 +2072,18 @@ impl SearchStore {
         records: Vec<persistence::SearchRecord>,
         result_records: Vec<persistence::SearchResultRecord>,
     ) -> Self {
+        Self::from_persisted_with_results_and_identities(
+            records,
+            result_records,
+            BTreeMap::new(),
+        )
+    }
+
+    fn from_persisted_with_results_and_identities(
+        records: Vec<persistence::SearchRecord>,
+        result_records: Vec<persistence::SearchResultRecord>,
+        identities: BTreeMap<String, String>,
+    ) -> Self {
         let mut results_by_search: BTreeMap<String, Vec<persistence::SearchResultRecord>> =
             BTreeMap::new();
         for result in result_records {
@@ -2072,6 +2101,12 @@ impl SearchStore {
                     record,
                     results_by_search.remove(&record.id).unwrap_or_default(),
                 )?;
+                if let Some(external_id) = identities
+                    .get(&record.id)
+                    .filter(|external_id| !external_id.trim().is_empty())
+                {
+                    parsed.id = external_id.clone();
+                }
                 parsed.results.truncate(remaining);
                 retained_results = retained_results.saturating_add(parsed.results.len());
                 Some(parsed)
@@ -2100,7 +2135,10 @@ impl SearchStore {
         results: Vec<FileEntry>,
         ttl_seconds: u64,
     ) -> Result<SearchCreateOutcome, SearchCreateError> {
-        self.expire_due();
+        let query = query.trim().to_owned();
+        if query.is_empty() {
+            return Err(SearchCreateError::InvalidQuery);
+        }
         let id = id.filter(|value| !value.trim().is_empty());
         if id.as_deref().is_some_and(|id| {
             self.records
@@ -2113,6 +2151,7 @@ impl SearchStore {
         if id.as_deref().is_some_and(|id| id == token.to_string()) {
             return Err(SearchCreateError::DuplicateId);
         }
+        let expired = self.expire_due();
         let mut evicted = Vec::new();
         if self.records.len() >= MAX_SEARCH_RECORDS {
             let Some(index) = self
@@ -2153,7 +2192,11 @@ impl SearchStore {
         };
         self.next_token = token.wrapping_add(1).max(1);
         self.records.push(record.clone());
-        Ok(SearchCreateOutcome { record, evicted })
+        Ok(SearchCreateOutcome {
+            record,
+            evicted,
+            expired,
+        })
     }
 
     fn create_scheduled_wishlist(
@@ -2274,10 +2317,17 @@ impl SearchStore {
     }
 
     fn expire_due(&mut self) -> Vec<SearchRecord> {
+        self.expire_due_excluding_target(None)
+    }
+
+    fn expire_due_excluding_target(&mut self, excluded_target: Option<&str>) -> Vec<SearchRecord> {
         let now = unix_timestamp();
         let mut expired = Vec::new();
         for record in &mut self.records {
-            if record.status == "active" && record.expires_at <= now {
+            if record.status == "active"
+                && record.expires_at <= now
+                && excluded_target != Some(record.target)
+            {
                 record.status = "expired";
                 record.updated_at = now;
                 expired.push(record.clone());
@@ -2344,7 +2394,7 @@ impl SearchStore {
         let record = self
             .records
             .iter_mut()
-            .find(|record| record.token == response.token)?;
+            .find(|record| record.token == response.token && record.status == "active")?;
         let result_limit = wishlist_policy
             .map(|policy| policy.max_results)
             .unwrap_or(MAX_SEARCH_RESULTS_PER_SEARCH);
@@ -2819,6 +2869,9 @@ async fn persist_search_record(state: &AppState, record: &SearchRecord) -> Resul
         db.insert_search(&persisted_search_record(record))
             .await
             .map_err(|error| format!("failed to persist search: {error}"))?;
+        db.upsert_search_identity(&record.token.to_string(), &record.id)
+            .await
+            .map_err(|error| format!("failed to persist search identity: {error}"))?;
         db.replace_search_results(
             &record.token.to_string(),
             &persisted_search_result_records(record),
@@ -2834,6 +2887,48 @@ async fn persist_search_records(state: &AppState, records: &[SearchRecord]) -> R
         persist_search_record(state, record).await?;
     }
     Ok(())
+}
+
+async fn persist_expired_searches(
+    state: &AppState,
+    records: &[SearchRecord],
+) -> Result<(), String> {
+    persist_search_records(state, records).await?;
+    for record in records {
+        publish_search_hub_event(state, "update", record);
+    }
+    Ok(())
+}
+
+async fn persist_expired_searches_with_rollback(
+    state: &AppState,
+    previous: SearchStore,
+    mutated: &SearchStore,
+    records: &[SearchRecord],
+) -> Result<(), String> {
+    if let Err(error) = persist_expired_searches(state, records).await {
+        rollback_searches_if_unchanged(state, previous, mutated).await;
+        return Err(error);
+    }
+    Ok(())
+}
+
+async fn rollback_search_record_if_unchanged(
+    state: &AppState,
+    previous: &SearchRecord,
+    mutated: &SearchRecord,
+) {
+    let mut searches = state.searches.write().await;
+    let Some(current) = searches
+        .records
+        .iter_mut()
+        .find(|record| record.token == mutated.token)
+    else {
+        return;
+    };
+    if *current == *mutated {
+        *current = previous.clone();
+    }
 }
 
 async fn delete_persisted_search(state: &AppState, record: &SearchRecord) -> Result<(), String> {
@@ -9184,7 +9279,17 @@ async fn controller_user_read_failure_response(
             .iter()
             .any(|record| record.username == username)
     };
-    tracked.then(|| routing::internal_server_error_response("user service unavailable"))
+    // The legacy browse controller asks the session-backed user service for
+    // every browse request.  When that service is unavailable, even an
+    // untracked user reaches the controller's 500 path; the user/status
+    // endpoints retain their 404 behavior for users that were never tracked.
+    if browse || tracked {
+        Some(routing::internal_server_error_response(
+            "user service unavailable",
+        ))
+    } else {
+        None
+    }
 }
 
 fn joined_room_subresource(path: &str, suffix: &str) -> Option<String> {
@@ -11921,6 +12026,7 @@ fn restart_reload_fingerprint(config: &AppConfig) -> String {
         format!("{:?}", config.controller_web_allow_remote_no_auth),
         format!("{:?}", config.controller_web_max_request_body_size),
         format!("{:?}", config.controller_web_rate_limiting),
+        format!("{:?}", &config.controller_web_cors),
         format!("{:?}", config.controller_diagnostics_allow_memory_dump),
         format!("{:?}", config.controller_diagnostics_allow_remote_dump),
         format!("{:?}", config.soulseek_diagnostic_level),
@@ -19161,12 +19267,15 @@ async fn route_http_request_with_headers(
                 Ok(body) => body,
                 Err(error) => return Ok(routing::service_unavailable_response(&error)),
             };
-            let _ = body;
-            Ok(HttpResponse {
-                status: "200 OK",
-                content_type: "",
-                body: String::new(),
-            })
+            if route.path.starts_with("/api/v0/") {
+                Ok(HttpResponse {
+                    status: "200 OK",
+                    content_type: "",
+                    body: String::new(),
+                })
+            } else {
+                Ok(routing::ok_response(body))
+            }
         }
         ("GET", "/api/server") => {
             let session = state.session.read().await;
@@ -20508,6 +20617,20 @@ async fn route_http_request_with_headers(
             content_type: "application/json",
             body: effective_sanitized_config_json(state).await,
         }),
+        ("GET", "/api/config/download-filter") => {
+            let exclusions = effective_download_exclusions(state).await;
+            Ok(routing::ok_response(
+                serde_json::json!({
+                    "exclude": exclusions,
+                    "maxTerms": 100,
+                    "maxTermLength": 256,
+                })
+                .to_string(),
+            ))
+        }
+        ("PUT", "/api/config/download-filter") => {
+            Ok(crate::route_dispatch::update_download_filter(state, body).await)
+        }
         ("GET", "/api/stats") => {
             let session = state.session.read().await;
             let session_stats = session.summary_json();
@@ -21913,10 +22036,18 @@ async fn route_http_request_with_headers(
         }
         ("GET", "/api/searches/records") => {
             let mut searches = state.searches.write().await;
+            let previous_searches = searches.clone();
             let expired = searches.expire_due();
             let body = searches.json(route.query);
+            let mutated_searches = searches.clone();
             drop(searches);
-            persist_search_records(state, &expired).await?;
+            persist_expired_searches_with_rollback(
+                state,
+                previous_searches,
+                &mutated_searches,
+                &expired,
+            )
+            .await?;
             Ok(HttpResponse {
                 status: "200 OK",
                 content_type: "application/json",
@@ -21925,10 +22056,18 @@ async fn route_http_request_with_headers(
         }
         ("GET", "/api/searches") => {
             let mut searches = state.searches.write().await;
+            let previous_searches = searches.clone();
             let expired = searches.expire_due();
             let body = searches.controller_list_json(route.query);
+            let mutated_searches = searches.clone();
             drop(searches);
-            persist_search_records(state, &expired).await?;
+            persist_expired_searches_with_rollback(
+                state,
+                previous_searches,
+                &mutated_searches,
+                &expired,
+            )
+            .await?;
             Ok(HttpResponse {
                 status: "200 OK",
                 content_type: "application/json",
@@ -21940,19 +22079,34 @@ async fn route_http_request_with_headers(
                 return Ok(routing::not_found_response());
             };
             let mut searches = state.searches.write().await;
+            let previous_searches = searches.clone();
             let expired = searches.expire_due();
             if let Some(record) = searches.get(token) {
                 let body = record.json_with_query(route.query);
+                let mutated_searches = searches.clone();
                 drop(searches);
-                persist_search_records(state, &expired).await?;
+                persist_expired_searches_with_rollback(
+                    state,
+                    previous_searches,
+                    &mutated_searches,
+                    &expired,
+                )
+                .await?;
                 Ok(HttpResponse {
                     status: "200 OK",
                     content_type: "application/json",
                     body,
                 })
             } else {
+                let mutated_searches = searches.clone();
                 drop(searches);
-                persist_search_records(state, &expired).await?;
+                persist_expired_searches_with_rollback(
+                    state,
+                    previous_searches,
+                    &mutated_searches,
+                    &expired,
+                )
+                .await?;
                 Ok(routing::not_found_response())
             }
         }
@@ -22079,6 +22233,7 @@ async fn route_http_request_with_headers(
               };
               let record = outcome.record;
               let evicted = outcome.evicted;
+              let expired = outcome.expired;
               let token = record.token;
               let mutated_searches = searches.clone();
 
@@ -22090,6 +22245,15 @@ async fn route_http_request_with_headers(
              };
              drop(searches);
 
+             if let Err(error) = persist_expired_searches(state, &expired).await {
+                 rollback_searches_if_unchanged(
+                     state,
+                     previous_searches.clone(),
+                     &mutated_searches,
+                 )
+                 .await;
+                 return Ok(routing::service_unavailable_response(&error));
+             }
              if let Err(error) = delete_persisted_searches(state, &evicted).await {
                  rollback_searches_if_unchanged(
                      state,
@@ -22188,13 +22352,25 @@ async fn route_http_request_with_headers(
             };
 
             if let Some(fallback_query) = fallback_query {
-                let fallback_record = {
+                let (previous_record, fallback_record) = {
                     let mut searches = state.searches.write().await;
-                    searches.reset_for_fallback(token, fallback_query, 5)
+                    let previous_record = searches.get(token);
+                    let fallback_record = searches.reset_for_fallback(token, fallback_query, 5);
+                    (previous_record, fallback_record)
                 };
                 if let Some(fallback_record) = fallback_record {
                     let body_json = fallback_record.json();
-                    persist_search_record(state, &fallback_record).await?;
+                    if let Err(error) = persist_search_record(state, &fallback_record).await {
+                        if let Some(previous_record) = previous_record.as_ref() {
+                            rollback_search_record_if_unchanged(
+                                state,
+                                previous_record,
+                                &fallback_record,
+                            )
+                            .await;
+                        }
+                        return Err(error);
+                    }
                     record_event(
                         state,
                         "wishlist.search.fallback_started",
@@ -22322,12 +22498,18 @@ async fn route_http_request_with_headers(
 
         ("POST", "/api/searches/prune") => {
             let mut searches = state.searches.write().await;
+            let previous_searches = searches.clone();
             let pruned_records = searches.prune_expired();
             let pruned = pruned_records.len();
             let remaining = searches.records.len();
+            let mutated_searches = searches.clone();
             drop(searches);
             for record in &pruned_records {
-                delete_persisted_search(state, record).await?;
+                if let Err(error) = delete_persisted_search(state, record).await {
+                    rollback_searches_if_unchanged(state, previous_searches, &mutated_searches)
+                        .await;
+                    return Err(error);
+                }
                 publish_search_hub_event(state, "delete", record);
             }
             Ok(routing::ok_response(format!("{{\"pruned\":{},\"remaining\":{}}}", pruned, remaining)))
@@ -24790,9 +24972,13 @@ async fn route_http_request_with_headers(
                     "room capacity is full",
                 ));
             };
-            if let Err(error) = persist_room_join_checked(state, room_name).await {
-                *rooms = previous;
-                return Ok(routing::service_unavailable_response(&error));
+            let should_persist = !route.path.starts_with("/api/v0/")
+                || state.config.controller_profile == ControllerProfile::Legacy;
+            if should_persist {
+                if let Err(error) = persist_room_join_checked(state, room_name).await {
+                    *rooms = previous;
+                    return Ok(routing::service_unavailable_response(&error));
+                }
             }
             drop(rooms);
             record_event(state, "room.joined", room_name.to_string(), None).await;
@@ -25364,11 +25550,23 @@ async fn route_http_request_with_headers(
                     .records
                     .iter()
                     .find(|record| record.username == username);
-                if state.config.controller_profile
-                    == ControllerProfile::Legacy
-                    && record.is_none()
-                {
+                if record.is_none() {
                     drop(browse);
+                    if state.config.controller_profile == ControllerProfile::Native {
+                        let session_state = state.session.read().await.state;
+                        if session_state != "connected" {
+                            return Ok(HttpResponse {
+                                status: "503 Service Unavailable",
+                                content_type: "application/json",
+                                body: serde_json::to_string(
+                                    "Soulseek server connection is not ready",
+                                )
+                                .unwrap_or_else(|_| {
+                                    "\"Soulseek server connection is not ready\"".to_owned()
+                                }),
+                            });
+                        }
+                    }
                     return Ok(routing::not_found_response());
                 }
                 let entries = record.map(|record| record.entries.as_slice()).unwrap_or(&[]);
@@ -25636,15 +25834,13 @@ async fn route_http_request_with_headers(
                 ));
             };
             let body = record.controller_room_json().to_string();
-            // The slskd compatibility contract persists this controller's
-            // subscription, while the native profile fork keeps the tracker transient.
-            if state.config.controller_profile
-                == ControllerProfile::Legacy
-            {
-            if let Err(error) = persist_room_join_checked(state, &room_name).await {
-                *rooms = previous;
-                return Ok(routing::service_unavailable_response(&error));
-            }
+            let should_persist = !route.path.starts_with("/api/v0/")
+                || state.config.controller_profile == ControllerProfile::Legacy;
+            if should_persist {
+                if let Err(error) = persist_room_join_checked(state, &room_name).await {
+                    *rooms = previous;
+                    return Ok(routing::service_unavailable_response(&error));
+                }
             }
             drop(rooms);
             record_event(state, "room.joined", room_name.clone(), None).await;
@@ -32238,6 +32434,7 @@ async fn route_http_request_with_headers(
               };
               let record = outcome.record;
               let evicted = outcome.evicted;
+              let expired = outcome.expired;
               let job_projection = serde_json::json!({
                   "jobId": record.id,
                   "type": "discography",
@@ -32272,6 +32469,8 @@ async fn route_http_request_with_headers(
                   "results": [],
               }).to_string();
               drop(searches);
+              persist_expired_searches(state, &expired).await?;
+              persist_search_record(state, &record).await?;
               delete_persisted_searches(state, &evicted).await?;
               Ok(routing::accepted_response(response))
           }
@@ -32351,6 +32550,7 @@ async fn route_http_request_with_headers(
               };
               let record = outcome.record;
               let evicted = outcome.evicted;
+              let expired = outcome.expired;
               let job_projection = serde_json::json!({
                   "jobId": record.id,
                   "type": "mb-release",
@@ -32386,6 +32586,8 @@ async fn route_http_request_with_headers(
                   "results": [],
               }).to_string();
               drop(searches);
+              persist_expired_searches(state, &expired).await?;
+              persist_search_record(state, &record).await?;
               delete_persisted_searches(state, &evicted).await?;
               Ok(routing::accepted_response(response))
           }
@@ -34141,14 +34343,19 @@ async fn route_http_request_with_headers(
          }
 
          ("POST", "/api/musicbrainz/targets") => {
-             if route.path.starts_with("/api/v0/")
-                 && extract_json_string_field(body, "target").is_none()
-                 && extract_json_string_field(body, "mbid").is_none()
-                 && extract_json_string_field(body, "artist").is_none()
-                 && extract_json_string_field(body, "title").is_none()
-                 && extract_json_string_field(body, "release").is_none()
-             {
-                 return Ok(routing::not_found_response());
+             if route.path.starts_with("/api/v0/") {
+                 match serde_json::from_str::<serde_json::Value>(body) {
+                     Ok(serde_json::Value::Object(_)) => {}
+                     _ => return Ok(routing::bad_request_response("request body is required")),
+                 }
+                 if extract_json_string_field(body, "target").is_none()
+                     && extract_json_string_field(body, "mbid").is_none()
+                     && extract_json_string_field(body, "artist").is_none()
+                     && extract_json_string_field(body, "title").is_none()
+                     && extract_json_string_field(body, "release").is_none()
+                 {
+                     return Ok(routing::not_found_response());
+                 }
              }
              let target = extract_json_string_field(body, "target")
                  .or_else(|| extract_json_string_field(body, "mbid"))
@@ -34217,6 +34424,7 @@ async fn route_http_request_with_headers(
              };
              let record = outcome.record;
              let evicted = outcome.evicted;
+             let expired = outcome.expired;
              let response = serde_json::json!({
                  "item_id": item_id,
                  "search_started": true,
@@ -34228,6 +34436,14 @@ async fn route_http_request_with_headers(
              }).to_string();
              let mutated_searches = searches.clone();
              drop(searches);
+             if let Err(error) = persist_expired_searches(state, &expired).await {
+                 rollback_searches_if_unchanged(state, previous_searches.clone(), &mutated_searches)
+                     .await;
+                 return Ok(wishlist_storage_error_response(
+                     route.path.starts_with("/api/v0/"),
+                     &error,
+                 ));
+             }
              if let Err(error) = delete_persisted_searches(state, &evicted).await {
                  rollback_searches_if_unchanged(state, previous_searches.clone(), &mutated_searches)
                      .await;
@@ -36114,7 +36330,7 @@ async fn solid_client_id_document_response(state: &AppState) -> HttpResponse {
     let document = serde_json::json!({
         "@context": "https://www.w3.org/ns/solid/oidc-context.jsonld",
         "client_id": client_id_url,
-        "client_name": "slskR",
+        "client_name": "slskdn",
         "application_type": "web",
         "redirect_uris": [client_id.to_string()],
         "scope": "openid webid",
@@ -39206,12 +39422,12 @@ fn apply_watched_controller_configuration<'a>(
                         state.config.controller_profile,
                     )
                 });
-                if text.is_some() && parsed.is_none() && !state.config.current_upstream_behavior {
-                    // Frozen profiles clear the current options projection when
-                    // watched YAML is syntactically invalid, while retaining
-                    // the already-loaded runtime/share index until the next
-                    // valid reload. Do not leave the previous watched
-                    // projection visible during that interval.
+                if text.is_some() && parsed.is_none() {
+                    // A syntactically invalid watched document must never leave
+                    // stale configuration visible through the current options
+                    // projection. Keep the already-loaded runtime/share index
+                    // until the next valid reload, but make the invalid state
+                    // explicit to API consumers for every controller profile.
                     let mut overlay = state.options_overlay.write().await;
                     overlay.watched_yaml_effective = Some(serde_json::Value::Null);
                     overlay.watched_share_directories = Some(Vec::new());
@@ -43111,11 +43327,10 @@ fn capability_service_peer_json(
         "username": descriptor.username,
         "flags": capability_flags_string(flags),
         "flagsValue": flags,
-        // The native Soulseek capability bridge records every binary
-        // capability-envelope observation as its runtime capability client;
-        // this is the stable DTO value exposed by CapabilitiesController,
-        // not the unrelated UserInfo version-string parser.
-        "clientVersion": "slskr/runtime-capability-v1",
+        // The capability controller describes the native slskdN-compatible
+        // capability envelope, not the unrelated UserInfo version-string
+        // parser or this replacement's internal package name.
+        "clientVersion": "slskdn/runtime-capability-v1",
         "protocolVersion": 1,
         "canSwarm": flags & CAPABILITY_SUPPORTS_SWARM != 0,
         "canMeshSync": flags & CAPABILITY_SUPPORTS_MESH_SYNC != 0,
@@ -50436,7 +50651,7 @@ fn preview_filename_contains_traversal(value: &str) -> bool {
 
 async fn virtual_soulfind_catalogue(state: &AppState) -> Vec<virtual_soulfind_v2::CatalogueItem> {
     let shares = state.shares.read().await;
-    shares
+    let mut catalogue = shares
         .entries
         .iter()
         .filter(|entry| matches!(library_media_kind(&entry.extension), "Audio"))
@@ -50462,7 +50677,25 @@ async fn virtual_soulfind_catalogue(state: &AppState) -> Vec<virtual_soulfind_v2
                 size: entry.size,
             }
         })
-        .collect()
+        .collect::<Vec<_>>();
+    drop(shares);
+
+    // Library metadata records are also local catalogue sources. They may not
+    // have a share-backed path, but they still provide the stable artist,
+    // release, and track identities required by the bounded planning API.
+    let library = state.library.read().await;
+    catalogue.extend(library.records.iter().map(|record| {
+        virtual_soulfind_v2::CatalogueItem {
+            source_id: format!("library:{}", record.id),
+            artist: record.artist.clone(),
+            title: record.title.clone(),
+            kind: record.kind.clone(),
+            created_at: record.created_at,
+            local_path: None,
+            size: 0,
+        }
+    }));
+    catalogue
 }
 
 fn virtual_soulfind_file_metadata(filename: &str) -> (String, String) {
@@ -53146,7 +53379,14 @@ async fn extended_controller_mutation_response(
         };
     }
     if path.starts_with("/api/collections/") && path.contains("/items/") {
-        return collection_item_controller_response(method, path, body, state).await;
+        return collection_item_controller_response(
+            method,
+            path,
+            body,
+            state,
+            is_versioned_v0,
+        )
+        .await;
     }
     if method == "POST" && path == "/api/capabilities/parse" {
         return capabilities_parse_response(body);
@@ -60285,8 +60525,13 @@ async fn extended_controller_search_response(
         Err(error) => return Err(search_create_error_response(error)),
     };
     let record = outcome.record;
+    let expired = outcome.expired;
     let mutated_searches = searches.clone();
     drop(searches);
+    if let Err(error) = persist_expired_searches(state, &expired).await {
+        rollback_searches_if_unchanged(state, previous_searches.clone(), &mutated_searches).await;
+        return Err(routing::service_unavailable_response(&error));
+    }
     if let Err(error) = delete_persisted_searches(state, &outcome.evicted).await {
         rollback_searches_if_unchanged(state, previous_searches.clone(), &mutated_searches).await;
         return Err(routing::service_unavailable_response(&error));
@@ -60635,15 +60880,16 @@ async fn collection_item_controller_response(
     path: &str,
     body: &str,
     state: &AppState,
+    is_versioned_v0: bool,
 ) -> HttpResponse {
     let Some(segments) = decoded_segments_after(path, "/api/collections/") else {
         return routing::not_found_response();
     };
-    if method == "POST"
+    if (method == "PUT" || (method == "POST" && is_versioned_v0))
         && matches!(segments.as_slice(), [_, section, action] if section == "items" && action == "reorder")
     {
         let collection_id = &segments[0];
-        let compatibility_contract = uuid::Uuid::parse_str(collection_id).is_ok();
+        let compatibility_contract = is_versioned_v0;
         if compatibility_contract {
             let item_ids = serde_json::from_str::<serde_json::Value>(body)
                 .ok()
@@ -71262,7 +71508,11 @@ async fn serve(invocation: ServeInvocation) -> Result<(), String> {
             .list_search_results(None, EVENT_HISTORY_LIMIT as i32, 0)
             .await
             .map_err(|error| format!("failed to load persisted search results: {error}"))?;
-        SearchStore::from_persisted_with_results(records, result_records)
+        let identities = db
+            .list_search_identities()
+            .await
+            .map_err(|error| format!("failed to load persisted search identities: {error}"))?;
+        SearchStore::from_persisted_with_results_and_identities(records, result_records, identities)
     } else {
         SearchStore::new()
     };
@@ -71962,6 +72212,7 @@ async fn serve(invocation: ServeInvocation) -> Result<(), String> {
         }
     }
     spawn_session_manager(Arc::clone(&state), session_receiver);
+    spawn_search_expiry_scheduler(Arc::clone(&state));
     spawn_gold_star_club(Arc::clone(&state));
     spawn_vpn_polling(Arc::clone(&state));
     spawn_controller_config_watcher(Arc::clone(&state));
@@ -72468,6 +72719,46 @@ fn spawn_session_manager(state: Arc<AppState>, mut receiver: mpsc::Receiver<Sess
     });
 }
 
+fn spawn_search_expiry_scheduler(state: Arc<AppState>) {
+    tokio::spawn(async move {
+        let interval_duration = Duration::from_secs(1);
+        let mut interval = time::interval_at(
+            Instant::now() + interval_duration,
+            interval_duration,
+        );
+        interval.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
+
+        loop {
+            interval.tick().await;
+
+            let preserve_wishlist = {
+                let wishlist_enabled = state.core_workflow_settings.read().await.wishlist.enabled;
+                let session_connected = state.session.read().await.state == "connected";
+                wishlist_enabled && session_connected
+            };
+            let (previous_searches, expired, mutated_searches) = {
+                let mut searches = state.searches.write().await;
+                let previous_searches = searches.clone();
+                let expired =
+                    searches.expire_due_excluding_target(preserve_wishlist.then_some("wishlist"));
+                let mutated_searches = searches.clone();
+                (previous_searches, expired, mutated_searches)
+            };
+
+            if let Err(error) = persist_expired_searches_with_rollback(
+                &state,
+                previous_searches,
+                &mutated_searches,
+                &expired,
+            )
+            .await
+            {
+                record_daemon_log(&state, logging::LogLevel::Warn, "search", error).await;
+            }
+        }
+    });
+}
+
 fn spawn_vpn_polling(state: Arc<AppState>) {
     if !state.config.integrations.vpn.enabled {
         return;
@@ -72881,7 +73172,7 @@ fn spawn_transfer_rescue(state: Arc<AppState>) {
 }
 
 async fn create_rescue_search(state: &AppState, query: String) -> Result<SearchRecord, String> {
-    let (record, evicted, previous_next_token, created_next_token) = {
+    let (record, evicted, expired, previous_next_token, created_next_token) = {
         let mut searches = state.searches.write().await;
         let previous_next_token = searches.next_token;
         let outcome = searches
@@ -72897,10 +73188,21 @@ async fn create_rescue_search(state: &AppState, query: String) -> Result<SearchR
         (
             outcome.record,
             outcome.evicted,
+            outcome.expired,
             previous_next_token,
             searches.next_token,
         )
     };
+    if let Err(error) = persist_expired_searches(state, &expired).await {
+        rollback_auto_retry_search(
+            &mut *state.searches.write().await,
+            &record,
+            evicted,
+            previous_next_token,
+            created_next_token,
+        );
+        return Err(error);
+    }
     if let Err(error) = persist_search_record(state, &record).await {
         rollback_auto_retry_search(
             &mut *state.searches.write().await,
@@ -73480,7 +73782,7 @@ async fn run_download_auto_retry_cycle_with_settings(
             .map_err(|_| "session manager is not running".to_owned())?;
         if candidate.source_kind == "network-search" {
             let query = virtual_basename(&candidate.source.filename).to_owned();
-            let (record, evicted, previous_next_token, created_next_token) = {
+            let (record, evicted, expired, previous_next_token, created_next_token) = {
                 let mut searches = state.searches.write().await;
                 let previous_next_token = searches.next_token;
                 let outcome = searches
@@ -73495,8 +73797,25 @@ async fn run_download_auto_retry_cycle_with_settings(
                     .map_err(|error| format!("auto-retry alternative search failed: {error:?}"))?;
                 let record = outcome.record;
                 let evicted = outcome.evicted;
-                (record, evicted, previous_next_token, searches.next_token)
+                let expired = outcome.expired;
+                (
+                    record,
+                    evicted,
+                    expired,
+                    previous_next_token,
+                    searches.next_token,
+                )
             };
+            if let Err(error) = persist_expired_searches(state, &expired).await {
+                rollback_auto_retry_search(
+                    &mut *state.searches.write().await,
+                    &record,
+                    evicted,
+                    previous_next_token,
+                    created_next_token,
+                );
+                return Err(error);
+            }
             if let Err(error) = persist_search_record(state, &record).await {
                 rollback_auto_retry_search(
                     &mut *state.searches.write().await,
@@ -74545,25 +74864,61 @@ async fn handle_owned_incoming(
     };
 
     if let Err(error) = result {
-        eprintln!(
-            "[Warning] soulseek: Incoming {incoming_name} from {} failed: {error}",
+        let level = incoming_peer_error_level(&error);
+        let message = format!(
+            "Incoming {incoming_name} from {} failed: {error}",
             scrub_socket_addr(remote_addr)
         );
         record_soulseek_diagnostic(
             &state,
-            logging::LogLevel::Warn,
+            level,
             "soulseek",
-            format!(
-                "Incoming {incoming_name} from {} failed: {error}",
-                scrub_socket_addr(remote_addr)
-            ),
+            message,
         )
         .await;
         update_listeners(&state, |snapshot| {
             snapshot.errors += 1;
-            snapshot.last_error = Some(error);
+            if level >= logging::LogLevel::Warn {
+                snapshot.last_error = Some(error);
+            }
         })
         .await;
+    }
+}
+
+fn incoming_peer_error_level(error: &str) -> logging::LogLevel {
+    let error = error.to_ascii_lowercase();
+    if [
+        "unexpected end of input",
+        "unexpected eof",
+        "connection reset",
+        "connection closed",
+        "broken pipe",
+        "timed out",
+    ]
+    .iter()
+    .any(|marker| error.contains(marker))
+    {
+        logging::LogLevel::Info
+    } else {
+        logging::LogLevel::Warn
+    }
+}
+
+#[cfg(test)]
+mod incoming_peer_error_tests {
+    #[test]
+    fn expected_peer_disconnects_are_not_warnings() {
+        assert_eq!(
+            super::incoming_peer_error_level(
+                "peer message receive failed: decode error: unexpected end of input"
+            ),
+            super::logging::LogLevel::Info
+        );
+        assert_eq!(
+            super::incoming_peer_error_level("peer authentication failed"),
+            super::logging::LogLevel::Warn
+        );
     }
 }
 
@@ -79189,9 +79544,11 @@ async fn send_due_wishlist_search(
             .await;
     }
 
-    let expired_searches = {
+    let (previous_searches, expired_searches) = {
         let mut searches = state.searches.write().await;
-        searches.expire_due()
+        let previous_searches = searches.clone();
+        let expired_searches = searches.expire_due();
+        (previous_searches, expired_searches)
     };
     let mut fallback_started = false;
     for record in expired_searches {
@@ -79222,18 +79579,34 @@ async fn send_due_wishlist_search(
         };
 
         if let Some(fallback_query) = fallback_query {
-            let fallback_record = {
+            let (previous_record, fallback_record) = {
                 let mut searches = state.searches.write().await;
-                searches.reset_for_fallback(record.token, fallback_query.clone(), 5)
+                let previous_record = previous_searches
+                    .records
+                    .iter()
+                    .find(|previous| previous.token == record.token)
+                    .cloned();
+                let fallback_record =
+                    searches.reset_for_fallback(record.token, fallback_query.clone(), 5);
+                (previous_record, fallback_record)
             };
             if let Some(fallback_record) = fallback_record {
                 if let Err(error) = persist_search_record(state, &fallback_record).await {
+                    if let Some(previous_record) = previous_record.as_ref() {
+                        rollback_search_record_if_unchanged(
+                            state,
+                            previous_record,
+                            &fallback_record,
+                        )
+                        .await;
+                    }
                     update_session(state, |snapshot| {
                         snapshot.last_error = Some(error.clone());
                     })
                     .await;
                     continue;
                 }
+                publish_search_hub_event(state, "update", &fallback_record);
                 record_event(
                     state,
                     "wishlist.search.fallback_started",
@@ -79261,12 +79634,20 @@ async fn send_due_wishlist_search(
         }
 
         if let Err(error) = persist_search_record(state, &record).await {
+            if let Some(previous_record) = previous_searches
+                .records
+                .iter()
+                .find(|previous| previous.token == record.token)
+            {
+                rollback_search_record_if_unchanged(state, previous_record, &record).await;
+            }
             update_session(state, |snapshot| {
                 snapshot.last_error = Some(error.clone());
             })
             .await;
             continue;
         }
+        publish_search_hub_event(state, "update", &record);
         if record.wishlist_item_id().is_none() {
             continue;
         }
@@ -79274,10 +79655,17 @@ async fn send_due_wishlist_search(
         let previous = wishlist.clone();
         let item = wishlist.record_completed_search(&record);
         let mutated = wishlist.clone();
-        drop(wishlist);
+            drop(wishlist);
         if let Some(item) = item {
             if let Err(error) = persist_wishlist_item_checked(state, &item).await {
                 rollback_wishlist_if_unchanged(state, previous, &mutated).await;
+                if let Some(previous_record) = previous_searches
+                    .records
+                    .iter()
+                    .find(|previous| previous.token == record.token)
+                {
+                    rollback_search_record_if_unchanged(state, previous_record, &record).await;
+                }
                 update_session(state, |snapshot| {
                     snapshot.last_error = Some(error.clone());
                 })
@@ -79298,8 +79686,9 @@ async fn send_due_wishlist_search(
         return;
     }
 
-    let (record, evicted, message) = {
+    let (record, evicted, expired, message, previous_searches, mutated_searches) = {
         let mut searches = state.searches.write().await;
+        let previous_searches = searches.clone();
         let token = match searches.allocate_token() {
             Ok(token) => token,
             Err(error) => {
@@ -79335,43 +79724,47 @@ async fn send_due_wishlist_search(
             }
         };
         debug_assert_eq!(outcome.record.token, token);
+        let mutated_searches = searches.clone();
         (
             outcome.record,
             outcome.evicted,
+            outcome.expired,
             ServerMessage::WishlistSearch(SearchRequest { token, query }),
+            previous_searches,
+            mutated_searches,
         )
     };
 
+    if let Err(error) = persist_expired_searches_with_rollback(
+        state,
+        previous_searches.clone(),
+        &mutated_searches,
+        &expired,
+    )
+    .await
+    {
+        update_session(state, |snapshot| {
+            snapshot.last_error = Some(error.clone());
+        })
+        .await;
+        return;
+    }
+
     if let Err(error) = delete_persisted_searches(state, &evicted).await {
+        rollback_searches_if_unchanged(state, previous_searches.clone(), &mutated_searches).await;
         update_session(state, |snapshot| {
             snapshot.last_error = Some(error.clone());
         })
         .await;
     }
 
-    if let Some(db) = state.db.as_ref() {
-        let persisted_search = persistence::SearchRecord {
-            id: record.token.to_string(),
-            query: record.query.clone(),
-            status: record.status.to_string(),
-            result_count: 0,
-            created_at: record.created_at as i64,
-            completed_at: None,
-            room: record.target_name.clone(),
-            target: Some("wishlist".to_owned()),
-            fallback_attempts: record.fallback_attempts as i64,
-        };
-        let persist_error = db
-            .insert_search(&persisted_search)
-            .await
-            .err()
-            .map(|error| error.to_string());
-        if let Some(error) = persist_error {
-            update_session(state, |snapshot| {
-                snapshot.last_error = Some(format!("failed to persist wishlist search: {error}"));
-            })
-            .await;
-        }
+    if let Err(error) = persist_search_record(state, &record).await {
+        rollback_searches_if_unchanged(state, previous_searches, &mutated_searches).await;
+        update_session(state, |snapshot| {
+            snapshot.last_error = Some(error.clone());
+        })
+        .await;
+        return;
     }
 
     record_event(
@@ -79446,13 +79839,20 @@ fn spawn_wishlist_smart_fallback(state: Arc<AppState>, token: u32) {
         };
         drop(record);
 
-        let Some(fallback_record) = ({
+        let (previous_record, fallback_record) = {
             let mut searches = state.searches.write().await;
-            searches.reset_for_fallback(token, fallback_query.clone(), 5)
-        }) else {
+            let previous_record = searches.get(token);
+            let fallback_record = searches.reset_for_fallback(token, fallback_query.clone(), 5);
+            (previous_record, fallback_record)
+        };
+        let Some(fallback_record) = fallback_record else {
             return;
         };
         if let Err(error) = persist_search_record(&state, &fallback_record).await {
+            if let Some(previous_record) = previous_record.as_ref() {
+                rollback_search_record_if_unchanged(&state, previous_record, &fallback_record)
+                    .await;
+            }
             update_session(&state, |snapshot| {
                 snapshot.last_error = Some(error);
             })

@@ -127,7 +127,7 @@ fn share_grant_permissions_from_request(body: &str, versioned: bool) -> String {
     }
 }
 
-async fn update_download_filter(state: &AppState, body: &str) -> HttpResponse {
+pub(super) async fn update_download_filter(state: &AppState, body: &str) -> HttpResponse {
     if !effective_remote_configuration(state) {
         return controller_forbidden_response();
     }
@@ -237,6 +237,10 @@ pub(super) async fn route_http_request_with_headers(
     route_http_request_inner(request, state, None).await
 }
 
+#[allow(
+    dead_code,
+    reason = "the historical dispatcher owns the legacy server call path"
+)]
 pub(super) async fn route_http_request_with_state(
     method: &str,
     path: &str,
