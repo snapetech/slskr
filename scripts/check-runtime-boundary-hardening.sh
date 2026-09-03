@@ -4,7 +4,11 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
-source_file="crates/slskr/src/lib.rs"
+source_files=(
+  crates/slskr/src/lib.rs
+  crates/slskr/src/controller_tests.rs
+  crates/slskr/src/event_store.rs
+)
 http_source="crates/slskr/src/http_server.rs"
 credential_source="crates/slskr/src/credential_store.rs"
 config_source="crates/slskr/src/config.rs"
@@ -153,7 +157,7 @@ for anchor in \
   'time::timeout(http_server::RESPONSE_WRITE_TIMEOUT' \
   'state.config.peer_response_timeout' \
   'state.incoming_connections'; do
-  if ! rg -n --fixed-strings -- "$anchor" "$source_file" >/dev/null; then
+  if ! rg -n --fixed-strings -- "$anchor" "${source_files[@]}" >/dev/null; then
     printf 'runtime boundary hardening check failed: missing %s\n' "$anchor" >&2
     status=1
   fi
@@ -253,7 +257,7 @@ done
 
 if ! rg -n --fixed-strings -- \
   'http_server::write_http_response(&mut writer, &response, keep_alive, &extra).await?;' \
-  "$source_file" >/dev/null; then
+  "${source_files[@]}" >/dev/null; then
   printf 'runtime boundary hardening check failed: API response write failures must terminate the connection\n' >&2
   status=1
 fi

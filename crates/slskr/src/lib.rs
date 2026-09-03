@@ -12547,6 +12547,7 @@ impl RuntimeCompatState {
         Some(updated)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn complete_songid_run(
         &mut self,
         id: &str,

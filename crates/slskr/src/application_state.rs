@@ -252,23 +252,6 @@ impl ControllerVersionState {
     }
 }
 
-#[cfg(test)]
-mod controller_version_state_tests {
-    #[test]
-    fn initial_application_state_version_includes_update_availability() {
-        let value = super::ControllerVersionState::initial().json(super::ControllerProfile::Native);
-        let value = super::application_state_version_json(value, super::ControllerProfile::Native);
-        assert_eq!(value["isUpdateAvailable"], false);
-    }
-
-    #[test]
-    fn initial_legacy_application_state_version_preserves_frozen_options_shape() {
-        let value = super::ControllerVersionState::initial().json(super::ControllerProfile::Legacy);
-        let value = super::application_state_version_json(value, super::ControllerProfile::Legacy);
-        assert!(value.get("isUpdateAvailable").is_none());
-    }
-}
-
 pub(crate) fn controller_version_json(state: &AppState) -> serde_json::Value {
     state
         .controller_version
@@ -285,4 +268,21 @@ pub(crate) fn application_state_version_json(
         version["isUpdateAvailable"] = serde_json::json!(false);
     }
     version
+}
+
+#[cfg(test)]
+mod controller_version_state_tests {
+    #[test]
+    fn initial_application_state_version_includes_update_availability() {
+        let value = super::ControllerVersionState::initial().json(super::ControllerProfile::Native);
+        let value = super::application_state_version_json(value, super::ControllerProfile::Native);
+        assert_eq!(value["isUpdateAvailable"], false);
+    }
+
+    #[test]
+    fn initial_legacy_application_state_version_preserves_frozen_options_shape() {
+        let value = super::ControllerVersionState::initial().json(super::ControllerProfile::Legacy);
+        let value = super::application_state_version_json(value, super::ControllerProfile::Legacy);
+        assert!(value.get("isUpdateAvailable").is_none());
+    }
 }

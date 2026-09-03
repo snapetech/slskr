@@ -1895,6 +1895,12 @@ impl DatabaseManager {
             .execute(&self.pool)
             .await?;
 
+        query(
+            "CREATE INDEX IF NOT EXISTS idx_messages_username_created ON messages(username, created_at DESC)",
+        )
+        .execute(&self.pool)
+        .await?;
+
         query("CREATE INDEX IF NOT EXISTS idx_webhooks_active ON webhooks(active)")
             .execute(&self.pool)
             .await?;
@@ -1950,6 +1956,12 @@ impl DatabaseManager {
         query("CREATE INDEX IF NOT EXISTS idx_library_items_artist ON library_items(artist)")
             .execute(&self.pool)
             .await?;
+
+        query(
+            "CREATE INDEX IF NOT EXISTS idx_library_items_created ON library_items(created_at DESC)",
+        )
+        .execute(&self.pool)
+        .await?;
 
         query("CREATE INDEX IF NOT EXISTS idx_destinations_default ON destinations(is_default)")
             .execute(&self.pool)
@@ -4821,151 +4833,89 @@ impl DatabaseManager {
 
     /// Get database statistics
     pub async fn get_stats(&self) -> Result<DatabaseStats, Box<dyn std::error::Error>> {
-        let search_count: (i64,) = query_as("SELECT COUNT(*) FROM searches")
-            .fetch_one(&self.pool)
-            .await?;
-        let search_result_count: (i64,) = query_as("SELECT COUNT(*) FROM search_results")
-            .fetch_one(&self.pool)
-            .await?;
-
-        let transfer_count: (i64,) = query_as("SELECT COUNT(*) FROM transfers")
-            .fetch_one(&self.pool)
-            .await?;
-
-        let transfer_event_count: (i64,) = query_as("SELECT COUNT(*) FROM transfer_events")
-            .fetch_one(&self.pool)
-            .await?;
-
-        let share_file_count: (i64,) = query_as("SELECT COUNT(*) FROM share_files")
-            .fetch_one(&self.pool)
-            .await?;
-
-        let event_count: (i64,) = query_as("SELECT COUNT(*) FROM events")
-            .fetch_one(&self.pool)
-            .await?;
-
-        let message_count: (i64,) = query_as("SELECT COUNT(*) FROM messages")
-            .fetch_one(&self.pool)
-            .await?;
-
-        let user_count: (i64,) = query_as("SELECT COUNT(*) FROM user_stats")
-            .fetch_one(&self.pool)
-            .await?;
-
-        let user_projection_count: (i64,) = query_as("SELECT COUNT(*) FROM user_records")
-            .fetch_one(&self.pool)
-            .await?;
-
-        let room_count: (i64,) = query_as("SELECT COUNT(*) FROM rooms WHERE subscribed = 1")
-            .fetch_one(&self.pool)
-            .await?;
-
-        let user_note_count: (i64,) = query_as("SELECT COUNT(*) FROM user_notes")
-            .fetch_one(&self.pool)
-            .await?;
-
-        let interest_count: (i64,) = query_as("SELECT COUNT(*) FROM interests")
-            .fetch_one(&self.pool)
-            .await?;
-
-        let security_ban_count: (i64,) = query_as("SELECT COUNT(*) FROM security_bans")
-            .fetch_one(&self.pool)
-            .await?;
-
-        let wishlist_count: (i64,) = query_as("SELECT COUNT(*) FROM wishlist_items")
-            .fetch_one(&self.pool)
-            .await?;
-
-        let contact_count: (i64,) = query_as("SELECT COUNT(*) FROM contacts")
-            .fetch_one(&self.pool)
-            .await?;
-
-        let share_grant_count: (i64,) = query_as("SELECT COUNT(*) FROM share_grants")
-            .fetch_one(&self.pool)
-            .await?;
-
-        let share_access_token_count: (i64,) = query_as("SELECT COUNT(*) FROM share_access_tokens")
-            .fetch_one(&self.pool)
-            .await?;
-
-        let share_group_count: (i64,) = query_as("SELECT COUNT(*) FROM share_groups")
-            .fetch_one(&self.pool)
-            .await?;
-
-        let share_group_member_count: (i64,) = query_as("SELECT COUNT(*) FROM share_group_members")
-            .fetch_one(&self.pool)
-            .await?;
-
-        let collection_count: (i64,) = query_as("SELECT COUNT(*) FROM collections")
-            .fetch_one(&self.pool)
-            .await?;
-
-        let collection_item_count: (i64,) = query_as("SELECT COUNT(*) FROM collection_items")
-            .fetch_one(&self.pool)
-            .await?;
-
-        let library_item_count: (i64,) = query_as("SELECT COUNT(*) FROM library_items")
-            .fetch_one(&self.pool)
-            .await?;
-
-        let destination_count: (i64,) = query_as("SELECT COUNT(*) FROM destinations")
-            .fetch_one(&self.pool)
-            .await?;
-
-        let now_playing_count: (i64,) = query_as("SELECT COUNT(*) FROM now_playing")
-            .fetch_one(&self.pool)
-            .await?;
-
-        let browse_count: (i64,) = query_as("SELECT COUNT(*) FROM browse_records")
-            .fetch_one(&self.pool)
-            .await?;
-
-        let runtime_state_count: (i64,) = query_as("SELECT COUNT(*) FROM runtime_compat_state")
-            .fetch_one(&self.pool)
-            .await?;
-
-        let oauth_state_count: (i64,) = query_as("SELECT COUNT(*) FROM oauth_states")
-            .fetch_one(&self.pool)
-            .await?;
-
-        let webhook_count: (i64,) = query_as("SELECT COUNT(*) FROM webhooks")
-            .fetch_one(&self.pool)
-            .await?;
-
-        let webhook_log_count: (i64,) = query_as("SELECT COUNT(*) FROM webhook_logs")
-            .fetch_one(&self.pool)
-            .await?;
+        // This endpoint is served from a single-connection pool. Keep all
+        // counts in one SQLite statement so the result has one read snapshot
+        // and does not acquire/release the connection once per table.
+        let rows: Vec<(String, i64)> = query_as(
+            r#"
+            WITH counts(name, value) AS (
+                SELECT 'search_count', COUNT(*) FROM searches
+                UNION ALL SELECT 'search_result_count', COUNT(*) FROM search_results
+                UNION ALL SELECT 'transfer_count', COUNT(*) FROM transfers
+                UNION ALL SELECT 'transfer_event_count', COUNT(*) FROM transfer_events
+                UNION ALL SELECT 'share_file_count', COUNT(*) FROM share_files
+                UNION ALL SELECT 'event_count', COUNT(*) FROM events
+                UNION ALL SELECT 'message_count', COUNT(*) FROM messages
+                UNION ALL SELECT 'user_count', COUNT(*) FROM user_stats
+                UNION ALL SELECT 'user_projection_count', COUNT(*) FROM user_records
+                UNION ALL SELECT 'room_count', COUNT(*) FROM rooms WHERE subscribed = 1
+                UNION ALL SELECT 'user_note_count', COUNT(*) FROM user_notes
+                UNION ALL SELECT 'interest_count', COUNT(*) FROM interests
+                UNION ALL SELECT 'security_ban_count', COUNT(*) FROM security_bans
+                UNION ALL SELECT 'wishlist_count', COUNT(*) FROM wishlist_items
+                UNION ALL SELECT 'contact_count', COUNT(*) FROM contacts
+                UNION ALL SELECT 'share_grant_count', COUNT(*) FROM share_grants
+                UNION ALL SELECT 'share_access_token_count', COUNT(*) FROM share_access_tokens
+                UNION ALL SELECT 'share_group_count', COUNT(*) FROM share_groups
+                UNION ALL SELECT 'share_group_member_count', COUNT(*) FROM share_group_members
+                UNION ALL SELECT 'collection_count', COUNT(*) FROM collections
+                UNION ALL SELECT 'collection_item_count', COUNT(*) FROM collection_items
+                UNION ALL SELECT 'library_item_count', COUNT(*) FROM library_items
+                UNION ALL SELECT 'destination_count', COUNT(*) FROM destinations
+                UNION ALL SELECT 'now_playing_count', COUNT(*) FROM now_playing
+                UNION ALL SELECT 'browse_count', COUNT(*) FROM browse_records
+                UNION ALL SELECT 'runtime_state_count', COUNT(*) FROM runtime_compat_state
+                UNION ALL SELECT 'oauth_state_count', COUNT(*) FROM oauth_states
+                UNION ALL SELECT 'webhook_count', COUNT(*) FROM webhooks
+                UNION ALL SELECT 'webhook_log_count', COUNT(*) FROM webhook_logs
+            )
+            SELECT name, value FROM counts
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        let counts = rows
+            .into_iter()
+            .collect::<std::collections::BTreeMap<_, _>>();
+        let count = |name: &str| -> Result<u64, Box<dyn std::error::Error>> {
+            let value = counts.get(name).copied().ok_or_else(|| {
+                Box::<dyn std::error::Error>::from(format!(
+                    "database statistics query omitted {name}"
+                ))
+            })?;
+            Ok(nonnegative_database_count(value)?)
+        };
 
         Ok(DatabaseStats {
-            search_count: nonnegative_database_count(search_count.0)?,
-            search_result_count: nonnegative_database_count(search_result_count.0)?,
-            transfer_count: nonnegative_database_count(transfer_count.0)?,
-            transfer_event_count: nonnegative_database_count(transfer_event_count.0)?,
-            share_file_count: nonnegative_database_count(share_file_count.0)?,
-            event_count: nonnegative_database_count(event_count.0)?,
-            message_count: nonnegative_database_count(message_count.0)?,
-            user_count: nonnegative_database_count(user_count.0)?,
-            user_projection_count: nonnegative_database_count(user_projection_count.0)?,
-            room_count: nonnegative_database_count(room_count.0)?,
-            user_note_count: nonnegative_database_count(user_note_count.0)?,
-            interest_count: nonnegative_database_count(interest_count.0)?,
-            security_ban_count: nonnegative_database_count(security_ban_count.0)?,
-            wishlist_count: nonnegative_database_count(wishlist_count.0)?,
-            contact_count: nonnegative_database_count(contact_count.0)?,
-            share_grant_count: nonnegative_database_count(share_grant_count.0)?,
-            share_access_token_count: nonnegative_database_count(share_access_token_count.0)?,
-            share_group_count: nonnegative_database_count(share_group_count.0)?,
-            share_group_member_count: nonnegative_database_count(share_group_member_count.0)?,
-            collection_count: nonnegative_database_count(collection_count.0)?,
-            collection_item_count: nonnegative_database_count(collection_item_count.0)?,
-            library_item_count: nonnegative_database_count(library_item_count.0)?,
-            destination_count: nonnegative_database_count(destination_count.0)?,
-            now_playing_count: nonnegative_database_count(now_playing_count.0)?,
-            browse_count: nonnegative_database_count(browse_count.0)?,
-            runtime_state_count: nonnegative_database_count(runtime_state_count.0)?,
-            oauth_state_count: nonnegative_database_count(oauth_state_count.0)?,
-            webhook_count: nonnegative_database_count(webhook_count.0)?,
-            webhook_log_count: nonnegative_database_count(webhook_log_count.0)?,
+            search_count: count("search_count")?,
+            search_result_count: count("search_result_count")?,
+            transfer_count: count("transfer_count")?,
+            transfer_event_count: count("transfer_event_count")?,
+            share_file_count: count("share_file_count")?,
+            event_count: count("event_count")?,
+            message_count: count("message_count")?,
+            user_count: count("user_count")?,
+            user_projection_count: count("user_projection_count")?,
+            room_count: count("room_count")?,
+            user_note_count: count("user_note_count")?,
+            interest_count: count("interest_count")?,
+            security_ban_count: count("security_ban_count")?,
+            wishlist_count: count("wishlist_count")?,
+            contact_count: count("contact_count")?,
+            share_grant_count: count("share_grant_count")?,
+            share_access_token_count: count("share_access_token_count")?,
+            share_group_count: count("share_group_count")?,
+            share_group_member_count: count("share_group_member_count")?,
+            collection_count: count("collection_count")?,
+            collection_item_count: count("collection_item_count")?,
+            library_item_count: count("library_item_count")?,
+            destination_count: count("destination_count")?,
+            now_playing_count: count("now_playing_count")?,
+            browse_count: count("browse_count")?,
+            runtime_state_count: count("runtime_state_count")?,
+            oauth_state_count: count("oauth_state_count")?,
+            webhook_count: count("webhook_count")?,
+            webhook_log_count: count("webhook_log_count")?,
         })
     }
 
@@ -5398,6 +5348,45 @@ mod tests {
         assert_eq!(stats.message_count, 0);
         assert_eq!(stats.user_count, 0);
         assert_eq!(stats.room_count, 0);
+    }
+
+    #[tokio::test]
+    async fn common_paged_reads_use_ordered_indexes() {
+        let db = DatabaseManager::in_memory().await.unwrap();
+
+        let message_plan = query(
+            "EXPLAIN QUERY PLAN SELECT id FROM messages WHERE username = 'user' ORDER BY created_at DESC LIMIT 100 OFFSET 0",
+        )
+        .fetch_all(&db.pool)
+        .await
+        .unwrap();
+        let message_details = message_plan
+            .iter()
+            .map(|row| row.try_get::<String, _>("detail").unwrap())
+            .collect::<Vec<_>>();
+        assert!(message_details
+            .iter()
+            .any(|detail| detail.contains("idx_messages_username_created")));
+        assert!(!message_details
+            .iter()
+            .any(|detail| detail.contains("TEMP B-TREE")));
+
+        let library_plan = query(
+            "EXPLAIN QUERY PLAN SELECT id FROM library_items ORDER BY created_at DESC LIMIT 100 OFFSET 0",
+        )
+        .fetch_all(&db.pool)
+        .await
+        .unwrap();
+        let library_details = library_plan
+            .iter()
+            .map(|row| row.try_get::<String, _>("detail").unwrap())
+            .collect::<Vec<_>>();
+        assert!(library_details
+            .iter()
+            .any(|detail| detail.contains("idx_library_items_created")));
+        assert!(!library_details
+            .iter()
+            .any(|detail| detail.contains("TEMP B-TREE")));
     }
 
     #[cfg(unix)]
