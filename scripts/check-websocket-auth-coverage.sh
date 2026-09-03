@@ -48,7 +48,9 @@ for anchor in \
   'MAX_WEBSOCKET_CONNECTIONS' \
   'state.websocket_connections' \
   'websocket_connection_pool_reserves_http_capacity'; do
-  if ! rg -n --fixed-strings -- "$anchor" crates/slskr/src/lib.rs >/dev/null; then
+  if ! rg -n --fixed-strings -- "$anchor" \
+    crates/slskr/src/lib.rs \
+    crates/slskr/src/controller_tests.rs >/dev/null; then
     printf 'websocket auth coverage check failed: missing WebSocket admission anchor %s\n' "$anchor" >&2
     status=1
   fi
