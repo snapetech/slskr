@@ -322,70 +322,19 @@ The schema is ready for implementation with async-graphql or juniper libraries.
 
 ---
 
-## 5. Performance Benchmarking Suite ✅
+## 5. Performance Benchmarking
 
-**Location**: `benchmarks/benchmark.rs`  
-**Lines**: 400+
+The old standalone Rust benchmark was removed because it simulated requests
+and randomly generated success/failure; it was not connected to the daemon or
+Cargo's benchmark runner. The maintained tool is
+[`scripts/benchmark-http.py`](../scripts/benchmark-http.py), documented in
+[`benchmarks/README.md`](../benchmarks/README.md).
 
-### Overview
-
-Comprehensive benchmarking framework for measuring API throughput, latency, and resource usage.
-
-### Features
-
-- **Latency Metrics**: Min, max, avg, P50, P95, P99
-- **Throughput Calculation**: Requests per second
-- **Load Profiles**: Light, medium, heavy, stress
-- **Report Generation**: Detailed performance reports
-- **Concurrent Clients**: Multi-threaded load simulation
-
-### Usage
-
-```rust
-use benchmarks::{HttpBenchmark, BenchmarkSuite};
-
-let mut suite = BenchmarkSuite::new();
-
-// Add benchmarks
-suite.add(HttpBenchmark::new(
-    "GET /api/health".to_string(),
-    "http://127.0.0.1:5030".to_string(),
-    "/api/health".to_string(),
-    "GET".to_string(),
-    100,  // concurrent clients
-    1000, // requests per client
-));
-
-// Run benchmarks
-let results = suite.run();
-
-// Generate report
-let report = suite.generate_report(&results);
-println!("{}", report);
-```
-
-### Load Profiles
-
-```rust
-LoadTestProfile::light()   // 10 clients, 60 seconds
-LoadTestProfile::medium()  // 100 clients, 120 seconds
-LoadTestProfile::heavy()   // 500 clients, 180 seconds
-LoadTestProfile::stress()  // 2000 clients, 300 seconds
-```
-
-### Output
-
-```
-| Benchmark | Requests | Success | Failed | Duration(ms) | Min(ms) | P50(ms) | P99(ms) | Throughput(rps) |
-|-----------|----------|---------|--------|--------------|---------|---------|---------|-----------------|
-| GET /health | 100000 | 95000 | 5000 | 10000 | 1 | 5 | 50 | 10000.00 |
-```
-
-### Test Coverage
-
-- ✅ 2 unit tests
-- ✅ Result calculation verification
-- ✅ Load profile validation
+It uses real persistent HTTP connections, deterministic read workloads,
+warmups, bounded latency samples, status/error accounting, and JSON output.
+It is intentionally read-only. Mutation and SignalR performance scenarios
+remain explicit lifecycle tests so they cannot hide parity-visible side
+effects or event ordering.
 
 ---
 
