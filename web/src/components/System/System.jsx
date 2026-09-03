@@ -418,8 +418,8 @@ const System = ({ runtimeProfile, options = {}, state = {}, theme }) => {
 
   // The two controller profiles have established flat System tab surfaces.
   // Keep the grouped layout for the general slskR surface, but preserve the
-  // target profile contracts so a drop-in replacement does not add a second
-  // navigation layer or change the visible control inventory.
+  // target profile behavior so this surface keeps one navigation layer and
+  // preserves the visible control inventory.
   const profilePanes = runtimeProfile === 'legacy'
     ? panes.filter((pane) => LEGACY_SYSTEM_ROUTES.includes(pane.route))
     : panes;
