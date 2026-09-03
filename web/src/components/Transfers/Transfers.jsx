@@ -1,10 +1,11 @@
 import './Transfers.css';
 import * as autoReplaceLibrary from '../../lib/autoReplace';
 import * as transfersLibrary from '../../lib/transfers';
+import { usePolling } from '../../lib/usePolling';
 import { LoaderSegment, PlaceholderSegment } from '../Shared';
 import TransferGroup from './TransferGroup';
 import TransfersHeader from './TransfersHeader';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { toast } from 'react-toastify';
 
 const AUTO_REPLACE_THRESHOLD = 0; // 0% = exact match only (configurable on backend)
@@ -302,23 +303,16 @@ const Transfers = ({ runtimeProfile, direction, server }) => {
 
   useEffect(() => {
     setConnecting(true);
+  }, [runtimeProfile, direction]);
 
-    const init = async () => {
+  usePolling(
+    async () => {
       await fetch();
       setConnecting(false);
-    };
-
-    init();
-    const interval = window.setInterval(fetch, 1_000);
-
-    return () => {
-      clearInterval(interval);
-    };
-  }, [runtimeProfile, direction]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useMemo(() => {
-    setConnecting(true);
-  }, [direction]); // eslint-disable-line react-hooks/exhaustive-deps
+    },
+    1_000,
+    { resetKey: `${runtimeProfile}:${direction}` },
+  );
 
   const retry = async ({
     file,

@@ -4,7 +4,8 @@
 
 import * as swarmAnalyticsLibrary from '../../../lib/swarmAnalytics';
 import { formatBytes } from '../../../lib/util';
-import React, { useCallback, useEffect, useState } from 'react';
+import { usePolling } from '../../../lib/usePolling';
+import React, { useCallback, useState } from 'react';
 import { toast } from 'react-toastify';
 import {
   Card,
@@ -66,11 +67,9 @@ const SwarmAnalytics = () => {
     }
   }, [rankingLimit, timeWindow]);
 
-  useEffect(() => {
-    fetchAnalytics();
-    const interval = setInterval(fetchAnalytics, 30_000); // Refresh every 30 seconds
-    return () => clearInterval(interval);
-  }, [fetchAnalytics]);
+  usePolling(fetchAnalytics, 30_000, {
+    resetKey: `${timeWindow}:${rankingLimit}`,
+  });
 
   const getPriorityColor = (priority) => {
     switch (priority) {

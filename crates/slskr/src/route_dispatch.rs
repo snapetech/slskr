@@ -1702,37 +1702,7 @@ async fn route_dispatch_group_0(
             ))
         }
         ("GET", "/api/application") => {
-            let session = state.session.read().await;
-            let share_lifecycle = state.share_lifecycle.read().await;
-            let rooms = state.rooms.read().await;
-            let users = state.users.read().await;
-            let relay = state.relay.read().await;
-            let runtime = state.runtime.read().await;
-            let distributed_network = state.distributed_network.read().await;
-            let distributed_settings = *state.soulseek_distributed_settings.read().await;
-            let runtime_credentials_configured = state.runtime_credentials.read().await.is_some();
-            let connected_endpoint = connected_server_address(state);
-            let body = application_state_json(
-                &session,
-                &share_lifecycle,
-                &rooms,
-                &users,
-                &relay,
-                &runtime,
-                &distributed_network,
-                distributed_settings,
-                &state.config,
-                runtime_credentials_configured,
-                connected_endpoint.as_deref(),
-                controller_version_json(state),
-            );
-            drop(runtime);
-            drop(distributed_network);
-            drop(relay);
-            drop(users);
-            drop(rooms);
-            drop(share_lifecycle);
-            drop(session);
+            let body = application_state_json_for_state(state).await;
             Ok(HttpResponse {
                 status: "200 OK",
                 content_type: "application/json; charset=utf-8",

@@ -13,7 +13,7 @@ As of the 2026-09-02 refactoring baseline:
 - `crates/slskr/src/route_dispatch.rs`: approximately 19,600 lines.
 - `web/src`: approximately 95,500 lines.
 - Default daemon unit tests: 440.
-- Web tests: 511.
+- Web tests: 514.
 
 These are structural measurements only. No latency or throughput number is
 claimed here until it comes from the real benchmark artifact.
@@ -38,6 +38,20 @@ persistence enabled, and add explicit safe read endpoints for the workload
 being compared. The tool keeps one HTTP connection per worker, drains real
 responses, records actual statuses and errors, and bounds retained latency
 samples. A non-zero exit status means at least one measured request failed.
+
+Compare two artifacts only when the workload metadata matches:
+
+```bash
+python3 scripts/compare-benchmark.py \
+  target/perf/native-disabled-before.json \
+  target/perf/native-disabled-after.json \
+  --max-latency-regression-percent 10 \
+  --max-throughput-regression-percent 10 \
+  --output target/perf/native-disabled-comparison.json
+```
+
+The comparison checks the aggregate and each endpoint case. Missing metrics
+and workload drift are invalid results, not successful comparisons.
 
 Mutation and SignalR performance scenarios must remain explicit lifecycle
 scenarios. They are not hidden in a generic load test because event ordering,

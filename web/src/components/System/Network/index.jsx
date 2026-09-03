@@ -4,8 +4,9 @@ import {
   formatNetworkHealthReport,
 } from '../../../lib/networkHealthScore';
 import { getLocalStorageItem, setLocalStorageItem } from '../../../lib/storage';
+import { usePolling } from '../../../lib/usePolling';
 import { LoaderSegment, ShrinkableButton } from '../../Shared';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { toast } from 'react-toastify';
 import {
   Button,
@@ -233,16 +234,12 @@ const Network = ({ options = {}, state = {}, theme }) => {
     }
   }, []);
 
+  usePolling(fetchData, 5_000);
+
   const dismissDhtExposureConsent = () => {
     setLocalStorageItem(DHT_EXPOSURE_CONSENT_KEY, 'acknowledged');
     setDhtExposureAcknowledged(true);
   };
-
-  useEffect(() => {
-    fetchData();
-    const interval = setInterval(fetchData, 5_000); // Refresh every 5 seconds
-    return () => clearInterval(interval);
-  }, [fetchData]);
 
   const handleSync = async (username) => {
     setSyncing((previous) => ({ ...previous, [username]: true }));

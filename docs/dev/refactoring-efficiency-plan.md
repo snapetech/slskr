@@ -6,6 +6,28 @@ This plan covers structural refactoring, runtime efficiency, build/test
 efficiency, and Web UI efficiency after the universal replacement gate was
 closed. It does not reopen or weaken the parity contract.
 
+## Current implementation status
+
+The first execution batch is complete and verified on `main`:
+
+- live HTTP benchmarking now produces bounded, real-response artifacts;
+- like-for-like artifact comparison rejects workload drift and reports
+  latency, throughput, and failure-rate regressions;
+- application-state serialization snapshots owned values before final JSON
+  construction, and HTTP/SignalR share that boundary;
+- compatibility event publication has one source module, and transfer metrics
+  use one queue pass while preserving target status partitions;
+- bounded event history and its compatibility projections now have one owned
+  module instead of living in the controller source;
+- bulk transfer deletion uses bounded parameter chunks inside one transaction;
+- the high-frequency functional Web UI refreshes use non-overlapping polling
+  that pauses hidden documents and refreshes once when visible again.
+
+The historical controller test relocation, wider route-domain split, and
+instrumented persistence/query baselines remain open. They require mechanical
+source moves or live measurements and are not represented as completed by the
+runtime changes above.
+
 ## Fixed invariants
 
 Every swath must preserve the pinned slskd/slskdN compatibility profiles and
@@ -30,7 +52,7 @@ The inventory is intentionally descriptive, not a performance claim:
 - `web/src` is about 95,500 lines. The largest current areas include the
   System/MediaCore surface, `App.jsx`, and the player/search surfaces.
 - The default daemon test binary contains 440 Rust unit tests; the web suite
-  contains 511 tests.
+  contains 514 tests.
 - The existing Cargo configuration already serializes workspace jobs and
   limits debug metadata. Compiler settings must be changed only after timing
   evidence.

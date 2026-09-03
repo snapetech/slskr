@@ -42,18 +42,7 @@ pub(crate) fn hub_name_for_target(
     target: crate::config::ControllerProfile,
 ) -> Option<&'static str> {
     let hub = hub_name(path)?;
-    let supported = match target {
-        crate::config::ControllerProfile::Legacy => {
-            matches!(hub, "application" | "logs" | "search" | "metrics")
-        }
-        crate::config::ControllerProfile::Native => {
-            matches!(
-                hub,
-                "application" | "logs" | "search" | "songid" | "listening-party" | "transfers"
-            )
-        }
-    };
-    supported.then_some(hub)
+    hub_supported_for_target(hub, target).then_some(hub)
 }
 
 /// Return the supported hub name for SignalR's POST negotiation route.
@@ -71,7 +60,11 @@ pub(crate) fn negotiate_hub_name_for_target(
     target: crate::config::ControllerProfile,
 ) -> Option<&'static str> {
     let hub = negotiate_hub_name(path)?;
-    let supported = match target {
+    hub_supported_for_target(hub, target).then_some(hub)
+}
+
+fn hub_supported_for_target(hub: &str, target: crate::config::ControllerProfile) -> bool {
+    match target {
         crate::config::ControllerProfile::Legacy => {
             matches!(hub, "application" | "logs" | "search" | "metrics")
         }
@@ -81,8 +74,7 @@ pub(crate) fn negotiate_hub_name_for_target(
                 "application" | "logs" | "search" | "songid" | "listening-party" | "transfers"
             )
         }
-    };
-    supported.then_some(hub)
+    }
 }
 
 /// Map a hub to the equivalent protected controller surface.
@@ -596,92 +588,77 @@ pub(crate) fn search_hub_payload(
 }
 
 async fn application_state_json(state: &AppState) -> String {
-    let session = state.session.read().await;
-    let share_lifecycle = state.share_lifecycle.read().await;
-    let rooms = state.rooms.read().await;
-    let users = state.users.read().await;
-    let relay = state.relay.read().await;
-    let runtime = state.runtime.read().await;
-    let distributed_network = state.distributed_network.read().await;
-    let distributed_settings = *state.soulseek_distributed_settings.read().await;
-    let runtime_credentials_configured = state.runtime_credentials.read().await.is_some();
-    let connected_endpoint = crate::connected_server_address(state);
-    crate::application_state_json(
-        &session,
-        &share_lifecycle,
-        &rooms,
-        &users,
-        &relay,
-        &runtime,
-        &distributed_network,
-        distributed_settings,
-        &state.config,
-        runtime_credentials_configured,
-        connected_endpoint.as_deref(),
-        crate::controller_version_json(state),
-    )
+    crate::application_state_json_for_state(state).await
 }
 
 fn transfer_metrics(transfers: &crate::TransferQueue) -> Value {
     fn direction_metrics(transfers: &crate::TransferQueue, direction: u32) -> Value {
-        let entries = transfers
+        let now = crate::unix_timestamp();
+        let mut in_progress_files = 0usize;
+        let mut in_progress_users = std::collections::HashSet::new();
+        let mut total_speed = 0.0;
+        let mut queued_files = 0usize;
+        let mut queued_users = std::collections::HashSet::new();
+        let mut queued_bytes = 0u64;
+        let mut completed_succeeded = 0usize;
+        let mut completed_failed = 0usize;
+        let mut completed_bytes = 0u64;
+
+        // This used to materialize four filtered vectors and then walk them
+        // again for counts and unique-user sets. Keep the projection's exact
+        // status partitions while doing one bounded pass over the queue.
+        for entry in transfers
             .entries
             .iter()
             .filter(|entry| entry.direction == direction)
-            .collect::<Vec<_>>();
-        let in_progress = entries
-            .iter()
-            .copied()
-            .filter(|entry| crate::is_active_transfer_status(&entry.status))
-            .collect::<Vec<_>>();
-        let queued = entries
-            .iter()
-            .copied()
-            .filter(|entry| entry.status == "queued")
-            .collect::<Vec<_>>();
-        let completed = entries
-            .iter()
-            .copied()
-            .filter(|entry| {
-                matches!(
-                    entry.status.as_str(),
-                    "succeeded" | "failed" | "cancelled" | "rejected"
-                )
-            })
-            .collect::<Vec<_>>();
-        let now = crate::unix_timestamp();
-        let total_speed = in_progress
-            .iter()
-            .map(|entry| entry.average_speed_at(now))
-            .sum::<f64>();
-        let average_speed = if in_progress.is_empty() {
+        {
+            if crate::is_active_transfer_status(&entry.status) {
+                in_progress_files += 1;
+                if let Some(username) = entry.peer_username.as_deref() {
+                    in_progress_users.insert(username);
+                }
+                total_speed += entry.average_speed_at(now);
+            }
+            if entry.status == "queued" {
+                queued_files += 1;
+                if let Some(username) = entry.peer_username.as_deref() {
+                    queued_users.insert(username);
+                }
+                queued_bytes = queued_bytes.saturating_add(entry.size.unwrap_or(0));
+            }
+            if matches!(
+                entry.status.as_str(),
+                "succeeded" | "failed" | "cancelled" | "rejected"
+            ) {
+                if entry.status == "succeeded" {
+                    completed_succeeded += 1;
+                } else if matches!(entry.status.as_str(), "failed" | "rejected") {
+                    completed_failed += 1;
+                }
+                completed_bytes = completed_bytes.saturating_add(entry.bytes_transferred);
+            }
+        }
+        let average_speed = if in_progress_files == 0 {
             0.0
         } else {
-            total_speed / in_progress.len() as f64
-        };
-        let users = |items: &[&crate::TransferEntry]| {
-            items
-                .iter()
-                .filter_map(|entry| entry.peer_username.as_deref())
-                .collect::<std::collections::HashSet<_>>()
-                .len()
+            total_speed / in_progress_files as f64
         };
         json!({
             "inProgress": {
-                "files": in_progress.len(),
-                "users": users(&in_progress),
+                "files": in_progress_files,
+                "users": in_progress_users.len(),
                 "averageSpeed": average_speed,
                 "totalSpeed": total_speed,
             },
             "queued": {
-                "files": queued.len(),
-                "users": users(&queued),
-                "bytes": queued.iter().filter_map(|entry| entry.size).sum::<u64>(),
+                "files": queued_files,
+                "users": queued_users.len(),
+                "bytes": queued_bytes,
             },
             "completed": {
-                "succeeded": completed.iter().filter(|entry| entry.status == "succeeded").count(),
-                "failed": completed.iter().filter(|entry| matches!(entry.status.as_str(), "failed" | "rejected")).count(),
-                "bytes": completed.iter().map(|entry| entry.bytes_transferred).sum::<u64>(),
+                "succeeded": completed_succeeded,
+                "failed": completed_failed,
+                "bytes": completed_bytes,
             },
         })
     }
@@ -847,7 +824,7 @@ mod tests {
         let updated = transfers
             .update_status(entry.id, "in_progress", Some(25), None)
             .expect("transfer update");
-        let payload = crate::transfer_hub_activity_json(&updated);
+        let payload = crate::event_bus::transfer_hub_activity_json(&updated);
         assert_eq!(payload["previousState"], "Queued");
         assert_eq!(payload["state"], "InProgress");
     }

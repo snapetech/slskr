@@ -13,6 +13,8 @@ use std::fs::OpenOptions;
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+const SQLITE_PARAMETER_CHUNK: usize = 900;
+
 #[cfg(unix)]
 fn prepare_private_database_file(db_path: &str) -> std::io::Result<()> {
     let file = OpenOptions::new()
@@ -29,6 +31,10 @@ fn prepare_private_database_file(db_path: &str) -> std::io::Result<()> {
         ));
     }
     file.set_permissions(std::fs::Permissions::from_mode(0o600))
+}
+
+fn sql_placeholders(count: usize) -> String {
+    (0..count).map(|_| "?").collect::<Vec<_>>().join(", ")
 }
 
 /// Search record for persistence
@@ -2818,12 +2824,19 @@ impl DatabaseManager {
 
     /// Delete a set of transfer records atomically.
     pub async fn delete_transfers(&self, ids: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+        if ids.is_empty() {
+            return Ok(());
+        }
         let mut transaction = self.pool.begin().await?;
-        for id in ids {
-            query("DELETE FROM transfers WHERE id = ?")
-                .bind(id)
-                .execute(&mut *transaction)
-                .await?;
+        for chunk in ids.chunks(SQLITE_PARAMETER_CHUNK) {
+            let mut statement = query(AssertSqlSafe(format!(
+                "DELETE FROM transfers WHERE id IN ({})",
+                sql_placeholders(chunk.len())
+            )));
+            for id in chunk {
+                statement = statement.bind(id);
+            }
+            statement.execute(&mut *transaction).await?;
         }
         transaction.commit().await?;
         Ok(())
@@ -2834,16 +2847,27 @@ impl DatabaseManager {
         &self,
         ids: &[String],
     ) -> Result<(), Box<dyn std::error::Error>> {
+        if ids.is_empty() {
+            return Ok(());
+        }
         let mut transaction = self.pool.begin().await?;
-        for id in ids {
-            query("DELETE FROM transfer_events WHERE transfer_id = ?")
-                .bind(id)
-                .execute(&mut *transaction)
-                .await?;
-            query("DELETE FROM transfers WHERE id = ?")
-                .bind(id)
-                .execute(&mut *transaction)
-                .await?;
+        for chunk in ids.chunks(SQLITE_PARAMETER_CHUNK) {
+            let placeholders = sql_placeholders(chunk.len());
+            let mut event_statement = query(AssertSqlSafe(format!(
+                "DELETE FROM transfer_events WHERE transfer_id IN ({placeholders})"
+            )));
+            for id in chunk {
+                event_statement = event_statement.bind(id);
+            }
+            event_statement.execute(&mut *transaction).await?;
+
+            let mut transfer_statement = query(AssertSqlSafe(format!(
+                "DELETE FROM transfers WHERE id IN ({placeholders})"
+            )));
+            for id in chunk {
+                transfer_statement = transfer_statement.bind(id);
+            }
+            transfer_statement.execute(&mut *transaction).await?;
         }
         transaction.commit().await?;
         Ok(())
@@ -5539,6 +5563,19 @@ mod tests {
             .await
             .unwrap()
             .is_empty());
+
+        let mut ids = Vec::new();
+        for suffix in ["a", "b", "c"] {
+            let mut additional = record.clone();
+            additional.id = format!("transfer_{suffix}");
+            db.insert_transfer(&additional).await.unwrap();
+            ids.push(additional.id);
+        }
+        db.delete_transfers(&ids).await.unwrap();
+        assert!(db.get_transfer("transfer_a").await.unwrap().is_none());
+        assert!(db.get_transfer("transfer_b").await.unwrap().is_none());
+        assert!(db.get_transfer("transfer_c").await.unwrap().is_none());
+        db.delete_transfers(&[]).await.unwrap();
     }
 
     #[tokio::test]

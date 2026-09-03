@@ -4,6 +4,7 @@
 
 import * as jobsLibrary from '../../../lib/jobs';
 import { formatBytes } from '../../../lib/util';
+import { usePolling } from '../../../lib/usePolling';
 import SwarmVisualization from '../SwarmVisualization';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'react-toastify';
@@ -90,11 +91,7 @@ const Jobs = () => {
     fetchJobs();
   }, [fetchJobs]);
 
-  useEffect(() => {
-    fetchSwarmJobs();
-    const interval = setInterval(fetchSwarmJobs, 5_000); // Refresh every 5 seconds
-    return () => clearInterval(interval);
-  }, [fetchSwarmJobs]);
+  usePolling(fetchSwarmJobs, 5_000);
 
   const analytics = useMemo(() => {
     const allJobs = [...jobs, ...swarmJobs];

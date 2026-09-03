@@ -6,7 +6,8 @@ import {
   podWorkflowFilterOptions,
   podWorkflowSections,
 } from './mediaCoreWorkflows';
-import React, { useEffect, useState } from 'react';
+import { usePolling } from '../../../lib/usePolling';
+import React, { useCallback, useEffect, useState } from 'react';
 import { toast } from 'react-toastify';
 import {
   Card,
@@ -344,26 +345,20 @@ const MediaCore = () => {
   const [republishing, setRepublishing] = useState(false);
   const [loadingStats, setLoadingStats] = useState(false);
 
-  useEffect(() => {
-    const fetchStats = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        const data = await mediacore.getContentIdStats();
-        setStats(data);
-      } catch (error_) {
-        setError(error_.message);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchStats();
-
-    // Refresh stats every 60 seconds
-    const interval = setInterval(fetchStats, 60_000);
-    return () => clearInterval(interval);
+  const fetchStats = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const data = await mediacore.getContentIdStats();
+      setStats(data);
+    } catch (error_) {
+      setError(error_.message);
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  usePolling(fetchStats, 60_000);
 
   const handleRegister = async () => {
     if (!externalId.trim() || !descriptorContentId.trim()) return;

@@ -1,7 +1,8 @@
 import './Security.css';
 import * as securityApi from '../../../lib/security';
 import AdversarialSettings from './AdversarialSettings';
-import React, { useCallback, useEffect, useState } from 'react';
+import { usePolling } from '../../../lib/usePolling';
+import React, { useCallback, useState } from 'react';
 import {
   Button,
   Dimmer,
@@ -35,11 +36,7 @@ const Security = () => {
     }
   }, []);
 
-  useEffect(() => {
-    fetchData();
-    const interval = setInterval(fetchData, 30_000);
-    return () => clearInterval(interval);
-  }, [fetchData]);
+  usePolling(fetchData, 30_000);
 
   if (loading) {
     return (

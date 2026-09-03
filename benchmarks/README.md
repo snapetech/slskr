@@ -32,5 +32,21 @@ SignalR workloads belong in explicit scenario runners so their side effects
 and event ordering remain visible rather than being hidden in a generic load
 test.
 
+Compare like-for-like live artifacts with explicit regression policy:
+
+```bash
+python3 scripts/compare-benchmark.py \
+  target/perf/native-disabled-before.json \
+  target/perf/native-disabled-after.json \
+  --max-latency-regression-percent 10 \
+  --max-throughput-regression-percent 10 \
+  --output target/perf/native-disabled-comparison.json
+```
+
+The comparison rejects mismatched profiles, persistence labels, endpoint
+workloads, status policies, concurrency, and timing settings. It reports
+latency, throughput, and failure-rate checks for the aggregate and every
+endpoint case; it does not silently treat missing measurements as a pass.
+
 The old standalone `benchmarks/benchmark.rs` simulated requests and was not a
 valid performance measurement; it has been removed.

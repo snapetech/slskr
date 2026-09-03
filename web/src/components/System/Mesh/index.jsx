@@ -2,7 +2,8 @@ import * as mesh from '../../../lib/mesh';
 import * as soulseekDiscovery from '../../../lib/soulseekDiscovery';
 import MeshEvidencePolicy from './MeshEvidencePolicy';
 import RealmSubjectIndexConflicts from './RealmSubjectIndexConflicts';
-import React, { useEffect, useState } from 'react';
+import { usePolling } from '../../../lib/usePolling';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   Button,
   Card,
@@ -27,6 +28,19 @@ const Mesh = ({ runtimeProfile } = {}) => {
   const [rendezvousLoading, setRendezvousLoading] = useState(false);
   const [rendezvousMessage, setRendezvousMessage] = useState(null);
 
+  const fetchStats = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const data = await mesh.getStats();
+      setStats(data);
+    } catch (error_) {
+      setError(error_.message);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   const getRendezvousErrorText = (error_, fallback) => {
     const data = error_?.response?.data;
     if (typeof data === 'string') return data;
@@ -35,26 +49,7 @@ const Mesh = ({ runtimeProfile } = {}) => {
     return error_?.message || fallback;
   };
 
-  useEffect(() => {
-    const fetchStats = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        const data = await mesh.getStats();
-        setStats(data);
-      } catch (error_) {
-        setError(error_.message);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchStats();
-
-    // Refresh stats every 30 seconds
-    const interval = setInterval(fetchStats, 30_000);
-    return () => clearInterval(interval);
-  }, []);
+  usePolling(fetchStats, 30_000);
 
   useEffect(() => {
     const fetchRendezvousStatus = async () => {

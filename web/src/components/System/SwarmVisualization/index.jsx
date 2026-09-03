@@ -4,6 +4,7 @@
 
 import * as jobsLibrary from '../../../lib/jobs';
 import { formatBytes } from '../../../lib/util';
+import { usePolling } from '../../../lib/usePolling';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Grid,
@@ -56,11 +57,14 @@ const SwarmVisualization = ({ jobId }) => {
     }
   }, [jobId]);
 
+  usePolling(fetchData, 2_000, {
+    enabled: Boolean(jobId),
+    resetKey: jobId,
+  });
+
   useEffect(() => {
-    fetchData();
-    const interval = setInterval(fetchData, 2_000); // Refresh every 2 seconds
-    return () => clearInterval(interval);
-  }, [fetchData]);
+    if (!jobId) void fetchData();
+  }, [fetchData, jobId]);
 
   const peerContributions = useMemo(() => {
     if (traceSummary?.peers && traceSummary.peers.length > 0) {

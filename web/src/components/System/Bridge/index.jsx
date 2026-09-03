@@ -1,5 +1,6 @@
 import * as bridge from '../../../lib/bridge';
-import React, { useEffect, useState } from 'react';
+import { usePolling } from '../../../lib/usePolling';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   Button,
   Card,
@@ -26,6 +27,15 @@ const Bridge = () => {
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
 
+  const fetchDashboard = useCallback(async () => {
+    try {
+      const dashboardData = await bridge.getDashboard();
+      setDashboard(dashboardData);
+    } catch {
+      // Silently fail on refresh
+    }
+  }, []);
+
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -46,18 +56,9 @@ const Bridge = () => {
 
     fetchData();
 
-    // Refresh dashboard every 10 seconds
-    const interval = setInterval(async () => {
-      try {
-        const dashboardData = await bridge.getDashboard();
-        setDashboard(dashboardData);
-      } catch {
-        // Silently fail on refresh
-      }
-    }, 10_000);
-
-    return () => clearInterval(interval);
   }, []);
+
+  usePolling(fetchDashboard, 10_000, { immediate: false });
 
   const handleConfigChange = (field, value) => {
     setConfig((previous) => ({
