@@ -64,7 +64,7 @@ Latest scanner counts:
 | Protocol count/length candidates | 134 |
 | Protocol scalar emission candidates | 194 |
 | Resolver/raw stream candidates | 881 |
-| Task/cancellation/lifecycle candidates | 992 |
+| Task/cancellation/lifecycle candidates | 993 |
 | Example Web API candidates | 275 |
 
 ### Constructor/mutable collection candidates

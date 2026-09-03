@@ -2866,18 +2866,40 @@ fn persisted_search_result_records(record: &SearchRecord) -> Vec<persistence::Se
 
 async fn persist_search_record(state: &AppState, record: &SearchRecord) -> Result<(), String> {
     if let Some(db) = state.db.as_ref() {
-        db.insert_search(&persisted_search_record(record))
-            .await
-            .map_err(|error| format!("failed to persist search: {error}"))?;
-        db.upsert_search_identity(&record.token.to_string(), &record.id)
-            .await
-            .map_err(|error| format!("failed to persist search identity: {error}"))?;
-        db.replace_search_results(
-            &record.token.to_string(),
-            &persisted_search_result_records(record),
+        let persisted_record = persisted_search_record(record);
+        let persisted_results = persisted_search_result_records(record);
+        db.persist_search(
+            &persisted_record,
+            &record.id,
+            &persisted_results,
         )
         .await
-        .map_err(|error| format!("failed to persist search results: {error}"))?;
+        .map_err(|error| format!("failed to persist search and results: {error}"))?;
+    }
+    Ok(())
+}
+
+async fn persist_search_transition(
+    state: &AppState,
+    upserts: &[SearchRecord],
+    evicted: &[SearchRecord],
+) -> Result<(), String> {
+    if let Some(db) = state.db.as_ref() {
+        let writes = upserts
+            .iter()
+            .map(|record| persistence::SearchWrite {
+                record: persisted_search_record(record),
+                external_id: record.id.clone(),
+                results: persisted_search_result_records(record),
+            })
+            .collect::<Vec<_>>();
+        let deletes = evicted
+            .iter()
+            .map(|record| record.token.to_string())
+            .collect::<Vec<_>>();
+        db.persist_search_changes(&writes, &deletes)
+            .await
+            .map_err(|error| format!("failed to persist search transition: {error}"))?;
     }
     Ok(())
 }
@@ -22245,27 +22267,14 @@ async fn route_http_request_with_headers(
              };
              drop(searches);
 
-             if let Err(error) = persist_expired_searches(state, &expired).await {
-                 rollback_searches_if_unchanged(
-                     state,
-                     previous_searches.clone(),
-                     &mutated_searches,
-                 )
-                 .await;
-                 return Ok(routing::service_unavailable_response(&error));
-             }
-             if let Err(error) = delete_persisted_searches(state, &evicted).await {
-                 rollback_searches_if_unchanged(
-                     state,
-                     previous_searches.clone(),
-                     &mutated_searches,
-                 )
-                 .await;
-                 return Ok(routing::service_unavailable_response(&error));
-             }
-             if let Err(error) = persist_search_record(state, &record).await {
+             let mut upserts = expired.clone();
+             upserts.push(record.clone());
+             if let Err(error) = persist_search_transition(state, &upserts, &evicted).await {
                  rollback_searches_if_unchanged(state, previous_searches, &mutated_searches).await;
                  return Ok(routing::service_unavailable_response(&error));
+             }
+             for expired_record in &expired {
+                 publish_search_hub_event(state, "update", expired_record);
              }
              session_command_permit.send(SessionCommand::Search {
                  token,
@@ -32427,14 +32436,19 @@ async fn route_http_request_with_headers(
                   .or_else(|| extract_json_string_field(body, "query"))
                   .unwrap_or_else(|| "discography".to_owned());
               let query = format!("{} discography", artist.trim()).trim().to_owned();
-              let mut searches = state.searches.write().await;
-              let outcome = match searches.create(None, query, "global", None, Vec::new(), DEFAULT_SEARCH_TTL_SECONDS) {
-                  Ok(outcome) => outcome,
-                  Err(error) => return Ok(search_create_error_response(error)),
+              let (previous_searches, mutated_searches, record, evicted, expired) = {
+                  let mut searches = state.searches.write().await;
+                  let previous_searches = searches.clone();
+                  let outcome = match searches.create(None, query, "global", None, Vec::new(), DEFAULT_SEARCH_TTL_SECONDS) {
+                      Ok(outcome) => outcome,
+                      Err(error) => return Ok(search_create_error_response(error)),
+                  };
+                  let record = outcome.record;
+                  let evicted = outcome.evicted;
+                  let expired = outcome.expired;
+                  let mutated_searches = searches.clone();
+                  (previous_searches, mutated_searches, record, evicted, expired)
               };
-              let record = outcome.record;
-              let evicted = outcome.evicted;
-              let expired = outcome.expired;
               let job_projection = serde_json::json!({
                   "jobId": record.id,
                   "type": "discography",
@@ -32456,6 +32470,7 @@ async fn route_http_request_with_headers(
                   .await
                   .upsert(format!("job/discography/{}", record.id), job_projection);
               if let Err(error) = job_store_result {
+                  rollback_searches_if_unchanged(state, previous_searches, &mutated_searches).await;
                   return Ok(routing::service_unavailable_response(&error));
               }
               let response = serde_json::json!({
@@ -32468,10 +32483,20 @@ async fn route_http_request_with_headers(
                   "query": record.query,
                   "results": [],
               }).to_string();
-              drop(searches);
-              persist_expired_searches(state, &expired).await?;
-              persist_search_record(state, &record).await?;
-              delete_persisted_searches(state, &evicted).await?;
+              let mut upserts = expired.clone();
+              upserts.push(record.clone());
+              if let Err(error) = persist_search_transition(state, &upserts, &evicted).await {
+                  rollback_searches_if_unchanged(state, previous_searches, &mutated_searches).await;
+                  let _ = state
+                      .controller_features
+                      .write()
+                      .await
+                      .remove(&format!("job/discography/{}", record.id));
+                  return Ok(routing::service_unavailable_response(&error));
+              }
+              for expired_record in &expired {
+                  publish_search_hub_event(state, "update", expired_record);
+              }
               Ok(routing::accepted_response(response))
           }
 
@@ -32543,14 +32568,19 @@ async fn route_http_request_with_headers(
                   .filter(|value| !value.trim().is_empty())
                   .collect::<Vec<_>>()
                   .join(" ");
-              let mut searches = state.searches.write().await;
-              let outcome = match searches.create(None, query, "global", None, Vec::new(), DEFAULT_SEARCH_TTL_SECONDS) {
-                  Ok(outcome) => outcome,
-                  Err(error) => return Ok(search_create_error_response(error)),
+              let (previous_searches, mutated_searches, record, evicted, expired) = {
+                  let mut searches = state.searches.write().await;
+                  let previous_searches = searches.clone();
+                  let outcome = match searches.create(None, query, "global", None, Vec::new(), DEFAULT_SEARCH_TTL_SECONDS) {
+                      Ok(outcome) => outcome,
+                      Err(error) => return Ok(search_create_error_response(error)),
+                  };
+                  let record = outcome.record;
+                  let evicted = outcome.evicted;
+                  let expired = outcome.expired;
+                  let mutated_searches = searches.clone();
+                  (previous_searches, mutated_searches, record, evicted, expired)
               };
-              let record = outcome.record;
-              let evicted = outcome.evicted;
-              let expired = outcome.expired;
               let job_projection = serde_json::json!({
                   "jobId": record.id,
                   "type": "mb-release",
@@ -32572,6 +32602,7 @@ async fn route_http_request_with_headers(
                   .await
                   .upsert(format!("job/mb-release/{}", record.id), job_projection);
               if let Err(error) = job_store_result {
+                  rollback_searches_if_unchanged(state, previous_searches, &mutated_searches).await;
                   return Ok(routing::service_unavailable_response(&error));
               }
               let response = serde_json::json!({
@@ -32585,10 +32616,20 @@ async fn route_http_request_with_headers(
                   "query": record.query,
                   "results": [],
               }).to_string();
-              drop(searches);
-              persist_expired_searches(state, &expired).await?;
-              persist_search_record(state, &record).await?;
-              delete_persisted_searches(state, &evicted).await?;
+              let mut upserts = expired.clone();
+              upserts.push(record.clone());
+              if let Err(error) = persist_search_transition(state, &upserts, &evicted).await {
+                  rollback_searches_if_unchanged(state, previous_searches, &mutated_searches).await;
+                  let _ = state
+                      .controller_features
+                      .write()
+                      .await
+                      .remove(&format!("job/mb-release/{}", record.id));
+                  return Ok(routing::service_unavailable_response(&error));
+              }
+              for expired_record in &expired {
+                  publish_search_hub_event(state, "update", expired_record);
+              }
               Ok(routing::accepted_response(response))
           }
 
@@ -34436,29 +34477,17 @@ async fn route_http_request_with_headers(
              }).to_string();
              let mutated_searches = searches.clone();
              drop(searches);
-             if let Err(error) = persist_expired_searches(state, &expired).await {
-                 rollback_searches_if_unchanged(state, previous_searches.clone(), &mutated_searches)
-                     .await;
+             let mut upserts = expired.clone();
+             upserts.push(record.clone());
+             if let Err(error) = persist_search_transition(state, &upserts, &evicted).await {
+                 rollback_searches_if_unchanged(state, previous_searches, &mutated_searches).await;
                  return Ok(wishlist_storage_error_response(
                      route.path.starts_with("/api/v0/"),
                      &error,
                  ));
              }
-             if let Err(error) = delete_persisted_searches(state, &evicted).await {
-                 rollback_searches_if_unchanged(state, previous_searches.clone(), &mutated_searches)
-                     .await;
-                 return Ok(wishlist_storage_error_response(
-                     route.path.starts_with("/api/v0/"),
-                     &error,
-                 ));
-             }
-             if let Err(error) = persist_search_record(state, &record).await {
-                 rollback_searches_if_unchanged(state, previous_searches, &mutated_searches)
-                     .await;
-                 return Ok(wishlist_storage_error_response(
-                     route.path.starts_with("/api/v0/"),
-                     &error,
-                 ));
+             for expired_record in &expired {
+                 publish_search_hub_event(state, "update", expired_record);
              }
              session_command_permit.send(SessionCommand::Search {
                  token: record.token,
@@ -60525,20 +60554,18 @@ async fn extended_controller_search_response(
         Err(error) => return Err(search_create_error_response(error)),
     };
     let record = outcome.record;
+    let evicted = outcome.evicted;
     let expired = outcome.expired;
     let mutated_searches = searches.clone();
     drop(searches);
-    if let Err(error) = persist_expired_searches(state, &expired).await {
-        rollback_searches_if_unchanged(state, previous_searches.clone(), &mutated_searches).await;
-        return Err(routing::service_unavailable_response(&error));
-    }
-    if let Err(error) = delete_persisted_searches(state, &outcome.evicted).await {
-        rollback_searches_if_unchanged(state, previous_searches.clone(), &mutated_searches).await;
-        return Err(routing::service_unavailable_response(&error));
-    }
-    if let Err(error) = persist_search_record(state, &record).await {
+    let mut upserts = expired.clone();
+    upserts.push(record.clone());
+    if let Err(error) = persist_search_transition(state, &upserts, &evicted).await {
         rollback_searches_if_unchanged(state, previous_searches, &mutated_searches).await;
         return Err(routing::service_unavailable_response(&error));
+    }
+    for expired_record in &expired {
+        publish_search_hub_event(state, "update", expired_record);
     }
     permit.send(SessionCommand::Search {
         token: record.token,
@@ -73172,9 +73199,9 @@ fn spawn_transfer_rescue(state: Arc<AppState>) {
 }
 
 async fn create_rescue_search(state: &AppState, query: String) -> Result<SearchRecord, String> {
-    let (record, evicted, expired, previous_next_token, created_next_token) = {
+    let (previous_searches, mutated_searches, record, evicted, expired) = {
         let mut searches = state.searches.write().await;
-        let previous_next_token = searches.next_token;
+        let previous_searches = searches.clone();
         let outcome = searches
             .create(
                 None,
@@ -73185,44 +73212,23 @@ async fn create_rescue_search(state: &AppState, query: String) -> Result<SearchR
                 DEFAULT_SEARCH_TTL_SECONDS,
             )
             .map_err(|error| format!("rescue alternative search failed: {error:?}"))?;
+        let mutated_searches = searches.clone();
         (
+            previous_searches,
+            mutated_searches,
             outcome.record,
             outcome.evicted,
             outcome.expired,
-            previous_next_token,
-            searches.next_token,
         )
     };
-    if let Err(error) = persist_expired_searches(state, &expired).await {
-        rollback_auto_retry_search(
-            &mut *state.searches.write().await,
-            &record,
-            evicted,
-            previous_next_token,
-            created_next_token,
-        );
+    let mut upserts = expired.clone();
+    upserts.push(record.clone());
+    if let Err(error) = persist_search_transition(state, &upserts, &evicted).await {
+        rollback_searches_if_unchanged(state, previous_searches, &mutated_searches).await;
         return Err(error);
     }
-    if let Err(error) = persist_search_record(state, &record).await {
-        rollback_auto_retry_search(
-            &mut *state.searches.write().await,
-            &record,
-            evicted,
-            previous_next_token,
-            created_next_token,
-        );
-        return Err(error);
-    }
-    if let Err(error) = delete_persisted_searches(state, &evicted).await {
-        let _ = delete_persisted_searches(state, std::slice::from_ref(&record)).await;
-        rollback_auto_retry_search(
-            &mut *state.searches.write().await,
-            &record,
-            evicted,
-            previous_next_token,
-            created_next_token,
-        );
-        return Err(error);
+    for expired_record in &expired {
+        publish_search_hub_event(state, "update", expired_record);
     }
     publish_search_hub_event(state, "create", &record);
     Ok(record)
@@ -73696,38 +73702,6 @@ fn rollback_auto_retry_replacement(
     transfers.persist_state();
 }
 
-fn rollback_auto_retry_search(
-    searches: &mut SearchStore,
-    created: &SearchRecord,
-    evicted: Vec<SearchRecord>,
-    previous_next_token: u32,
-    created_next_token: u32,
-) {
-    if searches
-        .records
-        .iter()
-        .any(|record| record.token == created.token && record == created)
-    {
-        searches
-            .records
-            .retain(|record| record.token != created.token);
-    }
-    for record in evicted {
-        if searches.records.len() >= MAX_SEARCH_RECORDS
-            || searches
-                .records
-                .iter()
-                .any(|current| current.id == record.id || current.token == record.token)
-        {
-            continue;
-        }
-        searches.records.push(record);
-    }
-    if searches.next_token == created_next_token {
-        searches.next_token = previous_next_token;
-    }
-}
-
 #[cfg(any(test, feature = "bounded-differential"))]
 #[allow(dead_code)]
 async fn run_download_auto_retry_cycle(
@@ -73782,9 +73756,9 @@ async fn run_download_auto_retry_cycle_with_settings(
             .map_err(|_| "session manager is not running".to_owned())?;
         if candidate.source_kind == "network-search" {
             let query = virtual_basename(&candidate.source.filename).to_owned();
-            let (record, evicted, expired, previous_next_token, created_next_token) = {
+            let (previous_searches, mutated_searches, record, evicted, expired) = {
                 let mut searches = state.searches.write().await;
-                let previous_next_token = searches.next_token;
+                let previous_searches = searches.clone();
                 let outcome = searches
                     .create(
                         None,
@@ -73798,44 +73772,23 @@ async fn run_download_auto_retry_cycle_with_settings(
                 let record = outcome.record;
                 let evicted = outcome.evicted;
                 let expired = outcome.expired;
+                let mutated_searches = searches.clone();
                 (
+                    previous_searches,
+                    mutated_searches,
                     record,
                     evicted,
                     expired,
-                    previous_next_token,
-                    searches.next_token,
                 )
             };
-            if let Err(error) = persist_expired_searches(state, &expired).await {
-                rollback_auto_retry_search(
-                    &mut *state.searches.write().await,
-                    &record,
-                    evicted,
-                    previous_next_token,
-                    created_next_token,
-                );
+            let mut upserts = expired.clone();
+            upserts.push(record.clone());
+            if let Err(error) = persist_search_transition(state, &upserts, &evicted).await {
+                rollback_searches_if_unchanged(state, previous_searches, &mutated_searches).await;
                 return Err(error);
             }
-            if let Err(error) = persist_search_record(state, &record).await {
-                rollback_auto_retry_search(
-                    &mut *state.searches.write().await,
-                    &record,
-                    evicted,
-                    previous_next_token,
-                    created_next_token,
-                );
-                return Err(error);
-            }
-            if let Err(error) = delete_persisted_searches(state, &evicted).await {
-                let _ = delete_persisted_searches(state, std::slice::from_ref(&record)).await;
-                rollback_auto_retry_search(
-                    &mut *state.searches.write().await,
-                    &record,
-                    evicted,
-                    previous_next_token,
-                    created_next_token,
-                );
-                return Err(error);
+            for expired_record in &expired {
+                publish_search_hub_event(state, "update", expired_record);
             }
             publish_search_hub_event(state, "create", &record);
             permit.send(SessionCommand::Search {
@@ -79735,36 +79688,18 @@ async fn send_due_wishlist_search(
         )
     };
 
-    if let Err(error) = persist_expired_searches_with_rollback(
-        state,
-        previous_searches.clone(),
-        &mutated_searches,
-        &expired,
-    )
-    .await
-    {
-        update_session(state, |snapshot| {
-            snapshot.last_error = Some(error.clone());
-        })
-        .await;
-        return;
-    }
-
-    if let Err(error) = delete_persisted_searches(state, &evicted).await {
-        rollback_searches_if_unchanged(state, previous_searches.clone(), &mutated_searches).await;
-        update_session(state, |snapshot| {
-            snapshot.last_error = Some(error.clone());
-        })
-        .await;
-    }
-
-    if let Err(error) = persist_search_record(state, &record).await {
+    let mut upserts = expired.clone();
+    upserts.push(record.clone());
+    if let Err(error) = persist_search_transition(state, &upserts, &evicted).await {
         rollback_searches_if_unchanged(state, previous_searches, &mutated_searches).await;
         update_session(state, |snapshot| {
             snapshot.last_error = Some(error.clone());
         })
         .await;
         return;
+    }
+    for expired_record in &expired {
+        publish_search_hub_event(state, "update", expired_record);
     }
 
     record_event(

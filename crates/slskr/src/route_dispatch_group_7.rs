@@ -667,28 +667,17 @@ async fn route_dispatch_group_7(context: &RouteDispatchContext<'_, '_>) -> Route
             .to_string();
             let mutated_searches = searches.clone();
             drop(searches);
-            if let Err(error) = persist_expired_searches(state, &expired).await {
-                rollback_searches_if_unchanged(state, previous_searches.clone(), &mutated_searches)
-                    .await;
-                return Ok(wishlist_storage_error_response(
-                    route.path.starts_with("/api/v0/"),
-                    &error,
-                ));
-            }
-            if let Err(error) = delete_persisted_searches(state, &evicted).await {
-                rollback_searches_if_unchanged(state, previous_searches.clone(), &mutated_searches)
-                    .await;
-                return Ok(wishlist_storage_error_response(
-                    route.path.starts_with("/api/v0/"),
-                    &error,
-                ));
-            }
-            if let Err(error) = persist_search_record(state, &record).await {
+            let mut upserts = expired.clone();
+            upserts.push(record.clone());
+            if let Err(error) = persist_search_transition(state, &upserts, &evicted).await {
                 rollback_searches_if_unchanged(state, previous_searches, &mutated_searches).await;
                 return Ok(wishlist_storage_error_response(
                     route.path.starts_with("/api/v0/"),
                     &error,
                 ));
+            }
+            for expired_record in &expired {
+                publish_search_hub_event(state, "update", expired_record);
             }
             session_command_permit.send(SessionCommand::Search {
                 token: record.token,

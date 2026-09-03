@@ -12,6 +12,7 @@ use serde_json::{json, Value};
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
     sync::mpsc,
+    time::{self, Duration},
 };
 use uuid::Uuid;
 
@@ -20,6 +21,8 @@ use crate::{relay, AppState};
 const SIGNALR_RECORD_SEPARATOR: char = '\x1e';
 const MAX_SIGNALR_MESSAGE_BYTES: usize = 256 * 1024;
 const MAX_WEBSOCKET_FRAME_BYTES: u64 = 4 * 1024 * 1024;
+const WEBSOCKET_WRITE_TIMEOUT: Duration = Duration::from_secs(30);
+pub(crate) const HUB_INBOUND_QUEUE_CAPACITY: usize = 8;
 
 #[derive(Debug)]
 pub(crate) enum WebSocketFrame {
@@ -69,9 +72,7 @@ where
         .await
         .protocol
         .issue_challenge(&connection_id, now);
-    let (outbound_tx, mut outbound_rx) = mpsc::unbounded_channel::<String>();
-    relay::register_hub_connection(connection_id.clone(), outbound_tx);
-    write_signalr_json(
+    if let Err(error) = write_signalr_json(
         writer,
         &json!({
             "type": 1,
@@ -79,14 +80,29 @@ where
             "arguments": [challenge],
         }),
     )
-    .await?;
+    .await
+    {
+        state
+            .relay
+            .write()
+            .await
+            .protocol
+            .deregister_connection(&connection_id);
+        return Err(error);
+    }
 
-    let (inbound_tx, mut inbound_rx) = mpsc::unbounded_channel();
+    // Do not register the live sender until the challenge has reached the
+    // client. If the initial write fails, there is no socket loop to perform
+    // the normal cleanup path.
+    let (outbound_tx, mut outbound_rx) = mpsc::channel(relay::HUB_OUTBOUND_QUEUE_CAPACITY);
+    relay::register_hub_connection(connection_id.clone(), outbound_tx);
+
+    let (inbound_tx, mut inbound_rx) = mpsc::channel(HUB_INBOUND_QUEUE_CAPACITY);
     let reader_task = tokio::spawn(async move {
         loop {
             let frame = read_ws_frame(&mut reader).await;
-            let done = matches!(frame, Ok(WebSocketFrame::Close(_)) | Err(_));
-            if inbound_tx.send(frame).is_err() || done {
+            let done = matches!(&frame, Ok(WebSocketFrame::Close(_)) | Err(_));
+            if inbound_tx.send(frame).await.is_err() || done {
                 break;
             }
         }
@@ -369,6 +385,18 @@ where
     if payload.len() as u64 > MAX_WEBSOCKET_FRAME_BYTES {
         return Err("relay websocket response is too large".to_owned());
     }
+    time::timeout(
+        WEBSOCKET_WRITE_TIMEOUT,
+        write_ws_frame_inner(writer, opcode, payload),
+    )
+    .await
+    .map_err(|_| "relay websocket write deadline exceeded".to_owned())?
+}
+
+async fn write_ws_frame_inner<W>(writer: &mut W, opcode: u8, payload: &[u8]) -> Result<(), String>
+where
+    W: AsyncWrite + Unpin,
+{
     let mut header = Vec::with_capacity(10);
     header.push(opcode);
     match payload.len() {

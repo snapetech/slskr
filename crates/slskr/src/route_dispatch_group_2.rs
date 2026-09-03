@@ -272,23 +272,15 @@ async fn route_dispatch_group_2(context: &RouteDispatchContext<'_, '_>) -> Route
                     let token = outcome.record.token;
                     let evicted = outcome.evicted;
                     let expired = outcome.expired;
-                    let mutated_searches = searches.clone();
                     let Some((failed_record, _)) = searches.set_status_by_token(token, "failed")
                     else {
                         return Ok(disconnected_search_conflict_response(state, display_state));
                     };
+                    let mutated_searches = searches.clone();
                     drop(searches);
-                    if let Err(error) = persist_expired_searches(state, &expired).await {
-                        rollback_searches_if_unchanged(state, previous_searches, &mutated_searches)
-                            .await;
-                        return Ok(routing::service_unavailable_response(&error));
-                    }
-                    if let Err(error) = delete_persisted_searches(state, &evicted).await {
-                        rollback_searches_if_unchanged(state, previous_searches, &mutated_searches)
-                            .await;
-                        return Ok(routing::service_unavailable_response(&error));
-                    }
-                    if let Err(error) = persist_search_record(state, &failed_record).await {
+                    let mut upserts = expired.clone();
+                    upserts.push(failed_record.clone());
+                    if let Err(error) = persist_search_transition(state, &upserts, &evicted).await {
                         rollback_searches_if_unchanged(state, previous_searches, &mutated_searches)
                             .await;
                         return Ok(routing::service_unavailable_response(&error));
@@ -349,19 +341,14 @@ async fn route_dispatch_group_2(context: &RouteDispatchContext<'_, '_>) -> Route
             };
             drop(searches);
 
-            if let Err(error) = persist_expired_searches(state, &expired).await {
-                rollback_searches_if_unchanged(state, previous_searches.clone(), &mutated_searches)
-                    .await;
-                return Ok(routing::service_unavailable_response(&error));
-            }
-            if let Err(error) = delete_persisted_searches(state, &evicted).await {
-                rollback_searches_if_unchanged(state, previous_searches.clone(), &mutated_searches)
-                    .await;
-                return Ok(routing::service_unavailable_response(&error));
-            }
-            if let Err(error) = persist_search_record(state, &record).await {
+            let mut upserts = expired.clone();
+            upserts.push(record.clone());
+            if let Err(error) = persist_search_transition(state, &upserts, &evicted).await {
                 rollback_searches_if_unchanged(state, previous_searches, &mutated_searches).await;
                 return Ok(routing::service_unavailable_response(&error));
+            }
+            for expired_record in &expired {
+                publish_search_hub_event(state, "update", expired_record);
             }
             session_command_permit.send(SessionCommand::Search {
                 token,

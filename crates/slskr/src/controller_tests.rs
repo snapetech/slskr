@@ -42771,7 +42771,8 @@ async fn relay_stream_requests_agent_and_serves_matching_upload() {
     let content_id =
         super::stable_content_hash(remote_filename, payload.len() as u64).to_string();
 
-    let (hub_sender, mut hub_receiver) = tokio::sync::mpsc::unbounded_channel();
+    let (hub_sender, mut hub_receiver) =
+        tokio::sync::mpsc::channel(super::relay::HUB_OUTBOUND_QUEUE_CAPACITY);
     super::relay::register_hub_connection("connection-1".to_owned(), hub_sender);
     let open_state = Arc::clone(&state);
     let open = tokio::spawn(async move {
@@ -142332,7 +142333,8 @@ async fn controller_api_differential_relay_open_cases_impl() {
             .starts_with("HTTP/1.1 500 Internal Server Error")
     );
 
-    let (hub_sender, mut hub_receiver) = tokio::sync::mpsc::unbounded_channel();
+    let (hub_sender, mut hub_receiver) =
+        tokio::sync::mpsc::channel(super::relay::HUB_OUTBOUND_QUEUE_CAPACITY);
     super::relay::register_hub_connection("slskdn-relay-connection".to_owned(), hub_sender);
     let stream_state = Arc::clone(&controller_state);
     let stream_path = format!("/api/v0/relay/streams/{content_id}?agentName=edge-one");

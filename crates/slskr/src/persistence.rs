@@ -79,6 +79,15 @@ pub struct SearchResultRecord {
     pub created_at: i64,
 }
 
+/// One complete search projection to write inside a larger search transition.
+/// The public identity is stored separately because the protocol token and
+/// the controller-facing identifier have different compatibility contracts.
+pub struct SearchWrite {
+    pub record: SearchRecord,
+    pub external_id: String,
+    pub results: Vec<SearchResultRecord>,
+}
+
 /// Transfer record for persistence
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TransferRecord {
@@ -2288,6 +2297,168 @@ impl DatabaseManager {
             .bind(external_id)
             .execute(&self.pool)
             .await?;
+        Ok(())
+    }
+
+    /// Persist a search projection, its stable public identity, and all of
+    /// its result rows as one durable unit. Search updates are emitted from
+    /// the in-memory store only after this operation succeeds, so a failed
+    /// result batch must not leave behind a half-written search or identity.
+    pub async fn persist_search(
+        &self,
+        record: &SearchRecord,
+        external_id: &str,
+        results: &[SearchResultRecord],
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut transaction = self.pool.begin().await?;
+        query(
+            r#"
+            INSERT OR REPLACE INTO searches (id, query, status, result_count, created_at, completed_at, room, target, fallback_attempts)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(&record.id)
+        .bind(&record.query)
+        .bind(&record.status)
+        .bind(record.result_count)
+        .bind(record.created_at)
+        .bind(record.completed_at)
+        .bind(&record.room)
+        .bind(&record.target)
+        .bind(record.fallback_attempts)
+        .execute(&mut *transaction)
+        .await?;
+
+        query("INSERT OR REPLACE INTO search_identities (search_id, external_id) VALUES (?, ?)")
+            .bind(&record.id)
+            .bind(external_id)
+            .execute(&mut *transaction)
+            .await?;
+
+        query("DELETE FROM search_results WHERE search_id = ?")
+            .bind(&record.id)
+            .execute(&mut *transaction)
+            .await?;
+        for batch in results.chunks(SQLITE_PARAMETER_CHUNK / 14) {
+            let statement = format!(
+                r#"
+                INSERT INTO search_results
+                (search_id, peer_username, filename, size, extension, bit_rate, sample_rate, bit_depth, length_seconds, locked, slot_free, average_speed, queue_length, created_at)
+                VALUES {}
+                "#,
+                sql_value_rows(batch.len(), 14)
+            );
+            let mut insert = query(AssertSqlSafe(statement));
+            for result in batch {
+                insert = insert
+                    .bind(&record.id)
+                    .bind(&result.peer_username)
+                    .bind(&result.filename)
+                    .bind(result.size)
+                    .bind(&result.extension)
+                    .bind(result.bit_rate)
+                    .bind(result.sample_rate)
+                    .bind(result.bit_depth)
+                    .bind(result.length_seconds)
+                    .bind(result.locked)
+                    .bind(result.slot_free)
+                    .bind(result.average_speed)
+                    .bind(result.queue_length)
+                    .bind(result.created_at);
+            }
+            insert.execute(&mut *transaction).await?;
+        }
+        transaction.commit().await?;
+        Ok(())
+    }
+
+    /// Atomically apply search upserts and evictions. This keeps an in-memory
+    /// SearchStore transition and its durable projection from diverging when
+    /// a result batch, identity write, or eviction fails partway through.
+    pub async fn persist_search_changes(
+        &self,
+        upserts: &[SearchWrite],
+        deletes: &[String],
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut transaction = self.pool.begin().await?;
+        for write in upserts {
+            query(
+                r#"
+                INSERT OR REPLACE INTO searches (id, query, status, result_count, created_at, completed_at, room, target, fallback_attempts)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                "#,
+            )
+            .bind(&write.record.id)
+            .bind(&write.record.query)
+            .bind(&write.record.status)
+            .bind(write.record.result_count)
+            .bind(write.record.created_at)
+            .bind(write.record.completed_at)
+            .bind(&write.record.room)
+            .bind(&write.record.target)
+            .bind(write.record.fallback_attempts)
+            .execute(&mut *transaction)
+            .await?;
+
+            query(
+                "INSERT OR REPLACE INTO search_identities (search_id, external_id) VALUES (?, ?)",
+            )
+            .bind(&write.record.id)
+            .bind(&write.external_id)
+            .execute(&mut *transaction)
+            .await?;
+
+            query("DELETE FROM search_results WHERE search_id = ?")
+                .bind(&write.record.id)
+                .execute(&mut *transaction)
+                .await?;
+            for batch in write.results.chunks(SQLITE_PARAMETER_CHUNK / 14) {
+                let statement = format!(
+                    r#"
+                    INSERT INTO search_results
+                    (search_id, peer_username, filename, size, extension, bit_rate, sample_rate, bit_depth, length_seconds, locked, slot_free, average_speed, queue_length, created_at)
+                    VALUES {}
+                    "#,
+                    sql_value_rows(batch.len(), 14)
+                );
+                let mut insert = query(AssertSqlSafe(statement));
+                for result in batch {
+                    insert = insert
+                        .bind(&write.record.id)
+                        .bind(&result.peer_username)
+                        .bind(&result.filename)
+                        .bind(result.size)
+                        .bind(&result.extension)
+                        .bind(result.bit_rate)
+                        .bind(result.sample_rate)
+                        .bind(result.bit_depth)
+                        .bind(result.length_seconds)
+                        .bind(result.locked)
+                        .bind(result.slot_free)
+                        .bind(result.average_speed)
+                        .bind(result.queue_length)
+                        .bind(result.created_at);
+                }
+                insert.execute(&mut *transaction).await?;
+            }
+        }
+        // Apply evictions after upserts. A capacity-full create can expire
+        // and evict the same old record; the eviction must win in that case.
+        for id in deletes {
+            query("DELETE FROM search_results WHERE search_id = ?")
+                .bind(id)
+                .execute(&mut *transaction)
+                .await?;
+            query("DELETE FROM searches WHERE id = ?")
+                .bind(id)
+                .execute(&mut *transaction)
+                .await?;
+            query("DELETE FROM search_identities WHERE search_id = ?")
+                .bind(id)
+                .execute(&mut *transaction)
+                .await?;
+        }
+        transaction.commit().await?;
         Ok(())
     }
 

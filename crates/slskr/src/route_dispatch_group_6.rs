@@ -2211,14 +2211,19 @@ async fn route_dispatch_group_6(context: &RouteDispatchContext<'_, '_>) -> Route
                   .or_else(|| extract_json_string_field(body, "query"))
                   .unwrap_or_else(|| "discography".to_owned());
               let query = format!("{} discography", artist.trim()).trim().to_owned();
-              let mut searches = state.searches.write().await;
-              let outcome = match searches.create(None, query, "global", None, Vec::new(), DEFAULT_SEARCH_TTL_SECONDS) {
-                  Ok(outcome) => outcome,
-                  Err(error) => return Ok(search_create_error_response(error)),
+              let (previous_searches, mutated_searches, record, evicted, expired) = {
+                  let mut searches = state.searches.write().await;
+                  let previous_searches = searches.clone();
+                  let outcome = match searches.create(None, query, "global", None, Vec::new(), DEFAULT_SEARCH_TTL_SECONDS) {
+                      Ok(outcome) => outcome,
+                      Err(error) => return Ok(search_create_error_response(error)),
+                  };
+                  let record = outcome.record;
+                  let evicted = outcome.evicted;
+                  let expired = outcome.expired;
+                  let mutated_searches = searches.clone();
+                  (previous_searches, mutated_searches, record, evicted, expired)
               };
-              let record = outcome.record;
-              let evicted = outcome.evicted;
-              let expired = outcome.expired;
               let job_projection = serde_json::json!({
                   "jobId": record.id,
                   "type": "discography",
@@ -2240,6 +2245,7 @@ async fn route_dispatch_group_6(context: &RouteDispatchContext<'_, '_>) -> Route
                   .await
                   .upsert(format!("job/discography/{}", record.id), job_projection);
               if let Err(error) = job_store_result {
+                  rollback_searches_if_unchanged(state, previous_searches, &mutated_searches).await;
                   return Ok(routing::service_unavailable_response(&error));
               }
               let response = serde_json::json!({
@@ -2252,10 +2258,20 @@ async fn route_dispatch_group_6(context: &RouteDispatchContext<'_, '_>) -> Route
                   "query": record.query,
                   "results": [],
               }).to_string();
-              drop(searches);
-              persist_expired_searches(state, &expired).await?;
-              persist_search_record(state, &record).await?;
-              delete_persisted_searches(state, &evicted).await?;
+              let mut upserts = expired.clone();
+              upserts.push(record.clone());
+              if let Err(error) = persist_search_transition(state, &upserts, &evicted).await {
+                  rollback_searches_if_unchanged(state, previous_searches, &mutated_searches).await;
+                  let _ = state
+                      .controller_features
+                      .write()
+                      .await
+                      .remove(&format!("job/discography/{}", record.id));
+                  return Ok(routing::service_unavailable_response(&error));
+              }
+              for expired_record in &expired {
+                  publish_search_hub_event(state, "update", expired_record);
+              }
               Ok(routing::accepted_response(response))
           }
 
@@ -2327,14 +2343,19 @@ async fn route_dispatch_group_6(context: &RouteDispatchContext<'_, '_>) -> Route
                   .filter(|value| !value.trim().is_empty())
                   .collect::<Vec<_>>()
                   .join(" ");
-              let mut searches = state.searches.write().await;
-              let outcome = match searches.create(None, query, "global", None, Vec::new(), DEFAULT_SEARCH_TTL_SECONDS) {
-                  Ok(outcome) => outcome,
-                  Err(error) => return Ok(search_create_error_response(error)),
+              let (previous_searches, mutated_searches, record, evicted, expired) = {
+                  let mut searches = state.searches.write().await;
+                  let previous_searches = searches.clone();
+                  let outcome = match searches.create(None, query, "global", None, Vec::new(), DEFAULT_SEARCH_TTL_SECONDS) {
+                      Ok(outcome) => outcome,
+                      Err(error) => return Ok(search_create_error_response(error)),
+                  };
+                  let record = outcome.record;
+                  let evicted = outcome.evicted;
+                  let expired = outcome.expired;
+                  let mutated_searches = searches.clone();
+                  (previous_searches, mutated_searches, record, evicted, expired)
               };
-              let record = outcome.record;
-              let evicted = outcome.evicted;
-              let expired = outcome.expired;
               let job_projection = serde_json::json!({
                   "jobId": record.id,
                   "type": "mb-release",
@@ -2356,6 +2377,7 @@ async fn route_dispatch_group_6(context: &RouteDispatchContext<'_, '_>) -> Route
                   .await
                   .upsert(format!("job/mb-release/{}", record.id), job_projection);
               if let Err(error) = job_store_result {
+                  rollback_searches_if_unchanged(state, previous_searches, &mutated_searches).await;
                   return Ok(routing::service_unavailable_response(&error));
               }
               let response = serde_json::json!({
@@ -2369,10 +2391,20 @@ async fn route_dispatch_group_6(context: &RouteDispatchContext<'_, '_>) -> Route
                   "query": record.query,
                   "results": [],
               }).to_string();
-              drop(searches);
-              persist_expired_searches(state, &expired).await?;
-              persist_search_record(state, &record).await?;
-              delete_persisted_searches(state, &evicted).await?;
+              let mut upserts = expired.clone();
+              upserts.push(record.clone());
+              if let Err(error) = persist_search_transition(state, &upserts, &evicted).await {
+                  rollback_searches_if_unchanged(state, previous_searches, &mutated_searches).await;
+                  let _ = state
+                      .controller_features
+                      .write()
+                      .await
+                      .remove(&format!("job/mb-release/{}", record.id));
+                  return Ok(routing::service_unavailable_response(&error));
+              }
+              for expired_record in &expired {
+                  publish_search_hub_event(state, "update", expired_record);
+              }
               Ok(routing::accepted_response(response))
           }
 

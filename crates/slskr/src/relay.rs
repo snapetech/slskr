@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx_core::{query::query, row::Row};
 use sqlx_sqlite::{SqliteConnectOptions, SqlitePoolOptions};
-use tokio::sync::{mpsc::UnboundedSender, oneshot};
+use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
 
 use crate::config::{ControllerProfile, RelaySettings};
@@ -31,6 +31,7 @@ use crate::config::{ControllerProfile, RelaySettings};
 const CHALLENGE_TTL_SECONDS: u64 = 10;
 const REQUEST_TTL_SECONDS: u64 = 5 * 60;
 const DOWNLOAD_TTL_SECONDS: u64 = 10 * 60;
+pub(crate) const HUB_OUTBOUND_QUEUE_CAPACITY: usize = 64;
 const PBKDF2_ITERATIONS: NonZeroU32 = match NonZeroU32::new(1_000) {
     Some(value) => value,
     None => unreachable!(),
@@ -56,8 +57,7 @@ pub(crate) fn credential_scheme(target: ControllerProfile) -> CredentialScheme {
 /// SignalR is a process-local transport in the oracle.  Keep the equivalent
 /// connection senders outside the persisted compatibility projection: they
 /// are live sockets, not state that can be serialized or restored.
-static HUB_CONNECTIONS: OnceLock<Mutex<BTreeMap<String, UnboundedSender<String>>>> =
-    OnceLock::new();
+static HUB_CONNECTIONS: OnceLock<Mutex<BTreeMap<String, mpsc::Sender<String>>>> = OnceLock::new();
 
 /// A controller request for an agent file is completed by a later multipart
 /// HTTP request.  The sender is deliberately process-local: a live stream
@@ -71,7 +71,7 @@ static FILE_UPLOAD_WAITERS: OnceLock<FileUploadWaiters> = OnceLock::new();
 type FileInfoWaiters = Mutex<BTreeMap<String, oneshot::Sender<Result<FileInfo, String>>>>;
 static FILE_INFO_WAITERS: OnceLock<FileInfoWaiters> = OnceLock::new();
 
-fn hub_connections() -> &'static Mutex<BTreeMap<String, UnboundedSender<String>>> {
+fn hub_connections() -> &'static Mutex<BTreeMap<String, mpsc::Sender<String>>> {
     HUB_CONNECTIONS.get_or_init(|| Mutex::new(BTreeMap::new()))
 }
 
@@ -83,7 +83,7 @@ fn file_info_waiters() -> &'static FileInfoWaiters {
     FILE_INFO_WAITERS.get_or_init(|| Mutex::new(BTreeMap::new()))
 }
 
-pub(crate) fn register_hub_connection(connection_id: String, sender: UnboundedSender<String>) {
+pub(crate) fn register_hub_connection(connection_id: String, sender: mpsc::Sender<String>) {
     if let Ok(mut connections) = hub_connections().lock() {
         connections.insert(connection_id, sender);
     }
@@ -95,8 +95,10 @@ pub(crate) fn unregister_hub_connection(connection_id: &str) {
     }
 }
 
-/// Push a SignalR invocation to a connected agent.  A false return means the
-/// agent is no longer connected or its writer queue has closed.
+/// Push a SignalR invocation to a connected agent. A false return means the
+/// agent is not connected, its writer queue is closed, or its bounded queue is
+/// full. Dropping a message under backpressure is preferable to allowing a
+/// stalled relay agent to grow controller memory without a limit.
 pub(crate) fn send_hub_invocation(
     runtime: &RuntimeState,
     agent_name: &str,
@@ -106,22 +108,26 @@ pub(crate) fn send_hub_invocation(
     let Some(connection_id) = runtime.connection_for_agent(agent_name) else {
         return false;
     };
-    let Ok(connections) = hub_connections().lock() else {
+    let Ok(mut connections) = hub_connections().lock() else {
         return false;
     };
-    let Some(sender) = connections.get(connection_id) else {
+    let Some(sender) = connections.get(connection_id).cloned() else {
         return false;
     };
-    sender
-        .send(
-            serde_json::json!({
-                "type": 1,
-                "target": target,
-                "arguments": arguments,
-            })
-            .to_string(),
-        )
-        .is_ok()
+    let message = serde_json::json!({
+        "type": 1,
+        "target": target,
+        "arguments": arguments,
+    })
+    .to_string();
+    match sender.try_send(message) {
+        Ok(()) => true,
+        Err(mpsc::error::TrySendError::Full(_)) => false,
+        Err(mpsc::error::TrySendError::Closed(_)) => {
+            connections.remove(connection_id);
+            false
+        }
+    }
 }
 
 #[derive(Debug)]

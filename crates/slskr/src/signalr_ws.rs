@@ -153,12 +153,12 @@ where
         write_invocation(writer, &target, argument).await?;
     }
 
-    let (inbound_tx, mut inbound_rx) = mpsc::unbounded_channel();
+    let (inbound_tx, mut inbound_rx) = mpsc::channel(relay_ws::HUB_INBOUND_QUEUE_CAPACITY);
     let reader_task = tokio::spawn(async move {
         loop {
             let frame = relay_ws::read_ws_frame(&mut reader).await;
             let done = matches!(&frame, Ok(relay_ws::WebSocketFrame::Close(_)) | Err(_));
-            if inbound_tx.send(frame).is_err() || done {
+            if inbound_tx.send(frame).await.is_err() || done {
                 break;
             }
         }
