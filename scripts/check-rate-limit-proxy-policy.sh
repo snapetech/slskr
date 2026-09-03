@@ -5,6 +5,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
 status=0
+controller_sources=(crates/slskr/src/lib.rs crates/slskr/src/controller_tests.rs)
 
 if ! rg -n 'SLSKR_TRUSTED_PROXY_CIDRS|trusted_proxy_cidrs' crates/slskr/src docs >/dev/null; then
   printf 'rate-limit proxy policy check failed: trusted proxy CIDR configuration is missing\n' >&2
@@ -21,9 +22,9 @@ if ! rg -n 'trusted_proxy_cidrs.*any|rate_limit_remote_addr' crates/slskr/src/li
   status=1
 fi
 
-if ! rg -n 'trusted_proxy_rate_limit_addr_rejects_spoofed_leftmost_hop' crates/slskr/src/lib.rs >/dev/null ||
-   ! rg -n 'trusted_proxy_rate_limit_addr_fails_closed_on_malformed_chain' crates/slskr/src/lib.rs >/dev/null ||
-   ! rg -n 'trusted_proxy_rate_limit_addr_does_not_fallback_from_invalid_forwarded_header' crates/slskr/src/lib.rs >/dev/null; then
+if ! rg -n 'trusted_proxy_rate_limit_addr_rejects_spoofed_leftmost_hop' "${controller_sources[@]}" >/dev/null ||
+   ! rg -n 'trusted_proxy_rate_limit_addr_fails_closed_on_malformed_chain' "${controller_sources[@]}" >/dev/null ||
+   ! rg -n 'trusted_proxy_rate_limit_addr_does_not_fallback_from_invalid_forwarded_header' "${controller_sources[@]}" >/dev/null; then
   printf 'rate-limit proxy policy check failed: spoofing rejection coverage is missing\n' >&2
   status=1
 fi
@@ -36,7 +37,7 @@ fi
 if ! rg -n --fixed-strings -- 'authenticated_rate_limit_user_key' crates/slskr/src/lib.rs >/dev/null ||
    ! rg -n --fixed-strings -- 'if !utils::is_authorized_from(config, authorization, cookie, remote_addr)' crates/slskr/src/lib.rs >/dev/null ||
    ! rg -n --fixed-strings -- '.map(|token| rate_limit_user_key(&token))' crates/slskr/src/lib.rs >/dev/null ||
-   ! rg -n --fixed-strings -- 'authenticated_rate_limit_key_uses_verified_credential_identity' crates/slskr/src/lib.rs >/dev/null; then
+   ! rg -n --fixed-strings -- 'authenticated_rate_limit_key_uses_verified_credential_identity' "${controller_sources[@]}" >/dev/null; then
   printf 'rate-limit proxy policy check failed: verified authenticated rate-limit identity is missing\n' >&2
   status=1
 fi
