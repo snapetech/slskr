@@ -57,7 +57,12 @@ def percentile(samples: list[float], fraction: float) -> float:
 
 
 def explain_query_plan(connection: sqlite3.Connection, statement: str) -> list[dict[str, Any]]:
-    rows = connection.execute(f"EXPLAIN QUERY PLAN {statement}").fetchall()
+    # SQLite cannot bind a complete statement as a parameter. `parse_query`
+    # restricts callers to one SELECT without semicolons, while the database
+    # connection is opened read-only and has query_only enabled below.
+    # nosemgrep: python.lang.security.audit.formatted-sql-query.formatted-sql-query,python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query
+    explain_statement = f"EXPLAIN QUERY PLAN {statement}"
+    rows = connection.execute(explain_statement).fetchall()  # nosemgrep: python.lang.security.audit.formatted-sql-query.formatted-sql-query,python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query
     return [
         {
             "id": row[0],
