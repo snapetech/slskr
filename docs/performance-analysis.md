@@ -6,14 +6,15 @@ runtime benchmarks.
 
 ## Current inventory
 
-As of the 2026-09-02 refactoring baseline:
+As of the 2026-09-02 completed refactoring swath:
 
 - Rust workspace source: approximately 370,000 lines.
 - `crates/slskr/src/lib.rs`: approximately 90,000 lines; the opt-in
   historical differential suite is maintained in a separate source file.
-- `crates/slskr/src/route_dispatch.rs`: approximately 19,600 lines.
+- `crates/slskr/src/route_dispatch.rs`: approximately 1,548 lines, plus
+  eight included route-group files totaling approximately 18,068 lines.
 - `web/src`: approximately 95,500 lines.
-- Default daemon unit tests: 441.
+- Default daemon unit tests: 442.
 - Web tests: 514.
 
 These are structural measurements only. No latency or throughput number is
@@ -71,6 +72,51 @@ python3 scripts/compare-benchmark.py \
 The comparison checks the aggregate and each endpoint case. Missing metrics
 and workload drift are invalid results, not successful comparisons.
 
+For an isolated local daemon comparison, disable the native controller
+limiter and raise the API quota only in the benchmark process environment:
+
+```bash
+export SLSKD_WEB_RATE_LIMITING=false
+export SLSKR_API_RATE_LIMIT_ANONYMOUS=4294967295
+export SLSKR_API_RATE_LIMIT_AUTHENTICATED=4294967295
+```
+
+Do not carry those measurement-only values into a deployment configuration.
+
+## Refactoring swath evidence
+
+The native release comparison used commit `df501d30` as the baseline and the
+completed worktree as the candidate. Both daemons used persistence-enabled
+fresh SQLite state, four persistent HTTP connections, a two-second warmup, a
+ten-second run, and the same two changed read endpoints: `/api/stats` and
+`/api/admin/database/stats`. Every response was HTTP 200 and both artifacts
+had zero failures. The aggregate changed from 23,836 requests at 2,383.215
+RPS with p95 latency 2.131 ms to 136,611 requests at 13,659.795 RPS with p95
+latency 0.441 ms; the 10% comparison gate passed. This is local evidence for
+the changed persistence paths, not a production-scale claim.
+
+The same release comparison under the legacy profile also passed with zero
+failures: 11,733 requests at 2,346.116 RPS and p95 latency 1.075 ms before,
+versus 70,962 requests at 14,190.126 RPS and p95 latency 0.214 ms after. The
+legacy workload used the two stats endpoints and the same isolated persistence
+and limiter settings.
+
+A separate seven-endpoint diagnostic run also returned only HTTP 200 responses
+with zero failures. Its comparison was not accepted as a general latency gate
+because untouched scalar routes showed small absolute latency increases while
+the persistence-heavy routes improved. The focused changed-path gate is the
+reported acceptance result; no universal latency improvement is claimed.
+
+The current SQLite profiler recorded the supporting plans on a fresh migrated
+database: `idx_messages_username_created` serves username-plus-created-at
+message reads and `idx_library_items_created` serves recent library reads,
+with no temporary sort B-tree in either plan. Other tested search, transfer,
+share, and recent-list paths retained their existing indexes.
+
+The Web build emitted a 331,410-byte System chunk and a separate 150,875-byte
+MediaCore chunk; the prior combined System chunk was 481,703 bytes. The named
+bundle-budget check passed, including the 632,535-byte vendor chunk.
+
 The Web UI's shared polling controller is used for periodic refreshes that
 remain active while a screen is mounted. It waits for each request to finish,
 pauses timers while the document is hidden, and owns cleanup on route or
@@ -91,6 +137,7 @@ cargo build -p slskr --timings
 cargo test -p slskr --lib
 npm --prefix web test
 npm --prefix web run build
+npm --prefix web run test:bundle-budget
 ```
 
 Record wall time externally with the shell or CI runner, and record daemon

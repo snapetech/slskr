@@ -34,10 +34,21 @@ The first execution batch is complete and verified on `main`:
   pauses hidden documents and refreshes once when visible again, including the
   remaining class-based chat, browse, room, pod, footer, and port-forwarding
   surfaces.
+- the bounded production route match is physically partitioned into eight
+  source files while remaining in one Rust module, so ownership improves
+  without adding a submodule call boundary to every request;
+- `DatabaseManager::get_stats` now uses one SQLite statement and one read
+  snapshot, and query-plan evidence justified ordered indexes for username
+  message reads and recent library reads;
+- the System/MediaCore Web UI boundary now lazy-loads MediaCore, emits a
+  separate chunk, and enforces named JavaScript/CSS bundle budgets;
+- the changed persistence paths have passing native and legacy release
+  before/after HTTP comparisons with zero request failures.
 
-The wider route-domain file split and broad before/after persistence/query
-baselines remain open. The profiler and initial local artifact do not turn a
-small database sample into a general performance claim.
+The in-repo implementation swath is complete. Production-scale database
+population, external-peer interoperability, and long-running soak evidence
+remain deployment-environment validation work; the local artifacts do not
+turn an empty SQLite sample into a general production claim.
 
 ## Fixed invariants
 
@@ -59,12 +70,16 @@ The inventory is intentionally descriptive, not a performance claim:
 - `crates/slskr/src/lib.rs` is about 90,000 lines. It contains production
   state, projections, and routing; the opt-in historical differential suite is
   in `crates/slskr/src/controller_tests.rs`.
-- `crates/slskr/src/route_dispatch.rs` is about 19,600 lines. The production
-  bounded dispatcher and the historical dispatcher still coexist.
+- `crates/slskr/src/route_dispatch.rs` is about 1,548 lines, with eight
+  included route-group source files totaling about 18,068 lines. The bounded
+  dispatcher and the historical dispatcher still coexist, but the production
+  route source is no longer one monolithic file.
 - `web/src` is about 95,500 lines. The largest current areas include the
   System/MediaCore surface, `App.jsx`, and the player/search surfaces.
-- The default daemon test binary contains 441 Rust unit tests; the web suite
+- The default daemon test binary contains 442 Rust unit tests; the web suite
   contains 514 tests.
+- The current Web build emits a 331,410-byte System chunk and a separate
+  150,875-byte MediaCore chunk; the checked vendor chunk is 632,535 bytes.
 - The existing Cargo configuration already serializes workspace jobs and
   limits debug metadata. Compiler settings must be changed only after timing
   evidence.
@@ -89,6 +104,9 @@ The inventory is intentionally descriptive, not a performance claim:
 
 Exit criteria: repeatable baseline artifacts, a documented command, and
 regression thresholds chosen from observed variance rather than guesswork.
+The native and legacy persistence-heavy release comparisons now meet that
+gate; the mixed diagnostic workload remains recorded separately when
+untouched scalar routes are included.
 
 ## Swath 2: source and test boundaries
 
@@ -151,7 +169,8 @@ bounded, and persistence/lifecycle/live-interoperability gates pass.
 
 Exit criteria: live success/loading/empty/validation/error/reconnect audits
 remain clean, while network, render, and bundle measurements improve or stay
-neutral.
+neutral. The current System/MediaCore split and bundle-budget gate meet the
+bundle portion of this criterion.
 
 ## Verification cadence
 
@@ -160,7 +179,8 @@ The cadence is deliberately batched:
 - Per edit: changed-file Rust format check, `cargo check -p slskr`, focused
   Rust tests, and the affected web test subset.
 - Per swath: full Rust tests, full web tests/build, both profile compile
-  checks, relevant differential gates, and a before/after benchmark.
+  checks, relevant differential gates, a before/after benchmark, and the Web
+  bundle-budget check.
 - Release boundary: strict universal manifest, live interop and UI evidence,
   packaging checks, and release-note validation.
 

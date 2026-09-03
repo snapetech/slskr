@@ -12,7 +12,6 @@ import Integrations from './Integrations';
 import Jobs from './Jobs';
 import LibraryHealth from './LibraryHealth';
 import Logs from './Logs';
-import MediaCore from './MediaCore';
 import Mesh from './Mesh';
 import Metrics from './Metrics';
 import Network from './Network';
@@ -22,9 +21,11 @@ import Security from './Security';
 import Shares from './Shares';
 import SourceProviders from './SourceProviders';
 import SwarmAnalytics from './SwarmAnalytics';
-import React, { useEffect, useRef } from 'react';
+import React, { lazy, Suspense, useEffect, useRef } from 'react';
 import { Navigate, useNavigate, useParams } from 'react-router-dom';
 import { Icon, Menu, Segment, Tab } from 'semantic-ui-react';
+
+const MediaCore = lazy(() => import('./MediaCore'));
 
 // Six named groups instead of one 22-item flat tab strip. Order here is the
 // order sections appear in; a pane's `section` field below assigns it to one.
@@ -172,7 +173,9 @@ const System = ({ runtimeProfile, options = {}, state = {}, theme }) => {
       },
       render: () => (
         <Tab.Pane>
-          <MediaCore />
+          <Suspense fallback={<Segment loading />}>
+            <MediaCore />
+          </Suspense>
         </Tab.Pane>
       ),
       route: 'mediacore',

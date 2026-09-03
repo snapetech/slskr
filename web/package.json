@@ -80,6 +80,7 @@
     "pretest:e2e:ci": "npm run build",
     "start": "vite",
     "test": "vitest run --maxWorkers=1",
+    "test:bundle-budget": "python3 ../scripts/check-web-bundle-budget.py --build-dir build",
     "test:build-output": "node ./scripts/verify-build-output.mjs",
     "test:e2e": "playwright test",
     "test:e2e:ci": "playwright test --reporter=line",
