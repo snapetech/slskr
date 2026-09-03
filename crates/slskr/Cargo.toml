@@ -32,7 +32,7 @@ default = ["focused-controller-tests"]
 focused-controller-tests = []
 # The historical controller differential suite is a single monolithic test
 # module. Keep it opt-in so ordinary workspace tests compile the focused suite.
-full-controller-tests = []
+full-controller-tests = ["bounded-differential"]
 # The pre-split dispatcher is retained only as an opt-in diagnostic oracle.
 # Production builds use the bounded route-group dispatcher by default.
 legacy-route-dispatch = []

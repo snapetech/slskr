@@ -48,5 +48,10 @@ workloads, status policies, concurrency, and timing settings. It reports
 latency, throughput, and failure-rate checks for the aggregate and every
 endpoint case; it does not silently treat missing measurements as a pass.
 
+For persistence work, profile explicit read-only statements with
+[`scripts/profile-sqlite.py`](../scripts/profile-sqlite.py). Its artifact pairs
+the real SQLite query plan with bounded timing samples and row-count ranges,
+so index or query changes can be evaluated against the same database shape.
+
 The old standalone `benchmarks/benchmark.rs` simulated requests and was not a
 valid performance measurement; it has been removed.

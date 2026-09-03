@@ -28,6 +28,41 @@ pub struct ParsedRoute<'a> {
     pub query: Option<&'a str>,
 }
 
+/// The immutable request context shared by route-domain dispatchers.
+/// Keeping request fields together prevents a route group from accidentally
+/// dropping headers, the raw body, or the authorization value as the bounded
+/// dispatcher is split into smaller domains.
+#[derive(Clone, Copy)]
+pub struct RouteRequest<'a> {
+    pub method: &'a str,
+    pub path: &'a str,
+    pub authorization: Option<&'a str>,
+    pub body: &'a str,
+    pub headers: &'a RequestSecurityHeaders,
+}
+
+impl<'a> RouteRequest<'a> {
+    pub fn new(
+        method: &'a str,
+        path: &'a str,
+        authorization: Option<&'a str>,
+        body: &'a str,
+        headers: &'a RequestSecurityHeaders,
+    ) -> Self {
+        Self {
+            method,
+            path,
+            authorization,
+            body,
+            headers,
+        }
+    }
+
+    pub fn parsed(&self) -> ParsedRoute<'a> {
+        parse_route(self.method, self.path)
+    }
+}
+
 pub fn parse_route<'a>(method: &'a str, path: &'a str) -> ParsedRoute<'a> {
     let (path_only, query) = split_request_target(path);
     let normalized_path = normalize_api_path(path_only);

@@ -19,16 +19,25 @@ The first execution batch is complete and verified on `main`:
   use one queue pass while preserving target status partitions;
 - bounded event history and its compatibility projections now have one owned
   module instead of living in the controller source;
+- controller version state and application-state compatibility projection
+  helpers now have one owned module;
+- the bounded route groups now receive one typed dispatch context rather than
+  nine parallel arguments, keeping request metadata aligned as domains split;
 - bulk transfer deletion uses bounded parameter chunks inside one transaction;
+- bulk search, hash, message, share, wishlist, and library persistence writes
+  use bounded SQLite parameter batches inside their existing transactions;
+- explicit read-only SQLite query-plan and timing artifacts can now be
+  captured with `scripts/profile-sqlite.py` before changing indexes or caches;
+- the opt-in historical differential suite now lives outside `lib.rs` while
+  retaining its existing feature gates and runner entry point;
 - the high-frequency Web UI refreshes use shared non-overlapping polling that
   pauses hidden documents and refreshes once when visible again, including the
   remaining class-based chat, browse, room, pod, footer, and port-forwarding
   surfaces.
 
-The historical controller test relocation, wider route-domain split, and
-instrumented persistence/query baselines remain open. They require mechanical
-source moves or live measurements and are not represented as completed by the
-runtime changes above.
+The wider route-domain file split and broad before/after persistence/query
+baselines remain open. The profiler and initial local artifact do not turn a
+small database sample into a general performance claim.
 
 ## Fixed invariants
 
@@ -47,13 +56,14 @@ mixing unrelated behavior changes.
 The inventory is intentionally descriptive, not a performance claim:
 
 - The Rust workspace contains about 370,000 source lines.
-- `crates/slskr/src/lib.rs` is about 235,000 lines. It contains production
-  state, projections, routing, and an opt-in historical differential suite.
+- `crates/slskr/src/lib.rs` is about 90,000 lines. It contains production
+  state, projections, and routing; the opt-in historical differential suite is
+  in `crates/slskr/src/controller_tests.rs`.
 - `crates/slskr/src/route_dispatch.rs` is about 19,600 lines. The production
   bounded dispatcher and the historical dispatcher still coexist.
 - `web/src` is about 95,500 lines. The largest current areas include the
   System/MediaCore surface, `App.jsx`, and the player/search surfaces.
-- The default daemon test binary contains 440 Rust unit tests; the web suite
+- The default daemon test binary contains 441 Rust unit tests; the web suite
   contains 514 tests.
 - The existing Cargo configuration already serializes workspace jobs and
   limits debug metadata. Compiler settings must be changed only after timing

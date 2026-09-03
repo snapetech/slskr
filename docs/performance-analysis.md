@@ -9,10 +9,11 @@ runtime benchmarks.
 As of the 2026-09-02 refactoring baseline:
 
 - Rust workspace source: approximately 370,000 lines.
-- `crates/slskr/src/lib.rs`: approximately 235,000 lines.
+- `crates/slskr/src/lib.rs`: approximately 90,000 lines; the opt-in
+  historical differential suite is maintained in a separate source file.
 - `crates/slskr/src/route_dispatch.rs`: approximately 19,600 lines.
 - `web/src`: approximately 95,500 lines.
-- Default daemon unit tests: 440.
+- Default daemon unit tests: 441.
 - Web tests: 514.
 
 These are structural measurements only. No latency or throughput number is
@@ -38,6 +39,23 @@ persistence enabled, and add explicit safe read endpoints for the workload
 being compared. The tool keeps one HTTP connection per worker, drains real
 responses, records actual statuses and errors, and bounds retained latency
 samples. A non-zero exit status means at least one measured request failed.
+
+Profile concrete SQLite reads before changing indexes or caches:
+
+```bash
+python3 scripts/profile-sqlite.py \
+  --database /path/to/slskr.db \
+  --query 'messages=SELECT id, username, created_at FROM messages ORDER BY created_at DESC LIMIT 100' \
+  --query 'transfers=SELECT id, status, started_at FROM transfers ORDER BY started_at DESC LIMIT 100' \
+  --warmup 2 \
+  --iterations 10 \
+  --output target/perf/sqlite-baseline.json
+```
+
+This read-only profiler records each statement's `EXPLAIN QUERY PLAN`, result
+row-count range, and measured minimum/median/p95/maximum latency. It reports
+the selected database and workload; it does not claim that a small local
+database represents production behavior.
 
 Compare two artifacts only when the workload metadata matches:
 

@@ -199,3 +199,90 @@ fn application_state_json(snapshot: ApplicationStateSnapshot, config: &AppConfig
     })
     .to_string()
 }
+
+#[derive(Clone, Debug)]
+pub(crate) struct ControllerVersionState {
+    pub(crate) latest: Option<String>,
+    pub(crate) latest_tag: Option<String>,
+    pub(crate) latest_url: Option<String>,
+    pub(crate) checked_at: Option<String>,
+    pub(crate) is_update_available: Option<bool>,
+}
+
+impl ControllerVersionState {
+    pub(crate) fn initial() -> Self {
+        Self {
+            latest: None,
+            latest_tag: None,
+            latest_url: None,
+            checked_at: None,
+            is_update_available: None,
+        }
+    }
+
+    pub(crate) fn json(&self, target: ControllerProfile) -> serde_json::Value {
+        let mut value = serde_json::json!({
+            "full": format!("{} ({})", crate::APP_VERSION, crate::APP_VERSION),
+            "current": crate::APP_VERSION,
+            "isCanary": false,
+            "isDevelopment": crate::APP_VERSION == "0.0.0" || cfg!(debug_assertions),
+        });
+        if target == ControllerProfile::Native {
+            value["latest"] = serde_json::json!(self.latest.as_deref().unwrap_or_default());
+            value["latestTag"] = serde_json::json!(self.latest_tag.as_deref().unwrap_or_default());
+            value["latestUrl"] = serde_json::json!(self.latest_url.as_deref().unwrap_or_default());
+        } else {
+            for (key, candidate) in [
+                ("latest", self.latest.as_ref()),
+                ("latestTag", self.latest_tag.as_ref()),
+                ("latestUrl", self.latest_url.as_ref()),
+            ] {
+                if let Some(candidate) = candidate {
+                    value[key] = serde_json::json!(candidate);
+                }
+            }
+        }
+        if let Some(checked_at) = self.checked_at.as_ref() {
+            value["checkedAt"] = serde_json::json!(checked_at);
+        }
+        if let Some(is_update_available) = self.is_update_available {
+            value["isUpdateAvailable"] = serde_json::json!(is_update_available);
+        }
+        value
+    }
+}
+
+#[cfg(test)]
+mod controller_version_state_tests {
+    #[test]
+    fn initial_application_state_version_includes_update_availability() {
+        let value = super::ControllerVersionState::initial().json(super::ControllerProfile::Native);
+        let value = super::application_state_version_json(value, super::ControllerProfile::Native);
+        assert_eq!(value["isUpdateAvailable"], false);
+    }
+
+    #[test]
+    fn initial_legacy_application_state_version_preserves_frozen_options_shape() {
+        let value = super::ControllerVersionState::initial().json(super::ControllerProfile::Legacy);
+        let value = super::application_state_version_json(value, super::ControllerProfile::Legacy);
+        assert!(value.get("isUpdateAvailable").is_none());
+    }
+}
+
+pub(crate) fn controller_version_json(state: &AppState) -> serde_json::Value {
+    state
+        .controller_version
+        .read()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .json(state.config.controller_profile)
+}
+
+pub(crate) fn application_state_version_json(
+    mut version: serde_json::Value,
+    profile: ControllerProfile,
+) -> serde_json::Value {
+    if profile == ControllerProfile::Native {
+        version["isUpdateAvailable"] = serde_json::json!(false);
+    }
+    version
+}

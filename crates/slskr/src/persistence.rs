@@ -37,6 +37,13 @@ fn sql_placeholders(count: usize) -> String {
     (0..count).map(|_| "?").collect::<Vec<_>>().join(", ")
 }
 
+fn sql_value_rows(row_count: usize, column_count: usize) -> String {
+    let row = format!("({})", sql_placeholders(column_count));
+    std::iter::repeat_n(row, row_count)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 /// Search record for persistence
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SearchRecord {
@@ -2318,31 +2325,34 @@ impl DatabaseManager {
             let _ = transaction.rollback().await;
             return Err(error.into());
         }
-        for record in records {
-            let insert = query(
+        for batch in records.chunks(SQLITE_PARAMETER_CHUNK / 14) {
+            let statement = format!(
                 r#"
                 INSERT INTO search_results
                 (search_id, peer_username, filename, size, extension, bit_rate, sample_rate, bit_depth, length_seconds, locked, slot_free, average_speed, queue_length, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES {}
                 "#,
-            )
-            .bind(search_id)
-            .bind(&record.peer_username)
-            .bind(&record.filename)
-            .bind(record.size)
-            .bind(&record.extension)
-            .bind(record.bit_rate)
-            .bind(record.sample_rate)
-            .bind(record.bit_depth)
-            .bind(record.length_seconds)
-            .bind(record.locked)
-            .bind(record.slot_free)
-            .bind(record.average_speed)
-            .bind(record.queue_length)
-            .bind(record.created_at)
-            .execute(&mut *transaction)
-            .await;
-            if let Err(error) = insert {
+                sql_value_rows(batch.len(), 14)
+            );
+            let mut insert = query(AssertSqlSafe(statement));
+            for record in batch {
+                insert = insert
+                    .bind(search_id)
+                    .bind(&record.peer_username)
+                    .bind(&record.filename)
+                    .bind(record.size)
+                    .bind(&record.extension)
+                    .bind(record.bit_rate)
+                    .bind(record.sample_rate)
+                    .bind(record.bit_depth)
+                    .bind(record.length_seconds)
+                    .bind(record.locked)
+                    .bind(record.slot_free)
+                    .bind(record.average_speed)
+                    .bind(record.queue_length)
+                    .bind(record.created_at);
+            }
+            if let Err(error) = insert.execute(&mut *transaction).await {
                 let _ = transaction.rollback().await;
                 return Err(error.into());
             }
@@ -2509,26 +2519,30 @@ impl DatabaseManager {
         query("DELETE FROM HashDb")
             .execute(&mut *transaction)
             .await?;
-        for record in records {
-            query(
+        for batch in records.chunks(SQLITE_PARAMETER_CHUNK / 10) {
+            let statement = format!(
                 r#"
                 INSERT INTO HashDb
                     (flac_key, byte_hash, size, first_seen_at, last_updated_at, seq_id, use_count, full_file_hash, musicbrainz_id, file_sha256)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES {}
                 "#,
-            )
-            .bind(&record.flac_key)
-            .bind(&record.byte_hash)
-            .bind(record.size)
-            .bind(record.first_seen_at)
-            .bind(record.last_updated_at)
-            .bind(record.seq_id)
-            .bind(record.use_count)
-            .bind(&record.full_file_hash)
-            .bind(&record.musicbrainz_id)
-            .bind(&record.file_sha256)
-            .execute(&mut *transaction)
-            .await?;
+                sql_value_rows(batch.len(), 10)
+            );
+            let mut insert = query(AssertSqlSafe(statement));
+            for record in batch {
+                insert = insert
+                    .bind(&record.flac_key)
+                    .bind(&record.byte_hash)
+                    .bind(record.size)
+                    .bind(record.first_seen_at)
+                    .bind(record.last_updated_at)
+                    .bind(record.seq_id)
+                    .bind(record.use_count)
+                    .bind(&record.full_file_hash)
+                    .bind(&record.musicbrainz_id)
+                    .bind(&record.file_sha256);
+            }
+            insert.execute(&mut *transaction).await?;
         }
         query(
             r#"
@@ -3030,23 +3044,27 @@ impl DatabaseManager {
     ) -> Result<(), Box<dyn std::error::Error>> {
         let mut tx = self.pool.begin().await?;
         query("DELETE FROM share_files").execute(&mut *tx).await?;
-        for record in records {
-            query(
+        for batch in records.chunks(SQLITE_PARAMETER_CHUNK / 7) {
+            let statement = format!(
                 r#"
                 INSERT OR REPLACE INTO share_files
                 (filename, size, extension, root_label, local_path, attributes_json, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                VALUES {}
                 "#,
-            )
-            .bind(&record.filename)
-            .bind(record.size)
-            .bind(&record.extension)
-            .bind(&record.root_label)
-            .bind(&record.local_path)
-            .bind(&record.attributes_json)
-            .bind(record.updated_at)
-            .execute(&mut *tx)
-            .await?;
+                sql_value_rows(batch.len(), 7)
+            );
+            let mut insert = query(AssertSqlSafe(statement));
+            for record in batch {
+                insert = insert
+                    .bind(&record.filename)
+                    .bind(record.size)
+                    .bind(&record.extension)
+                    .bind(&record.root_label)
+                    .bind(&record.local_path)
+                    .bind(&record.attributes_json)
+                    .bind(record.updated_at);
+            }
+            insert.execute(&mut *tx).await?;
         }
         tx.commit().await?;
         Ok(())
@@ -3209,24 +3227,28 @@ impl DatabaseManager {
     ) -> Result<(), Box<dyn std::error::Error>> {
         let mut transaction = self.pool.begin().await?;
         let result = async {
-            for record in records {
-                query(
+            for batch in records.chunks(SQLITE_PARAMETER_CHUNK / 9) {
+                let statement = format!(
                     r#"
                     INSERT INTO messages (id, username, content, direction, read, created_at, source_id, source_timestamp, was_replayed)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES {}
                     "#,
-                )
-                .bind(&record.id)
-                .bind(&record.username)
-                .bind(&record.content)
-                .bind(&record.direction)
-                .bind(record.read as i32)
-                .bind(record.created_at)
-                .bind(record.source_id)
-                .bind(record.source_timestamp)
-                .bind(record.was_replayed as i32)
-                .execute(&mut *transaction)
-                .await?;
+                    sql_value_rows(batch.len(), 9)
+                );
+                let mut insert = query(AssertSqlSafe(statement));
+                for record in batch {
+                    insert = insert
+                        .bind(&record.id)
+                        .bind(&record.username)
+                        .bind(&record.content)
+                        .bind(&record.direction)
+                        .bind(record.read as i32)
+                        .bind(record.created_at)
+                        .bind(record.source_id)
+                        .bind(record.source_timestamp)
+                        .bind(record.was_replayed as i32);
+                }
+                insert.execute(&mut *transaction).await?;
             }
             Ok::<(), sqlx_core::Error>(())
         }
@@ -3287,12 +3309,19 @@ impl DatabaseManager {
         &self,
         ids: &[String],
     ) -> Result<(), Box<dyn std::error::Error>> {
+        if ids.is_empty() {
+            return Ok(());
+        }
         let mut transaction = self.pool.begin().await?;
-        for id in ids {
-            query("UPDATE messages SET read = 1 WHERE id = ?")
-                .bind(id)
-                .execute(&mut *transaction)
-                .await?;
+        for chunk in ids.chunks(SQLITE_PARAMETER_CHUNK) {
+            let mut statement = query(AssertSqlSafe(format!(
+                "UPDATE messages SET read = 1 WHERE id IN ({})",
+                sql_placeholders(chunk.len())
+            )));
+            for id in chunk {
+                statement = statement.bind(id);
+            }
+            statement.execute(&mut *transaction).await?;
         }
         transaction.commit().await?;
         Ok(())
@@ -3708,7 +3737,7 @@ impl DatabaseManager {
         records: &[WishlistItemRecord],
     ) -> Result<(), Box<dyn std::error::Error>> {
         let mut transaction = self.pool.begin().await?;
-        for batch in records.chunks(40) {
+        for batch in records.chunks(SQLITE_PARAMETER_CHUNK / 26) {
             let values = std::iter::repeat_n(
                 "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 batch.len(),
@@ -4544,20 +4573,24 @@ impl DatabaseManager {
         records: &[LibraryItemRecord],
     ) -> Result<(), Box<dyn std::error::Error>> {
         let mut transaction = self.pool.begin().await?;
-        for record in records {
-            query(
+        for batch in records.chunks(SQLITE_PARAMETER_CHUNK / 5) {
+            let statement = format!(
                 r#"
                 INSERT OR REPLACE INTO library_items (id, artist, title, kind, created_at)
-                VALUES (?, ?, ?, ?, ?)
+                VALUES {}
                 "#,
-            )
-            .bind(&record.id)
-            .bind(&record.artist)
-            .bind(&record.title)
-            .bind(&record.kind)
-            .bind(record.created_at)
-            .execute(&mut *transaction)
-            .await?;
+                sql_value_rows(batch.len(), 5)
+            );
+            let mut insert = query(AssertSqlSafe(statement));
+            for record in batch {
+                insert = insert
+                    .bind(&record.id)
+                    .bind(&record.artist)
+                    .bind(&record.title)
+                    .bind(&record.kind)
+                    .bind(record.created_at);
+            }
+            insert.execute(&mut *transaction).await?;
         }
         transaction.commit().await?;
         Ok(())
@@ -5760,6 +5793,35 @@ mod tests {
         let second_page = db.list_messages_from_user("user1", 1, 1).await.unwrap();
         assert_eq!(second_page.len(), 1);
         assert_eq!(second_page[0].id, "msg_1");
+    }
+
+    #[tokio::test]
+    async fn bulk_message_operations_cross_sqlite_bind_chunk_boundary() {
+        let db = DatabaseManager::in_memory().await.unwrap();
+        let records = (0..101)
+            .map(|index| MessageRecord {
+                id: format!("bulk_msg_{index}"),
+                username: "bulk-user".to_owned(),
+                content: format!("message {index}"),
+                direction: "incoming".to_owned(),
+                read: false,
+                created_at: index,
+                source_id: None,
+                source_timestamp: None,
+                was_replayed: false,
+            })
+            .collect::<Vec<_>>();
+
+        db.insert_messages(&records).await.unwrap();
+        let ids = records
+            .iter()
+            .map(|record| record.id.clone())
+            .collect::<Vec<_>>();
+        db.mark_messages_read(&ids).await.unwrap();
+
+        let persisted = db.list_messages(200, 0).await.unwrap();
+        assert_eq!(persisted.len(), records.len());
+        assert!(persisted.iter().all(|record| record.read));
     }
 
     #[tokio::test]

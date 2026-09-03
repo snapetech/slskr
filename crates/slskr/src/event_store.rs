@@ -133,6 +133,7 @@ pub(crate) struct EventStore {
     pub(crate) records: Vec<EventRecord>,
     pub(crate) next_id: u64,
     pub(crate) history_limit: usize,
+    ids: std::collections::HashSet<u64>,
 }
 
 impl EventStore {
@@ -141,6 +142,7 @@ impl EventStore {
             records: Vec::new(),
             next_id: 1,
             history_limit,
+            ids: std::collections::HashSet::new(),
         }
     }
 
@@ -171,6 +173,7 @@ impl EventStore {
             let extra = records.len() - history_limit;
             records.drain(0..extra);
         }
+        let ids = records.iter().map(|record| record.id).collect();
         let next_id = records
             .iter()
             .map(|record| record.id)
@@ -181,6 +184,7 @@ impl EventStore {
             records,
             next_id,
             history_limit,
+            ids,
         }
     }
 
@@ -199,9 +203,12 @@ impl EventStore {
             created_at: crate::unix_timestamp(),
         };
         self.records.push(record.clone());
+        self.ids.insert(record.id);
         if self.records.len() > self.history_limit {
             let extra = self.records.len() - self.history_limit;
-            self.records.drain(0..extra);
+            for removed in self.records.drain(0..extra) {
+                self.ids.remove(&removed.id);
+            }
         }
         record
     }
@@ -209,7 +216,7 @@ impl EventStore {
     fn allocate_id(&mut self) -> u64 {
         let mut candidate = self.next_id.max(1);
         for _ in 0..=self.records.len() {
-            if !self.records.iter().any(|record| record.id == candidate) {
+            if !self.ids.contains(&candidate) {
                 self.next_id = candidate.wrapping_add(1).max(1);
                 return candidate;
             }

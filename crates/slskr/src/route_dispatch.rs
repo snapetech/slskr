@@ -180,7 +180,8 @@ pub(super) async fn route_http_request_with_headers(
     state: &AppState,
     headers: &RequestSecurityHeaders,
 ) -> Result<HttpResponse, String> {
-    route_http_request_inner(method, path, authorization, body, state, headers, None).await
+    let request = routing::RouteRequest::new(method, path, authorization, body, headers);
+    route_http_request_inner(request, state, None).await
 }
 
 pub(super) async fn route_http_request_with_state(
@@ -192,16 +193,8 @@ pub(super) async fn route_http_request_with_state(
     headers: &RequestSecurityHeaders,
 ) -> Result<HttpResponse, String> {
     let state_arc = state.clone();
-    route_http_request_inner(
-        method,
-        path,
-        authorization,
-        body,
-        &state,
-        headers,
-        Some(state_arc),
-    )
-    .await
+    let request = routing::RouteRequest::new(method, path, authorization, body, headers);
+    route_http_request_inner(request, &state, Some(state_arc)).await
 }
 
 fn versioned_share_rescan_response(state: &AppState, state_arc: Arc<AppState>) -> HttpResponse {
@@ -864,14 +857,17 @@ pub(crate) async fn musicbrainz_discography_coverage_with_settings(
 }
 
 async fn route_http_request_inner(
-    method: &str,
-    path: &str,
-    authorization: Option<&str>,
-    body: &str,
+    request: routing::RouteRequest<'_>,
     state: &AppState,
-    headers: &RequestSecurityHeaders,
     state_arc: Option<Arc<AppState>>,
 ) -> Result<HttpResponse, String> {
+    let routing::RouteRequest {
+        method,
+        path,
+        authorization,
+        body,
+        headers,
+    } = request;
     // Start request tracing
     let span = tracing::RequestSpan::new(
         method.to_string(),
@@ -882,7 +878,7 @@ async fn route_http_request_inner(
     let _correlation_id = span.correlation_id.clone();
     tracing::set_request_span(span);
 
-    let route = routing::parse_route(method, path);
+    let route = request.parsed();
     let request_is_versioned_v0 = route.path.starts_with("/api/v0/");
 
     let (raw_path, _) = crate::utils::split_request_target(path);
@@ -1462,115 +1458,38 @@ async fn route_http_request_inner(
     }
 
     let extended_mutation = extended_controller_mutation_route(method, &normalized_path);
-    let mut response = route_dispatch_group_0(
+    let context = RouteDispatchContext {
         method,
-        &normalized_path,
+        normalized_path: &normalized_path,
         authorization,
         body,
         state,
-        &route,
+        route: &route,
         headers,
         extended_mutation,
         request_is_versioned_v0,
-    )
-    .await;
+    };
+    let mut response = route_dispatch_group_0(&context).await;
     if route_is_unhandled(&response) {
-        response = route_dispatch_group_1(
-            method,
-            &normalized_path,
-            authorization,
-            body,
-            state,
-            &route,
-            headers,
-            extended_mutation,
-            request_is_versioned_v0,
-        )
-        .await;
+        response = route_dispatch_group_1(&context).await;
     }
     if route_is_unhandled(&response) {
-        response = route_dispatch_group_2(
-            method,
-            &normalized_path,
-            authorization,
-            body,
-            state,
-            &route,
-            headers,
-            extended_mutation,
-            request_is_versioned_v0,
-        )
-        .await;
+        response = route_dispatch_group_2(&context).await;
     }
     if route_is_unhandled(&response) {
-        response = route_dispatch_group_3(
-            method,
-            &normalized_path,
-            authorization,
-            body,
-            state,
-            &route,
-            headers,
-            extended_mutation,
-            request_is_versioned_v0,
-        )
-        .await;
+        response = route_dispatch_group_3(&context).await;
     }
     if route_is_unhandled(&response) {
-        response = route_dispatch_group_4(
-            method,
-            &normalized_path,
-            authorization,
-            body,
-            state,
-            &route,
-            headers,
-            extended_mutation,
-            request_is_versioned_v0,
-        )
-        .await;
+        response = route_dispatch_group_4(&context).await;
     }
     if route_is_unhandled(&response) {
-        response = route_dispatch_group_5(
-            method,
-            &normalized_path,
-            authorization,
-            body,
-            state,
-            &route,
-            headers,
-            extended_mutation,
-            request_is_versioned_v0,
-        )
-        .await;
+        response = route_dispatch_group_5(&context).await;
     }
     if route_is_unhandled(&response) {
-        response = route_dispatch_group_6(
-            method,
-            &normalized_path,
-            authorization,
-            body,
-            state,
-            &route,
-            headers,
-            extended_mutation,
-            request_is_versioned_v0,
-        )
-        .await;
+        response = route_dispatch_group_6(&context).await;
     }
     if route_is_unhandled(&response) {
-        response = route_dispatch_group_7(
-            method,
-            &normalized_path,
-            authorization,
-            body,
-            state,
-            &route,
-            headers,
-            extended_mutation,
-            request_is_versioned_v0,
-        )
-        .await;
+        response = route_dispatch_group_7(&context).await;
     }
     response.inspect(|response| {
         let status_code: u16 = response
@@ -1583,17 +1502,31 @@ async fn route_http_request_inner(
     })
 }
 
-async fn route_dispatch_group_0(
-    method: &str,
-    normalized_path: &str,
-    authorization: Option<&str>,
-    body: &str,
-    state: &AppState,
-    route: &routing::ParsedRoute<'_>,
-    headers: &RequestSecurityHeaders,
+#[derive(Clone, Copy)]
+struct RouteDispatchContext<'request, 'state> {
+    method: &'request str,
+    normalized_path: &'request str,
+    authorization: Option<&'request str>,
+    body: &'request str,
+    state: &'state AppState,
+    route: &'state routing::ParsedRoute<'request>,
+    headers: &'state RequestSecurityHeaders,
     extended_mutation: bool,
     request_is_versioned_v0: bool,
-) -> RouteDispatchResult {
+}
+
+async fn route_dispatch_group_0(context: &RouteDispatchContext<'_, '_>) -> RouteDispatchResult {
+    let RouteDispatchContext {
+        method,
+        normalized_path,
+        authorization,
+        body,
+        state,
+        route,
+        headers,
+        extended_mutation,
+        request_is_versioned_v0,
+    } = *context;
     match (method, normalized_path) {
         ("GET", "/") => Ok(index_html_response()),
         ("HEAD", "/") => Ok(head_response(index_html_response())),
@@ -2667,17 +2600,18 @@ async fn route_dispatch_group_0(
     }
 }
 
-async fn route_dispatch_group_1(
-    method: &str,
-    normalized_path: &str,
-    authorization: Option<&str>,
-    body: &str,
-    state: &AppState,
-    route: &routing::ParsedRoute<'_>,
-    headers: &RequestSecurityHeaders,
-    extended_mutation: bool,
-    request_is_versioned_v0: bool,
-) -> RouteDispatchResult {
+async fn route_dispatch_group_1(context: &RouteDispatchContext<'_, '_>) -> RouteDispatchResult {
+    let RouteDispatchContext {
+        method,
+        normalized_path,
+        authorization,
+        body,
+        state,
+        route,
+        headers,
+        extended_mutation,
+        request_is_versioned_v0,
+    } = *context;
     match (method, normalized_path) {
         ("GET", "/api/dht/peers") if route.path.starts_with("/api/v0/") => {
             let peers = match state.dht.as_ref() {
@@ -4582,17 +4516,18 @@ async fn route_dispatch_group_1(
     }
 }
 
-async fn route_dispatch_group_2(
-    method: &str,
-    normalized_path: &str,
-    authorization: Option<&str>,
-    body: &str,
-    state: &AppState,
-    route: &routing::ParsedRoute<'_>,
-    headers: &RequestSecurityHeaders,
-    extended_mutation: bool,
-    request_is_versioned_v0: bool,
-) -> RouteDispatchResult {
+async fn route_dispatch_group_2(context: &RouteDispatchContext<'_, '_>) -> RouteDispatchResult {
+    let RouteDispatchContext {
+        method,
+        normalized_path,
+        authorization,
+        body,
+        state,
+        route,
+        headers,
+        extended_mutation,
+        request_is_versioned_v0,
+    } = *context;
     match (method, normalized_path) {
         ("GET", "/api/session") => {
             let snapshot = state.session.read().await;
@@ -7749,17 +7684,18 @@ async fn route_dispatch_group_2(
     }
 }
 
-async fn route_dispatch_group_3(
-    method: &str,
-    normalized_path: &str,
-    authorization: Option<&str>,
-    body: &str,
-    state: &AppState,
-    route: &routing::ParsedRoute<'_>,
-    headers: &RequestSecurityHeaders,
-    extended_mutation: bool,
-    request_is_versioned_v0: bool,
-) -> RouteDispatchResult {
+async fn route_dispatch_group_3(context: &RouteDispatchContext<'_, '_>) -> RouteDispatchResult {
+    let RouteDispatchContext {
+        method,
+        normalized_path,
+        authorization,
+        body,
+        state,
+        route,
+        headers,
+        extended_mutation,
+        request_is_versioned_v0,
+    } = *context;
     match (method, normalized_path) {
         ("POST", _path) if room_messages_path(normalized_path).is_some() => {
             let Some(room_name) = room_messages_path(normalized_path) else {
@@ -9139,17 +9075,18 @@ async fn route_dispatch_group_3(
     }
 }
 
-async fn route_dispatch_group_4(
-    method: &str,
-    normalized_path: &str,
-    authorization: Option<&str>,
-    body: &str,
-    state: &AppState,
-    route: &routing::ParsedRoute<'_>,
-    headers: &RequestSecurityHeaders,
-    extended_mutation: bool,
-    request_is_versioned_v0: bool,
-) -> RouteDispatchResult {
+async fn route_dispatch_group_4(context: &RouteDispatchContext<'_, '_>) -> RouteDispatchResult {
+    let RouteDispatchContext {
+        method,
+        normalized_path,
+        authorization,
+        body,
+        state,
+        route,
+        headers,
+        extended_mutation,
+        request_is_versioned_v0,
+    } = *context;
     match (method, normalized_path) {
         ("GET", "/api/database/stats") => Ok(routing::ok_response(
             database_stats_value(state).await.to_string(),
@@ -11108,17 +11045,18 @@ async fn route_dispatch_group_4(
     }
 }
 
-async fn route_dispatch_group_5(
-    method: &str,
-    normalized_path: &str,
-    authorization: Option<&str>,
-    body: &str,
-    state: &AppState,
-    route: &routing::ParsedRoute<'_>,
-    headers: &RequestSecurityHeaders,
-    extended_mutation: bool,
-    request_is_versioned_v0: bool,
-) -> RouteDispatchResult {
+async fn route_dispatch_group_5(context: &RouteDispatchContext<'_, '_>) -> RouteDispatchResult {
+    let RouteDispatchContext {
+        method,
+        normalized_path,
+        authorization,
+        body,
+        state,
+        route,
+        headers,
+        extended_mutation,
+        request_is_versioned_v0,
+    } = *context;
     match (method, normalized_path) {
         ("GET", path)
             if path.starts_with("/api/share-grants/")
@@ -13310,17 +13248,18 @@ async fn route_dispatch_group_5(
     }
 }
 
-async fn route_dispatch_group_6(
-    method: &str,
-    normalized_path: &str,
-    authorization: Option<&str>,
-    body: &str,
-    state: &AppState,
-    route: &routing::ParsedRoute<'_>,
-    headers: &RequestSecurityHeaders,
-    extended_mutation: bool,
-    request_is_versioned_v0: bool,
-) -> RouteDispatchResult {
+async fn route_dispatch_group_6(context: &RouteDispatchContext<'_, '_>) -> RouteDispatchResult {
+    let RouteDispatchContext {
+        method,
+        normalized_path,
+        authorization,
+        body,
+        state,
+        route,
+        headers,
+        extended_mutation,
+        request_is_versioned_v0,
+    } = *context;
     match (method, normalized_path) {
         ("PUT", path) if path.ends_with("/adversarial") && !path.contains("/api/") => {
             Ok(routing::not_found_response())
@@ -17142,17 +17081,18 @@ async fn route_dispatch_group_6(
     }
 }
 
-async fn route_dispatch_group_7(
-    method: &str,
-    normalized_path: &str,
-    authorization: Option<&str>,
-    body: &str,
-    state: &AppState,
-    route: &routing::ParsedRoute<'_>,
-    headers: &RequestSecurityHeaders,
-    extended_mutation: bool,
-    request_is_versioned_v0: bool,
-) -> RouteDispatchResult {
+async fn route_dispatch_group_7(context: &RouteDispatchContext<'_, '_>) -> RouteDispatchResult {
+    let RouteDispatchContext {
+        method,
+        normalized_path,
+        authorization,
+        body,
+        state,
+        route,
+        headers,
+        extended_mutation,
+        request_is_versioned_v0,
+    } = *context;
     match (method, normalized_path) {
         ("GET", "/api/musicbrainz/release-radar/subscriptions") => {
             if route.path.starts_with("/api/v0/") {
