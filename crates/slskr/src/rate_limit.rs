@@ -47,6 +47,8 @@ pub struct RateLimiter {
 
 const MAX_USER_WINDOWS: usize = 16_384;
 const MAX_IP_WINDOWS: usize = 16_384;
+const MAX_USER_KEY_BYTES: usize = 256;
+const MAX_PARTITION_BYTES: usize = 128;
 
 impl RateLimiter {
     /// Create new rate limiter
@@ -79,7 +81,9 @@ impl RateLimiter {
     /// Check rate limit for authenticated user
     async fn check_user_limit(&self, username: &str) -> bool {
         let max_requests = self.config.max_requests_authenticated;
-        let key = user_key(username);
+        let Some(key) = user_key(username) else {
+            return false;
+        };
         let now = Instant::now();
         let mut windows = self.user_windows.write().await;
         if !windows.contains_key(&key) && windows.len() >= MAX_USER_WINDOWS {
@@ -153,8 +157,9 @@ impl RateLimiter {
         max_requests: u32,
         window_seconds: u64,
     ) -> bool {
-        let ip = ip_key(remote_addr).unwrap_or_else(|| "unknown".to_owned());
-        let key = format!("{partition}:{ip}");
+        let Some(key) = ip_partition_key(remote_addr, partition) else {
+            return false;
+        };
         let window_seconds = window_seconds.max(1);
         let now = Instant::now();
         let mut windows = self.ip_windows.write().await;
@@ -186,8 +191,9 @@ impl RateLimiter {
         partition: &str,
         max_requests: u32,
     ) -> u32 {
-        let ip = ip_key(remote_addr).unwrap_or_else(|| "unknown".to_owned());
-        let key = format!("{partition}:{ip}");
+        let Some(key) = ip_partition_key(remote_addr, partition) else {
+            return max_requests;
+        };
         let now = Instant::now();
         let windows = self.ip_windows.read().await;
         windows.get(&key).map_or(max_requests, |window| {
@@ -204,8 +210,9 @@ impl RateLimiter {
         remote_addr: Option<SocketAddr>,
         partition: &str,
     ) -> u64 {
-        let ip = ip_key(remote_addr).unwrap_or_else(|| "unknown".to_owned());
-        let key = format!("{partition}:{ip}");
+        let Some(key) = ip_partition_key(remote_addr, partition) else {
+            return 0;
+        };
         let now = Instant::now();
         let windows = self.ip_windows.read().await;
         windows.get(&key).map_or(0, |window| {
@@ -236,7 +243,9 @@ impl RateLimiter {
 
     async fn get_user_remaining(&self, username: &str) -> u32 {
         let max_requests = self.config.max_requests_authenticated;
-        let key = user_key(username);
+        let Some(key) = user_key(username) else {
+            return max_requests;
+        };
         let now = Instant::now();
         let windows = self.user_windows.read().await;
 
@@ -279,7 +288,9 @@ impl RateLimiter {
     }
 
     async fn get_user_reset_time(&self, username: &str) -> u64 {
-        let key = user_key(username);
+        let Some(key) = user_key(username) else {
+            return 0;
+        };
         let now = Instant::now();
         let windows = self.user_windows.read().await;
 
@@ -374,8 +385,25 @@ fn ip_key(remote_addr: Option<SocketAddr>) -> Option<String> {
     })
 }
 
-fn user_key(username: &str) -> String {
-    username.to_ascii_lowercase()
+fn user_key(username: &str) -> Option<String> {
+    if username.is_empty()
+        || username.len() > MAX_USER_KEY_BYTES
+        || username.chars().any(char::is_control)
+    {
+        return None;
+    }
+    Some(username.to_ascii_lowercase())
+}
+
+fn ip_partition_key(remote_addr: Option<SocketAddr>, partition: &str) -> Option<String> {
+    if partition.is_empty()
+        || partition.len() > MAX_PARTITION_BYTES
+        || partition.chars().any(char::is_control)
+    {
+        return None;
+    }
+    let ip = ip_key(remote_addr).unwrap_or_else(|| "unknown".to_owned());
+    Some(format!("{partition}:{ip}"))
 }
 
 fn duration_ceiling_seconds(duration: Duration) -> u64 {
@@ -465,8 +493,17 @@ pub struct SoulseekSafetyLimiter {
 
 impl SoulseekSafetyLimiter {
     const WINDOW: Duration = Duration::from_secs(60);
+    const MAX_TRACKED_SOURCES: usize = 4_096;
+    const MAX_SOURCE_BYTES: usize = 128;
+    const MAX_OPERATIONS_PER_MINUTE: usize = 10_000;
 
-    pub fn new(config: SoulseekSafetyConfig) -> Self {
+    pub fn new(mut config: SoulseekSafetyConfig) -> Self {
+        config.max_searches_per_minute = config
+            .max_searches_per_minute
+            .min(Self::MAX_OPERATIONS_PER_MINUTE);
+        config.max_browses_per_minute = config
+            .max_browses_per_minute
+            .min(Self::MAX_OPERATIONS_PER_MINUTE);
         Self {
             config,
             search_windows: Mutex::new(HashMap::new()),
@@ -499,8 +536,23 @@ impl SoulseekSafetyLimiter {
         if !self.config.enabled || maximum == 0 {
             return true;
         }
+        if source.is_empty()
+            || source.len() > Self::MAX_SOURCE_BYTES
+            || source.chars().any(char::is_control)
+        {
+            return false;
+        }
         let now = Instant::now();
         let mut windows = windows.lock().expect("Soulseek safety limiter lock");
+        if !windows.contains_key(source) && windows.len() >= Self::MAX_TRACKED_SOURCES {
+            windows.retain(|_, window| {
+                Self::prune(window, now);
+                !window.is_empty()
+            });
+            if windows.len() >= Self::MAX_TRACKED_SOURCES {
+                return false;
+            }
+        }
         let window = windows.entry(source.to_owned()).or_default();
         Self::prune(window, now);
         if window.len() >= maximum {
@@ -520,12 +572,14 @@ impl SoulseekSafetyLimiter {
             .browse_windows
             .lock()
             .expect("Soulseek browse limiter lock");
-        for window in searches.values_mut() {
+        searches.retain(|_, window| {
             Self::prune(window, now);
-        }
-        for window in browses.values_mut() {
+            !window.is_empty()
+        });
+        browses.retain(|_, window| {
             Self::prune(window, now);
-        }
+            !window.is_empty()
+        });
         let searches_by_source = searches
             .iter()
             .map(|(source, window)| (source.clone(), window.len()))
@@ -977,5 +1031,73 @@ mod tests {
         assert!(limiter.check_rate_limit(None, None).await);
         assert!(!limiter.check_rate_limit(None, None).await);
         assert!(limiter.get_reset_time(None, None).await > 0);
+    }
+
+    #[tokio::test]
+    async fn rate_limit_rejects_oversized_untrusted_keys() {
+        let limiter = RateLimiter::new(RateLimitConfig::default());
+        let oversized_user = "u".repeat(MAX_USER_KEY_BYTES + 1);
+        assert!(!limiter.check_rate_limit(None, Some(&oversized_user)).await);
+        assert_eq!(
+            limiter.get_remaining(None, Some(&oversized_user)).await,
+            limiter.config.max_requests_authenticated
+        );
+        assert_eq!(limiter.get_reset_time(None, Some(&oversized_user)).await, 0);
+
+        let oversized_partition = "p".repeat(MAX_PARTITION_BYTES + 1);
+        assert!(
+            !limiter
+                .check_ip_partition(None, &oversized_partition, 1, 60)
+                .await
+        );
+        assert_eq!(
+            limiter
+                .get_ip_partition_remaining(None, &oversized_partition, 1)
+                .await,
+            1
+        );
+        assert_eq!(
+            limiter
+                .get_ip_partition_reset_time(None, &oversized_partition)
+                .await,
+            0
+        );
+    }
+
+    #[test]
+    fn soulseek_safety_reclaims_expired_sources_and_bounds_input() {
+        let limiter = SoulseekSafetyLimiter::new(SoulseekSafetyConfig {
+            max_searches_per_minute: usize::MAX,
+            ..SoulseekSafetyConfig::default()
+        });
+        assert_eq!(
+            limiter.metrics().max_searches_per_minute,
+            SoulseekSafetyLimiter::MAX_OPERATIONS_PER_MINUTE
+        );
+        let expired = Instant::now()
+            .checked_sub(SoulseekSafetyLimiter::WINDOW + Duration::from_secs(1))
+            .expect("expired instant");
+        let mut windows = limiter
+            .search_windows
+            .lock()
+            .expect("Soulseek search limiter lock");
+        for index in 0..SoulseekSafetyLimiter::MAX_TRACKED_SOURCES {
+            windows.insert(format!("expired-{index}"), VecDeque::from([expired]));
+        }
+        drop(windows);
+
+        assert!(limiter.try_consume_search("new-source"));
+        assert_eq!(
+            limiter
+                .search_windows
+                .lock()
+                .expect("Soulseek search limiter lock")
+                .len(),
+            1
+        );
+        assert!(
+            !limiter.try_consume_search(&"s".repeat(SoulseekSafetyLimiter::MAX_SOURCE_BYTES + 1))
+        );
+        assert!(!limiter.try_consume_search("bad\nsource"));
     }
 }
