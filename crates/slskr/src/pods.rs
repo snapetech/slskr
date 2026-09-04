@@ -1445,7 +1445,7 @@ fn load_state(path: &Path) -> Result<BTreeMap<String, StoredPod>, String> {
         stored.members.retain(|member| {
             !member.peer_id.trim().is_empty()
                 && member.peer_id.len() <= MAX_PEER_ID_BYTES
-                && matches!(member.role.as_str(), "owner" | "mod" | "member")
+                && matches!(member.role.as_str(), "owner" | "mod" | "member" | "guest")
                 && member
                     .public_key
                     .as_ref()
@@ -1509,8 +1509,8 @@ mod tests {
     use super::{
         gold_star_club_available_with_setting, gold_star_club_opted_in_for_profile,
         gold_star_club_opted_in_value, gold_star_club_pod, record_gold_star_club_revocation,
-        PodRecord, PodStore, GOLD_STAR_CLUB_GENERAL_CHANNEL_ID, GOLD_STAR_CLUB_MAX_MEMBERS,
-        GOLD_STAR_CLUB_POD_ID,
+        PodMember, PodRecord, PodStore, GOLD_STAR_CLUB_GENERAL_CHANNEL_ID,
+        GOLD_STAR_CLUB_MAX_MEMBERS, GOLD_STAR_CLUB_POD_ID,
     };
 
     #[test]
@@ -1648,6 +1648,40 @@ mod tests {
                 .binding_info
                 .as_deref(),
             Some("soulseek-room:music")
+        );
+        std::fs::remove_dir_all(state_dir).unwrap();
+    }
+
+    #[test]
+    fn guest_membership_survives_restart() {
+        let state_dir = std::env::temp_dir().join(format!(
+            "slskr-pods-guest-restart-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&state_dir).unwrap();
+        let mut store = PodStore::empty(&state_dir);
+        store.create(fixture(), "owner".to_owned()).unwrap();
+        store
+            .upsert_member(
+                "pod:test",
+                PodMember {
+                    peer_id: "guest".to_owned(),
+                    role: "guest".to_owned(),
+                    is_banned: false,
+                    public_key: None,
+                    joined_at: None,
+                    last_seen: None,
+                },
+            )
+            .unwrap();
+
+        let loaded = PodStore::load(&state_dir).unwrap();
+        assert_eq!(
+            loaded
+                .member_for_verification("pod:test", "guest")
+                .unwrap()
+                .role,
+            "guest"
         );
         std::fs::remove_dir_all(state_dir).unwrap();
     }
