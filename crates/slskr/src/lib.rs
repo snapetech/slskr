@@ -188,6 +188,8 @@ pub(crate) use event_store::{EventRecord, EventStore};
 
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 const FAILED_UPLOAD_PEER_COOLDOWN_SECONDS: u64 = 30;
+const MAX_FAILED_UPLOAD_PEER_COOLDOWNS: usize = 4_096;
+const MAX_FAILED_UPLOAD_PEER_USERNAME_BYTES: usize = 1_024;
 static NEXT_DISTRIBUTED_PING_TOKEN: AtomicUsize = AtomicUsize::new(1);
 
 fn next_distributed_ping_token() -> u32 {
@@ -201,16 +203,28 @@ struct UploadPeerCooldowns {
 
 impl UploadPeerCooldowns {
     fn record_failure(&mut self, username: &str, now: u64) {
-        let key = username.trim().to_ascii_lowercase();
-        if key.is_empty() {
+        let Some(key) = upload_peer_cooldown_key(username) else {
             return;
+        };
+        self.retry_after.retain(|_, expires_at| *expires_at > now);
+        if !self.retry_after.contains_key(&key)
+            && self.retry_after.len() >= MAX_FAILED_UPLOAD_PEER_COOLDOWNS
+        {
+            if let Some(oldest) = self
+                .retry_after
+                .iter()
+                .min_by_key(|(_, expires_at)| *expires_at)
+                .map(|(username, _)| username.clone())
+            {
+                self.retry_after.remove(&oldest);
+            }
         }
         self.retry_after
             .insert(key, now.saturating_add(FAILED_UPLOAD_PEER_COOLDOWN_SECONDS));
     }
 
     fn remaining(&mut self, username: &str, now: u64) -> Option<u64> {
-        let key = username.trim().to_ascii_lowercase();
+        let key = upload_peer_cooldown_key(username)?;
         let retry_after = self.retry_after.get(&key).copied()?;
         if retry_after > now {
             return Some(retry_after.saturating_sub(now));
@@ -218,6 +232,17 @@ impl UploadPeerCooldowns {
         self.retry_after.remove(&key);
         None
     }
+}
+
+fn upload_peer_cooldown_key(username: &str) -> Option<String> {
+    let username = username.trim();
+    if username.is_empty()
+        || username.len() > MAX_FAILED_UPLOAD_PEER_USERNAME_BYTES
+        || username.chars().any(char::is_control)
+    {
+        return None;
+    }
+    Some(username.to_ascii_lowercase())
 }
 
 fn is_expected_remote_upload_failure(error: &str) -> bool {
@@ -300,6 +325,71 @@ mod upload_peer_cooldown_regression_tests {
             "upload filename is not available from local shares"
         ));
     }
+
+    #[test]
+    fn cooldown_state_bounds_peer_keys_and_reclaims_capacity() {
+        let mut cooldowns = super::UploadPeerCooldowns::default();
+        cooldowns.record_failure(
+            &"x".repeat(super::MAX_FAILED_UPLOAD_PEER_USERNAME_BYTES + 1),
+            100,
+        );
+        assert!(cooldowns.retry_after.is_empty());
+
+        for index in 0..super::MAX_FAILED_UPLOAD_PEER_COOLDOWNS {
+            cooldowns.record_failure(&format!("peer-{index}"), 100);
+        }
+        cooldowns.record_failure("new-peer", 100);
+        assert_eq!(
+            cooldowns.retry_after.len(),
+            super::MAX_FAILED_UPLOAD_PEER_COOLDOWNS
+        );
+        assert!(cooldowns.retry_after.contains_key("new-peer"));
+
+        cooldowns.record_failure("after-expiry", 131);
+        assert_eq!(cooldowns.retry_after.len(), 1);
+        assert!(cooldowns.retry_after.contains_key("after-expiry"));
+    }
+}
+
+#[cfg(test)]
+mod mesh_sync_security_state_tests {
+    #[test]
+    fn sync_violation_state_bounds_peer_keys_and_reclaims_capacity() {
+        let settings = crate::config::MeshSyncSecuritySettings {
+            max_invalid_entries_per_window: 50,
+            max_invalid_messages_per_window: 10,
+            rate_limit_window: std::time::Duration::from_secs(300),
+            quarantine_violation_threshold: 3,
+            quarantine_duration: std::time::Duration::from_secs(1_800),
+            proof_of_possession_enabled: false,
+            require_signed_entries: false,
+            consensus_min_peers: 5,
+            consensus_min_agreements: 3,
+            alert_threshold_signature_failures: 50,
+            alert_threshold_rate_limit_violations: 20,
+            alert_threshold_quarantine_events: 10,
+        };
+        let mut mesh = super::MeshState::new();
+        for index in 0..super::MAX_MESH_SYNC_SECURITY_PEERS {
+            mesh.sync_invalid_entries
+                .insert(format!("peer-{index}"), (1_000, 1));
+        }
+        assert!(mesh.record_invalid_sync_entries("new-peer", 1, &settings, 1_000));
+        assert_eq!(
+            mesh.sync_invalid_entries.len(),
+            super::MAX_MESH_SYNC_SECURITY_PEERS
+        );
+        assert!(mesh.record_invalid_sync_entries(
+            &"x".repeat(super::MAX_MESH_SYNC_PEER_ID_BYTES + 1),
+            1,
+            &settings,
+            1_000,
+        ));
+
+        assert!(!mesh.record_invalid_sync_entries("reclaimed-peer", 1, &settings, 2_000));
+        assert_eq!(mesh.sync_invalid_entries.len(), 1);
+        assert!(mesh.sync_invalid_entries.contains_key("reclaimed-peer"));
+    }
 }
 
 const MAX_WEBHOOK_DELIVERY_TASKS: usize = 32;
@@ -325,6 +415,8 @@ const MAX_POD_PENDING_MEMBERSHIP_RECORDS: usize = 4_096;
 const POD_JOIN_REPLAY_TTL_SECONDS: u64 = 300;
 const POD_JOIN_TIMESTAMP_SKEW_MILLIS: u64 = 5 * 60 * 1_000;
 const WEBSOCKET_AUTH_PROTOCOL_PREFIX: &str = "slskr.api-token.";
+const MAX_MESH_SYNC_SECURITY_PEERS: usize = 4_096;
+const MAX_MESH_SYNC_PEER_ID_BYTES: usize = 256;
 
 use crate::config::{
     json_bool_option, json_escape, json_option, json_u32_option, json_u64_option,
@@ -5641,6 +5733,17 @@ struct MeshState {
     updated_at: u64,
 }
 
+fn mesh_sync_peer_key(username: &str) -> Option<String> {
+    let username = username.trim();
+    if username.is_empty()
+        || username.len() > MAX_MESH_SYNC_PEER_ID_BYTES
+        || username.chars().any(char::is_control)
+    {
+        return None;
+    }
+    Some(username.to_ascii_lowercase())
+}
+
 impl MeshState {
     #[cfg(any(test, feature = "bounded-differential"))]
     fn new() -> Self {
@@ -5689,10 +5792,13 @@ impl MeshState {
     }
 
     fn sync_is_quarantined(&mut self, username: &str, now: u64) -> bool {
+        let Some(key) = mesh_sync_peer_key(username) else {
+            return false;
+        };
         self.sync_quarantined_until
             .retain(|_, expires_at| *expires_at > now);
         self.sync_quarantined_until
-            .get(&username.to_ascii_lowercase())
+            .get(&key)
             .is_some_and(|expires_at| *expires_at > now)
     }
 
@@ -5703,8 +5809,21 @@ impl MeshState {
         settings: &crate::config::MeshSyncSecuritySettings,
         now: u64,
     ) -> bool {
-        let key = username.to_ascii_lowercase();
-        let window = settings.rate_limit_window.as_secs();
+        let Some(key) = mesh_sync_peer_key(username) else {
+            return true;
+        };
+        let window = settings.rate_limit_window.as_secs().max(1);
+        self.sync_invalid_entries
+            .retain(|_, (started_at, _)| now.saturating_sub(*started_at) < window);
+        self.sync_rate_violations
+            .retain(|_, (started_at, _)| now.saturating_sub(*started_at) < window);
+        self.sync_quarantined_until
+            .retain(|_, expires_at| *expires_at > now);
+        if !self.sync_invalid_entries.contains_key(&key)
+            && self.sync_invalid_entries.len() >= MAX_MESH_SYNC_SECURITY_PEERS
+        {
+            return true;
+        }
         let entry = self
             .sync_invalid_entries
             .entry(key.clone())
@@ -5717,6 +5836,11 @@ impl MeshState {
             return false;
         }
         self.sync_rejected_messages = self.sync_rejected_messages.saturating_add(1);
+        if !self.sync_rate_violations.contains_key(&key)
+            && self.sync_rate_violations.len() >= MAX_MESH_SYNC_SECURITY_PEERS
+        {
+            return true;
+        }
         let violations = self
             .sync_rate_violations
             .entry(key.clone())
@@ -5726,10 +5850,14 @@ impl MeshState {
         }
         violations.1 = violations.1.saturating_add(1);
         if violations.1 >= settings.quarantine_violation_threshold {
-            self.sync_quarantined_until.insert(
-                key,
-                now.saturating_add(settings.quarantine_duration.as_secs()),
-            );
+            if self.sync_quarantined_until.contains_key(&key)
+                || self.sync_quarantined_until.len() < MAX_MESH_SYNC_SECURITY_PEERS
+            {
+                self.sync_quarantined_until.insert(
+                    key,
+                    now.saturating_add(settings.quarantine_duration.as_secs()),
+                );
+            }
             self.sync_quarantine_events = self.sync_quarantine_events.saturating_add(1);
             violations.1 = 0;
         }
