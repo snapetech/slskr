@@ -7,7 +7,7 @@ import {
   podWorkflowSections,
 } from './mediaCoreWorkflows';
 import { usePolling } from '../../../lib/usePolling';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef } from 'react';
 import { toast } from 'react-toastify';
 import {
   Card,
@@ -27,323 +27,346 @@ import {
   TextArea,
 } from 'semantic-ui-react';
 
+const useMountedState = (mountedRef, initialValue) => {
+  const [value, setValue] = React.useState(initialValue);
+  const setMountedValue = React.useCallback(
+    (nextValue) => {
+      if (mountedRef.current) {
+        setValue(nextValue);
+      }
+    },
+    [mountedRef],
+  );
+
+  return [value, setMountedValue];
+};
+
 const MediaCore = () => {
-  const [stats, setStats] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [podWorkflowFilter, setPodWorkflowFilter] = useState('all');
+  const mountedRef = useRef(false);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const [stats, setStats] = useMountedState(mountedRef, null);
+  const [loading, setLoading] = useMountedState(mountedRef, true);
+  const [error, setError] = useMountedState(mountedRef, null);
+  const [podWorkflowFilter, setPodWorkflowFilter] = useMountedState(mountedRef, 'all');
 
   // Form state
-  const [externalId, setExternalId] = useState('');
-  const [descriptorContentId, setDescriptorContentId] = useState('');
-  const [resolveId, setResolveId] = useState('');
-  const [validateContentIdInput, setValidateContentIdInput] = useState('');
-  const [domain, setDomain] = useState('');
-  const [type, setType] = useState('');
-  const [resolvedContent, setResolvedContent] = useState(null);
-  const [validatedContent, setValidatedContent] = useState(null);
-  const [domainResults, setDomainResults] = useState(null);
-  const [traversalResults, setTraversalResults] = useState(null);
-  const [graphResults, setGraphResults] = useState(null);
-  const [inboundResults, setInboundResults] = useState(null);
-  const [traverseContentId, setTraverseContentId] = useState('');
-  const [traverseLinkName, setTraverseLinkName] = useState('');
-  const [graphContentId, setGraphContentId] = useState('');
-  const [inboundTargetId, setInboundTargetId] = useState('');
-  const [registering, setRegistering] = useState(false);
-  const [resolving, setResolving] = useState(false);
-  const [validating, setValidating] = useState(false);
-  const [searchingDomain, setSearchingDomain] = useState(false);
-  const [traversing, setTraversing] = useState(false);
-  const [gettingGraph, setGettingGraph] = useState(false);
-  const [findingInbound, setFindingInbound] = useState(false);
-  const [audioSamples, setAudioSamples] = useState('');
-  const [sampleRate, setSampleRate] = useState(44_100);
-  const [audioAlgorithm, setAudioAlgorithm] = useState('ChromaPrint');
-  const [imagePixels, setImagePixels] = useState('');
-  const [imageWidth, setImageWidth] = useState(100);
-  const [imageHeight, setImageHeight] = useState(100);
-  const [imageAlgorithm, setImageAlgorithm] = useState('PHash');
-  const [hashA, setHashA] = useState('');
-  const [hashB, setHashB] = useState('');
-  const [similarityThreshold, setSimilarityThreshold] = useState(0.8);
-  const [audioHashResult, setAudioHashResult] = useState(null);
-  const [imageHashResult, setImageHashResult] = useState(null);
-  const [similarityResult, setSimilarityResult] = useState(null);
-  const [supportedAlgorithms, setSupportedAlgorithms] = useState(null);
-  const [computingAudioHash, setComputingAudioHash] = useState(false);
-  const [computingImageHash, setComputingImageHash] = useState(false);
-  const [computingSimilarity, setComputingSimilarity] = useState(false);
-  const [perceptualContentIdA, setPerceptualContentIdA] = useState('');
-  const [perceptualContentIdB, setPerceptualContentIdB] = useState('');
-  const [perceptualThreshold, setPerceptualThreshold] = useState(0.7);
-  const [findSimilarContentId, setFindSimilarContentId] = useState('');
-  const [findSimilarMinConfidence, setFindSimilarMinConfidence] = useState(0.7);
-  const [findSimilarMaxResults, setFindSimilarMaxResults] = useState(10);
-  const [textSimilarityA, setTextSimilarityA] = useState('');
-  const [textSimilarityB, setTextSimilarityB] = useState('');
+  const [externalId, setExternalId] = useMountedState(mountedRef, '');
+  const [descriptorContentId, setDescriptorContentId] = useMountedState(mountedRef, '');
+  const [resolveId, setResolveId] = useMountedState(mountedRef, '');
+  const [validateContentIdInput, setValidateContentIdInput] = useMountedState(mountedRef, '');
+  const [domain, setDomain] = useMountedState(mountedRef, '');
+  const [type, setType] = useMountedState(mountedRef, '');
+  const [resolvedContent, setResolvedContent] = useMountedState(mountedRef, null);
+  const [validatedContent, setValidatedContent] = useMountedState(mountedRef, null);
+  const [domainResults, setDomainResults] = useMountedState(mountedRef, null);
+  const [traversalResults, setTraversalResults] = useMountedState(mountedRef, null);
+  const [graphResults, setGraphResults] = useMountedState(mountedRef, null);
+  const [inboundResults, setInboundResults] = useMountedState(mountedRef, null);
+  const [traverseContentId, setTraverseContentId] = useMountedState(mountedRef, '');
+  const [traverseLinkName, setTraverseLinkName] = useMountedState(mountedRef, '');
+  const [graphContentId, setGraphContentId] = useMountedState(mountedRef, '');
+  const [inboundTargetId, setInboundTargetId] = useMountedState(mountedRef, '');
+  const [registering, setRegistering] = useMountedState(mountedRef, false);
+  const [resolving, setResolving] = useMountedState(mountedRef, false);
+  const [validating, setValidating] = useMountedState(mountedRef, false);
+  const [searchingDomain, setSearchingDomain] = useMountedState(mountedRef, false);
+  const [traversing, setTraversing] = useMountedState(mountedRef, false);
+  const [gettingGraph, setGettingGraph] = useMountedState(mountedRef, false);
+  const [findingInbound, setFindingInbound] = useMountedState(mountedRef, false);
+  const [audioSamples, setAudioSamples] = useMountedState(mountedRef, '');
+  const [sampleRate, setSampleRate] = useMountedState(mountedRef, 44_100);
+  const [audioAlgorithm, setAudioAlgorithm] = useMountedState(mountedRef, 'ChromaPrint');
+  const [imagePixels, setImagePixels] = useMountedState(mountedRef, '');
+  const [imageWidth, setImageWidth] = useMountedState(mountedRef, 100);
+  const [imageHeight, setImageHeight] = useMountedState(mountedRef, 100);
+  const [imageAlgorithm, setImageAlgorithm] = useMountedState(mountedRef, 'PHash');
+  const [hashA, setHashA] = useMountedState(mountedRef, '');
+  const [hashB, setHashB] = useMountedState(mountedRef, '');
+  const [similarityThreshold, setSimilarityThreshold] = useMountedState(mountedRef, 0.8);
+  const [audioHashResult, setAudioHashResult] = useMountedState(mountedRef, null);
+  const [imageHashResult, setImageHashResult] = useMountedState(mountedRef, null);
+  const [similarityResult, setSimilarityResult] = useMountedState(mountedRef, null);
+  const [supportedAlgorithms, setSupportedAlgorithms] = useMountedState(mountedRef, null);
+  const [computingAudioHash, setComputingAudioHash] = useMountedState(mountedRef, false);
+  const [computingImageHash, setComputingImageHash] = useMountedState(mountedRef, false);
+  const [computingSimilarity, setComputingSimilarity] = useMountedState(mountedRef, false);
+  const [perceptualContentIdA, setPerceptualContentIdA] = useMountedState(mountedRef, '');
+  const [perceptualContentIdB, setPerceptualContentIdB] = useMountedState(mountedRef, '');
+  const [perceptualThreshold, setPerceptualThreshold] = useMountedState(mountedRef, 0.7);
+  const [findSimilarContentId, setFindSimilarContentId] = useMountedState(mountedRef, '');
+  const [findSimilarMinConfidence, setFindSimilarMinConfidence] = useMountedState(mountedRef, 0.7);
+  const [findSimilarMaxResults, setFindSimilarMaxResults] = useMountedState(mountedRef, 10);
+  const [textSimilarityA, setTextSimilarityA] = useMountedState(mountedRef, '');
+  const [textSimilarityB, setTextSimilarityB] = useMountedState(mountedRef, '');
   const [perceptualSimilarityResult, setPerceptualSimilarityResult] =
-    useState(null);
-  const [findSimilarResult, setFindSimilarResult] = useState(null);
-  const [textSimilarityResult, setTextSimilarityResult] = useState(null);
+    useMountedState(mountedRef, null);
+  const [findSimilarResult, setFindSimilarResult] = useMountedState(mountedRef, null);
+  const [textSimilarityResult, setTextSimilarityResult] = useMountedState(mountedRef, null);
   const [computingPerceptualSimilarity, setComputingPerceptualSimilarity] =
-    useState(false);
-  const [findingSimilarContent, setFindingSimilarContent] = useState(false);
-  const [computingTextSimilarity, setComputingTextSimilarity] = useState(false);
-  const [exportContentIds, setExportContentIds] = useState('');
-  const [includeLinks, setIncludeLinks] = useState(true);
-  const [importPackage, setImportPackage] = useState('');
-  const [conflictStrategy, setConflictStrategy] = useState('Merge');
-  const [dryRun, setDryRun] = useState(false);
-  const [exportResult, setExportResult] = useState(null);
-  const [importResult, setImportResult] = useState(null);
-  const [conflictAnalysis, setConflictAnalysis] = useState(null);
-  const [availableStrategies, setAvailableStrategies] = useState(null);
-  const [exportingMetadata, setExportingMetadata] = useState(false);
-  const [importingMetadata, setImportingMetadata] = useState(false);
-  const [analyzingConflicts, setAnalyzingConflicts] = useState(false);
-  const [retrievalResult, setRetrievalResult] = useState(null);
-  const [batchRetrievalResult, setBatchRetrievalResult] = useState(null);
-  const [queryResult, setQueryResult] = useState(null);
+    useMountedState(mountedRef, false);
+  const [findingSimilarContent, setFindingSimilarContent] = useMountedState(mountedRef, false);
+  const [computingTextSimilarity, setComputingTextSimilarity] = useMountedState(mountedRef, false);
+  const [exportContentIds, setExportContentIds] = useMountedState(mountedRef, '');
+  const [includeLinks, setIncludeLinks] = useMountedState(mountedRef, true);
+  const [importPackage, setImportPackage] = useMountedState(mountedRef, '');
+  const [conflictStrategy, setConflictStrategy] = useMountedState(mountedRef, 'Merge');
+  const [dryRun, setDryRun] = useMountedState(mountedRef, false);
+  const [exportResult, setExportResult] = useMountedState(mountedRef, null);
+  const [importResult, setImportResult] = useMountedState(mountedRef, null);
+  const [conflictAnalysis, setConflictAnalysis] = useMountedState(mountedRef, null);
+  const [availableStrategies, setAvailableStrategies] = useMountedState(mountedRef, null);
+  const [exportingMetadata, setExportingMetadata] = useMountedState(mountedRef, false);
+  const [importingMetadata, setImportingMetadata] = useMountedState(mountedRef, false);
+  const [analyzingConflicts, setAnalyzingConflicts] = useMountedState(mountedRef, false);
+  const [retrievalResult, setRetrievalResult] = useMountedState(mountedRef, null);
+  const [batchRetrievalResult, setBatchRetrievalResult] = useMountedState(mountedRef, null);
+  const [queryResult, setQueryResult] = useMountedState(mountedRef, null);
   const [descriptorVerificationResult, setDescriptorVerificationResult] =
-    useState(null);
-  const [retrievalStats, setRetrievalStats] = useState(null);
-  const [retrieveContentId, setRetrieveContentId] = useState('');
-  const [batchRetrieveContentIds, setBatchRetrieveContentIds] = useState('');
-  const [queryDomain, setQueryDomain] = useState('audio');
-  const [queryType, setQueryType] = useState('');
-  const [queryMaxResults, setQueryMaxResults] = useState(50);
-  const [verifyDescriptor, setVerifyDescriptor] = useState('');
-  const [bypassCache, setBypassCache] = useState(false);
-  const [retrievingDescriptor, setRetrievingDescriptor] = useState(false);
-  const [retrievingBatch, setRetrievingBatch] = useState(false);
-  const [queryingDescriptors, setQueryingDescriptors] = useState(false);
-  const [verifyingDescriptor, setVerifyingDescriptor] = useState(false);
-  const [loadingRetrievalStats, setLoadingRetrievalStats] = useState(false);
-  const [mediaCoreDashboard, setMediaCoreDashboard] = useState(null);
-  const [contentRegistryStats, setContentRegistryStats] = useState(null);
-  const [descriptorStats, setDescriptorStats] = useState(null);
-  const [fuzzyMatchingStats, setFuzzyMatchingStats] = useState(null);
-  const [ipldMappingStats, setIpldMappingStats] = useState(null);
-  const [perceptualHashingStats, setPerceptualHashingStats] = useState(null);
+    useMountedState(mountedRef, null);
+  const [retrievalStats, setRetrievalStats] = useMountedState(mountedRef, null);
+  const [retrieveContentId, setRetrieveContentId] = useMountedState(mountedRef, '');
+  const [batchRetrieveContentIds, setBatchRetrieveContentIds] = useMountedState(mountedRef, '');
+  const [queryDomain, setQueryDomain] = useMountedState(mountedRef, 'audio');
+  const [queryType, setQueryType] = useMountedState(mountedRef, '');
+  const [queryMaxResults, setQueryMaxResults] = useMountedState(mountedRef, 50);
+  const [verifyDescriptor, setVerifyDescriptor] = useMountedState(mountedRef, '');
+  const [bypassCache, setBypassCache] = useMountedState(mountedRef, false);
+  const [retrievingDescriptor, setRetrievingDescriptor] = useMountedState(mountedRef, false);
+  const [retrievingBatch, setRetrievingBatch] = useMountedState(mountedRef, false);
+  const [queryingDescriptors, setQueryingDescriptors] = useMountedState(mountedRef, false);
+  const [verifyingDescriptor, setVerifyingDescriptor] = useMountedState(mountedRef, false);
+  const [loadingRetrievalStats, setLoadingRetrievalStats] = useMountedState(mountedRef, false);
+  const [mediaCoreDashboard, setMediaCoreDashboard] = useMountedState(mountedRef, null);
+  const [contentRegistryStats, setContentRegistryStats] = useMountedState(mountedRef, null);
+  const [descriptorStats, setDescriptorStats] = useMountedState(mountedRef, null);
+  const [fuzzyMatchingStats, setFuzzyMatchingStats] = useMountedState(mountedRef, null);
+  const [ipldMappingStats, setIpldMappingStats] = useMountedState(mountedRef, null);
+  const [perceptualHashingStats, setPerceptualHashingStats] = useMountedState(mountedRef, null);
   const [metadataPortabilityStats, setMetadataPortabilityStats] =
-    useState(null);
-  const [contentPublishingStats, setContentPublishingStats] = useState(null);
-  const [loadingDashboard, setLoadingDashboard] = useState(false);
-  const [loadingRegistryStats, setLoadingRegistryStats] = useState(false);
-  const [loadingDescriptorStats, setLoadingDescriptorStats] = useState(false);
-  const [loadingFuzzyStats, setLoadingFuzzyStats] = useState(false);
-  const [loadingIpldStats, setLoadingIpldStats] = useState(false);
-  const [loadingPerceptualStats, setLoadingPerceptualStats] = useState(false);
-  const [loadingPortabilityStats, setLoadingPortabilityStats] = useState(false);
-  const [loadingPublishingStats, setLoadingPublishingStats] = useState(false);
+    useMountedState(mountedRef, null);
+  const [contentPublishingStats, setContentPublishingStats] = useMountedState(mountedRef, null);
+  const [loadingDashboard, setLoadingDashboard] = useMountedState(mountedRef, false);
+  const [loadingRegistryStats, setLoadingRegistryStats] = useMountedState(mountedRef, false);
+  const [loadingDescriptorStats, setLoadingDescriptorStats] = useMountedState(mountedRef, false);
+  const [loadingFuzzyStats, setLoadingFuzzyStats] = useMountedState(mountedRef, false);
+  const [loadingIpldStats, setLoadingIpldStats] = useMountedState(mountedRef, false);
+  const [loadingPerceptualStats, setLoadingPerceptualStats] = useMountedState(mountedRef, false);
+  const [loadingPortabilityStats, setLoadingPortabilityStats] = useMountedState(mountedRef, false);
+  const [loadingPublishingStats, setLoadingPublishingStats] = useMountedState(mountedRef, false);
 
   // PodCore DHT states
-  const [podToPublish, setPodToPublish] = useState('');
-  const [publishingPod, setPublishingPod] = useState(false);
-  const [podPublishingResult, setPodPublishingResult] = useState(null);
-  const [podMetadataToRetrieve, setPodMetadataToRetrieve] = useState('');
-  const [retrievingPodMetadata, setRetrievingPodMetadata] = useState(false);
-  const [podMetadataResult, setPodMetadataResult] = useState(null);
-  const [podToUnpublish, setPodToUnpublish] = useState('');
-  const [unpublishingPod, setUnpublishingPod] = useState(false);
-  const [podUnpublishResult, setPodUnpublishResult] = useState(null);
-  const [podPublishingStats, setPodPublishingStats] = useState(null);
-  const [loadingPodStats, setLoadingPodStats] = useState(false);
+  const [podToPublish, setPodToPublish] = useMountedState(mountedRef, '');
+  const [publishingPod, setPublishingPod] = useMountedState(mountedRef, false);
+  const [podPublishingResult, setPodPublishingResult] = useMountedState(mountedRef, null);
+  const [podMetadataToRetrieve, setPodMetadataToRetrieve] = useMountedState(mountedRef, '');
+  const [retrievingPodMetadata, setRetrievingPodMetadata] = useMountedState(mountedRef, false);
+  const [podMetadataResult, setPodMetadataResult] = useMountedState(mountedRef, null);
+  const [podToUnpublish, setPodToUnpublish] = useMountedState(mountedRef, '');
+  const [unpublishingPod, setUnpublishingPod] = useMountedState(mountedRef, false);
+  const [podUnpublishResult, setPodUnpublishResult] = useMountedState(mountedRef, null);
+  const [podPublishingStats, setPodPublishingStats] = useMountedState(mountedRef, null);
+  const [loadingPodStats, setLoadingPodStats] = useMountedState(mountedRef, false);
 
   // Pod Membership states
-  const [membershipRecord, setMembershipRecord] = useState('');
-  const [publishingMembership, setPublishingMembership] = useState(false);
-  const [membershipPublishResult, setMembershipPublishResult] = useState(null);
-  const [membershipPodId, setMembershipPodId] = useState('');
-  const [membershipPeerId, setMembershipPeerId] = useState('');
-  const [gettingMembership, setGettingMembership] = useState(false);
-  const [membershipResult, setMembershipResult] = useState(null);
+  const [membershipRecord, setMembershipRecord] = useMountedState(mountedRef, '');
+  const [publishingMembership, setPublishingMembership] = useMountedState(mountedRef, false);
+  const [membershipPublishResult, setMembershipPublishResult] = useMountedState(mountedRef, null);
+  const [membershipPodId, setMembershipPodId] = useMountedState(mountedRef, '');
+  const [membershipPeerId, setMembershipPeerId] = useMountedState(mountedRef, '');
+  const [gettingMembership, setGettingMembership] = useMountedState(mountedRef, false);
+  const [membershipResult, setMembershipResult] = useMountedState(mountedRef, null);
   const [verifyingMembershipStatus, setVerifyingMembershipStatus] =
-    useState(false);
-  const [membershipVerification, setMembershipVerification] = useState(null);
-  const [banningMember, setBanningMember] = useState(false);
-  const [banReason, setBanReason] = useState('');
-  const [banResult, setBanResult] = useState(null);
-  const [changingRole, setChangingRole] = useState(false);
-  const [newRole, setNewRole] = useState('member');
-  const [roleChangeResult, setRoleChangeResult] = useState(null);
-  const [membershipStats, setMembershipStats] = useState(null);
-  const [loadingMembershipStats, setLoadingMembershipStats] = useState(false);
+    useMountedState(mountedRef, false);
+  const [membershipVerification, setMembershipVerification] = useMountedState(mountedRef, null);
+  const [banningMember, setBanningMember] = useMountedState(mountedRef, false);
+  const [banReason, setBanReason] = useMountedState(mountedRef, '');
+  const [banResult, setBanResult] = useMountedState(mountedRef, null);
+  const [changingRole, setChangingRole] = useMountedState(mountedRef, false);
+  const [newRole, setNewRole] = useMountedState(mountedRef, 'member');
+  const [roleChangeResult, setRoleChangeResult] = useMountedState(mountedRef, null);
+  const [membershipStats, setMembershipStats] = useMountedState(mountedRef, null);
+  const [loadingMembershipStats, setLoadingMembershipStats] = useMountedState(mountedRef, false);
 
   // Pod Membership Verification states
-  const [verifyPodId, setVerifyPodId] = useState('');
-  const [verifyPeerId, setVerifyPeerId] = useState('');
-  const [verifyingMembership, setVerifyingMembership] = useState(false);
+  const [verifyPodId, setVerifyPodId] = useMountedState(mountedRef, '');
+  const [verifyPeerId, setVerifyPeerId] = useMountedState(mountedRef, '');
+  const [verifyingMembership, setVerifyingMembership] = useMountedState(mountedRef, false);
   const [membershipVerificationResult, setMembershipVerificationResult] =
-    useState(null);
+    useMountedState(mountedRef, null);
   const [membershipMessageToVerify, setMembershipMessageToVerify] =
-    useState('');
-  const [verifyingMessage, setVerifyingMessage] = useState(false);
+    useMountedState(mountedRef, '');
+  const [verifyingMessage, setVerifyingMessage] = useMountedState(mountedRef, false);
   const [messageVerificationResult, setMessageVerificationResult] =
-    useState(null);
-  const [roleCheckPodId, setRoleCheckPodId] = useState('');
-  const [roleCheckPeerId, setRoleCheckPeerId] = useState('');
-  const [requiredRole, setRequiredRole] = useState('member');
-  const [checkingRole, setCheckingRole] = useState(false);
-  const [roleCheckResult, setRoleCheckResult] = useState(null);
-  const [verificationStats, setVerificationStats] = useState(null);
+    useMountedState(mountedRef, null);
+  const [roleCheckPodId, setRoleCheckPodId] = useMountedState(mountedRef, '');
+  const [roleCheckPeerId, setRoleCheckPeerId] = useMountedState(mountedRef, '');
+  const [requiredRole, setRequiredRole] = useMountedState(mountedRef, 'member');
+  const [checkingRole, setCheckingRole] = useMountedState(mountedRef, false);
+  const [roleCheckResult, setRoleCheckResult] = useMountedState(mountedRef, null);
+  const [verificationStats, setVerificationStats] = useMountedState(mountedRef, null);
   const [loadingVerificationStats, setLoadingVerificationStats] =
-    useState(false);
+    useMountedState(mountedRef, false);
 
   // Pod Discovery states
-  const [podToRegister, setPodToRegister] = useState('');
-  const [registeringPod, setRegisteringPod] = useState(false);
-  const [podRegistrationResult, setPodRegistrationResult] = useState(null);
-  const [podToUnregister, setPodToUnregister] = useState('');
-  const [unregisteringPod, setUnregisteringPod] = useState(false);
-  const [podUnregistrationResult, setPodUnregistrationResult] = useState(null);
-  const [discoverByName, setDiscoverByName] = useState('');
-  const [discoveringByName, setDiscoveringByName] = useState(false);
-  const [nameDiscoveryResult, setNameDiscoveryResult] = useState(null);
-  const [discoverByTag, setDiscoverByTag] = useState('');
-  const [discoveringByTag, setDiscoveringByTag] = useState(false);
-  const [tagDiscoveryResult, setTagDiscoveryResult] = useState(null);
-  const [discoverTags, setDiscoverTags] = useState('');
-  const [discoveringByTags, setDiscoveringByTags] = useState(false);
-  const [tagsDiscoveryResult, setTagsDiscoveryResult] = useState(null);
-  const [discoverLimit, setDiscoverLimit] = useState(50);
-  const [discoveringAll, setDiscoveringAll] = useState(false);
-  const [allDiscoveryResult, setAllDiscoveryResult] = useState(null);
-  const [discoverByContent, setDiscoverByContent] = useState('');
-  const [discoveringByContent, setDiscoveringByContent] = useState(false);
-  const [contentDiscoveryResult, setContentDiscoveryResult] = useState(null);
-  const [discoveryStats, setDiscoveryStats] = useState(null);
-  const [loadingDiscoveryStats, setLoadingDiscoveryStats] = useState(false);
+  const [podToRegister, setPodToRegister] = useMountedState(mountedRef, '');
+  const [registeringPod, setRegisteringPod] = useMountedState(mountedRef, false);
+  const [podRegistrationResult, setPodRegistrationResult] = useMountedState(mountedRef, null);
+  const [podToUnregister, setPodToUnregister] = useMountedState(mountedRef, '');
+  const [unregisteringPod, setUnregisteringPod] = useMountedState(mountedRef, false);
+  const [podUnregistrationResult, setPodUnregistrationResult] = useMountedState(mountedRef, null);
+  const [discoverByName, setDiscoverByName] = useMountedState(mountedRef, '');
+  const [discoveringByName, setDiscoveringByName] = useMountedState(mountedRef, false);
+  const [nameDiscoveryResult, setNameDiscoveryResult] = useMountedState(mountedRef, null);
+  const [discoverByTag, setDiscoverByTag] = useMountedState(mountedRef, '');
+  const [discoveringByTag, setDiscoveringByTag] = useMountedState(mountedRef, false);
+  const [tagDiscoveryResult, setTagDiscoveryResult] = useMountedState(mountedRef, null);
+  const [discoverTags, setDiscoverTags] = useMountedState(mountedRef, '');
+  const [discoveringByTags, setDiscoveringByTags] = useMountedState(mountedRef, false);
+  const [tagsDiscoveryResult, setTagsDiscoveryResult] = useMountedState(mountedRef, null);
+  const [discoverLimit, setDiscoverLimit] = useMountedState(mountedRef, 50);
+  const [discoveringAll, setDiscoveringAll] = useMountedState(mountedRef, false);
+  const [allDiscoveryResult, setAllDiscoveryResult] = useMountedState(mountedRef, null);
+  const [discoverByContent, setDiscoverByContent] = useMountedState(mountedRef, '');
+  const [discoveringByContent, setDiscoveringByContent] = useMountedState(mountedRef, false);
+  const [contentDiscoveryResult, setContentDiscoveryResult] = useMountedState(mountedRef, null);
+  const [discoveryStats, setDiscoveryStats] = useMountedState(mountedRef, null);
+  const [loadingDiscoveryStats, setLoadingDiscoveryStats] = useMountedState(mountedRef, false);
 
   // Pod Join/Leave states
-  const [joinRequestData, setJoinRequestData] = useState('');
-  const [requestingJoin, setRequestingJoin] = useState(false);
-  const [joinRequestResult, setJoinRequestResult] = useState(null);
-  const [acceptanceData, setAcceptanceData] = useState('');
-  const [acceptingJoin, setAcceptingJoin] = useState(false);
-  const [acceptanceResult, setAcceptanceResult] = useState(null);
-  const [leaveRequestData, setLeaveRequestData] = useState('');
-  const [requestingLeave, setRequestingLeave] = useState(false);
-  const [leaveRequestResult, setLeaveRequestResult] = useState(null);
-  const [acceptingLeave, setAcceptingLeave] = useState(false);
-  const [leaveAcceptanceResult, setLeaveAcceptanceResult] = useState(null);
-  const [pendingPodId, setPendingPodId] = useState('');
-  const [loadingPendingRequests, setLoadingPendingRequests] = useState(false);
-  const [pendingJoinRequests, setPendingJoinRequests] = useState(null);
-  const [pendingLeaveRequests, setPendingLeaveRequests] = useState(null);
+  const [joinRequestData, setJoinRequestData] = useMountedState(mountedRef, '');
+  const [requestingJoin, setRequestingJoin] = useMountedState(mountedRef, false);
+  const [joinRequestResult, setJoinRequestResult] = useMountedState(mountedRef, null);
+  const [acceptanceData, setAcceptanceData] = useMountedState(mountedRef, '');
+  const [acceptingJoin, setAcceptingJoin] = useMountedState(mountedRef, false);
+  const [acceptanceResult, setAcceptanceResult] = useMountedState(mountedRef, null);
+  const [leaveRequestData, setLeaveRequestData] = useMountedState(mountedRef, '');
+  const [requestingLeave, setRequestingLeave] = useMountedState(mountedRef, false);
+  const [leaveRequestResult, setLeaveRequestResult] = useMountedState(mountedRef, null);
+  const [acceptingLeave, setAcceptingLeave] = useMountedState(mountedRef, false);
+  const [leaveAcceptanceResult, setLeaveAcceptanceResult] = useMountedState(mountedRef, null);
+  const [pendingPodId, setPendingPodId] = useMountedState(mountedRef, '');
+  const [loadingPendingRequests, setLoadingPendingRequests] = useMountedState(mountedRef, false);
+  const [pendingJoinRequests, setPendingJoinRequests] = useMountedState(mountedRef, null);
+  const [pendingLeaveRequests, setPendingLeaveRequests] = useMountedState(mountedRef, null);
 
   // Pod Message Routing states
-  const [routeMessageData, setRouteMessageData] = useState('');
-  const [routingMessage, setRoutingMessage] = useState(false);
-  const [routingResult, setRoutingResult] = useState(null);
-  const [routeToPeersMessage, setRouteToPeersMessage] = useState('');
-  const [routeToPeersIds, setRouteToPeersIds] = useState('');
-  const [routingToPeers, setRoutingToPeers] = useState(false);
-  const [routingToPeersResult, setRoutingToPeersResult] = useState(null);
-  const [routingStats, setRoutingStats] = useState(null);
-  const [loadingRoutingStats, setLoadingRoutingStats] = useState(false);
-  const [checkMessageId, setCheckMessageId] = useState('');
-  const [checkPodId, setCheckPodId] = useState('');
-  const [checkingMessageSeen, setCheckingMessageSeen] = useState(false);
-  const [messageSeenResult, setMessageSeenResult] = useState(null);
+  const [routeMessageData, setRouteMessageData] = useMountedState(mountedRef, '');
+  const [routingMessage, setRoutingMessage] = useMountedState(mountedRef, false);
+  const [routingResult, setRoutingResult] = useMountedState(mountedRef, null);
+  const [routeToPeersMessage, setRouteToPeersMessage] = useMountedState(mountedRef, '');
+  const [routeToPeersIds, setRouteToPeersIds] = useMountedState(mountedRef, '');
+  const [routingToPeers, setRoutingToPeers] = useMountedState(mountedRef, false);
+  const [routingToPeersResult, setRoutingToPeersResult] = useMountedState(mountedRef, null);
+  const [routingStats, setRoutingStats] = useMountedState(mountedRef, null);
+  const [loadingRoutingStats, setLoadingRoutingStats] = useMountedState(mountedRef, false);
+  const [checkMessageId, setCheckMessageId] = useMountedState(mountedRef, '');
+  const [checkPodId, setCheckPodId] = useMountedState(mountedRef, '');
+  const [checkingMessageSeen, setCheckingMessageSeen] = useMountedState(mountedRef, false);
+  const [messageSeenResult, setMessageSeenResult] = useMountedState(mountedRef, null);
 
   // Pod Message Signing states
-  const [messageToSign, setMessageToSign] = useState('');
-  const [privateKeyForSigning, setPrivateKeyForSigning] = useState('');
-  const [signingMessage, setSigningMessage] = useState(false);
-  const [signedMessageResult, setSignedMessageResult] = useState(null);
-  const [messageToVerify, setMessageToVerify] = useState('');
-  const [verifyingSignature, setVerifyingSignature] = useState(false);
-  const [verificationResult, setVerificationResult] = useState(null);
-  const [generatingKeyPair, setGeneratingKeyPair] = useState(false);
-  const [generatedKeyPair, setGeneratedKeyPair] = useState(null);
-  const [signingStats, setSigningStats] = useState(null);
-  const [loadingSigningStats, setLoadingSigningStats] = useState(false);
+  const [messageToSign, setMessageToSign] = useMountedState(mountedRef, '');
+  const [privateKeyForSigning, setPrivateKeyForSigning] = useMountedState(mountedRef, '');
+  const [signingMessage, setSigningMessage] = useMountedState(mountedRef, false);
+  const [signedMessageResult, setSignedMessageResult] = useMountedState(mountedRef, null);
+  const [messageToVerify, setMessageToVerify] = useMountedState(mountedRef, '');
+  const [verifyingSignature, setVerifyingSignature] = useMountedState(mountedRef, false);
+  const [verificationResult, setVerificationResult] = useMountedState(mountedRef, null);
+  const [generatingKeyPair, setGeneratingKeyPair] = useMountedState(mountedRef, false);
+  const [generatedKeyPair, setGeneratedKeyPair] = useMountedState(mountedRef, null);
+  const [signingStats, setSigningStats] = useMountedState(mountedRef, null);
+  const [loadingSigningStats, setLoadingSigningStats] = useMountedState(mountedRef, false);
 
   // Pod Message Storage states
-  const [storageStats, setStorageStats] = useState(null);
-  const [storageStatsLoading, setStorageStatsLoading] = useState(false);
-  const [cleanupLoading, setCleanupLoading] = useState(false);
-  const [rebuildIndexLoading, setRebuildIndexLoading] = useState(false);
-  const [vacuumLoading, setVacuumLoading] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState(null);
-  const [searchLoading, setSearchLoading] = useState(false);
+  const [storageStats, setStorageStats] = useMountedState(mountedRef, null);
+  const [storageStatsLoading, setStorageStatsLoading] = useMountedState(mountedRef, false);
+  const [cleanupLoading, setCleanupLoading] = useMountedState(mountedRef, false);
+  const [rebuildIndexLoading, setRebuildIndexLoading] = useMountedState(mountedRef, false);
+  const [vacuumLoading, setVacuumLoading] = useMountedState(mountedRef, false);
+  const [searchQuery, setSearchQuery] = useMountedState(mountedRef, '');
+  const [searchResults, setSearchResults] = useMountedState(mountedRef, null);
+  const [searchLoading, setSearchLoading] = useMountedState(mountedRef, false);
 
   // Pod Message Backfill states
-  const [backfillStats, setBackfillStats] = useState(null);
-  const [backfillStatsLoading, setBackfillStatsLoading] = useState(false);
-  const [syncBackfillLoading, setSyncBackfillLoading] = useState(false);
-  const [lastSeenTimestamps, setLastSeenTimestamps] = useState(null);
-  const [backfillPodId, setBackfillPodId] = useState('');
+  const [backfillStats, setBackfillStats] = useMountedState(mountedRef, null);
+  const [backfillStatsLoading, setBackfillStatsLoading] = useMountedState(mountedRef, false);
+  const [syncBackfillLoading, setSyncBackfillLoading] = useMountedState(mountedRef, false);
+  const [lastSeenTimestamps, setLastSeenTimestamps] = useMountedState(mountedRef, null);
+  const [backfillPodId, setBackfillPodId] = useMountedState(mountedRef, '');
 
   // Pod Channel Management states
-  const [channels, setChannels] = useState([]);
-  const [channelsLoading, setChannelsLoading] = useState(false);
-  const [createChannelLoading, setCreateChannelLoading] = useState(false);
-  const [updateChannelLoading, setUpdateChannelLoading] = useState(false);
-  const [deleteChannelLoading, setDeleteChannelLoading] = useState(false);
-  const [channelPodId, setChannelPodId] = useState('');
-  const [newChannelName, setNewChannelName] = useState('');
-  const [newChannelKind, setNewChannelKind] = useState('General');
-  const [editingChannel, setEditingChannel] = useState(null);
-  const [editChannelName, setEditChannelName] = useState('');
+  const [channels, setChannels] = useMountedState(mountedRef, []);
+  const [channelsLoading, setChannelsLoading] = useMountedState(mountedRef, false);
+  const [createChannelLoading, setCreateChannelLoading] = useMountedState(mountedRef, false);
+  const [updateChannelLoading, setUpdateChannelLoading] = useMountedState(mountedRef, false);
+  const [deleteChannelLoading, setDeleteChannelLoading] = useMountedState(mountedRef, false);
+  const [channelPodId, setChannelPodId] = useMountedState(mountedRef, '');
+  const [newChannelName, setNewChannelName] = useMountedState(mountedRef, '');
+  const [newChannelKind, setNewChannelKind] = useMountedState(mountedRef, 'General');
+  const [editingChannel, setEditingChannel] = useMountedState(mountedRef, null);
+  const [editChannelName, setEditChannelName] = useMountedState(mountedRef, '');
 
   // Pod Content Linking states
-  const [contentId, setContentId] = useState('');
-  const [contentValidation, setContentValidation] = useState(null);
-  const [contentMetadata, setContentMetadata] = useState(null);
-  const [contentSearchQuery, setContentSearchQuery] = useState('');
-  const [contentSearchResults, setContentSearchResults] = useState([]);
+  const [contentId, setContentId] = useMountedState(mountedRef, '');
+  const [contentValidation, setContentValidation] = useMountedState(mountedRef, null);
+  const [contentMetadata, setContentMetadata] = useMountedState(mountedRef, null);
+  const [contentSearchQuery, setContentSearchQuery] = useMountedState(mountedRef, '');
+  const [contentSearchResults, setContentSearchResults] = useMountedState(mountedRef, []);
   const [contentValidationLoading, setContentValidationLoading] =
-    useState(false);
-  const [contentMetadataLoading, setContentMetadataLoading] = useState(false);
-  const [contentSearchLoading, setContentSearchLoading] = useState(false);
-  const [createPodLoading, setCreatePodLoading] = useState(false);
-  const [newPodName, setNewPodName] = useState('');
-  const [newPodVisibility, setNewPodVisibility] = useState('Unlisted');
+    useMountedState(mountedRef, false);
+  const [contentMetadataLoading, setContentMetadataLoading] = useMountedState(mountedRef, false);
+  const [contentSearchLoading, setContentSearchLoading] = useMountedState(mountedRef, false);
+  const [createPodLoading, setCreatePodLoading] = useMountedState(mountedRef, false);
+  const [newPodName, setNewPodName] = useMountedState(mountedRef, '');
+  const [newPodVisibility, setNewPodVisibility] = useMountedState(mountedRef, 'Unlisted');
 
   // Pod Opinion Management states
-  const [opinionPodId, setOpinionPodId] = useState('');
-  const [opinionContentId, setOpinionContentId] = useState('');
-  const [opinionVariantHash, setOpinionVariantHash] = useState('');
-  const [opinionScore, setOpinionScore] = useState(5);
-  const [opinionNote, setOpinionNote] = useState('');
-  const [opinions, setOpinions] = useState([]);
-  const [opinionStatistics, setOpinionStatistics] = useState(null);
-  const [publishOpinionLoading, setPublishOpinionLoading] = useState(false);
-  const [getOpinionsLoading, setGetOpinionsLoading] = useState(false);
-  const [getStatsLoading, setGetStatsLoading] = useState(false);
-  const [refreshOpinionsLoading, setRefreshOpinionsLoading] = useState(false);
+  const [opinionPodId, setOpinionPodId] = useMountedState(mountedRef, '');
+  const [opinionContentId, setOpinionContentId] = useMountedState(mountedRef, '');
+  const [opinionVariantHash, setOpinionVariantHash] = useMountedState(mountedRef, '');
+  const [opinionScore, setOpinionScore] = useMountedState(mountedRef, 5);
+  const [opinionNote, setOpinionNote] = useMountedState(mountedRef, '');
+  const [opinions, setOpinions] = useMountedState(mountedRef, []);
+  const [opinionStatistics, setOpinionStatistics] = useMountedState(mountedRef, null);
+  const [publishOpinionLoading, setPublishOpinionLoading] = useMountedState(mountedRef, false);
+  const [getOpinionsLoading, setGetOpinionsLoading] = useMountedState(mountedRef, false);
+  const [getStatsLoading, setGetStatsLoading] = useMountedState(mountedRef, false);
+  const [refreshOpinionsLoading, setRefreshOpinionsLoading] = useMountedState(mountedRef, false);
 
   // Pod Opinion Aggregation states
-  const [aggregatedOpinions, setAggregatedOpinions] = useState(null);
-  const [memberAffinities, setMemberAffinities] = useState({});
-  const [consensusRecommendations, setConsensusRecommendations] = useState([]);
-  const [getAggregatedLoading, setGetAggregatedLoading] = useState(false);
-  const [getAffinitiesLoading, setGetAffinitiesLoading] = useState(false);
+  const [aggregatedOpinions, setAggregatedOpinions] = useMountedState(mountedRef, null);
+  const [memberAffinities, setMemberAffinities] = useMountedState(mountedRef, {});
+  const [consensusRecommendations, setConsensusRecommendations] = useMountedState(mountedRef, []);
+  const [getAggregatedLoading, setGetAggregatedLoading] = useMountedState(mountedRef, false);
+  const [getAffinitiesLoading, setGetAffinitiesLoading] = useMountedState(mountedRef, false);
   const [getRecommendationsLoading, setGetRecommendationsLoading] =
-    useState(false);
-  const [updateAffinitiesLoading, setUpdateAffinitiesLoading] = useState(false);
-  const [publishContentId, setPublishContentId] = useState('');
-  const [publishCodec, setPublishCodec] = useState('mp3');
-  const [publishSize, setPublishSize] = useState(1_024);
-  const [batchContentIds, setBatchContentIds] = useState('');
-  const [updateTargetId, setUpdateTargetId] = useState('');
-  const [updateCodec, setUpdateCodec] = useState('');
-  const [updateSize, setUpdateSize] = useState('');
-  const [updateConfidence, setUpdateConfidence] = useState('');
-  const [publishResult, setPublishResult] = useState(null);
-  const [batchPublishResult, setBatchPublishResult] = useState(null);
-  const [updateResult, setUpdateResult] = useState(null);
-  const [republishResult, setRepublishResult] = useState(null);
-  const [publishingStats, setPublishingStats] = useState(null);
-  const [publishingDescriptor, setPublishingDescriptor] = useState(false);
-  const [publishingBatch, setPublishingBatch] = useState(false);
-  const [updatingDescriptor, setUpdatingDescriptor] = useState(false);
-  const [republishing, setRepublishing] = useState(false);
-  const [loadingStats, setLoadingStats] = useState(false);
+    useMountedState(mountedRef, false);
+  const [updateAffinitiesLoading, setUpdateAffinitiesLoading] = useMountedState(mountedRef, false);
+  const [publishContentId, setPublishContentId] = useMountedState(mountedRef, '');
+  const [publishCodec, setPublishCodec] = useMountedState(mountedRef, 'mp3');
+  const [publishSize, setPublishSize] = useMountedState(mountedRef, 1_024);
+  const [batchContentIds, setBatchContentIds] = useMountedState(mountedRef, '');
+  const [updateTargetId, setUpdateTargetId] = useMountedState(mountedRef, '');
+  const [updateCodec, setUpdateCodec] = useMountedState(mountedRef, '');
+  const [updateSize, setUpdateSize] = useMountedState(mountedRef, '');
+  const [updateConfidence, setUpdateConfidence] = useMountedState(mountedRef, '');
+  const [publishResult, setPublishResult] = useMountedState(mountedRef, null);
+  const [batchPublishResult, setBatchPublishResult] = useMountedState(mountedRef, null);
+  const [updateResult, setUpdateResult] = useMountedState(mountedRef, null);
+  const [republishResult, setRepublishResult] = useMountedState(mountedRef, null);
+  const [publishingStats, setPublishingStats] = useMountedState(mountedRef, null);
+  const [publishingDescriptor, setPublishingDescriptor] = useMountedState(mountedRef, false);
+  const [publishingBatch, setPublishingBatch] = useMountedState(mountedRef, false);
+  const [updatingDescriptor, setUpdatingDescriptor] = useMountedState(mountedRef, false);
+  const [republishing, setRepublishing] = useMountedState(mountedRef, false);
+  const [loadingStats, setLoadingStats] = useMountedState(mountedRef, false);
 
   const fetchStats = useCallback(async () => {
     try {

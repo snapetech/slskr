@@ -1,6 +1,7 @@
 import { fetchAlbumCompletion } from '../../lib/musicBrainz';
 import { toDisplayError } from '../../lib/errors';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useMountedRef } from '../../lib/useMountedRef';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Button,
   Header,
@@ -24,29 +25,56 @@ const AlbumCompletionPanel = ({ disabled }) => {
   const [albums, setAlbums] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const mountedRef = useMountedRef();
+  const requestIdRef = useRef(0);
 
   const loadAlbums = useCallback(async () => {
+    const requestId = ++requestIdRef.current;
     if (disabled) {
-      setAlbums([]);
+      if (mountedRef.current) setAlbums([]);
       return;
     }
 
+    if (!mountedRef.current) return;
     setLoading(true);
     setError(null);
 
     try {
       const response = await fetchAlbumCompletion();
-      setAlbums(response.data?.albums ?? []);
+      if (
+        !mountedRef.current ||
+        requestId !== requestIdRef.current
+      ) {
+        return;
+      }
+      setAlbums(
+        (Array.isArray(response.data?.albums) ? response.data.albums : []).map(
+          (album) => ({
+            ...album,
+            tracks: Array.isArray(album?.tracks) ? album.tracks : [],
+          }),
+        ),
+      );
     } catch (loadError) {
       console.error(loadError);
-      setError(toDisplayError(loadError, 'Unable to load album completion data'));
+      if (
+        mountedRef.current &&
+        requestId === requestIdRef.current
+      ) {
+        setError(toDisplayError(loadError, 'Unable to load album completion data'));
+      }
     } finally {
-      setLoading(false);
+      if (
+        mountedRef.current &&
+        requestId === requestIdRef.current
+      ) {
+        setLoading(false);
+      }
     }
   }, [disabled]);
 
   useEffect(() => {
-    loadAlbums();
+    void loadAlbums();
   }, [loadAlbums]);
 
   const albumCount = albums.length;

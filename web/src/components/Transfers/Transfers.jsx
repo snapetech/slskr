@@ -1,5 +1,6 @@
 import './Transfers.css';
 import * as autoReplaceLibrary from '../../lib/autoReplace';
+import { toDisplayError } from '../../lib/errors';
 import * as transfersLibrary from '../../lib/transfers';
 import { usePolling } from '../../lib/usePolling';
 import { LoaderSegment, PlaceholderSegment } from '../Shared';
@@ -10,8 +11,7 @@ import { toast } from 'react-toastify';
 
 const AUTO_REPLACE_THRESHOLD = 0; // 0% = exact match only (configurable on backend)
 
-const getErrorMessage = (error) =>
-  error?.response?.data ?? error?.message ?? `${error}`;
+const getErrorMessage = (error) => toDisplayError(error);
 
 const summarizeBulkFailures = ({ action, failures }) => {
   if (failures.length === 0) {
@@ -83,12 +83,25 @@ const Transfers = ({ runtimeProfile, direction, server }) => {
   const lastQueuePositionBatchAtRef = useRef(0);
   const queuePositionCacheRef = useRef(new Map());
   const queuePositionRequestsRef = useRef(new Set());
+  const mountedRef = useRef(false);
+  const modeRequestIdsRef = useRef({ autoReplace: 0, accelerated: 0 });
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      latestFetchIdRef.current += 1;
+      modeRequestIdsRef.current.autoReplace += 1;
+      modeRequestIdsRef.current.accelerated += 1;
+    };
+  }, []);
 
   const retrying = retryingSingle || bulkCounts.retry > 0;
   const cancelling = cancellingSingle || bulkCounts.cancel > 0;
   const removing = removingSingle || bulkCounts.remove > 0;
 
   const changeBulkCount = (action, delta) => {
+    if (!mountedRef.current) return;
     setBulkCounts((previousCounts) => ({
       ...previousCounts,
       [action]: Math.max(0, previousCounts[action] + delta),
@@ -129,6 +142,7 @@ const Transfers = ({ runtimeProfile, direction, server }) => {
   };
 
   const hideTransfers = (files, matches = () => true) => {
+    if (!mountedRef.current) return;
     const until = Date.now() + OPTIMISTIC_HIDE_MS;
 
     files.forEach((file) => {
@@ -150,7 +164,7 @@ const Transfers = ({ runtimeProfile, direction, server }) => {
 
     bulkQueueRunningRef.current = true;
 
-    while (bulkQueueRef.current.length > 0) {
+    while (bulkQueueRef.current.length > 0 && mountedRef.current) {
       const queuedOperation = bulkQueueRef.current.shift();
 
       try {
@@ -165,7 +179,7 @@ const Transfers = ({ runtimeProfile, direction, server }) => {
         changeBulkCount(queuedOperation.action, -1);
         queuedOperation.batch.remaining -= 1;
 
-        if (queuedOperation.batch.remaining === 0) {
+        if (mountedRef.current && queuedOperation.batch.remaining === 0) {
           summarizeBulkFailures({
             action: queuedOperation.batch.action,
             failures: queuedOperation.batch.failures,
@@ -261,11 +275,13 @@ const Transfers = ({ runtimeProfile, direction, server }) => {
           username: file.username,
         });
 
-        queuePositionCacheRef.current.set(key, {
-          placeInQueue: queueResponse.data,
-          updatedAt: Date.now(),
-        });
-        file.placeInQueue = queueResponse.data;
+        if (mountedRef.current) {
+          queuePositionCacheRef.current.set(key, {
+            placeInQueue: queueResponse.data,
+            updatedAt: Date.now(),
+          });
+          file.placeInQueue = queueResponse.data;
+        }
       } catch (error) {
         console.debug(
           'Failed to fetch queue position for',
@@ -281,6 +297,7 @@ const Transfers = ({ runtimeProfile, direction, server }) => {
   };
 
   const fetch = async () => {
+    if (!mountedRef.current) return;
     const fetchId = latestFetchIdRef.current + 1;
     latestFetchIdRef.current = fetchId;
 
@@ -292,12 +309,17 @@ const Transfers = ({ runtimeProfile, direction, server }) => {
 
       await refreshQueuePositions(response);
 
-      if (fetchId === latestFetchIdRef.current) {
+      if (
+        mountedRef.current &&
+        fetchId === latestFetchIdRef.current
+      ) {
         setTransfers(filterHiddenTransfers(response));
       }
     } catch (error) {
       console.error(error);
-      toast.error(getErrorMessage(error));
+      if (mountedRef.current) {
+        toast.error(getErrorMessage(error));
+      }
     }
   };
 
@@ -308,7 +330,9 @@ const Transfers = ({ runtimeProfile, direction, server }) => {
   usePolling(
     async () => {
       await fetch();
-      setConnecting(false);
+      if (mountedRef.current) {
+        setConnecting(false);
+      }
     },
     1_000,
     { resetKey: `${runtimeProfile}:${direction}` },
@@ -323,7 +347,7 @@ const Transfers = ({ runtimeProfile, direction, server }) => {
 
     try {
       if (!suppressStateChange) {
-        setRetryingSingle(true);
+        if (mountedRef.current) setRetryingSingle(true);
       }
 
       await transfersLibrary.download({
@@ -332,13 +356,13 @@ const Transfers = ({ runtimeProfile, direction, server }) => {
       });
     } catch (error) {
       console.error(error);
-      if (!suppressErrorToast) {
+      if (!suppressErrorToast && mountedRef.current) {
         toast.error(getErrorMessage(error));
       }
 
       throw error;
     } finally {
-      if (!suppressStateChange) {
+      if (!suppressStateChange && mountedRef.current) {
         setRetryingSingle(false);
       }
     }
@@ -373,19 +397,19 @@ const Transfers = ({ runtimeProfile, direction, server }) => {
 
     try {
       if (!suppressStateChange) {
-        setCancellingSingle(true);
+        if (mountedRef.current) setCancellingSingle(true);
       }
 
       await transfersLibrary.cancel({ direction, id, username });
     } catch (error) {
       console.error(error);
-      if (!suppressErrorToast) {
+      if (!suppressErrorToast && mountedRef.current) {
         toast.error(getErrorMessage(error));
       }
 
       throw error;
     } finally {
-      if (!suppressStateChange) {
+      if (!suppressStateChange && mountedRef.current) {
         setCancellingSingle(false);
       }
     }
@@ -417,7 +441,7 @@ const Transfers = ({ runtimeProfile, direction, server }) => {
 
     try {
       if (!suppressStateChange) {
-        setRemovingSingle(true);
+        if (mountedRef.current) setRemovingSingle(true);
       }
 
       await transfersLibrary.cancel({
@@ -429,13 +453,13 @@ const Transfers = ({ runtimeProfile, direction, server }) => {
       });
     } catch (error) {
       console.error(error);
-      if (!suppressErrorToast) {
+      if (!suppressErrorToast && mountedRef.current) {
         toast.error(getErrorMessage(error));
       }
 
       throw error;
     } finally {
-      if (!suppressStateChange) {
+      if (!suppressStateChange && mountedRef.current) {
         setRemovingSingle(false);
       }
     }
@@ -482,6 +506,7 @@ const Transfers = ({ runtimeProfile, direction, server }) => {
   };
 
   useEffect(() => {
+    let cancelled = false;
     const fetchDownloadModeStatus = async () => {
       if (direction !== 'download' || runtimeProfile === 'legacy') {
         return;
@@ -492,38 +517,54 @@ const Transfers = ({ runtimeProfile, direction, server }) => {
           autoReplaceLibrary.getAutoReplaceStatus(),
           transfersLibrary.getAcceleratedMode(),
         ]);
-        setAutoReplaceEnabled(autoReplaceStatus?.enabled ?? false);
-        setAcceleratedEnabled(acceleratedStatus?.enabled ?? false);
+        if (!cancelled && mountedRef.current) {
+          setAutoReplaceEnabled(autoReplaceStatus?.enabled ?? false);
+          setAcceleratedEnabled(acceleratedStatus?.enabled ?? false);
+        }
       } catch (error) {
-        console.error('Failed to fetch download mode status:', error);
+        if (!cancelled) {
+          console.error('Failed to fetch download mode status:', error);
+        }
       }
     };
 
-    fetchDownloadModeStatus();
+    void fetchDownloadModeStatus();
+    return () => {
+      cancelled = true;
+      modeRequestIdsRef.current.autoReplace += 1;
+      modeRequestIdsRef.current.accelerated += 1;
+    };
   }, [runtimeProfile, direction]);
 
   const handleAutoReplaceChange = async (enabled) => {
+    const requestId = ++modeRequestIdsRef.current.autoReplace;
     try {
       if (enabled) {
         await autoReplaceLibrary.enableAutoReplace();
+        if (!mountedRef.current || requestId !== modeRequestIdsRef.current.autoReplace) return;
         setAutoReplaceEnabled(true);
         toast.info(
           'Auto-replace enabled. Backend will check for stuck downloads periodically.',
         );
       } else {
         await autoReplaceLibrary.disableAutoReplace();
+        if (!mountedRef.current || requestId !== modeRequestIdsRef.current.autoReplace) return;
         setAutoReplaceEnabled(false);
         toast.info('Auto-replace disabled');
       }
     } catch (error) {
       console.error('Failed to toggle auto-replace:', error);
-      toast.error('Failed to toggle auto-replace');
+      if (mountedRef.current && requestId === modeRequestIdsRef.current.autoReplace) {
+        toast.error('Failed to toggle auto-replace');
+      }
     }
   };
 
   const handleAcceleratedChange = async (enabled) => {
+    const requestId = ++modeRequestIdsRef.current.accelerated;
     try {
       const status = await transfersLibrary.setAcceleratedMode({ enabled });
+      if (!mountedRef.current || requestId !== modeRequestIdsRef.current.accelerated) return;
       setAcceleratedEnabled(status?.enabled ?? enabled);
       toast.info(
         enabled
@@ -532,7 +573,9 @@ const Transfers = ({ runtimeProfile, direction, server }) => {
       );
     } catch (error) {
       console.error('Failed to toggle accelerated mode:', error);
-      toast.error('Failed to toggle accelerated mode');
+      if (mountedRef.current && requestId === modeRequestIdsRef.current.accelerated) {
+        toast.error('Failed to toggle accelerated mode');
+      }
     }
   };
 

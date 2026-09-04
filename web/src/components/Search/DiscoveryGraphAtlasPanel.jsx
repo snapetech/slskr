@@ -1,9 +1,11 @@
 import * as discoveryGraph from '../../lib/discoveryGraph';
+import { toDisplayError } from '../../lib/errors';
 import * as searches from '../../lib/searches';
 import { getLocalStorageItem } from '../../lib/storage';
+import { useMountedRef } from '../../lib/useMountedRef';
 import './Search.css';
 import DiscoveryGraphAtlas from './DiscoveryGraphAtlas';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import {
@@ -42,15 +44,19 @@ const DiscoveryGraphAtlasPanel = ({ disabled, persistRoute = false }) => {
   const [activeEdgeTypes, setActiveEdgeTypes] = useState([]);
   const [pinnedNode, setPinnedNode] = useState(null);
   const [savedBranches, setSavedBranches] = useState([]);
+  const mountedRef = useMountedRef();
+  const requestIdRef = useRef(0);
 
   const loadSavedBranches = () => {
     try {
       const raw = getLocalStorageItem('slskr.discoveryGraph.savedBranches');
       const parsed = raw ? JSON.parse(raw) : [];
-      setSavedBranches(Array.isArray(parsed) ? parsed : []);
+      if (mountedRef.current) {
+        setSavedBranches(Array.isArray(parsed) ? parsed : []);
+      }
     } catch (error) {
       console.warn('Failed to load saved Discovery Graph branches', error);
-      setSavedBranches([]);
+      if (mountedRef.current) setSavedBranches([]);
     }
   };
 
@@ -81,11 +87,11 @@ const DiscoveryGraphAtlasPanel = ({ disabled, persistRoute = false }) => {
       request.recordingId ||
       request.songIdRunId;
 
-    if (hasSeed) {
-      openGraph(request);
+    if (hasSeed && !disabled) {
+      void openGraph(request);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [persistRoute]);
+  }, [disabled, location.search, persistRoute]);
 
   const buildRequest = () => ({
     album: album.trim() || undefined,
@@ -98,10 +104,18 @@ const DiscoveryGraphAtlasPanel = ({ disabled, persistRoute = false }) => {
   });
 
   const openGraph = async (request) => {
+    const requestId = ++requestIdRef.current;
+    if (!mountedRef.current || disabled) return;
     setLoading(true);
 
     try {
       const nextGraph = await discoveryGraph.buildDiscoveryGraph(request);
+      if (
+        !mountedRef.current ||
+        requestId !== requestIdRef.current
+      ) {
+        return;
+      }
       setGraph(nextGraph);
       setActiveEdgeTypes([]);
       if (persistRoute) {
@@ -113,11 +127,19 @@ const DiscoveryGraphAtlasPanel = ({ disabled, persistRoute = false }) => {
       }
     } catch (error) {
       console.error(error);
-      toast.error(
-        error?.response?.data ?? error?.message ?? 'Failed to build discovery graph',
-      );
+      if (
+        mountedRef.current &&
+        requestId === requestIdRef.current
+      ) {
+        toast.error(toDisplayError(error, 'Failed to build discovery graph'));
+      }
     } finally {
-      setLoading(false);
+      if (
+        mountedRef.current &&
+        requestId === requestIdRef.current
+      ) {
+        setLoading(false);
+      }
     }
   };
 
@@ -173,12 +195,14 @@ const DiscoveryGraphAtlasPanel = ({ disabled, persistRoute = false }) => {
 
     try {
       const count = await searches.createBatch({ queries });
-      toast.success(`Started ${count} nearby atlas searches`);
+      if (mountedRef.current) {
+        toast.success(`Started ${count} nearby atlas searches`);
+      }
     } catch (error) {
       console.error(error);
-      toast.error(
-        error?.response?.data ?? error?.message ?? 'Failed to queue nearby atlas searches',
-      );
+      if (mountedRef.current) {
+        toast.error(toDisplayError(error, 'Failed to queue nearby atlas searches'));
+      }
     }
   };
 
@@ -194,10 +218,14 @@ const DiscoveryGraphAtlasPanel = ({ disabled, persistRoute = false }) => {
 
     try {
       await navigator.clipboard.writeText(report);
-      toast.success('Discovery Graph branch report copied');
+      if (mountedRef.current) {
+        toast.success('Discovery Graph branch report copied');
+      }
     } catch (error) {
       console.error(error);
-      toast.error('Unable to copy Discovery Graph branch report');
+      if (mountedRef.current) {
+        toast.error('Unable to copy Discovery Graph branch report');
+      }
     }
   };
 

@@ -8,7 +8,9 @@ import {
   promoteTasteRecommendationToWishlist,
   subscribeTasteRecommendationReleaseRadar,
 } from '../../lib/tasteRecommendations';
-import React, { useState } from 'react';
+import { toDisplayError } from '../../lib/errors';
+import { useMountedRef } from '../../lib/useMountedRef';
+import React, { useRef, useState } from 'react';
 import { toast } from 'react-toastify';
 import {
   Button,
@@ -41,8 +43,13 @@ const FederatedTasteRecommendationsPanel = ({ disabled }) => {
   const [recommendations, setRecommendations] = useState([]);
   const [status, setStatus] = useState('');
   const [summary, setSummary] = useState(null);
+  const mountedRef = useMountedRef();
+  const loadRequestIdRef = useRef(0);
+  const actionRequestIdRef = useRef(0);
 
   const loadRecommendations = async () => {
+    const requestId = ++loadRequestIdRef.current;
+    if (!mountedRef.current || disabled) return;
     setError('');
     setLoading(true);
     try {
@@ -52,6 +59,12 @@ const FederatedTasteRecommendationsPanel = ({ disabled }) => {
         limit: Number(limit) || 20,
         minimumTrustedSources: Number(minimumTrustedSources) || 2,
       });
+      if (
+        !mountedRef.current ||
+        requestId !== loadRequestIdRef.current
+      ) {
+        return;
+      }
       setSummary(response.data);
       setRecommendations(response.data?.recommendations || []);
       setStatus(
@@ -60,49 +73,99 @@ const FederatedTasteRecommendationsPanel = ({ disabled }) => {
         }.`,
       );
     } catch (loadError) {
-      setError(
-        loadError?.response?.data ||
-          loadError?.message ||
-          'Unable to load federated taste recommendations.',
-      );
+      if (
+        mountedRef.current &&
+        requestId === loadRequestIdRef.current
+      ) {
+        setError(
+          toDisplayError(
+            loadError,
+            'Unable to load federated taste recommendations.',
+          ),
+        );
+      }
     } finally {
-      setLoading(false);
+      if (
+        mountedRef.current &&
+        requestId === loadRequestIdRef.current
+      ) {
+        setLoading(false);
+      }
     }
   };
 
   const promoteToWishlist = async (recommendation) => {
+    const requestId = ++actionRequestIdRef.current;
+    if (!mountedRef.current || disabled) return;
     try {
       const response = await promoteTasteRecommendationToWishlist({
         note: 'Promoted from federated taste recommendation review.',
         workRef: recommendation.workRef,
       });
+      if (
+        !mountedRef.current ||
+        requestId !== actionRequestIdRef.current
+      ) {
+        return;
+      }
       setStatus(response.data?.message || `Promoted ${getTitle(recommendation.workRef)} to Wishlist.`);
     } catch (promoteError) {
-      toast.error(promoteError?.response?.data?.message || promoteError.message);
+      if (
+        mountedRef.current &&
+        requestId === actionRequestIdRef.current
+      ) {
+        toast.error(toDisplayError(promoteError, 'Unable to promote recommendation.'));
+      }
     }
   };
 
   const subscribeRadar = async (recommendation) => {
+    const requestId = ++actionRequestIdRef.current;
+    if (!mountedRef.current || disabled) return;
     try {
       const response = await subscribeTasteRecommendationReleaseRadar({
         scope: 'trusted',
         workRef: recommendation.workRef,
       });
+      if (
+        !mountedRef.current ||
+        requestId !== actionRequestIdRef.current
+      ) {
+        return;
+      }
       setStatus(response.data?.message || `Subscribed ${getCreator(recommendation.workRef)} to Release Radar.`);
     } catch (subscribeError) {
-      toast.error(subscribeError?.response?.data?.message || subscribeError.message);
+      if (
+        mountedRef.current &&
+        requestId === actionRequestIdRef.current
+      ) {
+        toast.error(toDisplayError(subscribeError, 'Unable to subscribe to Release Radar.'));
+      }
     }
   };
 
   const previewGraph = async (recommendation) => {
+    const requestId = ++actionRequestIdRef.current;
+    if (!mountedRef.current || disabled) return;
     try {
       const response = await previewTasteRecommendationGraph({
         workRef: recommendation.workRef,
       });
+      if (
+        !mountedRef.current ||
+        requestId !== actionRequestIdRef.current
+      ) {
+        return;
+      }
       setGraphPreview(response.data);
       setStatus(`Previewed Discovery Graph for ${getTitle(recommendation.workRef)}.`);
     } catch (previewError) {
-      toast.error(previewError?.response?.data?.message || previewError.message);
+      if (
+        mountedRef.current &&
+        requestId === actionRequestIdRef.current
+      ) {
+        toast.error(toDisplayError(previewError, 'Unable to preview Discovery Graph.'));
+      }
     }
   };
 

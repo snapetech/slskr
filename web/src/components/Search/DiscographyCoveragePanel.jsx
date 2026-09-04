@@ -3,7 +3,8 @@ import {
   promoteDiscographyCoverageToWishlist,
 } from '../../lib/musicBrainz';
 import { toDisplayError } from '../../lib/errors';
-import React, { useMemo, useState } from 'react';
+import { useMountedRef } from '../../lib/useMountedRef';
+import React, { useMemo, useRef, useState } from 'react';
 import { toast } from 'react-toastify';
 import {
   Button,
@@ -80,6 +81,9 @@ const DiscographyCoveragePanel = ({ disabled }) => {
   const [loading, setLoading] = useState(false);
   const [profile, setProfile] = useState('CoreDiscography');
   const [promoting, setPromoting] = useState(false);
+  const mountedRef = useMountedRef();
+  const loadRequestIdRef = useRef(0);
+  const promoteRequestIdRef = useRef(0);
 
   const missingCount = useMemo(() => {
     if (!coverage) {
@@ -92,12 +96,14 @@ const DiscographyCoveragePanel = ({ disabled }) => {
   }, [coverage]);
 
   const loadCoverage = async ({ forceRefresh = false } = {}) => {
+    const requestId = ++loadRequestIdRef.current;
     const normalizedArtistId = artistId.trim();
     if (!normalizedArtistId) {
       toast.error('Artist MBID is required');
       return;
     }
 
+    if (!mountedRef.current) return;
     setLoading(true);
     setError(null);
 
@@ -107,12 +113,28 @@ const DiscographyCoveragePanel = ({ disabled }) => {
         forceRefresh,
         profile,
       });
+      if (
+        !mountedRef.current ||
+        requestId !== loadRequestIdRef.current
+      ) {
+        return;
+      }
       setCoverage(normalizeDiscographyCoverage(response.data));
     } catch (loadError) {
       console.error(loadError);
-      setError(toDisplayError(loadError, 'Unable to load discography coverage'));
+      if (
+        mountedRef.current &&
+        requestId === loadRequestIdRef.current
+      ) {
+        setError(toDisplayError(loadError, 'Unable to load discography coverage'));
+      }
     } finally {
-      setLoading(false);
+      if (
+        mountedRef.current &&
+        requestId === loadRequestIdRef.current
+      ) {
+        setLoading(false);
+      }
     }
   };
 
@@ -121,6 +143,8 @@ const DiscographyCoveragePanel = ({ disabled }) => {
       return;
     }
 
+    const requestId = ++promoteRequestIdRef.current;
+    if (!mountedRef.current) return;
     setPromoting(true);
 
     try {
@@ -129,15 +153,31 @@ const DiscographyCoveragePanel = ({ disabled }) => {
         filter: filter.trim() || 'flac',
         profile,
       });
+      if (
+        !mountedRef.current ||
+        requestId !== promoteRequestIdRef.current
+      ) {
+        return;
+      }
       toast.success(
         `Added ${response.data?.createdCount ?? 0} missing tracks to Wishlist`,
       );
       await loadCoverage();
     } catch (promoteError) {
       console.error(promoteError);
-      toast.error(toDisplayError(promoteError, 'Unable to add missing tracks to Wishlist'));
+      if (
+        mountedRef.current &&
+        requestId === promoteRequestIdRef.current
+      ) {
+        toast.error(toDisplayError(promoteError, 'Unable to add missing tracks to Wishlist'));
+      }
     } finally {
-      setPromoting(false);
+      if (
+        mountedRef.current &&
+        requestId === promoteRequestIdRef.current
+      ) {
+        setPromoting(false);
+      }
     }
   };
 

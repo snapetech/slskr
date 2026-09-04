@@ -3,8 +3,10 @@
 // </copyright>
 
 import * as soulseekDiscovery from '../../lib/soulseekDiscovery';
+import { toDisplayError } from '../../lib/errors';
 import * as wishlist from '../../lib/wishlist';
-import React, { useMemo, useState } from 'react';
+import { useMountedRef } from '../../lib/useMountedRef';
+import React, { useMemo, useRef, useState } from 'react';
 import { toast } from 'react-toastify';
 import {
   Button,
@@ -38,25 +40,28 @@ const normalizeUser = (user) => {
 };
 
 const getRecommendations = (payload) =>
-  (getValue(payload, 'recommendations', 'Recommendations', []) || [])
+  (Array.isArray(getValue(payload, 'recommendations', 'Recommendations', []))
+    ? getValue(payload, 'recommendations', 'Recommendations', [])
+    : [])
     .map(normalizeRecommendation)
     .filter((recommendation) => recommendation.item);
 
 const getUnrecommendations = (payload) =>
-  (getValue(payload, 'unrecommendations', 'Unrecommendations', []) || [])
+  (Array.isArray(getValue(payload, 'unrecommendations', 'Unrecommendations', []))
+    ? getValue(payload, 'unrecommendations', 'Unrecommendations', [])
+    : [])
     .map(normalizeRecommendation)
     .filter((recommendation) => recommendation.item);
 
 const getUsernames = (payload) =>
-  (getValue(payload, 'usernames', 'Usernames', []) || [])
+  (Array.isArray(getValue(payload, 'usernames', 'Usernames', []))
+    ? getValue(payload, 'usernames', 'Usernames', [])
+    : [])
     .map(normalizeUser)
     .filter((user) => user.username);
 
 const errorMessage = (error, fallback) =>
-  error?.response?.data?.message ||
-  error?.response?.data ||
-  error?.message ||
-  fallback;
+  toDisplayError(error, fallback);
 
 const SoulseekDiscoveryPanel = ({ disabled, onSearch }) => {
   const [error, setError] = useState('');
@@ -70,6 +75,9 @@ const SoulseekDiscoveryPanel = ({ disabled, onSearch }) => {
   const [unrecommendations, setUnrecommendations] = useState([]);
   const [userInterests, setUserInterests] = useState(null);
   const [username, setUsername] = useState('');
+  const mountedRef = useMountedRef();
+  const requestIdRef = useRef(0);
+  const actionRequestIdRef = useRef(0);
 
   const hasResults = useMemo(
     () =>
@@ -88,24 +96,39 @@ const SoulseekDiscoveryPanel = ({ disabled, onSearch }) => {
   };
 
   const run = async (label, action) => {
+    const requestId = ++requestIdRef.current;
+    if (!mountedRef.current || disabled) return;
     setError('');
     setLoading(true);
     try {
-      await action();
+      await action(() =>
+        mountedRef.current && requestId === requestIdRef.current,
+      );
     } catch (actionError) {
-      setError(errorMessage(actionError, `Unable to ${label}.`));
+      if (
+        mountedRef.current &&
+        requestId === requestIdRef.current
+      ) {
+        setError(errorMessage(actionError, `Unable to ${label}.`));
+      }
     } finally {
-      setLoading(false);
+      if (
+        mountedRef.current &&
+        requestId === requestIdRef.current
+      ) {
+        setLoading(false);
+      }
     }
   };
 
   const loadRecommendations = (global = false) =>
-    run(global ? 'load global recommendations' : 'load recommendations', async () => {
+    run(global ? 'load global recommendations' : 'load recommendations', async (isCurrent) => {
       const response = global
         ? await soulseekDiscovery.getGlobalRecommendations()
         : await soulseekDiscovery.getRecommendations();
       const payload = response.data || {};
 
+      if (!isCurrent()) return;
       clearResults();
       setRecommendations(getRecommendations(payload));
       setUnrecommendations(getUnrecommendations(payload));
@@ -124,11 +147,12 @@ const SoulseekDiscoveryPanel = ({ disabled, onSearch }) => {
       return;
     }
 
-    run('load item recommendations', async () => {
+    run('load item recommendations', async (isCurrent) => {
       const response = await soulseekDiscovery.getItemRecommendations({
         item: trimmed,
       });
 
+      if (!isCurrent()) return;
       clearResults();
       setRecommendations(getRecommendations(response.data || {}));
       setTitle(`Recommendations for ${trimmed}`);
@@ -137,13 +161,15 @@ const SoulseekDiscoveryPanel = ({ disabled, onSearch }) => {
   };
 
   const loadSimilarUsers = () =>
-    run('load similar users', async () => {
+    run('load similar users', async (isCurrent) => {
       const response = await soulseekDiscovery.getSimilarUsers();
 
+      if (!isCurrent()) return;
       clearResults();
-      setSimilarUsers((response.data || []).map(normalizeUser).filter((user) => user.username));
+      const users = Array.isArray(response.data) ? response.data : [];
+      setSimilarUsers(users.map(normalizeUser).filter((user) => user.username));
       setTitle('Similar users');
-      setStatus(`Loaded ${(response.data || []).length} similar user${(response.data || []).length === 1 ? '' : 's'}.`);
+      setStatus(`Loaded ${users.length} similar user${users.length === 1 ? '' : 's'}.`);
     });
 
   const loadItemSimilarUsers = () => {
@@ -153,11 +179,12 @@ const SoulseekDiscoveryPanel = ({ disabled, onSearch }) => {
       return;
     }
 
-    run('load item similar users', async () => {
+    run('load item similar users', async (isCurrent) => {
       const response = await soulseekDiscovery.getItemSimilarUsers({
         item: trimmed,
       });
 
+      if (!isCurrent()) return;
       clearResults();
       setSimilarUsers(getUsernames(response.data || {}));
       setTitle(`Users similar to ${trimmed}`);
@@ -172,11 +199,12 @@ const SoulseekDiscoveryPanel = ({ disabled, onSearch }) => {
       return;
     }
 
-    run('load user interests', async () => {
+    run('load user interests', async (isCurrent) => {
       const response = await soulseekDiscovery.getUserInterests({
         username: trimmed,
       });
 
+      if (!isCurrent()) return;
       clearResults();
       setUserInterests(response.data || {});
       setTitle(`${trimmed} interests`);
@@ -199,14 +227,17 @@ const SoulseekDiscoveryPanel = ({ disabled, onSearch }) => {
         ? soulseekDiscovery.removeInterest
         : soulseekDiscovery.addInterest;
 
-    run('update interests', async () => {
+    run('update interests', async (isCurrent) => {
       await action({ item: trimmed });
+      if (!isCurrent()) return;
       setStatus(`${remove ? 'Removed' : 'Added'} ${trimmed} ${hated ? 'as a hated interest' : 'as an interest'}.`);
       setInterest('');
     });
   };
 
   const addToWishlist = async (searchText) => {
+    const requestId = ++actionRequestIdRef.current;
+    if (!mountedRef.current || disabled) return;
     try {
       await wishlist.create({
         autoDownload: false,
@@ -215,9 +246,19 @@ const SoulseekDiscoveryPanel = ({ disabled, onSearch }) => {
         maxResults: 25,
         searchText,
       });
-      toast.success(`Added ${searchText} to Wishlist for review`);
+      if (
+        mountedRef.current &&
+        requestId === actionRequestIdRef.current
+      ) {
+        toast.success(`Added ${searchText} to Wishlist for review`);
+      }
     } catch (wishlistError) {
-      toast.error(errorMessage(wishlistError, 'Unable to add to Wishlist.'));
+      if (
+        mountedRef.current &&
+        requestId === actionRequestIdRef.current
+      ) {
+        toast.error(errorMessage(wishlistError, 'Unable to add to Wishlist.'));
+      }
     }
   };
 

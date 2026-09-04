@@ -1,8 +1,9 @@
 import * as discoveryGraph from '../../lib/discoveryGraph';
+import { useMountedRef } from '../../lib/useMountedRef';
 import * as searches from '../../lib/searches';
 import { toDisplayError } from '../../lib/errors';
 import { resolveTarget } from '../../lib/musicBrainz';
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { toast } from 'react-toastify';
 import {
   Button,
@@ -44,21 +45,42 @@ const MusicBrainzLookup = ({ disabled }) => {
   const [graphOpen, setGraphOpen] = useState(false);
   const [graphData, setGraphData] = useState(null);
   const [graphRequest, setGraphRequest] = useState(null);
+  const mountedRef = useMountedRef();
+  const lookupRequestIdRef = useRef(0);
+  const graphRequestIdRef = useRef(0);
 
   const openDiscoveryGraph = async (request) => {
+    const requestId = ++graphRequestIdRef.current;
+    if (!mountedRef.current || disabled) return;
     setGraphLoading(true);
     setGraphOpen(true);
     setGraphRequest(request);
 
     try {
       const graph = await discoveryGraph.buildDiscoveryGraph(request);
+      if (
+        !mountedRef.current ||
+        requestId !== graphRequestIdRef.current
+      ) {
+        return;
+      }
       setGraphData(graph);
     } catch (error) {
       console.error(error);
-      toast.error(toDisplayError(error, 'Failed to build discovery graph'));
-      setGraphOpen(false);
+      if (
+        mountedRef.current &&
+        requestId === graphRequestIdRef.current
+      ) {
+        toast.error(toDisplayError(error, 'Failed to build discovery graph'));
+        setGraphOpen(false);
+      }
     } finally {
-      setGraphLoading(false);
+      if (
+        mountedRef.current &&
+        requestId === graphRequestIdRef.current
+      ) {
+        setGraphLoading(false);
+      }
     }
   };
 
@@ -68,6 +90,8 @@ const MusicBrainzLookup = ({ disabled }) => {
       return;
     }
 
+    const requestId = ++lookupRequestIdRef.current;
+    if (!mountedRef.current || disabled) return;
     setLoading(true);
 
     try {
@@ -83,6 +107,12 @@ const MusicBrainzLookup = ({ disabled }) => {
         throw new Error('MusicBrainz target response did not include a target');
       }
 
+      if (
+        !mountedRef.current ||
+        requestId !== lookupRequestIdRef.current
+      ) {
+        return;
+      }
       setTarget(resolvedTarget);
 
       toast.success(
@@ -92,9 +122,19 @@ const MusicBrainzLookup = ({ disabled }) => {
       );
     } catch (error) {
       console.error(error);
-      toast.error(toDisplayError(error, 'Failed to resolve target'));
+      if (
+        mountedRef.current &&
+        requestId === lookupRequestIdRef.current
+      ) {
+        toast.error(toDisplayError(error, 'Failed to resolve target'));
+      }
     } finally {
-      setLoading(false);
+      if (
+        mountedRef.current &&
+        requestId === lookupRequestIdRef.current
+      ) {
+        setLoading(false);
+      }
     }
   };
 
@@ -204,10 +244,14 @@ const MusicBrainzLookup = ({ disabled }) => {
 
     try {
       const count = await searches.createBatch({ queries });
-      toast.success(`Started ${count} nearby graph searches`);
+      if (mountedRef.current) {
+        toast.success(`Started ${count} nearby graph searches`);
+      }
     } catch (error) {
       console.error(error);
-      toast.error(toDisplayError(error, 'Failed to queue nearby searches'));
+      if (mountedRef.current) {
+        toast.error(toDisplayError(error, 'Failed to queue nearby searches'));
+      }
     }
   };
 

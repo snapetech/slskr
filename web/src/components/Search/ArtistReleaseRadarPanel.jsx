@@ -8,7 +8,9 @@ import {
   routeArtistReleaseRadarNotification,
   subscribeArtistReleaseRadar,
 } from '../../lib/musicBrainz';
-import React, { useEffect, useState } from 'react';
+import { toDisplayError } from '../../lib/errors';
+import { useMountedRef } from '../../lib/useMountedRef';
+import React, { useEffect, useRef, useState } from 'react';
 import { toast } from 'react-toastify';
 import {
   Button,
@@ -54,29 +56,49 @@ const ArtistReleaseRadarPanel = ({ disabled }) => {
   const [status, setStatus] = useState('');
   const [subscriptions, setSubscriptions] = useState([]);
   const [unreadOnly, setUnreadOnly] = useState(false);
+  const mountedRef = useMountedRef();
+  const loadRequestIdRef = useRef(0);
+  const operationRequestIdRef = useRef(0);
 
   const loadRadar = async () => {
+    const requestId = ++loadRequestIdRef.current;
     if (disabled) return;
 
+    if (!mountedRef.current) return;
     setError(null);
     try {
       const [subscriptionsResponse, notificationsResponse] = await Promise.all([
         fetchArtistReleaseRadarSubscriptions(),
         fetchArtistReleaseRadarNotifications({ unreadOnly }),
       ]);
-      setSubscriptions(subscriptionsResponse.data || []);
-      setNotifications(notificationsResponse.data || []);
-    } catch (loadError) {
-      setError(
-        loadError?.response?.data ||
-          loadError?.message ||
-          'Unable to load release radar.',
+      if (
+        !mountedRef.current ||
+        requestId !== loadRequestIdRef.current
+      ) {
+        return;
+      }
+      setSubscriptions(
+        Array.isArray(subscriptionsResponse.data)
+          ? subscriptionsResponse.data
+          : [],
       );
+      setNotifications(
+        Array.isArray(notificationsResponse.data)
+          ? notificationsResponse.data
+          : [],
+      );
+    } catch (loadError) {
+      if (
+        mountedRef.current &&
+        requestId === loadRequestIdRef.current
+      ) {
+        setError(toDisplayError(loadError, 'Unable to load release radar.'));
+      }
     }
   };
 
   useEffect(() => {
-    loadRadar();
+    void loadRadar();
   }, [disabled, unreadOnly]);
 
   const subscribe = async () => {
@@ -85,6 +107,8 @@ const ArtistReleaseRadarPanel = ({ disabled }) => {
       return;
     }
 
+    const requestId = ++operationRequestIdRef.current;
+    if (!mountedRef.current || disabled) return;
     setError(null);
     try {
       await subscribeArtistReleaseRadar({
@@ -94,36 +118,58 @@ const ArtistReleaseRadarPanel = ({ disabled }) => {
         mutedReleaseGroupIds: parseList(mutedReleaseGroups),
         scope,
       });
+      if (
+        !mountedRef.current ||
+        requestId !== operationRequestIdRef.current
+      ) {
+        return;
+      }
       setStatus(`Watching ${artistName.trim() || artistId.trim()}.`);
       setArtistId('');
       setArtistName('');
       await loadRadar();
     } catch (subscribeError) {
-      setError(
-        subscribeError?.response?.data ||
-          subscribeError?.message ||
-          'Unable to save release radar subscription.',
-      );
+      if (
+        mountedRef.current &&
+        requestId === operationRequestIdRef.current
+      ) {
+        setError(
+          toDisplayError(
+            subscribeError,
+            'Unable to save release radar subscription.',
+          ),
+        );
+      }
     }
   };
 
   const routeNotification = async (notification) => {
+    const requestId = ++operationRequestIdRef.current;
+    if (!mountedRef.current || disabled) return;
     setError(null);
     try {
       const response = await routeArtistReleaseRadarNotification({
         notificationId: notification.id,
         targetPeerIds: parseList(routeTargets),
       });
+      if (
+        !mountedRef.current ||
+        requestId !== operationRequestIdRef.current
+      ) {
+        return;
+      }
       setStatus(
         `Route ${response.data?.success ? 'sent' : 'recorded'} for ${getWorkTitle(notification)}.`,
       );
     } catch (routeError) {
-      setError(
-        routeError?.response?.data?.errorMessage ||
-          routeError?.response?.data ||
-          routeError?.message ||
-          'Unable to route release radar notification.',
-      );
+      if (
+        mountedRef.current &&
+        requestId === operationRequestIdRef.current
+      ) {
+        setError(
+          toDisplayError(routeError, 'Unable to route release radar notification.'),
+        );
+      }
     }
   };
 

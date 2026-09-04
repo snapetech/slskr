@@ -7,8 +7,9 @@ import {
   getWishlistRequestState,
   getRunnableWishlistRequests,
 } from '../../lib/acquisitionRequests';
+import { toDisplayError } from '../../lib/errors';
 import * as wishlistAPI from '../../lib/wishlist';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import {
@@ -32,6 +33,19 @@ const formatDate = (dateString) => {
   return date.toLocaleString();
 };
 
+const useMountedFlag = () => {
+  const mountedRef = useRef(false);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  return mountedRef;
+};
+
 const WishlistItemRow = ({
   item,
   onDelete,
@@ -42,17 +56,37 @@ const WishlistItemRow = ({
 }) => {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [running, setRunning] = useState(false);
+  const mountedRef = useMountedFlag();
+  const requestIdRef = useRef(0);
   const requestState = getWishlistRequestState(item, []);
 
   const handleRunSearch = async () => {
+    const requestId = ++requestIdRef.current;
     setRunning(true);
     try {
       const result = await onRunSearch(item.id);
-      toast.success(`Search completed with ${result.responseCount} results`);
+      if (
+        mountedRef.current &&
+        requestId === requestIdRef.current
+      ) {
+        const responseCount =
+          result?.responseCount ?? result?.ResponseCount ?? 0;
+        toast.success(`Search completed with ${responseCount} results`);
+      }
     } catch (error) {
-      toast.error(`Search failed: ${error.message}`);
+      if (
+        mountedRef.current &&
+        requestId === requestIdRef.current
+      ) {
+        toast.error(`Search failed: ${toDisplayError(error)}`);
+      }
     } finally {
-      setRunning(false);
+      if (
+        mountedRef.current &&
+        requestId === requestIdRef.current
+      ) {
+        setRunning(false);
+      }
     }
   };
 
@@ -115,6 +149,7 @@ const WishlistItemRow = ({
         )}
         <Button
           compact
+          disabled={running}
           icon="play"
           loading={running}
           onClick={handleRunSearch}
@@ -164,6 +199,8 @@ const WishlistModal = ({ item, onClose, onSave }) => {
   const [saving, setSaving] = useState(false);
   const [ignoredResults, setIgnoredResults] = useState([]);
   const [loadingIgnoredResults, setLoadingIgnoredResults] = useState(false);
+  const mountedRef = useMountedFlag();
+  const operationRequestIdRef = useRef(0);
 
   const isEdit = Boolean(item?.id);
 
@@ -197,15 +234,27 @@ const WishlistModal = ({ item, onClose, onSave }) => {
   }, [isEdit, item?.id]);
 
   const restoreIgnoredResult = async (rule) => {
+    const requestId = ++operationRequestIdRef.current;
     try {
       await wishlistAPI.removeIgnoredResult(item.id, rule.id);
+      if (
+        !mountedRef.current ||
+        requestId !== operationRequestIdRef.current
+      ) {
+        return;
+      }
       setIgnoredResults((current) =>
         current.filter((candidate) => candidate.id !== rule.id),
       );
       toast.info(`Restored ${rule.directory} from ${rule.username}`);
     } catch (error) {
-      console.error(error);
-      toast.error(error?.response?.data ?? error?.message ?? String(error));
+      if (
+        mountedRef.current &&
+        requestId === operationRequestIdRef.current
+      ) {
+        console.error(error);
+        toast.error(toDisplayError(error));
+      }
     }
   };
 
@@ -215,6 +264,7 @@ const WishlistModal = ({ item, onClose, onSave }) => {
       return;
     }
 
+    const requestId = ++operationRequestIdRef.current;
     setSaving(true);
     try {
       await onSave({
@@ -225,11 +275,27 @@ const WishlistModal = ({ item, onClose, onSave }) => {
         maxResults,
         searchText: searchText.trim(),
       });
+      if (
+        !mountedRef.current ||
+        requestId !== operationRequestIdRef.current
+      ) {
+        return;
+      }
       onClose();
     } catch (error) {
-      toast.error(`Failed to save: ${error.message}`);
+      if (
+        mountedRef.current &&
+        requestId === operationRequestIdRef.current
+      ) {
+        toast.error(`Failed to save: ${toDisplayError(error)}`);
+      }
     } finally {
-      setSaving(false);
+      if (
+        mountedRef.current &&
+        requestId === operationRequestIdRef.current
+      ) {
+        setSaving(false);
+      }
     }
   };
 
@@ -360,11 +426,22 @@ const CsvImportModal = ({ onClose, onImport }) => {
   const [includeAlbum, setIncludeAlbum] = useState(false);
   const [maxResults, setMaxResults] = useState(100);
   const [importing, setImporting] = useState(false);
+  const mountedRef = useMountedFlag();
+  const operationRequestIdRef = useRef(0);
 
   const handleFile = async (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
-    setCsvText(await file.text());
+    try {
+      const text = await file.text();
+      if (mountedRef.current) {
+        setCsvText(text);
+      }
+    } catch (error) {
+      if (mountedRef.current) {
+        toast.error(`Failed to read CSV file: ${toDisplayError(error)}`);
+      }
+    }
   };
 
   const handleImport = async () => {
@@ -373,6 +450,7 @@ const CsvImportModal = ({ onClose, onImport }) => {
       return;
     }
 
+    const requestId = ++operationRequestIdRef.current;
     setImporting(true);
     try {
       await onImport({
@@ -383,11 +461,27 @@ const CsvImportModal = ({ onClose, onImport }) => {
         includeAlbum,
         maxResults,
       });
+      if (
+        !mountedRef.current ||
+        requestId !== operationRequestIdRef.current
+      ) {
+        return;
+      }
       onClose();
     } catch (error) {
-      toast.error(`CSV import failed: ${error.message}`);
+      if (
+        mountedRef.current &&
+        requestId === operationRequestIdRef.current
+      ) {
+        toast.error(`CSV import failed: ${toDisplayError(error)}`);
+      }
     } finally {
-      setImporting(false);
+      if (
+        mountedRef.current &&
+        requestId === operationRequestIdRef.current
+      ) {
+        setImporting(false);
+      }
     }
   };
 
@@ -492,6 +586,9 @@ const Wishlist = () => {
   const [bulkRunning, setBulkRunning] = useState(false);
   const [bulkFilter, setBulkFilter] = useState('');
   const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const mountedRef = useMountedFlag();
+  const loadRequestIdRef = useRef(0);
+  const operationRequestIdRef = useRef(0);
   const requestSummary = useMemo(
     () =>
       buildWishlistRequestSummary({
@@ -517,28 +614,51 @@ const Wishlist = () => {
 
     try {
       await navigator.clipboard.writeText(report);
-      setRequestCopyStatus('Wishlist request review copied.');
+      if (mountedRef.current) {
+        setRequestCopyStatus('Wishlist request review copied.');
+      }
     } catch {
-      setRequestCopyStatus('Unable to copy Wishlist request review.');
+      if (mountedRef.current) {
+        setRequestCopyStatus('Unable to copy Wishlist request review.');
+      }
     }
   };
 
   const runEnabledSearches = async () => {
+    const requestId = ++operationRequestIdRef.current;
     setBulkRunning(true);
     const results = [];
 
     try {
       for (const item of runnableRequests) {
+        if (
+          !mountedRef.current ||
+          requestId !== operationRequestIdRef.current
+        ) {
+          return;
+        }
         try {
           const result = await wishlistAPI.runSearch(item.id);
+          if (
+            !mountedRef.current ||
+            requestId !== operationRequestIdRef.current
+          ) {
+            return;
+          }
           results.push({
             id: item.id,
             responseCount: result.responseCount ?? result.ResponseCount ?? 0,
             status: 'ran',
           });
         } catch (error) {
+          if (
+            !mountedRef.current ||
+            requestId !== operationRequestIdRef.current
+          ) {
+            return;
+          }
           results.push({
-            error: error.message || 'Search failed',
+            error: toDisplayError(error, 'Search failed'),
             id: item.id,
             status: 'failed',
           });
@@ -547,6 +667,12 @@ const Wishlist = () => {
 
       const ran = results.filter((result) => result.status === 'ran').length;
       const failed = results.filter((result) => result.status === 'failed').length;
+      if (
+        !mountedRef.current ||
+        requestId !== operationRequestIdRef.current
+      ) {
+        return;
+      }
       setRequestCopyStatus(
         `Ran ${ran} enabled Wishlist search${ran === 1 ? '' : 'es'}${
           failed ? `; ${failed} failed` : ''
@@ -554,18 +680,47 @@ const Wishlist = () => {
       );
       await loadItems();
     } finally {
-      setBulkRunning(false);
+      if (
+        mountedRef.current &&
+        requestId === operationRequestIdRef.current
+      ) {
+        setBulkRunning(false);
+      }
     }
   };
 
   const loadItems = useCallback(async () => {
+    const requestId = ++loadRequestIdRef.current;
     try {
       const data = await wishlistAPI.getAll();
-      setItems(Array.isArray(data) ? data : []);
+      if (
+        !mountedRef.current ||
+        requestId !== loadRequestIdRef.current
+      ) {
+        return;
+      }
+      const nextItems = Array.isArray(data) ? data : [];
+      setItems(nextItems);
+      setSelectedIds((current) => {
+        const availableIds = new Set(nextItems.map((item) => item.id));
+        return new Set(
+          [...current].filter((itemId) => availableIds.has(itemId)),
+        );
+      });
     } catch (error) {
-      toast.error(`Failed to load wishlist: ${error.message}`);
+      if (
+        mountedRef.current &&
+        requestId === loadRequestIdRef.current
+      ) {
+        toast.error(`Failed to load wishlist: ${toDisplayError(error)}`);
+      }
     } finally {
-      setLoading(false);
+      if (
+        mountedRef.current &&
+        requestId === loadRequestIdRef.current
+      ) {
+        setLoading(false);
+      }
     }
   }, []);
 
@@ -589,23 +744,40 @@ const Wishlist = () => {
     const ids = [...selectedIds];
     if (ids.length === 0) return;
 
+    const requestId = ++operationRequestIdRef.current;
     setBulkRunning(true);
     try {
       const result = await wishlistAPI.updateFilters(ids, bulkFilter.trim());
+      if (
+        !mountedRef.current ||
+        requestId !== operationRequestIdRef.current
+      ) {
+        return;
+      }
       const updatedCount = result?.updatedCount ?? result?.UpdatedCount ?? ids.length;
       toast.success(`Updated filters for ${updatedCount} item(s)`);
       setSelectedIds(new Set());
       setBulkFilter('');
       await loadItems();
     } catch (error) {
-      toast.error(`Failed to update filters: ${error.message}`);
+      if (
+        mountedRef.current &&
+        requestId === operationRequestIdRef.current
+      ) {
+        toast.error(`Failed to update filters: ${toDisplayError(error)}`);
+      }
     } finally {
-      setBulkRunning(false);
+      if (
+        mountedRef.current &&
+        requestId === operationRequestIdRef.current
+      ) {
+        setBulkRunning(false);
+      }
     }
   };
 
   useEffect(() => {
-    loadItems();
+    void loadItems();
   }, [loadItems]);
 
   const handleAdd = () => {
@@ -625,9 +797,11 @@ const Wishlist = () => {
   const handleSave = async (item) => {
     if (item.id) {
       await wishlistAPI.update(item.id, item);
+      if (!mountedRef.current) return;
       toast.success('Wishlist item updated');
     } else {
       await wishlistAPI.create(item);
+      if (!mountedRef.current) return;
       toast.success('Added to wishlist');
     }
 
@@ -635,12 +809,24 @@ const Wishlist = () => {
   };
 
   const handleDelete = async (id) => {
+    const requestId = ++operationRequestIdRef.current;
     try {
       await wishlistAPI.remove(id);
+      if (
+        !mountedRef.current ||
+        requestId !== operationRequestIdRef.current
+      ) {
+        return;
+      }
       toast.success('Wishlist item deleted');
       await loadItems();
     } catch (error) {
-      toast.error(`Failed to delete: ${error.message}`);
+      if (
+        mountedRef.current &&
+        requestId === operationRequestIdRef.current
+      ) {
+        toast.error(`Failed to delete: ${toDisplayError(error)}`);
+      }
     }
   };
 
@@ -652,8 +838,9 @@ const Wishlist = () => {
 
   const handleImport = async (request) => {
     const result = await wishlistAPI.importCsv(request);
+    if (!mountedRef.current) return;
     toast.success(
-      `Imported ${result.createdCount} searches (${result.duplicateCount} duplicates, ${result.skippedCount} skipped)`,
+      `Imported ${result?.createdCount ?? 0} searches (${result?.duplicateCount ?? 0} duplicates, ${result?.skippedCount ?? 0} skipped)`,
     );
     await loadItems();
   };
