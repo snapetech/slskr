@@ -734,6 +734,7 @@ async fn upload_shares(
         .map_err(|error| format!("relay share database directory create failed: {error}"))?;
     let database_path =
         relay_directory.join(format!("agent-shares-{}.db", uuid::Uuid::new_v4().simple()));
+    let mut database_guard = RelayTemporaryFile::new(database_path.clone());
     relay::write_share_database(&database_path, target, &shares).await?;
     let database_file = fs::File::open(&database_path)
         .await
@@ -765,8 +766,14 @@ async fn upload_shares(
     .await;
     let cleanup = fs::remove_file(&database_path).await;
     match (result, cleanup) {
-        (Ok(()), Ok(())) => Ok(()),
-        (Err(error), Ok(())) => Err(error),
+        (Ok(()), Ok(())) => {
+            database_guard.commit();
+            Ok(())
+        }
+        (Err(error), Ok(())) => {
+            database_guard.commit();
+            Err(error)
+        }
         (Ok(()), Err(error)) => Err(format!(
             "relay share upload completed but temporary database cleanup failed: {error}"
         )),
@@ -1184,5 +1191,23 @@ mod tests {
     fn relay_tls_pin_parser_rejects_blank_values() {
         assert!(relay_pins(" ,\t,").is_empty());
         assert_eq!(relay_pins("z, a, z"), vec!["a", "z"]);
+    }
+
+    #[test]
+    fn relay_temporary_file_guard_cleans_up_uncommitted_files() {
+        let path = std::env::temp_dir().join(format!(
+            "slskr-relay-temporary-{}.db",
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::write(&path, b"temporary").unwrap();
+        drop(RelayTemporaryFile::new(path.clone()));
+        assert!(!path.exists());
+
+        std::fs::write(&path, b"committed").unwrap();
+        let mut guard = RelayTemporaryFile::new(path.clone());
+        guard.commit();
+        drop(guard);
+        assert_eq!(std::fs::read(&path).unwrap(), b"committed");
+        std::fs::remove_file(path).unwrap();
     }
 }
