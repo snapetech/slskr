@@ -447,6 +447,21 @@ fn hash_db_entry(entry: MeshHashEntry) -> Option<super::content_discovery::HashD
     })
 }
 
+#[allow(dead_code)]
+fn _mesh_sync_message_types_are_exhaustive(message: &MeshSyncMessage) {
+    let _ = match message {
+        MeshSyncMessage::Hello(_) => MeshMessageType::Hello,
+        MeshSyncMessage::ReqDelta(_) => MeshMessageType::ReqDelta,
+        MeshSyncMessage::PushDelta(_) => MeshMessageType::PushDelta,
+        MeshSyncMessage::ReqKey(_) => MeshMessageType::ReqKey,
+        MeshSyncMessage::RespKey(_) => MeshMessageType::RespKey,
+        MeshSyncMessage::Ack(_) => MeshMessageType::Ack,
+        MeshSyncMessage::ReqChunk(_) => MeshMessageType::ReqChunk,
+        MeshSyncMessage::RespChunk(_) => MeshMessageType::RespChunk,
+        MeshSyncMessage::DhtStore(_) => MeshMessageType::DhtStore,
+    };
+}
+
 #[cfg(test)]
 mod tests {
     use slskr_client::mesh_sync::MeshHashEntry;
@@ -480,19 +495,4 @@ mod tests {
             );
         }
     }
-}
-
-#[allow(dead_code)]
-fn _mesh_sync_message_types_are_exhaustive(message: &MeshSyncMessage) {
-    let _ = match message {
-        MeshSyncMessage::Hello(_) => MeshMessageType::Hello,
-        MeshSyncMessage::ReqDelta(_) => MeshMessageType::ReqDelta,
-        MeshSyncMessage::PushDelta(_) => MeshMessageType::PushDelta,
-        MeshSyncMessage::ReqKey(_) => MeshMessageType::ReqKey,
-        MeshSyncMessage::RespKey(_) => MeshMessageType::RespKey,
-        MeshSyncMessage::Ack(_) => MeshMessageType::Ack,
-        MeshSyncMessage::ReqChunk(_) => MeshMessageType::ReqChunk,
-        MeshSyncMessage::RespChunk(_) => MeshMessageType::RespChunk,
-        MeshSyncMessage::DhtStore(_) => MeshMessageType::DhtStore,
-    };
 }
