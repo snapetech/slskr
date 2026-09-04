@@ -5,7 +5,7 @@
 //! it authenticates to the hub, publishes the local share snapshot, answers
 //! file-upload requests, and receives completed-download notifications.
 
-use std::{net::SocketAddr, sync::Arc, time::Duration};
+use std::{net::SocketAddr, path::Path, sync::Arc, time::Duration};
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use futures_util::{
@@ -759,8 +759,17 @@ async fn upload_shares(
         form,
     )
     .await;
-    let _ = fs::remove_file(&database_path).await;
-    result
+    let cleanup = fs::remove_file(&database_path).await;
+    match (result, cleanup) {
+        (Ok(()), Ok(())) => Ok(()),
+        (Err(error), Ok(())) => Err(error),
+        (Ok(()), Err(error)) => Err(format!(
+            "relay share upload completed but temporary database cleanup failed: {error}"
+        )),
+        (Err(error), Err(cleanup_error)) => Err(format!(
+            "{error}; temporary relay share database cleanup failed: {cleanup_error}"
+        )),
+    }
 }
 
 async fn handle_server_invocation(
@@ -993,6 +1002,7 @@ pub(crate) async fn download_completed_file(
             response.status()
         ));
     }
+    let expected_length = response.content_length();
     let mut output = fs::File::create(&temporary)
         .await
         .map_err(|error| format!("relay download destination create failed: {error}"))?;
@@ -1002,7 +1012,6 @@ pub(crate) async fn download_completed_file(
         let chunk = chunk.map_err(|error| format!("relay download body failed: {error}"))?;
         bytes_written = bytes_written.saturating_add(chunk.len() as u64);
         if bytes_written > MAX_RELAY_DOWNLOAD_BYTES {
-            let _ = fs::remove_file(&temporary).await;
             return Err("relay download exceeds the 1 GiB limit".to_owned());
         }
         output
@@ -1014,11 +1023,39 @@ pub(crate) async fn download_completed_file(
         .flush()
         .await
         .map_err(|error| format!("relay download flush failed: {error}"))?;
+    output
+        .sync_all()
+        .await
+        .map_err(|error| format!("relay download sync failed: {error}"))?;
+    if let Some(expected_length) = expected_length {
+        if expected_length != bytes_written {
+            return Err(format!(
+                "relay download length mismatch: expected {expected_length}, received {bytes_written}"
+            ));
+        }
+    }
     drop(output);
     fs::rename(&temporary, &destination)
         .await
         .map_err(|error| format!("relay download commit failed: {error}"))?;
     temporary_guard.commit();
+    sync_download_directory(destination.parent().unwrap_or_else(|| Path::new("."))).await?;
+    Ok(())
+}
+
+#[cfg(unix)]
+async fn sync_download_directory(path: &Path) -> Result<(), String> {
+    let directory = fs::File::open(path)
+        .await
+        .map_err(|error| format!("relay download parent directory open failed: {error}"))?;
+    directory
+        .sync_all()
+        .await
+        .map_err(|error| format!("relay download parent directory sync failed: {error}"))
+}
+
+#[cfg(not(unix))]
+async fn sync_download_directory(_path: &Path) -> Result<(), String> {
     Ok(())
 }
 
@@ -1043,7 +1080,17 @@ impl RelayTemporaryFile {
 impl Drop for RelayTemporaryFile {
     fn drop(&mut self) {
         if !self.committed {
-            let _ = std::fs::remove_file(&self.path);
+            match std::fs::remove_file(&self.path) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => {
+                    tracing::warn!(
+                        path = %self.path.display(),
+                        %error,
+                        "relay temporary download cleanup failed"
+                    );
+                }
+            }
         }
     }
 }

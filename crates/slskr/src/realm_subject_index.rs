@@ -343,15 +343,8 @@ impl Store {
         let Some(path) = self.state_path.as_deref() else {
             return Ok(());
         };
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)
-                .map_err(|error| format!("realm subject-index state directory failed: {error}"))?;
-        }
-        let temporary = path.with_extension("json.tmp");
-        fs::write(&temporary, &bytes)
-            .map_err(|error| format!("realm subject-index state write failed: {error}"))?;
-        fs::rename(&temporary, path)
-            .map_err(|error| format!("realm subject-index state commit failed: {error}"))
+        crate::write_file_atomic(path, &bytes)
+            .map_err(|error| format!("realm subject-index state write failed: {error}"))
     }
 }
 

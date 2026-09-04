@@ -804,14 +804,22 @@ impl Gateway {
             {
                 continue;
             }
-            let _ = self
+            if let Err((status, error)) = self
                 .handle_pods_call(
                     "PostMessage",
                     &envelope.payload,
                     message.sender_peer_id.trim(),
                     &state,
                 )
-                .await;
+                .await
+            {
+                tracing::warn!(
+                    %status,
+                    %error,
+                    sender_peer_id = message.sender_peer_id.trim(),
+                    "overlay pod message dispatch failed"
+                );
+            }
         }
     }
 
@@ -1022,7 +1030,18 @@ impl Gateway {
                     result = copy_tcp_to_quic(tcp_read, send, max_bytes) => result,
                 }
             };
-            let _ = timeout(policy.max_relay_duration.max(Duration::from_secs(1)), relay).await;
+            match timeout(policy.max_relay_duration.max(Duration::from_secs(1)), relay).await {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => {
+                    tracing::debug!(%error, ?remote, "overlay QUIC relay stopped with an error");
+                }
+                Err(_) => {
+                    tracing::warn!(
+                        ?remote,
+                        "overlay QUIC relay exceeded its configured duration"
+                    );
+                }
+            }
             drop(permit);
             return;
         }
@@ -1094,14 +1113,22 @@ impl Gateway {
             {
                 continue;
             }
-            let _ = self
+            if let Err((status, error)) = self
                 .handle_pods_call(
                     "PostMessage",
                     &envelope.payload,
                     message.sender_peer_id.trim(),
                     &state,
                 )
-                .await;
+                .await
+            {
+                tracing::warn!(
+                    %status,
+                    %error,
+                    sender_peer_id = message.sender_peer_id.trim(),
+                    "overlay QUIC pod message dispatch failed"
+                );
+            }
         }
     }
 }

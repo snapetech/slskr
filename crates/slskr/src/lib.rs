@@ -90865,12 +90865,22 @@ fn write_file_atomic_with_temp_path(
     }
 
     match replace_file(temp_path, path) {
-        Ok(()) => Ok(()),
+        Ok(()) => sync_state_directory(path.parent().unwrap_or_else(|| Path::new("."))),
         Err(error) => {
             let _ = fs::remove_file(temp_path);
             Err(error)
         }
     }
+}
+
+#[cfg(unix)]
+fn sync_state_directory(path: &Path) -> std::io::Result<()> {
+    fs::File::open(path).and_then(|directory| directory.sync_all())
+}
+
+#[cfg(not(unix))]
+fn sync_state_directory(_path: &Path) -> std::io::Result<()> {
+    Ok(())
 }
 
 #[cfg(unix)]

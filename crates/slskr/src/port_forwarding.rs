@@ -339,9 +339,21 @@ impl Rule {
         };
         send.abort();
         receive.abort();
-        let _ = timeout(TUNNEL_CLOSE_TIMEOUT, close_tunnel(&client, &tunnel_id)).await;
-        result?;
-        Ok(())
+        let _ = send.await;
+        let _ = receive.await;
+        let close_result =
+            match timeout(TUNNEL_CLOSE_TIMEOUT, close_tunnel(&client, &tunnel_id)).await {
+                Ok(result) => result,
+                Err(_) => Err("Gateway tunnel close timed out".to_owned()),
+            };
+        match (result, close_result) {
+            (Ok(()), Ok(())) => Ok(()),
+            (Err(error), Ok(())) => Err(error),
+            (Ok(()), Err(error)) => Err(error),
+            (Err(error), Err(close_error)) => Err(format!(
+                "{error}; gateway tunnel close failed: {close_error}"
+            )),
+        }
     }
 
     fn status(&self) -> Status {

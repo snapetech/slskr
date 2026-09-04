@@ -71,6 +71,10 @@ static FILE_UPLOAD_WAITERS: OnceLock<FileUploadWaiters> = OnceLock::new();
 type FileInfoWaiters = Mutex<BTreeMap<String, oneshot::Sender<Result<FileInfo, String>>>>;
 static FILE_INFO_WAITERS: OnceLock<FileInfoWaiters> = OnceLock::new();
 
+/// Share-manifest updates are read/modify/write operations.  Serialize them
+/// so concurrent agent uploads cannot overwrite one another's records.
+static SHARE_MANIFEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
 fn hub_connections() -> &'static Mutex<BTreeMap<String, mpsc::Sender<String>>> {
     HUB_CONNECTIONS.get_or_init(|| Mutex::new(BTreeMap::new()))
 }
@@ -81,6 +85,10 @@ fn file_upload_waiters() -> &'static FileUploadWaiters {
 
 fn file_info_waiters() -> &'static FileInfoWaiters {
     FILE_INFO_WAITERS.get_or_init(|| Mutex::new(BTreeMap::new()))
+}
+
+fn share_manifest_lock() -> &'static Mutex<()> {
+    SHARE_MANIFEST_LOCK.get_or_init(|| Mutex::new(()))
 }
 
 pub(crate) fn register_hub_connection(connection_id: String, sender: mpsc::Sender<String>) {
@@ -1201,6 +1209,9 @@ fn persist_share_manifest(
     {
         return Ok(());
     }
+    let _manifest_guard = share_manifest_lock()
+        .lock()
+        .map_err(|_| "relay share manifest lock is poisoned".to_owned())?;
     let manifest_path = incoming_directory.join("manifest.json");
     let mut records = match fs::read(&manifest_path) {
         Ok(bytes) => serde_json::from_slice::<Vec<PersistedShareUpload>>(&bytes)
@@ -1212,11 +1223,46 @@ fn persist_share_manifest(
     records.push(record.clone());
     let bytes = serde_json::to_vec_pretty(&records)
         .map_err(|error| format!("relay share manifest serialization failed: {error}"))?;
-    let temporary_path = manifest_path.with_extension("json.tmp");
-    fs::write(&temporary_path, bytes)
-        .map_err(|error| format!("relay share manifest write failed: {error}"))?;
-    fs::rename(&temporary_path, &manifest_path)
-        .map_err(|error| format!("relay share manifest replace failed: {error}"))?;
+    let temporary_path =
+        incoming_directory.join(format!(".manifest-{}.json.tmp", Uuid::new_v4().simple()));
+    let write_result = (|| {
+        use std::io::Write;
+
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut temporary = options
+            .open(&temporary_path)
+            .map_err(|error| format!("relay share manifest write failed: {error}"))?;
+        temporary
+            .write_all(&bytes)
+            .and_then(|()| temporary.sync_all())
+            .map_err(|error| format!("relay share manifest write failed: {error}"))?;
+        drop(temporary);
+        fs::rename(&temporary_path, &manifest_path)
+            .map_err(|error| format!("relay share manifest replace failed: {error}"))?;
+        sync_manifest_directory(incoming_directory)
+    })();
+    if write_result.is_err() {
+        let _ = fs::remove_file(&temporary_path);
+    }
+    write_result?;
+    Ok(())
+}
+
+#[cfg(unix)]
+fn sync_manifest_directory(path: &Path) -> Result<(), String> {
+    fs::File::open(path)
+        .and_then(|directory| directory.sync_all())
+        .map_err(|error| format!("relay share manifest directory sync failed: {error}"))
+}
+
+#[cfg(not(unix))]
+fn sync_manifest_directory(_path: &Path) -> Result<(), String> {
     Ok(())
 }
 
@@ -1493,5 +1539,64 @@ mod tests {
         assert!(state.agent_shares.is_empty());
         assert!(state.completed_share_uploads.is_empty());
         std::fs::remove_dir_all(root).expect("remove relay manifest fixture");
+    }
+
+    #[test]
+    fn concurrent_relay_share_manifest_updates_retain_both_records() {
+        let root = std::env::temp_dir().join(format!(
+            "slskr-relay-manifest-concurrent-{}",
+            Uuid::new_v4().simple()
+        ));
+        let incoming = root.join("relay").join("incoming");
+        std::fs::create_dir_all(&incoming).expect("create concurrent manifest directory");
+        let first_token = Uuid::new_v4();
+        let second_token = Uuid::new_v4();
+        let first_path = incoming.join(format!("share-{}.db", first_token.simple()));
+        let second_path = incoming.join(format!("share-{}.db", second_token.simple()));
+        let first = PersistedShareUpload {
+            token: first_token.to_string(),
+            agent_name: "edge-one".to_owned(),
+            shares: vec![RemoteShare {
+                filename: "one.flac".to_owned(),
+                size: 1,
+            }],
+            database_path: first_path.clone(),
+            completed_at: 1,
+        };
+        let second = PersistedShareUpload {
+            token: second_token.to_string(),
+            agent_name: "edge-two".to_owned(),
+            shares: vec![RemoteShare {
+                filename: "two.flac".to_owned(),
+                size: 2,
+            }],
+            database_path: second_path.clone(),
+            completed_at: 2,
+        };
+        let first_token_text = first.token.clone();
+        let second_token_text = second.token.clone();
+        let first_thread = std::thread::spawn(move || persist_share_manifest(&first_path, &first));
+        let second_thread =
+            std::thread::spawn(move || persist_share_manifest(&second_path, &second));
+        first_thread
+            .join()
+            .expect("first manifest writer must not panic")
+            .expect("first manifest update");
+        second_thread
+            .join()
+            .expect("second manifest writer must not panic")
+            .expect("second manifest update");
+
+        let bytes = std::fs::read(incoming.join("manifest.json")).expect("read manifest");
+        let records = serde_json::from_slice::<Vec<PersistedShareUpload>>(&bytes)
+            .expect("parse concurrent manifest");
+        assert_eq!(records.len(), 2);
+        assert!(records
+            .iter()
+            .any(|record| record.token == first_token_text));
+        assert!(records
+            .iter()
+            .any(|record| record.token == second_token_text));
+        std::fs::remove_dir_all(root).expect("remove concurrent manifest fixture");
     }
 }

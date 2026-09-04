@@ -5,7 +5,7 @@ import { usePlayer } from './PlayerContext';
 import { usePolling } from '../../lib/usePolling';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'react-toastify';
-import { Button, Checkbox, Icon, Label, List, Popup, Segment } from 'semantic-ui-react';
+import { Button, Checkbox, Icon, Label, List, Message, Popup, Segment } from 'semantic-ui-react';
 
 const applyPartyState = (state, player) => {
   if (!state || typeof state !== 'object' || Array.isArray(state)) return;
@@ -43,6 +43,8 @@ const PodListenAlongPanel = ({ channelId, compact = false, podId, user }) => {
   const [globalRadio, setGlobalRadio] = useState(false);
   const [meshStreaming, setMeshStreaming] = useState(false);
   const [partyState, setPartyState] = useState(null);
+  const [partyStateError, setPartyStateError] = useState(null);
+  const [directoryError, setDirectoryError] = useState(null);
   const [publishing, setPublishing] = useState(false);
   const followingRef = useRef(false);
   const playerRef = useRef(player);
@@ -81,6 +83,7 @@ const PodListenAlongPanel = ({ channelId, compact = false, podId, user }) => {
           ? state
           : null;
       setPartyState(nextState);
+      setPartyStateError(null);
       if (followingRef.current) {
         playerRef.current.followParty(nextState);
         applyPartyState(nextState, playerRef.current);
@@ -118,9 +121,14 @@ const PodListenAlongPanel = ({ channelId, compact = false, podId, user }) => {
               ? state
               : null,
           );
+          setPartyStateError(null);
         }
       })
-      .catch(() => {});
+      .catch((error) => {
+        if (!disposed && mountedRef.current) {
+          setPartyStateError(toDisplayError(error, 'Party state unavailable'));
+        }
+      });
 
     return () => {
       disposed = true;
@@ -141,6 +149,7 @@ const PodListenAlongPanel = ({ channelId, compact = false, podId, user }) => {
         mountedRef.current &&
         requestId === directoryRequestIdRef.current
       ) {
+        setDirectoryError(null);
         setDirectory(
           Array.isArray(nextDirectory)
             ? nextDirectory.filter(
@@ -150,12 +159,12 @@ const PodListenAlongPanel = ({ channelId, compact = false, podId, user }) => {
             : [],
         );
       }
-    } catch {
+    } catch (error) {
       if (
         mountedRef.current &&
         requestId === directoryRequestIdRef.current
       ) {
-        setDirectory([]);
+        setDirectoryError(toDisplayError(error, 'Radio directory unavailable'));
       }
     }
   }, []);
@@ -199,6 +208,7 @@ const PodListenAlongPanel = ({ channelId, compact = false, podId, user }) => {
           ? state
           : null,
       );
+      setPartyStateError(null);
       await refreshDirectory();
     } catch (error) {
       console.error('[Listen Along] Failed to publish party state:', error);
@@ -246,6 +256,14 @@ const PodListenAlongPanel = ({ channelId, compact = false, podId, user }) => {
   if (compact) {
     return (
       <Segment className="pod-listen-along pod-listen-along-compact">
+        {(partyStateError || directoryError) && (
+          <Message
+            aria-live="polite"
+            content={partyStateError || directoryError}
+            negative
+            size="tiny"
+          />
+        )}
         <div className="pod-listen-along-compact-status">
           <Popup
             content={
@@ -359,6 +377,14 @@ const PodListenAlongPanel = ({ channelId, compact = false, podId, user }) => {
 
   return (
     <Segment className="pod-listen-along">
+      {(partyStateError || directoryError) && (
+        <Message
+          aria-live="polite"
+          content={partyStateError || directoryError}
+          negative
+          size="tiny"
+        />
+      )}
       <div className="pod-listen-along-main">
         <div>
           <strong>Listen Along</strong>

@@ -791,10 +791,20 @@ fn assemble_and_publish(
     })?;
     fs::remove_file(assembly_path)
         .map_err(|_| "published download staging file could not be removed".to_owned())?;
-    if let Ok(parent) = fs::File::open(output_path.parent().unwrap_or_else(|| Path::new("."))) {
-        let _ = parent.sync_all();
-    }
+    sync_output_directory(output_path.parent().unwrap_or_else(|| Path::new(".")))?;
     Ok(final_hash)
+}
+
+#[cfg(unix)]
+fn sync_output_directory(path: &Path) -> Result<(), String> {
+    fs::File::open(path)
+        .and_then(|directory| directory.sync_all())
+        .map_err(|_| "published download parent directory could not be synchronized".to_owned())
+}
+
+#[cfg(not(unix))]
+fn sync_output_directory(_path: &Path) -> Result<(), String> {
+    Ok(())
 }
 
 fn create_private_directory(path: &Path) -> std::io::Result<()> {

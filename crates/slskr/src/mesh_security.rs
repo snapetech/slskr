@@ -1197,16 +1197,8 @@ impl CertificatePinManager {
         .map_err(|error| format!("mesh certificate pins serialization failed: {error}"))?;
         drop(peers);
 
-        let temporary = self
-            .storage_path
-            .with_extension(format!("json.{}.tmp", uuid::Uuid::new_v4().simple()));
-        fs::write(&temporary, body)
-            .map_err(|error| format!("mesh certificate pins write failed: {error}"))?;
-        if let Err(error) = fs::rename(&temporary, &self.storage_path) {
-            let _ = fs::remove_file(&temporary);
-            return Err(format!("mesh certificate pins replace failed: {error}"));
-        }
-        Ok(())
+        crate::write_file_atomic(&self.storage_path, body)
+            .map_err(|error| format!("mesh certificate pins write failed: {error}"))
     }
 }
 
