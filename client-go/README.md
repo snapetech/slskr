@@ -1,6 +1,6 @@
 # slskr Go API Client
 
-Official Go client library for the slskr HTTP API.
+Go client library for the independent slskr HTTP API.
 
 ## Features
 
@@ -142,4 +142,5 @@ Contributions welcome!
 
 ## License
 
-MIT - See LICENSE for details
+AGPL-3.0-only. See the repository [LICENSE](../LICENSE) and [NOTICE](../NOTICE)
+files for details.
