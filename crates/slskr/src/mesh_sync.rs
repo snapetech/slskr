@@ -436,6 +436,7 @@ fn hash_db_entry(entry: MeshHashEntry) -> Option<super::content_discovery::HashD
         || entry.byte_hash.len() != 64
         || !entry.byte_hash.bytes().all(|byte| byte.is_ascii_hexdigit())
         || entry.size <= 0
+        || entry.size > MAX_MESH_FILE_SIZE as i64
     {
         return None;
     }
@@ -466,18 +467,22 @@ fn _mesh_sync_message_types_are_exhaustive(message: &MeshSyncMessage) {
 mod tests {
     use slskr_client::mesh_sync::MeshHashEntry;
 
-    use super::hash_db_entry;
+    use super::{hash_db_entry, MAX_MESH_FILE_SIZE};
 
-    fn entry(flac_key: &str) -> MeshHashEntry {
+    fn entry_with_size(flac_key: &str, size: i64) -> MeshHashEntry {
         MeshHashEntry {
             sequence_id: 1,
             flac_key: flac_key.to_owned(),
             byte_hash: "a".repeat(64),
-            size: 1,
+            size,
             metadata_flags: None,
             signer_public_key: None,
             signature: None,
         }
+    }
+
+    fn entry(flac_key: &str) -> MeshHashEntry {
+        entry_with_size(flac_key, 1)
     }
 
     #[test]
@@ -494,5 +499,10 @@ mod tests {
                 "accepted {invalid:?}"
             );
         }
+        assert!(hash_db_entry(entry_with_size(
+            "0123456789abcdef",
+            (MAX_MESH_FILE_SIZE + 1) as i64,
+        ))
+        .is_none());
     }
 }
