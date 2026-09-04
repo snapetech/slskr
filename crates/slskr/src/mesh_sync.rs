@@ -19,9 +19,10 @@ use slskr_client::{
 };
 use tokio::io::{AsyncRead, AsyncWrite};
 
+use super::content_discovery::MAX_MESH_FILE_SIZE;
+
 const MESH_SYNC_PREFIX: &str = "MESH:";
 const MAX_ENTRIES_PER_SYNC: usize = 1_000;
-const MAX_MESH_FILE_SIZE: u64 = 10_000_000_000;
 
 /// Handle one inbound private message. Return `true` when the message belongs
 /// to mesh-sync, including malformed or intentionally dropped messages, so the

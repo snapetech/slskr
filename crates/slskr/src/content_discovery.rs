@@ -17,6 +17,7 @@ const MAX_STATE_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_HASH_ENTRIES: usize = 16_384;
 const MAX_HASH_MERGE_ENTRIES: usize = 1_000;
 const MAX_MESH_MERGE_ENTRIES: usize = MAX_HASH_MERGE_ENTRIES * 2;
+pub(crate) const MAX_MESH_FILE_SIZE: u64 = 10_000_000_000;
 const MAX_SHADOW_RECORDINGS: usize = 4_096;
 const MAX_SHADOW_MERGE_RECORDS: usize = 256;
 const MAX_PEERS_PER_RECORDING: usize = 64;
@@ -652,6 +653,10 @@ impl ContentDiscoveryStore {
         let mut valid = Vec::with_capacity(entries.len());
         let mut skipped = 0;
         for entry in entries {
+            if entry.size > MAX_MESH_FILE_SIZE {
+                skipped += 1;
+                continue;
+            }
             match normalize_hash_entry(entry, now) {
                 Ok(entry) => valid.push(entry),
                 Err(_) => skipped += 1,
@@ -1163,6 +1168,25 @@ mod tests {
             .expect("validated mesh batch should merge");
         assert_eq!(result, (MAX_HASH_MERGE_ENTRIES * 2 - 1, 0));
         assert_eq!(store.hash_entries().len(), MAX_HASH_MERGE_ENTRIES * 2 - 1);
+    }
+
+    #[test]
+    fn mesh_hash_merge_skips_entries_over_the_frozen_file_size_limit() {
+        let mut store = ContentDiscoveryStore::in_memory();
+        let oversized = HashDbEntry {
+            flac_key: "mesh-key".to_owned(),
+            file_sha256: HASH.to_owned(),
+            size: MAX_MESH_FILE_SIZE + 1,
+            ..HashDbEntry::default()
+        };
+
+        assert_eq!(
+            store
+                .merge_hash_entries_from_mesh(vec![oversized])
+                .expect("oversized mesh entries are skipped"),
+            (0, 1)
+        );
+        assert!(store.hash_entries().is_empty());
     }
 
     #[test]
