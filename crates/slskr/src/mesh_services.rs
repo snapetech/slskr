@@ -127,7 +127,7 @@ pub async fn post_pod_message(
                     slskr_client::overlay::OVERLAY_VERSION,
                     client.remote_certificate_sha256.map(hex::encode),
                 )
-                .await,
+                .await?,
         )
     } else {
         None
@@ -325,7 +325,7 @@ async fn fetch_content_inner(
                         slskr_client::overlay::OVERLAY_VERSION,
                         client.remote_certificate_sha256.map(hex::encode),
                     )
-                    .await,
+                    .await?,
             )
         } else {
             None

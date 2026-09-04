@@ -45,6 +45,10 @@ use tokio_rustls::{
 };
 
 const MAX_GATEWAY_CONNECTIONS: usize = 128;
+const MAX_OVERLAY_METADATA_USERNAME_BYTES: usize = 256;
+const MAX_OVERLAY_METADATA_FEATURES: usize = 20;
+const MAX_OVERLAY_METADATA_FEATURE_BYTES: usize = 32;
+const MAX_OVERLAY_METADATA_THUMBPRINT_BYTES: usize = 128;
 const MAX_TUNNELS: usize = 128;
 const MAX_TUNNELS_PER_PEER: usize = 10;
 const MAX_REPLAY_NONCES: usize = 4_096;
@@ -601,10 +605,31 @@ impl Gateway {
         features: Vec<String>,
         version: i32,
         certificate_thumbprint: Option<String>,
-    ) -> String {
+    ) -> Result<String, String> {
+        if username.trim().is_empty()
+            || username.len() > MAX_OVERLAY_METADATA_USERNAME_BYTES
+            || username.chars().any(char::is_control)
+            || features.len() > MAX_OVERLAY_METADATA_FEATURES
+            || features.iter().any(|feature| {
+                feature.is_empty()
+                    || feature.len() > MAX_OVERLAY_METADATA_FEATURE_BYTES
+                    || feature.chars().any(char::is_control)
+            })
+            || certificate_thumbprint.as_deref().is_some_and(|thumbprint| {
+                thumbprint.is_empty()
+                    || thumbprint.len() > MAX_OVERLAY_METADATA_THUMBPRINT_BYTES
+                    || thumbprint.chars().any(char::is_control)
+            })
+        {
+            return Err("outbound overlay metadata is invalid".to_owned());
+        }
+        let mut connections = self.overlay_connections.write().await;
+        if connections.len() >= MAX_GATEWAY_CONNECTIONS {
+            return Err("overlay connection capacity is full".to_owned());
+        }
         let connection_id = uuid::Uuid::new_v4().simple().to_string();
         let timestamp = overlay_timestamp();
-        self.overlay_connections.write().await.insert(
+        connections.insert(
             connection_id.clone(),
             OverlayConnectionMetadata {
                 username,
@@ -618,7 +643,7 @@ impl Gateway {
                 is_outbound: true,
             },
         );
-        connection_id
+        Ok(connection_id)
     }
 
     pub async fn remove_overlay_connection(&self, connection_id: &str) {
@@ -632,7 +657,7 @@ impl Gateway {
         features: Vec<String>,
         version: i32,
         certificate_thumbprint: Option<String>,
-    ) -> OutboundOverlayGuard {
+    ) -> Result<OutboundOverlayGuard, String> {
         let connection_id = self
             .register_outbound_overlay(
                 username,
@@ -642,10 +667,10 @@ impl Gateway {
                 certificate_thumbprint,
             )
             .await;
-        OutboundOverlayGuard {
+        Ok(OutboundOverlayGuard {
             gateway: Arc::clone(self),
-            connection_id,
-        }
+            connection_id: connection_id?,
+        })
     }
 
     pub async fn run(self: Arc<Self>, state: Arc<super::AppState>) -> Result<(), String> {
@@ -3248,7 +3273,8 @@ mod tests {
                 OVERLAY_VERSION,
                 None,
             )
-            .await;
+            .await
+            .unwrap();
         let connections = gateway.active_overlay_connections().await;
         assert_eq!(connections.len(), 1);
         assert_eq!(connections[0].username, "remote");
@@ -3258,6 +3284,49 @@ mod tests {
         drop(guard);
         tokio::task::yield_now().await;
         assert!(gateway.active_overlay_connections().await.is_empty());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn outbound_overlay_metadata_is_validated_and_capacity_bounded() {
+        let root = temporary_directory("gateway-outbound-capacity");
+        let gateway =
+            Gateway::load_or_create_with_quic("127.0.0.1:0".parse().unwrap(), &root, None)
+                .await
+                .unwrap();
+        assert!(gateway
+            .register_outbound_overlay(
+                "x".repeat(MAX_OVERLAY_METADATA_USERNAME_BYTES + 1),
+                "192.0.2.10:2234".parse().unwrap(),
+                Vec::new(),
+                OVERLAY_VERSION,
+                None,
+            )
+            .await
+            .is_err());
+        for index in 0..MAX_GATEWAY_CONNECTIONS {
+            assert!(gateway
+                .register_outbound_overlay(
+                    format!("remote-{index}"),
+                    "192.0.2.10:2234".parse().unwrap(),
+                    vec![FEATURE_MESH_SERVICE.to_owned()],
+                    OVERLAY_VERSION,
+                    None,
+                )
+                .await
+                .is_ok());
+        }
+        assert!(gateway
+            .register_outbound_overlay(
+                "capacity-full".to_owned(),
+                "192.0.2.10:2234".parse().unwrap(),
+                Vec::new(),
+                OVERLAY_VERSION,
+                None,
+            )
+            .await
+            .is_err());
+        drop(gateway);
         fs::remove_dir_all(root).unwrap();
     }
 
