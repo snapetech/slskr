@@ -257,6 +257,10 @@ pub const OVERLAY_MAX_DELTA_REQUESTS_PER_HOUR: usize = 60;
 pub const OVERLAY_MAX_MESH_SEARCH_REQUESTS_PER_MINUTE: usize = 30;
 pub const OVERLAY_VIOLATION_BACKOFF: Duration = Duration::from_secs(300);
 pub const OVERLAY_MAX_VIOLATIONS_BEFORE_BAN: u32 = 3;
+const MAX_OVERLAY_TRACKED_IPS: usize = 4_096;
+const MAX_OVERLAY_TRACKED_PEERS: usize = 4_096;
+const MAX_OVERLAY_ID_BYTES: usize = 512;
+const OVERLAY_STATE_RETENTION: Duration = Duration::from_secs(10 * 60);
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OverlayRateLimitResult {
@@ -285,6 +289,7 @@ struct OverlayIpState {
     active_connections: usize,
     violations: u32,
     backoff_until: Option<Instant>,
+    last_activity: Option<Instant>,
 }
 
 #[derive(Debug, Default)]
@@ -292,6 +297,7 @@ struct OverlayPeerState {
     message_times: VecDeque<Instant>,
     delta_request_times: VecDeque<Instant>,
     mesh_search_request_times: VecDeque<Instant>,
+    last_activity: Option<Instant>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -329,7 +335,16 @@ impl OverlayRateLimiter {
     pub fn check_connection(&self, ip: IpAddr) -> OverlayRateLimitResult {
         let now = Instant::now();
         let mut ip_states = self.ip_states.lock().expect("overlay IP limiter lock");
+        if !ip_states.contains_key(&ip) && ip_states.len() >= MAX_OVERLAY_TRACKED_IPS {
+            prune_overlay_ip_states(&mut ip_states, now);
+            if ip_states.len() >= MAX_OVERLAY_TRACKED_IPS {
+                drop(ip_states);
+                self.record_rejection();
+                return OverlayRateLimitResult::rejected("overlay IP tracking capacity reached");
+            }
+        }
         let state = ip_states.entry(ip).or_default();
+        state.last_activity = Some(now);
         if state.backoff_until.is_some_and(|until| until > now) {
             let mut global = self.global.lock().expect("overlay global limiter lock");
             global.rejected = global.rejected.saturating_add(1);
@@ -363,6 +378,7 @@ impl OverlayRateLimiter {
     }
 
     pub fn record_disconnection(&self, ip: IpAddr) {
+        let now = Instant::now();
         if let Some(state) = self
             .ip_states
             .lock()
@@ -370,15 +386,29 @@ impl OverlayRateLimiter {
             .get_mut(&ip)
         {
             state.active_connections = state.active_connections.saturating_sub(1);
+            state.last_activity = Some(now);
         }
         let mut global = self.global.lock().expect("overlay global limiter lock");
         global.total_connections = global.total_connections.saturating_sub(1);
     }
 
     pub fn check_message(&self, connection_id: &str) -> OverlayRateLimitResult {
+        if !valid_overlay_id(connection_id) {
+            self.record_rejection();
+            return OverlayRateLimitResult::rejected("overlay connection identity is invalid");
+        }
         let now = Instant::now();
         let mut peers = self.peer_states.lock().expect("overlay peer limiter lock");
+        if !peers.contains_key(connection_id) && peers.len() >= MAX_OVERLAY_TRACKED_PEERS {
+            prune_overlay_peer_states(&mut peers, now);
+            if peers.len() >= MAX_OVERLAY_TRACKED_PEERS {
+                drop(peers);
+                self.record_rejection();
+                return OverlayRateLimitResult::rejected("overlay peer tracking capacity reached");
+            }
+        }
         let state = peers.entry(connection_id.to_owned()).or_default();
+        state.last_activity = Some(now);
         prune_instants(&mut state.message_times, now, Duration::from_secs(1));
         if state.message_times.len() >= OVERLAY_MAX_MESSAGES_PER_SECOND {
             self.record_rejection();
@@ -416,9 +446,22 @@ impl OverlayRateLimiter {
         queue: impl Fn(&mut OverlayPeerState) -> &mut VecDeque<Instant>,
         reason: &str,
     ) -> OverlayRateLimitResult {
+        if !valid_overlay_id(peer_id) {
+            self.record_rejection();
+            return OverlayRateLimitResult::rejected("overlay peer identity is invalid");
+        }
         let now = Instant::now();
         let mut peers = self.peer_states.lock().expect("overlay peer limiter lock");
+        if !peers.contains_key(peer_id) && peers.len() >= MAX_OVERLAY_TRACKED_PEERS {
+            prune_overlay_peer_states(&mut peers, now);
+            if peers.len() >= MAX_OVERLAY_TRACKED_PEERS {
+                drop(peers);
+                self.record_rejection();
+                return OverlayRateLimitResult::rejected("overlay peer tracking capacity reached");
+            }
+        }
         let state = peers.entry(peer_id.to_owned()).or_default();
+        state.last_activity = Some(now);
         let entries = queue(state);
         prune_instants(entries, now, window);
         if entries.len() >= maximum {
@@ -432,7 +475,17 @@ impl OverlayRateLimiter {
     pub fn record_violation(&self, ip: IpAddr) {
         let now = Instant::now();
         let mut state = self.ip_states.lock().expect("overlay IP limiter lock");
+        if !state.contains_key(&ip) && state.len() >= MAX_OVERLAY_TRACKED_IPS {
+            prune_overlay_ip_states(&mut state, now);
+            if state.len() >= MAX_OVERLAY_TRACKED_IPS {
+                drop(state);
+                let mut global = self.global.lock().expect("overlay global limiter lock");
+                global.violations = global.violations.saturating_add(1);
+                return;
+            }
+        }
         let state = state.entry(ip).or_default();
+        state.last_activity = Some(now);
         state.violations = state.violations.saturating_add(1);
         if state.violations >= OVERLAY_MAX_VIOLATIONS_BEFORE_BAN {
             state.backoff_until = Some(now + OVERLAY_VIOLATION_BACKOFF);
@@ -450,14 +503,22 @@ impl OverlayRateLimiter {
 
     pub fn stats(&self) -> OverlayRateLimiterStats {
         let now = Instant::now();
+        let tracked_ips = {
+            let mut ip_states = self.ip_states.lock().expect("overlay IP limiter lock");
+            prune_overlay_ip_states(&mut ip_states, now);
+            ip_states.len()
+        };
+        let tracked_peers = {
+            let mut peer_states = self.peer_states.lock().expect("overlay peer limiter lock");
+            prune_overlay_peer_states(&mut peer_states, now);
+            peer_states.len()
+        };
         let mut global = self.global.lock().expect("overlay global limiter lock");
         prune_instants(&mut global.recent_connections, now, Duration::from_secs(60));
-        let ip_states = self.ip_states.lock().expect("overlay IP limiter lock");
-        let peer_states = self.peer_states.lock().expect("overlay peer limiter lock");
         OverlayRateLimiterStats {
             total_connections: global.total_connections,
-            tracked_ips: ip_states.len(),
-            tracked_peers: peer_states.len(),
+            tracked_ips,
+            tracked_peers,
             recent_connections: global.recent_connections.len(),
             violations: global.violations,
             rejected: global.rejected,
@@ -477,6 +538,50 @@ fn prune_instants(queue: &mut VecDeque<Instant>, now: Instant, window: Duration)
     {
         queue.pop_front();
     }
+}
+
+fn valid_overlay_id(value: &str) -> bool {
+    !value.trim().is_empty()
+        && value.len() <= MAX_OVERLAY_ID_BYTES
+        && !value.chars().any(char::is_control)
+}
+
+fn prune_overlay_ip_states(states: &mut HashMap<IpAddr, OverlayIpState>, now: Instant) {
+    states.retain(|_, state| {
+        state.active_connections > 0
+            || state.backoff_until.is_some_and(|until| until > now)
+            || state
+                .last_activity
+                .is_some_and(|last| now.saturating_duration_since(last) < OVERLAY_STATE_RETENTION)
+    });
+}
+
+fn prune_overlay_peer_state(state: &mut OverlayPeerState, now: Instant) {
+    prune_instants(&mut state.message_times, now, Duration::from_secs(1));
+    prune_instants(
+        &mut state.delta_request_times,
+        now,
+        Duration::from_secs(60 * 60),
+    );
+    prune_instants(
+        &mut state.mesh_search_request_times,
+        now,
+        Duration::from_secs(60),
+    );
+}
+
+fn prune_overlay_peer_states(states: &mut HashMap<String, OverlayPeerState>, now: Instant) {
+    for state in states.values_mut() {
+        prune_overlay_peer_state(state, now);
+    }
+    states.retain(|_, state| {
+        !state.message_times.is_empty()
+            || !state.delta_request_times.is_empty()
+            || !state.mesh_search_request_times.is_empty()
+            || state
+                .last_activity
+                .is_some_and(|last| now.saturating_duration_since(last) < OVERLAY_STATE_RETENTION)
+    });
 }
 
 #[derive(Clone, Debug)]
@@ -1756,5 +1861,21 @@ mod tests {
         assert!(manager.peer_certificate_info("expired").is_some());
 
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn overlay_limiter_bounds_peer_identity_state() {
+        let limiter = OverlayRateLimiter::new();
+        assert!(!limiter.check_message("").allowed);
+        assert_eq!(limiter.stats().tracked_peers, 0);
+
+        let oversized = "x".repeat(MAX_OVERLAY_ID_BYTES + 1);
+        assert!(!limiter.check_delta_request(&oversized).allowed);
+
+        for index in 0..MAX_OVERLAY_TRACKED_PEERS {
+            assert!(limiter.check_message(&format!("peer-{index}")).allowed);
+        }
+        assert!(!limiter.check_message("peer-over-cap").allowed);
+        assert_eq!(limiter.stats().tracked_peers, MAX_OVERLAY_TRACKED_PEERS);
     }
 }
