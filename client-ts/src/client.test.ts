@@ -1,5 +1,5 @@
 import { SlskrClient } from './client';
-import { NetworkError } from './errors';
+import { ApiError, NetworkError } from './errors';
 
 describe('SlskrClient request lifecycle', () => {
   it('validates and normalizes the REST base URL', () => {
@@ -79,6 +79,28 @@ describe('SlskrClient request lifecycle', () => {
 
     await expect(client.health()).rejects.toBeInstanceOf(NetworkError);
     expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserves structured API errors without assuming an object body', async () => {
+    global.fetch = jest.fn().mockResolvedValue(new Response(
+      JSON.stringify({ error: 'validation_failed', message: 'Invalid query', details: 'query is required' }),
+      { status: 422, headers: { 'content-type': 'application/json' } },
+    ));
+    const client = new SlskrClient({
+      baseUrl: 'http://localhost:8080',
+      token: 'test-token',
+      retries: 3,
+    });
+
+    await expect(client.health()).rejects.toMatchObject({
+      code: 'validation_failed',
+      details: 'query is required',
+      message: 'Invalid query',
+      status: 422,
+    });
+
+    global.fetch = jest.fn().mockResolvedValue(new Response('["invalid"]', { status: 400 }));
+    await expect(client.health()).rejects.toBeInstanceOf(ApiError);
   });
 
   it('bounds streamed responses without a content length', async () => {
@@ -192,7 +214,7 @@ describe('SlskrClient request lifecycle', () => {
     await expect(client.leaveRoom('lounge room')).resolves.toBeUndefined();
     await expect(client.getEvents()).resolves.toMatchObject([{ type: 'message', data: {} }]);
 
-    expect(requests.find((request) => request.url.includes('/api/messages/7/ack'))?.init?.method).toBe('PUT');
+    expect(requests.find((request) => request.url.includes('/api/messages/7/ack'))?.init?.method).toBe('POST');
     const transferRequest = requests.find((request) => request.url.includes('/api/transfers'));
     expect(transferRequest?.url).toContain('direction=0');
     expect(requests.some((request) => request.url.endsWith('/api/rooms/lounge%20room/join'))).toBe(true);

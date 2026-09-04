@@ -185,7 +185,7 @@ class SlskrClient:
 
     async def acknowledge_message(self, message_id: str) -> None:
         """Mark message as acknowledged"""
-        await self._put(
+        await self._post(
             f"/api/messages/{self._path_segment(message_id)}/ack",
             {},
         )
@@ -309,14 +309,39 @@ class SlskrClient:
                 if response.status >= 400:
                     error_data = {}
                     try:
-                        error_data = await self._read_json(response, MAX_HTTP_ERROR_BYTES)
+                        parsed_error = await self._read_json(response, MAX_HTTP_ERROR_BYTES)
+                        if isinstance(parsed_error, dict):
+                            error_data = parsed_error
                     except Exception:
                         pass
 
+                    error_code = next(
+                        (
+                            error_data.get(key)
+                            for key in ("code", "error")
+                            if isinstance(error_data.get(key), str)
+                            and error_data.get(key)
+                        ),
+                        f"HTTP {response.status}",
+                    )
+                    message = next(
+                        (
+                            error_data.get(key)
+                            for key in ("message", "detail", "error")
+                            if isinstance(error_data.get(key), str)
+                            and error_data.get(key)
+                        ),
+                        f"HTTP {response.status}",
+                    )
+                    details = error_data.get("details")
+                    if not isinstance(details, str):
+                        details = None
+
                     raise ApiError(
                         response.status,
-                        error_data.get("error", f"HTTP {response.status}"),
-                        details=error_data.get("details"),
+                        error_code,
+                        message=message,
+                        details=details,
                     )
 
                 if response.status == 204:

@@ -63,9 +63,7 @@ Use these when public Soulseek resets or throttles daemon sessions:
 
 | Variable | Purpose |
 | --- | --- |
-| `SLSKR_SLSKR_ACCOUNT_INDEX` | Soulseek account index used by the `slskr` daemon target; default `3`. |
 | `SLSKR_SLSKR_ACCOUNT_INDEX` | Soulseek account index used by the `slskr` daemon target; default `4`. |
-| `SLSKR_SLSKR_PROBE_ACCOUNT_INDEX` | Soulseek account index used by `slskr` when probing `slskr`; default `1`. |
 | `SLSKR_SLSKR_PROBE_ACCOUNT_INDEX` | Soulseek account index used by `slskr` when probing `slskr`; default `2`. |
 | `SLSKR_DAEMON_PREFLIGHT_ATTEMPTS` | Local daemon HTTP/log readiness attempts before peer-address probes; default `24`. |
 | `SLSKR_DAEMON_READINESS_ATTEMPTS` | Public peer-address attempts after daemon preflight; default `36`. |

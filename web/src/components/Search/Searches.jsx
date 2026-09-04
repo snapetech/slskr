@@ -480,8 +480,10 @@ const Searches = ({ runtimeProfile, server } = {}) => {
       setSearches((old) => ({
         ...old,
         [search.id]: {
-          ...old[search.id],
           ...search,
+          // The row callback can hold an older projection than the hub/REST
+          // state. Preserve the freshest fields while forcing cancellation.
+          ...old[search.id],
           endedAt: new Date().toISOString(),
           isComplete: true,
           state: 'Cancelled',

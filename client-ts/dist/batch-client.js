@@ -54,7 +54,7 @@ class BatchClient {
      * Get all failed results
      */
     getFailed(response) {
-        return response.results.filter((r) => r.status >= 400);
+        return response.results.filter((r) => !(r.status >= 200 && r.status < 300));
     }
     /**
      * Get all successful results

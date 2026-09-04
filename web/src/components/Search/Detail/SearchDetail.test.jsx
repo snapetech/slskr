@@ -174,6 +174,23 @@ describe('SearchDetail wishlist folder ignores', () => {
     expect(getResponses).toHaveBeenCalledTimes(2);
   });
 
+  it('renders an explicit terminal state when a completed search has no results', async () => {
+    getResponses.mockResolvedValue([]);
+
+    render(
+      <SearchDetail
+        {...createProps({
+          fileCount: 0,
+          responseCount: 0,
+        })}
+      />,
+    );
+
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'No results were returned for this search.',
+    );
+  });
+
   it('confirms and persists a new wishlist folder ignore', async () => {
     render(
       <SearchDetail

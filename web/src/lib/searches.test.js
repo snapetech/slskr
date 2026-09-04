@@ -94,6 +94,55 @@ describe('getResponses', () => {
 });
 
 describe('filterResponse', () => {
+  it('normalizes malformed response containers and numeric filters', () => {
+    expect(
+      search.filterResponse({
+        filters: { minFilesInFolder: 'not-a-number' },
+        response: {
+          files: [null, { filename: 'valid.mp3' }],
+          lockedFiles: { invalid: true },
+          fileCount: 'not-a-number',
+          lockedFileCount: null,
+        },
+      }),
+    ).toMatchObject({
+      files: [{ filename: 'valid.mp3' }],
+      fileCount: 1,
+      lockedFiles: [],
+      lockedFileCount: 0,
+    });
+  });
+
+  it('applies minimum folder counts to public and locked files together', () => {
+    expect(
+      search.filterResponse({
+        filters: { minFilesInFolder: 2 },
+        response: {
+          files: [{ filename: 'public.mp3' }],
+          lockedFiles: [{ filename: 'private.mp3' }],
+        },
+      }),
+    ).toMatchObject({
+      files: [{ filename: 'public.mp3' }],
+      lockedFiles: [{ filename: 'private.mp3' }],
+    });
+
+    expect(
+      search.filterResponse({
+        filters: { minFilesInFolder: 3 },
+        response: {
+          files: [{ filename: 'public.mp3' }],
+          lockedFiles: [{ filename: 'private.mp3' }],
+        },
+      }),
+    ).toMatchObject({
+      files: [],
+      fileCount: 0,
+      lockedFiles: [],
+      lockedFileCount: 0,
+    });
+  });
+
   it('removes VBR files if "iscbr" is specified', () => {
     const response = {
       files: [
@@ -251,6 +300,14 @@ describe('filterResponse', () => {
 });
 
 describe('parseFiltersFromString', () => {
+  it('accepts non-string input as an empty query', () => {
+    expect(search.parseFiltersFromString(null)).toMatchObject({
+      include: [],
+      exclude: [],
+      minBitRate: 0,
+    });
+  });
+
   it('returns correct minBitrate', () => {
     expect(search.parseFiltersFromString('foo minbr:42 bar')).toMatchObject({
       minBitRate: 42,

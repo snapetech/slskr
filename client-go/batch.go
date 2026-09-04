@@ -33,7 +33,7 @@ func (b *BatchResult) IsSuccess() bool {
 
 // IsError checks if operation failed
 func (b *BatchResult) IsError() bool {
-	return b.Status >= 400
+	return !b.IsSuccess()
 }
 
 // BatchBuilder helps build batch operations

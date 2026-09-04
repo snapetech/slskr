@@ -26,3 +26,13 @@ func TestBatchBuilderOwnsNestedRequestBodies(t *testing.T) {
 		t.Fatalf("builder retained aliased filters: %v", storedFilters)
 	}
 }
+
+func TestBatchResultTreatsRedirectAsError(t *testing.T) {
+	result := BatchResult{ID: "redirect", Status: 302}
+	if !result.IsError() {
+		t.Fatal("expected a redirect result to be treated as an error")
+	}
+	if result.IsSuccess() {
+		t.Fatal("expected a redirect result not to be treated as successful")
+	}
+}

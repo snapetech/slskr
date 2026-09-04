@@ -457,7 +457,7 @@ export class SlskrClient {
   }
 
   async acknowledgeMessage(id: string): Promise<void> {
-    await this.putAuth(`/api/messages/${this.pathSegment(id)}/ack`, {});
+    await this.postAuth(`/api/messages/${this.pathSegment(id)}/ack`, {});
   }
 
   // =========================================================================
@@ -655,14 +655,33 @@ export class SlskrClient {
       }
 
       if (!response.ok) {
-        const errorData = await this.readJson(response, MAX_HTTP_ERROR_BYTES).catch(() => ({})) as {
-          error?: string;
-          details?: string;
-        };
+        const parsedError = await this.readJson(response, MAX_HTTP_ERROR_BYTES).catch(() => ({}));
+        const errorData =
+          parsedError !== null &&
+          typeof parsedError === 'object' &&
+          !Array.isArray(parsedError)
+            ? parsedError as Record<string, unknown>
+            : {};
+        const errorCode =
+          typeof errorData.code === 'string'
+            ? errorData.code
+            : typeof errorData.error === 'string'
+              ? errorData.error
+              : `HTTP ${response.status}`;
+        const message =
+          typeof errorData.message === 'string'
+            ? errorData.message
+            : typeof errorData.detail === 'string'
+              ? errorData.detail
+              : typeof errorData.error === 'string'
+                ? errorData.error
+                : `HTTP ${response.status}`;
+        const details = typeof errorData.details === 'string' ? errorData.details : undefined;
         throw new ApiError(
           response.status,
-          errorData.error || `HTTP ${response.status}`,
-          errorData.details
+          errorCode,
+          message,
+          details
         );
       }
 

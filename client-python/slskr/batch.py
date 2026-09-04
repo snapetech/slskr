@@ -18,7 +18,7 @@ class BatchOperation:
     def to_dict(self) -> Dict:
         """Convert to dictionary"""
         op = {"id": self.id, "method": self.method, "path": self.path}
-        if self.body:
+        if self.body is not None:
             op["body"] = deepcopy(self.body)
         return op
 
@@ -37,7 +37,12 @@ class BatchResult:
 
     def is_error(self) -> bool:
         """Check if operation failed"""
-        return self.status >= 400
+        return not self.is_success()
+
+
+def clone_operation(operation: BatchOperation) -> BatchOperation:
+    """Copy an operation so builders do not retain caller-owned state."""
+    return BatchOperation(operation.id, operation.method, operation.path, operation.body)
 
 
 class BatchResponse:
@@ -57,7 +62,7 @@ class BatchResponse:
 
     def get_failed(self) -> List[BatchResult]:
         """Get failed operations"""
-        return [r for r in self.results if r.is_error()]
+        return [r for r in self.results if not r.is_success()]
 
 
 class BatchBuilder:
@@ -98,12 +103,12 @@ class BatchBuilder:
 
     def add_operations(self, ops: List[BatchOperation]) -> "BatchBuilder":
         """Add multiple operations"""
-        self.operations.extend(ops)
+        self.operations.extend(clone_operation(operation) for operation in ops)
         return self
 
     def get_operations(self) -> List[BatchOperation]:
         """Get current operations"""
-        return self.operations[:]
+        return [clone_operation(operation) for operation in self.operations]
 
     def clear(self) -> "BatchBuilder":
         """Clear all operations"""

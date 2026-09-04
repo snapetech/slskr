@@ -37,7 +37,33 @@ vi.mock('./SongIDPanel', () => ({
   default: () => <div data-testid="songid-panel">SongID panel</div>,
 }));
 vi.mock('./Detail/SearchDetail', () => ({ default: () => null }));
-vi.mock('./List/SearchList', () => ({ default: () => null }));
+vi.mock('./List/SearchList', () => ({
+  default: ({ onStop, searches }) => {
+    const search = Object.values(searches ?? {})[0];
+    if (!search) {
+      return null;
+    }
+
+    return (
+      <>
+        <span data-testid="search-list-file-count">{search.fileCount}</span>
+        <button
+          onClick={() =>
+            onStop({
+              fileCount: 1,
+              id: search.id,
+              searchText: 'stale search row',
+              state: 'InProgress',
+            })
+          }
+          type="button"
+        >
+          Stop search
+        </button>
+      </>
+    );
+  },
+}));
 
 const callbacks = {};
 
@@ -139,6 +165,29 @@ describe('Searches', () => {
     await waitFor(() =>
       expect(library.getStatus).toHaveBeenCalledWith({ id: 'search-1' }),
     );
+  });
+
+  it('preserves the freshest search projection when stop receives a stale row', async () => {
+    library.getAll.mockResolvedValue([
+      {
+        fileCount: 9,
+        id: 'search-1',
+        responseCount: 4,
+        searchText: 'fresh search',
+        state: 'InProgress',
+      },
+    ]);
+    library.stop.mockResolvedValue({});
+
+    await renderSearches();
+
+    await waitFor(() =>
+      expect(screen.getByTestId('search-list-file-count')).toHaveTextContent('9'),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Stop search' }));
+
+    await waitFor(() => expect(library.stop).toHaveBeenCalledWith({ id: 'search-1' }));
+    expect(screen.getByTestId('search-list-file-count')).toHaveTextContent('9');
   });
 
   it('refreshes generic search events by resource id', async () => {

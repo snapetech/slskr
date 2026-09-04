@@ -270,6 +270,7 @@ const getSizeFromRegex = (string, regex) => {
 };
 
 export const parseFiltersFromString = (string) => {
+  const query = typeof string === 'string' ? string : '';
   const filters = {
     exclude: [],
     extensions: [],
@@ -291,39 +292,39 @@ export const parseFiltersFromString = (string) => {
   };
 
   filters.minBitRate =
-    getNthMatch(string, /(minbr|minbitrate):(\d+)/iu, 2) || filters.minBitRate;
+    getNthMatch(query, /(minbr|minbitrate):(\d+)/iu, 2) || filters.minBitRate;
   filters.minBitDepth =
-    getNthMatch(string, /(minbd|minbitdepth):(\d+)/iu, 2) ||
+    getNthMatch(query, /(minbd|minbitdepth):(\d+)/iu, 2) ||
     filters.minBitDepth;
   filters.minSampleRate =
-    getNthMatch(string, /(minsr|minsamplerate):(\d+)/iu, 2) ||
+    getNthMatch(query, /(minsr|minsamplerate):(\d+)/iu, 2) ||
     filters.minSampleRate;
 
   filters.minFileSize =
-    getSizeFromRegex(string, /(minfs|minfilesize):(\d+)(kb|mb|gb)?/iu) ||
+    getSizeFromRegex(query, /(minfs|minfilesize):(\d+)(kb|mb|gb)?/iu) ||
     filters.minFileSize;
 
   filters.maxFileSize =
-    getSizeFromRegex(string, /(maxfs|maxfilesize):(\d+)(kb|mb|gb)?/iu) ||
+    getSizeFromRegex(query, /(maxfs|maxfilesize):(\d+)(kb|mb|gb)?/iu) ||
     filters.maxFileSize;
 
   filters.minLength =
-    getNthMatch(string, /(minlen|minlength):(\d+)/iu, 2) || filters.minLength;
+    getNthMatch(query, /(minlen|minlength):(\d+)/iu, 2) || filters.minLength;
   filters.minFilesInFolder =
-    getNthMatch(string, /(minfif|minfilesinfolder):(\d+)/iu, 2) ||
+    getNthMatch(query, /(minfif|minfilesinfolder):(\d+)/iu, 2) ||
     filters.minFilesInFolder;
 
-  filters.isVBR = Boolean(/isvbr/iu.test(string));
-  filters.isCBR = Boolean(/iscbr/iu.test(string));
-  filters.isLossless = Boolean(/islossless/iu.test(string));
-  filters.isLossy = Boolean(/islossy/iu.test(string));
-  filters.preferLossless = Boolean(/preferlossless/iu.test(string));
+  filters.isVBR = Boolean(/isvbr/iu.test(query));
+  filters.isCBR = Boolean(/iscbr/iu.test(query));
+  filters.isLossless = Boolean(/islossless/iu.test(query));
+  filters.isLossy = Boolean(/islossy/iu.test(query));
+  filters.preferLossless = Boolean(/preferlossless/iu.test(query));
   filters.preferMinBitRate =
-    getNthMatch(string, /(prefbr|preferbr|preferbitrate):(\d+)/iu, 2) ||
+    getNthMatch(query, /(prefbr|preferbr|preferbitrate):(\d+)/iu, 2) ||
     filters.preferMinBitRate;
 
   // Parse extensions: ext:flac,mp3 or ext:flac mp3
-  const extensionMatch = string.match(/ext:(\S+)/iu);
+  const extensionMatch = query.match(/ext:(\S+)/iu);
   if (extensionMatch) {
     filters.extensions = extensionMatch[1]
       .split(/[ ,]/)
@@ -331,7 +332,7 @@ export const parseFiltersFromString = (string) => {
       .filter((e) => e.length > 0);
   }
 
-  const preferredExtensionMatch = string.match(/prefext:(\S+)/iu);
+  const preferredExtensionMatch = query.match(/prefext:(\S+)/iu);
   if (preferredExtensionMatch) {
     filters.preferExtensions = preferredExtensionMatch[1]
       .split(/[ ,]/)
@@ -339,7 +340,7 @@ export const parseFiltersFromString = (string) => {
       .filter((e) => e.length > 0);
   }
 
-  const terms = (string.toLowerCase().match(/-?"[^"]+"|\S+/gu) || [])
+  const terms = (query.toLowerCase().match(/-?"[^"]+"|\S+/gu) || [])
     .map((term) => {
       const excluded = term.startsWith('-');
       const value = (excluded ? term.slice(1) : term).replace(/^"|"$/gu, '');
@@ -367,43 +368,83 @@ export const parseFiltersFromString = (string) => {
 
 // eslint-disable-next-line complexity
 const filterFile = (file, filters) => {
+  const input =
+    file && typeof file === 'object' && !Array.isArray(file) ? file : {};
+  const activeFilters =
+    filters && typeof filters === 'object' && !Array.isArray(filters)
+      ? filters
+      : {};
   const {
     bitRate,
     size,
     length,
-    filename,
+    filename: rawFilename,
     sampleRate,
     bitDepth,
     isVariableBitRate,
-  } = file;
+  } = input;
   const {
-    isCBR,
-    isVBR,
-    isLossless,
-    isLossy,
-    minBitRate,
-    minBitDepth,
-    minSampleRate,
-    maxFileSize,
-    minFileSize,
-    minLength,
-    include = [],
-    exclude = [],
-    extensions = [],
-  } = filters;
+    isCBR = false,
+    isVBR = false,
+    isLossless = false,
+    isLossy = false,
+  } = activeFilters;
+  const rawInclude = Array.isArray(activeFilters.include)
+    ? activeFilters.include
+    : [];
+  const rawExclude = Array.isArray(activeFilters.exclude)
+    ? activeFilters.exclude
+    : [];
+  const rawExtensions = Array.isArray(activeFilters.extensions)
+    ? activeFilters.extensions
+    : [];
+  const include = rawInclude
+    .filter((term) => typeof term === 'string')
+    .map((term) => term.toLowerCase());
+  const exclude = rawExclude
+    .filter((term) => typeof term === 'string')
+    .map((term) => term.toLowerCase());
+  const extensions = rawExtensions
+    .filter((extension) => typeof extension === 'string')
+    .map((extension) => extension.toLowerCase().replace(/^\./u, ''));
+  const numeric = (value, fallback = 0) => {
+    const parsed = typeof value === 'number' ? value : Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  };
+  const normalizedBitRate = numeric(bitRate);
+  const normalizedSize = numeric(size);
+  const normalizedLength = numeric(length);
+  const normalizedSampleRate = numeric(sampleRate);
+  const normalizedBitDepth = numeric(bitDepth);
+  const minBitRate = numeric(activeFilters.minBitRate);
+  const minBitDepth = numeric(activeFilters.minBitDepth);
+  const minSampleRate = numeric(activeFilters.minSampleRate);
+  const maxFileSize = numeric(
+    activeFilters.maxFileSize,
+    Number.MAX_SAFE_INTEGER,
+  );
+  const minFileSize = numeric(activeFilters.minFileSize);
+  const minLength = numeric(activeFilters.minLength);
+  const filename = typeof rawFilename === 'string' ? rawFilename : '';
 
-  if (isCBR && (isVariableBitRate === undefined || isVariableBitRate))
+  if (isCBR && (typeof isVariableBitRate !== 'boolean' || isVariableBitRate))
     return false;
-  if (isVBR && (isVariableBitRate === undefined || !isVariableBitRate))
+  if (isVBR && (typeof isVariableBitRate !== 'boolean' || !isVariableBitRate))
     return false;
-  if (isLossless && (!sampleRate || !bitDepth)) return false;
-  if (isLossy && (sampleRate || bitDepth)) return false;
-  if (bitRate < minBitRate) return false;
-  if (bitDepth < minBitDepth) return false;
-  if (minSampleRate && sampleRate && sampleRate < minSampleRate) return false;
-  if (size < minFileSize) return false;
-  if (size > maxFileSize) return false;
-  if (length < minLength) return false;
+  if (isLossless && (!normalizedSampleRate || !normalizedBitDepth))
+    return false;
+  if (isLossy && (normalizedSampleRate || normalizedBitDepth)) return false;
+  if (normalizedBitRate < minBitRate) return false;
+  if (normalizedBitDepth < minBitDepth) return false;
+  if (
+    minSampleRate &&
+    normalizedSampleRate &&
+    normalizedSampleRate < minSampleRate
+  )
+    return false;
+  if (normalizedSize < minFileSize) return false;
+  if (normalizedSize > maxFileSize) return false;
+  if (normalizedLength < minLength) return false;
 
   // Filter by file extension
   if (extensions.length > 0) {
@@ -450,23 +491,49 @@ export const filterResponse = ({
     lockedFiles: [],
   },
 }) => {
-  const { files = [], lockedFiles = [] } = response;
+  const responseObject =
+    response && typeof response === 'object' && !Array.isArray(response)
+      ? response
+      : {};
+  const files = Array.isArray(responseObject.files) ? responseObject.files : [];
+  const lockedFiles = Array.isArray(responseObject.lockedFiles)
+    ? responseObject.lockedFiles
+    : [];
+  const activeFilters =
+    filters && typeof filters === 'object' && !Array.isArray(filters)
+      ? filters
+      : {};
+  const reportedFileCount = Number(responseObject.fileCount);
+  const reportedLockedFileCount = Number(responseObject.lockedFileCount);
+  const fileCount = Number.isFinite(reportedFileCount)
+    ? Math.max(0, reportedFileCount, files.length)
+    : files.length;
+  const lockedFileCount = Number.isFinite(reportedLockedFileCount)
+    ? Math.max(0, reportedLockedFileCount, lockedFiles.length)
+    : lockedFiles.length;
 
-  if (
-    response.fileCount + response.lockedFileCount <
-    filters.minFilesInFolder
-  ) {
-    return { ...response, files: [] };
+  if (fileCount + lockedFileCount < Number(activeFilters.minFilesInFolder || 0)) {
+    return {
+      ...responseObject,
+      fileCount: 0,
+      files: [],
+      lockedFileCount: 0,
+      lockedFiles: [],
+    };
   }
 
   const filterFiles = (filesToFilter) =>
-    filesToFilter.filter((file) => filterFile(file, filters));
+    filesToFilter.filter(
+      (file) =>
+        file && typeof file === 'object' && !Array.isArray(file) &&
+        filterFile(file, activeFilters),
+    );
 
   const filteredFiles = filterFiles(files);
   const filteredLockedFiles = filterFiles(lockedFiles);
 
   return {
-    ...response,
+    ...responseObject,
     fileCount: filteredFiles.length,
     files: filteredFiles,
     lockedFileCount: filteredLockedFiles.length,

@@ -383,7 +383,7 @@ class SlskrClient {
         }));
     }
     async acknowledgeMessage(id) {
-        await this.putAuth(`/api/messages/${this.pathSegment(id)}/ack`, {});
+        await this.postAuth(`/api/messages/${this.pathSegment(id)}/ack`, {});
     }
     // =========================================================================
     // Transfers
@@ -531,8 +531,26 @@ class SlskrClient {
                 clearTimeout(timeoutId);
             }
             if (!response.ok) {
-                const errorData = await this.readJson(response, MAX_HTTP_ERROR_BYTES).catch(() => ({}));
-                throw new errors_1.ApiError(response.status, errorData.error || `HTTP ${response.status}`, errorData.details);
+                const parsedError = await this.readJson(response, MAX_HTTP_ERROR_BYTES).catch(() => ({}));
+                const errorData = parsedError !== null &&
+                    typeof parsedError === 'object' &&
+                    !Array.isArray(parsedError)
+                    ? parsedError
+                    : {};
+                const errorCode = typeof errorData.code === 'string'
+                    ? errorData.code
+                    : typeof errorData.error === 'string'
+                        ? errorData.error
+                        : `HTTP ${response.status}`;
+                const message = typeof errorData.message === 'string'
+                    ? errorData.message
+                    : typeof errorData.detail === 'string'
+                        ? errorData.detail
+                        : typeof errorData.error === 'string'
+                            ? errorData.error
+                            : `HTTP ${response.status}`;
+                const details = typeof errorData.details === 'string' ? errorData.details : undefined;
+                throw new errors_1.ApiError(response.status, errorCode, message, details);
             }
             if (response.status === 204) {
                 return undefined;

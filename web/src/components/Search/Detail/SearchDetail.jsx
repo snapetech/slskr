@@ -104,7 +104,10 @@ const SearchDetail = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(undefined);
 
-  const [results, setResults] = useState([]);
+  // `null` means the result endpoint has not hydrated yet.  An empty array is
+  // a real terminal response and must be rendered as such rather than making
+  // the detail page look blank while it is still loading.
+  const [results, setResults] = useState(null);
 
   // filters and sorting options
   const [hiddenResults, setHiddenResults] = useState([]);
@@ -329,7 +332,7 @@ const SearchDetail = ({
 
     const filters = parseFiltersFromString(resultFilters);
 
-    return results
+    return asArray(results)
       .filter((r) => !hiddenResults.includes(r.username))
       .filter((r) => !(hideBlockedUsers && blockedUsers.includes(r.username)))
       .map((response) => {
@@ -424,7 +427,7 @@ const SearchDetail = ({
   const reset = () => {
     setLoading(false);
     setError(undefined);
-    setResults([]);
+    setResults(null);
     setHiddenResults([]);
     setDisplayCount(pageSize);
   };
@@ -611,9 +614,13 @@ const SearchDetail = ({
     toast.success(`Saved local album rule for ${rule.albumTitle}`);
   };
 
-  const filteredCount = results?.length - sortedAndFilteredResults.length;
+  const resultCount = Array.isArray(results) ? results.length : 0;
+  const filteredCount = Math.max(
+    0,
+    resultCount - sortedAndFilteredResults.length,
+  );
   const remainingCount = sortedAndFilteredResults.length - displayCount;
-  const loaded = !removing && !creating && !loading && Boolean(results);
+  const loaded = !removing && !creating && !loading && results !== null;
 
   if (error) {
     return <ErrorSegment caption={error?.message ?? error} />;
@@ -981,6 +988,16 @@ const SearchDetail = ({
                 </List.Item>
               ))}
             </List>
+          </Segment>
+        )}
+        {loaded && sortedAndFilteredResults.length === 0 && (
+          <Segment
+            className="search-empty-state"
+            role="status"
+          >
+            {resultCount === 0
+              ? 'No results were returned for this search.'
+              : 'No results match the current filters.'}
           </Segment>
         )}
         {loaded &&

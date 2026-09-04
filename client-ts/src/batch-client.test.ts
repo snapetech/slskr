@@ -68,4 +68,21 @@ describe('Batch operation limits', () => {
     expect(postAuth.mock.calls[0][1].operations[0].body.filters).toEqual(['direct']);
     expect(postAuth.mock.calls[1][1].operations[0].body.filters).toEqual(['bulk']);
   });
+
+  it('classifies every non-2xx result as failed', () => {
+    const { client } = mockClient();
+    const batch = new BatchClient(client);
+    const response = {
+      results: [
+        { id: 'ok', status: 200, body: {} },
+        { id: 'redirect', status: 302, body: {} },
+        { id: 'error', status: 500, body: {} },
+      ],
+      total_time_ms: 1,
+    };
+
+    expect(batch.allSuccessful(response)).toBe(false);
+    expect(batch.getSuccessful(response).map((result) => result.id)).toEqual(['ok']);
+    expect(batch.getFailed(response).map((result) => result.id)).toEqual(['redirect', 'error']);
+  });
 });

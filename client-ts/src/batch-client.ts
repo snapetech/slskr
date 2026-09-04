@@ -69,7 +69,7 @@ export class BatchClient {
    * Get all failed results
    */
   getFailed(response: BatchResponse): BatchResult[] {
-    return response.results.filter((r) => r.status >= 400);
+    return response.results.filter((r) => !(r.status >= 200 && r.status < 300));
   }
 
   /**

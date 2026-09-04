@@ -39,7 +39,7 @@ async def test_python_client_uses_daemon_wire_contracts():
             {"entries": [{"id": 3}]},
         ]
     )
-    client._post = AsyncMock(side_effect=[{"id": 4}, {"id": 5}])
+    client._post = AsyncMock(side_effect=[{"id": 4}, {"id": 5}, None])
     client._put = AsyncMock(return_value=None)
 
     assert await client.list_searches() == [{"id": "search-1"}]
@@ -65,8 +65,9 @@ async def test_python_client_uses_daemon_wire_contracts():
             {"direction": 0, "peer_username": "alice", "filename": "track.flac"},
         ),
         call("/api/messages", {"username": "alice", "body": "hello"}),
+        call("/api/messages/7/ack", {}),
     ]
-    client._put.assert_awaited_once_with("/api/messages/7/ack", {})
+    client._post.assert_any_await("/api/messages/7/ack", {})
 
 
 def test_batch_builder_serializes_and_limits_operations():
@@ -109,6 +110,23 @@ def test_batch_response_helpers_classify_results():
     assert not response.all_successful()
     assert [result.id for result in response.get_successful()] == ["ok"]
     assert [result.id for result in response.get_failed()] == ["bad"]
+
+
+def test_batch_helpers_treat_redirects_as_failures_and_copy_operations():
+    response = BatchResponse([BatchResult("redirect", 302, {})], 1)
+    assert not response.all_successful()
+    assert [result.id for result in response.get_failed()] == ["redirect"]
+
+    body = {"options": {"filters": ["lossless"]}}
+    builder = BatchBuilder(SlskrClient("https://example.test", "token"))
+    operation = BatchOperation("op", "POST", "/api/searches", body)
+    builder.add_operations([operation])
+    body["options"]["filters"].append("mutated")
+    snapshot = builder.get_operations()
+    snapshot[0].body["options"]["filters"].append("snapshot")
+    assert builder.get_operations()[0].to_dict()["body"] == {
+        "options": {"filters": ["lossless"]}
+    }
 
 
 def test_websocket_client_uses_event_endpoint_and_tracks_topics():
@@ -474,6 +492,37 @@ async def test_python_client_does_not_replay_mutations_after_transport_failure()
         await client._request("POST", "/api/searches", body={"query": "rare"})
 
     session.request.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_python_client_preserves_structured_api_errors_and_non_object_bodies():
+    response = MagicMock(status=422)
+    context = MagicMock()
+    context.__aenter__ = AsyncMock(return_value=response)
+    context.__aexit__ = AsyncMock(return_value=False)
+    session = MagicMock()
+    session.request.return_value = context
+    client = SlskrClient("https://example.test", "token", retries=3)
+    client.session = session
+    client._read_json = AsyncMock(
+        return_value={
+            "error": "validation_failed",
+            "message": "Invalid query",
+            "details": "query is required",
+        }
+    )
+
+    with pytest.raises(ApiError) as raised:
+        await client._request("GET", "/api/health")
+
+    assert raised.value.code == "validation_failed"
+    assert str(raised.value) == "Invalid query"
+    assert raised.value.details == "query is required"
+
+    client._read_json = AsyncMock(return_value=["invalid"])
+    with pytest.raises(ApiError) as raised:
+        await client._request("GET", "/api/health")
+    assert raised.value.code == "HTTP 422"
 
 
 @pytest.mark.asyncio
