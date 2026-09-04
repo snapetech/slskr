@@ -392,6 +392,38 @@ mod mesh_sync_security_state_tests {
     }
 }
 
+#[cfg(test)]
+mod podcore_runtime_stats_tests {
+    #[test]
+    fn diagnostic_dimension_maps_bound_untrusted_keys() {
+        let stats = super::PodCoreRuntimeStats::default();
+        for index in 0..super::MAX_PODCORE_STAT_KEYS {
+            stats.record_discovery_search(&format!("type-{index}"), 0);
+        }
+        stats.record_discovery_search("new-type", 0);
+        stats.record_discovery_search(
+            &"x".repeat(super::MAX_PODCORE_STAT_KEY_BYTES + 1),
+            0,
+        );
+
+        assert_eq!(
+            stats
+                .discovery_searches_by_type
+                .lock()
+                .expect("discovery stat lock")
+                .len(),
+            super::MAX_PODCORE_STAT_KEYS
+        );
+        assert_eq!(
+            stats.record_opinion_refresh(
+                &"x".repeat(super::MAX_PODCORE_STAT_KEY_BYTES + 1),
+                1,
+            ),
+            0
+        );
+    }
+}
+
 const MAX_WEBHOOK_DELIVERY_TASKS: usize = 32;
 #[cfg(any(test, feature = "bounded-differential"))]
 const MAX_INCOMING_CONNECTION_TASKS: usize = 128;
@@ -412,6 +444,8 @@ const PEER_ENDPOINT_TTL_SECONDS: u64 = 300;
 const PEER_CAPABILITY_LEASE_SECONDS: u64 = 24 * 60 * 60;
 const MAX_POD_JOIN_REPLAY_RECORDS: usize = 4_096;
 const MAX_POD_PENDING_MEMBERSHIP_RECORDS: usize = 4_096;
+const MAX_PODCORE_STAT_KEYS: usize = 4_096;
+const MAX_PODCORE_STAT_KEY_BYTES: usize = 256;
 const POD_JOIN_REPLAY_TTL_SECONDS: u64 = 300;
 const POD_JOIN_TIMESTAMP_SKEW_MILLIS: u64 = 5 * 60 * 1_000;
 const WEBSOCKET_AUTH_PROTOCOL_PREFIX: &str = "slskr.api-token.";
@@ -18032,6 +18066,28 @@ struct PodCoreRuntimeStats {
     opinion_refresh_counts: std::sync::Mutex<BTreeMap<String, usize>>,
 }
 
+fn podcore_stat_key(value: &str) -> Option<&str> {
+    let value = value.trim();
+    if value.is_empty()
+        || value.len() > MAX_PODCORE_STAT_KEY_BYTES
+        || value.chars().any(char::is_control)
+    {
+        return None;
+    }
+    Some(value)
+}
+
+fn increment_podcore_stat(map: &mut BTreeMap<String, u64>, key: &str) {
+    let Some(key) = podcore_stat_key(key) else {
+        return;
+    };
+    if !map.contains_key(key) && map.len() >= MAX_PODCORE_STAT_KEYS {
+        return;
+    }
+    let count = map.entry(key.to_owned()).or_default();
+    *count = count.saturating_add(1);
+}
+
 impl PodCoreRuntimeStats {
     fn record_dht_unpublish(&self) {
         use std::sync::atomic::Ordering;
@@ -18052,7 +18108,7 @@ impl PodCoreRuntimeStats {
                 .and_then(|content_id| content_id.split(':').nth(1))
             {
                 if let Ok(mut by_domain) = self.dht_publications_by_domain.lock() {
-                    *by_domain.entry(domain.to_owned()).or_default() += 1;
+                    increment_podcore_stat(&mut by_domain, domain);
                 }
             }
             let visibility =
@@ -18092,7 +18148,7 @@ impl PodCoreRuntimeStats {
             self.total_backfill_duration_ms
                 .fetch_add(elapsed_ms, Ordering::Relaxed);
             if let Ok(mut by_pod) = self.backfill_requests_by_pod.lock() {
-                *by_pod.entry(pod_id.to_owned()).or_default() += 1;
+                increment_podcore_stat(&mut by_pod, pod_id);
             }
         } else {
             self.backfill_failed.fetch_add(1, Ordering::Relaxed);
@@ -18122,7 +18178,7 @@ impl PodCoreRuntimeStats {
         self.total_routing_time_ms
             .fetch_add(elapsed_ms, Ordering::Relaxed);
         if let Ok(mut by_pod) = self.routing_messages_by_pod.lock() {
-            *by_pod.entry(pod_id.to_owned()).or_default() += 1;
+            increment_podcore_stat(&mut by_pod, pod_id);
         }
         if let Ok(mut last_operation) = self.last_routing_operation.lock() {
             *last_operation = Some(chrono::Utc::now().to_rfc3339());
@@ -18136,7 +18192,7 @@ impl PodCoreRuntimeStats {
         self.total_discovery_search_time_ms
             .fetch_add(elapsed_ms, Ordering::Relaxed);
         if let Ok(mut by_type) = self.discovery_searches_by_type.lock() {
-            *by_type.entry(search_type.to_owned()).or_default() += 1;
+            increment_podcore_stat(&mut by_type, search_type);
         }
         if let Ok(mut last_operation) = self.last_discovery_operation.lock() {
             *last_operation = Some(chrono::Utc::now().to_rfc3339());
@@ -18144,9 +18200,15 @@ impl PodCoreRuntimeStats {
     }
 
     fn record_opinion_refresh(&self, pod_id: &str, opinion_count: usize) -> usize {
+        let Some(pod_id) = podcore_stat_key(pod_id) else {
+            return 0;
+        };
         let Ok(mut counts) = self.opinion_refresh_counts.lock() else {
             return 0;
         };
+        if !counts.contains_key(pod_id) && counts.len() >= MAX_PODCORE_STAT_KEYS {
+            return 0;
+        }
         let previous_count = counts.insert(pod_id.to_owned(), opinion_count).unwrap_or(0);
         opinion_count.saturating_sub(previous_count)
     }
