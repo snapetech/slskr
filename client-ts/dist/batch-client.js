@@ -20,6 +20,15 @@ function cloneOperation(operation) {
         ...(operation.body === undefined ? {} : { body: cloneJson(operation.body) }),
     };
 }
+function validateBatchOperationIds(operations) {
+    const seen = new Set();
+    for (const operation of operations) {
+        if (seen.has(operation.id)) {
+            throw new Error(`Batch contains duplicate operation ID: ${operation.id}`);
+        }
+        seen.add(operation.id);
+    }
+}
 class BatchClient {
     constructor(client) {
         this.client = client;
@@ -40,6 +49,7 @@ class BatchClient {
         if (operations.length > exports.maxBatchOperations) {
             throw new Error(`Batch cannot contain more than ${exports.maxBatchOperations} operations`);
         }
+        validateBatchOperationIds(operations);
         const request = { operations: operations.map(cloneOperation) };
         // Use internal client method to make the request
         return this.client.postAuth('/api/batch', request);
@@ -70,12 +80,21 @@ class BatchBuilder {
         this.operations = [];
         this.idCounter = 0;
     }
+    nextId(id) {
+        if (id)
+            return id;
+        let candidate;
+        do {
+            candidate = `op-${++this.idCounter}`;
+        } while (this.operations.some((operation) => operation.id === candidate));
+        return candidate;
+    }
     /**
      * Add GET operation
      */
     get(path, id) {
         this.operations.push({
-            id: id || `op-${++this.idCounter}`,
+            id: this.nextId(id),
             method: 'GET',
             path,
         });
@@ -86,7 +105,7 @@ class BatchBuilder {
      */
     post(path, body, id) {
         this.operations.push({
-            id: id || `op-${++this.idCounter}`,
+            id: this.nextId(id),
             method: 'POST',
             path,
             body: cloneJson(body),
@@ -98,7 +117,7 @@ class BatchBuilder {
      */
     put(path, body, id) {
         this.operations.push({
-            id: id || `op-${++this.idCounter}`,
+            id: this.nextId(id),
             method: 'PUT',
             path,
             body: cloneJson(body),
@@ -110,7 +129,7 @@ class BatchBuilder {
      */
     delete(path, id) {
         this.operations.push({
-            id: id || `op-${++this.idCounter}`,
+            id: this.nextId(id),
             method: 'DELETE',
             path,
         });
@@ -153,6 +172,7 @@ class BatchBuilder {
         if (this.operations.length > exports.maxBatchOperations) {
             throw new Error(`Batch cannot contain more than ${exports.maxBatchOperations} operations`);
         }
+        validateBatchOperationIds(this.operations);
         const request = { operations: this.operations.map(cloneOperation) };
         return this.client.postAuth('/api/batch', request);
     }

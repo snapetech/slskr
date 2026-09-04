@@ -33,6 +33,7 @@ export declare class BatchBuilder {
     private operations;
     private idCounter;
     constructor(client: SlskrClient);
+    private nextId;
     /**
      * Add GET operation
      */
