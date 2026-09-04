@@ -496,15 +496,16 @@ pub(crate) fn parse_multipart<'a>(
     let marker = format!("--{boundary}").into_bytes();
     let mut cursor = 0;
     let mut parts = Vec::new();
-    while let Some(start) = find_bytes(body, &marker, cursor) {
+    while let Some(start) = find_multipart_boundary(body, &marker, cursor) {
         cursor = start + marker.len();
         if body.get(cursor..cursor + 2) == Some(b"--") {
             break;
         }
-        if body.get(cursor..cursor + 2) == Some(b"\r\n") {
-            cursor += 2;
+        if body.get(cursor..cursor + 2) != Some(b"\r\n") {
+            return Err("multipart boundary delimiter is invalid".to_owned());
         }
-        let Some(next) = find_bytes(body, &marker, cursor) else {
+        cursor += 2;
+        let Some(next) = find_multipart_boundary(body, &marker, cursor) else {
             return Err("multipart closing boundary is missing".to_owned());
         };
         let mut part_end = next;
@@ -568,6 +569,20 @@ fn find_bytes(haystack: &[u8], needle: &[u8], from: usize) -> Option<usize> {
         .windows(needle.len())
         .position(|window| window == needle)
         .map(|offset| from + offset)
+}
+
+fn find_multipart_boundary(haystack: &[u8], marker: &[u8], from: usize) -> Option<usize> {
+    let mut search_from = from;
+    while let Some(start) = find_bytes(haystack, marker, search_from) {
+        let at_line_start =
+            start == 0 || (start >= 2 && haystack.get(start - 2..start) == Some(b"\r\n"));
+        let suffix = haystack.get(start + marker.len()..start + marker.len() + 2);
+        if at_line_start && matches!(suffix, Some(b"--") | Some(b"\r\n")) {
+            return Some(start);
+        }
+        search_from = start.saturating_add(1);
+    }
+    None
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1591,6 +1606,22 @@ mod tests {
             parts[0].data.as_ptr(),
             body[payload_offset..].as_ptr()
         ));
+    }
+
+    #[test]
+    fn multipart_parser_keeps_boundary_like_binary_payloads() {
+        let payload = b"\0binary--boundaryXpayload";
+        let mut body =
+            b"--boundary\r\nContent-Disposition: form-data; name=\"database\"; filename=\"shares.db\"\r\n\r\n"
+                .to_vec();
+        body.extend_from_slice(payload);
+        body.extend_from_slice(b"\r\n--boundary--\r\n");
+
+        let parts = parse_multipart(&body, Some("multipart/form-data; boundary=boundary"))
+            .expect("boundary-like bytes in binary payload must not terminate the part");
+
+        assert_eq!(parts.len(), 1);
+        assert_eq!(parts[0].data, payload);
     }
 
     #[test]
