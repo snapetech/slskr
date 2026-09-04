@@ -51095,16 +51095,11 @@ fn persist_relay_upload_part(
 fn persist_relay_share_database(
     state: &AppState,
     token: uuid::Uuid,
-    filename: &str,
+    _filename: &str,
     data: &[u8],
 ) -> Result<PathBuf, String> {
     let directory = relay_upload_directory(state)?;
-    let extension = Path::new(filename)
-        .extension()
-        .and_then(|value| value.to_str())
-        .filter(|value| value.len() <= 16 && value.bytes().all(|byte| byte.is_ascii_alphanumeric()))
-        .unwrap_or("db");
-    let path = directory.join(format!("share-{}.{}", token.simple(), extension));
+    let path = directory.join(format!("share-{}.db", token.simple()));
     let file = write_private_relay_staging_file(&path, data, "relay share database")?;
     drop(file);
     Ok(path)

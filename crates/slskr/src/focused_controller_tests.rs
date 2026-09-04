@@ -1471,3 +1471,24 @@ fn profile_static_roots_serve_the_selected_spa_on_dashboard() {
     .is_none());
     let _ = fs::remove_dir_all(root);
 }
+
+#[test]
+fn relay_share_database_storage_uses_restart_stable_suffix() {
+    let (state, _receiver) = test_state_with_env(MapEnv::default());
+    let token = uuid::Uuid::new_v4();
+    let stored = super::persist_relay_share_database(&state, token, "shares.sqlite", b"fixture")
+        .expect("persist relay share database");
+    let expected = format!("share-{}.db", token.simple());
+    assert_eq!(
+        stored.file_name().and_then(|name| name.to_str()),
+        Some(expected.as_str())
+    );
+    assert!(stored.is_file());
+    assert!(!state
+        .config
+        .state_dir
+        .join("relay/incoming")
+        .join(format!("share-{}.sqlite", token.simple()))
+        .exists());
+    let _ = fs::remove_dir_all(&state.config.state_dir);
+}

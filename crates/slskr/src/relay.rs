@@ -217,6 +217,7 @@ pub(crate) async fn write_share_database(
     target: ControllerProfile,
     shares: &[RemoteShare],
 ) -> Result<(), String> {
+    validate_share_entries(shares)?;
     let options = SqliteConnectOptions::new()
         .filename(path)
         .create_if_missing(true);
@@ -282,6 +283,8 @@ pub(crate) async fn write_share_database(
             .map_err(|error| format!("relay share database scan failed: {error}"))?;
 
         for share in shares {
+            let size = i64::try_from(share.size)
+                .map_err(|_| "relay share size exceeds SQLite integer range".to_owned())?;
             let mut components = share.filename.rsplitn(2, '/');
             let _file_name = components.next();
             let parent = components.next().unwrap_or_default();
@@ -316,7 +319,7 @@ pub(crate) async fn write_share_database(
                     query("INSERT INTO files (maskedFilename, originalFilename, size, touchedAt, code, extension, attributeJson, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
                         .bind(&share.filename)
                         .bind(&share.filename)
-                        .bind(share.size as i64)
+                        .bind(size)
                         .bind("1970-01-01")
                         .bind(1_i64)
                         .bind(&extension)
@@ -330,7 +333,7 @@ pub(crate) async fn write_share_database(
                     query("INSERT INTO files (maskedFilename, originalFilename, size, touchedAt, code, extension, attributeJson, timestamp, isBlocked, isQuarantined, moderationReason) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
                         .bind(&share.filename)
                         .bind(&share.filename)
-                        .bind(share.size as i64)
+                        .bind(size)
                         .bind("1970-01-01")
                         .bind(1_i64)
                         .bind(&extension)
@@ -1100,6 +1103,12 @@ impl RuntimeState {
         completed_at: u64,
     ) -> Result<(), String> {
         validate_share_entries(&shares)?;
+        if share_count != shares.len() {
+            return Err(format!(
+                "relay share count {share_count} does not match {} entries",
+                shares.len()
+            ));
+        }
         let completed = CompletedShareUpload {
             agent_name: agent_name.clone(),
             share_count,
@@ -1234,6 +1243,11 @@ fn persist_share_manifest(
     records.push(record.clone());
     let bytes = serde_json::to_vec_pretty(&records)
         .map_err(|error| format!("relay share manifest serialization failed: {error}"))?;
+    if bytes.len() as u64 > MAX_RELAY_SHARE_MANIFEST_BYTES {
+        return Err(format!(
+            "relay share manifest exceeds {MAX_RELAY_SHARE_MANIFEST_BYTES} bytes"
+        ));
+    }
     let temporary_path =
         incoming_directory.join(format!(".manifest-{}.json.tmp", Uuid::new_v4().simple()));
     let write_result = (|| {
@@ -1298,6 +1312,12 @@ fn validate_share_entries(shares: &[RemoteShare]) -> Result<(), String> {
         return Err(format!(
             "relay share filename exceeds {MAX_RELAY_SHARE_FILENAME_BYTES} bytes or contains invalid characters"
         ));
+    }
+    if shares
+        .iter()
+        .any(|share| i64::try_from(share.size).is_err())
+    {
+        return Err("relay share size exceeds SQLite integer range".to_owned());
     }
     Ok(())
 }
@@ -1618,6 +1638,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn relay_share_database_rejects_sizes_outside_sqlite_range() {
+        let path = std::env::temp_dir().join(format!(
+            "slskr-relay-share-size-limit-{}.db",
+            Uuid::new_v4().simple()
+        ));
+        let error = write_share_database(
+            &path,
+            ControllerProfile::Native,
+            &[RemoteShare {
+                filename: "Remote/Too-Large.flac".to_owned(),
+                size: u64::MAX,
+            }],
+        )
+        .await
+        .expect_err("unrepresentable relay share size must be rejected");
+        assert!(error.contains("SQLite integer range"), "{error}");
+        assert!(!path.exists());
+    }
+
+    #[tokio::test]
     async fn persisted_relay_share_upload_rehydrates_remote_file_lookup() {
         let root =
             std::env::temp_dir().join(format!("slskr-relay-rehydrate-{}", Uuid::new_v4().simple()));
@@ -1737,6 +1777,22 @@ mod tests {
             )
             .expect_err("oversized relay share record must be rejected");
         assert!(error.contains("contains more than"), "{error}");
+    }
+
+    #[test]
+    fn relay_share_record_rejects_inconsistent_count() {
+        let mut state = RuntimeState::new();
+        let error = state
+            .record_share_upload(
+                Uuid::new_v4(),
+                "edge-count".to_owned(),
+                1,
+                Vec::new(),
+                std::env::temp_dir().join("not-published.db"),
+                1,
+            )
+            .expect_err("relay share count mismatch must be rejected");
+        assert!(error.contains("does not match"), "{error}");
     }
 
     #[test]
