@@ -301,7 +301,7 @@ async fn route_dispatch_group_6(context: &RouteDispatchContext<'_, '_>) -> Route
                  .collect::<HashSet<_>>()
                  .len();
              Ok(routing::ok_response(serde_json::json!({
-                 "isRunning": discovery.running,
+                 "isRunning": discovery.is_running(),
                  "currentSearchTerm": discovery.search_term,
                  "stats": {
                      "totalFiles": sources.len(),
@@ -321,37 +321,60 @@ async fn route_dispatch_group_6(context: &RouteDispatchContext<'_, '_>) -> Route
              if search_term.is_empty() {
                  return Ok(routing::bad_request_response("SearchTerm is required"));
              }
-            if state.source_discovery.read().await.running {
-                let current = state.source_discovery.read().await.search_term.clone();
-                return Ok(routing::HttpResponse {
-                    status: "409 Conflict",
-                    content_type: "application/json",
-                    body: serde_json::json!({
-                        "error": "Discovery already running",
-                        "currentSearchTerm": current,
-                        "hint": "Call /api/v0/discovery/stop first",
-                    })
-                    .to_string(),
-                });
-            }
             let hash_verification_enabled =
                 extract_json_bool_field(body, "enableHashVerification").unwrap_or(true);
             let search_term = truncate_utf8_bytes(search_term, MAX_SEARCH_QUERY_BYTES);
+            let generation = {
+                let mut discovery = state.source_discovery.write().await;
+                let Some(generation) = discovery.begin_start(
+                    search_term.clone(),
+                    hash_verification_enabled,
+                ) else {
+                    return Ok(routing::HttpResponse {
+                        status: "409 Conflict",
+                        content_type: "application/json",
+                        body: serde_json::json!({
+                            "error": "Discovery already running",
+                            "currentSearchTerm": discovery.search_term.clone(),
+                            "hint": "Call /api/v0/discovery/stop first",
+                        })
+                        .to_string(),
+                    });
+                };
+                generation
+            };
             let record = match dispatch_source_discovery_search(state, search_term.clone()).await {
                 Ok(record) => record,
                 Err(error) if error == "session manager is not running" => {
                     match create_rescue_search(state, search_term.clone()).await {
                         Ok(record) => record,
-                        Err(error) => return Ok(routing::service_unavailable_response(&error)),
+                        Err(error) => {
+                            state.source_discovery.write().await.fail_start(generation);
+                            return Ok(routing::service_unavailable_response(&error));
+                        }
                     }
                 }
-                Err(error) => return Ok(routing::service_unavailable_response(&error)),
+                Err(error) => {
+                    state.source_discovery.write().await.fail_start(generation);
+                    return Ok(routing::service_unavailable_response(&error));
+                }
             };
-             state.source_discovery.write().await.start(
-                 search_term.clone(),
-                 hash_verification_enabled,
-                 record.token,
-             );
+             if !state
+                 .source_discovery
+                 .write()
+                 .await
+                 .finish_start(generation, record.token)
+             {
+                 return Ok(routing::HttpResponse {
+                     status: "409 Conflict",
+                     content_type: "application/json",
+                     body: serde_json::json!({
+                         "error": "Discovery start was superseded",
+                         "hint": "Retry the discovery start request",
+                     })
+                     .to_string(),
+                 });
+             }
              Ok(routing::ok_response(serde_json::json!({
                  "message": "Discovery started",
                  "searchTerm": search_term,
@@ -359,13 +382,12 @@ async fn route_dispatch_group_6(context: &RouteDispatchContext<'_, '_>) -> Route
              }).to_string()))
         }
         ("POST", "/api/discovery/stop") => {
-            if !state.source_discovery.read().await.running {
+            let mut discovery = state.source_discovery.write().await;
+            if !discovery.stop() {
                 return Ok(routing::ok_response(
                     serde_json::json!({"message": "Discovery not running"}).to_string(),
                 ));
             }
-            let mut discovery = state.source_discovery.write().await;
-            discovery.running = false;
              let searches = state.searches.read().await;
              let sources = source_discovery_sources(&discovery, &searches);
              discovery.last_cycle_new_files = sources.len();

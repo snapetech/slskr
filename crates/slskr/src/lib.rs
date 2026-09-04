@@ -12302,6 +12302,8 @@ const MAX_SOURCE_DISCOVERY_SEARCHES: usize = 32;
 #[derive(Clone, Debug, Default)]
 struct SourceDiscoveryState {
     running: bool,
+    generation: u64,
+    starting_generation: Option<u64>,
     search_term: String,
     hash_verification_enabled: bool,
     search_tokens: VecDeque<u32>,
@@ -12311,12 +12313,59 @@ struct SourceDiscoveryState {
 }
 
 impl SourceDiscoveryState {
-    fn start(&mut self, search_term: String, hash_verification_enabled: bool, token: u32) {
-        self.running = true;
+    fn begin_start(&mut self, search_term: String, hash_verification_enabled: bool) -> Option<u64> {
+        if self.is_running() {
+            return None;
+        }
+        self.generation = self.generation.wrapping_add(1).max(1);
+        self.starting_generation = Some(self.generation);
         self.search_term = search_term;
         self.hash_verification_enabled = hash_verification_enabled;
         self.search_tokens.clear();
+        Some(self.generation)
+    }
+
+    fn finish_start(&mut self, generation: u64, token: u32) -> bool {
+        if self.starting_generation != Some(generation) {
+            return false;
+        }
+        self.starting_generation = None;
+        self.running = true;
         self.record_dispatch(token);
+        true
+    }
+
+    fn fail_start(&mut self, generation: u64) {
+        if self.starting_generation != Some(generation) {
+            return;
+        }
+        self.starting_generation = None;
+        self.running = false;
+        self.search_term.clear();
+        self.hash_verification_enabled = false;
+        self.search_tokens.clear();
+    }
+
+    fn is_running(&self) -> bool {
+        self.running || self.starting_generation.is_some()
+    }
+
+    fn stop(&mut self) -> bool {
+        if !self.is_running() {
+            return false;
+        }
+        self.running = false;
+        self.starting_generation = None;
+        true
+    }
+
+    fn record_dispatch_if_current(&mut self, generation: u64, token: u32) -> bool {
+        if self.running && self.generation == generation {
+            self.record_dispatch(token);
+            true
+        } else {
+            false
+        }
     }
 
     fn record_dispatch(&mut self, token: u32) {
@@ -30853,7 +30902,7 @@ async fn route_http_request_with_headers(
                  .collect::<HashSet<_>>()
                  .len();
              Ok(routing::ok_response(serde_json::json!({
-                 "isRunning": discovery.running,
+                 "isRunning": discovery.is_running(),
                  "currentSearchTerm": discovery.search_term,
                  "stats": {
                      "totalFiles": sources.len(),
@@ -30873,37 +30922,60 @@ async fn route_http_request_with_headers(
              if search_term.is_empty() {
                  return Ok(routing::bad_request_response("SearchTerm is required"));
              }
-            if state.source_discovery.read().await.running {
-                let current = state.source_discovery.read().await.search_term.clone();
-                return Ok(routing::HttpResponse {
-                    status: "409 Conflict",
-                    content_type: "application/json",
-                    body: serde_json::json!({
-                        "error": "Discovery already running",
-                        "currentSearchTerm": current,
-                        "hint": "Call /api/v0/discovery/stop first",
-                    })
-                    .to_string(),
-                });
-            }
             let hash_verification_enabled =
                 extract_json_bool_field(body, "enableHashVerification").unwrap_or(true);
             let search_term = truncate_utf8_bytes(search_term, MAX_SEARCH_QUERY_BYTES);
+            let generation = {
+                let mut discovery = state.source_discovery.write().await;
+                let Some(generation) = discovery.begin_start(
+                    search_term.clone(),
+                    hash_verification_enabled,
+                ) else {
+                    return Ok(routing::HttpResponse {
+                        status: "409 Conflict",
+                        content_type: "application/json",
+                        body: serde_json::json!({
+                            "error": "Discovery already running",
+                            "currentSearchTerm": discovery.search_term.clone(),
+                            "hint": "Call /api/v0/discovery/stop first",
+                        })
+                        .to_string(),
+                    });
+                };
+                generation
+            };
             let record = match dispatch_source_discovery_search(state, search_term.clone()).await {
                 Ok(record) => record,
                 Err(error) if error == "session manager is not running" => {
                     match create_rescue_search(state, search_term.clone()).await {
                         Ok(record) => record,
-                        Err(error) => return Ok(routing::service_unavailable_response(&error)),
+                        Err(error) => {
+                            state.source_discovery.write().await.fail_start(generation);
+                            return Ok(routing::service_unavailable_response(&error));
+                        }
                     }
                 }
-                Err(error) => return Ok(routing::service_unavailable_response(&error)),
+                Err(error) => {
+                    state.source_discovery.write().await.fail_start(generation);
+                    return Ok(routing::service_unavailable_response(&error));
+                }
             };
-             state.source_discovery.write().await.start(
-                 search_term.clone(),
-                 hash_verification_enabled,
-                 record.token,
-             );
+             if !state
+                 .source_discovery
+                 .write()
+                 .await
+                 .finish_start(generation, record.token)
+             {
+                 return Ok(routing::HttpResponse {
+                     status: "409 Conflict",
+                     content_type: "application/json",
+                     body: serde_json::json!({
+                         "error": "Discovery start was superseded",
+                         "hint": "Retry the discovery start request",
+                     })
+                     .to_string(),
+                 });
+             }
              Ok(routing::ok_response(serde_json::json!({
                  "message": "Discovery started",
                  "searchTerm": search_term,
@@ -30911,13 +30983,12 @@ async fn route_http_request_with_headers(
              }).to_string()))
         }
         ("POST", "/api/discovery/stop") => {
-            if !state.source_discovery.read().await.running {
+            let mut discovery = state.source_discovery.write().await;
+            if !discovery.stop() {
                 return Ok(routing::ok_response(
                     serde_json::json!({"message": "Discovery not running"}).to_string(),
                 ));
             }
-            let mut discovery = state.source_discovery.write().await;
-            discovery.running = false;
              let searches = state.searches.read().await;
              let sources = source_discovery_sources(&discovery, &searches);
              discovery.last_cycle_new_files = sources.len();
@@ -73965,17 +74036,21 @@ fn spawn_source_discovery(state: Arc<AppState>) {
             interval.tick().await;
             let query = {
                 let discovery = state.source_discovery.read().await;
-                discovery.running.then(|| discovery.search_term.clone())
+                discovery
+                    .running
+                    .then(|| (discovery.search_term.clone(), discovery.generation))
             };
-            let Some(query) = query else {
+            let Some((query, generation)) = query else {
                 continue;
             };
             match dispatch_source_discovery_search(&state, query).await {
-                Ok(record) => state
-                    .source_discovery
-                    .write()
-                    .await
-                    .record_dispatch(record.token),
+                Ok(record) => {
+                    state
+                        .source_discovery
+                        .write()
+                        .await
+                        .record_dispatch_if_current(generation, record.token);
+                }
                 Err(error) => {
                     record_daemon_log(
                         &state,
@@ -90701,11 +90776,58 @@ fn transfer_state_path(state_dir: &Path) -> PathBuf {
 }
 
 fn write_transfer_events_header(path: &Path) -> Result<(), String> {
-    write_file_atomic(
-        path,
-        "slskr-transfer-events-v2\nid\tdirection\ttoken\tsize\tbytes_transferred\tstatus\treason\tfilename\n",
-    )
-    .map_err(|error| format!("transfer events header write failed: {error}"))
+    use std::io::{Read, Seek, SeekFrom, Write};
+
+    const HEADER: &[u8] = b"slskr-transfer-events-v2\nid\tdirection\ttoken\tsize\tbytes_transferred\tstatus\treason\tfilename\n";
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent)
+        .map_err(|error| format!("transfer events directory create failed: {error}"))?;
+
+    if let Ok(metadata) = fs::symlink_metadata(path) {
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err("transfer events path must be a regular file".to_owned());
+        }
+    }
+
+    let mut options = fs::OpenOptions::new();
+    options.read(true).write(true).create(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    let mut file = options
+        .open(path)
+        .map_err(|error| format!("transfer events header open failed: {error}"))?;
+    let metadata = file
+        .metadata()
+        .map_err(|error| format!("transfer events header metadata failed: {error}"))?;
+    if !metadata.is_file() {
+        return Err("transfer events path must be a regular file".to_owned());
+    }
+
+    if metadata.len() == 0 {
+        file.write_all(HEADER)
+            .map_err(|error| format!("transfer events header write failed: {error}"))?;
+        file.sync_all()
+            .map_err(|error| format!("transfer events header sync failed: {error}"))?;
+        sync_state_directory(parent)
+            .map_err(|error| format!("transfer events directory sync failed: {error}"))?;
+        return Ok(());
+    }
+
+    if metadata.len() < HEADER.len() as u64 {
+        return Err("transfer events file has an incomplete header".to_owned());
+    }
+    file.seek(SeekFrom::Start(0))
+        .map_err(|error| format!("transfer events header seek failed: {error}"))?;
+    let mut actual = vec![0_u8; HEADER.len()];
+    file.read_exact(&mut actual)
+        .map_err(|error| format!("transfer events header read failed: {error}"))?;
+    if actual != HEADER {
+        return Err("transfer events file has an unsupported header".to_owned());
+    }
+    Ok(())
 }
 
 fn rotate_transfer_events_if_needed(path: &Path) -> Result<(), String> {
@@ -90728,6 +90850,8 @@ fn rotate_transfer_events_if_needed(path: &Path) -> Result<(), String> {
     }
     fs::rename(path, &rotated_path)
         .map_err(|error| format!("transfer event rotation failed: {error}"))?;
+    sync_state_directory(path.parent().unwrap_or_else(|| Path::new(".")))
+        .map_err(|error| format!("transfer event rotation directory sync failed: {error}"))?;
     write_transfer_events_header(path)
 }
 
@@ -90904,6 +91028,7 @@ fn replace_file(source: &Path, destination: &Path) -> std::io::Result<()> {
 fn append_transfer_event(path: &Path, entry: &TransferEntry) -> Result<(), String> {
     use std::io::Write;
 
+    write_transfer_events_header(path)?;
     rotate_transfer_events_if_needed(path)?;
 
     let mut file = open_transfer_event_file(path)?;
@@ -90919,7 +91044,11 @@ fn append_transfer_event(path: &Path, entry: &TransferEntry) -> Result<(), Strin
         escape_cache_field(entry.reason.as_deref().unwrap_or_default()),
         escape_cache_field(&entry.filename)
     )
-    .map_err(|error| format!("transfer event append failed: {error}"))
+    .map_err(|error| format!("transfer event append failed: {error}"))?;
+    file.flush()
+        .map_err(|error| format!("transfer event flush failed: {error}"))?;
+    file.sync_all()
+        .map_err(|error| format!("transfer event sync failed: {error}"))
 }
 
 fn open_transfer_event_file(path: &Path) -> Result<fs::File, String> {

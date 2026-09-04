@@ -40764,6 +40764,29 @@ async fn source_discovery_routes_dispatch_and_project_bounded_search_sources() {
     assert_eq!(stopped_json["stats"]["lastCycleNewFiles"], 1);
 }
 
+#[cfg_attr(test, test)]
+#[cfg(feature = "full-controller-tests")]
+fn source_discovery_generation_ignores_stale_completion() {
+    let mut discovery = super::SourceDiscoveryState::default();
+    let first = discovery
+        .begin_start("first".to_owned(), true)
+        .expect("first start reservation");
+    assert!(discovery.is_running());
+    assert!(discovery.begin_start("second".to_owned(), false).is_none());
+
+    assert!(discovery.stop());
+    let second = discovery
+        .begin_start("second".to_owned(), false)
+        .expect("second start reservation");
+    assert_ne!(first, second);
+    assert!(!discovery.finish_start(first, 1));
+    assert!(!discovery.record_dispatch_if_current(first, 2));
+    assert!(discovery.finish_start(second, 3));
+    assert!(discovery.running);
+    assert_eq!(discovery.search_term, "second");
+    assert_eq!(discovery.search_tokens.as_slices().0, &[3]);
+}
+
 #[cfg_attr(test, tokio::test)]
 #[cfg(feature = "full-controller-tests")]
 async fn virtual_soulfind_v2_routes_execute_bounded_local_intent_workflow() {
@@ -103181,7 +103204,15 @@ fn transfer_queue_persists_and_reloads_resume_state() {
         queue.update_status(entry.id, "in_progress", Some(40), None);
     }
 
+    let events_path = super::transfer_events_path(&state_dir);
+    let events_before_restart = std::fs::read_to_string(&events_path).expect("transfer events");
+    assert!(events_before_restart.contains("\tqueued\t"));
+    assert!(events_before_restart.contains("\tin_progress\t"));
+    assert_eq!(events_before_restart.lines().count(), 4);
+
     let reloaded = super::TransferQueue::new(&config);
+    let events_after_restart = std::fs::read_to_string(&events_path).expect("reloaded events");
+    assert_eq!(events_after_restart, events_before_restart);
     let entry = reloaded.entries.first().expect("reloaded transfer");
     assert_eq!(entry.status, "queued");
     assert_eq!(entry.bytes_transferred, 40);
