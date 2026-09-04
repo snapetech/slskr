@@ -669,9 +669,7 @@ fn relay_upload_request(message: &Value) -> Result<(String, u64, String), String
     let filename = arguments
         .first()
         .and_then(Value::as_str)
-        .filter(|filename| {
-            !filename.trim().is_empty() && filename.len() <= MAX_RELAY_FILENAME_BYTES
-        })
+        .filter(|filename| valid_relay_filename(filename))
         .map(str::to_owned)
         .ok_or_else(|| "relay upload request filename is invalid".to_owned())?;
     let start_offset = arguments
@@ -685,6 +683,12 @@ fn relay_upload_request(message: &Value) -> Result<(String, u64, String), String
         .map(str::to_owned)
         .ok_or_else(|| "relay upload request token is invalid".to_owned())?;
     Ok((filename, start_offset, token))
+}
+
+fn valid_relay_filename(filename: &str) -> bool {
+    !filename.trim().is_empty()
+        && filename.len() <= MAX_RELAY_FILENAME_BYTES
+        && !filename.chars().any(char::is_control)
 }
 
 fn relay_upload_failure_token(message: &Value) -> Option<String> {
@@ -797,7 +801,11 @@ async fn handle_server_invocation(
                 .and_then(Value::as_str)
                 .unwrap_or_default();
             let token = arguments.get(1).and_then(Value::as_str).unwrap_or_default();
-            let info = crate::find_shared_local_file(state, filename).await;
+            let info = if valid_relay_filename(filename) {
+                crate::find_shared_local_file(state, filename).await
+            } else {
+                None
+            };
             send_signalr_json(
                 socket,
                 &json!({
@@ -882,15 +890,29 @@ async fn upload_file(
     start_offset: u64,
     token: &str,
 ) -> Result<(), String> {
+    if !valid_relay_filename(filename) {
+        return Err("requested relay filename is invalid".to_owned());
+    }
     let shared = crate::find_shared_local_file(state, filename)
         .await
         .ok_or_else(|| "requested relay file was not found".to_owned())?;
     if start_offset > shared.size {
         return Err("relay file start offset exceeds file length".to_owned());
     }
-    let mut file = fs::File::open(&shared.local_path)
+    let file = crate::open_shared_local_file(state, &shared.local_path)
         .await
         .map_err(|error| format!("relay shared file open failed: {error}"))?;
+    let mut file = fs::File::from_std(file);
+    let metadata = file
+        .metadata()
+        .await
+        .map_err(|error| format!("relay shared file metadata failed: {error}"))?;
+    if !metadata.is_file() || metadata.len() != shared.size {
+        return Err("relay shared file changed after share lookup".to_owned());
+    }
+    if start_offset > metadata.len() {
+        return Err("relay file start offset exceeds file length".to_owned());
+    }
     file.seek(SeekFrom::Start(start_offset))
         .await
         .map_err(|error| format!("relay shared file seek failed: {error}"))?;

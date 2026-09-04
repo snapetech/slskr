@@ -92,7 +92,10 @@ pub(crate) async fn handle_signed_message(
     }
 
     let mut response = dispatch_message(state, username, message).await?;
-    response.sign(&state.capability_signing_key).ok()?;
+    if let Err(error) = response.sign(&state.capability_signing_key) {
+        tracing::error!(%username, %error, "mesh-sync response could not be signed");
+        return None;
+    }
     Some(response)
 }
 
@@ -419,7 +422,10 @@ fn mesh_hash_entry(
         signature: None,
     };
     if let Some(signing_key) = signing_key {
-        sign_mesh_hash_entry(&mut wire, signing_key).ok()?;
+        if let Err(error) = sign_mesh_hash_entry(&mut wire, signing_key) {
+            tracing::error!(%error, "mesh-sync hash entry could not be signed");
+            return None;
+        }
     }
     Some(wire)
 }

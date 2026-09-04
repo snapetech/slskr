@@ -5,11 +5,17 @@ use std::{
     time::Duration,
 };
 
-use tokio::{process::Command, sync::Semaphore, time};
+use tokio::{
+    io::{AsyncRead, AsyncReadExt},
+    process::Command,
+    sync::Semaphore,
+    time,
+};
 
 use crate::config::{ControllerProfile, ScriptIntegrationSettings};
 
 const MAX_CONCURRENT_SCRIPT_RUNS: usize = 32;
+const MAX_SCRIPT_OUTPUT_BYTES: usize = 1024 * 1024;
 const SCRIPT_TIMEOUT: Duration = Duration::from_secs(300);
 
 fn format_timeout(duration: Duration) -> String {
@@ -105,28 +111,70 @@ async fn run_with_timeout(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
-    let output = time::timeout(timeout_duration, command.output())
-        .await
-        .map_err(|_| {
-            format!(
-                "script timed out after {}",
-                format_timeout(timeout_duration)
-            )
-        })?
+    let mut child = command
+        .spawn()
         .map_err(|error| format!("failed to run script: {error}"))?;
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let mut stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "script stdout pipe was not created".to_owned())?;
+    let mut stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "script stderr pipe was not created".to_owned())?;
+    let output = time::timeout(timeout_duration, async {
+        let (stdout, stderr) = tokio::try_join!(
+            read_script_output(&mut stdout, "stdout"),
+            read_script_output(&mut stderr, "stderr"),
+        )?;
+        let status = child
+            .wait()
+            .await
+            .map_err(|error| format!("failed to wait for script: {error}"))?;
+        Ok::<_, String>((status, stdout, stderr))
+    })
+    .await
+    .map_err(|_| {
+        format!(
+            "script timed out after {}",
+            format_timeout(timeout_duration)
+        )
+    })??;
+    let (status, stdout, stderr) = output;
+    let stderr = String::from_utf8_lossy(&stderr);
     if !stderr.is_empty() {
         return Err(format!(
             "STDERR: {}",
             stderr.lines().collect::<Vec<_>>().join(" ")
         ));
     }
-    Ok(String::from_utf8_lossy(&output.stdout)
+    if !status.success() {
+        return Err(format!("script exited unsuccessfully: {status}"));
+    }
+    Ok(String::from_utf8_lossy(&stdout)
         .lines()
         .map(str::trim)
         .filter(|line| !line.is_empty())
         .map(ToOwned::to_owned)
         .collect())
+}
+
+async fn read_script_output<R>(reader: &mut R, stream: &str) -> Result<Vec<u8>, String>
+where
+    R: AsyncRead + Unpin,
+{
+    let mut output = Vec::new();
+    reader
+        .take((MAX_SCRIPT_OUTPUT_BYTES.saturating_add(1)) as u64)
+        .read_to_end(&mut output)
+        .await
+        .map_err(|error| format!("script {stream} read failed: {error}"))?;
+    if output.len() > MAX_SCRIPT_OUTPUT_BYTES {
+        return Err(format!(
+            "script {stream} exceeded the {MAX_SCRIPT_OUTPUT_BYTES} byte output limit"
+        ));
+    }
+    Ok(output)
 }
 
 pub(crate) fn dispatch(
@@ -252,6 +300,35 @@ mod tests {
 
         assert_eq!(error, "script timed out after 10ms");
         tokio::fs::remove_dir_all(directory).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn script_nonzero_exit_without_stderr_is_reported() {
+        let directory =
+            std::env::temp_dir().join(format!("slskr-script-exit-{}", uuid::Uuid::new_v4()));
+        let script = script(ScriptRunSettings {
+            executable: "/bin/sh".to_owned(),
+            arglist: Some(vec!["-c".to_owned(), "exit 7".to_owned()]),
+            ..Default::default()
+        });
+
+        let error = run(&script, &directory, ControllerProfile::Native, "{}")
+            .await
+            .expect_err("non-zero script exit");
+
+        assert!(error.contains("script exited unsuccessfully"), "{error}");
+        tokio::fs::remove_dir_all(directory).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn script_output_reader_rejects_oversized_output() {
+        let data = vec![b'x'; MAX_SCRIPT_OUTPUT_BYTES + 1];
+        let mut reader = &data[..];
+        let error = read_script_output(&mut reader, "stdout")
+            .await
+            .expect_err("oversized script output");
+
+        assert!(error.contains("output limit"), "{error}");
     }
 
     #[test]

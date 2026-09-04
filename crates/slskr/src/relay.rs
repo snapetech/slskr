@@ -141,6 +141,7 @@ pub(crate) fn send_hub_invocation(
 #[derive(Debug)]
 pub(crate) struct UploadedFile {
     pub filename: String,
+    pub file: fs::File,
     pub path: PathBuf,
     pub length: u64,
 }

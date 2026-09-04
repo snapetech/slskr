@@ -435,7 +435,7 @@ async fn read_http_request_inner<R: AsyncBufRead + Unpin>(
         && (path.starts_with("/api/v0/relay/controller/files/")
             || path.starts_with("/api/v0/relay/controller/shares/"))
     {
-        body_size_limit.max(RELAY_UPLOAD_BODY_SIZE_LIMIT)
+        RELAY_UPLOAD_BODY_SIZE_LIMIT
     } else {
         body_size_limit
     };

@@ -570,8 +570,14 @@ impl QuicDataReceiveStream {
         &mut self,
         already_read: usize,
     ) -> Result<Vec<u8>, QuicDataError> {
+        if already_read > self.max_payload_bytes {
+            return Err(QuicDataError::OversizedPayload {
+                actual: already_read,
+                max: self.max_payload_bytes,
+            });
+        }
         self.receive
-            .read_to_end(self.max_payload_bytes.saturating_sub(already_read))
+            .read_to_end(self.max_payload_bytes - already_read)
             .await
             .map_err(|error| QuicDataError::Stream(error.to_string()))
     }

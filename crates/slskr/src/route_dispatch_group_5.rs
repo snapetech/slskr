@@ -376,16 +376,19 @@ async fn route_dispatch_group_5(context: &RouteDispatchContext<'_, '_>) -> Route
                 .iter()
                 .any(|user| user.username.eq_ignore_ascii_case(&username) && user.watched);
             drop(users);
-            let descriptor = local_capability_descriptor(state).await.ok();
+            let descriptor = match local_capability_descriptor(state).await {
+                Ok(descriptor) => descriptor,
+                Err(error) => return Ok(routing::service_unavailable_response(&error)),
+            };
             let json = serde_json::json!({
-                "peerId": descriptor.as_ref().map(|value| value.peer_id.as_str()).unwrap_or(""),
-                "publicKey": descriptor.as_ref().map(|value| STANDARD.encode(value.public_key)).unwrap_or_default(),
+                "peerId": descriptor.peer_id,
+                "publicKey": STANDARD.encode(descriptor.public_key),
                 "displayName": username.clone(),
-                "capabilities": descriptor.as_ref().map(|value| value.features.clone()).unwrap_or_default(),
-                "endpoints": descriptor.as_ref().map(|value| value.endpoints.clone()).unwrap_or_default(),
-                "createdAt": descriptor.as_ref().map(|value| value.issued_at_unix).unwrap_or(0),
-                "expiresAt": descriptor.as_ref().map(|value| value.expires_at_unix).unwrap_or(0),
-                "signature": descriptor.as_ref().and_then(|value| value.signature).map(|signature| STANDARD.encode(signature)).unwrap_or_default(),
+                "capabilities": descriptor.features,
+                "endpoints": descriptor.endpoints,
+                "createdAt": descriptor.issued_at_unix,
+                "expiresAt": descriptor.expires_at_unix,
+                "signature": descriptor.signature.map(|signature| STANDARD.encode(signature)).unwrap_or_default(),
                 "username": username,
                 "description": "",
                 "picture": "",

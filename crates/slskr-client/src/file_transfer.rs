@@ -65,7 +65,9 @@ where
 
     pub async fn receive_token(&mut self) -> Result<u32, ClientError> {
         if self.obfuscated {
-            let bytes = self.read_obfuscated_payload(4).await?;
+            let bytes = self
+                .read_obfuscated_payload(4, DEFAULT_MAX_TRANSFER_CHUNK_LEN)
+                .await?;
             Ok(u32::from_le_bytes(
                 bytes.try_into().expect("fixed token length"),
             ))
@@ -86,7 +88,9 @@ where
 
     pub async fn receive_offset(&mut self) -> Result<u64, ClientError> {
         if self.obfuscated {
-            let bytes = self.read_obfuscated_payload(8).await?;
+            let bytes = self
+                .read_obfuscated_payload(8, DEFAULT_MAX_TRANSFER_CHUNK_LEN)
+                .await?;
             Ok(u64::from_le_bytes(
                 bytes.try_into().expect("fixed offset length"),
             ))
@@ -122,7 +126,7 @@ where
             });
         }
         if self.obfuscated {
-            return self.read_obfuscated_payload(length).await;
+            return self.read_obfuscated_payload(length, max_len).await;
         }
         let mut chunk = vec![0; length];
         self.stream.read_exact(&mut chunk).await?;
@@ -154,11 +158,15 @@ where
         Ok(())
     }
 
-    async fn read_obfuscated_payload(&mut self, length: usize) -> Result<Vec<u8>, ClientError> {
-        if length > DEFAULT_MAX_TRANSFER_CHUNK_LEN {
+    async fn read_obfuscated_payload(
+        &mut self,
+        length: usize,
+        max_len: usize,
+    ) -> Result<Vec<u8>, ClientError> {
+        if length > max_len {
             return Err(ClientError::FrameTooLarge {
                 length,
-                max: DEFAULT_MAX_TRANSFER_CHUNK_LEN,
+                max: max_len,
             });
         }
         while self.decoded.len() < length {

@@ -29072,16 +29072,19 @@ async fn route_http_request_with_headers(
                 .iter()
                 .any(|user| user.username.eq_ignore_ascii_case(&username) && user.watched);
             drop(users);
-            let descriptor = local_capability_descriptor(state).await.ok();
+            let descriptor = match local_capability_descriptor(state).await {
+                Ok(descriptor) => descriptor,
+                Err(error) => return Ok(routing::service_unavailable_response(&error)),
+            };
             let json = serde_json::json!({
-                "peerId": descriptor.as_ref().map(|value| value.peer_id.as_str()).unwrap_or(""),
-                "publicKey": descriptor.as_ref().map(|value| STANDARD.encode(value.public_key)).unwrap_or_default(),
+                "peerId": descriptor.peer_id,
+                "publicKey": STANDARD.encode(descriptor.public_key),
                 "displayName": username.clone(),
-                "capabilities": descriptor.as_ref().map(|value| value.features.clone()).unwrap_or_default(),
-                "endpoints": descriptor.as_ref().map(|value| value.endpoints.clone()).unwrap_or_default(),
-                "createdAt": descriptor.as_ref().map(|value| value.issued_at_unix).unwrap_or(0),
-                "expiresAt": descriptor.as_ref().map(|value| value.expires_at_unix).unwrap_or(0),
-                "signature": descriptor.as_ref().and_then(|value| value.signature).map(|signature| STANDARD.encode(signature)).unwrap_or_default(),
+                "capabilities": descriptor.features,
+                "endpoints": descriptor.endpoints,
+                "createdAt": descriptor.issued_at_unix,
+                "expiresAt": descriptor.expires_at_unix,
+                "signature": descriptor.signature.map(|signature| STANDARD.encode(signature)).unwrap_or_default(),
                 "username": username,
                 "description": "",
                 "picture": "",
@@ -33747,7 +33750,15 @@ async fn route_http_request_with_headers(
                         };
                         tokio::task::spawn_blocking(move || {
                             let _process_permit = process_permit;
-                            let _ = child.wait();
+                            match child.wait() {
+                                Ok(status) if !status.success() => {
+                                    ::tracing::warn!(process_id, ?status, "external visualizer exited unsuccessfully");
+                                }
+                                Ok(_) => {}
+                                Err(error) => {
+                                    ::tracing::warn!(process_id, %error, "external visualizer process wait failed");
+                                }
+                            }
                         });
                         record_event(
                             state,
@@ -50876,7 +50887,11 @@ async fn versioned_relay_request_bytes(
         let Some(filename) = file_part.filename.as_deref() else {
             return Some(routing::bad_request_response("Upload filename is missing"));
         };
-        if filename.is_empty() || filename.contains("..") {
+        if filename.is_empty()
+            || filename.len() > 4 * 1024
+            || filename.contains("..")
+            || filename.chars().any(char::is_control)
+        {
             return Some(routing::bad_request_response("Invalid filename"));
         }
         let authorized = state.relay.write().await.protocol.validate_file_upload(
@@ -51065,9 +51080,10 @@ fn persist_relay_upload_part(
 ) -> Result<relay::UploadedFile, String> {
     let directory = relay_upload_directory(state)?;
     let path = directory.join(format!("file-{}.part", token.simple()));
-    fs::write(&path, data).map_err(|error| format!("relay file upload write failed: {error}"))?;
+    let file = write_private_relay_staging_file(&path, data, "relay file upload")?;
     Ok(relay::UploadedFile {
         filename: filename.to_owned(),
+        file,
         path,
         length: data.len() as u64,
     })
@@ -51086,9 +51102,38 @@ fn persist_relay_share_database(
         .filter(|value| value.len() <= 16 && value.bytes().all(|byte| byte.is_ascii_alphanumeric()))
         .unwrap_or("db");
     let path = directory.join(format!("share-{}.{}", token.simple(), extension));
-    fs::write(&path, data)
-        .map_err(|error| format!("relay share database write failed: {error}"))?;
+    let file = write_private_relay_staging_file(&path, data, "relay share database")?;
+    drop(file);
     Ok(path)
+}
+
+fn write_private_relay_staging_file(
+    path: &Path,
+    data: &[u8],
+    label: &str,
+) -> Result<fs::File, String> {
+    use std::io::Write;
+
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options
+        .open(path)
+        .map_err(|error| format!("{label} staging create failed: {error}"))?;
+    let result = file
+        .write_all(data)
+        .and_then(|()| file.sync_all())
+        .map_err(|error| format!("{label} staging write failed: {error}"));
+    if let Err(error) = result {
+        drop(file);
+        let _ = fs::remove_file(path);
+        return Err(error);
+    }
+    Ok(file)
 }
 
 fn decoded_path_segment(segment: &str) -> String {
@@ -77752,36 +77797,36 @@ async fn open_relay_controller_stream(
             return Err("relay agent file stream timed out".to_owned());
         }
     };
-    if file_info.length != uploaded.length
-        || (expected_size != 0 && uploaded.length != expected_size)
+    let relay::UploadedFile {
+        filename,
+        file,
+        path,
+        length,
+    } = uploaded;
+    if file_info.length != length || (expected_size != 0 && length != expected_size)
     {
-        cleanup_relay_upload(&uploaded.path);
+        cleanup_relay_upload(&path);
         return Err("relay agent upload length does not match file-info".to_owned());
     }
-    let file = fs::File::open(&uploaded.path)
-        .map_err(|error| {
-            cleanup_relay_upload(&uploaded.path);
-            format!("relay stream file open failed: {error}")
-        })?;
     let metadata = file
         .metadata()
         .map_err(|error| {
-            cleanup_relay_upload(&uploaded.path);
+            cleanup_relay_upload(&path);
             format!("relay stream file metadata failed: {error}")
         })?;
     if !metadata.is_file() {
-        cleanup_relay_upload(&uploaded.path);
+        cleanup_relay_upload(&path);
         return Err("relay stream upload is not a file".to_owned());
     }
-    if metadata.len() != uploaded.length {
-        cleanup_relay_upload(&uploaded.path);
+    if metadata.len() != length {
+        cleanup_relay_upload(&path);
         return Err("relay stream upload length changed during transfer".to_owned());
     }
     Ok(LocalStreamFile {
         file,
         length: metadata.len(),
-        content_type: preview_stream_content_type(&uploaded.filename).to_owned(),
-        cleanup_path: Some(uploaded.path),
+        content_type: preview_stream_content_type(&filename).to_owned(),
+        cleanup_path: Some(path),
     })
 }
 
@@ -87886,28 +87931,112 @@ fn retention_age_for_transfer(
     }
 }
 
-fn prune_files_older_than(root: &Path, age_minutes: u64, now: SystemTime) {
+fn prune_files_older_than(root: &Path, age_minutes: u64, now: SystemTime) -> Result<usize, String> {
     let cutoff = now
         .checked_sub(Duration::from_secs(age_minutes.saturating_mul(60)))
         .unwrap_or(SystemTime::UNIX_EPOCH);
-    let Ok(entries) = fs::read_dir(root) else {
-        return;
+    let entries = match fs::read_dir(root) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+        Err(error) => {
+            return Err(format!(
+                "file retention directory scan failed for {}: {error}",
+                root.display()
+            ));
+        }
     };
-    for entry in entries.flatten() {
+    let mut removed = 0_usize;
+    let mut failures = 0_usize;
+    let mut first_failure = None;
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) => {
+                failures = failures.saturating_add(1);
+                if first_failure.is_none() {
+                    first_failure = Some(format!("directory entry read failed: {error}"));
+                }
+                continue;
+            }
+        };
         let path = entry.path();
-        let Ok(metadata) = fs::symlink_metadata(&path) else {
-            continue;
+        let metadata = match fs::symlink_metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => {
+                failures = failures.saturating_add(1);
+                if first_failure.is_none() {
+                    first_failure = Some(format!("{}: metadata failed: {error}", path.display()));
+                }
+                continue;
+            }
         };
         if metadata.file_type().is_symlink() {
             continue;
         }
         if metadata.is_dir() {
-            prune_files_older_than(&path, age_minutes, now);
-            let _ = fs::remove_dir(&path);
-        } else if metadata.is_file() && metadata.modified().is_ok_and(|modified| modified < cutoff)
-        {
-            let _ = fs::remove_file(path);
+            if let Err(error) = prune_files_older_than(&path, age_minutes, now) {
+                failures = failures.saturating_add(1);
+                if first_failure.is_none() {
+                    first_failure = Some(error);
+                }
+            }
+            match fs::remove_dir(&path) {
+                Ok(()) => removed = removed.saturating_add(1),
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::NotFound | std::io::ErrorKind::DirectoryNotEmpty
+                    ) => {}
+                Err(error) => {
+                    failures = failures.saturating_add(1);
+                    if first_failure.is_none() {
+                        first_failure = Some(format!(
+                            "{}: directory removal failed: {error}",
+                            path.display()
+                        ));
+                    }
+                }
+            }
+        } else if metadata.is_file() {
+            let is_expired = match metadata.modified() {
+                Ok(modified) => modified < cutoff,
+                Err(error) => {
+                    failures = failures.saturating_add(1);
+                    if first_failure.is_none() {
+                        first_failure = Some(format!(
+                            "{}: modification time failed: {error}",
+                            path.display()
+                        ));
+                    }
+                    false
+                }
+            };
+            if is_expired {
+                match fs::remove_file(&path) {
+                    Ok(()) => removed = removed.saturating_add(1),
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(error) => {
+                        failures = failures.saturating_add(1);
+                        if first_failure.is_none() {
+                            first_failure = Some(format!(
+                                "{}: file removal failed: {error}",
+                                path.display()
+                            ));
+                        }
+                    }
+                }
+            }
         }
+    }
+    if failures == 0 {
+        Ok(removed)
+    } else {
+        Err(format!(
+            "file retention cleanup under {} had {failures} failure(s) after removing {removed} item(s); first failure: {}",
+            root.display(),
+            first_failure.unwrap_or_else(|| "unknown failure".to_owned())
+        ))
     }
 }
 
@@ -88043,19 +88172,31 @@ async fn run_retention_once(state: &AppState) {
     let incomplete = state.config.retention.files_incomplete_minutes;
     let downloads = effective_downloads_dir(state);
     let incomplete_dir = effective_incomplete_dir(state);
-    let prune_error = tokio::task::spawn_blocking(move || {
+    let prune_result = match tokio::task::spawn_blocking(move || {
         let now = SystemTime::now();
+        let mut failures = Vec::new();
         if let Some(age) = complete {
-            prune_files_older_than(&downloads, age, now);
+            if let Err(error) = prune_files_older_than(&downloads, age, now) {
+                failures.push(error);
+            }
         }
         if let Some(age) = incomplete {
-            prune_files_older_than(&incomplete_dir, age, now);
+            if let Err(error) = prune_files_older_than(&incomplete_dir, age, now) {
+                failures.push(error);
+            }
+        }
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            Err(failures.join("; "))
         }
     })
     .await
-    .err()
-    .map(|error| error.to_string());
-    if let Some(error) = prune_error {
+    {
+        Ok(result) => result,
+        Err(error) => Err(error.to_string()),
+    };
+    if let Err(error) = prune_result {
         record_daemon_log(
             state,
             logging::LogLevel::Error,
@@ -88070,17 +88211,67 @@ async fn run_retention_once(state: &AppState) {
             state.config.retention.logs_days.saturating_mul(86_400),
         ))
         .unwrap_or(SystemTime::UNIX_EPOCH);
-    if let Ok(entries) = fs::read_dir(state.config.state_dir.join("logs")) {
-        for entry in entries.flatten() {
-            if entry
-                .metadata()
-                .ok()
-                .and_then(|metadata| metadata.modified().ok())
-                .is_some_and(|modified| modified < log_cutoff)
-            {
-                let _ = fs::remove_file(entry.path());
+    let log_directory = state.config.state_dir.join("logs");
+    let mut log_cleanup_failure = None;
+    match fs::read_dir(&log_directory) {
+        Ok(entries) => {
+            for entry in entries {
+                let Ok(entry) = entry else {
+                    log_cleanup_failure = Some("log directory entry read failed".to_owned());
+                    continue;
+                };
+                let path = entry.path();
+                let metadata = match entry.metadata() {
+                    Ok(metadata) => metadata,
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                    Err(error) => {
+                        if log_cleanup_failure.is_none() {
+                            log_cleanup_failure = Some(format!(
+                                "{}: metadata failed: {error}",
+                                path.display()
+                            ));
+                        }
+                        continue;
+                    }
+                };
+                let modified = match metadata.modified() {
+                    Ok(modified) => modified,
+                    Err(error) => {
+                        if log_cleanup_failure.is_none() {
+                            log_cleanup_failure = Some(format!(
+                                "{}: modification time failed: {error}",
+                                path.display()
+                            ));
+                        }
+                        continue;
+                    }
+                };
+                let expired = modified < log_cutoff;
+                if expired {
+                    match fs::remove_file(&path) {
+                        Ok(()) => {}
+                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                        Err(error) if log_cleanup_failure.is_none() => {
+                            log_cleanup_failure = Some(format!("{}: {error}", path.display()));
+                        }
+                        Err(_) => {}
+                    }
+                }
             }
         }
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+            log_cleanup_failure = Some(format!("{}: {error}", log_directory.display()));
+        }
+        Err(_) => {}
+    }
+    if let Some(error) = log_cleanup_failure {
+        record_daemon_log(
+            state,
+            logging::LogLevel::Error,
+            "retention",
+            format!("log retention cleanup failed: {error}"),
+        )
+        .await;
     }
 }
 

@@ -2950,7 +2950,15 @@ async fn route_dispatch_group_6(context: &RouteDispatchContext<'_, '_>) -> Route
                         };
                         tokio::task::spawn_blocking(move || {
                             let _process_permit = process_permit;
-                            let _ = child.wait();
+                            match child.wait() {
+                                Ok(status) if !status.success() => {
+                                    ::tracing::warn!(process_id, ?status, "external visualizer exited unsuccessfully");
+                                }
+                                Ok(_) => {}
+                                Err(error) => {
+                                    ::tracing::warn!(process_id, %error, "external visualizer process wait failed");
+                                }
+                            }
                         });
                         record_event(
                             state,
