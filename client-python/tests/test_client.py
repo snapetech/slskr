@@ -178,6 +178,34 @@ async def test_websocket_client_cleans_up_when_connect_is_cancelled():
 
 
 @pytest.mark.asyncio
+async def test_websocket_client_bounds_a_stalled_handshake():
+    dial_started = asyncio.Event()
+
+    async def blocked_connect(*_args, **_kwargs):
+        dial_started.set()
+        await asyncio.Event().wait()
+
+    session = MagicMock()
+    session.ws_connect = AsyncMock(side_effect=blocked_connect)
+    session.close = AsyncMock()
+
+    with patch("slskr.websocket.aiohttp.ClientSession", return_value=session):
+        client = WebSocketClient(
+            "https://example.test", "token", connect_timeout=0.01
+        )
+        connecting = asyncio.create_task(client.connect())
+        await dial_started.wait()
+
+        with pytest.raises(asyncio.TimeoutError):
+            await connecting
+
+    session.close.assert_awaited_once()
+    assert client.session is None
+    assert client.ws is None
+    assert not client.is_connected()
+
+
+@pytest.mark.asyncio
 async def test_websocket_client_restores_subscriptions_on_connect():
     ws = MagicMock()
     ws.closed = False

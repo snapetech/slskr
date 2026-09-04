@@ -10,12 +10,19 @@ from urllib.parse import urlsplit, urlunsplit
 import aiohttp
 
 MAX_WEBSOCKET_MESSAGE_BYTES = 64 * 1024
+DEFAULT_WEBSOCKET_CONNECT_TIMEOUT = 30.0
 
 
 class WebSocketClient:
     """WebSocket client for real-time events"""
 
-    def __init__(self, base_url: str, token: str, debug: bool = False):
+    def __init__(
+        self,
+        base_url: str,
+        token: str,
+        debug: bool = False,
+        connect_timeout: float = DEFAULT_WEBSOCKET_CONNECT_TIMEOUT,
+    ):
         parsed_url = urlsplit(base_url)
         if (
             parsed_url.scheme not in ("http", "https")
@@ -33,6 +40,9 @@ class WebSocketClient:
         )
         self.token = token
         self.debug = debug
+        if connect_timeout <= 0:
+            raise ValueError("connect_timeout must be greater than zero")
+        self.connect_timeout = connect_timeout
         self.session: Optional[aiohttp.ClientSession] = None
         self.ws: Optional[aiohttp.ClientWebSocketResponse] = None
         self._connect_lock = asyncio.Lock()
@@ -62,19 +72,25 @@ class WebSocketClient:
                 session = aiohttp.ClientSession()
                 self.session = session
 
-                self.ws = await session.ws_connect(
-                    self.url,
-                    headers=headers,
-                    autoclose=False,
-                    max_msg_size=MAX_WEBSOCKET_MESSAGE_BYTES,
+                self.ws = await asyncio.wait_for(
+                    session.ws_connect(
+                        self.url,
+                        headers=headers,
+                        autoclose=False,
+                        max_msg_size=MAX_WEBSOCKET_MESSAGE_BYTES,
+                    ),
+                    timeout=self.connect_timeout,
                 )
 
                 if self.subscribed_topics:
-                    await self.ws.send_json(
-                        {
-                            "type": "subscribe",
-                            "data": {"topics": sorted(self.subscribed_topics)},
-                        }
+                    await asyncio.wait_for(
+                        self.ws.send_json(
+                            {
+                                "type": "subscribe",
+                                "data": {"topics": sorted(self.subscribed_topics)},
+                            }
+                        ),
+                        timeout=self.connect_timeout,
                     )
 
                 self.reconnect_attempts = 0

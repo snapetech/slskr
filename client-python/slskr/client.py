@@ -91,7 +91,12 @@ class SlskrClient:
         """Connect to WebSocket for real-time events"""
         async with self._ws_lock:
             if self.ws is None:
-                self.ws = WebSocketClient(self.base_url, self.token, debug=self.debug)
+                self.ws = WebSocketClient(
+                    self.base_url,
+                    self.token,
+                    debug=self.debug,
+                    connect_timeout=self.timeout,
+                )
 
             if not self.ws.is_connected():
                 await self.ws.connect()

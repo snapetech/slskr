@@ -273,3 +273,29 @@ func TestDisconnectCancelsInFlightWebSocketConnection(t *testing.T) {
 		t.Fatal("connection became active after disconnect")
 	}
 }
+
+func TestWebSocketConnectUsesClientTimeout(t *testing.T) {
+	requestStarted := make(chan struct{})
+	releaseUpgrade := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		close(requestStarted)
+		<-releaseUpgrade
+		_, _ = writer.Write([]byte("upgrade deliberately delayed"))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "token")
+	client.Timeout = 10 * time.Millisecond
+	websocketClient := client.NewWebSocketClient(false)
+
+	err := websocketClient.Connect(context.Background())
+	close(releaseUpgrade)
+	if err == nil || !strings.Contains(err.Error(), "timeout") {
+		t.Fatalf("expected configured WebSocket deadline, got %v", err)
+	}
+	select {
+	case <-requestStarted:
+	default:
+		t.Fatal("WebSocket dial did not reach the test server")
+	}
+}

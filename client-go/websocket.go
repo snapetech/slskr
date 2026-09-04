@@ -8,11 +8,16 @@ import (
 	"net/url"
 	"path"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 )
 
-const maxWebSocketMessageBytes = 64 * 1024
+const (
+	maxWebSocketMessageBytes       = 64 * 1024
+	defaultWebSocketConnectTimeout = 30 * time.Second
+	webSocketReadTimeout           = 2 * time.Minute
+)
 
 // WebSocketClient represents a WebSocket connection to the API
 type WebSocketClient struct {
@@ -20,6 +25,7 @@ type WebSocketClient struct {
 	initErr           error
 	token             string
 	debug             bool
+	connectTimeout    time.Duration
 	mu                sync.RWMutex
 	connected         bool
 	connecting        bool
@@ -38,12 +44,17 @@ type WebSocketClient struct {
 // NewWebSocketClient creates a new WebSocket client
 func (c *Client) NewWebSocketClient(debug bool) *WebSocketClient {
 	wsURL, err := websocketURL(c.BaseURL)
+	connectTimeout := c.Timeout
+	if connectTimeout <= 0 {
+		connectTimeout = defaultWebSocketConnectTimeout
+	}
 
 	return &WebSocketClient{
 		url:              wsURL,
 		initErr:          err,
 		token:            c.Token,
 		debug:            debug,
+		connectTimeout:   connectTimeout,
 		subscribedTopics: make(map[string]bool),
 		eventChannels:    make(map[string][]chan interface{}),
 	}
@@ -74,7 +85,9 @@ func (w *WebSocketClient) Connect(ctx context.Context) error {
 		headers.Set("Authorization", "Bearer "+w.token)
 	}
 
-	conn, _, err := websocket.DefaultDialer.DialContext(ctx, w.url, headers)
+	dialContext, cancelDial := context.WithTimeout(ctx, w.connectTimeout)
+	conn, _, err := websocket.DefaultDialer.DialContext(dialContext, w.url, headers)
+	cancelDial()
 	if err != nil {
 		w.mu.Lock()
 		w.connecting = false
@@ -94,7 +107,7 @@ func (w *WebSocketClient) Connect(ctx context.Context) error {
 			"data": map[string]interface{}{"topics": retainedTopics},
 		}
 		w.writeMu.Lock()
-		err := conn.WriteJSON(msg)
+		err := w.writeJSONOnConnection(conn, msg, websocketDeadline(ctx, w.connectTimeout))
 		w.writeMu.Unlock()
 		if err != nil {
 			w.subscriptionMu.Unlock()
@@ -105,6 +118,10 @@ func (w *WebSocketClient) Connect(ctx context.Context) error {
 			return fmt.Errorf("restore subscriptions: %w", err)
 		}
 	}
+	_ = conn.SetReadDeadline(time.Now().Add(webSocketReadTimeout))
+	conn.SetPongHandler(func(string) error {
+		return conn.SetReadDeadline(time.Now().Add(webSocketReadTimeout))
+	})
 
 	w.mu.Lock()
 	w.connecting = false
@@ -169,6 +186,7 @@ func (w *WebSocketClient) Disconnect(ctx context.Context) error {
 
 	if conn != nil {
 		w.writeMu.Lock()
+		_ = conn.SetWriteDeadline(websocketDeadline(ctx, w.connectTimeout))
 		_ = conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
 		_ = conn.Close()
 		w.writeMu.Unlock()
@@ -318,6 +336,7 @@ func (w *WebSocketClient) handleMessages(conn *websocket.Conn) {
 			}
 			return
 		}
+		_ = conn.SetReadDeadline(time.Now().Add(webSocketReadTimeout))
 
 		msg, err := parseMessage(data)
 		if err != nil {
@@ -351,7 +370,22 @@ func (w *WebSocketClient) writeJSON(msg map[string]interface{}) error {
 		return fmt.Errorf("not connected")
 	}
 
+	return w.writeJSONOnConnection(conn, msg, time.Now().Add(w.connectTimeout))
+}
+
+func (w *WebSocketClient) writeJSONOnConnection(conn *websocket.Conn, msg interface{}, deadline time.Time) error {
+	if err := conn.SetWriteDeadline(deadline); err != nil {
+		return err
+	}
 	return conn.WriteJSON(msg)
+}
+
+func websocketDeadline(ctx context.Context, timeout time.Duration) time.Time {
+	deadline := time.Now().Add(timeout)
+	if ctxDeadline, ok := ctx.Deadline(); ok && ctxDeadline.Before(deadline) {
+		return ctxDeadline
+	}
+	return deadline
 }
 
 func (w *WebSocketClient) processMessage(msg map[string]interface{}) {
