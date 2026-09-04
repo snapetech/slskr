@@ -1463,13 +1463,17 @@ async fn route_dispatch_group_1(context: &RouteDispatchContext<'_, '_>) -> Route
 
                 tokio::spawn(async move {
                     let _delivery_permit = delivery_permit;
-                    let _ = webhooks::WebhookDispatcher::send_webhook(
+                    let webhook_id = webhook_clone.id.clone();
+                    if let Err(error) = webhooks::WebhookDispatcher::send_webhook(
                         &webhook_clone.url,
                         &webhook_clone.secret,
                         &payload.to_string(),
                         webhook_clone.timeout_seconds,
                     )
-                    .await;
+                    .await
+                    {
+                        ::tracing::warn!(%webhook_id, %error, "webhook test delivery failed");
+                    }
                 });
 
                 Ok(routing::ok_response(

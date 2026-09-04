@@ -2135,7 +2135,9 @@ async fn route_dispatch_group_2(context: &RouteDispatchContext<'_, '_>) -> Route
             }
             if remove_file {
                 if let Some(path) = target.local_path.as_deref() {
-                    let _ = fs::remove_file(path);
+                    if let Err(error) = remove_transfer_file_if_present(path).await {
+                        return Ok(routing::service_unavailable_response(&error));
+                    }
                 }
             }
             Ok(routing::no_content_response())
@@ -2183,7 +2185,9 @@ async fn route_dispatch_group_2(context: &RouteDispatchContext<'_, '_>) -> Route
             }
             if remove_file {
                 if let Some(path) = target.local_path.as_deref() {
-                    let _ = fs::remove_file(path);
+                    if let Err(error) = remove_transfer_file_if_present(path).await {
+                        return Ok(routing::service_unavailable_response(&error));
+                    }
                 }
             }
             Ok(routing::no_content_response())
@@ -3270,5 +3274,13 @@ async fn route_dispatch_group_2(context: &RouteDispatchContext<'_, '_>) -> Route
             }
         }
         _ => Err(ROUTE_NOT_HANDLED.to_owned()),
+    }
+}
+
+async fn remove_transfer_file_if_present(path: &str) -> Result<(), String> {
+    match tokio::fs::remove_file(path).await {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!("transfer file removal failed: {error}")),
     }
 }

@@ -19,10 +19,15 @@ use sha2::{Digest, Sha256};
 use tokio::{
     fs,
     io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt, SeekFrom},
+    sync::Semaphore,
     time,
 };
 use tokio_rustls::rustls;
-use tokio_tungstenite::{connect_async_tls_with_config, tungstenite::Message, Connector};
+use tokio_tungstenite::{
+    connect_async_tls_with_config,
+    tungstenite::{protocol::WebSocketConfig, Message},
+    Connector,
+};
 use x509_parser::prelude::parse_x509_certificate;
 
 use crate::{
@@ -36,6 +41,11 @@ const RELAY_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 const RELAY_REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 const RELAY_FILE_CHUNK_BYTES: usize = 64 * 1024;
 const MAX_RELAY_DOWNLOAD_BYTES: u64 = 1024 * 1024 * 1024;
+const MAX_RELAY_SIGNALR_FRAME_BYTES: usize = 1024 * 1024;
+const MAX_RELAY_MESSAGES_PER_FRAME: usize = 256;
+const MAX_RELAY_FILENAME_BYTES: usize = 4 * 1024;
+const MAX_RELAY_TOKEN_BYTES: usize = 512;
+const MAX_RELAY_UPLOADS: usize = 16;
 
 type RelaySocket =
     tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
@@ -77,9 +87,12 @@ async fn run_connection(state: &Arc<AppState>, settings: &RelaySettings) -> Resu
     } else {
         None
     };
+    let websocket_config = WebSocketConfig::default()
+        .max_message_size(Some(MAX_RELAY_SIGNALR_FRAME_BYTES))
+        .max_frame_size(Some(MAX_RELAY_SIGNALR_FRAME_BYTES));
     let (mut socket, _) = time::timeout(
         RELAY_CONNECT_TIMEOUT,
-        connect_async_tls_with_config(websocket_url, None, true, connector),
+        connect_async_tls_with_config(websocket_url, Some(websocket_config), true, connector),
     )
     .await
     .map_err(|_| "relay controller websocket connection timed out".to_owned())?
@@ -135,6 +148,7 @@ async fn run_connection(state: &Arc<AppState>, settings: &RelaySettings) -> Resu
     let mut pending_uploads: FuturesUnordered<BoxFuture<'static, (String, Result<(), String>)>> =
         FuturesUnordered::new();
     let mut pending_failures = std::collections::VecDeque::new();
+    let upload_slots = Arc::new(Semaphore::new(MAX_RELAY_UPLOADS));
     loop {
         while let Some((token, error)) = pending_failures.pop_front() {
             send_signalr_json(
@@ -168,6 +182,10 @@ async fn run_connection(state: &Arc<AppState>, settings: &RelaySettings) -> Resu
                             .and_then(Value::as_array)
                             .and_then(|arguments| arguments.first())
                             .and_then(Value::as_str)
+                            .filter(|filename| {
+                                !filename.trim().is_empty()
+                                    && filename.len() <= MAX_RELAY_FILENAME_BYTES
+                            })
                             .unwrap_or_default()
                             .to_owned();
                         let start_offset = message
@@ -181,14 +199,26 @@ async fn run_connection(state: &Arc<AppState>, settings: &RelaySettings) -> Resu
                             .and_then(Value::as_array)
                             .and_then(|arguments| arguments.get(2))
                             .and_then(Value::as_str)
+                            .filter(|token| {
+                                !token.trim().is_empty() && token.len() <= MAX_RELAY_TOKEN_BYTES
+                            })
                             .unwrap_or_default()
                             .to_owned();
+                        let Ok(upload_permit) = Arc::clone(&upload_slots).try_acquire_owned()
+                        else {
+                            pending_failures.push_back((
+                                token,
+                                "relay upload capacity reached; retry later".to_owned(),
+                            ));
+                            continue;
+                        };
                         let task_state = Arc::clone(state);
                         let task_settings = settings.clone();
                         let task_client = http_client.clone();
                         let task_instance = instance_name.clone();
                         let task_token = token.clone();
                         pending_uploads.push(Box::pin(async move {
+                            let _upload_permit = upload_permit;
                             let result = upload_file(
                                 &task_state,
                                 &task_settings,
@@ -532,14 +562,7 @@ async fn next_signalr_messages(socket: &mut RelaySocket) -> Result<Vec<Value>, S
             message.map_err(|error| format!("relay websocket receive failed: {error}"))?;
         match message {
             Message::Text(text) => {
-                let values = text
-                    .split(SIGNALR_RECORD_SEPARATOR)
-                    .filter(|part| !part.is_empty())
-                    .map(|part| {
-                        serde_json::from_str::<Value>(part)
-                            .map_err(|error| format!("relay SignalR JSON is invalid: {error}"))
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
+                let values = parse_signalr_text(&text)?;
                 if !values.is_empty() {
                     return Ok(values);
                 }
@@ -554,6 +577,26 @@ async fn next_signalr_messages(socket: &mut RelaySocket) -> Result<Vec<Value>, S
             Message::Binary(_) | Message::Pong(_) | Message::Frame(_) => {}
         }
     }
+}
+
+fn parse_signalr_text(text: &str) -> Result<Vec<Value>, String> {
+    if text.len() > MAX_RELAY_SIGNALR_FRAME_BYTES {
+        return Err("relay SignalR frame exceeds the 1 MiB limit".to_owned());
+    }
+    let mut values = Vec::new();
+    for part in text
+        .split(SIGNALR_RECORD_SEPARATOR)
+        .filter(|part| !part.is_empty())
+    {
+        if values.len() >= MAX_RELAY_MESSAGES_PER_FRAME {
+            return Err("relay SignalR frame contains too many messages".to_owned());
+        }
+        values.push(
+            serde_json::from_str::<Value>(part)
+                .map_err(|error| format!("relay SignalR JSON is invalid: {error}"))?,
+        );
+    }
+    Ok(values)
 }
 
 async fn upload_shares(
@@ -910,6 +953,21 @@ impl Drop for RelayTemporaryFile {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn signalr_parser_rejects_oversized_frames_and_message_batches() {
+        let oversized = "x".repeat(MAX_RELAY_SIGNALR_FRAME_BYTES + 1);
+        assert!(parse_signalr_text(&oversized)
+            .expect_err("oversized frame")
+            .contains("1 MiB"));
+
+        let too_many = std::iter::repeat_n("{}", MAX_RELAY_MESSAGES_PER_FRAME + 1)
+            .collect::<Vec<_>>()
+            .join(&SIGNALR_RECORD_SEPARATOR.to_string());
+        assert!(parse_signalr_text(&too_many)
+            .expect_err("oversized message batch")
+            .contains("too many messages"));
+    }
 
     #[test]
     fn relay_spki_pin_matches_certificate_public_key_value() {
