@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <Container version="2">
   <Name>slskr</Name>
-  <Repository>ghcr.io/snapetech/slskr:0.2.15</Repository>
+  <Repository>ghcr.io/snapetech/slskr:0.2.38</Repository>
   <Registry>https://ghcr.io</Registry>
   <Network>bridge</Network>
   <Branch>stable</Branch>

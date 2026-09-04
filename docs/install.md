@@ -38,6 +38,10 @@ Cross-compiling those targets from x86-64 additionally requires matching
 AArch64 C linkers; the release workflow avoids that dependency by building on
 native ARM64 runners.
 
+The Linux release installer and the Proxmox LXC setup script select the
+`x86_64` or `aarch64` GNU archive from `uname -m`, so the same installation
+entry point works on both supported Linux architectures.
+
 ## Config And State
 
 Default config file:

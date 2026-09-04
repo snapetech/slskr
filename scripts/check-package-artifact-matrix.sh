@@ -28,6 +28,72 @@ for target in \
   fi
 done
 
+for target in \
+  x86_64-unknown-linux-gnu \
+  x86_64-unknown-linux-musl \
+  aarch64-unknown-linux-gnu \
+  aarch64-unknown-linux-musl \
+  x86_64-apple-darwin \
+  aarch64-apple-darwin \
+  x86_64-pc-windows-msvc; do
+  if ! rg -n -F "$target" .github/workflows/ci.yml >/dev/null; then
+    printf 'package artifact matrix check failed: CI platform target missing: %s\n' "$target"
+    status=1
+  fi
+done
+
+for expected in \
+  'platform-builds:' \
+  'name: Platform ${{ matrix.name }}' \
+  'native_tests: true' \
+  'native_tests: false' \
+  'scripts/build-release-archive.sh --target' \
+  'scripts/verify-release-artifacts.sh target/dist' \
+  'Run Windows archive smoke' \
+  'Expand-Archive' \
+  'actions/upload-artifact@'; do
+  if ! rg -n -F -- "$expected" .github/workflows/ci.yml >/dev/null; then
+    printf 'package artifact matrix check failed: CI platform coverage token missing: %s\n' "$expected"
+    status=1
+  fi
+done
+
+for expected in \
+  'aarch64|arm64) rust_arch="aarch64"' \
+  'x86_64|amd64) rust_arch="x86_64"'; do
+  if ! rg -n -F -- "$expected" packaging/linux/install-from-release.sh packaging/proxmox-lxc/setup-inside-ct.sh >/dev/null; then
+    printf 'package artifact matrix check failed: Linux installer architecture mapping missing: %s\n' "$expected"
+    status=1
+  fi
+done
+
+for expected in \
+  'packaging/snap/snapcraft.yaml' \
+  'packaging/flatpak/io.github.slskd.slskr.yml' \
+  'packaging/chocolatey/slskr.nuspec' \
+  'packaging/helm/slskr/Chart.yaml' \
+  'packaging/truenas-scale/charts/slskr/Chart.yaml' \
+  'packaging/unraid/slskr.xml' \
+  'packaging/synology-spk/INFO'; do
+  if ! rg -n -F -- "$expected" packaging/scripts/update-release-metadata.sh >/dev/null; then
+    printf 'package artifact matrix check failed: release metadata refresh missing: %s\n' "$expected"
+    status=1
+  fi
+done
+
+for expected in \
+  '"x86_64-linux"' \
+  '"aarch64-linux"' \
+  '"x86_64-darwin"' \
+  '"aarch64-darwin"' \
+  'mkSlskr' \
+  'fetchurl'; do
+  if ! rg -n -F -- "$expected" flake.nix >/dev/null; then
+    printf 'package artifact matrix check failed: Nix release source missing: %s\n' "$expected"
+    status=1
+  fi
+done
+
 if ! rg -n -U 'name: macos-x64\n[[:space:]]+os: macos-15-intel\n[[:space:]]+target: x86_64-apple-darwin' .github/workflows/release.yml >/dev/null; then
   printf 'package artifact matrix check failed: macOS x64 releases must build on a native Intel runner\n' >&2
   status=1
@@ -36,7 +102,9 @@ fi
 for expected in \
   'Select full Perl for vendored OpenSSL' \
   'OPENSSL_SRC_PERL=' \
-  'Locale::Maketext::Simple'; do
+  'Locale::Maketext::Simple' \
+  'Run Windows archive smoke' \
+  'Expand-Archive'; do
   if ! rg -n -F "$expected" .github/workflows/release.yml >/dev/null; then
     printf 'package artifact matrix check failed: Windows vendored OpenSSL prerequisite missing: %s\n' "$expected" >&2
     status=1

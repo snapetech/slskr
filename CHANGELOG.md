@@ -18,6 +18,25 @@ the release is prepared. Do not rewrite audited release history.
 
 ## [Unreleased]
 
+## [0.2.39] — 2026-09-04
+
+- Expanded required CI to build and verify every supported Linux, macOS, and
+  Windows archive on current changes, with native workspace tests where
+  available and downloadable test artifacts.
+- Repaired Winget fork synchronization with recoverable backups, and aligned
+  package metadata, architecture-aware installers, Nix sources, and release
+  documentation with the actual artifact matrix.
+
+## [0.2.38] — 2026-08-30
+
+- Published native Linux x86-64 and AArch64 GNU/musl, macOS Intel and Apple
+  silicon, and Windows archives with checksums, dependency manifests, and
+  build provenance.
+- Hardened compatibility-profile routing, Soulseek transport, transfer and
+  persistence lifecycles, and the React Web UI's error and reconnect paths.
+- Refreshed downstream package metadata and release validation for the current
+  archive matrix.
+
 ## [0.2.34] — 2026-08-28
 
 - Aligned native/current networking with current upstream shared-port behavior,

@@ -4,7 +4,7 @@ on:
   workflow_call:
     inputs:
       tag:
-        description: "Release tag to publish, for example release-v0.2.15"
+        description: "Release tag to publish, for example release-v<semver>"
         required: true
         type: string
     secrets:
@@ -41,7 +41,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag to publish, for example release-v0.2.15"
+        description: "Release tag to publish, for example release-v<semver>"
         required: true
 
 permissions:
@@ -647,4 +647,8 @@ jobs:
           Copy-Item packaging/winget/snapetech.slskr.yaml $submitPath/
           Copy-Item packaging/winget/snapetech.slskr.installer.yaml $submitPath/
           Copy-Item packaging/winget/snapetech.slskr.locale.en-US.yaml $submitPath/
-          .\wingetcreate.exe submit $submitPath -t $env:WINGETCREATE_GITHUB_TOKEN
+          $submitScript = Join-Path $env:GITHUB_WORKSPACE 'scripts/submit-winget-release.ps1'
+          & $submitScript `
+            -WingetCreatePath (Join-Path $PWD 'wingetcreate.exe') `
+            -SubmitPath $submitPath `
+            -PackageVersion '${{ needs.metadata.outputs.pkgver }}'

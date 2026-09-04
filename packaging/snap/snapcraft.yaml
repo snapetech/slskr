@@ -1,6 +1,6 @@
 name: slskr
 base: core22
-version: '0.2.15'
+version: '0.2.38'
 summary: Rust Soulseek daemon with bundled Web UI
 description: |
   slskR is a Rust Soulseek client and daemon with a local web interface.
@@ -20,5 +20,5 @@ apps:
 parts:
   slskr:
     plugin: dump
-    source: https://github.com/snapetech/slskr/releases/download/release-v0.2.15/slskr-v0.2.15-x86_64-unknown-linux-gnu.tar.gz
-    source-checksum: sha256/719ed6b26b34ec51ac45370cef64ab8dd5cf85b1f56d18f8ba38b126296a814e
+    source: https://github.com/snapetech/slskr/releases/download/release-v0.2.38/slskr-v0.2.38-x86_64-unknown-linux-gnu.tar.gz
+    source-checksum: sha256/254ef1125c7e15f015ec0ead8b563e8755b8be16b74f9261b8592c5202fb95f0

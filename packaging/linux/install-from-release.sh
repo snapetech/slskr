@@ -29,7 +29,16 @@ if [ -z "$VERSION" ]; then
   exit 1
 fi
 
-ARCHIVE="slskr-${VERSION#release-v}-x86_64-unknown-linux-gnu.tar.gz"
+case "$(uname -m)" in
+  x86_64|amd64) rust_arch="x86_64" ;;
+  aarch64|arm64) rust_arch="aarch64" ;;
+  *)
+    echo "Unsupported Linux architecture: $(uname -m)" >&2
+    exit 1
+    ;;
+esac
+
+ARCHIVE="slskr-${VERSION#release-v}-${rust_arch}-unknown-linux-gnu.tar.gz"
 WORK_DIR="$(mktemp -d)"
 trap 'rm -rf "$WORK_DIR"' EXIT
 ARCHIVE_PATH="${WORK_DIR}/${ARCHIVE}"

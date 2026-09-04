@@ -104,17 +104,26 @@ release-section level and move shipped `## [Unreleased]` bullets into a dated
 section when preparing a release; the CI and tag workflows reject a missing or
 placeholder section.
 
-## CI Matrix
+## CI and release matrix
 
-The release workflow builds these native runner variants:
+The `CI` workflow runs the platform matrix on every pull request and push to
+`main`. Each matrix job builds a target archive, verifies its checksum and
+layout, and uploads the archive for seven days so a platform-specific build can
+be downloaded for testing. Native workspace tests run on Linux x64, Linux
+AArch64, both macOS architectures, and Windows; the additional musl jobs smoke
+test their built static binary through the same archive verifier.
 
-- `linux-x64` on `ubuntu-latest`
-- `linux-musl-x64` on `ubuntu-latest`
-- `linux-arm64` on `ubuntu-24.04-arm`
-- `linux-musl-arm64` on `ubuntu-24.04-arm`
-- `macos-x64` on `macos-14` with the `x86_64-apple-darwin` Rust target
-- `macos-arm64` on `macos-14`
-- `windows-x64` on `windows-latest`
+The release workflow uses the same native runner and target mapping:
+
+| Target | CI and release runner | Rust target | CI exercise |
+| --- | --- | --- | --- |
+| `linux-x64` | `ubuntu-latest` | `x86_64-unknown-linux-gnu` | Full Linux tests and archive smoke |
+| `linux-musl-x64` | `ubuntu-latest` | `x86_64-unknown-linux-musl` | Static archive build and smoke |
+| `linux-arm64` | `ubuntu-24.04-arm` | `aarch64-unknown-linux-gnu` | Full AArch64 tests and archive smoke |
+| `linux-musl-arm64` | `ubuntu-24.04-arm` | `aarch64-unknown-linux-musl` | Static archive build and smoke |
+| `macos-x64` | `macos-15-intel` | `x86_64-apple-darwin` | Native workspace tests and archive smoke |
+| `macos-arm64` | `macos-14` | `aarch64-apple-darwin` | Native workspace tests and archive smoke |
+| `windows-x64` | `windows-latest` | `x86_64-pc-windows-msvc` | Native workspace tests and archive smoke |
 
 Push a tag named:
 
@@ -124,9 +133,10 @@ release-v<semver>
 
 Tag-triggered releases intentionally use the `release-v<semver>` convention,
 for example `release-v1.2.3` or `release-v1.2.3-rc.1`. Plain `v*` tags and
-loose `release-*` tags are not release triggers. Commits pushed to `main` do
-not build release archives, and the release workflow does not provide a manual
-dispatch path; a full release requires a `release-v<semver>` tag on `main`.
+loose `release-*` tags are not release triggers. Commits pushed to `main` build
+short-lived CI test archives but do not create GitHub release assets, and the
+release workflow does not provide a manual dispatch path; a full release
+requires a `release-v<semver>` tag on `main`.
 
 For a tag build, the workflow creates a GitHub Release and uploads all archives
 plus `SHA256SUMS.txt`, `slskr-cyclonedx.json`, and

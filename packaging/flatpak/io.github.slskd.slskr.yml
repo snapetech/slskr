@@ -31,5 +31,5 @@ modules:
       - chmod +x /app/bin/slskr-wrapper
     sources:
       - type: archive
-        url: https://github.com/snapetech/slskr/releases/download/release-v0.2.15/slskr-v0.2.15-x86_64-unknown-linux-gnu.tar.gz
-        sha256: 719ed6b26b34ec51ac45370cef64ab8dd5cf85b1f56d18f8ba38b126296a814e
+        url: https://github.com/snapetech/slskr/releases/download/release-v0.2.38/slskr-v0.2.38-x86_64-unknown-linux-gnu.tar.gz
+        sha256: 254ef1125c7e15f015ec0ead8b563e8755b8be16b74f9261b8592c5202fb95f0

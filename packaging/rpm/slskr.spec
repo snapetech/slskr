@@ -1,10 +1,10 @@
 Name:           slskr
-Version:        0.2.15
+Version:        0.2.38
 Release:        1%{?dist}
 Summary:        Rust Soulseek daemon with bundled Web UI
 License:        AGPL-3.0-only
 URL:            https://github.com/snapetech/slskr
-Source0:        slskr-v0.2.15-x86_64-unknown-linux-gnu.tar.gz
+Source0:        slskr-v0.2.38-x86_64-unknown-linux-gnu.tar.gz
 Source1:        slskr.service
 Source2:        slskr.sysusers
 Source3:        slskr.tmpfiles

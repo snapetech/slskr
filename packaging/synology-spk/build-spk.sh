@@ -4,7 +4,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="${SCRIPT_DIR}/build"
 PACKAGE_DIR="${BUILD_DIR}/package"
-VERSION="${SLSKR_VERSION:-0.2.15}"
+VERSION="${SLSKR_VERSION:-0.2.38}"
 
 rm -rf "$BUILD_DIR"
 mkdir -p "$PACKAGE_DIR"

@@ -1,6 +1,6 @@
 # yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.6.0.schema.json
 PackageIdentifier: snapetech.slskr
-PackageVersion: 0.2.15
+PackageVersion: 0.2.38
 PackageLocale: en-US
 Publisher: snapetech
 PublisherUrl: https://github.com/snapetech
@@ -18,6 +18,6 @@ Tags:
   - daemon
   - webui
   - rust
-ReleaseNotesUrl: https://github.com/snapetech/slskr/releases/tag/release-v0.2.15
+ReleaseNotesUrl: https://github.com/snapetech/slskr/releases/tag/release-v0.2.38
 ManifestType: defaultLocale
 ManifestVersion: 1.6.0

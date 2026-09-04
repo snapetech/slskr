@@ -3,4 +3,4 @@ name: slskr
 description: Rust Soulseek daemon with bundled Web UI
 type: application
 version: 0.1.0
-appVersion: "0.2.15"
+appVersion: "0.2.38"

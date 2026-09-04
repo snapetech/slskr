@@ -163,6 +163,51 @@ end
 ''')
 PY
 
+sed -i \
+  -e "s|^version: .*|version: '${pkgver}'|" \
+  -e "s|^    source: https://github.com/snapetech/slskr/releases/download/[^/]*/.*|    source: https://github.com/snapetech/slskr/releases/download/${tag}/${linux_x64}|" \
+  -e "s|^    source-checksum: sha256/.*|    source-checksum: sha256/${linux_x64_sha}|" \
+  packaging/snap/snapcraft.yaml
+
+sed -i \
+  -e "s|^        url: https://github.com/snapetech/slskr/releases/download/[^/]*/.*|        url: https://github.com/snapetech/slskr/releases/download/${tag}/${linux_x64}|" \
+  -e "s|^        sha256: .*|        sha256: ${linux_x64_sha}|" \
+  packaging/flatpak/io.github.slskd.slskr.yml
+
+sed -i \
+  -e "s|<version>[^<]*</version>|<version>${pkgver}</version>|" \
+  packaging/chocolatey/slskr.nuspec
+sed -i \
+  -e "s|^\$url = .*|\$url = \"https://github.com/snapetech/slskr/releases/download/${tag}/${win_x64}\"|" \
+  -e "s|^\$checksum = .*|\$checksum = \"${win_x64_sha}\"|" \
+  packaging/chocolatey/tools/chocolateyinstall.ps1
+
+for chart in \
+  packaging/helm/slskr/Chart.yaml \
+  packaging/truenas-scale/charts/slskr/Chart.yaml; do
+  sed -i "s|^appVersion: .*|appVersion: \"${pkgver}\"|" "$chart"
+done
+for values in \
+  packaging/helm/slskr/values.yaml \
+  packaging/truenas-scale/charts/slskr/values.yaml; do
+  sed -i "s|^  tag: .*|  tag: \"${pkgver}\"|" "$values"
+done
+
+sed -i "s|^  <Repository>.*</Repository>|  <Repository>ghcr.io/snapetech/slskr:${pkgver}</Repository>|" \
+  packaging/unraid/slskr.xml
+sed -i "s|^version=\".*\"|version=\"${pkgver}\"|" \
+  packaging/synology-spk/INFO
+sed -i "s|^VERSION=\"\${SLSKR_VERSION:-.*}\"|VERSION=\"\${SLSKR_VERSION:-${pkgver}}\"|" \
+  packaging/synology-spk/build-spk.sh
+
+sed -i \
+  -e "s|^        version = .*|        version = \"${pkgver}\";|" \
+  -e "/\"x86_64-linux\" = {/,/^[[:space:]]*};/ { s|^            url = .*|            url = \"https://github.com/snapetech/slskr/releases/download/${tag}/${linux_x64}\";|; s|^            sha256 = .*|            sha256 = \"${linux_x64_sha}\";|; }" \
+  -e "/\"aarch64-linux\" = {/,/^[[:space:]]*};/ { s|^            url = .*|            url = \"https://github.com/snapetech/slskr/releases/download/${tag}/${linux_arm64}\";|; s|^            sha256 = .*|            sha256 = \"${linux_arm64_sha}\";|; }" \
+  -e "/\"x86_64-darwin\" = {/,/^[[:space:]]*};/ { s|^            url = .*|            url = \"https://github.com/snapetech/slskr/releases/download/${tag}/${mac_x64}\";|; s|^            sha256 = .*|            sha256 = \"${mac_x64_sha}\";|; }" \
+  -e "/\"aarch64-darwin\" = {/,/^[[:space:]]*};/ { s|^            url = .*|            url = \"https://github.com/snapetech/slskr/releases/download/${tag}/${mac_arm64}\";|; s|^            sha256 = .*|            sha256 = \"${mac_arm64_sha}\";|; }" \
+  flake.nix
+
 if grep -R "CHANGE_ME" \
   packaging/aur \
   packaging/homebrew \

@@ -1,11 +1,10 @@
-# On-demand Windows runner
+# Windows runners
 
-The `Windows Smoke` workflow uses the private `snapetech/packer` Windows VM
-runner:
+Windows coverage uses GitHub-hosted `windows-latest` runners. The `CI`
+platform matrix builds and archive-verifies the native
+`x86_64-pc-windows-msvc` release artifact and runs the workspace tests. The
+separate `Windows Smoke` workflow remains available for on-demand or
+pull-request Rust/WASM/web smoke coverage.
 
-```yaml
-runs-on: [self-hosted, Windows, X64, packer-windows]
-```
-
-This gives Windows Rust/WASM/web build coverage without keeping a Windows VM
-running. The runner is ephemeral and powers down after one job.
+The release workflow uses the same hosted runner for the Windows archive. No
+self-hosted Windows labels or private VM are required.

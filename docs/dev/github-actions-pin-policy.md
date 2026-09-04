@@ -17,7 +17,7 @@ or if a pinned action is missing from this ledger.
 | `actions/setup-node` | `v6` | `820762786026740c76f36085b0efc47a31fe5020` | Node setup for web, dashboard, TypeScript SDK, and live parity gates. |
 | `actions/setup-go` | `v7.0.0` | `b7ad1dad31e06c5925ef5d2fc7ad053ef454303e` | Go SDK test setup. |
 | `actions/setup-python` | `v7.0.0` | `5fda3b95a4ea91299a34e894583c3862153e4b97` | Python SDK and slskd API compatibility smoke setup. |
-| `actions/upload-artifact` | `v7.0.1` | `043fb46d1a93c77aae656e7c1c64a875d1fc6a0a` | Release archive and live parity artifact upload. |
+| `actions/upload-artifact` | `v7.0.1` | `043fb46d1a93c77aae656e7c1c64a875d1fc6a0a` | CI platform, release archive, and live parity artifact upload. |
 | `actions/download-artifact` | `v8.0.1` | `3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c` | Release archive download before publishing. |
 | `actions/attest-build-provenance` | `v4` | `4d101475d8b20a2381f78447822ac1eab6504dd8` | Dereferenced tag target for release asset attestations. |
 | `softprops/action-gh-release` | `v3` | `3d0d9888cb7fd7b750713d6e236d1fcb99157228` | GitHub Release publisher. |

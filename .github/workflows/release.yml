@@ -49,7 +49,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_SHA: ${{ github.sha }}
         run: |
-          for _ in {1..120}; do
+          for _ in {1..240}; do
             run_json="$(
               gh run list \
                 --repo "$GITHUB_REPOSITORY" \
@@ -265,6 +265,24 @@ jobs:
       - name: Verify archive layout
         shell: bash
         run: scripts/verify-release-artifacts.sh target/dist
+      - name: Run Windows archive smoke
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $archive = Get-ChildItem 'target/dist/*.zip' | Select-Object -First 1
+          if ($null -eq $archive) {
+            throw 'Windows archive was not produced'
+          }
+          $extract = Join-Path $env:RUNNER_TEMP "slskr-release-archive-$env:GITHUB_RUN_ID"
+          Expand-Archive -LiteralPath $archive.FullName -DestinationPath $extract
+          $binary = Get-ChildItem -LiteralPath $extract -Filter 'slskr.exe' -Recurse | Select-Object -First 1
+          if ($null -eq $binary) {
+            throw 'Windows archive does not contain slskr.exe'
+          }
+          & $binary.FullName version
+          if ($LASTEXITCODE -ne 0) {
+            throw "Packaged Windows binary exited with status $LASTEXITCODE"
+          }
       - name: Upload archive
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # actions/upload-artifact@v7.0.1
         with:

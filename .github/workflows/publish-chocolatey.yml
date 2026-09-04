@@ -22,6 +22,16 @@ jobs:
           RELEASE_TAG: ${{ inputs.tag }}
         run: |
           gh release download $env:RELEASE_TAG --pattern 'slskr-*-x86_64-pc-windows-msvc.zip' --dir release-assets
+      - name: Resolve package version
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          if ($env:RELEASE_TAG -notmatch '^release-v(?<version>[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?)$') {
+            throw "Expected a release-v<semver> tag, got $env:RELEASE_TAG"
+          }
+          "PACKAGE_VERSION=$($Matches['version'])" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Render and pack Chocolatey artifact
         shell: pwsh
         run: |
@@ -31,10 +41,18 @@ jobs:
             -replace '\$url\s*=\s*".*"', "`$url = `"$($asset.Name)`"" `
             -replace '\$checksum\s*=\s*".*"', "`$checksum = `"$hash`"" |
             Set-Content packaging\chocolatey\tools\chocolateyinstall.ps1
+          $nuspecPath = 'packaging\chocolatey\slskr.nuspec'
+          $nuspec = Get-Content $nuspecPath -Raw
+          $nuspec = $nuspec -replace '<version>[^<]+</version>', "<version>$env:PACKAGE_VERSION</version>"
+          Set-Content $nuspecPath $nuspec
           choco pack packaging\chocolatey\slskr.nuspec --outputdirectory release-assets
       - name: Push package when credentials are configured
-        if: env.CHOCO_API_KEY != ''
         shell: pwsh
         env:
           CHOCO_API_KEY: ${{ secrets.CHOCO_API_KEY }}
-        run: choco push (Get-ChildItem release-assets\*.nupkg | Select-Object -First 1) --source https://push.chocolatey.org/ --api-key $env:CHOCO_API_KEY
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:CHOCO_API_KEY)) {
+            Write-Host "CHOCO_API_KEY not configured; skipping Chocolatey push."
+            exit 0
+          }
+          choco push (Get-ChildItem release-assets\*.nupkg | Select-Object -First 1) --source https://push.chocolatey.org/ --api-key $env:CHOCO_API_KEY
