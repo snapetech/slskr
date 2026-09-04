@@ -129,6 +129,31 @@ def test_batch_helpers_treat_redirects_as_failures_and_copy_operations():
     }
 
 
+def test_batch_builder_avoids_generated_id_collisions():
+    builder = BatchBuilder(SlskrClient("https://example.test", "token"))
+    builder.add_operations([BatchOperation("op-0", "GET", "/api/health")])
+    builder.get("/api/version")
+
+    assert [operation.id for operation in builder.get_operations()] == ["op-0", "op-1"]
+
+
+@pytest.mark.asyncio
+async def test_batch_builder_rejects_duplicate_ids_before_sending():
+    client = SlskrClient("https://example.test", "token")
+    client._post = AsyncMock()
+    builder = BatchBuilder(client)
+    builder.add_operations(
+        [
+            BatchOperation("same", "GET", "/api/health"),
+            BatchOperation("same", "GET", "/api/version"),
+        ]
+    )
+
+    with pytest.raises(ValueError, match="duplicate operation ID"):
+        await builder.execute()
+    client._post.assert_not_awaited()
+
+
 def test_websocket_client_uses_event_endpoint_and_tracks_topics():
     client = WebSocketClient("https://example.test/base/", "token")
 

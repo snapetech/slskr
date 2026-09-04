@@ -1,6 +1,10 @@
 package slskr
 
-import "testing"
+import (
+	"context"
+	"strings"
+	"testing"
+)
 
 func TestBatchBuilderOwnsNestedRequestBodies(t *testing.T) {
 	client := NewClient("http://example.test", "token")
@@ -35,4 +39,31 @@ func TestBatchResultTreatsRedirectAsError(t *testing.T) {
 	if result.IsSuccess() {
 		t.Fatal("expected a redirect result not to be treated as successful")
 	}
+}
+
+func TestBatchBuilderAvoidsGeneratedIDCollisions(t *testing.T) {
+	client := NewClient("http://example.test", "token")
+	builder := client.NewBatchBuilder()
+	builder.Get("/api/health", stringPointer("op-0"))
+	builder.Get("/api/version", nil)
+
+	operations := builder.GetOperations()
+	if operations[1].ID == operations[0].ID {
+		t.Fatalf("generated operation ID collided with explicit ID: %#v", operations)
+	}
+}
+
+func TestBatchBuilderRejectsDuplicateIDsBeforeSending(t *testing.T) {
+	client := NewClient("http://example.test", "token")
+	builder := client.NewBatchBuilder()
+	builder.Get("/api/health", stringPointer("same"))
+	builder.Get("/api/version", stringPointer("same"))
+
+	if _, err := builder.Execute(context.Background()); err == nil || !strings.Contains(err.Error(), "duplicate operation ID") {
+		t.Fatalf("expected duplicate operation ID error, got %v", err)
+	}
+}
+
+func stringPointer(value string) *string {
+	return &value
 }

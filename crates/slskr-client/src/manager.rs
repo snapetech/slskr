@@ -133,21 +133,23 @@ where
             return Ok(false);
         }
 
-        let _gate = self.peer_connects[peer_connect_stripe(username)]
-            .lock()
-            .await;
-        if self.peer_cache.contains(username).await {
-            return Ok(false);
-        }
-        let connection = time::timeout(timeout, (self.connector)(username.to_owned()))
-            .await
-            .map_err(|_| ClientError::TimedOut {
-                operation: "managed peer connect",
-            })??;
-        self.peer_cache
-            .insert(username.to_owned(), connection)
-            .await?;
-        Ok(true)
+        time::timeout(timeout, async {
+            let _gate = self.peer_connects[peer_connect_stripe(username)]
+                .lock()
+                .await;
+            if self.peer_cache.contains(username).await {
+                return Ok(false);
+            }
+            let connection = (self.connector)(username.to_owned()).await?;
+            self.peer_cache
+                .insert(username.to_owned(), connection)
+                .await?;
+            Ok(true)
+        })
+        .await
+        .map_err(|_| ClientError::TimedOut {
+            operation: "managed peer connect",
+        })?
     }
 
     pub async fn request_indirect_peer_messages(

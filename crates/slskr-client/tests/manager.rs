@@ -224,6 +224,52 @@ async fn timed_out_peer_connect_does_not_block_retry() {
 }
 
 #[tokio::test]
+async fn manager_timeout_covers_waiting_for_peer_connect_gate() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let calls_for_connector = Arc::clone(&calls);
+    let (client, _) = duplex(512);
+    let manager = Arc::new(ConnectionManager::new(
+        ServerSession::new(ServerConnection::new(client)),
+        PeerConnectionCache::new(),
+        Arc::new(move |_| {
+            calls_for_connector.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async move {
+                std::future::pending::<
+                    Result<PeerMessageConnection<DuplexStream>, slskr_client::ClientError>,
+                >()
+                .await
+            })
+        }),
+    ));
+
+    let first_manager = Arc::clone(&manager);
+    let first = tokio::spawn(async move {
+        first_manager
+            .ensure_peer_messages_with_timeout("peer", Duration::from_secs(30))
+            .await
+    });
+    while calls.load(Ordering::SeqCst) == 0 {
+        tokio::task::yield_now().await;
+    }
+
+    let second = tokio::time::timeout(
+        Duration::from_millis(100),
+        manager.ensure_peer_messages_with_timeout("PEER", Duration::from_millis(10)),
+    )
+    .await;
+    first.abort();
+    let _ = first.await;
+
+    assert!(matches!(
+        second,
+        Ok(Err(slskr_client::ClientError::TimedOut {
+            operation: "managed peer connect"
+        }))
+    ));
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
 async fn request_indirect_peer_messages_sends_server_connect_message() {
     let (client, server) = duplex(512);
     let manager = ConnectionManager::new(

@@ -85,4 +85,26 @@ describe('Batch operation limits', () => {
     expect(batch.getSuccessful(response).map((result) => result.id)).toEqual(['ok']);
     expect(batch.getFailed(response).map((result) => result.id)).toEqual(['redirect', 'error']);
   });
+
+  it('avoids generated IDs colliding with bulk additions', () => {
+    const { client } = mockClient();
+    const builder = new BatchBuilder(client).addOperations([
+      { id: 'op-1', method: 'GET', path: '/api/health' },
+    ]);
+
+    builder.get('/api/version');
+
+    expect(builder.getOperations().map((operation) => operation.id)).toEqual(['op-1', 'op-2']);
+  });
+
+  it('rejects duplicate IDs before sending', async () => {
+    const { client, postAuth } = mockClient();
+    const batch = new BatchClient(client);
+
+    await expect(batch.execute([
+      { id: 'same', method: 'GET', path: '/api/health' },
+      { id: 'same', method: 'GET', path: '/api/version' },
+    ])).rejects.toThrow('duplicate operation ID');
+    expect(postAuth).not.toHaveBeenCalled();
+  });
 });

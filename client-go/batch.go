@@ -53,69 +53,75 @@ func (c *Client) NewBatchBuilder() *BatchBuilder {
 
 // Get adds a GET operation
 func (b *BatchBuilder) Get(path string, opID *string) *BatchBuilder {
-	id := fmt.Sprintf("op-%d", b.opCounter)
-	if opID != nil {
-		id = *opID
-	}
+	id := b.operationID(opID)
 	b.operations = append(b.operations, BatchOperation{
 		ID:     id,
 		Method: "GET",
 		Path:   path,
 	})
-	b.opCounter++
 	return b
 }
 
 // Post adds a POST operation
 func (b *BatchBuilder) Post(path string, body map[string]interface{}, opID *string) *BatchBuilder {
-	id := fmt.Sprintf("op-%d", b.opCounter)
-	if opID != nil {
-		id = *opID
-	}
+	id := b.operationID(opID)
 	b.operations = append(b.operations, BatchOperation{
 		ID:     id,
 		Method: "POST",
 		Path:   path,
 		Body:   cloneJSONMap(body),
 	})
-	b.opCounter++
 	return b
 }
 
 // Put adds a PUT operation
 func (b *BatchBuilder) Put(path string, body map[string]interface{}, opID *string) *BatchBuilder {
-	id := fmt.Sprintf("op-%d", b.opCounter)
-	if opID != nil {
-		id = *opID
-	}
+	id := b.operationID(opID)
 	b.operations = append(b.operations, BatchOperation{
 		ID:     id,
 		Method: "PUT",
 		Path:   path,
 		Body:   cloneJSONMap(body),
 	})
-	b.opCounter++
 	return b
 }
 
 // Delete adds a DELETE operation
 func (b *BatchBuilder) Delete(path string, opID *string) *BatchBuilder {
-	id := fmt.Sprintf("op-%d", b.opCounter)
-	if opID != nil {
-		id = *opID
-	}
+	id := b.operationID(opID)
 	b.operations = append(b.operations, BatchOperation{
 		ID:     id,
 		Method: "DELETE",
 		Path:   path,
 	})
-	b.opCounter++
 	return b
 }
 
 // Size returns number of operations
 func (b *BatchBuilder) Size() int {
 	return len(b.operations)
+}
+
+func (b *BatchBuilder) operationID(opID *string) string {
+	if opID != nil {
+		b.opCounter++
+		return *opID
+	}
+
+	for {
+		id := fmt.Sprintf("op-%d", b.opCounter)
+		b.opCounter++
+		duplicate := false
+		for _, operation := range b.operations {
+			if operation.ID == id {
+				duplicate = true
+				break
+			}
+		}
+		if !duplicate {
+			return id
+		}
+	}
 }
 
 // Clear clears all operations
@@ -170,6 +176,9 @@ func (b *BatchBuilder) Execute(ctx context.Context) (*BatchResponse, error) {
 	if len(b.operations) > 100 {
 		return nil, fmt.Errorf("batch cannot exceed 100 operations")
 	}
+	if err := validateBatchOperationIDs(b.operations); err != nil {
+		return nil, err
+	}
 
 	request := map[string]interface{}{
 		"operations": b.operations,
@@ -197,6 +206,17 @@ func (b *BatchBuilder) Execute(ctx context.Context) (*BatchResponse, error) {
 	}
 
 	return &response, nil
+}
+
+func validateBatchOperationIDs(operations []BatchOperation) error {
+	seen := make(map[string]struct{}, len(operations))
+	for _, operation := range operations {
+		if _, exists := seen[operation.ID]; exists {
+			return fmt.Errorf("batch contains duplicate operation ID %q", operation.ID)
+		}
+		seen[operation.ID] = struct{}{}
+	}
+	return nil
 }
 
 // AllSuccessful checks if all operations succeeded

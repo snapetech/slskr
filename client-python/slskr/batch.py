@@ -73,32 +73,38 @@ class BatchBuilder:
         self.operations: List[BatchOperation] = []
         self.op_counter = 0
 
+    def _next_id(self, op_id: str = None) -> str:
+        if op_id:
+            return op_id
+
+        while True:
+            candidate = f"op-{self.op_counter}"
+            self.op_counter += 1
+            if all(operation.id != candidate for operation in self.operations):
+                return candidate
+
     def get(self, path: str, op_id: str = None) -> "BatchBuilder":
         """Add GET operation"""
-        op_id = op_id or f"op-{self.op_counter}"
+        op_id = self._next_id(op_id)
         self.operations.append(BatchOperation(op_id, "GET", path))
-        self.op_counter += 1
         return self
 
     def post(self, path: str, body: Dict, op_id: str = None) -> "BatchBuilder":
         """Add POST operation"""
-        op_id = op_id or f"op-{self.op_counter}"
+        op_id = self._next_id(op_id)
         self.operations.append(BatchOperation(op_id, "POST", path, body))
-        self.op_counter += 1
         return self
 
     def put(self, path: str, body: Dict, op_id: str = None) -> "BatchBuilder":
         """Add PUT operation"""
-        op_id = op_id or f"op-{self.op_counter}"
+        op_id = self._next_id(op_id)
         self.operations.append(BatchOperation(op_id, "PUT", path, body))
-        self.op_counter += 1
         return self
 
     def delete(self, path: str, op_id: str = None) -> "BatchBuilder":
         """Add DELETE operation"""
-        op_id = op_id or f"op-{self.op_counter}"
+        op_id = self._next_id(op_id)
         self.operations.append(BatchOperation(op_id, "DELETE", path))
-        self.op_counter += 1
         return self
 
     def add_operations(self, ops: List[BatchOperation]) -> "BatchBuilder":
@@ -127,6 +133,10 @@ class BatchBuilder:
 
         if len(self.operations) > 100:
             raise ValueError("Batch cannot exceed 100 operations")
+
+        ids = [operation.id for operation in self.operations]
+        if len(ids) != len(set(ids)):
+            raise ValueError("Batch contains duplicate operation ID")
 
         request = {"operations": [op.to_dict() for op in self.operations]}
 
