@@ -2130,53 +2130,41 @@ fn decode_joined_room(reader: &mut Reader<'_>) -> Result<JoinedRoom, DecodeError
     // malformed count cannot reserve a large username vector before the
     // later vector headers are validated.
     let user_count = reader.read_bounded_count("room users", 36)?;
-    let mut usernames = Vec::with_capacity(user_count);
+    let mut users = Vec::with_capacity(user_count);
     for _ in 0..user_count {
-        usernames.push(reader.read_string()?);
+        users.push(RoomUser {
+            username: reader.read_string()?,
+            status: 0,
+            average_speed: 0,
+            upload_count: 0,
+            file_count: 0,
+            directory_count: 0,
+            slots_free: 0,
+            country_code: String::new(),
+        });
     }
 
     matching_room_count(reader, "room user statuses", user_count, 4)?;
-    let mut statuses = Vec::with_capacity(user_count);
-    for _ in 0..user_count {
-        statuses.push(reader.read_u32_le()?);
+    for user in &mut users {
+        user.status = reader.read_u32_le()?;
     }
 
     matching_room_count(reader, "room user data", user_count, 20)?;
-    let mut data = Vec::with_capacity(user_count);
-    for _ in 0..user_count {
-        data.push((
-            reader.read_u32_le()?,
-            reader.read_u64_le()?,
-            reader.read_u32_le()?,
-            reader.read_u32_le()?,
-        ));
+    for user in &mut users {
+        user.average_speed = reader.read_u32_le()?;
+        user.upload_count = reader.read_u64_le()?;
+        user.file_count = reader.read_u32_le()?;
+        user.directory_count = reader.read_u32_le()?;
     }
 
     matching_room_count(reader, "room user slots", user_count, 4)?;
-    let mut slots = Vec::with_capacity(user_count);
-    for _ in 0..user_count {
-        slots.push(reader.read_u32_le()?);
+    for user in &mut users {
+        user.slots_free = reader.read_u32_le()?;
     }
 
     matching_room_count(reader, "room user countries", user_count, 4)?;
-    let mut countries = Vec::with_capacity(user_count);
-    for _ in 0..user_count {
-        countries.push(reader.read_string()?);
-    }
-
-    let mut users = Vec::with_capacity(user_count);
-    for (index, username) in usernames.into_iter().enumerate() {
-        let (average_speed, upload_count, file_count, directory_count) = data[index];
-        users.push(RoomUser {
-            username,
-            status: statuses[index],
-            average_speed,
-            upload_count,
-            file_count,
-            directory_count,
-            slots_free: slots[index],
-            country_code: countries[index].clone(),
-        });
+    for user in &mut users {
+        user.country_code = reader.read_string()?;
     }
 
     let (owner, operators) = if reader.is_empty() {
