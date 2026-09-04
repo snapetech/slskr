@@ -1325,10 +1325,10 @@ async fn route_dispatch_group_3(context: &RouteDispatchContext<'_, '_>) -> Route
             let diagnostics = serde_json::json!({
                 "status": "operational",
                 "transfers": {
-                    "active": transfers.entries.iter().filter(|t| t.status == "in_progress").count(),
+                    "active": transfers.entries.iter().filter(|t| is_active_transfer_status(&t.status)).count(),
                     "total": transfers.entries.len(),
-                    "succeeded": transfers.entries.iter().filter(|t| t.status == "succeeded").count(),
-                    "failed": transfers.entries.iter().filter(|t| t.status == "failed").count(),
+                    "succeeded": transfers.entries.iter().filter(|t| is_successful_transfer_status(&t.status)).count(),
+                    "failed": transfers.entries.iter().filter(|t| is_failed_transfer_status(&t.status)).count(),
                 },
                 "searches": {
                     "total": searches.records.len(),
@@ -1361,8 +1361,8 @@ async fn route_dispatch_group_3(context: &RouteDispatchContext<'_, '_>) -> Route
                     .as_secs(),
                 "transfers": {
                     "queue_size": transfers.entries.len(),
-                    "active_downloads": transfers.entries.iter().filter(|t| t.status == "in_progress" && t.direction == 0).count(),
-                    "active_uploads": transfers.entries.iter().filter(|t| t.status == "in_progress" && t.direction != 0).count(),
+                    "active_downloads": transfers.entries.iter().filter(|t| is_active_transfer_status(&t.status) && t.direction == 0).count(),
+                    "active_uploads": transfers.entries.iter().filter(|t| is_active_transfer_status(&t.status) && t.direction != 0).count(),
                 },
                 "searches": {
                     "total": searches.records.len(),

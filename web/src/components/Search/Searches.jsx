@@ -120,6 +120,7 @@ const Searches = ({ runtimeProfile, server } = {}) => {
   const [connecting, setConnecting] = useState(true);
   const [error, setError] = useState(undefined);
   const [searches, setSearches] = useState({});
+  const [initialSearchesLoaded, setInitialSearchesLoaded] = useState(false);
 
   const [removing, setRemoving] = useState(false);
   const [removingAll, setRemovingAll] = useState(false);
@@ -204,12 +205,9 @@ const Searches = ({ runtimeProfile, server } = {}) => {
 
   useEffect(() => {
     let mounted = true;
+    let restHydrated = false;
 
     const loadSearches = async () => {
-      if (runtimeProfile) {
-        return;
-      }
-
       try {
         const records = await library.getAll();
         if (!mounted) {
@@ -230,6 +228,11 @@ const Searches = ({ runtimeProfile, server } = {}) => {
           return;
         }
         onConnectionError(loadError?.message ?? 'Failed to load searches');
+      } finally {
+        restHydrated = true;
+        if (mounted) {
+          setInitialSearchesLoaded(true);
+        }
       }
     };
 
@@ -273,6 +276,9 @@ const Searches = ({ runtimeProfile, server } = {}) => {
     const searchHub = createSearchHubConnection();
 
     searchHub.on('list', (searchesEvent) => {
+      if (restHydrated) {
+        return;
+      }
       if (!Array.isArray(searchesEvent)) {
         loadSearches();
         return;
@@ -321,18 +327,10 @@ const Searches = ({ runtimeProfile, server } = {}) => {
       try {
         onConnecting();
         await searchHub.start();
-        if (runtimeProfile) {
-          onConnected();
-        } else {
-          await loadSearches();
-        }
+        await loadSearches();
       } catch (connectionError) {
         toast.error(connectionError?.message ?? 'Failed to connect to search updates');
-        if (runtimeProfile) {
-          onConnected();
-        } else {
-          await loadSearches();
-        }
+        await loadSearches();
       }
     };
 
@@ -507,12 +505,44 @@ const Searches = ({ runtimeProfile, server } = {}) => {
   }, [connecting, creating, error, runtimeProfile, searchId]);
 
   useEffect(() => {
-    if (!searchId || connecting || error || creating || searches[searchId]) {
+    if (
+      !searchId ||
+      connecting ||
+      error ||
+      creating ||
+      !initialSearchesLoaded ||
+      searches[searchId]
+    ) {
       return;
     }
 
-    routerNavigate('/searches', { replace: true });
-  }, [connecting, creating, error, routerNavigate, searchId, searches]);
+    let cancelled = false;
+
+    const loadSearch = async () => {
+      try {
+        const search = await library.getStatus({ id: searchId });
+        const resolvedId = searchEventIdentifier(search);
+        if (cancelled || resolvedId === undefined || resolvedId === null) {
+          return;
+        }
+        onUpdate((old) => ({
+          ...old,
+          [searchId]: { ...search, id: searchId },
+        }));
+      } catch (loadError) {
+        if (!cancelled) {
+          console.debug('failed to load search details', loadError);
+          routerNavigate('/searches', { replace: true });
+        }
+      }
+    };
+
+    loadSearch();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [connecting, creating, error, initialSearchesLoaded, routerNavigate, searchId, searches]);
 
   if (connecting) {
     return <LoaderSegment />;

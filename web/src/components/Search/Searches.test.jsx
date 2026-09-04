@@ -8,7 +8,11 @@ import { getCapabilities } from '../../lib/slskr';
 import * as library from '../../lib/searches';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import React from 'react';
-import { MemoryRouter } from 'react-router-dom';
+import {
+  MemoryRouter,
+  Route,
+  Routes,
+} from 'react-router-dom';
 
 vi.mock('../../lib/hubFactory', () => ({
   createSearchHubConnection: vi.fn(),
@@ -37,7 +41,11 @@ vi.mock('./List/SearchList', () => ({ default: () => null }));
 
 const callbacks = {};
 
-const renderSearches = async ({ waitForInput = true } = {}) => {
+const renderSearches = async ({
+  initialEntries = ['/searches'],
+  runtimeProfile,
+  waitForInput = true,
+} = {}) => {
   callbacks.list = undefined;
   createSearchHubConnection.mockReturnValue({
     on: vi.fn((eventName, callback) => {
@@ -52,9 +60,19 @@ const renderSearches = async ({ waitForInput = true } = {}) => {
     stop: vi.fn(),
   });
 
+  const searches = (
+    <Searches
+      runtimeProfile={runtimeProfile}
+      server={{ isConnected: true }}
+    />
+  );
+
   render(
-    <MemoryRouter initialEntries={['/searches']}>
-      <Searches server={{ isConnected: true }} />
+    <MemoryRouter initialEntries={initialEntries}>
+      <Routes>
+        <Route path="/searches" element={searches} />
+        <Route path="/searches/:id" element={searches} />
+      </Routes>
     </MemoryRouter>,
   );
 
@@ -83,6 +101,44 @@ describe('Searches', () => {
     await renderSearches();
 
     await waitFor(() => expect(library.getAll).toHaveBeenCalledTimes(1));
+  });
+
+  it('hydrates native search state from the REST list instead of relying on hub history', async () => {
+    library.getAll.mockResolvedValue([
+      {
+        id: 'search-1',
+        searchText: 'native search',
+        startedAt: '2026-05-15T00:00:00Z',
+      },
+    ]);
+
+    await renderSearches({
+      initialEntries: ['/searches/search-1'],
+      runtimeProfile: 'native',
+      waitForInput: false,
+    });
+
+    await waitFor(() => expect(library.getAll).toHaveBeenCalledTimes(1));
+    expect(library.getStatus).not.toHaveBeenCalled();
+  });
+
+  it('loads a detail record when the initial search list races navigation', async () => {
+    library.getAll.mockResolvedValue([]);
+    library.getStatus.mockResolvedValue({
+      id: 'search-1',
+      searchText: 'raced search',
+      state: 'Completed',
+    });
+
+    await renderSearches({
+      initialEntries: ['/searches/search-1'],
+      runtimeProfile: 'native',
+      waitForInput: false,
+    });
+
+    await waitFor(() =>
+      expect(library.getStatus).toHaveBeenCalledWith({ id: 'search-1' }),
+    );
   });
 
   it('refreshes generic search events by resource id', async () => {

@@ -937,10 +937,7 @@ async fn route_dispatch_group_2(context: &RouteDispatchContext<'_, '_>) -> Route
                 .filter(|entry| {
                     entry.direction == 0
                         && entry.request_id.as_deref() == Some(request_id)
-                        && !matches!(
-                            entry.status.as_str(),
-                            "succeeded" | "completed" | "cancelled"
-                        )
+                        && !is_terminal_transfer_status(&entry.status)
                 })
                 .map(|entry| entry.id)
                 .collect::<Vec<_>>();
@@ -991,7 +988,7 @@ async fn route_dispatch_group_2(context: &RouteDispatchContext<'_, '_>) -> Route
                 .filter(|entry| {
                     since.is_some()
                         || include_completed
-                        || !matches!(entry.status.as_str(), "succeeded" | "completed")
+                        || !is_successful_transfer_status(&entry.status)
                 })
                 .filter(|entry| since.is_none_or(|since| entry.updated_at_ms > since))
                 .map(TransferEntry::controller_file_json)
@@ -1048,7 +1045,7 @@ async fn route_dispatch_group_2(context: &RouteDispatchContext<'_, '_>) -> Route
                 .entries
                 .iter()
                 .filter(|entry| entry.direction == direction)
-                .filter(|entry| matches!(entry.status.as_str(), "succeeded" | "completed"))
+                .filter(|entry| is_successful_transfer_status(&entry.status))
                 .filter(|entry| entry.updated_at_ms <= as_of)
                 .collect::<Vec<_>>();
             rows.sort_by_key(|entry| {
@@ -1352,8 +1349,8 @@ async fn route_dispatch_group_2(context: &RouteDispatchContext<'_, '_>) -> Route
             let shares = state.shares.read().await;
             Ok(routing::ok_response(serde_json::json!({
                  "activeUploads": uploads.iter().filter(|entry| is_active_transfer_status(&entry.status)).count(),
-                 "failedUploads": uploads.iter().filter(|entry| matches!(entry.status.as_str(), "failed" | "errored")).count(),
-                 "succeededUploads": uploads.iter().filter(|entry| entry.status == "succeeded").count(),
+                 "failedUploads": uploads.iter().filter(|entry| is_failed_transfer_status(&entry.status)).count(),
+                 "succeededUploads": uploads.iter().filter(|entry| is_successful_transfer_status(&entry.status)).count(),
                  "totalUploadRecords": uploads.len(),
                  "generatedAt": unix_timestamp(),
                  "isConnected": state.session.read().await.state == "connected",
@@ -1770,7 +1767,7 @@ async fn route_dispatch_group_2(context: &RouteDispatchContext<'_, '_>) -> Route
                 .iter()
                 .filter(|entry| {
                     entry.direction == 0
-                        && matches!(entry.status.as_str(), "failed" | "rejected" | "errored")
+                        && is_failed_transfer_status(&entry.status)
                         && requested_transfer_id.is_none_or(|id| entry.id == id)
                 })
                 .cloned()
@@ -2272,9 +2269,7 @@ async fn route_dispatch_group_2(context: &RouteDispatchContext<'_, '_>) -> Route
                     let active_count = transfers
                         .entries
                         .iter()
-                        .filter(|transfer| {
-                            transfer.status == "in_progress" || transfer.status == "peer_lookup"
-                        })
+                        .filter(|transfer| is_active_transfer_status(&transfer.status))
                         .count();
                     if active_count >= state.config.transfer_max_active {
                         return Ok(routing::conflict_response("transfer limit reached"));
@@ -2326,7 +2321,7 @@ async fn route_dispatch_group_2(context: &RouteDispatchContext<'_, '_>) -> Route
                     let active_count = transfers
                         .entries
                         .iter()
-                        .filter(|t| t.status == "in_progress" || t.status == "peer_lookup")
+                        .filter(|t| is_active_transfer_status(&t.status))
                         .count();
 
                     if active_count >= max_active {
@@ -2457,7 +2452,7 @@ async fn route_dispatch_group_2(context: &RouteDispatchContext<'_, '_>) -> Route
                                 "bytes_transferred exceeds transfer size",
                             ));
                         }
-                        if matches!(status_str.as_str(), "succeeded" | "completed")
+                        if is_successful_transfer_status(&status_str)
                             && entry.size.is_some_and(|size| bytes_transferred != size)
                         {
                             drop(transfers);

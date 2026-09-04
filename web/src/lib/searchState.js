@@ -13,7 +13,7 @@ export const getSearchStateKind = (search = {}) => {
     return 'failed';
   }
 
-  if (tokens.some((token) => ['cancelled', 'canceled', 'expired'].includes(token))) {
+  if (tokens.some((token) => ['cancelled', 'canceled'].includes(token))) {
     return 'cancelled';
   }
 
@@ -25,6 +25,7 @@ export const getSearchStateKind = (search = {}) => {
         'complete',
         'timedout',
         'timed out',
+        'expired',
         'responselimitreached',
         'response limit reached',
         'filelimitreached',

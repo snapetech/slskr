@@ -18885,6 +18885,10 @@ fn search_store_merges_peer_search_responses() {
     assert_eq!(updated.results[0].queue_length, Some(7));
     assert_eq!(updated.results[1].filename, "Private/Locked.flac");
     assert!(updated.results[1].locked);
+    assert_eq!(
+        updated.expires_at,
+        updated.updated_at.saturating_add(updated.ttl_seconds)
+    );
     let responses = serde_json::from_str::<serde_json::Value>(&updated.controller_responses_json())
         .expect("response json");
     assert_eq!(responses[0]["fileCount"], 1);
@@ -41782,6 +41786,7 @@ async fn hashdb_history_backfill_batches_persists_inventory_and_progress() {
                 ignored_result_count: 0,
                 hidden_locked_count: 0,
                 fallback_attempts: 0,
+                ttl_seconds: super::DEFAULT_SEARCH_TTL_SECONDS,
                 expires_at: 0,
                 created_at: index,
                 updated_at: index,
@@ -77862,6 +77867,7 @@ async fn controller_api_differential_multisource_residuals() {
             ignored_result_count: 0,
             hidden_locked_count: 0,
             fallback_attempts: 0,
+            ttl_seconds: super::DEFAULT_SEARCH_TTL_SECONDS,
             expires_at: u64::MAX,
             created_at: 1,
             updated_at: 1,
@@ -79114,6 +79120,7 @@ async fn controller_api_differential_hashdb_history_backfill() {
                 ignored_result_count: 0,
                 hidden_locked_count: 0,
                 fallback_attempts: 0,
+                ttl_seconds: super::DEFAULT_SEARCH_TTL_SECONDS,
                 expires_at: 0,
                 created_at: index,
                 updated_at: index,
@@ -137081,6 +137088,7 @@ async fn controller_api_differential_backfill_residuals() {
                     ignored_result_count: 0,
                     hidden_locked_count: 0,
                     fallback_attempts: 0,
+                    ttl_seconds: super::DEFAULT_SEARCH_TTL_SECONDS,
                     expires_at: 0,
                     created_at: 1,
                     updated_at: 1,

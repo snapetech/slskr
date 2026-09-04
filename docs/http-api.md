@@ -345,9 +345,14 @@ rows are written to SQLite and rehydrated on restart.
 {
   "query": "song title",
   "room": null,
-  "target": null
+  "target": null,
+  "ttl_seconds": 15
 }
 ```
+
+The default active-search inactivity window is 15 seconds, matching the
+Soulseek search contract. Each accepted peer response resets the window. A
+caller can provide a different positive `ttl_seconds` value up to 24 hours.
 
 **Response:** `201 Created` with search details
 

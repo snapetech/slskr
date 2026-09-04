@@ -113,7 +113,7 @@ async fn route_dispatch_group_6(context: &RouteDispatchContext<'_, '_>) -> Route
             let active_transfers = transfers
                 .entries
                 .iter()
-                .filter(|entry| matches!(entry.status.as_str(), "queued" | "requested" | "in_progress"))
+                .filter(|entry| is_queued_or_active_transfer_status(&entry.status))
                 .count();
             let searches = state.searches.read().await;
             let users = state.users.read().await;
@@ -3279,12 +3279,9 @@ async fn route_dispatch_group_6(context: &RouteDispatchContext<'_, '_>) -> Route
         ("DELETE", path) if path.starts_with("/api/transfers/") && path.ends_with("/all/completed") => {
             let mut transfers = state.transfers.write().await;
             let before = transfers.entries.len();
-            transfers.entries.retain(|entry| {
-                !matches!(
-                    entry.status.as_str(),
-                    "succeeded" | "completed" | "cancelled" | "failed" | "rejected"
-                )
-            });
+            transfers
+                .entries
+                .retain(|entry| !is_terminal_transfer_status(&entry.status));
             let pruned = before.saturating_sub(transfers.entries.len());
             transfers.persist_state();
             drop(transfers);

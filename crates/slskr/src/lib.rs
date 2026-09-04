@@ -340,7 +340,8 @@ const MAX_EVENT_KIND_BYTES: usize = 128;
 const MAX_EVENT_RESOURCE_BYTES: usize = 4 * 1024;
 const MAX_EVENT_DETAIL_BYTES: usize = 64 * 1024;
 const DEFAULT_LIST_LIMIT: usize = 500;
-const DEFAULT_SEARCH_TTL_SECONDS: u64 = 300;
+const DEFAULT_SEARCH_TTL_SECONDS: u64 = 15;
+const DEFAULT_WISHLIST_SEARCH_TTL_SECONDS: u64 = 300;
 const MAX_SEARCH_TTL_SECONDS: u64 = 24 * 60 * 60;
 const MAX_WEB_STATIC_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_INTEGRATION_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
@@ -1649,6 +1650,7 @@ struct SearchRecord {
     ignored_result_count: usize,
     hidden_locked_count: usize,
     fallback_attempts: usize,
+    ttl_seconds: u64,
     expires_at: u64,
     created_at: u64,
     updated_at: u64,
@@ -1904,6 +1906,7 @@ impl SearchRecord {
             ignored_result_count: 0,
             hidden_locked_count: 0,
             fallback_attempts: usize::try_from(record.fallback_attempts.max(0)).unwrap_or_default(),
+            ttl_seconds: DEFAULT_SEARCH_TTL_SECONDS,
             expires_at: 0,
             created_at: record.created_at.max(0) as u64,
             updated_at: record.completed_at.unwrap_or(record.created_at).max(0) as u64,
@@ -2186,6 +2189,7 @@ impl SearchStore {
             ignored_result_count: 0,
             hidden_locked_count: 0,
             fallback_attempts: 0,
+            ttl_seconds,
             expires_at: now.saturating_add(ttl_seconds),
             created_at: now,
             updated_at: now,
@@ -2361,6 +2365,7 @@ impl SearchStore {
         record.ignored_result_count = 0;
         record.hidden_locked_count = 0;
         record.fallback_attempts = record.fallback_attempts.saturating_add(1);
+        record.ttl_seconds = ttl_seconds;
         record.expires_at = now.saturating_add(ttl_seconds);
         record.updated_at = now;
         Some(record.clone())
@@ -2451,7 +2456,9 @@ impl SearchStore {
                 result_limit,
             );
         }
-        record.updated_at = unix_timestamp();
+        let now = unix_timestamp();
+        record.updated_at = now;
+        record.expires_at = now.saturating_add(record.ttl_seconds);
         Some(record.clone())
     }
 
@@ -3284,7 +3291,7 @@ fn public_transfer_reason(status: &str, reason: Option<&str>) -> Option<&'static
 }
 
 fn transfer_failure_code(status: &str, reason: Option<&str>) -> Option<&'static str> {
-    if !matches!(status, "failed" | "rejected" | "errored") {
+    if !is_failed_transfer_status(status) {
         return None;
     }
     let reason = reason?.to_ascii_lowercase();
@@ -3334,7 +3341,7 @@ fn transfer_recovery_label(status: &str, reason: Option<&str>) -> Option<&'stati
 fn download_request_state(entries: &[&TransferEntry]) -> &'static str {
     if entries
         .iter()
-        .any(|entry| matches!(entry.status.as_str(), "succeeded" | "completed"))
+        .any(|entry| is_successful_transfer_status(&entry.status))
     {
         "Completed"
     } else if entries.iter().any(|entry| {
@@ -4101,7 +4108,7 @@ impl TransferQueue {
             entry.bytes_transferred = bytes_transferred;
         }
         entry.reason = bounded_transfer_reason(reason);
-        if matches!(status, "succeeded" | "completed" | "cancelled" | "errored") {
+        if is_terminal_transfer_status(status) {
             entry.next_attempt_at = None;
         }
         entry.updated_at = now;
@@ -4136,7 +4143,7 @@ impl TransferQueue {
             entry.size = size;
         }
         entry.reason = bounded_transfer_reason(reason);
-        if matches!(status, "succeeded" | "completed" | "cancelled" | "errored") {
+        if is_terminal_transfer_status(status) {
             entry.next_attempt_at = None;
         }
         entry.updated_at = now;
@@ -4471,7 +4478,7 @@ impl TransferQueue {
         let succeeded = self
             .entries
             .iter()
-            .filter(|entry| entry.status == "succeeded")
+            .filter(|entry| is_successful_transfer_status(&entry.status))
             .count();
         let cancelled = self
             .entries
@@ -4481,7 +4488,7 @@ impl TransferQueue {
         let failed = self
             .entries
             .iter()
-            .filter(|entry| matches!(entry.status.as_str(), "failed" | "rejected" | "errored"))
+            .filter(|entry| is_failed_transfer_status(&entry.status))
             .count();
         let bytes_transferred = self
             .entries
@@ -22899,7 +22906,7 @@ async fn route_http_request_with_headers(
                 .filter(|entry| {
                     entry.direction == 0
                         && entry.request_id.as_deref() == Some(request_id)
-                        && !matches!(entry.status.as_str(), "succeeded" | "completed" | "cancelled")
+                        && !is_terminal_transfer_status(&entry.status)
                 })
                 .map(|entry| entry.id)
                 .collect::<Vec<_>>();
@@ -22950,7 +22957,7 @@ async fn route_http_request_with_headers(
                 .filter(|entry| {
                     since.is_some()
                         || include_completed
-                        || !matches!(entry.status.as_str(), "succeeded" | "completed")
+                        || !is_successful_transfer_status(&entry.status)
                 })
                 .filter(|entry| since.is_none_or(|since| entry.updated_at_ms > since))
                 .map(TransferEntry::controller_file_json)
@@ -23007,7 +23014,7 @@ async fn route_http_request_with_headers(
                 .entries
                 .iter()
                 .filter(|entry| entry.direction == direction)
-                .filter(|entry| matches!(entry.status.as_str(), "succeeded" | "completed"))
+                .filter(|entry| is_successful_transfer_status(&entry.status))
                 .filter(|entry| entry.updated_at_ms <= as_of)
                 .collect::<Vec<_>>();
             rows.sort_by_key(|entry| {
@@ -23273,8 +23280,7 @@ async fn route_http_request_with_headers(
                  .entries
                  .iter()
                  .filter(|entry| {
-                     entry.direction == 0
-                         && matches!(entry.status.as_str(), "failed" | "rejected" | "cancelled")
+                     entry.direction == 0 && is_failed_transfer_status(&entry.status)
                  })
                  .count();
              let enabled = state.runtime.read().await.autoreplace_enabled;
@@ -23305,8 +23311,8 @@ async fn route_http_request_with_headers(
              let shares = state.shares.read().await;
              Ok(routing::ok_response(serde_json::json!({
                  "activeUploads": uploads.iter().filter(|entry| is_active_transfer_status(&entry.status)).count(),
-                 "failedUploads": uploads.iter().filter(|entry| matches!(entry.status.as_str(), "failed" | "errored")).count(),
-                 "succeededUploads": uploads.iter().filter(|entry| entry.status == "succeeded").count(),
+                 "failedUploads": uploads.iter().filter(|entry| is_failed_transfer_status(&entry.status)).count(),
+                 "succeededUploads": uploads.iter().filter(|entry| is_successful_transfer_status(&entry.status)).count(),
                  "totalUploadRecords": uploads.len(),
                  "generatedAt": unix_timestamp(),
                  "isConnected": state.session.read().await.state == "connected",
@@ -23707,7 +23713,7 @@ async fn route_http_request_with_headers(
                 .iter()
                 .filter(|entry| {
                     entry.direction == 0
-                        && matches!(entry.status.as_str(), "failed" | "rejected")
+                        && is_failed_transfer_status(&entry.status)
                         && requested_transfer_id.is_none_or(|id| entry.id == id)
                 })
                 .cloned()
@@ -24125,7 +24131,7 @@ async fn route_http_request_with_headers(
                         .entries
                         .iter()
                         .filter(|transfer| {
-                            transfer.status == "in_progress" || transfer.status == "peer_lookup"
+                            is_active_transfer_status(&transfer.status)
                         })
                         .count();
                     if active_count >= state.config.transfer_max_active {
@@ -24176,7 +24182,7 @@ async fn route_http_request_with_headers(
                     // Check max active transfer limit
                     let max_active = state.config.transfer_max_active;
                     let active_count = transfers.entries.iter()
-                        .filter(|t| t.status == "in_progress" || t.status == "peer_lookup")
+                        .filter(|t| is_active_transfer_status(&t.status))
                         .count();
 
                     if active_count >= max_active {
@@ -24298,7 +24304,7 @@ async fn route_http_request_with_headers(
                                 "bytes_transferred exceeds transfer size",
                             ));
                         }
-                        if matches!(status_str.as_str(), "succeeded" | "completed")
+                        if is_successful_transfer_status(&status_str)
                             && entry.size.is_some_and(|size| bytes_transferred != size)
                         {
                             drop(transfers);
@@ -24315,16 +24321,13 @@ async fn route_http_request_with_headers(
                         let entry_for_persistence = entry.clone();
 
                          // Prepare webhook dispatch
-                         let webhook_event = match status_str.as_str() {
-                             "succeeded" | "completed" => {
+                         let webhook_event = if is_successful_transfer_status(&status_str) {
                                  Some(webhooks::WebhookEvent::TransferCompleted)
-                             }
-                             "failed" | "rejected" | "errored" => {
+                             } else if is_failed_transfer_status(&status_str) {
                                  Some(webhooks::WebhookEvent::TransferFailed)
-                             }
-                             "cancelled" => None,
-                             _ => unreachable!("validated terminal transfer status"),
-                         };
+                             } else {
+                                 None
+                             };
 
                          let webhook_data = serde_json::json!({
                              "transfer_id": id,
@@ -26405,10 +26408,10 @@ async fn route_http_request_with_headers(
             let diagnostics = serde_json::json!({
                 "status": "operational",
                 "transfers": {
-                    "active": transfers.entries.iter().filter(|t| t.status == "in_progress").count(),
+                    "active": transfers.entries.iter().filter(|t| is_active_transfer_status(&t.status)).count(),
                     "total": transfers.entries.len(),
-                    "succeeded": transfers.entries.iter().filter(|t| t.status == "succeeded").count(),
-                    "failed": transfers.entries.iter().filter(|t| t.status == "failed").count(),
+                    "succeeded": transfers.entries.iter().filter(|t| is_successful_transfer_status(&t.status)).count(),
+                    "failed": transfers.entries.iter().filter(|t| is_failed_transfer_status(&t.status)).count(),
                 },
                 "searches": {
                     "total": searches.records.len(),
@@ -26441,8 +26444,8 @@ async fn route_http_request_with_headers(
                     .as_secs(),
                 "transfers": {
                     "queue_size": transfers.entries.len(),
-                    "active_downloads": transfers.entries.iter().filter(|t| t.status == "in_progress" && t.direction == 0).count(),
-                    "active_uploads": transfers.entries.iter().filter(|t| t.status == "in_progress" && t.direction != 0).count(),
+                    "active_downloads": transfers.entries.iter().filter(|t| is_active_transfer_status(&t.status) && t.direction == 0).count(),
+                    "active_uploads": transfers.entries.iter().filter(|t| is_active_transfer_status(&t.status) && t.direction != 0).count(),
                 },
                 "searches": {
                     "total": searches.records.len(),
@@ -28979,7 +28982,7 @@ async fn route_http_request_with_headers(
                         "progress": {
                             "releases_total": 0,
                             "releases_done": 0,
-                            "releases_failed": if matches!(entry.status.as_str(), "failed" | "errored") { 1 } else { 0 },
+                        "releases_failed": if is_failed_transfer_status(&entry.status) { 1 } else { 0 },
                         },
                         "progress_percent": progress,
                         "filename": entry.filename,
@@ -29488,7 +29491,7 @@ async fn route_http_request_with_headers(
              let active_transfers = transfers
                  .entries
                  .iter()
-                 .filter(|entry| matches!(entry.status.as_str(), "queued" | "in_progress" | "requested"))
+                 .filter(|entry| is_queued_or_active_transfer_status(&entry.status))
                  .count();
              let bytes = transfers
                  .entries
@@ -29593,7 +29596,7 @@ async fn route_http_request_with_headers(
              let active_sessions = transfers
                  .entries
                  .iter()
-                 .filter(|entry| matches!(entry.status.as_str(), "queued" | "in_progress" | "requested"))
+                 .filter(|entry| is_queued_or_active_transfer_status(&entry.status))
                  .count();
              let total_requests = transfers.entries.len();
              drop(transfers);
@@ -30459,7 +30462,7 @@ async fn route_http_request_with_headers(
             let active_transfers = transfers
                 .entries
                 .iter()
-                .filter(|entry| matches!(entry.status.as_str(), "queued" | "requested" | "in_progress"))
+                .filter(|entry| is_queued_or_active_transfer_status(&entry.status))
                 .count();
             let searches = state.searches.read().await;
             let users = state.users.read().await;
@@ -47331,7 +47334,7 @@ fn transfer_remote_directory(filename: &str) -> &str {
 }
 
 async fn maybe_import_lidarr_completed_download(state: &AppState, transfer: &TransferEntry) {
-    if transfer.direction != 0 || transfer.status != "succeeded" {
+    if transfer.direction != 0 || !is_successful_transfer_status(&transfer.status) {
         return;
     }
     let Some(local_directory) = transfer
@@ -47354,10 +47357,7 @@ async fn maybe_import_lidarr_completed_download(state: &AppState, transfer: &Tra
                 && candidate.direction == 0
                 && candidate.peer_username == transfer.peer_username
                 && transfer_remote_directory(&candidate.filename) == remote_directory
-                && !matches!(
-                    candidate.status.as_str(),
-                    "succeeded" | "completed" | "cancelled" | "failed" | "rejected"
-                )
+                && !is_terminal_transfer_status(&candidate.status)
         });
     if has_pending_file {
         return;
@@ -47406,7 +47406,7 @@ async fn maybe_import_lidarr_completed_download(state: &AppState, transfer: &Tra
 /// connected agent can retry the authenticated HTTP fetch without the old
 /// token-passthrough shortcut.
 async fn issue_relay_download_tokens(state: &AppState, transfer: &TransferEntry) {
-    if transfer.direction != 0 || transfer.status != "succeeded" {
+    if transfer.direction != 0 || !is_successful_transfer_status(&transfer.status) {
         return;
     }
     let Some(local_path) = transfer.local_path.as_deref() else {
@@ -47567,7 +47567,7 @@ fn delete_lidarr_rejected_files_if_enabled(
 }
 
 async fn maybe_upload_ftp_completed_download(state: &AppState, transfer: &TransferEntry) {
-    if transfer.direction != 0 || transfer.status != "succeeded" {
+    if transfer.direction != 0 || !is_successful_transfer_status(&transfer.status) {
         return;
     }
     let Some(local_path) = transfer.local_path.as_deref() else {
@@ -69041,7 +69041,7 @@ async fn native_compat_response(method: &str, path: &str, state: &AppState) -> H
                     .iter()
                     .filter(|entry| {
                         entry.peer_username.as_deref() == Some(user.username.as_str())
-                            && matches!(entry.status.as_str(), "queued" | "in_progress" | "requested")
+                            && is_queued_or_active_transfer_status(&entry.status)
                     })
                     .count();
                 serde_json::json!({
@@ -69200,7 +69200,7 @@ async fn native_compat_response(method: &str, path: &str, state: &AppState) -> H
             "shares": shares.entries.len(),
             "searches": searches.records.len(),
             "transfers": transfers.entries.len(),
-            "activeTransfers": transfers.entries.iter().filter(|entry| matches!(entry.status.as_str(), "queued" | "in_progress" | "requested")).count(),
+            "activeTransfers": transfers.entries.iter().filter(|entry| is_queued_or_active_transfer_status(&entry.status)).count(),
             "users": users.records.len(),
             "watchedUsers": users.records.iter().filter(|user| user.watched).count(),
             "rooms": rooms.records.len(),
@@ -70264,11 +70264,11 @@ fn controller_download_stats_json(transfers: &TransferQueue) -> String {
         .count();
     let completed = downloads
         .iter()
-        .filter(|entry| matches!(entry.status.as_str(), "succeeded" | "completed"))
+        .filter(|entry| is_successful_transfer_status(&entry.status))
         .count();
     let failed = downloads
         .iter()
-        .filter(|entry| matches!(entry.status.as_str(), "failed" | "rejected" | "errored"))
+        .filter(|entry| is_failed_transfer_status(&entry.status))
         .count();
     let cancelled = downloads
         .iter()
@@ -70355,7 +70355,7 @@ fn controller_stuck_downloads_json(query: Option<&str>, transfers: &TransferQueu
         .filter(|entry| entry.direction == 0)
         .filter(|entry| controller_transfer_matches_query(entry, None, username.as_deref()))
         .filter(|entry| {
-            matches!(entry.status.as_str(), "failed" | "rejected" | "errored")
+            is_failed_transfer_status(&entry.status)
                 || (is_active_transfer_status(&entry.status) && entry.bytes_transferred == 0)
         })
         .collect::<Vec<_>>();
@@ -70404,14 +70404,11 @@ fn controller_download_user_stats_json(_query: Option<&str>, transfers: &Transfe
             .entry(entry.peer_username.clone().unwrap_or_default())
             .or_insert((0, 0, 0, 0, None));
         stats.0 += 1;
-        if matches!(entry.status.as_str(), "succeeded" | "completed") {
+        if is_successful_transfer_status(&entry.status) {
             stats.1 += 1;
             stats.3 = stats.3.saturating_add(entry.bytes_transferred);
         }
-        if matches!(
-            entry.status.as_str(),
-            "failed" | "rejected" | "errored" | "cancelled"
-        ) {
+        if is_failed_transfer_status(&entry.status) || entry.status == "cancelled" {
             stats.2 += 1;
         }
         if is_terminal_transfer_status(&entry.status) {
@@ -71342,8 +71339,8 @@ fn controller_user_transfer_report(username: &str, transfers: &TransferQueue) ->
             "summary": {},
             "statistics": {
                 "total": selected.len(),
-                "successful": selected.iter().filter(|entry| entry.status == "succeeded").count(),
-                "errored": selected.iter().filter(|entry| matches!(entry.status.as_str(), "failed" | "rejected" | "errored")).count(),
+                "successful": selected.iter().filter(|entry| is_successful_transfer_status(&entry.status)).count(),
+                "errored": selected.iter().filter(|entry| is_failed_transfer_status(&entry.status)).count(),
                 "cancelled": selected.iter().filter(|entry| entry.status == "cancelled").count(),
             },
             "exceptions": [],
@@ -73971,7 +73968,7 @@ async fn run_download_auto_retry_cycle_with_settings(
                     .iter()
                     .any(|entry| {
                         entry.id == candidate.source.id
-                            && matches!(entry.status.as_str(), "failed" | "errored")
+                            && is_failed_transfer_status(&entry.status)
                     })
             {
                 continue;
@@ -74993,7 +74990,7 @@ fn incoming_peer_error_level(error: &str) -> logging::LogLevel {
     .iter()
     .any(|marker| error.contains(marker))
     {
-        logging::LogLevel::Info
+        logging::LogLevel::Debug
     } else {
         logging::LogLevel::Warn
     }
@@ -75002,12 +74999,12 @@ fn incoming_peer_error_level(error: &str) -> logging::LogLevel {
 #[cfg(test)]
 mod incoming_peer_error_tests {
     #[test]
-    fn expected_peer_disconnects_are_not_warnings() {
+    fn expected_peer_disconnects_are_debug_diagnostics() {
         assert_eq!(
             super::incoming_peer_error_level(
                 "peer message receive failed: decode error: unexpected end of input"
             ),
-            super::logging::LogLevel::Info
+            super::logging::LogLevel::Debug
         );
         assert_eq!(
             super::incoming_peer_error_level("peer authentication failed"),
@@ -76526,7 +76523,7 @@ async fn issue_listening_party_stream_ticket(
         });
         let transfer = transfers.entries.iter().find(|entry| {
             entry.direction == 0
-                && matches!(entry.status.as_str(), "succeeded" | "completed")
+                && is_successful_transfer_status(&entry.status)
                 && (entry.filename == content_id
                     || entry.id.to_string()
                         == content_id.strip_prefix("transfer-").unwrap_or_default())
@@ -76665,7 +76662,7 @@ async fn open_relay_controller_stream(
             .iter()
             .find(|entry| {
                 entry.direction == 0
-                    && matches!(entry.status.as_str(), "succeeded" | "completed")
+                    && is_successful_transfer_status(&entry.status)
                     && (entry.filename == content_id
                         || stable_content_hash(&entry.filename, entry.size.unwrap_or(0))
                             .to_string()
@@ -77109,7 +77106,7 @@ async fn open_local_preview_stream_file(
             .find(|entry| {
                 entry.direction == 0
                     && entry.filename == ticket.filename
-                    && matches!(entry.status.as_str(), "succeeded" | "completed")
+                    && is_successful_transfer_status(&entry.status)
             })
             .cloned()
     };
@@ -77459,7 +77456,7 @@ async fn open_primary_stream_file(
                     .and_then(|id| id.parse::<u64>().ok())
                     == Some(entry.id);
                 entry.direction == 0
-                    && matches!(entry.status.as_str(), "succeeded" | "completed")
+                    && is_successful_transfer_status(&entry.status)
                     && (matches_id || ticket_filename.as_deref() == Some(entry.filename.as_str()))
             })
             .cloned()
@@ -78366,8 +78363,8 @@ fn user_upload_limit_statistics(
         let Some(started_at) = entry.started_at else {
             continue;
         };
-        let failed = matches!(entry.status.as_str(), "failed" | "rejected" | "cancelled");
-        let succeeded = matches!(entry.status.as_str(), "succeeded" | "completed");
+        let failed = is_failed_transfer_status(&entry.status) || entry.status == "cancelled";
+        let succeeded = is_successful_transfer_status(&entry.status);
         if started_at >= weekly_cutoff {
             if failed {
                 stats.weekly_failed_files = stats.weekly_failed_files.saturating_add(1);
@@ -79804,7 +79801,7 @@ async fn send_due_wishlist_search(
         let outcome = match searches.create_scheduled_wishlist_for_item(
             query.clone(),
             wishlist_item_id.clone(),
-            300,
+            DEFAULT_WISHLIST_SEARCH_TTL_SECONDS,
         ) {
             Ok(outcome) => outcome,
             Err(error) => {
@@ -81792,7 +81789,7 @@ async fn apply_completed_download_permissions(
     state: &AppState,
     transfer: TransferEntry,
 ) -> TransferEntry {
-    if transfer.direction != 0 || transfer.status != "succeeded" {
+    if transfer.direction != 0 || !is_successful_transfer_status(&transfer.status) {
         return transfer;
     }
     let mode = state
@@ -81838,7 +81835,7 @@ async fn enrich_completed_audio_metadata(
     state: &AppState,
     transfer: TransferEntry,
 ) -> TransferEntry {
-    if transfer.direction != 0 || transfer.status != "succeeded" {
+    if transfer.direction != 0 || !is_successful_transfer_status(&transfer.status) {
         return transfer;
     }
     let Some(local_path) = transfer.local_path.as_deref() else {
@@ -85562,7 +85559,7 @@ async fn recently_completed_wishlist_track_keys(state: &AppState) -> HashSet<Str
         .entries
         .iter()
         .filter(|entry| {
-            entry.direction == 0 && matches!(entry.status.as_str(), "succeeded" | "completed")
+            entry.direction == 0 && is_successful_transfer_status(&entry.status)
         })
         .filter_map(|entry| {
             let identity = entry
@@ -86652,7 +86649,7 @@ async fn database_cleanup_value(state: &AppState, body: &str) -> serde_json::Val
     let before = transfers.entries.len();
     transfers
         .entries
-        .retain(|entry| is_active_transfer_status(&entry.status) || entry.status == "queued");
+        .retain(|entry| !is_terminal_transfer_status(&entry.status));
     let pruned_transfers = before.saturating_sub(transfers.entries.len());
     transfers.persist_state();
     drop(transfers);

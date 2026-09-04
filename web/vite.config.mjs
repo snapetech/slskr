@@ -4,6 +4,9 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 
+// Keep this file explicitly ESM so Vite does not load it through the legacy
+// CommonJS config path.
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const nodeModulesPath = path.resolve(__dirname, 'node_modules');
 

@@ -10,6 +10,7 @@ describe('search state helpers', () => {
   it('recognizes native and universal terminal state spellings', () => {
     expect(isSearchComplete({ state: 'Completed, TimedOut' })).toBe(true);
     expect(isSearchComplete({ state: 'Cancelled' })).toBe(true);
+    expect(getSearchStateKind({ status: 'expired' })).toBe('completed');
     expect(isSearchComplete({ status: 'failed' })).toBe(true);
     expect(isSearchComplete({ state: 'InProgress' })).toBe(false);
     expect(getSearchStateKind({ state: 'Completed, Errored' })).toBe('failed');

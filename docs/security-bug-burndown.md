@@ -183,8 +183,13 @@ Scope: current `slskR` checkout, including Rust daemon/API, Rust WASM UI, React 
 | Medium | Rust dependency hygiene | `cargo tree -d -p slskr` shows reviewed transitive duplicate roots for digest-family crypto crates plus `getrandom` and `hashbrown` in the release graph. | Fixed by documenting the current duplicate-root set and adding a remediation gate that fails when new duplicate roots enter the release binary graph without review. |
 | Medium | GitHub Actions supply chain | CI/release workflows used mutable action tags such as `actions/checkout@v4`, `actions/setup-node@v4`, and `softprops/action-gh-release@v2`. | Fixed by pinning first-party and third-party workflow actions to reviewed commit SHAs, documenting the update ledger in `docs/dev/github-actions-pin-policy.md`, and gating future workflow edits with `scripts/check-workflow-release-policy.sh`. |
 | Low | Rust module hygiene | Broad crate/module-level `#![allow(dead_code)]` previously hid unused backend compatibility surfaces from compiler review. | Fixed by removing broad allowances from backend Rust modules, keeping only narrow item-level exceptions, and gating against broad suppressions with `scripts/check-rust-module-hygiene.sh`. |
-| Low | Deprecated npm transitive deps | Web install warns on deprecated `lodash.get`, old core-js, and Babel proposal packages. | Upgrade or replace transitive owners where practical. |
-| Low | Dependency modernization | `npm outdated` shows major-version drift across web/dashboard/client-ts, including React 19, SignalR 10, date-fns 4, recharts 3, Jest 30, and TypeScript 6. | Plan compatibility upgrades separately from security fixes, with UI and generated-client regression coverage. |
+
+## Recently resolved
+
+| Severity | Area | Finding | Resolution |
+| --- | --- | --- | --- |
+| Low | Deprecated npm transitive deps | The web lint preset and Jest's test-exclude path pulled deprecated development-only packages into the frontend graph. | Removed the unused preset, declared the lint plugins actually imported by the web config, aligned the client test-only glob dependency to supported glob 13, and added a lockfile hygiene gate. |
+| Low | Dependency modernization | Safe patch drift existed in the frontend lockfiles and major candidates needed an explicit compatibility boundary. | Refreshed safe in-range lockfile versions and documented the TypeScript 6→7 and dashboard Vitest 4→5 sequence with required UI/client regression gates. |
 
 ## Scans Run
 

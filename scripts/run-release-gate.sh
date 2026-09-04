@@ -75,7 +75,7 @@ fi
 
 run_step "Install web dependencies" npm --prefix web ci
 run_step "Rust web UI headless audit" node scripts/audit-rust-web-ui.mjs
-run_step "Web advisory audit" npm --prefix web audit --audit-level=moderate
+run_step "Web advisory audit" bash scripts/check-web-audit.sh web
 run_step "Web lint" npm --prefix web run lint
 run_step "Web tests" npm --prefix web test
 run_step "Build web" npm --prefix web run build
@@ -83,14 +83,14 @@ run_step "Verify web build output" node web/scripts/verify-build-output.mjs
 run_step "Smoke web subpath build" node web/scripts/smoke-subpath-build.mjs
 
 run_step "Install dashboard dependencies" npm --prefix dashboard ci
-run_step "Dashboard advisory audit" npm --prefix dashboard audit --audit-level=moderate
+run_step "Dashboard advisory audit" bash scripts/check-web-audit.sh dashboard
 run_step "Dashboard type check" npm --prefix dashboard run type-check
 run_step "Dashboard lint" npm --prefix dashboard run lint
 run_step "Dashboard tests" npm --prefix dashboard test
 run_step "Build dashboard" npm --prefix dashboard run build
 
 run_step "Install TypeScript client dependencies" npm --prefix client-ts ci --ignore-scripts
-run_step "TypeScript client advisory audit" npm --prefix client-ts audit --audit-level=moderate
+run_step "TypeScript client advisory audit" bash scripts/check-web-audit.sh client-ts
 run_step "TypeScript client lint" npm --prefix client-ts run lint
 run_step "TypeScript client build" npm --prefix client-ts run build
 

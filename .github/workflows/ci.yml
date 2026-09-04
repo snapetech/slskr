@@ -87,7 +87,7 @@ jobs:
       - run: npm --prefix dashboard test
       - run: npm --prefix dashboard run build
       - run: npm --prefix client-ts ci --ignore-scripts
-      - run: npm --prefix client-ts audit --audit-level=moderate
+      - run: bash scripts/check-web-audit.sh client-ts
       - run: npm --prefix client-ts run lint
       - run: npm --prefix client-ts run build
 

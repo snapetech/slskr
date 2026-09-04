@@ -626,13 +626,10 @@ fn transfer_metrics(transfers: &crate::TransferQueue) -> Value {
                 }
                 queued_bytes = queued_bytes.saturating_add(entry.size.unwrap_or(0));
             }
-            if matches!(
-                entry.status.as_str(),
-                "succeeded" | "failed" | "cancelled" | "rejected"
-            ) {
-                if entry.status == "succeeded" {
+            if crate::is_terminal_transfer_status(&entry.status) {
+                if crate::is_successful_transfer_status(&entry.status) {
                     completed_succeeded += 1;
-                } else if matches!(entry.status.as_str(), "failed" | "rejected") {
+                } else if crate::is_failed_transfer_status(&entry.status) {
                     completed_failed += 1;
                 }
                 completed_bytes = completed_bytes.saturating_add(entry.bytes_transferred);
@@ -746,6 +743,7 @@ mod tests {
             ignored_result_count: 0,
             hidden_locked_count: 0,
             fallback_attempts: 0,
+            ttl_seconds: crate::DEFAULT_SEARCH_TTL_SECONDS,
             expires_at: 1,
             created_at: 1,
             updated_at: 1,

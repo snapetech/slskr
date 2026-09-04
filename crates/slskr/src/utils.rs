@@ -1111,6 +1111,10 @@ pub fn is_active_transfer_status(status: &str) -> bool {
     )
 }
 
+pub fn is_queued_or_active_transfer_status(status: &str) -> bool {
+    matches!(status, "queued" | "requested") || is_active_transfer_status(status)
+}
+
 pub fn is_terminal_transfer_status(status: &str) -> bool {
     matches!(
         status,

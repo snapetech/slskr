@@ -82,6 +82,7 @@ GATES=(
   scripts/check-audit-tooling.sh
   scripts/check-rust-module-hygiene.sh
   scripts/check-web-audit.sh
+  scripts/check-npm-dependency-hygiene.sh
   scripts/check-dev-tooling.sh
   scripts/check-openapi-docs-drift.sh
   scripts/check-docs-freshness.sh

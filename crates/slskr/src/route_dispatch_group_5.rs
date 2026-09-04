@@ -743,7 +743,7 @@ async fn route_dispatch_group_5(context: &RouteDispatchContext<'_, '_>) -> Route
                         "progress": {
                             "releases_total": 0,
                             "releases_done": 0,
-                            "releases_failed": if entry.status == "failed" { 1 } else { 0 },
+                            "releases_failed": if is_failed_transfer_status(&entry.status) { 1 } else { 0 },
                         },
                         "progress_percent": progress,
                         "filename": entry.filename,
@@ -1258,12 +1258,7 @@ async fn route_dispatch_group_5(context: &RouteDispatchContext<'_, '_>) -> Route
             let active_transfers = transfers
                 .entries
                 .iter()
-                .filter(|entry| {
-                    matches!(
-                        entry.status.as_str(),
-                        "queued" | "in_progress" | "requested"
-                    )
-                })
+                .filter(|entry| is_queued_or_active_transfer_status(&entry.status))
                 .count();
             let bytes = transfers
                 .entries
@@ -1366,12 +1361,7 @@ async fn route_dispatch_group_5(context: &RouteDispatchContext<'_, '_>) -> Route
             let active_sessions = transfers
                 .entries
                 .iter()
-                .filter(|entry| {
-                    matches!(
-                        entry.status.as_str(),
-                        "queued" | "in_progress" | "requested"
-                    )
-                })
+                .filter(|entry| is_queued_or_active_transfer_status(&entry.status))
                 .count();
             let total_requests = transfers.entries.len();
             drop(transfers);
@@ -1991,6 +1981,7 @@ async fn route_dispatch_group_5(context: &RouteDispatchContext<'_, '_>) -> Route
                             .await;
                         return Ok(routing::service_unavailable_response(&error));
                     }
+                    publish_search_hub_event(state, "update", &record);
                 }
                 return Ok(routing::ok_response(String::new()));
             }
