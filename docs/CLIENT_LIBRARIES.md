@@ -68,11 +68,11 @@ await client.get_stats()
 # Search
 await client.list_searches(limit=50, offset=0)
 search = await client.create_search(query="artist name")
-await client.get_search_details(search_id, limit=50)
+await client.get_search_details(search_id, limit=50, offset=0)
 
 # Messages
 await client.list_messages(limit=50)
-await client.get_user_messages(username, limit=50)
+await client.get_user_messages(username, limit=50, offset=0)
 await client.send_message(recipient, content)
 await client.acknowledge_message(message_id)
 
@@ -199,9 +199,9 @@ SlskrClient(
 - `get_stats()` → dict
 - `list_searches(limit, offset)` → list
 - `create_search(query, room, target)` → dict
-- `get_search_details(search_id, limit)` → dict
+- `get_search_details(search_id, limit, offset)` → dict
 - `list_messages(limit, offset)` → list
-- `get_user_messages(username, limit)` → list
+- `get_user_messages(username, limit, offset)` → list
 - `send_message(recipient, content)` → dict
 - `acknowledge_message(message_id)` → None
 - `list_transfers(direction, status, limit, offset)` → list
@@ -319,11 +319,12 @@ client.GetCapabilities(ctx)
 // Search
 client.ListSearches(ctx, limit, offset)
 client.CreateSearch(ctx, query)
+client.CreateSearchWithOptions(ctx, query, slskr.SearchOptions{Room: room, Target: target})
 client.GetSearchDetails(ctx, searchID, limit, offset)
 
 // Messages
 client.ListMessages(ctx, limit, offset)
-client.GetUserMessages(ctx, username, limit)
+client.GetUserMessages(ctx, username, limit, offset)
 client.SendMessage(ctx, recipient, content)
 client.AcknowledgeMessage(ctx, messageID)
 
@@ -337,10 +338,12 @@ client.SendMessage(ctx, recipient, content)
 // Users & Rooms
 client.GetUser(ctx, username)
 client.ListUsers(ctx, limit, offset)
-client.ListRooms(ctx)
+client.ListRooms(ctx[, limit, offset])
 client.GetRoom(ctx, roomID)
 client.JoinRoom(ctx, roomName)
 client.LeaveRoom(ctx, roomID)
+client.BrowseUser(ctx, username, folder, limit, offset)
+client.RequestBrowse(ctx, username[, folder])
 
 // Shares
 client.ListShares(ctx, limit, offset)

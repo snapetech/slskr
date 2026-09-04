@@ -34,6 +34,7 @@ async def test_python_client_uses_daemon_wire_contracts():
     client._get = AsyncMock(
         side_effect=[
             [{"id": "search-1"}],
+            {"id": "search-1", "results": []},
             {"entries": [{"id": 1}]},
             {"entries": [{"id": 2}]},
             {"entries": [{"id": 3}]},
@@ -43,8 +44,12 @@ async def test_python_client_uses_daemon_wire_contracts():
     client._put = AsyncMock(return_value=None)
 
     assert await client.list_searches() == [{"id": "search-1"}]
+    assert await client.get_search_details("search-1", limit=10, offset=2) == {
+        "id": "search-1",
+        "results": [],
+    }
     assert await client.list_messages() == [{"id": 1}]
-    assert await client.get_user_messages("alice") == [{"id": 2}]
+    assert await client.get_user_messages("alice", offset=2) == [{"id": 2}]
     assert await client.list_transfers(direction="download") == [{"id": 3}]
     assert await client.create_transfer("download", "alice", "track.flac") == {"id": 4}
     assert await client.send_message("alice", "hello") == {"id": 5}
@@ -52,8 +57,9 @@ async def test_python_client_uses_daemon_wire_contracts():
 
     assert client._get.await_args_list == [
         call("/api/searches", params={"limit": 50, "offset": 0}),
+        call("/api/searches/search-1", params={"limit": 10, "offset": 2}),
         call("/api/messages", params={"limit": 50, "offset": 0}),
-        call("/api/messages/alice", params={"limit": 50}),
+        call("/api/messages/alice", params={"limit": 50, "offset": 2}),
         call(
             "/api/transfers",
             params={"limit": 50, "offset": 0, "direction": 0},
@@ -138,6 +144,7 @@ async def test_python_client_covers_session_and_extended_api_routes():
         "entries": [{"filename": "track.flac"}]
     }
     assert await client.request_browse("bob") == {}
+    assert await client.request_browse("bob", folder="Albums") == {}
     assert await client.get_browse_requests(status="pending") == [{"username": "bob"}]
     assert await client.respond_to_browse_request("bob", "reject") == {}
     assert await client.respond_to_browse_request("bob", "accept", folder="Albums") == {}
@@ -158,6 +165,7 @@ async def test_python_client_covers_session_and_extended_api_routes():
     assert ("/api/users/bob/browse", {"limit": 50, "offset": 0, "folder": "Albums"}, True) in get_calls
     assert ("/api/events", {"limit": 50, "offset": 0, "kind": "search.completed"}, True) in get_calls
     assert ("/api/users/bob/browse/cancel", {"reason": "rejected by client"}, True) in post_calls
+    assert ("/api/users/bob/browse/request", {}, True) in post_calls
     assert ("/api/users/bob/browse/folder", {"folder": "Albums"}, True) in post_calls
     assert ("/api/mediacore/retrieve/cache/clear", {"keys": ["content:track"]}, True) in post_calls
     assert ("/api/rooms/lounge%20room/join", True) in delete_calls

@@ -76,16 +76,16 @@ func main() {
 - `PingSession(ctx, id)` / `DisconnectSession(ctx, id)` - Maintain or close the session
 - `GetSessionPrivileges(ctx, id)` - Read current privileges
 - `ListUsers(ctx, limit, offset)` / `GetUser(ctx, username)` - Read watched users
-- `ListRooms(ctx)` / `GetRoom(ctx, name)` / `JoinRoom(ctx, name)` / `LeaveRoom(ctx, name)` - Manage rooms
+- `ListRooms(ctx[, limit, offset])` / `GetRoom(ctx, name)` / `JoinRoom(ctx, name)` / `LeaveRoom(ctx, name)` - Manage rooms
 
 ### Search
 - `ListSearches(ctx, limit, offset)` - List searches
-- `CreateSearch(ctx, query)` - Create search
+- `CreateSearch(ctx, query)` / `CreateSearchWithOptions(ctx, query, options)` - Create global or targeted searches
 - `GetSearchDetails(ctx, searchID, limit, offset)` - Get search results
 
 ### Messages
 - `ListMessages(ctx, limit, offset)` - List messages
-- `GetUserMessages(ctx, username, limit)` - User messages
+- `GetUserMessages(ctx, username, limit[, offset])` - User messages
 - `SendMessage(ctx, recipient, content)` - Send message
 - `AcknowledgeMessage(ctx, messageID)` - Mark a message as read
 
@@ -96,7 +96,7 @@ func main() {
 - `CancelTransfer(ctx, transferID)` - Cancel a transfer
 
 ### Browse, Events & Administration
-- `BrowseUser(ctx, username, folder, limit, offset)` / `RequestBrowse(ctx, username)` - Browse a user's shares
+- `BrowseUser(ctx, username, folder, limit, offset)` / `RequestBrowse(ctx, username[, folder])` - Browse a user's shares
 - `GetBrowseRequests(ctx, status, limit, offset)` / `RespondToBrowseRequest(ctx, username, action, folder)` - Manage browse requests
 - `GetEvents(ctx, eventType, limit, offset)` - Read recorded events
 - `ListShares(ctx, limit, offset)` / `RefreshShares(ctx)` - Read or rescan shares

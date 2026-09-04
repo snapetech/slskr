@@ -144,11 +144,11 @@ Main HTTP client for REST API operations.
 **Search**
 - `list_searches(limit, offset)` - List searches
 - `create_search(query, room, target)` - Create search
-- `get_search_details(search_id)` - Search details
+- `get_search_details(search_id, limit, offset)` - Search details
 
 **Messages**
 - `list_messages(limit, offset)` - List messages
-- `get_user_messages(username)` - User messages
+- `get_user_messages(username, limit, offset)` - User messages
 - `send_message(recipient, content)` - Send message
 - `acknowledge_message(message_id)` - Mark read
 
@@ -159,7 +159,7 @@ Main HTTP client for REST API operations.
 - `cancel_transfer(transfer_id)` - Cancel transfer
 
 **Browse, Events & Administration**
-- `browse_user()` / `request_browse()` - Browse a user's shares
+- `browse_user()` / `request_browse(username, folder)` - Browse a user's shares
 - `get_browse_requests()` / `respond_to_browse_request()` - Manage browse requests
 - `get_events()` - Read recorded events
 - `list_shares()` / `refresh_shares()` - Read or rescan shares

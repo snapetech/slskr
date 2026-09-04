@@ -130,6 +130,16 @@ func TestClientUsesDaemonWireContracts(t *testing.T) {
 		case request.Method == http.MethodGet && request.URL.Path == "/api/searches":
 			write(`[{"id":"search-1"}]`)
 		case request.Method == http.MethodPost && request.URL.Path == "/api/searches":
+			var payload map[string]interface{}
+			if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+				t.Errorf("decode search payload: %v", err)
+			}
+			if payload["query"] != "ambient" {
+				t.Errorf("search payload used the wrong query: %#v", payload)
+			}
+			if payload["room"] == "lounge" && payload["target"] != "room" {
+				t.Errorf("targeted search payload used the wrong target: %#v", payload)
+			}
 			write(`{"searchId":"search-123","query":"ambient","results":[]}`)
 		case request.Method == http.MethodGet && request.URL.Path == "/api/searches/search-123":
 			if request.URL.Query().Get("limit") != "10" || request.URL.Query().Get("offset") != "2" {
@@ -139,6 +149,9 @@ func TestClientUsesDaemonWireContracts(t *testing.T) {
 		case request.Method == http.MethodGet && request.URL.Path == "/api/messages":
 			write(`{"entries":[{"id":1}]}`)
 		case request.Method == http.MethodGet && request.URL.Path == "/api/messages/alice":
+			if request.URL.Query().Get("limit") != "10" || request.URL.Query().Get("offset") != "2" {
+				t.Errorf("user message pagination was not encoded: %q", request.URL.RawQuery)
+			}
 			write(`{"entries":[{"id":2}]}`)
 		case request.Method == http.MethodPost && request.URL.Path == "/api/messages":
 			var payload map[string]interface{}
@@ -183,6 +196,9 @@ func TestClientUsesDaemonWireContracts(t *testing.T) {
 		case request.Method == http.MethodGet && request.URL.Path == "/api/users":
 			write(`{"entries":[{"username":"alice"}]}`)
 		case request.Method == http.MethodGet && request.URL.Path == "/api/rooms":
+			if request.URL.Query().Get("limit") != "10" || request.URL.Query().Get("offset") != "2" {
+				t.Errorf("room pagination was not encoded: %q", request.URL.RawQuery)
+			}
 			write(`{"entries":[{"name":"lounge"}]}`)
 		case request.Method == http.MethodGet && request.URL.Path == "/api/rooms/lounge":
 			write(`{"name":"lounge"}`)
@@ -230,6 +246,9 @@ func TestClientUsesDaemonWireContracts(t *testing.T) {
 	if err != nil || search["id"] != "search-123" || search["searchId"] != "search-123" {
 		t.Fatalf("unexpected create search response: %#v, %v", search, err)
 	}
+	if _, err := client.CreateSearchWithOptions(ctx, "ambient", SearchOptions{Room: "lounge", Target: "room"}); err != nil {
+		t.Fatalf("targeted search failed: %v", err)
+	}
 	searchDetails, err := client.GetSearchDetails(ctx, "search-123", 10, 2)
 	if err != nil || searchDetails["id"] != "search-123" {
 		t.Fatalf("unexpected search details response: %#v, %v", searchDetails, err)
@@ -238,7 +257,7 @@ func TestClientUsesDaemonWireContracts(t *testing.T) {
 	if err != nil || len(messages) != 1 {
 		t.Fatalf("unexpected messages response: %#v, %v", messages, err)
 	}
-	userMessages, err := client.GetUserMessages(ctx, "alice", 10)
+	userMessages, err := client.GetUserMessages(ctx, "alice", 10, 2)
 	if err != nil || len(userMessages) != 1 {
 		t.Fatalf("unexpected user messages response: %#v, %v", userMessages, err)
 	}
@@ -271,7 +290,7 @@ func TestClientUsesDaemonWireContracts(t *testing.T) {
 	if err != nil || len(users) != 1 {
 		t.Fatalf("unexpected users response: %#v, %v", users, err)
 	}
-	rooms, err := client.ListRooms(ctx)
+	rooms, err := client.ListRooms(ctx, 10, 2)
 	if err != nil || len(rooms) != 1 {
 		t.Fatalf("unexpected rooms response: %#v, %v", rooms, err)
 	}
@@ -384,6 +403,9 @@ func TestClientCoversSessionBrowseEventAndCacheRoutes(t *testing.T) {
 	}
 	if _, err := client.RequestBrowse(ctx, "alice"); err != nil {
 		t.Fatalf("request browse failed: %v", err)
+	}
+	if _, err := client.RequestBrowse(ctx, "alice", "Albums"); err != nil {
+		t.Fatalf("folder browse request failed: %v", err)
 	}
 	if requests, err := client.GetBrowseRequests(ctx, "pending", 10, 0); err != nil || len(requests) != 1 {
 		t.Fatalf("unexpected browse requests response: %#v, %v", requests, err)

@@ -172,10 +172,33 @@ func (c *Client) ListSearches(ctx context.Context, limit, offset int) ([]map[str
 	return out, nil
 }
 
-// CreateSearch creates a new search
+// SearchOptions describes optional targeting fields for a search.
+type SearchOptions struct {
+	Room   string
+	Target string
+}
+
+// CreateSearch creates a new global search.
 func (c *Client) CreateSearch(ctx context.Context, query string) (map[string]interface{}, error) {
+	return c.createSearch(ctx, query, nil)
+}
+
+// CreateSearchWithOptions creates a search with optional room or target fields.
+func (c *Client) CreateSearchWithOptions(ctx context.Context, query string, options SearchOptions) (map[string]interface{}, error) {
+	return c.createSearch(ctx, query, &options)
+}
+
+func (c *Client) createSearch(ctx context.Context, query string, options *SearchOptions) (map[string]interface{}, error) {
 	body := map[string]interface{}{
 		"query": query,
+	}
+	if options != nil {
+		if options.Room != "" {
+			body["room"] = options.Room
+		}
+		if options.Target != "" {
+			body["target"] = options.Target
+		}
 	}
 	result, err := c.post(ctx, "/api/searches", body, true)
 	if err != nil {
@@ -274,10 +297,16 @@ func (c *Client) ListMessages(ctx context.Context, limit, offset int) ([]map[str
 	return out, nil
 }
 
-// GetUserMessages gets messages from specific user
-func (c *Client) GetUserMessages(ctx context.Context, username string, limit int) ([]map[string]interface{}, error) {
+// GetUserMessages gets messages from a specific user. An optional offset may
+// be supplied for paginated reads.
+func (c *Client) GetUserMessages(ctx context.Context, username string, limit int, offsets ...int) ([]map[string]interface{}, error) {
 	params := url.Values{}
 	params.Set("limit", fmt.Sprintf("%d", limit))
+	offset := 0
+	if len(offsets) > 0 {
+		offset = offsets[0]
+	}
+	params.Set("offset", fmt.Sprintf("%d", offset))
 
 	result, err := c.getWithParams(ctx, fmt.Sprintf("/api/messages/%s", pathSegment(username)), params, true)
 	if err != nil {
@@ -351,9 +380,17 @@ func (c *Client) ListUsers(ctx context.Context, limit, offset int) ([]map[string
 // Rooms
 // ============================================================================
 
-// ListRooms lists chat rooms
-func (c *Client) ListRooms(ctx context.Context) ([]map[string]interface{}, error) {
-	result, err := c.get(ctx, "/api/rooms", true)
+// ListRooms lists chat rooms. Optional limit and offset values enable
+// pagination while preserving the unbounded legacy call shape.
+func (c *Client) ListRooms(ctx context.Context, pagination ...int) ([]map[string]interface{}, error) {
+	params := url.Values{}
+	if len(pagination) > 0 {
+		params.Set("limit", fmt.Sprintf("%d", pagination[0]))
+	}
+	if len(pagination) > 1 {
+		params.Set("offset", fmt.Sprintf("%d", pagination[1]))
+	}
+	result, err := c.getWithParams(ctx, "/api/rooms", params, true)
 	if err != nil {
 		return nil, err
 	}
@@ -454,9 +491,16 @@ func (c *Client) BrowseUser(ctx context.Context, username, folder string, limit,
 	return c.getWithParams(ctx, fmt.Sprintf("/api/users/%s/browse", pathSegment(username)), params, true)
 }
 
-// RequestBrowse requests a fresh browse listing from a user.
-func (c *Client) RequestBrowse(ctx context.Context, username string) (map[string]interface{}, error) {
-	return c.post(ctx, fmt.Sprintf("/api/users/%s/browse/request", pathSegment(username)), map[string]interface{}{}, true)
+// RequestBrowse requests a fresh browse listing from a user. Supplying an
+// optional folder requests that specific folder instead of the user's root.
+func (c *Client) RequestBrowse(ctx context.Context, username string, folders ...string) (map[string]interface{}, error) {
+	path := fmt.Sprintf("/api/users/%s/browse/request", pathSegment(username))
+	body := map[string]interface{}{}
+	if len(folders) > 0 {
+		path = fmt.Sprintf("/api/users/%s/browse/folder", pathSegment(username))
+		body["folder"] = folders[0]
+	}
+	return c.post(ctx, path, body, true)
 }
 
 // GetBrowseRequests lists pending and completed browse requests.

@@ -227,11 +227,13 @@ class SlskrClient:
                 result = {**result, "id": search_id}
         return result
 
-    async def get_search_details(self, search_id: str, limit: int = 50) -> Dict:
+    async def get_search_details(
+        self, search_id: str, limit: int = 50, offset: int = 0
+    ) -> Dict:
         """Get search details and results"""
         return await self._get(
             f"/api/searches/{self._path_segment(search_id)}",
-            params={"limit": limit},
+            params={"limit": limit, "offset": offset},
         )
 
     # =========================================================================
@@ -243,11 +245,13 @@ class SlskrClient:
         result = await self._get("/api/messages", params={"limit": limit, "offset": offset})
         return self._response_list(result, "messages", "entries")
 
-    async def get_user_messages(self, username: str, limit: int = 50) -> List[Dict]:
+    async def get_user_messages(
+        self, username: str, limit: int = 50, offset: int = 0
+    ) -> List[Dict]:
         """Get messages from user"""
         result = await self._get(
             f"/api/messages/{self._path_segment(username)}",
-            params={"limit": limit},
+            params={"limit": limit, "offset": offset},
         )
         return self._response_list(result, "messages", "entries")
 
@@ -345,10 +349,17 @@ class SlskrClient:
             f"/api/users/{self._path_segment(username)}/browse", params=params
         )
 
-    async def request_browse(self, username: str) -> Dict[str, Any]:
+    async def request_browse(
+        self, username: str, folder: Optional[str] = None
+    ) -> Dict[str, Any]:
         """Request a fresh browse listing from a user."""
+        segment = self._path_segment(username)
+        if folder is not None:
+            return await self._post(
+                f"/api/users/{segment}/browse/folder", {"folder": folder}
+            )
         return await self._post(
-            f"/api/users/{self._path_segment(username)}/browse/request", {}
+            f"/api/users/{segment}/browse/request", {}
         )
 
     async def get_browse_requests(
