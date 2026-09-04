@@ -132,27 +132,27 @@ impl DhtServiceState {
             .map_err(|error| (7, error))?;
         let ttl_seconds =
             i64::from(request.ttl_seconds).clamp(MIN_DHT_TTL_SECONDS, MAX_DHT_TTL_SECONDS) as u64;
+        let mut values = self
+            .values
+            .lock()
+            .map_err(|_| (1, "Store failed".to_owned()))?;
+        let now = unix_seconds();
+        values.retain(|_, record| record.expires_at > now);
+        if values.len() >= MAX_DHT_VALUES && !values.contains_key(&key) {
+            return Err((6, "Remote DHT storage quota exceeded".to_owned()));
+        }
+        // Keep the capacity check and admission update under the same values
+        // guard.  A rejected insert must not leave a quota record behind.
         if !self.admit_remote_store(&publisher_id, key, ttl_seconds) {
             return Err((6, "Remote DHT storage quota exceeded".to_owned()));
         }
-
-        {
-            let mut values = self
-                .values
-                .lock()
-                .map_err(|_| (1, "Store failed".to_owned()))?;
-            values.retain(|_, record| record.expires_at > unix_seconds());
-            if values.len() >= MAX_DHT_VALUES && !values.contains_key(&key) {
-                return Err((6, "Remote DHT storage quota exceeded".to_owned()));
-            }
-            values.insert(
-                key,
-                DhtValue {
-                    value,
-                    expires_at: unix_seconds().saturating_add(ttl_seconds),
-                },
-            );
-        }
+        values.insert(
+            key,
+            DhtValue {
+                value,
+                expires_at: now.saturating_add(ttl_seconds),
+            },
+        );
         self.observe_node(requester_id, &publisher_id);
 
         serde_json::to_vec(&StoreResponse {
@@ -229,6 +229,13 @@ impl DhtServiceState {
             *expiry = now.saturating_add(ttl_seconds);
             return true;
         }
+        // DhtServiceState stores one effective value per key.  Replace any
+        // prior publisher's admission for that key instead of charging quota
+        // for an entry that the value map has already overwritten.
+        let replaced_key = admissions
+            .keys()
+            .find(|(_, candidate)| *candidate == key)
+            .cloned();
         let publisher_count = admissions
             .keys()
             .filter(|(publisher, _)| publisher == publisher_id)
@@ -238,11 +245,17 @@ impl DhtServiceState {
             .keys()
             .filter(|(publisher, candidate)| publisher == publisher_id && candidate[0] == namespace)
             .count();
-        if admissions.len() >= MAX_DHT_VALUES
+        if admissions
+            .len()
+            .saturating_sub(replaced_key.is_some() as usize)
+            >= MAX_DHT_VALUES
             || publisher_count >= MAX_DHT_VALUES_PER_PUBLISHER
             || namespace_count >= MAX_DHT_VALUES_PER_NAMESPACE
         {
             return false;
+        }
+        if let Some((_, replaced_key)) = replaced_key {
+            admissions.retain(|(_, candidate), _| *candidate != replaced_key);
         }
         admissions.insert(record_key, now.saturating_add(ttl_seconds));
         true
@@ -624,30 +637,32 @@ fn build_publications(
     content_ids.sort();
     content_ids.dedup();
     for content_id in content_ids.iter().take(96) {
-        insert_publication(
-            &mut publications,
-            &format!("mesh:content-peers:{content_id}"),
-            encode_content_peer_hints(&snapshot.peer_id, &snapshot.endpoints, timestamp),
-        );
+        if let Some(value) =
+            encode_content_peer_hints(&snapshot.peer_id, &snapshot.endpoints, timestamp)
+        {
+            insert_publication(
+                &mut publications,
+                &format!("mesh:content-peers:{content_id}"),
+                value,
+            );
+        }
     }
     if !content_ids.is_empty() {
-        insert_publication(
-            &mut publications,
-            &format!("mesh:peer-content:{}", snapshot.peer_id),
-            encode_string_array(&content_ids[..content_ids.len().min(96)]),
-        );
+        if let Some(value) = encode_string_array(&content_ids[..content_ids.len().min(96)]) {
+            insert_publication(
+                &mut publications,
+                &format!("mesh:peer-content:{}", snapshot.peer_id),
+                value,
+            );
+        }
     }
 
     for shadow in snapshot.shadows.iter().take(96) {
         let namespace = format!("slskdn-vsf-mbid-recording-v1:{}", shadow.recording_id);
         let key = derive_key(&namespace);
-        publications.insert(
-            key,
-            Publication {
-                key,
-                value: encode_shadow_shard(&shadow.peer_ids, timestamp),
-            },
-        );
+        if let Some(value) = encode_shadow_shard(&shadow.peer_ids, timestamp) {
+            publications.insert(key, Publication { key, value });
+        }
     }
 
     let pod_ids = snapshot
@@ -657,7 +672,7 @@ fn build_publications(
         .map(|pod| pod.pod_id.clone())
         .collect::<Vec<_>>();
     for pod in snapshot.pods.iter().take(32) {
-        let value = serde_json::to_vec(&PodMetadata {
+        let Ok(value) = serde_json::to_vec(&PodMetadata {
             pod_id: &pod.pod_id,
             name: &pod.name,
             visibility: 0,
@@ -665,8 +680,9 @@ fn build_publications(
             tags: &pod.tags,
             channel_count: pod.channel_count,
             published_at: timestamp,
-        })
-        .unwrap_or_default();
+        }) else {
+            continue;
+        };
         insert_publication(
             &mut publications,
             &format!("pod:metadata:{}", pod.pod_id),
@@ -674,11 +690,12 @@ fn build_publications(
         );
     }
     if !pod_ids.is_empty() {
-        let value = serde_json::to_vec(&PodIndex {
+        let Ok(value) = serde_json::to_vec(&PodIndex {
             pod_ids: &pod_ids,
             updated_at: timestamp,
-        })
-        .unwrap_or_default();
+        }) else {
+            return publications.into_iter().take(MAX_PUBLICATIONS).collect();
+        };
         insert_publication(&mut publications, "pod:index:listed", value);
     }
 
@@ -690,6 +707,9 @@ fn insert_publication(
     namespace: &str,
     value: Vec<u8>,
 ) {
+    if value.len() > MAX_DHT_VALUE_BYTES {
+        return;
+    }
     let key = derive_key(namespace);
     publications.insert(key, Publication { key, value });
 }
@@ -766,57 +786,98 @@ fn dotnet_json_base64(value: &str) -> String {
     value.replace('+', "\\u002B")
 }
 
-fn encode_content_peer_hints(peer_id: &str, endpoints: &[String], timestamp: i64) -> Vec<u8> {
+fn encode_content_peer_hints(
+    peer_id: &str,
+    endpoints: &[String],
+    timestamp: i64,
+) -> Option<Vec<u8>> {
     let mut output = Vec::new();
-    write_array(&mut output, 1);
-    write_array(&mut output, 1);
-    write_array(&mut output, 3);
-    write_string(&mut output, peer_id);
-    write_array(&mut output, endpoints.len());
+    if !write_array(&mut output, 1)
+        || !write_array(&mut output, 1)
+        || !write_array(&mut output, 3)
+        || !write_string(&mut output, peer_id)
+        || !write_array(&mut output, endpoints.len())
+    {
+        return None;
+    }
     for endpoint in endpoints {
-        write_string(&mut output, endpoint);
+        if !write_string(&mut output, endpoint) {
+            return None;
+        }
     }
-    write_i64(&mut output, timestamp);
-    output
+    write_i64(&mut output, timestamp).then_some(output)
 }
 
-fn encode_string_array(values: &[String]) -> Vec<u8> {
+fn encode_string_array(values: &[String]) -> Option<Vec<u8>> {
     let mut output = Vec::new();
-    write_array(&mut output, values.len());
+    if !write_array(&mut output, values.len()) {
+        return None;
+    }
     for value in values {
-        write_string(&mut output, value);
+        if !write_string(&mut output, value) {
+            return None;
+        }
     }
-    output
+    Some(output)
 }
 
-fn encode_shadow_shard(peer_ids: &[String], timestamp: i64) -> Vec<u8> {
+fn encode_shadow_shard(peer_ids: &[String], timestamp: i64) -> Option<Vec<u8>> {
     let mut output = Vec::new();
-    write_array(&mut output, 6);
-    write_string(&mut output, "1.0");
-    write_array(&mut output, 2);
-    write_timestamp(&mut output, timestamp);
-    output.push(0);
-    write_u64(&mut output, STORE_TTL_SECONDS as u64);
-    write_array(&mut output, peer_ids.len().min(64));
-    for peer_id in peer_ids.iter().take(64) {
-        write_binary(&mut output, peer_id.as_bytes());
+    if !write_array(&mut output, 6)
+        || !write_string(&mut output, "1.0")
+        || !write_array(&mut output, 2)
+        || !write_timestamp(&mut output, timestamp)
+    {
+        return None;
     }
-    write_array(&mut output, 0);
-    write_u64(&mut output, peer_ids.len().min(64) as u64);
-    output
+    if !has_publication_capacity(&output, 1) {
+        return None;
+    }
+    output.push(0);
+    if !write_u64(&mut output, STORE_TTL_SECONDS as u64)
+        || !write_array(&mut output, peer_ids.len().min(64))
+    {
+        return None;
+    }
+    for peer_id in peer_ids.iter().take(64) {
+        if !write_binary(&mut output, peer_id.as_bytes()) {
+            return None;
+        }
+    }
+    if !write_array(&mut output, 0) || !write_u64(&mut output, peer_ids.len().min(64) as u64) {
+        return None;
+    }
+    Some(output)
 }
 
-fn write_array(output: &mut Vec<u8>, length: usize) {
+fn write_array(output: &mut Vec<u8>, length: usize) -> bool {
+    if length > u16::MAX as usize || !has_publication_capacity(output, 3) {
+        return false;
+    }
     if length < 16 {
         output.push(0x90 | length as u8);
     } else {
         output.push(0xdc);
         output.extend_from_slice(&(length as u16).to_be_bytes());
     }
+    true
 }
 
-fn write_string(output: &mut Vec<u8>, value: &str) {
+fn write_string(output: &mut Vec<u8>, value: &str) -> bool {
     let bytes = value.as_bytes();
+    if bytes.len() > u16::MAX as usize {
+        return false;
+    }
+    let prefix_len = if bytes.len() < 32 {
+        1
+    } else if bytes.len() <= u8::MAX as usize {
+        2
+    } else {
+        3
+    };
+    if !has_publication_capacity(output, prefix_len + bytes.len()) {
+        return false;
+    }
     if bytes.len() < 32 {
         output.push(0xa0 | bytes.len() as u8);
     } else if bytes.len() <= u8::MAX as usize {
@@ -826,9 +887,21 @@ fn write_string(output: &mut Vec<u8>, value: &str) {
         output.extend_from_slice(&(bytes.len() as u16).to_be_bytes());
     }
     output.extend_from_slice(bytes);
+    true
 }
 
-fn write_binary(output: &mut Vec<u8>, value: &[u8]) {
+fn write_binary(output: &mut Vec<u8>, value: &[u8]) -> bool {
+    if value.len() > u16::MAX as usize {
+        return false;
+    }
+    let prefix_len = if value.len() <= u8::MAX as usize {
+        2
+    } else {
+        3
+    };
+    if !has_publication_capacity(output, prefix_len + value.len()) {
+        return false;
+    }
     if value.len() <= u8::MAX as usize {
         output.extend_from_slice(&[0xc4, value.len() as u8]);
     } else {
@@ -836,9 +909,13 @@ fn write_binary(output: &mut Vec<u8>, value: &[u8]) {
         output.extend_from_slice(&(value.len() as u16).to_be_bytes());
     }
     output.extend_from_slice(value);
+    true
 }
 
-fn write_u64(output: &mut Vec<u8>, value: u64) {
+fn write_u64(output: &mut Vec<u8>, value: u64) -> bool {
+    if !has_publication_capacity(output, 9) {
+        return false;
+    }
     if value <= 0x7f {
         output.push(value as u8);
     } else if value <= u16::MAX as u64 {
@@ -851,19 +928,35 @@ fn write_u64(output: &mut Vec<u8>, value: u64) {
         output.push(0xcf);
         output.extend_from_slice(&value.to_be_bytes());
     }
+    true
 }
 
-fn write_i64(output: &mut Vec<u8>, value: i64) {
+fn write_i64(output: &mut Vec<u8>, value: i64) -> bool {
+    if !has_publication_capacity(output, 9) {
+        return false;
+    }
     output.push(0xd3);
     output.extend_from_slice(&value.to_be_bytes());
+    true
 }
 
-fn write_timestamp(output: &mut Vec<u8>, timestamp_ms: i64) {
+fn write_timestamp(output: &mut Vec<u8>, timestamp_ms: i64) -> bool {
+    if !has_publication_capacity(output, 10) {
+        return false;
+    }
     let seconds = timestamp_ms.div_euclid(1_000) as u64;
     let nanos = timestamp_ms.rem_euclid(1_000) as u64 * 1_000_000;
     let encoded = (nanos << 34) | seconds;
     output.extend_from_slice(&[0xd7, 0xff]);
     output.extend_from_slice(&encoded.to_be_bytes());
+    true
+}
+
+fn has_publication_capacity(output: &[u8], additional: usize) -> bool {
+    output
+        .len()
+        .checked_add(additional)
+        .is_some_and(|length| length <= MAX_DHT_VALUE_BYTES)
 }
 
 fn unix_millis() -> i64 {
@@ -997,11 +1090,85 @@ mod tests {
     #[test]
     fn shadow_messagepack_uses_dotnet_timestamp_extension_shape() {
         assert_eq!(
-            BASE64.encode(encode_shadow_shard(
-                &["peer-a".to_owned()],
-                1_700_000_000_123,
-            )),
+            BASE64.encode(encode_shadow_shard(&["peer-a".to_owned()], 1_700_000_000_123).unwrap()),
             "lqMxLjCS1/8dU1MAZVPxAADNDhCRxAZwZWVyLWGQAQ=="
         );
+    }
+
+    #[test]
+    fn publication_messagepack_rejects_unrepresentable_lengths() {
+        let mut output = Vec::new();
+        assert!(!write_array(&mut output, usize::from(u16::MAX) + 1));
+        assert!(output.is_empty());
+
+        let oversized = "x".repeat(usize::from(u16::MAX) + 1);
+        assert!(!write_string(&mut output, &oversized));
+        assert!(!write_binary(&mut output, oversized.as_bytes()));
+        assert!(encode_string_array(&[oversized]).is_none());
+    }
+
+    #[test]
+    fn publication_messagepack_stays_within_value_limit() {
+        let mut output = vec![0; MAX_DHT_VALUE_BYTES - 1];
+        assert!(!write_i64(&mut output, 1));
+        assert_eq!(output.len(), MAX_DHT_VALUE_BYTES - 1);
+    }
+
+    #[tokio::test]
+    async fn dht_store_replacing_a_key_reuses_its_admission() {
+        let state = DhtServiceState::default();
+        let key = derive_key("mesh:test:replacement");
+        let first_key = SigningKey::from_bytes(&[11; 32]);
+        let second_key = SigningKey::from_bytes(&[12; 32]);
+
+        for signing_key in [&first_key, &second_key] {
+            let request = signed_store_request(key, b"mesh-value", 600, unix_millis(), signing_key);
+            state
+                .handle_call(
+                    "Store",
+                    &serde_json::to_vec(&request).unwrap(),
+                    "overlay-peer",
+                )
+                .await
+                .expect("signed replacement store should be accepted");
+        }
+
+        let admissions = state.remote_admissions.lock().unwrap();
+        assert_eq!(admissions.len(), 1);
+        assert!(admissions.contains_key(&(peer_id(&second_key), key)));
+    }
+
+    #[tokio::test]
+    async fn rejected_full_dht_store_does_not_consume_admission() {
+        let state = DhtServiceState::default();
+        let now = unix_seconds();
+        {
+            let mut values = state.values.lock().unwrap();
+            for index in 0..MAX_DHT_VALUES {
+                let mut key = [0_u8; 20];
+                key[..8].copy_from_slice(&(index as u64).to_be_bytes());
+                values.insert(
+                    key,
+                    DhtValue {
+                        value: vec![0],
+                        expires_at: now + 600,
+                    },
+                );
+            }
+        }
+
+        let signing_key = SigningKey::from_bytes(&[13; 32]);
+        let request =
+            signed_store_request([u8::MAX; 20], b"rejected", 600, unix_millis(), &signing_key);
+        let error = state
+            .handle_call(
+                "Store",
+                &serde_json::to_vec(&request).unwrap(),
+                "overlay-peer",
+            )
+            .await
+            .expect_err("a full DHT must reject a new key");
+        assert_eq!(error.0, 6);
+        assert!(state.remote_admissions.lock().unwrap().is_empty());
     }
 }
