@@ -227,6 +227,26 @@ describe('Searches', () => {
     );
   });
 
+  it('hydrates the newly created search before displaying its result count', async () => {
+    library.getStatus.mockResolvedValue({
+      fileCount: 3,
+      responseCount: 1,
+      responsesAvailable: true,
+      searchText: 'beatles',
+      state: 'InProgress',
+      status: 'active',
+    });
+
+    const input = await renderSearches();
+    fireEvent.change(input, { target: { value: 'beatles' } });
+    fireEvent.keyUp(input, { key: 'Enter' });
+
+    await waitFor(() =>
+      expect(screen.getByTestId('search-list-file-count')).toHaveTextContent('3'),
+    );
+    expect(library.getStatus).toHaveBeenCalledWith({ id: expect.any(String) });
+  });
+
   it('only sends bridge providers when the backend explicitly advertises ScenePodBridge', async () => {
     getCapabilities.mockResolvedValue({
       feature: { scenePodBridge: true },

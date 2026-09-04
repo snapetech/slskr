@@ -23,6 +23,10 @@ CATEGORIES = {
 }
 AUDIENCES = {"users", "operators"}
 FRONTMATTER_KEYS = {"category", "audience", "area", "action", "breaking"}
+PLACEHOLDER_PATTERN = re.compile(
+    r"<!--|-->|--!>|\b(?:todo|tbd|fill in)\b",
+    re.IGNORECASE,
+)
 
 
 def is_release_note_path(file_name: str) -> bool:
@@ -96,7 +100,7 @@ def parse_release_note(file_name: str, content: str) -> dict[str, Any]:
     elif action.lower() != "none":
         if len(action) < 5 or len(action) > 200:
             errors.append("action must be 5-200 characters or exactly `none`")
-        if re.search(r"<!--|--!?>|\b(?:todo|tbd|fill in)\b", action, re.I):
+        if PLACEHOLDER_PATTERN.search(action):
             errors.append("action contains a placeholder or HTML comment")
 
     breaking = metadata.get("breaking", "").lower()
@@ -108,7 +112,7 @@ def parse_release_note(file_name: str, content: str) -> dict[str, Any]:
     body = re.sub(r"\s+", " ", match.group(2).strip())
     if len(body) < 30 or len(body) > 400:
         errors.append("body must be 30-400 characters and describe the user impact")
-    if re.search(r"<!--|--!?>|\b(?:todo|tbd|fill in)\b", body, re.I):
+    if PLACEHOLDER_PATTERN.search(body):
         errors.append("body contains a placeholder or HTML comment")
     if body and not re.match(r"[A-Z0-9`*_]", body):
         errors.append("body must start with a capitalized sentence")

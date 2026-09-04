@@ -15,8 +15,9 @@ KEY = re.compile(r"^(\s*)([A-Za-z_][A-Za-z0-9_-]*):(?:\s*(.*))?$")
 TOML_TABLE = re.compile(r"^\s*\[\[?([^\]]+)\]\]?\s*(?:#.*)?$")
 TOML_KEY = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_-]*)\s*=")
 PROPERTY = re.compile(
-    r"(\s*(?:\[[^\]]+\]\s*)*)"
-    r"public\s+[\w.<>,?\[\]]+\s+(\w+)\s*\{\s*get\s*;",
+    r"((?:[ \t]*\[[^\]\r\n]*\][ \t]*(?:\r?\n|$))+)"
+    r"[ \t]*public[ \t]+[^\r\n{};]+[ \t]+([A-Za-z_][A-Za-z0-9_]*)"
+    r"[ \t]*\{[ \t]*get[ \t]*;",
     re.MULTILINE,
 )
 EXPECTED = {

@@ -98,7 +98,7 @@ function extractRoutes(file) {
   const classAttributes = classPrefix;
   const classBody = source.slice(classIndex);
   const methodPattern =
-    /(\s*(?:\[[^\]]+\]\s*)+)(?:public|internal)\s+(?:async\s+)?(?:Task(?:<[^;{]+>)?|ActionResult(?:<[^;{]+>)?|IActionResult|[\w.<>,?]+)\s+\w+\s*\(/g;
+    /((?:[ \t]*\[[^\]\r\n]*\][ \t]*(?:\r?\n|$))+)[ \t]*(?:public|internal)[ \t]+(?:async[ \t]+)?(?:Task(?:<[^\r\n;{}]+>)?|ActionResult(?:<[^\r\n;{}]+>)?|IActionResult|[\w.<>,?]+)[ \t]+\w+[ \t]*\(/gm;
   const routes = [];
 
   for (const methodMatch of classBody.matchAll(methodPattern)) {

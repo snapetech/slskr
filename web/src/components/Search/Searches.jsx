@@ -115,6 +115,7 @@ const CollapsibleSection = ({
 
 const searchEventIdentifier = (eventOrSearch) =>
   eventOrSearch?.resource ?? eventOrSearch?.id ?? eventOrSearch?.token;
+const SEARCH_CREATE_HYDRATION_TIMEOUT_MS = 1_500;
 
 const Searches = ({ runtimeProfile, server } = {}) => {
   const normalizedServer = server ?? { isConnected: false };
@@ -397,21 +398,55 @@ const Searches = ({ runtimeProfile, server } = {}) => {
         searchText,
       });
 
+      const initialSearch = {
+        endedAt: null,
+        fileCount: 0,
+        id,
+        isComplete: false,
+        lockedFileCount: 0,
+        query: searchText,
+        responseCount: 0,
+        responsesAvailable: false,
+        searchText,
+        startedAt: new Date().toISOString(),
+        state: 'InProgress',
+        status: 'active',
+      };
+
+      // The create response is acknowledged only after the backend has
+      // persisted the search, but the hub CREATE event can race this render.
+      // Hydrate once so local-share matches and the full status projection are
+      // visible even when that event is missed during connection startup.
+      let hydratedSearch = {};
+      try {
+        let hydrationTimeout;
+        const status = await Promise.race([
+          library.getStatus({ id }),
+          new Promise((resolve) => {
+            hydrationTimeout = setTimeout(
+              () => resolve({}),
+              SEARCH_CREATE_HYDRATION_TIMEOUT_MS,
+            );
+          }),
+        ]).finally(() => clearTimeout(hydrationTimeout));
+        if (status && typeof status === 'object' && !Array.isArray(status)) {
+          hydratedSearch = status;
+        }
+      } catch (hydrateError) {
+        // The create succeeded; retain the local projection and let the hub or
+        // the normal refresh path populate the rest when the status endpoint
+        // is temporarily unavailable.
+        console.debug('failed to hydrate newly created search', hydrateError);
+      }
+
       setSearches((old) => ({
         ...old,
         [id]: {
-          endedAt: null,
-          fileCount: 0,
+          ...mergeSearchRecords(
+            mergeSearchRecords(initialSearch, old[id] ?? {}),
+            hydratedSearch,
+          ),
           id,
-          isComplete: false,
-          lockedFileCount: 0,
-          query: searchText,
-          responseCount: 0,
-          responsesAvailable: false,
-          searchText,
-          startedAt: new Date().toISOString(),
-          state: 'InProgress',
-          status: 'active',
         },
       }));
 
