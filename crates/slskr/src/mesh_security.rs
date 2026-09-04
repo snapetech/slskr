@@ -1108,6 +1108,7 @@ impl CertificatePinManager {
         if !peers.contains_key(peer_id) && peers.len() >= MAX_CERTIFICATE_PIN_PEERS {
             return Err("certificate pin peer capacity is full".to_owned());
         }
+        let previous = peers.get(peer_id).cloned();
         let info = peers
             .entry(peer_id.to_owned())
             .or_insert_with(|| PeerCertificateInfo {
@@ -1130,8 +1131,15 @@ impl CertificatePinManager {
                 }
             }
         }
-        drop(peers);
-        self.persist_pins()
+        if let Err(error) = self.persist_pins_locked(&peers) {
+            if let Some(previous) = previous {
+                peers.insert(peer_id.to_owned(), previous);
+            } else {
+                peers.remove(peer_id);
+            }
+            return Err(error);
+        }
+        Ok(())
     }
 
     pub fn rotate_pin(&self, peer_id: &str, pin: &str) -> Result<(), String> {
@@ -1147,16 +1155,21 @@ impl CertificatePinManager {
     }
 
     pub fn remove_peer_pins(&self, peer_id: &str) -> Result<(), String> {
-        self.peers
-            .lock()
-            .expect("mesh certificate pin lock")
-            .remove(peer_id);
-        self.persist_pins()
+        let mut peers = self.peers.lock().expect("mesh certificate pin lock");
+        let previous = peers.remove(peer_id);
+        if let Err(error) = self.persist_pins_locked(&peers) {
+            if let Some(previous) = previous {
+                peers.insert(peer_id.to_owned(), previous);
+            }
+            return Err(error);
+        }
+        Ok(())
     }
 
     pub fn cleanup_expired_pins(&self) -> Result<(), String> {
         let now = unix_seconds();
         let mut peers = self.peers.lock().expect("mesh certificate pin lock");
+        let previous = peers.clone();
         peers.retain(|_, info| {
             if now.saturating_sub(info.last_rotation) >= PREVIOUS_PIN_GRACE {
                 info.previous_pins.clear();
@@ -1165,8 +1178,11 @@ impl CertificatePinManager {
                 || !info.previous_pins.is_empty()
                 || now.saturating_sub(info.last_validation) < 90 * 24 * 60 * 60
         });
-        drop(peers);
-        self.persist_pins()
+        if let Err(error) = self.persist_pins_locked(&peers) {
+            *peers = previous;
+            return Err(error);
+        }
+        Ok(())
     }
 
     pub fn statistics(&self) -> CertificatePinStatistics {
@@ -1242,6 +1258,13 @@ impl CertificatePinManager {
 
     fn persist_pins(&self) -> Result<(), String> {
         let peers = self.peers.lock().expect("mesh certificate pin lock");
+        self.persist_pins_locked(&peers)
+    }
+
+    fn persist_pins_locked(
+        &self,
+        peers: &HashMap<String, PeerCertificateInfo>,
+    ) -> Result<(), String> {
         if peers.len() > MAX_CERTIFICATE_PIN_PEERS
             || peers
                 .values()
@@ -1254,7 +1277,6 @@ impl CertificatePinManager {
             last_updated: unix_seconds(),
         })
         .map_err(|error| format!("mesh certificate pins serialization failed: {error}"))?;
-        drop(peers);
         if body.len() > MAX_CERTIFICATE_PIN_STATE_BYTES {
             return Err("mesh certificate pin state exceeds the 2 MiB limit".to_owned());
         }
@@ -1688,5 +1710,51 @@ mod tests {
         assert_eq!(value["value"], 1);
         assert!(SecurityUtils::parse_json_safely::<serde_json::Value>("{}", 1, 32).is_err());
         assert!(SecurityUtils::parse_json_safely::<serde_json::Value>("[[[0]]]", 64, 2).is_err());
+    }
+
+    #[test]
+    fn certificate_pin_mutations_roll_back_when_persistence_fails() {
+        let root = std::env::temp_dir().join(format!(
+            "slskr-certificate-pin-rollback-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let mut manager = CertificatePinManager::new(&root).unwrap();
+        let first_pin = STANDARD.encode([1u8; 32]);
+        let second_pin = STANDARD.encode([2u8; 32]);
+        manager
+            .add_pin("peer", &first_pin, CertificatePinType::Current)
+            .unwrap();
+
+        let failed_storage_path = root.join("mesh/certificate-pins-directory");
+        std::fs::create_dir(&failed_storage_path).unwrap();
+        manager.storage_path = failed_storage_path;
+
+        assert!(manager
+            .add_pin("peer", &second_pin, CertificatePinType::Current)
+            .is_err());
+        let info = manager.peer_certificate_info("peer").unwrap();
+        assert_eq!(info.current_pins, vec![first_pin]);
+        assert!(info.previous_pins.is_empty());
+
+        assert!(manager.remove_peer_pins("peer").is_err());
+        assert!(manager.peer_certificate_info("peer").is_some());
+
+        {
+            let mut peers = manager.peers.lock().unwrap();
+            peers.insert(
+                "expired".to_owned(),
+                PeerCertificateInfo {
+                    peer_id: "expired".to_owned(),
+                    previous_pins: vec![second_pin],
+                    last_rotation: 0,
+                    last_validation: 0,
+                    ..PeerCertificateInfo::default()
+                },
+            );
+        }
+        assert!(manager.cleanup_expired_pins().is_err());
+        assert!(manager.peer_certificate_info("expired").is_some());
+
+        std::fs::remove_dir_all(root).unwrap();
     }
 }
