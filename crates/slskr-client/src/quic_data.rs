@@ -161,6 +161,7 @@ impl QuicDataConnection {
                 Ok(QuicDataInboundStream::Unidirectional(QuicDataReceiveStream {
                     receive,
                     max_payload_bytes: self.max_payload_bytes,
+                    received_bytes: 0,
                 }))
             }
         }
@@ -490,10 +491,12 @@ impl QuicDataStream {
             QuicDataSendStream {
                 send: self.send,
                 max_payload_bytes: self.max_payload_bytes,
+                written_bytes: 0,
             },
             QuicDataReceiveStream {
                 receive: self.receive,
                 max_payload_bytes: self.max_payload_bytes,
+                received_bytes: 0,
             },
         )
     }
@@ -526,20 +529,29 @@ impl QuicDataStream {
 pub struct QuicDataSendStream {
     send: quinn::SendStream,
     max_payload_bytes: usize,
+    written_bytes: usize,
 }
 
 impl QuicDataSendStream {
     pub async fn write_all(&mut self, payload: &[u8]) -> Result<(), QuicDataError> {
-        if payload.len() > self.max_payload_bytes {
+        let Some(total) = self.written_bytes.checked_add(payload.len()) else {
             return Err(QuicDataError::OversizedPayload {
-                actual: payload.len(),
+                actual: usize::MAX,
+                max: self.max_payload_bytes,
+            });
+        };
+        if total > self.max_payload_bytes {
+            return Err(QuicDataError::OversizedPayload {
+                actual: total,
                 max: self.max_payload_bytes,
             });
         }
         self.send
             .write_all(payload)
             .await
-            .map_err(|error| QuicDataError::Stream(error.to_string()))
+            .map_err(|error| QuicDataError::Stream(error.to_string()))?;
+        self.written_bytes = total;
+        Ok(())
     }
 
     pub async fn write_payload(&mut self, payload: &[u8]) -> Result<(), QuicDataError> {
@@ -558,38 +570,76 @@ impl QuicDataSendStream {
 pub struct QuicDataReceiveStream {
     receive: quinn::RecvStream,
     max_payload_bytes: usize,
+    received_bytes: usize,
 }
 
 impl QuicDataReceiveStream {
     pub async fn read_chunk(&mut self, buffer: &mut [u8]) -> Result<usize, QuicDataError> {
+        if buffer.is_empty() {
+            return Ok(0);
+        }
+        if self.received_bytes >= self.max_payload_bytes {
+            let mut probe = [0_u8; 1];
+            return self
+                .receive
+                .read(&mut probe)
+                .await
+                .map_err(|error| QuicDataError::Stream(error.to_string()))?
+                .map_or(Ok(0), |_| {
+                    Err(QuicDataError::OversizedPayload {
+                        actual: self.max_payload_bytes.saturating_add(1),
+                        max: self.max_payload_bytes,
+                    })
+                });
+        }
+        let remaining = self.max_payload_bytes - self.received_bytes;
+        let read_length = buffer.len().min(remaining);
+        let read_buffer = &mut buffer[..read_length];
         self.receive
-            .read(buffer)
+            .read(read_buffer)
             .await
-            .map(|read| read.unwrap_or(0))
-            .map_err(|error| QuicDataError::Stream(error.to_string()))
+            .map_err(|error| QuicDataError::Stream(error.to_string()))?
+            .map_or(Ok(0), |read| {
+                self.received_bytes = self.received_bytes.saturating_add(read);
+                Ok(read)
+            })
     }
 
     pub async fn read_to_end(&mut self) -> Result<Vec<u8>, QuicDataError> {
-        self.receive
-            .read_to_end(self.max_payload_bytes)
+        let remaining = self
+            .max_payload_bytes
+            .checked_sub(self.received_bytes)
+            .ok_or(QuicDataError::OversizedPayload {
+                actual: self.received_bytes,
+                max: self.max_payload_bytes,
+            })?;
+        let payload = self
+            .receive
+            .read_to_end(remaining)
             .await
-            .map_err(|error| QuicDataError::Stream(error.to_string()))
+            .map_err(|error| QuicDataError::Stream(error.to_string()))?;
+        self.received_bytes = self.received_bytes.saturating_add(payload.len());
+        Ok(payload)
     }
 
     pub async fn read_to_end_after(
         &mut self,
         already_read: usize,
     ) -> Result<Vec<u8>, QuicDataError> {
-        if already_read > self.max_payload_bytes {
+        let consumed = self.received_bytes.max(already_read);
+        if consumed > self.max_payload_bytes {
             return Err(QuicDataError::OversizedPayload {
-                actual: already_read,
+                actual: consumed,
                 max: self.max_payload_bytes,
             });
         }
-        self.receive
-            .read_to_end(self.max_payload_bytes - already_read)
+        let payload = self
+            .receive
+            .read_to_end(self.max_payload_bytes - consumed)
             .await
-            .map_err(|error| QuicDataError::Stream(error.to_string()))
+            .map_err(|error| QuicDataError::Stream(error.to_string()))?;
+        self.received_bytes = consumed.saturating_add(payload.len());
+        Ok(payload)
     }
 }
 
@@ -771,6 +821,7 @@ mod tests {
     use std::net::SocketAddr;
 
     use rcgen::generate_simple_self_signed;
+    use tokio::sync::oneshot;
     use tokio_rustls::rustls::pki_types::PrivatePkcs8KeyDer;
 
     use super::{connect_quic_data, send_quic_data, QuicDataClient, QuicDataServer};
@@ -820,6 +871,104 @@ mod tests {
         .await
         .expect_err("oversized data payload must fail before network I/O");
         assert!(error.to_string().contains("too large"));
+    }
+
+    #[tokio::test]
+    async fn split_data_stream_enforces_cumulative_payload_limit() {
+        let certificate = generate_simple_self_signed(vec!["localhost".to_owned()]).unwrap();
+        let certificate_der = certificate.cert.der().clone();
+        let certificate_pin =
+            crate::quic_control::certificate_public_key_pin(certificate_der.as_ref()).unwrap();
+        let private_key = PrivatePkcs8KeyDer::from(certificate.signing_key.serialize_der());
+        let server = QuicDataServer::bind(
+            SocketAddr::from(([127, 0, 0, 1], 0)),
+            certificate_der,
+            private_key,
+            16,
+        )
+        .unwrap();
+        let address = server.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let connection = server
+                .accept()
+                .await
+                .expect("incoming QUIC data connection")
+                .expect("QUIC data connection");
+            let stream = connection.accept_stream().await.unwrap();
+            stream.read_payload().await.unwrap()
+        });
+
+        let client = connect_quic_data(address, certificate_pin, 8)
+            .await
+            .unwrap();
+        let stream = client.open_stream().await.unwrap();
+        let (mut send, _receive) = stream.split();
+        send.write_all(b"12345").await.unwrap();
+        let error = send
+            .write_all(b"6789")
+            .await
+            .expect_err("split stream must enforce its cumulative payload limit");
+        assert!(matches!(
+            error,
+            super::QuicDataError::OversizedPayload { actual: 9, max: 8 }
+        ));
+        send.finish().unwrap();
+
+        assert_eq!(server.await.unwrap(), b"12345");
+        client.close();
+    }
+
+    #[tokio::test]
+    async fn split_data_stream_receive_rejects_bytes_after_limit() {
+        let certificate = generate_simple_self_signed(vec!["localhost".to_owned()]).unwrap();
+        let certificate_der = certificate.cert.der().clone();
+        let certificate_pin =
+            crate::quic_control::certificate_public_key_pin(certificate_der.as_ref()).unwrap();
+        let private_key = PrivatePkcs8KeyDer::from(certificate.signing_key.serialize_der());
+        let server = QuicDataServer::bind(
+            SocketAddr::from(([127, 0, 0, 1], 0)),
+            certificate_der,
+            private_key,
+            16,
+        )
+        .unwrap();
+        let address = server.local_addr().unwrap();
+        let (release_tx, release_rx) = oneshot::channel();
+        let server = tokio::spawn(async move {
+            let connection = server
+                .accept()
+                .await
+                .expect("incoming QUIC data connection")
+                .expect("QUIC data connection");
+            let stream = connection.accept_stream().await.unwrap();
+            let (mut send, _receive) = stream.split();
+            send.write_all(b"123456789").await?;
+            send.finish()?;
+            let _ = release_rx.await;
+            Ok::<(), super::QuicDataError>(())
+        });
+
+        let client = connect_quic_data(address, certificate_pin, 8)
+            .await
+            .unwrap();
+        let stream = client.open_stream().await.unwrap();
+        let (mut send, mut receive) = stream.split();
+        send.write_all(b"x").await.unwrap();
+        let mut buffer = [0_u8; 16];
+        let received = receive.read_chunk(&mut buffer).await;
+        let error = receive
+            .read_chunk(&mut buffer)
+            .await
+            .expect_err("receive side must reject bytes after its cumulative limit");
+        assert!(matches!(
+            error,
+            super::QuicDataError::OversizedPayload { actual: 9, max: 8 }
+        ));
+
+        let _ = release_tx.send(());
+        assert!(server.await.unwrap().is_ok());
+        assert_eq!(received.unwrap(), 8);
+        client.close();
     }
 
     #[tokio::test]
