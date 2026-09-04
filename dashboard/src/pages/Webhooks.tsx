@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Plus, Trash2, TestTube } from 'lucide-react';
 import { isAbortError, requestJson } from '../lib/api';
 
@@ -35,13 +35,7 @@ export default function Webhooks({ apiUrl, apiKey }: WebhooksPageProps) {
     'user.disconnected',
   ];
 
-  useEffect(() => {
-    const controller = new AbortController();
-    void fetchWebhooks(controller.signal);
-    return () => controller.abort();
-  }, [apiUrl, apiKey]);
-
-  const fetchWebhooks = async (signal?: AbortSignal) => {
+  const fetchWebhooks = useCallback(async (signal?: AbortSignal) => {
     try {
       setLoading(true);
       setError(null);
@@ -51,14 +45,21 @@ export default function Webhooks({ apiUrl, apiKey }: WebhooksPageProps) {
         apiKey,
         { signal },
       );
+      if (signal?.aborted) return;
       setWebhooks(Array.isArray(data) ? data : data.webhooks || []);
     } catch (err) {
-      if (isAbortError(err)) return;
+      if (signal?.aborted || isAbortError(err)) return;
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) setLoading(false);
     }
-  };
+  }, [apiKey, apiUrl]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetchWebhooks(controller.signal);
+    return () => controller.abort();
+  }, [fetchWebhooks]);
 
   const handleCreateWebhook = async () => {
     if (!newUrl) return;

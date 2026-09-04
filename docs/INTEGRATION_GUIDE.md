@@ -263,7 +263,7 @@ curl http://127.0.0.1:5030/api/health
 curl http://127.0.0.1:5030/api/health
 
 # Test API keys (requires auth)
-curl -H "Authorization: Bearer <key>" http://127.0.0.1:5030/api/admin/api-keys
+curl -H "Authorization: Bearer <key>" http://127.0.0.1:5030/api/admin/keys
 
 # Test webhooks
 curl -X POST http://127.0.0.1:5030/api/admin/webhooks \

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { isAbortError } from '../lib/api';
 import { parseMonitoringMetrics, type MonitoringMetrics } from '../lib/prometheus';
 
 interface MonitoringPageProps {
@@ -40,7 +41,7 @@ export default function Monitoring({ apiUrl, apiKey }: MonitoringPageProps) {
         if (
           !active ||
           controller !== requestController ||
-          (err instanceof DOMException && err.name === 'AbortError')
+          isAbortError(err)
         ) {
           return;
         }

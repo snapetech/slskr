@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Copy, Check } from 'lucide-react';
 import { isAbortError, requestJson } from '../lib/api';
 
@@ -30,6 +30,13 @@ export default function ApiKeys({ apiUrl, apiKey }: ApiKeysPageProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const copyTimeoutRef = useRef<number | null>(null);
+
+  useEffect(() => () => {
+    if (copyTimeoutRef.current !== null) {
+      window.clearTimeout(copyTimeoutRef.current);
+    }
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -72,7 +79,13 @@ export default function ApiKeys({ apiUrl, apiKey }: ApiKeysPageProps) {
     try {
       await navigator.clipboard.writeText(key.key);
       setCopiedId(key.id);
-      window.setTimeout(() => setCopiedId(null), 2000);
+      if (copyTimeoutRef.current !== null) {
+        window.clearTimeout(copyTimeoutRef.current);
+      }
+      copyTimeoutRef.current = window.setTimeout(() => {
+        copyTimeoutRef.current = null;
+        setCopiedId(null);
+      }, 2000);
     } catch {
       setError('Unable to copy the API key');
     }

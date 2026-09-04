@@ -1,5 +1,6 @@
 import React from "react";
 import { Link, useLocation } from "react-router-dom";
+import { useApi } from "../context/ApiContext";
 import {
   LayoutDashboard,
   Key,
@@ -14,6 +15,12 @@ import {
 
 export default function Sidebar() {
   const location = useLocation();
+  const { setApiKey, setIsConnected } = useApi();
+
+  const handleLogout = () => {
+    setApiKey(null);
+    setIsConnected(false);
+  };
 
   const links = [
     { path: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -72,7 +79,11 @@ export default function Sidebar() {
             <Coffee className="h-4 w-4" /> Ko-fi
           </a>
         </div>
-        <button className="flex items-center w-full text-gray-300 hover:text-white transition-colors">
+        <button
+          className="flex items-center w-full text-gray-300 hover:text-white transition-colors"
+          onClick={handleLogout}
+          type="button"
+        >
           <LogOut className="w-5 h-5 mr-3" />
           Logout
         </button>
