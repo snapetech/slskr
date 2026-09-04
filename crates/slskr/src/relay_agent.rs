@@ -5,7 +5,7 @@
 //! it authenticates to the hub, publishes the local share snapshot, answers
 //! file-upload requests, and receives completed-download notifications.
 
-use std::{sync::Arc, time::Duration};
+use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use futures_util::{
@@ -19,12 +19,13 @@ use sha2::{Digest, Sha256};
 use tokio::{
     fs,
     io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt, SeekFrom},
+    net::{lookup_host, TcpStream},
     sync::Semaphore,
     time,
 };
 use tokio_rustls::rustls;
 use tokio_tungstenite::{
-    connect_async_tls_with_config,
+    client_async_tls_with_config,
     tungstenite::{protocol::WebSocketConfig, Message},
     Connector,
 };
@@ -75,7 +76,13 @@ async fn run_connection(state: &Arc<AppState>, settings: &RelaySettings) -> Resu
         return Err("relay agent instance name is empty".to_owned());
     }
     let target = state.config.controller_profile;
-    let http_client = build_http_client(settings, target)?;
+    let relay_target = time::timeout(
+        RELAY_CONNECT_TIMEOUT,
+        resolve_relay_target(&settings.controller.address),
+    )
+    .await
+    .map_err(|_| "relay controller address resolution timed out".to_owned())??;
+    let http_client = build_http_client(settings, target, &relay_target)?;
     let websocket_url =
         relay_websocket_url(&settings.controller.address, &settings.controller.api_key)?;
     let connector = if settings.controller.ignore_certificate_errors
@@ -90,9 +97,14 @@ async fn run_connection(state: &Arc<AppState>, settings: &RelaySettings) -> Resu
     let websocket_config = WebSocketConfig::default()
         .max_message_size(Some(MAX_RELAY_SIGNALR_FRAME_BYTES))
         .max_frame_size(Some(MAX_RELAY_SIGNALR_FRAME_BYTES));
-    let (mut socket, _) = time::timeout(
+    let mut socket = time::timeout(
         RELAY_CONNECT_TIMEOUT,
-        connect_async_tls_with_config(websocket_url, Some(websocket_config), true, connector),
+        connect_relay_websocket(
+            &websocket_url,
+            &relay_target,
+            Some(websocket_config),
+            connector,
+        ),
     )
     .await
     .map_err(|_| "relay controller websocket connection timed out".to_owned())?
@@ -243,11 +255,13 @@ async fn run_connection(state: &Arc<AppState>, settings: &RelaySettings) -> Resu
 fn build_http_client(
     settings: &RelaySettings,
     target: ControllerProfile,
+    relay_target: &ResolvedRelayTarget,
 ) -> Result<reqwest::Client, String> {
     let mut builder = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .timeout(RELAY_REQUEST_TIMEOUT)
-        .no_proxy();
+        .no_proxy()
+        .resolve_to_addrs(&relay_target.host, &relay_target.addrs);
     if settings.controller.ignore_certificate_errors
         || !relay_pins(&settings.controller.pinned_spki).is_empty()
     {
@@ -256,6 +270,69 @@ fn build_http_client(
     builder
         .build()
         .map_err(|error| format!("relay HTTP client construction failed: {error}"))
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ResolvedRelayTarget {
+    host: String,
+    port: u16,
+    addrs: Vec<SocketAddr>,
+}
+
+async fn resolve_relay_target(address: &str) -> Result<ResolvedRelayTarget, String> {
+    let parsed = reqwest::Url::parse(address.trim().trim_end_matches('/'))
+        .map_err(|error| format!("relay controller address is invalid: {error}"))?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err("relay controller address must use http or https".to_owned());
+    }
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return Err("relay controller address must not contain embedded credentials".to_owned());
+    }
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| "relay controller address must include a host".to_owned())?
+        .to_owned();
+    let port = parsed
+        .port_or_known_default()
+        .ok_or_else(|| "relay controller address port is unknown".to_owned())?;
+    let mut addrs = lookup_host((host.as_str(), port))
+        .await
+        .map_err(|error| format!("relay controller address resolution failed: {error}"))?
+        .collect::<Vec<_>>();
+    addrs.sort_unstable();
+    addrs.dedup();
+    if addrs.is_empty() {
+        return Err("relay controller address did not resolve".to_owned());
+    }
+    Ok(ResolvedRelayTarget { host, port, addrs })
+}
+
+async fn connect_relay_websocket(
+    websocket_url: &str,
+    relay_target: &ResolvedRelayTarget,
+    config: Option<WebSocketConfig>,
+    connector: Option<Connector>,
+) -> Result<RelaySocket, String> {
+    let websocket = reqwest::Url::parse(websocket_url)
+        .map_err(|error| format!("relay websocket URL is invalid: {error}"))?;
+    let websocket_port = websocket
+        .port_or_known_default()
+        .ok_or_else(|| "relay websocket URL port is unknown".to_owned())?;
+    if websocket.host_str() != Some(relay_target.host.as_str())
+        || websocket_port != relay_target.port
+    {
+        return Err("relay websocket target does not match the resolved controller".to_owned());
+    }
+    let socket = TcpStream::connect(relay_target.addrs.as_slice())
+        .await
+        .map_err(|error| format!("relay controller websocket TCP connection failed: {error}"))?;
+    socket
+        .set_nodelay(true)
+        .map_err(|error| format!("relay websocket TCP setup failed: {error}"))?;
+    let (socket, _) = client_async_tls_with_config(websocket_url, socket, config, connector)
+        .await
+        .map_err(|error| format!("relay controller websocket handshake failed: {error}"))?;
+    Ok(socket)
 }
 
 #[derive(Debug)]
@@ -1006,6 +1083,20 @@ mod tests {
             relay_upload_request(&valid).expect("valid upload request"),
             ("track.flac".to_owned(), 42, "upload-token".to_owned())
         );
+    }
+
+    #[tokio::test]
+    async fn relay_controller_resolution_rejects_embedded_credentials() {
+        let resolved = resolve_relay_target("http://127.0.0.1:4242")
+            .await
+            .expect("literal controller target");
+        assert_eq!(resolved.host, "127.0.0.1");
+        assert_eq!(resolved.port, 4242);
+        assert_eq!(resolved.addrs, vec!["127.0.0.1:4242".parse().unwrap()]);
+        assert!(resolve_relay_target("https://user:secret@127.0.0.1:4242")
+            .await
+            .expect_err("embedded controller credentials")
+            .contains("embedded credentials"));
     }
 
     #[test]
