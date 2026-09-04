@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, Trash2, TestTube } from 'lucide-react';
+import { isAbortError, requestJson } from '../lib/api';
 
 interface WebhooksPageProps {
   apiUrl: string;
@@ -35,22 +36,24 @@ export default function Webhooks({ apiUrl, apiKey }: WebhooksPageProps) {
   ];
 
   useEffect(() => {
-    fetchWebhooks();
+    const controller = new AbortController();
+    void fetchWebhooks(controller.signal);
+    return () => controller.abort();
   }, [apiUrl, apiKey]);
 
-  const fetchWebhooks = async () => {
+  const fetchWebhooks = async (signal?: AbortSignal) => {
     try {
       setLoading(true);
       setError(null);
 
-      const headers: HeadersInit = {};
-      if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
-
-      const res = await fetch(`${apiUrl}/api/admin/webhooks`, { headers });
-      if (!res.ok) throw new Error('Failed to fetch webhooks');
-      const data = await res.json();
+      const data = await requestJson<Webhook[] | { webhooks?: Webhook[] }>(
+        `${apiUrl}/api/admin/webhooks`,
+        apiKey,
+        { signal },
+      );
       setWebhooks(Array.isArray(data) ? data : data.webhooks || []);
     } catch (err) {
+      if (isAbortError(err)) return;
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
       setLoading(false);
@@ -61,21 +64,13 @@ export default function Webhooks({ apiUrl, apiKey }: WebhooksPageProps) {
     if (!newUrl) return;
 
     try {
-      const headers: HeadersInit = {
-        'Content-Type': 'application/json',
-      };
-      if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
-
-      const res = await fetch(`${apiUrl}/api/admin/webhooks`, {
+      await requestJson(`${apiUrl}/api/admin/webhooks`, apiKey, {
         method: 'POST',
-        headers,
         body: JSON.stringify({
           url: newUrl,
           events: selectedEvents,
         }),
       });
-
-      if (!res.ok) throw new Error('Failed to create webhook');
       
       setShowForm(false);
       setNewUrl('');
@@ -90,15 +85,9 @@ export default function Webhooks({ apiUrl, apiKey }: WebhooksPageProps) {
     if (!window.confirm('Delete this webhook?')) return;
 
     try {
-      const headers: HeadersInit = {};
-      if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
-
-      const res = await fetch(`${apiUrl}/api/admin/webhooks/${id}`, {
+      await requestJson(`${apiUrl}/api/admin/webhooks/${id}`, apiKey, {
         method: 'DELETE',
-        headers,
       });
-
-      if (!res.ok) throw new Error('Failed to delete webhook');
       await fetchWebhooks();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
@@ -107,12 +96,8 @@ export default function Webhooks({ apiUrl, apiKey }: WebhooksPageProps) {
 
   const handleTestWebhook = async (id: string) => {
     try {
-      const headers: HeadersInit = {};
-      if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
-
-      await fetch(`${apiUrl}/api/admin/webhooks/${id}/test`, {
+      await requestJson(`${apiUrl}/api/admin/webhooks/${id}/test`, apiKey, {
         method: 'POST',
-        headers,
       });
 
       alert('Test webhook sent!');
@@ -183,7 +168,8 @@ export default function Webhooks({ apiUrl, apiKey }: WebhooksPageProps) {
             <div className="flex gap-2">
               <button
                 onClick={handleCreateWebhook}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                disabled={selectedEvents.length === 0}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
               >
                 Create
               </button>

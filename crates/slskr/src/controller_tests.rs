@@ -17348,6 +17348,48 @@ async fn events_api_records_mutating_workflows() {
 async fn webhook_registration_rejects_invalid_events_and_caps_count() {
     let (state, _receiver) = test_state();
 
+    let (array_state, _array_receiver) = test_state();
+    let array_created = super::route_http_request(
+        "POST",
+        "/api/webhooks",
+        None,
+        r#"{"url":"https://example.test/array-hook","events":["message.sent","search.created","message.sent"]}"#,
+        &array_state,
+    )
+    .await
+    .expect("array webhook");
+    assert_eq!(array_created.status, "201 Created");
+    let array_events = array_state
+        .webhooks
+        .read()
+        .await
+        .get_all()
+        .first()
+        .map(|webhook| webhook.events.clone())
+        .expect("array webhook record");
+    assert_eq!(array_events, vec![
+        super::webhooks::WebhookEvent::MessageSent,
+        super::webhooks::WebhookEvent::SearchCreated,
+    ]);
+
+    let admin_array_created = super::route_http_request(
+        "POST",
+        "/api/admin/webhooks",
+        None,
+        r#"{"url":"https://example.test/admin-array-hook","events":["transfer.failed"]}"#,
+        &array_state,
+    )
+    .await
+    .expect("admin array webhook");
+    assert_eq!(admin_array_created.status, "201 Created");
+    assert!(array_state
+        .webhooks
+        .read()
+        .await
+        .get_all()
+        .iter()
+        .any(|webhook| webhook.events == vec![super::webhooks::WebhookEvent::TransferFailed]));
+
     let invalid = super::route_http_request(
         "POST",
         "/api/webhooks",

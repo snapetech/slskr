@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ApiProvider, useApi } from './context/ApiContext';
@@ -19,10 +19,16 @@ import Configuration from './pages/Configuration';
 function AppContent() {
   const { apiUrl, apiKey, isConnected, setIsConnected } = useApi();
 
+  const healthHeaders = useMemo<HeadersInit>(() => {
+    const headers: HeadersInit = {};
+    if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+    return headers;
+  }, [apiKey]);
+
   // Fetch health check with auto-refresh
   const { data: health } = useFetch(
     `${apiUrl}/api/health`,
-    { interval: 5000 }
+    { headers: healthHeaders, interval: 5000 }
   );
 
   // Update connection status when health data changes

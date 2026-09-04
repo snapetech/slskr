@@ -21405,26 +21405,10 @@ async fn route_http_request_with_headers(
                  return Ok(routing::bad_request_response(&error.to_string()));
              }
 
-             let events_str = extract_json_string_field(body, "events");
-             let events = if let Some(ref e) = events_str {
-                 let mut events = Vec::new();
-                 for ev in e.split(',') {
-                     let event = webhooks::WebhookEvent::from_wire(ev);
-                     let Some(event) = event else {
-                         return Ok(routing::bad_request_response("invalid webhook event"));
-                     };
-                     if !events.contains(&event) {
-                         events.push(event);
-                     }
-                 }
-                 events
-             } else {
-                 vec![webhooks::WebhookEvent::SearchCreated]
+             let events = match extract_webhook_events(body) {
+                 Ok(events) => events,
+                 Err(error) => return Ok(routing::bad_request_response(error)),
              };
-
-             if events.is_empty() {
-                 return Ok(routing::bad_request_response("no valid events specified"));
-             }
 
              let secret = match extract_json_string_field(body, "secret") {
                  Some(secret) => {
@@ -25741,6 +25725,10 @@ async fn route_http_request_with_headers(
             if let Err(error) = webhooks::validate_webhook_url_for_registration(&url) {
                 return Ok(routing::bad_request_response(&error.to_string()));
             }
+            let events = match extract_webhook_events(body) {
+                Ok(events) => events,
+                Err(error) => return Ok(routing::bad_request_response(error)),
+            };
             let secret = match extract_json_string_field(body, "secret") {
                 Some(secret) => {
                     if let Err(error) = webhooks::validate_webhook_secret(&secret) {
@@ -25757,11 +25745,7 @@ async fn route_http_request_with_headers(
                     secret
                 }
             };
-            let webhook = webhooks::Webhook::new(
-                url,
-                vec![webhooks::WebhookEvent::SearchCreated],
-                secret.clone(),
-            );
+            let webhook = webhooks::Webhook::new(url, events, secret.clone());
             let mut webhooks = state.webhooks.write().await;
             let previous = webhooks.clone();
             let webhook_id = match webhooks.register(webhook.clone()) {
@@ -25888,7 +25872,7 @@ async fn route_http_request_with_headers(
             Ok(HttpResponse {
                 status: "200 OK",
                 content_type: "application/json",
-                body: r#"{"keys":[],"total":0}"#.to_owned(),
+                body: r#"{"keys":[],"total":0,"mode":"static","reason":"static SLSKR_API_TOKEN auth is active"}"#.to_owned(),
             })
         }
         ("DELETE", path) if path.starts_with("/api/admin/keys/") => {
@@ -48261,6 +48245,41 @@ fn extract_json_u32_field(body: &str, field: &str) -> Option<u32> {
         .get(field)?
         .as_u64()
         .and_then(|value| u32::try_from(value).ok())
+}
+
+fn extract_webhook_events(
+    body: &str,
+) -> Result<Vec<webhooks::WebhookEvent>, &'static str> {
+    let payload = serde_json::from_str::<serde_json::Value>(body)
+        .map_err(|_| "webhook payload must be valid JSON")?;
+    let Some(value) = payload.get("events") else {
+        return Ok(vec![webhooks::WebhookEvent::SearchCreated]);
+    };
+
+    let values = match value {
+        serde_json::Value::Array(values) => values
+            .iter()
+            .map(|value| value.as_str().ok_or("webhook events must be strings"))
+            .collect::<Result<Vec<_>, _>>()?,
+        serde_json::Value::String(value) => value.split(',').collect::<Vec<_>>(),
+        _ => return Err("webhook events must be an array or comma-separated string"),
+    };
+    if values.len() > webhooks::MAX_WEBHOOK_EVENTS {
+        return Err("too many webhook events");
+    }
+
+    let mut events = Vec::with_capacity(values.len());
+    for value in values {
+        let event = webhooks::WebhookEvent::from_wire(value)
+            .ok_or("invalid webhook event")?;
+        if !events.contains(&event) {
+            events.push(event);
+        }
+    }
+    if events.is_empty() {
+        return Err("no valid events specified");
+    }
+    Ok(events)
 }
 
 fn unversioned_mutation_requires_api_version(method: &str, path: &str) -> bool {

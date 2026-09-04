@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { Trash2, Plus, Copy, Check } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Copy, Check } from 'lucide-react';
+import { isAbortError, requestJson } from '../lib/api';
 
 interface ApiKeysPageProps {
   apiUrl: string;
@@ -9,106 +10,76 @@ interface ApiKeysPageProps {
 interface ApiKey {
   id: string;
   key?: string;
-  scopes: string[];
-  created_at: number;
+  scopes?: string[];
+  created_at?: number;
   expires_at?: number;
-  last_used?: number;
-  active: boolean;
+  active?: boolean;
+}
+
+interface ApiKeyResponse {
+  keys?: ApiKey[];
+  total?: number;
+  mode?: string;
+  reason?: string;
 }
 
 export default function ApiKeys({ apiUrl, apiKey }: ApiKeysPageProps) {
   const [keys, setKeys] = useState<ApiKey[]>([]);
+  const [mode, setMode] = useState('static');
+  const [reason, setReason] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [showForm, setShowForm] = useState(false);
-  const [newScopes, setNewScopes] = useState<string[]>(['read']);
-  const [expiresIn, setExpiresIn] = useState<number | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
-  const availableScopes = ['read', 'write', 'admin', 'webhooks'];
-
   useEffect(() => {
-    fetchKeys();
-  }, [apiUrl, apiKey]);
+    const controller = new AbortController();
+    let active = true;
 
-  const fetchKeys = async () => {
-    try {
+    const fetchKeys = async () => {
       setLoading(true);
       setError(null);
-
-      const headers: HeadersInit = {};
-      if (apiKey) {
-        headers['Authorization'] = `Bearer ${apiKey}`;
+      try {
+        const data = await requestJson<ApiKeyResponse | ApiKey[]>(`${apiUrl}/api/admin/keys`, apiKey, {
+          signal: controller.signal,
+        });
+        if (!active) return;
+        if (Array.isArray(data)) {
+          setKeys(data);
+          setMode(data.length > 0 ? 'managed' : 'static');
+          setReason('');
+        } else {
+          setKeys(data.keys ?? []);
+          setMode(data.mode ?? 'static');
+          setReason(data.reason ?? '');
+        }
+      } catch (fetchError) {
+        if (!active || isAbortError(fetchError)) return;
+        setError(fetchError instanceof Error ? fetchError.message : 'Failed to fetch API keys');
+      } finally {
+        if (active) setLoading(false);
       }
+    };
 
-      const res = await fetch(`${apiUrl}/api/admin/api-keys`, { headers });
-      if (!res.ok) throw new Error('Failed to fetch API keys');
-      const data = await res.json();
-      setKeys(Array.isArray(data) ? data : data.keys || []);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
-    } finally {
-      setLoading(false);
-    }
-  };
+    void fetchKeys();
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [apiUrl, apiKey]);
 
-  const handleCreateKey = async () => {
+  const handleCopyKey = async (key: ApiKey) => {
+    if (!key.key) return;
     try {
-      const headers: HeadersInit = {
-        'Content-Type': 'application/json',
-      };
-      if (apiKey) {
-        headers['Authorization'] = `Bearer ${apiKey}`;
-      }
-
-      const res = await fetch(`${apiUrl}/api/admin/api-keys`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          scopes: newScopes,
-          expires_days: expiresIn,
-        }),
-      });
-
-      if (!res.ok) throw new Error('Failed to create API key');
-      
-      setShowForm(false);
-      setNewScopes(['read']);
-      setExpiresIn(null);
-      await fetchKeys();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
+      await navigator.clipboard.writeText(key.key);
+      setCopiedId(key.id);
+      window.setTimeout(() => setCopiedId(null), 2000);
+    } catch {
+      setError('Unable to copy the API key');
     }
   };
 
-  const handleDeleteKey = async (id: string) => {
-    if (!window.confirm('Delete this API key?')) return;
-
-    try {
-      const headers: HeadersInit = {};
-      if (apiKey) {
-        headers['Authorization'] = `Bearer ${apiKey}`;
-      }
-
-      const res = await fetch(`${apiUrl}/api/admin/api-keys/${id}`, {
-        method: 'DELETE',
-        headers,
-      });
-
-      if (!res.ok) throw new Error('Failed to delete API key');
-      await fetchKeys();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
-    }
-  };
-
-  const handleCopyKey = (id: string) => {
-    navigator.clipboard.writeText(id);
-    setCopiedId(id);
-    setTimeout(() => setCopiedId(null), 2000);
-  };
-
-  const formatDate = (timestamp: number) => {
+  const formatDate = (timestamp?: number) => {
+    if (!timestamp) return 'Unknown';
     return new Date(timestamp * 1000).toLocaleDateString();
   };
 
@@ -118,15 +89,11 @@ export default function ApiKeys({ apiUrl, apiKey }: ApiKeysPageProps) {
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h2 className="text-2xl font-bold text-gray-900">API Keys</h2>
-        <button
-          onClick={() => setShowForm(!showForm)}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-        >
-          <Plus className="w-4 h-4" />
-          New Key
-        </button>
+      <div>
+        <h2 className="text-2xl font-bold text-gray-900">API authentication</h2>
+        <p className="mt-1 text-sm text-gray-600">
+          Authentication is configured on the daemon, not generated by this dashboard.
+        </p>
       </div>
 
       {error && (
@@ -135,73 +102,18 @@ export default function ApiKeys({ apiUrl, apiKey }: ApiKeysPageProps) {
         </div>
       )}
 
-      {showForm && (
-        <div className="bg-white rounded-lg shadow p-6">
-          <h3 className="text-lg font-semibold mb-4">Create New API Key</h3>
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Scopes
-              </label>
-              <div className="space-y-2">
-                {availableScopes.map((scope) => (
-                  <label key={scope} className="flex items-center">
-                    <input
-                      type="checkbox"
-                      checked={newScopes.includes(scope)}
-                      onChange={(e) => {
-                        if (e.target.checked) {
-                          setNewScopes([...newScopes, scope]);
-                        } else {
-                          setNewScopes(newScopes.filter((s) => s !== scope));
-                        }
-                      }}
-                      className="w-4 h-4 text-blue-600 rounded"
-                    />
-                    <span className="ml-2 text-gray-700">{scope}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
+      <div className="bg-blue-50 border border-blue-200 rounded-lg p-6">
+        <h3 className="text-lg font-semibold text-blue-900">{mode === 'static' ? 'Static token authentication' : 'Managed API keys'}</h3>
+        <p className="text-blue-800 mt-2">
+          {reason || 'Use the configured SLSKR_API_TOKEN (or a configured ApiKey credential) in the dashboard settings.'}
+        </p>
+        <p className="text-sm text-blue-700 mt-3">
+          The token value is never returned by the daemon and is not displayed here.
+        </p>
+      </div>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Expires In (days)
-              </label>
-              <input
-                type="number"
-                value={expiresIn || ''}
-                onChange={(e) => setExpiresIn(e.target.value ? parseInt(e.target.value) : null)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="Leave empty for no expiration"
-              />
-            </div>
-
-            <div className="flex gap-2">
-              <button
-                onClick={handleCreateKey}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-              >
-                Create
-              </button>
-              <button
-                onClick={() => setShowForm(false)}
-                className="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* API Keys List */}
-      <div className="bg-white rounded-lg shadow overflow-hidden">
-        {keys.length === 0 ? (
-          <div className="p-6 text-center text-gray-500">
-            No API keys yet. Create one to get started.
-          </div>
-        ) : (
+      {keys.length > 0 && (
+        <div className="bg-white rounded-lg shadow overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead className="bg-gray-50 border-b border-gray-200">
@@ -211,73 +123,37 @@ export default function ApiKeys({ apiUrl, apiKey }: ApiKeysPageProps) {
                   <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">Created</th>
                   <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">Expires</th>
                   <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">Status</th>
-                  <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">Actions</th>
+                  <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">Secret</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
-                {keys.map((k) => (
-                  <tr key={k.id} className="hover:bg-gray-50">
+                {keys.map((key) => (
+                  <tr key={key.id} className="hover:bg-gray-50">
                     <td className="px-6 py-4">
-                      <div className="flex items-center gap-2">
-                        <code className="text-sm bg-gray-100 px-2 py-1 rounded">
-                          {k.id.substring(0, 12)}...
-                        </code>
+                      <code className="text-sm bg-gray-100 px-2 py-1 rounded">{key.id}</code>
+                    </td>
+                    <td className="px-6 py-4 text-sm text-gray-600">{(key.scopes ?? []).join(', ') || 'Unknown'}</td>
+                    <td className="px-6 py-4 text-sm text-gray-600">{formatDate(key.created_at)}</td>
+                    <td className="px-6 py-4 text-sm text-gray-600">{key.expires_at ? formatDate(key.expires_at) : 'Never'}</td>
+                    <td className="px-6 py-4 text-sm text-gray-600">{key.active === false ? 'Revoked' : 'Active'}</td>
+                    <td className="px-6 py-4">
+                      {key.key && (
                         <button
-                          onClick={() => handleCopyKey(k.id)}
-                          className="p-1 hover:bg-gray-200 rounded"
+                          onClick={() => void handleCopyKey(key)}
+                          className="p-2 hover:bg-gray-100 rounded text-gray-600"
+                          aria-label={`Copy key ${key.id}`}
                         >
-                          {copiedId === k.id ? (
-                            <Check className="w-4 h-4 text-green-600" />
-                          ) : (
-                            <Copy className="w-4 h-4 text-gray-400" />
-                          )}
+                          {copiedId === key.id ? <Check className="w-4 h-4 text-green-600" /> : <Copy className="w-4 h-4" />}
                         </button>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="flex flex-wrap gap-1">
-                        {k.scopes.map((scope) => (
-                          <span
-                            key={scope}
-                            className="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded"
-                          >
-                            {scope}
-                          </span>
-                        ))}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 text-sm text-gray-600">
-                      {formatDate(k.created_at)}
-                    </td>
-                    <td className="px-6 py-4 text-sm text-gray-600">
-                      {k.expires_at ? formatDate(k.expires_at) : 'Never'}
-                    </td>
-                    <td className="px-6 py-4">
-                      <span
-                        className={`px-2 py-1 rounded text-xs font-medium ${
-                          k.active
-                            ? 'bg-green-100 text-green-800'
-                            : 'bg-red-100 text-red-800'
-                        }`}
-                      >
-                        {k.active ? 'Active' : 'Revoked'}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4">
-                      <button
-                        onClick={() => handleDeleteKey(k.id)}
-                        className="p-2 hover:bg-red-100 rounded text-red-600"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      )}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }

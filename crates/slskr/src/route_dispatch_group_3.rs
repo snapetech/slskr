@@ -629,6 +629,10 @@ async fn route_dispatch_group_3(context: &RouteDispatchContext<'_, '_>) -> Route
             if let Err(error) = webhooks::validate_webhook_url_for_registration(&url) {
                 return Ok(routing::bad_request_response(&error.to_string()));
             }
+            let events = match extract_webhook_events(body) {
+                Ok(events) => events,
+                Err(error) => return Ok(routing::bad_request_response(error)),
+            };
             let secret = match extract_json_string_field(body, "secret") {
                 Some(secret) => {
                     if let Err(error) = webhooks::validate_webhook_secret(&secret) {
@@ -645,11 +649,7 @@ async fn route_dispatch_group_3(context: &RouteDispatchContext<'_, '_>) -> Route
                     secret
                 }
             };
-            let webhook = webhooks::Webhook::new(
-                url,
-                vec![webhooks::WebhookEvent::SearchCreated],
-                secret.clone(),
-            );
+            let webhook = webhooks::Webhook::new(url, events, secret.clone());
             let mut webhooks = state.webhooks.write().await;
             let previous = webhooks.clone();
             let webhook_id = match webhooks.register(webhook.clone()) {
@@ -781,7 +781,7 @@ async fn route_dispatch_group_3(context: &RouteDispatchContext<'_, '_>) -> Route
         ("GET", "/api/admin/keys") => Ok(HttpResponse {
             status: "200 OK",
             content_type: "application/json",
-            body: r#"{"keys":[],"total":0}"#.to_owned(),
+            body: r#"{"keys":[],"total":0,"mode":"static","reason":"static SLSKR_API_TOKEN auth is active"}"#.to_owned(),
         }),
         ("DELETE", path) if path.starts_with("/api/admin/keys/") => {
             let key_id = path.rsplit('/').next().unwrap_or("");

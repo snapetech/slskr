@@ -13,6 +13,16 @@ interface UseFetchState<T> {
   refetch: () => Promise<void>;
 }
 
+function headersKey(headers?: HeadersInit): string {
+  if (!headers) return '';
+
+  return JSON.stringify(
+    Array.from(new Headers(headers).entries()).sort(([left], [right]) =>
+      left.localeCompare(right),
+    ),
+  );
+}
+
 /**
  * Custom hook for fetching data with proper cleanup and abort handling
  */
@@ -28,21 +38,29 @@ export function useFetch<T>(
   const isMountedRef = useRef(true);
   const abortControllerRef = useRef<AbortController | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const optionsRef = useRef(options);
+  optionsRef.current = options;
+
+  const interval = options?.interval;
+  const requestHeadersKey = headersKey(options?.headers);
 
   const fetchData = useCallback(async () => {
     if (!url) return;
 
+    const currentOptions = optionsRef.current;
+
     // Cancel previous request
     abortControllerRef.current?.abort();
-    abortControllerRef.current = new AbortController();
+    const requestController = new AbortController();
+    abortControllerRef.current = requestController;
 
     try {
       setLoading(true);
       setError(null);
 
       const response = await fetch(url, {
-        signal: abortControllerRef.current.signal,
-        headers: options?.headers || {},
+        signal: requestController.signal,
+        headers: currentOptions?.headers || {},
       });
 
       if (!response.ok) {
@@ -52,7 +70,10 @@ export function useFetch<T>(
       const result = await response.json() as T;
 
       // Only update state if component is still mounted
-      if (isMountedRef.current) {
+      if (
+        isMountedRef.current &&
+        abortControllerRef.current === requestController
+      ) {
         setData(result);
         setError(null);
       }
@@ -64,17 +85,23 @@ export function useFetch<T>(
 
       const error = err instanceof Error ? err : new Error('Unknown error');
       
-      if (isMountedRef.current) {
+      if (
+        isMountedRef.current &&
+        abortControllerRef.current === requestController
+      ) {
         setError(error);
         setData(null);
-        options?.onError?.(error);
+        currentOptions?.onError?.(error);
       }
     } finally {
-      if (isMountedRef.current) {
+      if (
+        isMountedRef.current &&
+        abortControllerRef.current === requestController
+      ) {
         setLoading(false);
       }
     }
-  }, [url, options]);
+  }, [url, requestHeadersKey]);
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -83,8 +110,8 @@ export function useFetch<T>(
     fetchData();
 
     // Set up auto-refresh if interval is specified
-    if (options?.interval && options.interval > 0) {
-      intervalRef.current = setInterval(fetchData, options.interval);
+    if (interval && interval > 0) {
+      intervalRef.current = setInterval(fetchData, interval);
     }
 
     // Cleanup on unmount
@@ -99,7 +126,7 @@ export function useFetch<T>(
         clearInterval(intervalRef.current);
       }
     };
-  }, [url, fetchData, options?.interval]);
+  }, [url, fetchData, interval]);
 
   return { data, loading, error, refetch: fetchData };
 }

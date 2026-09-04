@@ -1217,26 +1217,10 @@ async fn route_dispatch_group_1(context: &RouteDispatchContext<'_, '_>) -> Route
                 return Ok(routing::bad_request_response(&error.to_string()));
             }
 
-            let events_str = extract_json_string_field(body, "events");
-            let events = if let Some(ref e) = events_str {
-                let mut events = Vec::new();
-                for ev in e.split(',') {
-                    let event = webhooks::WebhookEvent::from_wire(ev);
-                    let Some(event) = event else {
-                        return Ok(routing::bad_request_response("invalid webhook event"));
-                    };
-                    if !events.contains(&event) {
-                        events.push(event);
-                    }
-                }
-                events
-            } else {
-                vec![webhooks::WebhookEvent::SearchCreated]
+            let events = match extract_webhook_events(body) {
+                Ok(events) => events,
+                Err(error) => return Ok(routing::bad_request_response(error)),
             };
-
-            if events.is_empty() {
-                return Ok(routing::bad_request_response("no valid events specified"));
-            }
 
             let secret = match extract_json_string_field(body, "secret") {
                 Some(secret) => {

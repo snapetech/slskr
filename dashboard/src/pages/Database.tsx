@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Trash2, Database as DatabaseIcon } from 'lucide-react';
+import { isAbortError, requestJson } from '../lib/api';
 
 interface DatabasePageProps {
   apiUrl: string;
@@ -7,9 +8,9 @@ interface DatabasePageProps {
 }
 
 interface DatabaseStats {
-  search_count: number;
-  transfer_count: number;
-  message_count: number;
+  searches?: number;
+  transfers?: number;
+  messages?: number;
 }
 
 export default function Database({ apiUrl, apiKey }: DatabasePageProps) {
@@ -18,20 +19,19 @@ export default function Database({ apiUrl, apiKey }: DatabasePageProps) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetchStats();
+    const controller = new AbortController();
+    void fetchStats(controller.signal);
+    return () => controller.abort();
   }, [apiUrl, apiKey]);
 
-  const fetchStats = async () => {
+  const fetchStats = async (signal?: AbortSignal) => {
     try {
       setLoading(true);
-      const headers: HeadersInit = {};
-      if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
-
-      const res = await fetch(`${apiUrl}/api/admin/database/stats`, { headers });
-      if (!res.ok) throw new Error('Failed to fetch database stats');
-      const data = await res.json();
+      setError(null);
+      const data = await requestJson<DatabaseStats>(`${apiUrl}/api/admin/database/stats`, apiKey, { signal });
       setStats(data);
     } catch (err) {
+      if (isAbortError(err)) return;
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
       setLoading(false);
@@ -42,20 +42,15 @@ export default function Database({ apiUrl, apiKey }: DatabasePageProps) {
     if (!window.confirm(`Delete records older than ${days} days?`)) return;
 
     try {
-      const headers: HeadersInit = { 'Content-Type': 'application/json' };
-      if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
-
-      const res = await fetch(`${apiUrl}/api/admin/database/cleanup`, {
+      await requestJson(`${apiUrl}/api/admin/database/cleanup`, apiKey, {
         method: 'POST',
-        headers,
         body: JSON.stringify({ days }),
       });
 
-      if (!res.ok) throw new Error('Cleanup failed');
-      alert('Cleanup completed');
+      setError(null);
       await fetchStats();
     } catch (err) {
-      alert('Cleanup failed');
+      setError(err instanceof Error ? err.message : 'Cleanup failed');
     }
   };
 
@@ -63,18 +58,13 @@ export default function Database({ apiUrl, apiKey }: DatabasePageProps) {
     if (!window.confirm('Optimize database? This may take time.')) return;
 
     try {
-      const headers: HeadersInit = {};
-      if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
-
-      const res = await fetch(`${apiUrl}/api/admin/database/vacuum`, {
+      await requestJson(`${apiUrl}/api/admin/database/vacuum`, apiKey, {
         method: 'POST',
-        headers,
       });
 
-      if (!res.ok) throw new Error('Vacuum failed');
-      alert('Vacuum completed');
+      setError(null);
     } catch (err) {
-      alert('Vacuum failed');
+      setError(err instanceof Error ? err.message : 'Vacuum failed');
     }
   };
 
@@ -96,7 +86,7 @@ export default function Database({ apiUrl, apiKey }: DatabasePageProps) {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-gray-600 text-sm">Searches</p>
-              <p className="text-3xl font-bold text-gray-900 mt-2">{stats?.search_count || 0}</p>
+              <p className="text-3xl font-bold text-gray-900 mt-2">{stats?.searches ?? 0}</p>
             </div>
             <DatabaseIcon className="w-12 h-12 text-blue-100" />
           </div>
@@ -106,7 +96,7 @@ export default function Database({ apiUrl, apiKey }: DatabasePageProps) {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-gray-600 text-sm">Transfers</p>
-              <p className="text-3xl font-bold text-gray-900 mt-2">{stats?.transfer_count || 0}</p>
+              <p className="text-3xl font-bold text-gray-900 mt-2">{stats?.transfers ?? 0}</p>
             </div>
             <DatabaseIcon className="w-12 h-12 text-green-100" />
           </div>
@@ -116,7 +106,7 @@ export default function Database({ apiUrl, apiKey }: DatabasePageProps) {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-gray-600 text-sm">Messages</p>
-              <p className="text-3xl font-bold text-gray-900 mt-2">{stats?.message_count || 0}</p>
+              <p className="text-3xl font-bold text-gray-900 mt-2">{stats?.messages ?? 0}</p>
             </div>
             <DatabaseIcon className="w-12 h-12 text-purple-100" />
           </div>

@@ -21,7 +21,7 @@ interface ApiProviderProps {
  * Eliminates prop drilling for apiUrl and apiKey
  */
 export function ApiProvider({ children }: ApiProviderProps) {
-  const [apiUrl, setApiUrl] = useLocalStorage('apiUrl', 'http://localhost:8080');
+  const [apiUrl, setApiUrl] = useLocalStorage('apiUrl', 'http://127.0.0.1:5030');
   const [apiKey, setApiKey] = useSessionStorage<string | null>('apiKey', null);
   const [isConnected, setIsConnected] = React.useState(false);
 

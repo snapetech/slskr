@@ -4,11 +4,24 @@ import { useApi } from '../context/ApiContext';
 import { useFetch } from '../hooks/useFetch';
 
 interface ServerStats {
-  total_searches?: number;
-  active_transfers?: number;
-  total_users?: number;
-  total_rooms?: number;
-  uptime?: number;
+  session?: {
+    state?: string;
+    connected?: boolean;
+  };
+  searches?: {
+    total?: number;
+    active?: number;
+  };
+  users?: {
+    total?: number;
+  };
+  rooms?: {
+    total?: number;
+  };
+  transfers?: {
+    total?: number;
+    in_progress?: number;
+  };
 }
 
 interface HealthStatus {
@@ -38,14 +51,6 @@ export default function Dashboard() {
     { headers, interval: 5000 }
   );
 
-  const formatUptime = (seconds?: number): string => {
-    if (!seconds) return 'N/A';
-    const days = Math.floor(seconds / 86400);
-    const hours = Math.floor((seconds % 86400) / 3600);
-    const mins = Math.floor((seconds % 3600) / 60);
-    return `${days}d ${hours}h ${mins}m`;
-  };
-
   if (loading && !stats) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -73,13 +78,13 @@ export default function Dashboard() {
           <div className="bg-blue-50 rounded-lg p-4">
             <p className="text-sm text-blue-600 font-medium">Status</p>
             <p className="text-2xl font-bold text-blue-900 mt-2">
-              {stats ? 'Healthy' : 'Unknown'}
+              {stats?.session?.connected ? 'Connected' : stats ? 'Disconnected' : 'Unknown'}
             </p>
           </div>
           <div className="bg-green-50 rounded-lg p-4">
-            <p className="text-sm text-green-600 font-medium">Uptime</p>
+            <p className="text-sm text-green-600 font-medium">Session State</p>
             <p className="text-2xl font-bold text-green-900 mt-2">
-              {formatUptime(stats?.uptime)}
+              {stats?.session?.state ?? 'Unknown'}
             </p>
           </div>
         </div>
@@ -90,25 +95,25 @@ export default function Dashboard() {
         <StatCard
           icon={Activity}
           label="Active Transfers"
-          value={stats?.active_transfers || 0}
+          value={stats?.transfers?.in_progress ?? 0}
           color="blue"
         />
         <StatCard
           icon={Database}
           label="Total Searches"
-          value={stats?.total_searches || 0}
+          value={stats?.searches?.total ?? 0}
           color="green"
         />
         <StatCard
           icon={Users}
           label="Total Users"
-          value={stats?.total_users || 0}
+          value={stats?.users?.total ?? 0}
           color="purple"
         />
         <StatCard
           icon={Zap}
           label="Total Rooms"
-          value={stats?.total_rooms || 0}
+          value={stats?.rooms?.total ?? 0}
           color="orange"
         />
       </div>
