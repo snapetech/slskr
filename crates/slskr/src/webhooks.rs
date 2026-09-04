@@ -296,6 +296,10 @@ fn webhook_timestamp_is_fresh(timestamp: i64) -> Result<bool, std::time::SystemT
     Ok(now.abs_diff(timestamp) <= WebhookSignature::MAX_TIMESTAMP_AGE_SECONDS as u64)
 }
 
+fn bounded_webhook_attempts(attempts: u32) -> u32 {
+    attempts.clamp(1, WEBHOOK_MAX_RETRIES.saturating_add(1))
+}
+
 /// Webhook manager
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WebhookManager {
@@ -585,7 +589,7 @@ impl WebhookDispatcher {
             client_builder = client_builder.use_preconfigured_tls(self_issued_tls_config()?);
         }
         let client = client_builder.build()?;
-        let attempts = attempts.max(1);
+        let attempts = bounded_webhook_attempts(attempts);
         let mut last_error = "webhook delivery failed".to_owned();
         for attempt in 1..=attempts {
             if attempt > 1 {
@@ -1615,6 +1619,13 @@ mod tests {
                 std::time::Duration::from_secs(seconds)
             );
         }
+    }
+
+    #[test]
+    fn frozen_webhook_attempts_are_bounded() {
+        assert_eq!(bounded_webhook_attempts(0), 1);
+        assert_eq!(bounded_webhook_attempts(2), 2);
+        assert_eq!(bounded_webhook_attempts(u32::MAX), WEBHOOK_MAX_RETRIES + 1);
     }
 
     #[tokio::test]
