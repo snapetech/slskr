@@ -1,20 +1,22 @@
 import api from './api';
 import { encodePathSegment } from './pathEncoding';
 
-// Helper to safely call API endpoints that may not exist yet
+// Older daemon profiles may not expose every optional endpoint. Preserve the
+// compatibility fallback for that case, but surface real outages and auth
+// failures so the UI cannot report fabricated empty state.
 const safeGet = async (endpoint, fallback = null) => {
   try {
     const response = await api.get(endpoint);
     return response.data;
   } catch (error) {
-    // Return fallback for 404s or other errors - endpoint may not be implemented
     if (error?.response?.status === 404) {
       console.debug(
-        `Endpoint ${endpoint} not found (expected during development)`,
+        `Endpoint ${endpoint} is unavailable on this daemon profile`,
       );
+      return fallback;
     }
 
-    return fallback;
+    throw error;
   }
 };
 

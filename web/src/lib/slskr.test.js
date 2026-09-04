@@ -1,0 +1,32 @@
+import api from './api';
+import {
+  getCapabilities,
+  getMetadataProcessingStatus,
+} from './slskr';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('./api', () => ({
+  __esModule: true,
+  default: {
+    get: vi.fn(),
+  },
+}));
+
+describe('slskr runtime API helpers', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('uses compatibility defaults only when an optional endpoint is absent', async () => {
+    api.get.mockRejectedValue({ response: { status: 404 } });
+
+    await expect(getCapabilities()).resolves.toEqual({ features: [] });
+  });
+
+  it('surfaces server failures instead of presenting empty runtime data', async () => {
+    const error = { response: { status: 503 } };
+    api.get.mockRejectedValue(error);
+
+    await expect(getMetadataProcessingStatus()).rejects.toBe(error);
+  });
+});

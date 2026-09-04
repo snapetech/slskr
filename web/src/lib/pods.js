@@ -4,6 +4,7 @@ import { encodePathSegment } from './pathEncoding';
 
 const baseUrl = `${urlBase}/api/v0/pods`;
 const discoveryBaseUrl = `${urlBase}/api/v0/podcore/discovery`;
+const asArray = (value) => (Array.isArray(value) ? value : []);
 
 export const list = async () => {
   const response = await fetch(baseUrl, {
@@ -200,7 +201,7 @@ const readDiscovery = async (response) => {
   }
 
   const result = await response.json();
-  return result?.pods || result?.Pods || [];
+  return asArray(result?.pods ?? result?.Pods);
 };
 
 export const discoverAll = async (limit = 50) => {

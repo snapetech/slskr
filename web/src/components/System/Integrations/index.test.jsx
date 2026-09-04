@@ -9,9 +9,11 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../../lib/lidarr', () => ({
+  getImportHistory: vi.fn(),
   getStatus: vi.fn(),
   getWantedMissing: vi.fn(),
   importCompletedDirectory: vi.fn(),
+  retryImport: vi.fn(),
   syncWanted: vi.fn(),
 }));
 
@@ -173,6 +175,37 @@ describe('Integrations', () => {
       expect(lidarr.syncWanted).toHaveBeenCalled();
     });
     expect(screen.getByText(/Wanted sync: 1 created/)).toBeInTheDocument();
+  });
+
+  it('loads Lidarr import history and retries a recorded import', async () => {
+    lidarr.getImportHistory.mockResolvedValue([
+      {
+        completedAt: '2026-08-17T12:00:00Z',
+        directory: '/downloads/Artist/Album',
+        errorMessage: 'No safe candidates',
+        id: 'history-1',
+        status: 'Failed',
+      },
+    ]);
+    lidarr.retryImport.mockResolvedValue({
+      commandId: 42,
+      safeCandidateCount: 1,
+    });
+
+    render(<Integrations />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Load Import History' }));
+    expect(await screen.findByText('No safe candidates')).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Retry Lidarr import for /downloads/Artist/Album',
+      }),
+    );
+    await waitFor(() => {
+      expect(lidarr.retryImport).toHaveBeenCalledWith('history-1');
+    });
+    expect(screen.getByText('Lidarr import retry queued: 1 file(s)')).toBeInTheDocument();
   });
 
   it('shows media-server adapter cards and path diagnostics', async () => {

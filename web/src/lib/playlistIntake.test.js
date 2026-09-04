@@ -15,6 +15,7 @@ import {
   formatPlaylistTagOrganizationReport,
   getDuePlaylistRefreshes,
   getPlaylistIntakes,
+  playlistIntakeStorageKey,
   previewPlaylistTagOrganizationPlan,
   previewPlaylistIntakeRefresh,
   scorePlaylistTrackCandidate,
@@ -296,6 +297,33 @@ describe('playlistIntake', () => {
         fileName: 'Stereolab - Radio Picks - French Disko',
         mediaKind: 'PlannedTrack',
         title: 'French Disko',
+      },
+    ]);
+  });
+
+  it('filters malformed stored playlists, tracks, and organization options', () => {
+    localStorage.setItem(
+      playlistIntakeStorageKey,
+      JSON.stringify([
+        null,
+        'bad playlist',
+        {
+          name: 'Safe playlist',
+          organizationOptions: [],
+          tracks: [null, 'bad track', { title: 'Safe track' }],
+        },
+      ]),
+    );
+
+    expect(getPlaylistIntakes()).toMatchObject([
+      {
+        name: 'Safe playlist',
+        organizationOptions: {
+          albumTitle: '',
+          multiArtistPolicy: 'preserve',
+          pathTemplate: '{artist}/{album}/{trackNumber} - {title}',
+        },
+        tracks: [{ title: 'Safe track' }],
       },
     ]);
   });

@@ -6,8 +6,10 @@ import api from './api';
 
 const baseUrl = '/quarantine-jury';
 
-export const getRequests = async () =>
-  (await api.get(`${baseUrl}/requests`)).data || [];
+export const getRequests = async () => {
+  const { data } = await api.get(`${baseUrl}/requests`);
+  return Array.isArray(data) ? data : [];
+};
 
 export const getReview = async (requestId) =>
   (await api.get(`${baseUrl}/requests/${encodeURIComponent(requestId)}/review`))

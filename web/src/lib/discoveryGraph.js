@@ -1,5 +1,10 @@
 import api from './api';
 
+const asObject = (value) =>
+  value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+const isPlainObject = (value) =>
+  value && typeof value === 'object' && !Array.isArray(value);
+
 export const buildDiscoveryGraph = async (request) => {
   const response = await api.post('/discovery-graph', request);
   return response.data;
@@ -33,18 +38,42 @@ export const fromQueryString = (search = '') => {
   };
 };
 
+const isSavedBranch = (branch) =>
+  branch &&
+  typeof branch === 'object' &&
+  !Array.isArray(branch) &&
+  typeof branch.id === 'string' &&
+  branch.id.trim() &&
+  typeof branch.title === 'string' &&
+  branch.title.trim();
+
+export const parseSavedDiscoveryGraphBranches = (raw) => {
+  try {
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter(isSavedBranch) : [];
+  } catch {
+    return [];
+  }
+};
+
+export const getDiscoveryGraphNodes = (graph) =>
+  Array.isArray(graph?.nodes) ? graph.nodes.filter(isPlainObject) : [];
+
+export const getDiscoveryGraphEdges = (graph) =>
+  Array.isArray(graph?.edges) ? graph.edges.filter(isPlainObject) : [];
+
 export const getVisibleDiscoveryGraph = ({
   edgeTypes = [],
   graph,
   maxDepth = 99,
   minNodeWeight = 0,
 } = {}) => {
-  const nodes = Array.isArray(graph?.nodes) ? graph.nodes : [];
+  const nodes = getDiscoveryGraphNodes(graph);
   const visibleNodes = nodes.filter(
     (node) => (node.depth || 0) <= maxDepth && (node.weight || 0) >= minNodeWeight,
   );
   const visibleNodeIds = new Set(visibleNodes.map((node) => node.nodeId));
-  const visibleEdges = (Array.isArray(graph?.edges) ? graph.edges : []).filter(
+  const visibleEdges = getDiscoveryGraphEdges(graph).filter(
     (edge) =>
       visibleNodeIds.has(edge.sourceNodeId) &&
       visibleNodeIds.has(edge.targetNodeId) &&
@@ -176,7 +205,7 @@ const summarizeCounts = (items, property) =>
   }, {});
 
 const appendCounts = (lines, counts) => {
-  const entries = Object.entries(counts || {});
+  const entries = Object.entries(asObject(counts));
   if (entries.length === 0) {
     lines.push('- none visible');
     return;

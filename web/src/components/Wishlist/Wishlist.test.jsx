@@ -14,6 +14,7 @@ vi.mock('../../lib/wishlist', () => ({
   remove: vi.fn(),
   runSearch: vi.fn(),
   update: vi.fn(),
+  updateFilters: vi.fn(),
 }));
 
 vi.mock('../../lib/spotifyIntegration', () => ({
@@ -145,6 +146,57 @@ describe('Wishlist', () => {
     );
     await waitFor(() =>
       expect(screen.getByText('No folders are ignored.')).toBeInTheDocument(),
+    );
+  });
+
+  it('bulk-edits filters for selected wishlist items', async () => {
+    wishlistAPI.updateFilters.mockResolvedValue({ updatedCount: 2 });
+
+    renderWishlist();
+
+    expect(await screen.findByText('rare album')).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole('checkbox', { name: 'Select rare album for bulk actions' }),
+    );
+    fireEvent.click(
+      screen.getByRole('checkbox', { name: 'Select auto track for bulk actions' }),
+    );
+    fireEvent.change(screen.getByLabelText('Bulk wishlist filter'), {
+      target: { value: 'mp3 minbr:320' },
+    });
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Apply filter to selected wishlist items' }),
+    );
+
+    await waitFor(() => {
+      expect(wishlistAPI.updateFilters).toHaveBeenCalledWith(
+        expect.arrayContaining(['wish-1', 'wish-2']),
+        'mp3 minbr:320',
+      );
+    });
+  });
+
+  it('encodes search ids and hides invalid dates', async () => {
+    wishlistAPI.getAll.mockResolvedValue([
+      {
+        autoDownload: false,
+        enabled: true,
+        id: 'wish-special',
+        lastMatchCount: 1,
+        lastSearchId: 'search/with?chars%',
+        lastSearchedAt: 'not-a-date',
+        searchText: 'encoded route',
+        totalSearchCount: 1,
+      },
+    ]);
+
+    renderWishlist();
+
+    expect(await screen.findByText('encoded route')).toBeInTheDocument();
+    expect(screen.getByText('Never')).toBeInTheDocument();
+    expect(screen.getByTitle('View last search results').closest('a')).toHaveAttribute(
+      'href',
+      '/searches/search%2Fwith%3Fchars%25',
     );
   });
 });

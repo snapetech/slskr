@@ -84,8 +84,8 @@ export const getActiveSwarmJobs = async () => {
     const response = await api.get('/multisource/jobs');
     return Array.isArray(response.data?.jobs) ? response.data.jobs : [];
   } catch (error) {
-    console.debug('Failed to fetch swarm jobs:', error);
-    return [];
+    if (error?.response?.status === 404) return [];
+    throw error;
   }
 };
 
@@ -125,7 +125,6 @@ export const getSwarmTraceSummary = async (jobId) => {
       return null;
     }
 
-    console.debug('Failed to fetch swarm trace summary:', error);
-    return null; // Trace may not be available for all jobs
+    throw error;
   }
 };

@@ -58,6 +58,14 @@ export const getFileName = (fullPath) => {
   return fullPath.split('\\').pop().split('/').pop();
 };
 
+export const getExtension = (fullPath) => {
+  if (!fullPath) return '';
+  const name = getFileName(fullPath);
+  const dot = name.lastIndexOf('.');
+  if (dot < 0 || dot === name.length - 1) return '';
+  return name.slice(dot + 1).toLowerCase();
+};
+
 export const getDirectoryName = (fullPath) => {
   let path = fullPath;
 

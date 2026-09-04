@@ -2670,9 +2670,11 @@ const LidarrPanel = ({ options }) => {
   const lidarrOptions = getLidarrOptions(options);
   const [status, setStatus] = useState(null);
   const [wanted, setWanted] = useState([]);
+  const [importHistory, setImportHistory] = useState([]);
   const [syncResult, setSyncResult] = useState(null);
   const [importDirectory, setImportDirectory] = useState('');
   const [importResult, setImportResult] = useState(null);
+  const [importRetryResult, setImportRetryResult] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState('');
   const enabled = getOption(lidarrOptions, 'enabled', 'Enabled');
@@ -2698,6 +2700,26 @@ const LidarrPanel = ({ options }) => {
     } finally {
       setLoading('');
     }
+  };
+
+  const loadImportHistory = async () => {
+    const data = await lidarr.getImportHistory({ limit: 50 });
+    setImportHistory(
+      Array.isArray(data)
+        ? data.filter(
+            (record) =>
+              record && typeof record === 'object' && !Array.isArray(record),
+          )
+        : [],
+    );
+  };
+
+  const retryImport = async (historyId) => {
+    await run('retry', async () => {
+      const result = await lidarr.retryImport(historyId);
+      setImportRetryResult(result);
+      await loadImportHistory();
+    });
   };
 
   return (
@@ -2825,6 +2847,20 @@ const LidarrPanel = ({ options }) => {
               </Button>
             }
           />
+          <Popup
+            content="Load the recent completed-download import history. Failed and skipped records can be retried when the recorded source is still available."
+            trigger={
+              <Button
+                icon
+                labelPosition="left"
+                loading={loading === 'history'}
+                onClick={() => run('history', loadImportHistory)}
+              >
+                <Icon name="history" />
+                Load Import History
+              </Button>
+            }
+          />
         </div>
         {status && (
           <Message
@@ -2867,6 +2903,74 @@ const LidarrPanel = ({ options }) => {
               ))}
             </Table.Body>
           </Table>
+        )}
+        {importRetryResult && (
+          <Message
+            info
+            size="small"
+          >
+            {importRetryResult.commandId || importRetryResult.CommandId
+              ? `Lidarr import retry queued: ${importRetryResult.safeCandidateCount || importRetryResult.SafeCandidateCount || 0} file(s)`
+              : importRetryResult.skippedReason ||
+                importRetryResult.SkippedReason ||
+                'Lidarr could not find a safe file to import on retry'}
+          </Message>
+        )}
+        {importHistory.length > 0 && (
+          <Segment>
+            <Header as="h4">
+              <Icon name="history" />
+              Import History
+            </Header>
+            <Table
+              celled
+              compact
+            >
+              <Table.Header>
+                <Table.Row>
+                  <Table.HeaderCell>Status</Table.HeaderCell>
+                  <Table.HeaderCell>Directory</Table.HeaderCell>
+                  <Table.HeaderCell>Completed</Table.HeaderCell>
+                  <Table.HeaderCell>Details</Table.HeaderCell>
+                  <Table.HeaderCell>Action</Table.HeaderCell>
+                </Table.Row>
+              </Table.Header>
+              <Table.Body>
+                {importHistory.map((record) => {
+                  const historyId = record.id || record.Id || record.historyId;
+                  const directory = record.directory || record.Directory || '-';
+                  const detail =
+                    record.errorMessage ||
+                    record.ErrorMessage ||
+                    record.skippedReason ||
+                    record.SkippedReason ||
+                    `${record.safeCandidateCount || record.SafeCandidateCount || 0} safe candidate(s)`;
+
+                  return (
+                    <Table.Row key={historyId || `${directory}-${record.completedAt || record.CompletedAt}`}>
+                      <Table.Cell>{record.status || record.Status || '-'}</Table.Cell>
+                      <Table.Cell>{directory}</Table.Cell>
+                      <Table.Cell>
+                        {record.completedAt || record.CompletedAt || record.startedAt || record.StartedAt || '-'}
+                      </Table.Cell>
+                      <Table.Cell>{detail}</Table.Cell>
+                      <Table.Cell>
+                        <Button
+                          aria-label={`Retry Lidarr import for ${directory}`}
+                          disabled={!historyId}
+                          loading={loading === 'retry'}
+                          onClick={() => retryImport(historyId)}
+                          size="small"
+                        >
+                          Retry
+                        </Button>
+                      </Table.Cell>
+                    </Table.Row>
+                  );
+                })}
+              </Table.Body>
+            </Table>
+          </Segment>
         )}
         <Segment className="integration-manual-import">
           <Header as="h4">Manual Import</Header>

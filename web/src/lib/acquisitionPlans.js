@@ -31,6 +31,9 @@ const normalizeState = (state) =>
 
 const normalizeText = (value) => `${value || ''}`.trim();
 
+const isPlainObject = (value) =>
+  value && typeof value === 'object' && !Array.isArray(value);
+
 const normalizePlan = (plan) => {
   const timestamp = now();
   const profile = getAcquisitionProfile(plan.acquisitionProfile);
@@ -64,7 +67,9 @@ const normalizePlan = (plan) => {
 export const getAcquisitionPlans = (getItem = getLocalStorageItem) => {
   try {
     const parsed = JSON.parse(getItem(acquisitionPlanStorageKey, '[]'));
-    return Array.isArray(parsed) ? parsed.map(normalizePlan) : [];
+    return Array.isArray(parsed)
+      ? parsed.filter(isPlainObject).map(normalizePlan)
+      : [];
   } catch {
     return [];
   }

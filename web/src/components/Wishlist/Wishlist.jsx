@@ -28,6 +28,7 @@ import {
 const formatDate = (dateString) => {
   if (!dateString) return 'Never';
   const date = new Date(dateString);
+  if (Number.isNaN(date.getTime())) return 'Never';
   return date.toLocaleString();
 };
 
@@ -36,6 +37,8 @@ const WishlistItemRow = ({
   onDelete,
   onEdit,
   onRunSearch,
+  onSelect,
+  selected,
 }) => {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [running, setRunning] = useState(false);
@@ -55,6 +58,13 @@ const WishlistItemRow = ({
 
   return (
     <Table.Row>
+      <Table.Cell>
+        <Checkbox
+          aria-label={`Select ${item.searchText} for bulk actions`}
+          checked={selected}
+          onChange={(_, { checked }) => onSelect(item.id, checked)}
+        />
+      </Table.Cell>
       <Table.Cell>
         <Icon
           color={item.enabled ? 'green' : 'grey'}
@@ -94,7 +104,7 @@ const WishlistItemRow = ({
       </Table.Cell>
       <Table.Cell>
         {item.lastSearchId && (
-          <Link to={`${urlBase}/searches/${item.lastSearchId}`}>
+          <Link to={`${urlBase}/searches/${encodeURIComponent(item.lastSearchId)}`}>
             <Button
               compact
               icon="search"
@@ -480,6 +490,8 @@ const Wishlist = () => {
   const [showImportModal, setShowImportModal] = useState(false);
   const [requestCopyStatus, setRequestCopyStatus] = useState('');
   const [bulkRunning, setBulkRunning] = useState(false);
+  const [bulkFilter, setBulkFilter] = useState('');
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
   const requestSummary = useMemo(
     () =>
       buildWishlistRequestSummary({
@@ -556,6 +568,41 @@ const Wishlist = () => {
       setLoading(false);
     }
   }, []);
+
+  const toggleSelection = (id, selected) => {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (selected) {
+        next.add(id);
+      } else {
+        next.delete(id);
+      }
+      return next;
+    });
+  };
+
+  const toggleAllSelections = (selected) => {
+    setSelectedIds(selected ? new Set(items.map((item) => item.id)) : new Set());
+  };
+
+  const handleBulkFilter = async () => {
+    const ids = [...selectedIds];
+    if (ids.length === 0) return;
+
+    setBulkRunning(true);
+    try {
+      const result = await wishlistAPI.updateFilters(ids, bulkFilter.trim());
+      const updatedCount = result?.updatedCount ?? result?.UpdatedCount ?? ids.length;
+      toast.success(`Updated filters for ${updatedCount} item(s)`);
+      setSelectedIds(new Set());
+      setBulkFilter('');
+      await loadItems();
+    } catch (error) {
+      toast.error(`Failed to update filters: ${error.message}`);
+    } finally {
+      setBulkRunning(false);
+    }
+  };
 
   useEffect(() => {
     loadItems();
@@ -734,6 +781,34 @@ const Wishlist = () => {
         </Segment>
       )}
 
+      {selectedIds.size > 0 && (
+        <Segment className="wishlist-bulk-actions">
+          <Header as="h4">
+            <Icon name="tasks" />
+            Bulk actions ({selectedIds.size})
+          </Header>
+          <Form>
+            <Form.Input
+              aria-label="Bulk wishlist filter"
+              label="Apply filter to selected items"
+              onChange={(event) => setBulkFilter(event.target.value)}
+              placeholder="e.g., flac OR mp3"
+              value={bulkFilter}
+            />
+            <Button
+              aria-label="Apply filter to selected wishlist items"
+              disabled={bulkRunning}
+              loading={bulkRunning}
+              onClick={handleBulkFilter}
+              primary
+            >
+              <Icon name="filter" />
+              Apply Filter
+            </Button>
+          </Form>
+        </Segment>
+      )}
+
       {loading ? (
         <Segment
           loading
@@ -768,6 +843,13 @@ const Wishlist = () => {
         >
           <Table.Header>
             <Table.Row>
+              <Table.HeaderCell width={1}>
+                <Checkbox
+                  aria-label="Select all wishlist items for bulk actions"
+                  checked={items.length > 0 && selectedIds.size === items.length}
+                  onChange={(_, { checked }) => toggleAllSelections(checked)}
+                />
+              </Table.HeaderCell>
               <Table.HeaderCell width={1}>Active</Table.HeaderCell>
               <Table.HeaderCell>Search</Table.HeaderCell>
               <Table.HeaderCell
@@ -801,6 +883,8 @@ const Wishlist = () => {
                 onDelete={handleDelete}
                 onEdit={handleEdit}
                 onRunSearch={handleRunSearch}
+                onSelect={toggleSelection}
+                selected={selectedIds.has(item.id)}
               />
             ))}
           </Table.Body>

@@ -32,10 +32,28 @@ export const getSyncStatus = async () =>
   (await api.get('/integrations/lidarr/sync/status')).data;
 
 export const getWantedMissing = async ({ page = 1, pageSize = 50 } = {}) =>
-  (await api.get(`/integrations/lidarr/wanted/missing?page=${page}&pageSize=${pageSize}`)).data;
+  (
+    await api.get(
+      `/integrations/lidarr/wanted/missing?page=${encodeURIComponent(page)}&pageSize=${encodeURIComponent(pageSize)}`,
+    )
+  ).data;
 
 export const syncWanted = async () =>
   (await api.post('/integrations/lidarr/wanted/sync')).data;
 
 export const importCompletedDirectory = async ({ directory }) =>
   (await api.post('/integrations/lidarr/manualimport', { directory })).data;
+
+export const getImportHistory = async ({ limit = 50 } = {}) =>
+  (
+    await api.get(
+      `/integrations/lidarr/manualimport/history?limit=${encodeURIComponent(limit)}`,
+    )
+  ).data;
+
+export const retryImport = async (historyId) =>
+  (
+    await api.post(
+      `/integrations/lidarr/manualimport/history/${encodeURIComponent(historyId)}/retry`,
+    )
+  ).data;

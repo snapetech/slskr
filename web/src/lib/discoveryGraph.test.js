@@ -2,7 +2,10 @@ import {
   buildDiscoveryGraphBranchPlan,
   formatDiscoveryGraphBranchReport,
   fromQueryString,
+  getDiscoveryGraphEdges,
+  getDiscoveryGraphNodes,
   getVisibleDiscoveryGraph,
+  parseSavedDiscoveryGraphBranches,
   toQueryString,
 } from './discoveryGraph';
 
@@ -144,5 +147,25 @@ describe('discoveryGraph helpers', () => {
     expect(report).toContain('- Identity: 85 (2) Identity appears on 2 graph edges.');
     expect(report).toContain('Center Track -> Nearby Track');
     expect(report).toContain('- Nearby Track');
+  });
+
+  it('ignores malformed graph and saved-branch payload entries', () => {
+    expect(getDiscoveryGraphNodes({ nodes: [null, 'bad', graph.nodes[0]] })).toEqual([
+      graph.nodes[0],
+    ]);
+    expect(getDiscoveryGraphEdges({ edges: [null, 'bad', graph.edges[0]] })).toEqual([
+      graph.edges[0],
+    ]);
+    expect(
+      getVisibleDiscoveryGraph({ graph: { edges: [null], nodes: [null] } }),
+    ).toMatchObject({
+      visibleEdges: [],
+      visibleNodes: [],
+    });
+    expect(
+      parseSavedDiscoveryGraphBranches(
+        JSON.stringify([null, 'bad', { id: 'branch-1', title: 'Saved branch' }]),
+      ),
+    ).toEqual([{ id: 'branch-1', title: 'Saved branch' }]);
   });
 });

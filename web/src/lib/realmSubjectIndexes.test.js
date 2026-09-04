@@ -68,4 +68,21 @@ describe('realmSubjectIndexes', () => {
       'Provenance: realm:realm-a:subject-index:index-b:r2',
     );
   });
+
+  it('ignores malformed conflict and value entries', () => {
+    const malformed = {
+      conflicts: [null, 'bad', { subjectId: 'valid', values: [null, 'bad'] }],
+    };
+
+    expect(summarizeRealmSubjectIndexConflicts(malformed)).toEqual({
+      authorityCount: 0,
+      conflictCount: 1,
+      conflictTypeCount: 0,
+      entryCount: 0,
+      indexCount: 0,
+    });
+    expect(formatRealmSubjectIndexConflictReport({ report: malformed })).toContain(
+      'Subject: valid',
+    );
+  });
 });

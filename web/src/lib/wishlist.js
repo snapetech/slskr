@@ -45,6 +45,15 @@ export const update = async (
   ).data;
 };
 
+export const updateFilters = async (ids, filter) => {
+  return (
+    await api.put('/wishlist/bulk-filter', {
+      filter,
+      ids,
+    })
+  ).data;
+};
+
 export const remove = async (id) => {
   await api.delete(`/wishlist/${encodeURIComponent(id)}`);
 };
@@ -75,7 +84,9 @@ export const importCsv = async ({
 
 export const getSearches = async (id, limit = 50) => {
   const data = (
-    await api.get(`/wishlist/${encodeURIComponent(id)}/searches?limit=${limit}`)
+    await api.get(
+      `/wishlist/${encodeURIComponent(id)}/searches?limit=${encodeURIComponent(limit)}`,
+    )
   ).data;
   return Array.isArray(data) ? data : [];
 };
