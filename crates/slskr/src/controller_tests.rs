@@ -42872,13 +42872,13 @@ async fn versioned_relay_controller_download_binds_token_to_agent() {
 #[cfg(feature = "full-controller-tests")]
 async fn versioned_relay_controller_upload_tokens_are_one_use() {
     let (state, secret, now) = configured_relay_test_state().await;
-    let upload_token = uuid::Uuid::new_v4();
-    assert!(state.relay.write().await.protocol.issue_file_upload_token(
-        "edge-one",
-        "Upload.flac",
-        upload_token,
-        now
-    ));
+    let (upload_token, upload_receiver) = state
+        .relay
+        .write()
+        .await
+        .protocol
+        .begin_file_stream("edge-one", "Upload.flac", 0, now)
+        .expect("relay upload stream");
     let upload_credential =
         super::relay::credential_for_test(secret, "edge-one", &upload_token.to_string());
     let upload_body = "--relay\r\nContent-Disposition: form-data; name=\"file\"; filename=\"Upload.flac\"\r\n\r\npayload\r\n--relay--\r\n";
@@ -42900,6 +42900,11 @@ async fn versioned_relay_controller_upload_tokens_are_one_use() {
     .await
     .expect("relay file upload route");
     assert_eq!(upload.status, "200 OK");
+    let uploaded = upload_receiver
+        .await
+        .expect("relay upload receiver")
+        .expect("relay upload result");
+    assert_eq!(uploaded.filename, "Upload.flac");
     let stored_upload = state
         .config
         .state_dir
@@ -42910,6 +42915,38 @@ async fn versioned_relay_controller_upload_tokens_are_one_use() {
         fs::read(&stored_upload).expect("stored relay upload"),
         b"payload"
     );
+    let (abandoned_token, abandoned_receiver) = state
+        .relay
+        .write()
+        .await
+        .protocol
+        .begin_file_stream("edge-one", "Abandoned.flac", 0, now)
+        .expect("abandoned relay upload stream");
+    drop(abandoned_receiver);
+    let mut abandoned_headers = upload_headers.clone();
+    abandoned_headers.x_relay_credential = Some(super::relay::credential_for_test(
+        secret,
+        "edge-one",
+        &abandoned_token.to_string(),
+    ));
+    let abandoned = Box::pin(super::route_http_request_with_headers(
+        "POST",
+        &format!("/api/v0/relay/controller/files/{abandoned_token}"),
+        None,
+        "--relay\r\nContent-Disposition: form-data; name=\"file\"; filename=\"Abandoned.flac\"\r\n\r\nstranded\r\n--relay--\r\n",
+        &state,
+        abandoned_headers,
+    ))
+    .await
+    .expect("abandoned relay upload route");
+    assert_eq!(abandoned.status, "503 Service Unavailable");
+    assert!(!state
+        .config
+        .state_dir
+        .join("relay")
+        .join("incoming")
+        .join(format!("file-{}.part", abandoned_token.simple()))
+        .exists());
     let replay = Box::pin(super::route_http_request_with_headers(
         "POST",
         &format!("/api/v0/relay/controller/files/{upload_token}"),
@@ -107142,13 +107179,13 @@ async fn controller_api_differential_controller_relay_controller_routes() {
             && !runtime_download.contains("Relay/Agent.txt")
     );
 
-    let upload_token = uuid::Uuid::new_v4();
-    assert!(state.relay.write().await.protocol.issue_file_upload_token(
-        "edge-one",
-        "Upload.flac",
-        upload_token,
-        now,
-    ));
+    let (upload_token, upload_receiver) = state
+        .relay
+        .write()
+        .await
+        .protocol
+        .begin_file_stream("edge-one", "Upload.flac", 0, now)
+        .expect("relay upload stream");
     let upload_headers = super::RequestSecurityHeaders {
         content_type: Some("multipart/form-data; boundary=relay".to_owned()),
         x_relay_agent: Some("edge-one".to_owned()),
@@ -107172,6 +107209,11 @@ async fn controller_api_differential_controller_relay_controller_routes() {
     ))
     .await
     .expect("relay controller file upload");
+    let uploaded = upload_receiver
+        .await
+        .expect("relay upload receiver")
+        .expect("relay upload result");
+    assert_eq!(uploaded.filename, "Upload.flac");
     let stored_upload = state
         .config
         .state_dir
@@ -107256,13 +107298,13 @@ async fn controller_api_differential_controller_relay_controller_routes() {
     fs::remove_dir_all(&incoming_directory).expect("remove relay upload directory");
     fs::write(&incoming_directory, b"relay upload directory is a file")
         .expect("create relay upload directory conflict");
-    let runtime_file_token = uuid::Uuid::new_v4();
-    assert!(state.relay.write().await.protocol.issue_file_upload_token(
-        "edge-one",
-        "Upload.flac",
-        runtime_file_token,
-        now,
-    ));
+    let (runtime_file_token, runtime_file_receiver) = state
+        .relay
+        .write()
+        .await
+        .protocol
+        .begin_file_stream("edge-one", "Upload.flac", 0, now)
+        .expect("runtime relay upload stream");
     let runtime_file_headers = super::RequestSecurityHeaders {
         content_type: Some("multipart/form-data; boundary=relay".to_owned()),
         x_relay_agent: Some("edge-one".to_owned()),
@@ -107292,6 +107334,10 @@ async fn controller_api_differential_controller_relay_controller_routes() {
                 .body
                 .contains("relay upload directory is a file")
     );
+    assert!(runtime_file_receiver
+        .await
+        .expect("runtime relay upload receiver")
+        .is_err());
     fs::remove_file(&incoming_directory).expect("remove relay upload conflict");
     fs::create_dir_all(&incoming_directory).expect("restore relay upload directory");
 
@@ -142224,13 +142270,13 @@ async fn controller_api_differential_relay_open_cases_impl() {
         runtime_download.status == "401 Unauthorized"
     );
 
-    let upload_token = uuid::Uuid::new_v4();
-    assert!(controller_state
+    let (upload_token, upload_receiver) = controller_state
         .relay
         .write()
         .await
         .protocol
-        .issue_file_upload_token("edge-one", "Upload.flac", upload_token, now,));
+        .begin_file_stream("edge-one", "Upload.flac", 0, now)
+        .expect("relay upload stream");
     let upload_credential = super::relay::credential_for_target(
         super::ControllerProfile::Native,
         &secret,
@@ -142255,6 +142301,11 @@ async fn controller_api_differential_relay_open_cases_impl() {
     ))
     .await
     .expect("relay file upload");
+    let uploaded = upload_receiver
+        .await
+        .expect("relay upload receiver")
+        .expect("relay upload result");
+    assert_eq!(uploaded.filename, "Upload.flac");
     let stored_upload = controller_state
         .config
         .state_dir
@@ -142289,13 +142340,13 @@ async fn controller_api_differential_relay_open_cases_impl() {
         "malformed-path-query-or-body",
         malformed_upload.status == "400 Bad Request"
     );
-    let runtime_upload_token = uuid::Uuid::new_v4();
-    assert!(controller_state
+    let (runtime_upload_token, runtime_upload_receiver) = controller_state
         .relay
         .write()
         .await
         .protocol
-        .issue_file_upload_token("edge-one", "Runtime.flac", runtime_upload_token, now,));
+        .begin_file_stream("edge-one", "Runtime.flac", 0, now)
+        .expect("runtime relay upload stream");
     let runtime_upload = super::versioned_relay_request(
         "POST",
         &format!("/api/v0/relay/controller/files/{runtime_upload_token}"),
@@ -142311,6 +142362,10 @@ async fn controller_api_differential_relay_open_cases_impl() {
     )
     .await
     .expect("runtime relay file upload");
+    assert!(runtime_upload_receiver
+        .await
+        .expect("runtime relay upload receiver")
+        .is_err());
     record!(
         "POST",
         "/api/v0/relay/controller/files/{token}",
@@ -142333,13 +142388,13 @@ async fn controller_api_differential_relay_open_cases_impl() {
         "restart-persistence-or-reset",
         restarted_upload.status == "401 Unauthorized"
     );
-    let concurrent_upload_token = uuid::Uuid::new_v4();
-    assert!(controller_state
+    let (concurrent_upload_token, concurrent_upload_receiver) = controller_state
         .relay
         .write()
         .await
         .protocol
-        .issue_file_upload_token("edge-one", "Concurrent.flac", concurrent_upload_token, now,));
+        .begin_file_stream("edge-one", "Concurrent.flac", 0, now)
+        .expect("concurrent relay upload stream");
     let concurrent_upload_credential = super::relay::credential_for_target(
         super::ControllerProfile::Native,
         &secret,
@@ -142375,6 +142430,10 @@ async fn controller_api_differential_relay_open_cases_impl() {
         .iter()
         .filter_map(|response| response.as_ref().map(|value| value.status))
         .collect::<Vec<_>>();
+    assert!(concurrent_upload_receiver
+        .await
+        .expect("concurrent relay upload receiver")
+        .is_ok());
     record!(
         "POST",
         "/api/v0/relay/controller/files/{token}",

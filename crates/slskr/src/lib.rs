@@ -39933,13 +39933,23 @@ fn apply_watched_controller_configuration<'a>(
                         .then_some(reloaded.obfuscated_advertised_port)
                         .flatten();
                 }
-                let _ = state
-                    .session_commands
-                    .send(SessionCommand::SetWaitPort {
+                if let Err(error) = send_session_command(
+                    state,
+                    SessionCommand::SetWaitPort {
                         port: reloaded.advertised_port,
                         obfuscated_port: effective_obfuscated_advertised_port(state),
-                    })
+                    },
+                )
+                .await
+                {
+                    record_daemon_log(
+                        state,
+                        logging::LogLevel::Warn,
+                        "configuration",
+                        format!("failed to publish reloaded Soulseek listener port: {error}"),
+                    )
                     .await;
+                }
             }
             (Ok(_), Ok(_)) => {}
             (regular, obfuscated) => {
@@ -50358,11 +50368,18 @@ async fn versioned_relay_request_bytes(
         return Some(match authorized {
             Some(_) => match persist_relay_upload_part(state, token, filename, &file_part.data) {
                 Ok(upload) => {
-                    let _ = relay::RuntimeState::complete_file_stream(token, upload);
-                    HttpResponse {
-                        status: "200 OK",
-                        content_type: "",
-                        body: String::new(),
+                    let upload_path = upload.path.clone();
+                    if relay::RuntimeState::complete_file_stream(token, upload) {
+                        HttpResponse {
+                            status: "200 OK",
+                            content_type: "",
+                            body: String::new(),
+                        }
+                    } else {
+                        cleanup_relay_upload(&upload_path);
+                        relay_upload_error_response(
+                            "relay file stream request is no longer active",
+                        )
                     }
                 }
                 Err(error) => {
@@ -50510,6 +50527,12 @@ fn relay_upload_directory(state: &AppState) -> Result<PathBuf, String> {
 fn relay_upload_error_response(error: &str) -> HttpResponse {
     eprintln!("relay upload operation failed: {error}");
     routing::service_unavailable_response("relay upload unavailable")
+}
+
+fn cleanup_relay_upload(path: &Path) {
+    if let Err(error) = fs::remove_file(path) {
+        eprintln!("relay upload cleanup failed for {}: {error}", path.display());
+    }
 }
 
 fn persist_relay_upload_part(
@@ -73165,9 +73188,27 @@ fn spawn_vpn_polling(state: Arc<AppState>) {
                 reconnect
             };
             if !status.is_ready {
-                let _ = send_session_command(&state, SessionCommand::VpnDisconnect).await;
+                if let Err(error) =
+                    send_session_command(&state, SessionCommand::VpnDisconnect).await
+                {
+                    record_daemon_log(
+                        &state,
+                        logging::LogLevel::Warn,
+                        "vpn",
+                        format!("failed to publish VPN disconnect command: {error}"),
+                    )
+                    .await;
+                }
             } else if reconnect {
-                let _ = send_session_command(&state, SessionCommand::Connect).await;
+                if let Err(error) = send_session_command(&state, SessionCommand::Connect).await {
+                    record_daemon_log(
+                        &state,
+                        logging::LogLevel::Warn,
+                        "vpn",
+                        format!("failed to publish VPN reconnect command: {error}"),
+                    )
+                    .await;
+                }
             }
         }
     });
@@ -77011,18 +77052,26 @@ async fn open_relay_controller_stream(
     if file_info.length != uploaded.length
         || (expected_size != 0 && uploaded.length != expected_size)
     {
-        let _ = fs::remove_file(&uploaded.path);
+        cleanup_relay_upload(&uploaded.path);
         return Err("relay agent upload length does not match file-info".to_owned());
     }
     let file = fs::File::open(&uploaded.path)
-        .map_err(|error| format!("relay stream file open failed: {error}"))?;
+        .map_err(|error| {
+            cleanup_relay_upload(&uploaded.path);
+            format!("relay stream file open failed: {error}")
+        })?;
     let metadata = file
         .metadata()
-        .map_err(|error| format!("relay stream file metadata failed: {error}"))?;
+        .map_err(|error| {
+            cleanup_relay_upload(&uploaded.path);
+            format!("relay stream file metadata failed: {error}")
+        })?;
     if !metadata.is_file() {
+        cleanup_relay_upload(&uploaded.path);
         return Err("relay stream upload is not a file".to_owned());
     }
     if metadata.len() != uploaded.length {
+        cleanup_relay_upload(&uploaded.path);
         return Err("relay stream upload length changed during transfer".to_owned());
     }
     Ok(LocalStreamFile {
@@ -89398,16 +89447,13 @@ async fn rebuild_share_index_with_permit(
             return Err(error);
         }
     };
-    let mut shares = state.shares.write().await;
-    let previous = std::mem::replace(&mut *shares, snapshot.clone());
     if let Err(error) = persist_share_index_checked(state, &snapshot).await {
-        *shares = previous;
         let mut lifecycle = state.share_lifecycle.write().await;
         lifecycle.scanning = false;
         lifecycle.faulted = true;
         return Err(error);
     }
-    drop(shares);
+    *state.shares.write().await = snapshot.clone();
     *state.share_lifecycle.write().await = ShareLifecycleState::from_snapshot(&snapshot);
     Ok(snapshot)
 }
