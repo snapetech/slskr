@@ -46,6 +46,7 @@ const MAX_RELAY_SIGNALR_FRAME_BYTES: usize = 1024 * 1024;
 const MAX_RELAY_MESSAGES_PER_FRAME: usize = 256;
 const MAX_RELAY_FILENAME_BYTES: usize = 4 * 1024;
 const MAX_RELAY_TOKEN_BYTES: usize = 512;
+const MAX_RELAY_ERROR_BYTES: usize = 4 * 1024;
 const MAX_RELAY_UPLOADS: usize = 16;
 
 type RelaySocket =
@@ -146,6 +147,7 @@ async fn run_connection(state: &Arc<AppState>, settings: &RelaySettings) -> Resu
     .await
     .map_err(|_| "relay controller share token request timed out".to_owned())??
     .and_then(|value| value.as_str().map(str::to_owned))
+    .filter(|token| valid_relay_token(token))
     .ok_or_else(|| "relay controller returned an invalid share token".to_owned())?;
     upload_shares(
         state,
@@ -549,8 +551,7 @@ fn relay_http_url(address: &str, path: &str) -> Result<String, String> {
 }
 
 async fn send_signalr_json(socket: &mut RelaySocket, value: &Value) -> Result<(), String> {
-    let mut text = value.to_string();
-    text.push(SIGNALR_RECORD_SEPARATOR);
+    let text = signalr_json_text(value)?;
     time::timeout(
         RELAY_REQUEST_TIMEOUT,
         socket.send(Message::Text(text.into())),
@@ -558,6 +559,15 @@ async fn send_signalr_json(socket: &mut RelaySocket, value: &Value) -> Result<()
     .await
     .map_err(|_| "relay websocket send timed out".to_owned())?
     .map_err(|error| format!("relay websocket send failed: {error}"))
+}
+
+fn signalr_json_text(value: &Value) -> Result<String, String> {
+    let mut text = value.to_string();
+    text.push(SIGNALR_RECORD_SEPARATOR);
+    if text.len() > MAX_RELAY_SIGNALR_FRAME_BYTES {
+        return Err("relay SignalR frame exceeds the 1 MiB limit".to_owned());
+    }
+    Ok(text)
 }
 
 async fn send_invocation(
@@ -589,6 +599,7 @@ async fn wait_for_challenge(socket: &mut RelaySocket) -> Result<String, String> 
                     .and_then(Value::as_array)
                     .and_then(|arguments| arguments.first())
                     .and_then(Value::as_str)
+                    .filter(|challenge| valid_relay_token(challenge))
                     .map(str::to_owned)
                     .ok_or_else(|| "relay challenge payload is invalid".to_owned());
             }
@@ -608,7 +619,10 @@ async fn wait_for_completion(
                 continue;
             }
             if let Some(error) = message.get("error").and_then(Value::as_str) {
-                return Err(format!("relay hub invocation failed: {error}"));
+                return Err(format!(
+                    "relay hub invocation failed: {}",
+                    bounded_relay_error(error)
+                ));
             }
             return Ok(message.get("result").cloned());
         }
@@ -679,7 +693,7 @@ fn relay_upload_request(message: &Value) -> Result<(String, u64, String), String
     let token = arguments
         .get(2)
         .and_then(Value::as_str)
-        .filter(|token| !token.trim().is_empty() && token.len() <= MAX_RELAY_TOKEN_BYTES)
+        .filter(|token| valid_relay_token(token))
         .map(str::to_owned)
         .ok_or_else(|| "relay upload request token is invalid".to_owned())?;
     Ok((filename, start_offset, token))
@@ -691,13 +705,30 @@ fn valid_relay_filename(filename: &str) -> bool {
         && !filename.chars().any(char::is_control)
 }
 
+fn valid_relay_token(token: &str) -> bool {
+    !token.trim().is_empty()
+        && token.len() <= MAX_RELAY_TOKEN_BYTES
+        && !token.chars().any(char::is_control)
+}
+
+fn bounded_relay_error(error: &str) -> String {
+    if error.trim().is_empty()
+        || error.len() > MAX_RELAY_ERROR_BYTES
+        || error.chars().any(char::is_control)
+    {
+        "relay controller returned an invalid error".to_owned()
+    } else {
+        error.to_owned()
+    }
+}
+
 fn relay_upload_failure_token(message: &Value) -> Option<String> {
     message
         .get("arguments")
         .and_then(Value::as_array)
         .and_then(|arguments| arguments.get(2))
         .and_then(Value::as_str)
-        .filter(|token| !token.trim().is_empty() && token.len() <= MAX_RELAY_TOKEN_BYTES)
+        .filter(|token| valid_relay_token(token))
         .map(str::to_owned)
 }
 
@@ -807,7 +838,14 @@ async fn handle_server_invocation(
                 .first()
                 .and_then(Value::as_str)
                 .unwrap_or_default();
-            let token = arguments.get(1).and_then(Value::as_str).unwrap_or_default();
+            let Some(token) = arguments
+                .get(1)
+                .and_then(Value::as_str)
+                .filter(|token| valid_relay_token(token))
+            else {
+                tracing::warn!("relay file-info callback token was invalid");
+                return Ok(());
+            };
             let info = if valid_relay_filename(filename) {
                 crate::find_shared_local_file(state, filename).await
             } else {
@@ -828,26 +866,32 @@ async fn handle_server_invocation(
             .await?;
         }
         "RequestFileUpload" => {
-            let filename = arguments
+            let Some(filename) = arguments
                 .first()
                 .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_owned();
+                .filter(|filename| valid_relay_filename(filename))
+            else {
+                tracing::warn!("relay upload callback filename was invalid");
+                return Ok(());
+            };
             let start_offset = arguments.get(1).and_then(Value::as_u64).unwrap_or(0);
-            let token = arguments
+            let Some(token) = arguments
                 .get(2)
                 .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_owned();
+                .filter(|token| valid_relay_token(token))
+            else {
+                tracing::warn!("relay upload callback token was invalid");
+                return Ok(());
+            };
             if let Err(error) = upload_file(
                 state,
                 settings,
                 runtime_profile,
                 client,
                 instance_name,
-                &filename,
+                filename,
                 start_offset,
-                &token,
+                token,
             )
             .await
             {
@@ -868,7 +912,10 @@ async fn handle_server_invocation(
                 .and_then(Value::as_str)
                 .unwrap_or_default();
             let token = arguments.get(1).and_then(Value::as_str).unwrap_or_default();
-            if settings.controller.downloads && !filename.is_empty() && !token.is_empty() {
+            if settings.controller.downloads
+                && valid_relay_filename(filename)
+                && valid_relay_token(token)
+            {
                 download_completed_file(
                     state,
                     settings,
@@ -899,6 +946,9 @@ async fn upload_file(
 ) -> Result<(), String> {
     if !valid_relay_filename(filename) {
         return Err("requested relay filename is invalid".to_owned());
+    }
+    if !valid_relay_token(token) {
+        return Err("relay upload token is invalid".to_owned());
     }
     let shared = crate::find_shared_local_file(state, filename)
         .await
@@ -957,6 +1007,9 @@ async fn post_relay_form(
     path_prefix: &str,
     form: Form,
 ) -> Result<(), String> {
+    if !valid_relay_token(token) {
+        return Err("relay upload token is invalid".to_owned());
+    }
     let url = relay_http_url(
         &settings.controller.address,
         &format!("{path_prefix}{}", crate::url_encode(token)),
@@ -987,6 +1040,12 @@ pub(crate) async fn download_completed_file(
     filename: &str,
     token: &str,
 ) -> Result<(), String> {
+    if !valid_relay_filename(filename) {
+        return Err("relay download filename is invalid".to_owned());
+    }
+    if !valid_relay_token(token) {
+        return Err("relay download token is invalid".to_owned());
+    }
     let root = crate::effective_downloads_dir(state);
     let destination_name = if settings.mode == "debug" {
         format!("{filename}.relayed")
@@ -1171,6 +1230,36 @@ mod tests {
             relay_upload_request(&valid).expect("valid upload request"),
             ("track.flac".to_owned(), 42, "upload-token".to_owned())
         );
+
+        let control_token = serde_json::json!({
+            "arguments": ["track.flac", 42, "upload\n-token"]
+        });
+        assert!(relay_upload_request(&control_token)
+            .expect_err("control character in upload token")
+            .contains("token"));
+    }
+
+    #[test]
+    fn relay_callbacks_bound_tokens_errors_and_outbound_frames() {
+        assert!(valid_relay_token("relay-token"));
+        assert!(!valid_relay_token("relay\n-token"));
+        assert!(!valid_relay_token(&"x".repeat(MAX_RELAY_TOKEN_BYTES + 1)));
+        assert_eq!(
+            bounded_relay_error("relay failed"),
+            "relay failed".to_owned()
+        );
+        assert_eq!(
+            bounded_relay_error(&"x".repeat(MAX_RELAY_ERROR_BYTES + 1)),
+            "relay controller returned an invalid error".to_owned()
+        );
+        assert!(signalr_json_text(&serde_json::json!({"ok": true}))
+            .expect("small outbound frame")
+            .ends_with(SIGNALR_RECORD_SEPARATOR));
+        assert!(signalr_json_text(&serde_json::json!({
+            "payload": "x".repeat(MAX_RELAY_SIGNALR_FRAME_BYTES)
+        }))
+        .expect_err("oversized outbound frame")
+        .contains("1 MiB"));
     }
 
     #[tokio::test]
