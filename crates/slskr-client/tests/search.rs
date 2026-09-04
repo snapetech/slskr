@@ -964,6 +964,26 @@ fn response(username: &str, token: u32) -> FileSearchResponse {
     }
 }
 
+#[test]
+fn search_results_drop_entries_with_control_characters() {
+    let mut results = SearchResults::new();
+    let mut filename_response = response("peer", 1);
+    filename_response.results.push(entry("bad\nname"));
+    assert!(results
+        .accept_peer_message(PeerMessage::FileSearchResponse(filename_response))
+        .unwrap());
+    assert_eq!(results.stored_files_len(), 0);
+
+    let mut extension_response = response("peer", 2);
+    let mut extension_entry = entry("clean-name");
+    extension_entry.extension = "flac\r".to_owned();
+    extension_response.private_results.push(extension_entry);
+    assert!(results
+        .accept_peer_message(PeerMessage::FileSearchResponse(extension_response))
+        .unwrap());
+    assert_eq!(results.stored_files_len(), 0);
+}
+
 fn handle(token: u32) -> SearchRequestHandle {
     SearchRequestHandle {
         token,

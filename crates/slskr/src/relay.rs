@@ -36,11 +36,13 @@ pub(crate) const MAX_RELAY_SHARE_ENTRIES: usize = 131_072;
 const MAX_RELAY_SHARE_MANIFEST_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_RELAY_SHARE_UPLOAD_RECORDS: usize = 4_096;
 const MAX_RELAY_SHARE_FILENAME_BYTES: usize = 16 * 1024;
+const MAX_RELAY_AGENT_NAME_BYTES: usize = 4 * 1024;
 const MAX_MULTIPART_PARTS: usize = 16;
 const MAX_MULTIPART_HEADER_BYTES: usize = 64 * 1024;
 const MAX_MULTIPART_PARAMETER_BYTES: usize = 16 * 1024;
 pub(crate) const MAX_RELAY_SHARE_METADATA_BYTES: usize = 64 * 1024 * 1024;
 pub(crate) const HUB_OUTBOUND_QUEUE_CAPACITY: usize = 64;
+pub(crate) const MAX_HUB_MESSAGE_BYTES: usize = 256 * 1024;
 const PBKDF2_ITERATIONS: NonZeroU32 = match NonZeroU32::new(1_000) {
     Some(value) => value,
     None => unreachable!(),
@@ -137,6 +139,9 @@ pub(crate) fn send_hub_invocation(
         "arguments": arguments,
     })
     .to_string();
+    if message.len() > MAX_HUB_MESSAGE_BYTES {
+        return false;
+    }
     match sender.try_send(message) {
         Ok(()) => true,
         Err(mpsc::error::TrySendError::Full(_)) => false,
@@ -777,6 +782,9 @@ impl RuntimeState {
         now: u64,
     ) -> bool {
         self.prune(now);
+        if validate_relay_agent_name(agent_name).is_err() {
+            return false;
+        }
         let Some(challenge) = self.challenges.get(connection_id) else {
             return false;
         };
@@ -1190,6 +1198,7 @@ impl RuntimeState {
         database_path: PathBuf,
         completed_at: u64,
     ) -> Result<(), String> {
+        validate_relay_agent_name(&agent_name)?;
         validate_share_entries(&shares)?;
         if share_count != shares.len() {
             return Err(format!(
@@ -1382,9 +1391,22 @@ fn read_share_manifest(path: &Path) -> Result<Option<Vec<PersistedShareUpload>>,
         ));
     }
     for record in &records {
+        validate_relay_agent_name(&record.agent_name)?;
         validate_share_entries(&record.shares)?;
     }
     Ok(Some(records))
+}
+
+fn validate_relay_agent_name(agent_name: &str) -> Result<(), String> {
+    if agent_name.trim().is_empty()
+        || agent_name.len() > MAX_RELAY_AGENT_NAME_BYTES
+        || agent_name.chars().any(char::is_control)
+    {
+        return Err(format!(
+            "relay agent name must be nonblank, control-free, and at most {MAX_RELAY_AGENT_NAME_BYTES} bytes"
+        ));
+    }
+    Ok(())
 }
 
 fn validate_share_entries(shares: &[RemoteShare]) -> Result<(), String> {
@@ -1916,6 +1938,33 @@ mod tests {
             .expect_err("oversized manifest must be rejected");
         assert!(error.contains("contains more than"), "{error}");
         std::fs::remove_dir_all(root).expect("remove oversized manifest fixture");
+    }
+
+    #[test]
+    fn relay_share_manifest_rejects_invalid_agent_names() {
+        let root = std::env::temp_dir().join(format!(
+            "slskr-relay-manifest-agent-name-{}",
+            Uuid::new_v4().simple()
+        ));
+        let incoming = root.join("relay").join("incoming");
+        std::fs::create_dir_all(&incoming).expect("create relay incoming directory");
+        let record = PersistedShareUpload {
+            token: Uuid::new_v4().to_string(),
+            agent_name: "edge\nforged".to_owned(),
+            shares: Vec::new(),
+            database_path: incoming.join("share-invalid.db"),
+            completed_at: 1,
+        };
+        std::fs::write(
+            incoming.join("manifest.json"),
+            serde_json::to_vec(&[record]).expect("serialize invalid agent manifest"),
+        )
+        .expect("write invalid agent manifest");
+
+        let error = read_share_manifest(&incoming.join("manifest.json"))
+            .expect_err("invalid persisted agent identity");
+        assert!(error.contains("agent name"), "{error}");
+        std::fs::remove_dir_all(root).expect("remove invalid agent manifest fixture");
     }
 
     #[test]

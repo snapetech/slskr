@@ -19,13 +19,15 @@ use uuid::Uuid;
 use crate::{relay, AppState};
 
 const SIGNALR_RECORD_SEPARATOR: char = '\x1e';
-const MAX_SIGNALR_MESSAGE_BYTES: usize = 256 * 1024;
+const MAX_SIGNALR_MESSAGE_BYTES: usize = relay::MAX_HUB_MESSAGE_BYTES;
 const MAX_SIGNALR_MESSAGES_PER_FRAME: usize = 256;
 const MAX_WEBSOCKET_FRAME_BYTES: u64 = 4 * 1024 * 1024;
 pub(crate) const WEBSOCKET_READ_TIMEOUT: Duration = Duration::from_secs(120);
 pub(crate) const SIGNALR_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(15);
 const WEBSOCKET_WRITE_TIMEOUT: Duration = Duration::from_secs(30);
 pub(crate) const HUB_INBOUND_QUEUE_CAPACITY: usize = 8;
+const MAX_RELAY_FAILURE_REASON_BYTES: usize = 4 * 1024;
+const DEFAULT_RELAY_FAILURE_REASON: &str = "relay agent failed to provide the requested file";
 
 #[derive(Debug)]
 pub(crate) enum WebSocketFrame {
@@ -283,11 +285,7 @@ where
                 return invocation_error(writer, invocation_id.as_deref(), "Invalid request id")
                     .await;
             };
-            let error = arguments
-                .get(1)
-                .and_then(Value::as_str)
-                .map(str::to_owned)
-                .unwrap_or_else(|| "relay agent failed to provide the requested file".to_owned());
+            let error = relay_failure_reason(arguments.get(1));
             if !registered {
                 Err("Unauthorized".to_owned())
             } else {
@@ -382,9 +380,25 @@ pub(crate) async fn write_signalr_text<W>(writer: &mut W, text: &str) -> Result<
 where
     W: AsyncWrite + Unpin,
 {
+    if text.len() > MAX_SIGNALR_MESSAGE_BYTES {
+        return Err("relay SignalR message is too large".to_owned());
+    }
     let mut payload = text.as_bytes().to_vec();
     payload.push(SIGNALR_RECORD_SEPARATOR as u8);
     write_ws_frame(writer, 0x81, &payload).await
+}
+
+fn relay_failure_reason(value: Option<&Value>) -> String {
+    let Some(reason) = value.and_then(Value::as_str) else {
+        return DEFAULT_RELAY_FAILURE_REASON.to_owned();
+    };
+    if reason.trim().is_empty()
+        || reason.len() > MAX_RELAY_FAILURE_REASON_BYTES
+        || reason.chars().any(char::is_control)
+    {
+        return DEFAULT_RELAY_FAILURE_REASON.to_owned();
+    }
+    reason.to_owned()
 }
 
 pub(crate) async fn write_ws_frame<W>(
@@ -600,5 +614,32 @@ mod tests {
             .join(&SIGNALR_RECORD_SEPARATOR.to_string());
         let error = signalr_messages(&burst).expect_err("message burst");
         assert!(error.contains("too many messages"), "{error}");
+    }
+
+    #[test]
+    fn relay_failure_reasons_are_bounded_and_control_free() {
+        assert_eq!(
+            relay_failure_reason(Some(&Value::String("failed".to_owned()))),
+            "failed"
+        );
+        assert_eq!(
+            relay_failure_reason(Some(&Value::String("bad\nreason".to_owned()))),
+            DEFAULT_RELAY_FAILURE_REASON
+        );
+        assert_eq!(
+            relay_failure_reason(Some(&Value::String(
+                "x".repeat(MAX_RELAY_FAILURE_REASON_BYTES + 1)
+            ))),
+            DEFAULT_RELAY_FAILURE_REASON
+        );
+    }
+
+    #[tokio::test]
+    async fn signalr_writer_rejects_oversized_messages() {
+        let mut writer = tokio::io::sink();
+        let error = write_signalr_text(&mut writer, &"x".repeat(MAX_SIGNALR_MESSAGE_BYTES + 1))
+            .await
+            .expect_err("oversized SignalR message");
+        assert!(error.contains("too large"), "{error}");
     }
 }

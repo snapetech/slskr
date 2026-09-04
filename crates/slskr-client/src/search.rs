@@ -5,7 +5,7 @@ use std::{
 
 use slskr_protocol::{
     distributed::DistributedSearch,
-    peer::{FileEntry, FileSearchResponse, PeerMessage},
+    peer::{FileEntry, FileSearchResponse, PeerMessage, MAX_FILE_ATTRIBUTES},
     server::{SearchRequest, ServerMessage, TargetedSearchRequest},
 };
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -28,6 +28,12 @@ const MAX_WISHLIST_SEARCH_TERM_CANDIDATES: usize = MAX_WISHLIST_SEARCH_TERMS * 1
 pub const MAX_OUTBOUND_SEARCH_FIELD_BYTES: usize = 4_096;
 pub const MAX_INBOUND_SEARCH_QUERY_BYTES: usize = 4_096;
 pub const MAX_INBOUND_SEARCH_QUERY_TERMS: usize = 64;
+
+fn valid_search_result_entry(entry: &FileEntry) -> bool {
+    entry.attributes.len() <= MAX_FILE_ATTRIBUTES
+        && !entry.filename.chars().any(char::is_control)
+        && !entry.extension.chars().any(char::is_control)
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SearchRequestHandle {
@@ -332,6 +338,14 @@ impl SearchResults {
         match message {
             PeerMessage::FileSearchResponse(mut response) => {
                 response.username = normalize_peer_username(&response.username)?.to_owned();
+                if response
+                    .results
+                    .iter()
+                    .chain(&response.private_results)
+                    .any(|entry| !valid_search_result_entry(entry))
+                {
+                    return Ok(true);
+                }
                 if self.by_token.len() >= MAX_TRACKED_SEARCH_RESULT_TOKENS
                     && !self.by_token.contains_key(&response.token)
                 {
