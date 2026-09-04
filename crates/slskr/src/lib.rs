@@ -72821,6 +72821,14 @@ fn spawn_session_manager(state: Arc<AppState>, mut receiver: mpsc::Receiver<Sess
                 .await;
             }
 
+            // Commands drained above may have failed while writing to the
+            // server.  That path records the reconnect requirement in shared
+            // runtime state; copy it before deciding whether this loop may
+            // wait forever for another command.
+            if state.runtime.read().await.application_reconnect_pending {
+                reconnect_requested = true;
+            }
+
             if reconnect_requested && session.is_none() {
                 match wait_for_reconnect_or_command(&mut receiver, state.config.reconnect_delay)
                     .await

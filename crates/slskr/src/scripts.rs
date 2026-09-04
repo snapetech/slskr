@@ -10,6 +10,16 @@ use tokio::{process::Command, sync::Semaphore, time};
 use crate::config::{ControllerProfile, ScriptIntegrationSettings};
 
 const MAX_CONCURRENT_SCRIPT_RUNS: usize = 32;
+const SCRIPT_TIMEOUT: Duration = Duration::from_secs(300);
+
+fn format_timeout(duration: Duration) -> String {
+    let milliseconds = duration.as_millis();
+    if milliseconds % 1_000 == 0 {
+        format!("{}s", milliseconds / 1_000)
+    } else {
+        format!("{milliseconds}ms")
+    }
+}
 
 static SCRIPT_RUN_PERMITS: OnceLock<Arc<Semaphore>> = OnceLock::new();
 
@@ -74,6 +84,16 @@ pub(crate) async fn run(
     target: ControllerProfile,
     payload: &str,
 ) -> Result<Vec<String>, String> {
+    run_with_timeout(script, script_directory, target, payload, SCRIPT_TIMEOUT).await
+}
+
+async fn run_with_timeout(
+    script: &ScriptIntegrationSettings,
+    script_directory: &Path,
+    target: ControllerProfile,
+    payload: &str,
+    timeout_duration: Duration,
+) -> Result<Vec<String>, String> {
     tokio::fs::create_dir_all(script_directory)
         .await
         .map_err(|error| format!("failed to create script directory: {error}"))?;
@@ -85,14 +105,15 @@ pub(crate) async fn run(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
-    let output = if target == ControllerProfile::Native {
-        time::timeout(Duration::from_secs(300), command.output())
-            .await
-            .map_err(|_| "script timed out after 300s".to_owned())?
-    } else {
-        command.output().await
-    }
-    .map_err(|error| format!("failed to run script: {error}"))?;
+    let output = time::timeout(timeout_duration, command.output())
+        .await
+        .map_err(|_| {
+            format!(
+                "script timed out after {}",
+                format_timeout(timeout_duration)
+            )
+        })?
+        .map_err(|error| format!("failed to run script: {error}"))?;
     let stderr = String::from_utf8_lossy(&output.stderr);
     if !stderr.is_empty() {
         return Err(format!(
@@ -206,6 +227,30 @@ mod tests {
                 .unwrap(),
             payload
         );
+        tokio::fs::remove_dir_all(directory).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn compatibility_script_timeout_bounds_hung_commands() {
+        let directory =
+            std::env::temp_dir().join(format!("slskr-script-timeout-{}", uuid::Uuid::new_v4()));
+        let script = script(ScriptRunSettings {
+            executable: "/bin/sh".to_owned(),
+            arglist: Some(vec!["-c".to_owned(), "sleep 1".to_owned()]),
+            ..Default::default()
+        });
+
+        let error = run_with_timeout(
+            &script,
+            &directory,
+            ControllerProfile::Legacy,
+            "{}",
+            Duration::from_millis(10),
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(error, "script timed out after 10ms");
         tokio::fs::remove_dir_all(directory).await.unwrap();
     }
 
