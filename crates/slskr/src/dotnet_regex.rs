@@ -1,5 +1,30 @@
-use std::sync::mpsc::{self, RecvTimeoutError};
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    mpsc::{self, RecvTimeoutError},
+};
 use std::time::Duration;
+
+const MAX_REGEX_MATCH_WORKERS: usize = 8;
+static ACTIVE_REGEX_MATCH_WORKERS: AtomicUsize = AtomicUsize::new(0);
+
+struct RegexWorkerPermit;
+
+impl RegexWorkerPermit {
+    fn acquire() -> Option<Self> {
+        ACTIVE_REGEX_MATCH_WORKERS
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |active| {
+                (active < MAX_REGEX_MATCH_WORKERS).then_some(active + 1)
+            })
+            .ok()
+            .map(|_| Self)
+    }
+}
+
+impl Drop for RegexWorkerPermit {
+    fn drop(&mut self) {
+        ACTIVE_REGEX_MATCH_WORKERS.fetch_sub(1, Ordering::AcqRel);
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct DotNetRegex {
@@ -60,6 +85,11 @@ impl DotNetRegex {
             return self.is_match(value);
         }
 
+        let permit = RegexWorkerPermit::acquire().ok_or_else(|| {
+            format!(
+                "regular-expression match worker capacity is full (maximum {MAX_REGEX_MATCH_WORKERS})"
+            )
+        })?;
         let folded = self.lowercase_input.then(|| value.to_lowercase());
         let value = folded.as_deref().unwrap_or(value).to_owned();
         let matcher = self.matcher.clone();
@@ -68,6 +98,7 @@ impl DotNetRegex {
             .name("slskr-regex-match".to_owned())
             .stack_size(16 * 1024 * 1024)
             .spawn(move || {
+                let _permit = permit;
                 let result = matcher.is_match(&value).map_err(|error| error.to_string());
                 let _ = sender.send(result);
             })
@@ -954,7 +985,20 @@ fn parse_inline_options(expression: &str, start: usize) -> Option<InlineOptions>
 
 #[cfg(test)]
 mod tests {
-    use super::{rewrite_dotnet_numbered_captures, DotNetRegex};
+    use super::{
+        rewrite_dotnet_numbered_captures, DotNetRegex, RegexWorkerPermit, MAX_REGEX_MATCH_WORKERS,
+    };
+
+    #[test]
+    fn regex_worker_admission_is_bounded_and_released() {
+        let mut permits = Vec::new();
+        for _ in 0..MAX_REGEX_MATCH_WORKERS {
+            permits.push(RegexWorkerPermit::acquire().expect("regex worker permit"));
+        }
+        assert!(RegexWorkerPermit::acquire().is_none());
+        drop(permits);
+        assert!(RegexWorkerPermit::acquire().is_some());
+    }
 
     #[test]
     fn translates_dotnet_control_escape_and_end_anchor() {
