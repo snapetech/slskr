@@ -734,6 +734,9 @@ export class SlskrClient {
       if (new TextEncoder().encode(text).byteLength > maximum) {
         throw new NetworkError(`HTTP response body exceeds ${maximum} bytes`);
       }
+      if (!text.trim()) {
+        return undefined;
+      }
       return JSON.parse(text);
     }
 
@@ -756,7 +759,11 @@ export class SlskrClient {
       body.set(chunk, offset);
       offset += chunk.byteLength;
     }
-    return JSON.parse(new TextDecoder().decode(body));
+    const text = new TextDecoder().decode(body);
+    if (!text.trim()) {
+      return undefined;
+    }
+    return JSON.parse(text);
   }
 
   // =========================================================================

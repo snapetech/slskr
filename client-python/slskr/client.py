@@ -592,7 +592,10 @@ class SlskrClient:
             if length > maximum:
                 raise NetworkError(f"HTTP response body exceeds {maximum} bytes")
             chunks.append(chunk)
-        return json.loads(b"".join(chunks))
+        body = b"".join(chunks)
+        if not body.strip():
+            return None
+        return json.loads(body)
 
     def _path_segment(self, value: str) -> str:
         return quote(str(value), safe="")

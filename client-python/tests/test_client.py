@@ -639,6 +639,14 @@ async def test_python_client_rejects_oversized_declared_response():
 
 
 @pytest.mark.asyncio
+async def test_python_client_accepts_empty_success_body_as_no_content():
+    client = SlskrClient("https://example.test", "token")
+    response = FakeResponse([b"  \n"])
+
+    assert await client._read_json(response, 8 * 1024 * 1024) is None
+
+
+@pytest.mark.asyncio
 async def test_python_client_bounds_chunked_response():
     client = SlskrClient("https://example.test", "token")
     response = FakeResponse([b"x" * 65, b"y" * 64])
