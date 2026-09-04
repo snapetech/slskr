@@ -34,6 +34,9 @@ where
             max: MAX_STORED_SOCIAL_FIELD_BYTES,
         });
     }
+    if message.chars().any(char::is_control) {
+        return Err(ClientError::InvalidSocialField { field: "body" });
+    }
     let mut seen = HashSet::new();
     let mut recipients = Vec::new();
 
@@ -443,6 +446,11 @@ mod tests {
 
     #[test]
     fn social_message_bodies_reject_control_characters() {
+        assert!(matches!(
+            private_message_users_command(["alice"], "hello\nforged"),
+            Err(ClientError::InvalidSocialField { field: "body" })
+        ));
+
         let mut rooms = RoomState::new();
         assert!(
             !rooms.apply_server_message(&ServerMessage::GlobalRoomMessage {
