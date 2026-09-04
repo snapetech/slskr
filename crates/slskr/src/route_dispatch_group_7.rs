@@ -1617,33 +1617,30 @@ async fn route_dispatch_group_7(context: &RouteDispatchContext<'_, '_>) -> Route
                     "Acceptor does not have permission to accept join requests"
                 }));
             }
-            let request = {
-                state
-                    .pod_membership_workflow
-                    .write()
-                    .await
-                    .remove_join(&input.pod_id, &input.peer_id)
-            };
-            let Some(request) = request else {
+            let mut workflow = state.pod_membership_workflow.write().await;
+            let Some(request) = workflow.remove_join(&input.pod_id, &input.peer_id) else {
                 return Ok(routing::bad_request_response(if request_is_versioned_v0 {
                     "Join acceptance could not be processed"
                 } else {
                     "No pending join request found"
                 }));
             };
-            let added = state
-                .rooms
-                .write()
-                .await
-                .add_member(&input.pod_id, input.peer_id.clone());
+            let added = {
+                state
+                    .rooms
+                    .write()
+                    .await
+                    .add_member(&input.pod_id, input.peer_id.clone())
+            };
             match added {
                 Ok(Some(_)) => {}
                 Ok(None) => {
-                    let _ = state
-                        .pod_membership_workflow
-                        .write()
-                        .await
-                        .add_join(request);
+                    if let Err(error) = workflow.add_join(request) {
+                        eprintln!("pod join acceptance rollback failed: {error}");
+                        return Ok(routing::service_unavailable_response(
+                            "pod membership rollback failed",
+                        ));
+                    }
                     return Ok(routing::bad_request_response(if request_is_versioned_v0 {
                         "Join acceptance could not be processed"
                     } else {
@@ -1651,11 +1648,12 @@ async fn route_dispatch_group_7(context: &RouteDispatchContext<'_, '_>) -> Route
                     }));
                 }
                 Err(()) => {
-                    let _ = state
-                        .pod_membership_workflow
-                        .write()
-                        .await
-                        .add_join(request);
+                    if let Err(error) = workflow.add_join(request) {
+                        eprintln!("pod join acceptance rollback failed: {error}");
+                        return Ok(routing::service_unavailable_response(
+                            "pod membership rollback failed",
+                        ));
+                    }
                     return Ok(if request_is_versioned_v0 {
                         routing::bad_request_response("Join acceptance could not be processed")
                     } else {
@@ -1663,6 +1661,7 @@ async fn route_dispatch_group_7(context: &RouteDispatchContext<'_, '_>) -> Route
                     });
                 }
             }
+            drop(workflow);
             state.pod_membership_workflow.write().await.set_role(
                 &input.pod_id,
                 &input.peer_id,
@@ -1812,36 +1811,35 @@ async fn route_dispatch_group_7(context: &RouteDispatchContext<'_, '_>) -> Route
                     "Acceptor does not have permission to accept leave requests"
                 }));
             }
-            let request = state
-                .pod_membership_workflow
-                .write()
-                .await
-                .remove_leave(&input.pod_id, &input.peer_id);
-            let Some(request) = request else {
+            let mut workflow = state.pod_membership_workflow.write().await;
+            let Some(request) = workflow.remove_leave(&input.pod_id, &input.peer_id) else {
                 return Ok(routing::bad_request_response(if request_is_versioned_v0 {
                     "Leave acceptance could not be processed"
                 } else {
                     "No pending leave request found"
                 }));
             };
-            if state
-                .rooms
-                .write()
-                .await
-                .remove_member(&input.pod_id, &input.peer_id)
-                .is_none()
-            {
-                let _ = state
-                    .pod_membership_workflow
+            let removed = {
+                state
+                    .rooms
                     .write()
                     .await
-                    .add_leave(request);
+                    .remove_member(&input.pod_id, &input.peer_id)
+            };
+            if removed.is_none() {
+                if let Err(error) = workflow.add_leave(request) {
+                    eprintln!("pod leave acceptance rollback failed: {error}");
+                    return Ok(routing::service_unavailable_response(
+                        "pod membership rollback failed",
+                    ));
+                }
                 return Ok(routing::bad_request_response(if request_is_versioned_v0 {
                     "Leave acceptance could not be processed"
                 } else {
                     "Not a member of this pod"
                 }));
             }
+            drop(workflow);
             state
                 .pod_membership_workflow
                 .write()

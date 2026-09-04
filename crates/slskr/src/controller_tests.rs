@@ -45552,6 +45552,19 @@ async fn rooms_api_joins_and_records_messages() {
             username: "friend".to_owned(),
         }
     );
+    let users = super::route_http_request(
+        "GET",
+        "/api/v0/rooms/joined/music/users",
+        None,
+        "",
+        &state,
+    )
+    .await
+    .expect("room member roster");
+    assert_eq!(users.status, "200 OK");
+    let users_json = serde_json::from_str::<serde_json::Value>(&users.body).unwrap();
+    assert_eq!(users_json[0]["username"], "friend");
+    assert_eq!(users_json[0]["status"], "Offline");
 
     let rooms = super::route_http_request("GET", "/api/v0/rooms", None, "", &state)
         .await
@@ -46155,6 +46168,14 @@ fn room_store_rejects_new_members_at_limit_but_accepts_duplicates() {
     assert!(rooms.add_member("music", "carol".to_owned()).is_err());
     assert!(rooms.add_member("music", "ALICE".to_owned()).is_ok());
     assert_eq!(rooms.records[0].members, ["alice", "bob"]);
+    assert_eq!(
+        rooms.records[0]
+            .roster
+            .iter()
+            .map(|user| user.username.as_str())
+            .collect::<Vec<_>>(),
+        ["alice", "bob"]
+    );
     assert_eq!(rooms.records[0].user_count, Some(2));
 }
 

@@ -1021,7 +1021,15 @@ async fn route_dispatch_group_3(context: &RouteDispatchContext<'_, '_>) -> Route
             let username = json_body_string(body)
                 .or_else(|| extract_json_string_field(body, "username"))
                 .or_else(|| extract_json_string_field(body, "name"))
-                .unwrap_or_else(|| body.trim().trim_matches('"').to_owned());
+                .map(|username| {
+                    truncate_utf8_bytes(username.trim().to_owned(), MAX_ROOM_USERNAME_BYTES)
+                })
+                .unwrap_or_else(|| {
+                    truncate_utf8_bytes(
+                        body.trim().trim_matches('"').to_owned(),
+                        MAX_ROOM_USERNAME_BYTES,
+                    )
+                });
             if username.trim().is_empty() {
                 return Ok(rooms_controller_value_bad_request_response(
                     "username is required",

@@ -8411,7 +8411,24 @@ impl RoomStore {
             {
                 return Err(());
             }
-            record.members.push(username);
+            record.members.push(username.clone());
+        }
+        if !record
+            .roster
+            .iter()
+            .any(|user| user.username.eq_ignore_ascii_case(&username))
+            && record.roster.len() < self.max_members_per_room
+        {
+            record.roster.push(RoomRosterEntry {
+                username: username.clone(),
+                status: 0,
+                average_speed: 0,
+                upload_count: 0,
+                file_count: 0,
+                directory_count: 0,
+                slots_free: 0,
+                country_code: String::new(),
+            });
         }
         record.user_count = Some(u32::try_from(record.members.len()).unwrap_or(u32::MAX));
         record.updated_at = now;
@@ -8428,6 +8445,9 @@ impl RoomStore {
             .iter()
             .position(|member| member.eq_ignore_ascii_case(username))?;
         record.members.remove(member);
+        record
+            .roster
+            .retain(|user| !user.username.eq_ignore_ascii_case(username));
         record.user_count = Some(u32::try_from(record.members.len()).unwrap_or(u32::MAX));
         record.updated_at = now;
         self.updated_at = now;
@@ -26379,7 +26399,15 @@ async fn route_http_request_with_headers(
             let username = json_body_string(body)
                 .or_else(|| extract_json_string_field(body, "username"))
                 .or_else(|| extract_json_string_field(body, "name"))
-                .unwrap_or_else(|| body.trim().trim_matches('"').to_owned());
+                .map(|username| {
+                    truncate_utf8_bytes(username.trim().to_owned(), MAX_ROOM_USERNAME_BYTES)
+                })
+                .unwrap_or_else(|| {
+                    truncate_utf8_bytes(
+                        body.trim().trim_matches('"').to_owned(),
+                        MAX_ROOM_USERNAME_BYTES,
+                    )
+                });
             if username.trim().is_empty() {
                 return Ok(rooms_controller_value_bad_request_response("username is required"));
             }
@@ -35912,33 +35940,30 @@ async fn route_http_request_with_headers(
                     "Acceptor does not have permission to accept join requests"
                 }));
             }
-            let request = {
-                state
-                    .pod_membership_workflow
-                    .write()
-                    .await
-                    .remove_join(&input.pod_id, &input.peer_id)
-            };
-            let Some(request) = request else {
+            let mut workflow = state.pod_membership_workflow.write().await;
+            let Some(request) = workflow.remove_join(&input.pod_id, &input.peer_id) else {
                 return Ok(routing::bad_request_response(if request_is_versioned_v0 {
                     "Join acceptance could not be processed"
                 } else {
                     "No pending join request found"
                 }));
             };
-            let added = state
-                .rooms
-                .write()
-                .await
-                .add_member(&input.pod_id, input.peer_id.clone());
+            let added = {
+                state
+                    .rooms
+                    .write()
+                    .await
+                    .add_member(&input.pod_id, input.peer_id.clone())
+            };
             match added {
                 Ok(Some(_)) => {}
                 Ok(None) => {
-                    let _ = state
-                        .pod_membership_workflow
-                        .write()
-                        .await
-                        .add_join(request);
+                    if let Err(error) = workflow.add_join(request) {
+                        eprintln!("pod join acceptance rollback failed: {error}");
+                        return Ok(routing::service_unavailable_response(
+                            "pod membership rollback failed",
+                        ));
+                    }
                     return Ok(routing::bad_request_response(if request_is_versioned_v0 {
                         "Join acceptance could not be processed"
                     } else {
@@ -35946,11 +35971,12 @@ async fn route_http_request_with_headers(
                     }));
                 }
                 Err(()) => {
-                    let _ = state
-                        .pod_membership_workflow
-                        .write()
-                        .await
-                        .add_join(request);
+                    if let Err(error) = workflow.add_join(request) {
+                        eprintln!("pod join acceptance rollback failed: {error}");
+                        return Ok(routing::service_unavailable_response(
+                            "pod membership rollback failed",
+                        ));
+                    }
                     return Ok(if request_is_versioned_v0 {
                         routing::bad_request_response("Join acceptance could not be processed")
                     } else {
@@ -35958,6 +35984,7 @@ async fn route_http_request_with_headers(
                     });
                 }
             }
+            drop(workflow);
             state
                 .pod_membership_workflow
                 .write()
@@ -36107,36 +36134,35 @@ async fn route_http_request_with_headers(
                     "Acceptor does not have permission to accept leave requests"
                 }));
             }
-            let request = state
-                .pod_membership_workflow
-                .write()
-                .await
-                .remove_leave(&input.pod_id, &input.peer_id);
-            let Some(request) = request else {
+            let mut workflow = state.pod_membership_workflow.write().await;
+            let Some(request) = workflow.remove_leave(&input.pod_id, &input.peer_id) else {
                 return Ok(routing::bad_request_response(if request_is_versioned_v0 {
                     "Leave acceptance could not be processed"
                 } else {
                     "No pending leave request found"
                 }));
             };
-            if state
-                .rooms
-                .write()
-                .await
-                .remove_member(&input.pod_id, &input.peer_id)
-                .is_none()
-            {
-                let _ = state
-                    .pod_membership_workflow
+            let removed = {
+                state
+                    .rooms
                     .write()
                     .await
-                    .add_leave(request);
+                    .remove_member(&input.pod_id, &input.peer_id)
+            };
+            if removed.is_none() {
+                if let Err(error) = workflow.add_leave(request) {
+                    eprintln!("pod leave acceptance rollback failed: {error}");
+                    return Ok(routing::service_unavailable_response(
+                        "pod membership rollback failed",
+                    ));
+                }
                 return Ok(routing::bad_request_response(if request_is_versioned_v0 {
                     "Leave acceptance could not be processed"
                 } else {
                     "Not a member of this pod"
                 }));
             }
+            drop(workflow);
             state
                 .pod_membership_workflow
                 .write()
