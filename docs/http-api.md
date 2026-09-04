@@ -204,7 +204,10 @@ immediate directory summaries for folder navigation.
 #### `GET /api/v0/files/incomplete/directories`
 
 List the scoped downloads or incomplete storage root using the slskd-compatible
-directory response shape. Add `/{base64-path}` to list a nested directory.
+directory response shape. Add `/{base64-path}` to list a nested directory. The
+path is UTF-8 encoded as standard Base64 and then percent-encoded as one URL
+path segment so `/`, `+`, and `=` inside the encoded value do not change the
+route.
 
 **Query Parameters:**
 - `recursive` (optional): `true` to include nested directories.
@@ -218,41 +221,34 @@ clients can detect bounded listings and request another page.
 
 ### Session Control
 
-#### `GET /api/sessions`
+#### `GET /api/v0/session`
 
-List all active sessions.
+Read the single server-session snapshot.
 
 **Response:**
 ```json
 {
-  "sessions": [
-    {
-      "id": "server-session",
-      "type": "server",
-      "status": "connected",
-      "connected_at": "2025-05-04T10:00:00Z"
-    }
-  ]
+  "state": "connected",
+  "username": "my_username",
+  "supporter": false,
+  "privileges_seconds": 0,
+  "last_error": null,
+  "last_server_message": null,
+  "server_messages_seen": 0,
+  "reconnects": 0,
+  "connected_at": null,
+  "updated_at": 0
 }
 ```
 
-#### `POST /api/sessions`
+#### `POST /api/v0/session/connect`
 
-Initiate a new session.
+Request the daemon to connect using its configured server credentials.
+**Response:** `202 Accepted` with `{"accepted":true}`.
 
-**Request Body:**
-```json
-{
-  "kind": "server",
-  "parameters": {}
-}
-```
+#### `POST /api/v0/session/ping`
 
-**Response:** `201 Created` with session details
-
-#### `POST /api/sessions/{id}/ping`
-
-Send ping to session to keep it alive.
+Send a keep-alive command to the server session.
 
 **Response:**
 ```json
@@ -262,27 +258,22 @@ Send ping to session to keep it alive.
 }
 ```
 
-#### `DELETE /api/sessions/{id}`
+#### `POST /api/v0/session/disconnect`
 
-Disconnect a session.
+Request a server-session disconnect.
 
-**Response:** `204 No Content`
+**Response:** `202 Accepted` with `{"accepted":true}`.
 
 ### Privileges
 
-#### `GET /api/sessions/{id}/privileges`
+#### `POST /api/v0/session/privileges/check`
 
-Check user privileges in session.
+Request a fresh privilege check for the connected account.
 
 **Response:**
 ```json
 {
-  "user_id": "username",
-  "privileges": [
-    "chat",
-    "download",
-    "upload"
-  ]
+  "accepted": true
 }
 ```
 
@@ -394,7 +385,7 @@ Get search details and results.
 
 ### Messages
 
-#### `GET /api/messages`
+#### `GET /api/v0/messages`
 
 List all messages.
 
@@ -405,18 +396,26 @@ List all messages.
 **Response:**
 ```json
 {
-  "messages": [
+  "entries": [
     {
-      "id": "msg-1",
-      "sender": "username",
-      "content": "Hello",
-      "timestamp": "2025-05-04T11:45:00Z"
+      "id": 1,
+      "username": "username",
+      "direction": "outbound",
+      "body": "Hello",
+      "acknowledged": false,
+      "created_at": 0,
+      "updated_at": 0
     }
-  ]
+  ],
+  "count": 1,
+  "filtered_count": 1,
+  "offset": 0,
+  "limit": null,
+  "updated_at": 0
 }
 ```
 
-#### `GET /api/messages/{username}`
+#### `GET /api/v0/messages/{username}`
 
 Get messages from a specific user.
 
@@ -426,7 +425,7 @@ Get messages from a specific user.
 
 **Response:** List of messages with given username
 
-#### `POST /api/messages`
+#### `POST /api/v0/messages`
 
 Send a message to a user. When persistence is enabled, the message projection
 is written to SQLite and rehydrated on restart.
@@ -434,14 +433,14 @@ is written to SQLite and rehydrated on restart.
 **Request Body:**
 ```json
 {
-  "recipient": "username",
-  "content": "Hello"
+  "username": "username",
+  "body": "Hello"
 }
 ```
 
 **Response:** `201 Created` with message details
 
-#### `PUT /api/messages/{id}/acknowledge`
+#### `POST /api/v0/messages/{id}/ack`
 
 Mark message as acknowledged. When persistence is enabled, the acknowledgement
 state is written to SQLite and rehydrated on restart.
@@ -555,14 +554,14 @@ Get room details and user list.
 }
 ```
 
-#### `POST /api/rooms/{name}`
+#### `POST /api/v0/rooms/{name}/join`
 
 Join a room. When persistence is enabled, the room subscription projection is
 written to SQLite and rehydrated on restart.
 
 **Response:** `201 Created` with room details
 
-#### `DELETE /api/rooms/{name}`
+#### `DELETE /api/v0/rooms/{name}/join`
 
 Leave a room. When persistence is enabled, the room subscription is marked
 unsubscribed in SQLite.
@@ -571,7 +570,7 @@ unsubscribed in SQLite.
 
 ### Browse
 
-#### `GET /api/browse/{username}`
+#### `GET /api/v0/users/{username}/browse`
 
 Browse a user's cached shared files. The slskd-compatible route returns
 directory groups with stable total and filtered counts so clients can page
@@ -611,59 +610,40 @@ without inferring totals from the current page length.
 }
 ```
 
-#### `POST /api/browse/{username}`
+#### `POST /api/v0/users/{username}/browse/request`
 
-Request browse from user.
+Request the user's complete shared-file list. The body is empty.
+**Response:** `202 Accepted` with browse request details.
 
-**Request Body:**
-```json
-{
-  "folder": null
-}
-```
+#### `POST /api/v0/users/{username}/browse/folder`
 
-**Response:** `201 Created` with browse request details
-
-#### `GET /api/browse/requests`
-
-List pending browse requests.
-
-**Query Parameters:**
-- `status` (optional): `pending`, `accepted`, `rejected`
-
-**Response:**
-```json
-{
-  "requests": [
-    {
-      "id": "request-1",
-      "from": "browsing_user",
-      "status": "pending",
-      "requested_at": "2025-05-04T11:35:00Z"
-    }
-  ]
-}
-```
-
-#### `POST /api/browse/requests/{id}`
-
-Accept or reject a browse request.
+Request one folder from a user.
 
 **Request Body:**
 ```json
 {
-  "action": "accept",
-  "folder": "/path/to/share"
+  "folder": "Music"
 }
 ```
 
-**Response:** `201 Created` with folder contents
+**Response:** `202 Accepted` with browse request details
 
-#### `PUT /api/browse/requests/{id}/acknowledge`
+#### `POST /api/v0/users/{username}/browse/fail`
 
-Mark browse request as acknowledged.
+Record a failed browse request.
 
-**Response:** `204 No Content`
+**Request Body:**
+```json
+{
+  "reason": "peer unavailable"
+}
+```
+
+#### `GET /api/v0/browse`
+
+List cached browse projections. For compatibility request tracking, the
+legacy `/api/browse/requests` alias returns `{ "requests": [...], "count": n }`;
+its entries identify users by `username`, not by a synthetic request ID.
 
 ### Events
 

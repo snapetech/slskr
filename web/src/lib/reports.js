@@ -22,13 +22,36 @@ export const getHistogram = async ({
   end,
   buckets,
   direction,
+  interval,
   username = null,
 } = {}) => {
   const parameters = new URLSearchParams();
 
   if (start) parameters.append('start', start.toISOString());
   if (end) parameters.append('end', end.toISOString());
-  if (buckets) parameters.append('buckets', buckets);
+
+  let histogramInterval = Number(interval);
+  if (!Number.isFinite(histogramInterval) || histogramInterval < 5) {
+    const startTime = start?.getTime();
+    const endTime = end?.getTime();
+    const requestedBuckets = Number(buckets);
+
+    if (
+      Number.isFinite(startTime) &&
+      Number.isFinite(endTime) &&
+      endTime > startTime &&
+      Number.isFinite(requestedBuckets) &&
+      requestedBuckets > 0
+    ) {
+      histogramInterval = Math.ceil(
+        ((endTime - startTime) / 60_000) / requestedBuckets,
+      );
+    }
+  }
+
+  if (Number.isFinite(histogramInterval)) {
+    parameters.append('interval', Math.max(5, Math.ceil(histogramInterval)));
+  }
   if (direction) parameters.append('direction', direction);
   if (username) parameters.append('username', username);
 

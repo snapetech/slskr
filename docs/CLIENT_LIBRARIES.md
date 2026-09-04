@@ -90,7 +90,7 @@ await client.cancel_transfer(transfer_id)
 batch = client.batch.builder()
 batch.get("/api/stats", op_id="stats")
 batch.post("/api/searches", {"query": "query"}, op_id="search")
-batch.put("/api/filters", {"enabled": True}, op_id="filters")
+batch.put("/api/v0/config/download-filter", {"enabled": True}, op_id="filters")
 batch.delete("/api/transfers/123", op_id="cancel")
 
 response = await batch.execute()

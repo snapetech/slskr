@@ -1,4 +1,5 @@
 import api from './api';
+import { encodePathSegment } from './pathEncoding';
 
 // Helper to safely call API endpoints that may not exist yet
 const safeGet = async (endpoint, fallback = null) => {
@@ -59,7 +60,7 @@ export const getMeshPeers = async () => {
 
 export const triggerMeshSync = async (username) => {
   try {
-    return (await api.post(`/mesh/sync/${username}`)).data;
+    return (await api.post(`/mesh/sync/${encodePathSegment(username)}`)).data;
   } catch (error) {
     return { error: error?.message || 'Sync failed', success: false };
   }
@@ -102,7 +103,7 @@ export const getActiveSwarmJobs = async () => {
 };
 
 export const getSwarmJob = async (jobId) => {
-  return safeGet(`/multisource/jobs/${jobId}`, null);
+  return safeGet(`/multisource/jobs/${encodePathSegment(jobId)}`, null);
 };
 
 // DHT API

@@ -171,9 +171,9 @@ curl -X POST /api/batch -d '{
 ```json
 {
   "operations": [
-    {"id":"1","method":"POST","path":"/api/messages","body":"{\"recipient\":\"alice\",\"content\":\"Hi\"}"},
-    {"id":"2","method":"POST","path":"/api/messages","body":"{\"recipient\":\"bob\",\"content\":\"Hello\"}"},
-    {"id":"3","method":"POST","path":"/api/messages","body":"{\"recipient\":\"charlie\",\"content\":\"Hey\"}"}
+    {"id":"1","method":"POST","path":"/api/v0/messages","body":"{\"username\":\"alice\",\"body\":\"Hi\"}"},
+    {"id":"2","method":"POST","path":"/api/v0/messages","body":"{\"username\":\"bob\",\"body\":\"Hello\"}"},
+    {"id":"3","method":"POST","path":"/api/v0/messages","body":"{\"username\":\"charlie\",\"body\":\"Hey\"}"}
   ]
 }
 ```
@@ -337,82 +337,37 @@ ws.on('ping', () => {
 });
 ```
 
-## Response Caching
+## MediaCore Retrieval Cache
 
-### Overview
-
-Static endpoints have configurable caching with TTL to reduce database/processing overhead and improve response times.
-
-### Cached Endpoints
-
-| Endpoint | Default TTL | Rationale |
-|----------|-------------|-----------|
-| `/api/version` | 1 hour | Never changes |
-| `/api/capabilities` | 1 hour | Static capabilities |
-| `/api/config` | 5 minutes | Configuration changes rarely |
-| `/api/stats` | 1 minute | Regular updates |
-| `/api/events` | 30 seconds | Needs freshness |
+The daemon caches retrieved MediaCore descriptors. This is a descriptor cache,
+not a generic HTTP response cache: there are no `/api/cache/stats` or
+`/api/cache/invalidate` endpoints.
 
 ### Cache Statistics
 
-Access cache metrics:
-
 ```bash
 curl -H "Authorization: Bearer token" \
-     http://127.0.0.1:5030/api/cache/stats
+     http://127.0.0.1:5030/api/v0/mediacore/retrieve/stats
 ```
 
-**Response:**
-```json
-{
-  "hits": 1543,
-  "misses": 257,
-  "evictions": 12,
-  "total_requests": 1800,
-  "hit_rate": 85.7,
-  "entries": 23,
-  "max_size": 1000
-}
-```
+The response includes `totalRetrievals`, `cacheHits`, `cacheMisses`,
+`cacheHitRatio`, `activeCacheEntries`, `cacheSizeBytes`, and
+`expiredEntriesCleaned`.
 
-### Cache Configuration
+### Selective Invalidation
 
-Configure cache behavior in `slskr.config.toml`:
-
-```toml
-# Cache TTLs
-cache_version_ttl_seconds = 3600
-cache_capabilities_ttl_seconds = 3600
-cache_config_ttl_seconds = 300
-cache_stats_ttl_seconds = 60
-cache_events_ttl_seconds = 30
-
-# Cache size limits
-cache_max_entries = 1000
-cache_cleanup_interval_seconds = 300
-```
-
-### Cache Invalidation
-
-Caches are automatically invalidated when:
-- Entry TTL expires
-- Maximum cache size reached (LRU eviction)
-- Specific endpoint mutation occurs
-
-**Manual Invalidation:**
+Clear all cached descriptors, or provide descriptor keys to clear only selected
+entries:
 
 ```bash
 curl -X POST -H "Authorization: Bearer token" \
-     http://127.0.0.1:5030/api/cache/invalidate \
-     -d '{"keys": ["/api/stats", "/api/config"]}'
+     -H "Content-Type: application/json" \
+     http://127.0.0.1:5030/api/v0/mediacore/retrieve/cache/clear \
+     -d '{"keys": ["content-id-1", "content-id-2"]}'
 ```
 
-### Performance Impact
-
-With 85% cache hit rate:
-- **Original Latency**: ~100ms per request
-- **Cached Latency**: ~5ms per cached request
-- **Total Improvement**: 94% latency reduction for cached endpoints
+The request is bounded and deduplicated by the daemon. An empty body preserves
+the clear-all behavior.
 
 ## Monitoring & Observability
 
@@ -564,12 +519,12 @@ ws.onmessage = (evt) => {
 };
 ```
 
-### 3. Monitor Cache Hit Rate
+### 3. Monitor MediaCore Retrieval Cache
 
 ```bash
 # Check cache performance
 curl -H "Authorization: Bearer token" \
-     http://127.0.0.1:5030/api/cache/stats | jq '.hit_rate'
+     http://127.0.0.1:5030/api/v0/mediacore/retrieve/stats | jq '.cacheHitRatio'
 
 # If < 70%, consider increasing TTLs
 ```
@@ -604,14 +559,13 @@ tail -f /var/log/slskr.log | grep -E "WARN|ERROR"
 2. Increase server timeout in reverse proxy
 3. Use sequential operations for very large batches
 
-### Cache Hit Rate Low
+### Retrieval Cache Metrics Missing
 
-**Error:** `Hit rate < 50%`
+**Error:** `GET /api/cache/stats` returns `404 Not Found`
 
 **Solutions:**
-1. Increase TTL for static endpoints
-2. Check if endpoints are being modified frequently
-3. Monitor with: `curl /api/cache/stats`
+1. Use `/api/v0/mediacore/retrieve/stats`
+2. Use `/api/v0/mediacore/retrieve/cache/clear` for descriptor invalidation
 
 ## References
 

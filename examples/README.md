@@ -145,25 +145,25 @@ API="http://localhost:8080"
 
 # Browse user files
 curl -H "Authorization: Bearer $TOKEN" \
-     "$API/api/browse/username"
+     "$API/api/v0/users/username/browse"
 
 # Browse specific folder
 curl -H "Authorization: Bearer $TOKEN" \
-     "$API/api/browse/username?folder=Music"
+     "$API/api/v0/users/username/browse?folder=Music"
 
 # Request browse permission
 curl -X POST -H "Authorization: Bearer $TOKEN" \
      -H "Origin: http://localhost:8080" \
      -H "Content-Type: application/json" \
-     -d '{"folder":null}' \
-     "$API/api/browse/username"
+     -d '{}' \
+     "$API/api/v0/users/username/browse/request"
 
-# Accept browse request
+# Request a specific folder
 curl -X POST -H "Authorization: Bearer $TOKEN" \
      -H "Origin: http://localhost:8080" \
      -H "Content-Type: application/json" \
-     -d '{"action":"accept","folder":"/music"}' \
-     "$API/api/browse/requests/request-id"
+     -d '{"folder":"Music"}' \
+     "$API/api/v0/users/username/browse/folder"
 ```
 
 ### 6. Dashboard

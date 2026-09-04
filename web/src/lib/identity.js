@@ -1,6 +1,7 @@
 // Identity & Friends API client
 
 import api from './api';
+import { encodePathSegment } from './pathEncoding';
 
 // Profile API
 export const getMyProfile = () => api.get('/profile/me');
@@ -11,11 +12,14 @@ export const createInvite = (data) => api.post('/profile/invite', data);
 
 // Contacts API
 export const getContacts = () => api.get('/contacts');
-export const getContact = (id) => api.get(`/contacts/${id}`);
+export const getContact = (id) =>
+  api.get(`/contacts/${encodePathSegment(id)}`);
 export const addContactFromInvite = (data) =>
   api.post('/contacts/from-invite', data);
 export const addContactFromDiscovery = (data) =>
   api.post('/contacts/from-discovery', data);
-export const updateContact = (id, data) => api.put(`/contacts/${id}`, data);
-export const deleteContact = (id) => api.delete(`/contacts/${id}`);
+export const updateContact = (id, data) =>
+  api.put(`/contacts/${encodePathSegment(id)}`, data);
+export const deleteContact = (id) =>
+  api.delete(`/contacts/${encodePathSegment(id)}`);
 export const getNearby = () => api.get('/contacts/nearby');

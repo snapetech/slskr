@@ -1,4 +1,5 @@
 import api from './api';
+import { encodePathSegment } from './pathEncoding';
 
 /**
  * Bridge API library for legacy client compatibility.
@@ -45,6 +46,8 @@ export const stopBridge = async () => {
 };
 
 export const getTransferProgress = async (transferId) => {
-  const response = await api.get(`/bridge/transfer/${transferId}/progress`);
+  const response = await api.get(
+    `/bridge/transfer/${encodePathSegment(transferId)}/progress`,
+  );
   return response.data;
 };

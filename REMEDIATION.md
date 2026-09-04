@@ -70,19 +70,20 @@ filtered out. Use this list to decide what the bin crate must keep working.
 
 ```
 /api/health                       /api/version                    /api/capabilities
-/api/stats                        /api/metrics                    /api/sessions[/...]
+/api/stats                        /api/metrics                    /api/session[/...]
 /api/config                       /api/admin/config
 /api/admin/api-keys[/...]         /api/admin/webhooks[/...]
 /api/admin/database/{stats,vacuum,cleanup}
-/api/cache/{stats,invalidate}
+/api/mediacore/retrieve/{stats,cache/clear}
 /api/searches[/...]               /api/search
 /api/transfers[/...]              /api/messages[/...]
-/api/rooms[/...]                  /api/rooms/join
-/api/users[/...]                  /api/browse/...                 /api/browse/requests[/...]
-/api/shares                       /api/shares/refresh
+/api/rooms[/...]                  /api/rooms/{room}/join
+/api/users[/...]                  /api/users/{username}/browse[/...]
+/api/browse                       /api/browse/requests[/...]
+/api/shares                       /api/shares/rescan
 /api/library/health/issues[/by-artist|by-release|by-type|fix]
 /api/library/health/scans[/...]   /api/library/health/summary
-/api/events                       /api/batch                      /api/filters
+/api/events                       /api/batch                      /api/config/download-filter
 ```
 
 **Streaming:**

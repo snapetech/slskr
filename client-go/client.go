@@ -483,12 +483,52 @@ func (c *Client) doJSON(req *http.Request, auth bool) (interface{}, error) {
 	if len(bodyBytes) == 0 {
 		return map[string]interface{}{}, nil
 	}
-	var result interface{}
-	if err := json.Unmarshal(bodyBytes, &result); err != nil {
-		return nil, err
+	return decodeJSONResponse(bodyBytes)
+}
+
+func decodeJSONResponse(body []byte) (interface{}, error) {
+	trimmed := bytes.TrimSpace(body)
+	if len(trimmed) == 0 {
+		return map[string]interface{}{}, nil
 	}
 
-	return result, nil
+	switch trimmed[0] {
+	case '{':
+		var result map[string]interface{}
+		if err := json.Unmarshal(trimmed, &result); err != nil {
+			return nil, err
+		}
+		return result, nil
+	case '[':
+		var result []interface{}
+		if err := json.Unmarshal(trimmed, &result); err != nil {
+			return nil, err
+		}
+		return result, nil
+	case '"':
+		var result string
+		if err := json.Unmarshal(trimmed, &result); err != nil {
+			return nil, err
+		}
+		return result, nil
+	case 't', 'f':
+		var result bool
+		if err := json.Unmarshal(trimmed, &result); err != nil {
+			return nil, err
+		}
+		return result, nil
+	case 'n':
+		if !bytes.Equal(trimmed, []byte("null")) {
+			return nil, fmt.Errorf("invalid JSON response")
+		}
+		return nil, nil
+	default:
+		var result float64
+		if err := json.Unmarshal(trimmed, &result); err != nil {
+			return nil, err
+		}
+		return result, nil
+	}
 }
 
 func responseArray(value interface{}, keys ...string) ([]interface{}, error) {
