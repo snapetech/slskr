@@ -7,7 +7,9 @@ import {
   formatRealmSubjectIndexConflictReport,
   summarizeRealmSubjectIndexConflicts,
 } from '../../../lib/realmSubjectIndexes';
-import React, { useMemo, useState } from 'react';
+import { toDisplayError } from '../../../lib/errors';
+import { useMountedRef } from '../../../lib/useMountedRef';
+import React, { useMemo, useRef, useState } from 'react';
 import {
   Button,
   Header,
@@ -31,13 +33,22 @@ const RealmSubjectIndexConflicts = () => {
   const [loading, setLoading] = useState(false);
   const [realmId, setRealmId] = useState('scene-realm');
   const [report, setReport] = useState(null);
-  const conflicts = report?.conflicts || report?.Conflicts || [];
+  const mountedRef = useMountedRef();
+  const loadRequestIdRef = useRef(0);
+  const copyRequestIdRef = useRef(0);
+  const conflicts = Array.isArray(report?.conflicts)
+    ? report.conflicts
+    : Array.isArray(report?.Conflicts)
+      ? report.Conflicts
+      : [];
   const summary = useMemo(
     () => summarizeRealmSubjectIndexConflicts(report || {}),
     [report],
   );
 
   const loadConflicts = async () => {
+    if (!mountedRef.current || loading) return;
+    const requestId = ++loadRequestIdRef.current;
     const trimmedRealmId = realmId.trim();
     if (!trimmedRealmId) {
       setError('Enter a realm id before loading subject-index conflicts.');
@@ -51,21 +62,38 @@ const RealmSubjectIndexConflicts = () => {
       const response = await fetchRealmSubjectIndexConflicts({
         realmId: trimmedRealmId,
       });
-      setReport(response.data);
+      if (
+        mountedRef.current &&
+        loadRequestIdRef.current === requestId
+      ) {
+        setReport(
+          response.data && typeof response.data === 'object'
+            ? response.data
+            : {},
+        );
+      }
     } catch (loadError) {
-      setError(
-        loadError?.response?.data ||
-          loadError?.response?.statusText ||
-          loadError?.message ||
-          'Unable to load realm subject-index conflicts.',
-      );
+      if (
+        mountedRef.current &&
+        loadRequestIdRef.current === requestId
+      ) {
+        setError(toDisplayError(loadError, 'Unable to load realm subject-index conflicts.'));
+      }
     } finally {
-      setLoading(false);
+      if (
+        mountedRef.current &&
+        loadRequestIdRef.current === requestId
+      ) {
+        setLoading(false);
+      }
     }
   };
 
   const copyReport = async () => {
-    if (!report) return;
+    if (!report || !mountedRef.current) return;
+    const requestId = ++copyRequestIdRef.current;
+    const isCurrentRequest = () =>
+      mountedRef.current && copyRequestIdRef.current === requestId;
 
     const text = formatRealmSubjectIndexConflictReport({
       disabledAuthorities,
@@ -79,9 +107,13 @@ const RealmSubjectIndexConflicts = () => {
 
     try {
       await navigator.clipboard.writeText(text);
-      setCopyStatus('Realm subject-index conflict report copied.');
+      if (isCurrentRequest()) {
+        setCopyStatus('Realm subject-index conflict report copied.');
+      }
     } catch {
-      setCopyStatus('Unable to copy realm subject-index conflict report.');
+      if (isCurrentRequest()) {
+        setCopyStatus('Unable to copy realm subject-index conflict report.');
+      }
     }
   };
 

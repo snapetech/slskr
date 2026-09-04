@@ -1,6 +1,8 @@
 import './Security.css';
 import * as securityApi from '../../../lib/security';
-import React, { useCallback, useEffect, useState } from 'react';
+import { toDisplayError } from '../../../lib/errors';
+import { useMountedRef } from '../../../lib/useMountedRef';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Button,
   Checkbox,
@@ -34,11 +36,29 @@ const AdversarialSettings = () => {
   const [transportLoading, setTransportLoading] = useState(false);
   const [torStatus, setTorStatus] = useState(null);
   const [torLoading, setTorLoading] = useState(false);
+  const mountedRef = useMountedRef();
+  const requestIdsRef = useRef({
+    save: 0,
+    settings: 0,
+    status: 0,
+    testTor: 0,
+    testTransport: 0,
+    tor: 0,
+    transport: 0,
+  });
 
   const fetchSettings = useCallback(async () => {
+    if (!mountedRef.current) return null;
+    const requestId = ++requestIdsRef.current.settings;
     try {
       setLoading(true);
       const data = await securityApi.getAdversarialSettings().catch(() => null);
+      if (
+        !mountedRef.current ||
+        requestIdsRef.current.settings !== requestId
+      ) {
+        return null;
+      }
       if (data) {
         setSettings(data);
         setError(null);
@@ -47,82 +67,132 @@ const AdversarialSettings = () => {
         setError('Adversarial features are not configured on this server');
       }
     } catch (fetchError) {
-      setError(fetchError.message || 'Failed to load adversarial settings');
+      if (
+        mountedRef.current &&
+        requestIdsRef.current.settings === requestId
+      ) {
+        setError(toDisplayError(fetchError, 'Failed to load adversarial settings'));
+      }
     } finally {
-      setLoading(false);
+      if (
+        mountedRef.current &&
+        requestIdsRef.current.settings === requestId
+      ) {
+        setLoading(false);
+      }
     }
 
     return null;
   }, []);
 
   const fetchStatus = useCallback(async () => {
+    if (!mountedRef.current) return;
+    const requestId = ++requestIdsRef.current.status;
     try {
       setStatusLoading(true);
       const statusData = await securityApi
         .getAdversarialStats()
         .catch(() => null);
-      if (statusData) {
+      if (
+        statusData &&
+        mountedRef.current &&
+        requestIdsRef.current.status === requestId
+      ) {
         setStatus(statusData);
       }
     } catch (statusError) {
-      console.error('Failed to load adversarial status:', statusError);
+      if (mountedRef.current && requestIdsRef.current.status === requestId) {
+        console.error('Failed to load adversarial status:', statusError);
+      }
     } finally {
-      setStatusLoading(false);
+      if (mountedRef.current && requestIdsRef.current.status === requestId) {
+        setStatusLoading(false);
+      }
     }
   }, []);
 
   const fetchTransportStatus = useCallback(async () => {
+    if (!mountedRef.current) return;
+    const requestId = ++requestIdsRef.current.transport;
     try {
       setTransportLoading(true);
       const transportData = await securityApi
         .getTransportStatus()
         .catch(() => null);
-      if (transportData) {
+      if (
+        transportData &&
+        mountedRef.current &&
+        requestIdsRef.current.transport === requestId
+      ) {
         setTransportStatus(transportData);
       }
     } catch (transportError) {
-      console.error('Failed to load transport status:', transportError);
+      if (
+        mountedRef.current &&
+        requestIdsRef.current.transport === requestId
+      ) {
+        console.error('Failed to load transport status:', transportError);
+      }
     } finally {
-      setTransportLoading(false);
+      if (
+        mountedRef.current &&
+        requestIdsRef.current.transport === requestId
+      ) {
+        setTransportLoading(false);
+      }
     }
   }, []);
 
   const fetchTorStatus = useCallback(async () => {
+    if (!mountedRef.current) return;
+    const requestId = ++requestIdsRef.current.tor;
     try {
       setTorLoading(true);
       const torData = await securityApi.getTorStatus().catch(() => null);
-      if (torData) {
+      if (
+        torData &&
+        mountedRef.current &&
+        requestIdsRef.current.tor === requestId
+      ) {
         setTorStatus(torData);
       }
     } catch (torError) {
-      console.error('Failed to load Tor status:', torError);
+      if (mountedRef.current && requestIdsRef.current.tor === requestId) {
+        console.error('Failed to load Tor status:', torError);
+      }
     } finally {
-      setTorLoading(false);
+      if (mountedRef.current && requestIdsRef.current.tor === requestId) {
+        setTorLoading(false);
+      }
     }
   }, []);
 
   useEffect(() => {
     const initialize = async () => {
       const configuredSettings = await fetchSettings();
-      fetchStatus();
+      if (!mountedRef.current) return;
+      void fetchStatus();
 
       const enabled = configuredSettings?.Enabled ?? configuredSettings?.enabled;
       if (!enabled) return;
 
-      fetchTransportStatus();
+      void fetchTransportStatus();
       const anonymity = configuredSettings.Anonymity || configuredSettings.anonymity;
       const anonymityEnabled = anonymity?.Enabled ?? anonymity?.enabled;
       const anonymityMode = anonymity?.Mode ?? anonymity?.mode;
       if (anonymityEnabled && anonymityMode === 'Tor') {
-        fetchTorStatus();
+        void fetchTorStatus();
       }
     };
 
-    initialize();
+    void initialize();
   }, [fetchSettings, fetchStatus, fetchTorStatus, fetchTransportStatus]);
 
   const handleSave = async () => {
-    if (!settings) return;
+    if (!settings || !mountedRef.current || saving) return;
+    const requestId = ++requestIdsRef.current.save;
+    const isCurrentRequest = () =>
+      mountedRef.current && requestIdsRef.current.save === requestId;
 
     try {
       setSaving(true);
@@ -130,12 +200,16 @@ const AdversarialSettings = () => {
       setSuccess(null);
 
       await securityApi.updateAdversarialSettings(settings);
-      setSuccess('Adversarial settings updated successfully');
-      setHasChanges(false);
+      if (isCurrentRequest()) {
+        setSuccess('Adversarial settings updated successfully');
+        setHasChanges(false);
+      }
     } catch (saveError) {
-      setError(saveError.message || 'Failed to save adversarial settings');
+      if (isCurrentRequest()) {
+        setError(toDisplayError(saveError, 'Failed to save adversarial settings'));
+      }
     } finally {
-      setSaving(false);
+      if (isCurrentRequest()) setSaving(false);
     }
   };
 
@@ -1340,10 +1414,10 @@ const AdversarialSettings = () => {
           <Button
             icon="refresh"
             onClick={() => {
-              fetchSettings();
-              fetchStatus();
-              fetchTransportStatus();
-              fetchTorStatus();
+              void fetchSettings();
+              void fetchStatus();
+              void fetchTransportStatus();
+              void fetchTorStatus();
             }}
             size="tiny"
             title="Refresh Settings & Status"
@@ -1352,16 +1426,23 @@ const AdversarialSettings = () => {
             icon="plug"
             loading={transportLoading}
             onClick={async () => {
+              const requestId = ++requestIdsRef.current.testTransport;
               try {
                 await securityApi.testTransportConnectivity();
-                setSuccess('Transport connectivity test completed');
-                fetchTransportStatus();
+                if (
+                  mountedRef.current &&
+                  requestIdsRef.current.testTransport === requestId
+                ) {
+                  setSuccess('Transport connectivity test completed');
+                  void fetchTransportStatus();
+                }
               } catch (error) {
-                setError(
-                  error?.response?.data ??
-                    error?.message ??
-                    'Transport test failed',
-                );
+                if (
+                  mountedRef.current &&
+                  requestIdsRef.current.testTransport === requestId
+                ) {
+                  setError(toDisplayError(error, 'Transport test failed'));
+                }
               }
             }}
             size="tiny"
@@ -1371,14 +1452,23 @@ const AdversarialSettings = () => {
             icon="shield alternate"
             loading={torLoading}
             onClick={async () => {
+              const requestId = ++requestIdsRef.current.testTor;
               try {
                 await securityApi.testTorConnectivity();
-                setSuccess('Tor connectivity test completed');
-                fetchTorStatus();
+                if (
+                  mountedRef.current &&
+                  requestIdsRef.current.testTor === requestId
+                ) {
+                  setSuccess('Tor connectivity test completed');
+                  void fetchTorStatus();
+                }
               } catch (error) {
-                setError(
-                  error?.response?.data ?? error?.message ?? 'Tor test failed',
-                );
+                if (
+                  mountedRef.current &&
+                  requestIdsRef.current.testTor === requestId
+                ) {
+                  setError(toDisplayError(error, 'Tor test failed'));
+                }
               }
             }}
             size="tiny"

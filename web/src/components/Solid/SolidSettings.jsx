@@ -1,4 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import { toDisplayError } from '../../lib/errors';
+import { useMountedRef } from '../../lib/useMountedRef';
+import React, { useEffect, useRef, useState } from 'react';
 import { TooltipButton } from '../Shared';
 import { Form, Message, Segment } from 'semantic-ui-react';
 import api from '../../lib/api';
@@ -8,6 +10,9 @@ export default function SolidSettings() {
   const [webId, setWebId] = useState('');
   const [resolved, setResolved] = useState(null);
   const [err, setErr] = useState('');
+  const mountedRef = useMountedRef();
+  const statusRequestIdRef = useRef(0);
+  const resolveRequestIdRef = useRef(0);
 
   const formatError = (e) => {
     const data = e?.response?.data;
@@ -23,31 +28,56 @@ export default function SolidSettings() {
   };
 
   useEffect(() => {
+    const requestId = ++statusRequestIdRef.current;
     (async () => {
+      if (!mountedRef.current) return;
       setErr('');
       try {
         const res = await api.get('/solid/status');
-        setStatus(res.data);
+        if (
+          mountedRef.current &&
+          statusRequestIdRef.current === requestId
+        ) {
+          setStatus(res.data);
+        }
       } catch (e) {
         const statusCode = e?.response?.status;
         if (statusCode === 404) {
-          setStatus({ enabled: false });
+          if (
+            mountedRef.current &&
+            statusRequestIdRef.current === requestId
+          ) {
+            setStatus({ enabled: false });
+          }
           return;
         }
 
-        setErr(formatError(e));
+        if (
+          mountedRef.current &&
+          statusRequestIdRef.current === requestId
+        ) {
+          setErr(toDisplayError(e, formatError(e)));
+        }
       }
     })();
-  }, []);
+
+    return () => {
+      statusRequestIdRef.current += 1;
+    };
+  }, [mountedRef]);
 
   const resolveWebId = async () => {
+    if (!mountedRef.current) return;
+    const requestId = ++resolveRequestIdRef.current;
+    const isCurrentRequest = () =>
+      mountedRef.current && resolveRequestIdRef.current === requestId;
     setErr('');
     setResolved(null);
     try {
       const res = await api.post('/solid/resolve-webid', { webId });
-      setResolved(res.data);
+      if (isCurrentRequest()) setResolved(res.data);
     } catch (e) {
-      setErr(formatError(e));
+      if (isCurrentRequest()) setErr(toDisplayError(e, formatError(e)));
     }
   };
 

@@ -1,5 +1,6 @@
 import * as sourceProvidersApi from '../../../lib/sourceProviders';
 import { toDisplayError } from '../../../lib/errors';
+import { useMountedRef } from '../../../lib/useMountedRef';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Button,
@@ -65,16 +66,22 @@ const SourceProviders = () => {
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const mountedRef = useMountedRef();
+  const loadRequestIdRef = React.useRef(0);
 
   const providers = useMemo(
     () =>
-      catalog.providers
+      (Array.isArray(catalog.providers) ? catalog.providers : [])
+        .filter((provider) => provider && typeof provider === 'object')
         .map(normalizeProvider)
         .sort((left, right) => left.sortOrder - right.sortOrder),
     [catalog.providers],
   );
   const profilePolicies = useMemo(
-    () => (catalog.profilePolicies ?? []).map(normalizeProfilePolicy),
+    () =>
+      (Array.isArray(catalog.profilePolicies) ? catalog.profilePolicies : [])
+        .filter((policy) => policy && typeof policy === 'object')
+        .map(normalizeProfilePolicy),
     [catalog.profilePolicies],
   );
   const activeCount = providers.filter((provider) => provider.active).length;
@@ -83,24 +90,46 @@ const SourceProviders = () => {
   ).length;
 
   const load = async () => {
+    if (!mountedRef.current) return;
+    const requestId = ++loadRequestIdRef.current;
     setLoading(true);
     setError('');
 
     try {
-      setCatalog(await sourceProvidersApi.getSourceProviders());
+      const nextCatalog = await sourceProvidersApi.getSourceProviders();
+      if (
+        mountedRef.current &&
+        loadRequestIdRef.current === requestId
+      ) {
+        setCatalog(
+          nextCatalog && typeof nextCatalog === 'object'
+            ? nextCatalog
+            : { acquisitionPlanningEnabled: false, providers: [] },
+        );
+      }
     } catch (loadError) {
-      setError(toDisplayError(
-        loadError,
-        loadError?.response?.statusText || 'Unable to load source providers',
-      ));
+      if (
+        mountedRef.current &&
+        loadRequestIdRef.current === requestId
+      ) {
+        setError(toDisplayError(
+          loadError,
+          loadError?.response?.statusText || 'Unable to load source providers',
+        ));
+      }
     } finally {
-      setLoading(false);
+      if (
+        mountedRef.current &&
+        loadRequestIdRef.current === requestId
+      ) {
+        setLoading(false);
+      }
     }
   };
 
   useEffect(() => {
-    load();
-  }, []);
+    void load();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (loading) {
     return (

@@ -1,6 +1,8 @@
 import { getKpiMetrics } from '../../../lib/telemetry';
+import { toDisplayError } from '../../../lib/errors';
 import { LoaderSegment } from '../../Shared';
-import React, { useCallback, useEffect, useState } from 'react';
+import { useMountedRef } from '../../../lib/useMountedRef';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Divider,
   Grid,
@@ -13,24 +15,32 @@ import {
 } from 'semantic-ui-react';
 
 const formatBytes = (bytes) => {
-  if (!bytes) return '0 B';
+  const numericBytes = Number(bytes);
+  if (!Number.isFinite(numericBytes) || numericBytes <= 0) return '0 B';
   const k = 1_024;
   const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return `${(bytes / k ** i).toFixed(1)} ${sizes[i]}`;
+  const i = Math.min(
+    sizes.length - 1,
+    Math.floor(Math.log(numericBytes) / Math.log(k)),
+  );
+  return `${(numericBytes / k ** i).toFixed(1)} ${sizes[i]}`;
 };
 
 const formatNumber = (value) => {
   if (value === undefined || value === null) return '—';
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
-  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
-  return Number.parseFloat(value.toFixed(2)).toString();
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) return '—';
+  if (numericValue >= 1_000_000) return `${(numericValue / 1_000_000).toFixed(1)}M`;
+  if (numericValue >= 1_000) return `${(numericValue / 1_000).toFixed(1)}K`;
+  return Number.parseFloat(numericValue.toFixed(2)).toString();
 };
 
 // Extract the first sample value from a metric, or null
 const sampleValue = (metric) => {
   if (!metric) return null;
-  if (metric.samples && metric.samples.length > 0) return metric.samples[0].value;
+  if (Array.isArray(metric.samples) && metric.samples.length > 0) {
+    return metric.samples[0]?.value ?? null;
+  }
   return null;
 };
 
@@ -80,10 +90,11 @@ const KPI_GROUPS = [
 ];
 
 const MetricGroup = ({ group, metrics }) => {
+  const normalizedMetrics = metrics && typeof metrics === 'object' ? metrics : {};
   const items = group.metrics
     .map(({ key, label, format }) => ({
       label,
-      value: sampleValue(metrics[key]),
+      value: sampleValue(normalizedMetrics[key]),
       format,
     }))
     .filter(({ value }) => value !== null);
@@ -109,7 +120,9 @@ const MetricGroup = ({ group, metrics }) => {
 };
 
 const SlskrMetricsTable = ({ metrics }) => {
-  const slskrMetrics = Object.entries(metrics)
+  const slskrMetrics = Object.entries(
+    metrics && typeof metrics === 'object' ? metrics : {},
+  )
     .filter(([key]) => key.startsWith('slskr_'))
     .sort(([a], [b]) => a.localeCompare(b));
 
@@ -156,23 +169,43 @@ const Metrics = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [lastUpdated, setLastUpdated] = useState(null);
+  const mountedRef = useMountedRef();
+  const requestIdRef = useRef(0);
 
   const fetchMetrics = useCallback(async () => {
+    if (!mountedRef.current) return;
+    const requestId = ++requestIdRef.current;
     setLoading(true);
     setError(null);
     try {
       const data = await getKpiMetrics();
-      setMetrics(data);
+      if (
+        !mountedRef.current ||
+        requestIdRef.current !== requestId
+      ) {
+        return;
+      }
+      setMetrics(data && typeof data === 'object' ? data : {});
       setLastUpdated(new Date());
     } catch (err) {
-      setError(err?.response?.data?.message || err.message || 'Failed to load metrics');
+      if (
+        mountedRef.current &&
+        requestIdRef.current === requestId
+      ) {
+        setError(toDisplayError(err, 'Failed to load metrics'));
+      }
     } finally {
-      setLoading(false);
+      if (
+        mountedRef.current &&
+        requestIdRef.current === requestId
+      ) {
+        setLoading(false);
+      }
     }
-  }, []);
+  }, [mountedRef]);
 
   useEffect(() => {
-    fetchMetrics();
+    void fetchMetrics();
   }, [fetchMetrics]);
 
   if (loading && !metrics) return <LoaderSegment />;

@@ -1,4 +1,6 @@
 import { buildDiagnosticBundle } from '../../../lib/diagnosticBundle';
+import { toDisplayError } from '../../../lib/errors';
+import { useMountedRef } from '../../../lib/useMountedRef';
 import React, { useMemo, useState } from 'react';
 import { toast } from 'react-toastify';
 import {
@@ -22,6 +24,7 @@ const copyToClipboard = async (value) => {
 
 const DiagnosticBundleModal = ({ options = {}, state = {} }) => {
   const [open, setOpen] = useState(false);
+  const mountedRef = useMountedRef();
   const bundle = useMemo(
     () =>
       buildDiagnosticBundle({
@@ -32,14 +35,22 @@ const DiagnosticBundleModal = ({ options = {}, state = {} }) => {
   );
 
   const copyBundle = async () => {
-    const copied = await copyToClipboard(bundle);
+    if (!mountedRef.current) return;
+    try {
+      const copied = await copyToClipboard(bundle);
 
-    if (copied) {
-      toast.success('Diagnostic bundle copied');
-      return;
+      if (!mountedRef.current) return;
+      if (copied) {
+        toast.success('Diagnostic bundle copied');
+        return;
+      }
+
+      toast.info('Select the diagnostic bundle text to copy it manually');
+    } catch (error) {
+      if (mountedRef.current) {
+        toast.error(toDisplayError(error, 'Unable to copy diagnostic bundle'));
+      }
     }
-
-    toast.info('Select the diagnostic bundle text to copy it manually');
   };
 
   return (

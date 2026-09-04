@@ -1,6 +1,7 @@
 import './Chat.css';
 import * as chat from '../../lib/chat';
 import { getLocalStorageItem, setLocalStorageItem } from '../../lib/storage';
+import { useMountedRef } from '../../lib/useMountedRef';
 import ChatSession from './ChatSession';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
@@ -49,6 +50,9 @@ const Chat = ({ runtimeProfile, state }) => {
   const [activeIndex, setActiveIndex] = useState(0);
   const [conversations, setConversations] = useState([]);
   const [usernameInput, setUsernameInput] = useState('');
+  const mountedRef = useMountedRef();
+  const hydrateRequestIdRef = useRef(0);
+  const deleteRequestIdRef = useRef(0);
   const closeTabRef = useRef(null);
   const updateTabRef = useRef(null);
 
@@ -110,8 +114,17 @@ const Chat = ({ runtimeProfile, state }) => {
   );
 
   const hydrateConversations = useCallback(async () => {
+    if (!mountedRef.current) return;
+    const requestId = ++hydrateRequestIdRef.current;
+
     try {
       const serverConversations = await chat.getAll();
+      if (
+        !mountedRef.current ||
+        hydrateRequestIdRef.current !== requestId
+      ) {
+        return;
+      }
       const activeConversations = (serverConversations || [])
         .filter((conversation) => conversation.username)
         .sort((a, b) => {
@@ -138,9 +151,14 @@ const Chat = ({ runtimeProfile, state }) => {
         });
       }
     } catch (error) {
-      console.error('Failed to hydrate conversations:', error);
+      if (
+        mountedRef.current &&
+        hydrateRequestIdRef.current === requestId
+      ) {
+        console.error('Failed to hydrate conversations:', error);
+      }
     }
-  }, [createTab]);
+  }, [createTab, mountedRef]);
 
   // Create initial tab on mount if none exist
   useEffect(() => {
@@ -150,7 +168,7 @@ const Chat = ({ runtimeProfile, state }) => {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    hydrateConversations();
+    void hydrateConversations();
   }, [hydrateConversations]);
 
   // Auto-create tab if all closed, and reset counter to keep numbers reasonable
@@ -202,11 +220,21 @@ const Chat = ({ runtimeProfile, state }) => {
 
   const handleDeleteConversation = useCallback(
     async (username) => {
+      if (!mountedRef.current) return;
+      const requestId = ++deleteRequestIdRef.current;
+
       // Remove the conversation from chat API
       try {
         await chat.remove({ username });
       } catch (error) {
         console.error('Failed to remove conversation:', error);
+      }
+
+      if (
+        !mountedRef.current ||
+        deleteRequestIdRef.current !== requestId
+      ) {
+        return;
       }
 
       // Close the tab
@@ -215,7 +243,7 @@ const Chat = ({ runtimeProfile, state }) => {
         closeTabRef.current?.(tabToClose.key);
       }
     },
-    [tabs],
+    [mountedRef, tabs],
   );
 
   const panes = tabs.map((tab, index) => ({

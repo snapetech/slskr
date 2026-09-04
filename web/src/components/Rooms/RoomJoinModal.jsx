@@ -1,5 +1,7 @@
 import './Rooms.css';
+import { toDisplayError } from '../../lib/errors';
 import * as rooms from '../../lib/rooms';
+import { useMountedRef } from '../../lib/useMountedRef';
 import React, { useEffect, useMemo, useState } from 'react';
 import { toast } from 'react-toastify';
 import {
@@ -22,23 +24,55 @@ const RoomJoinModal = ({ joinRoom: parentJoinRoom, ...modalOptions }) => {
   const [sortOrder, setSortOrder] = useState('desc');
   const [filter, setFilter] = useState('');
   const [loading, setLoading] = useState(true);
+  const [joining, setJoining] = useState(false);
+  const mountedRef = useMountedRef();
+  const loadRequestIdRef = React.useRef(0);
+  const joinRequestIdRef = React.useRef(0);
 
   useEffect(() => {
+    const requestId = ++loadRequestIdRef.current;
     const getAvailableRooms = async () => {
+      if (!mountedRef.current) return;
       setLoading(true);
       try {
         const availableResult = await rooms.getAvailable();
-        setAvailable(availableResult || []);
+        if (
+          !mountedRef.current ||
+          loadRequestIdRef.current !== requestId
+        ) {
+          return;
+        }
+        setAvailable(
+          Array.isArray(availableResult)
+            ? availableResult.filter(
+              (room) => room && typeof room.name === 'string',
+            )
+            : [],
+        );
       } catch {
-        toast.error('Failed to load room list');
-        setAvailable([]);
+        if (
+          mountedRef.current &&
+          loadRequestIdRef.current === requestId
+        ) {
+          toast.error('Failed to load room list');
+          setAvailable([]);
+        }
       } finally {
-        setLoading(false);
+        if (
+          mountedRef.current &&
+          loadRequestIdRef.current === requestId
+        ) {
+          setLoading(false);
+        }
       }
     };
 
-    if (open) getAvailableRooms();
-  }, [open]);
+    if (open) void getAvailableRooms();
+
+    return () => {
+      loadRequestIdRef.current += 1;
+    };
+  }, [mountedRef, open]);
 
   const sortedAvailable = useMemo(() => {
     const sorted = [...available].filter((room) =>
@@ -46,36 +80,54 @@ const RoomJoinModal = ({ joinRoom: parentJoinRoom, ...modalOptions }) => {
     );
 
     sorted.sort((a, b) => {
+      const aValue = a[sortBy] ?? '';
+      const bValue = b[sortBy] ?? '';
       if (sortOrder === 'asc') {
-        if (typeof a[sortBy] === 'string') {
-          return b[sortBy].localeCompare(a[sortBy]);
+        if (typeof aValue === 'string' || typeof bValue === 'string') {
+          return String(bValue).localeCompare(String(aValue));
         }
 
-        return a[sortBy] - b[sortBy];
+        return Number(bValue) - Number(aValue);
       }
 
-      if (typeof a[sortBy] === 'string') {
-        return a[sortBy].localeCompare(b[sortBy]);
+      if (typeof aValue === 'string' || typeof bValue === 'string') {
+        return String(aValue).localeCompare(String(bValue));
       }
 
-      return b[sortBy] - a[sortBy];
+      return Number(aValue) - Number(bValue);
     });
 
     return sorted;
   }, [available, filter, sortBy, sortOrder]);
 
   const close = () => {
+    loadRequestIdRef.current += 1;
+    joinRequestIdRef.current += 1;
     setAvailable([]);
     setSelected(undefined);
     setSortBy('name');
     setSortOrder('desc');
     setFilter('');
+    setJoining(false);
     setOpen(false);
   };
 
   const joinRoom = async () => {
-    await parentJoinRoom(selected);
-    close();
+    if (!selected || !mountedRef.current || joining) return;
+    const requestId = ++joinRequestIdRef.current;
+    const isCurrentRequest = () =>
+      mountedRef.current && joinRequestIdRef.current === requestId;
+    setJoining(true);
+    try {
+      await parentJoinRoom(selected);
+      if (isCurrentRequest()) close();
+    } catch (error) {
+      if (isCurrentRequest()) {
+        toast.error(toDisplayError(error, 'Failed to join room'));
+      }
+    } finally {
+      if (isCurrentRequest()) setJoining(false);
+    }
   };
 
   const isSelected = (room) => selected === room.name;
@@ -186,9 +238,10 @@ const RoomJoinModal = ({ joinRoom: parentJoinRoom, ...modalOptions }) => {
         )}
       </Modal.Content>
       <Modal.Actions>
-        <Button onClick={() => setOpen(false)}>Cancel</Button>
+        <Button disabled={joining} onClick={() => close()}>Cancel</Button>
         <Button
-          disabled={!selected}
+          disabled={!selected || joining}
+          loading={joining}
           onClick={() => joinRoom()}
           positive
         >

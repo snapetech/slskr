@@ -1,6 +1,8 @@
 import * as bridge from '../../../lib/bridge';
+import { toDisplayError } from '../../../lib/errors';
 import { usePolling } from '../../../lib/usePolling';
-import React, { useCallback, useEffect, useState } from 'react';
+import { useMountedRef } from '../../../lib/useMountedRef';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Button,
   Card,
@@ -26,18 +28,33 @@ const Bridge = () => {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
+  const [controlAction, setControlAction] = useState('');
+  const mountedRef = useMountedRef();
+  const dashboardRequestIdRef = useRef(0);
+  const loadRequestIdRef = useRef(0);
+  const saveRequestIdRef = useRef(0);
+  const controlRequestIdRef = useRef(0);
 
   const fetchDashboard = useCallback(async () => {
+    if (!mountedRef.current) return;
+    const requestId = ++dashboardRequestIdRef.current;
     try {
       const dashboardData = await bridge.getDashboard();
-      setDashboard(dashboardData);
+      if (
+        mountedRef.current &&
+        dashboardRequestIdRef.current === requestId
+      ) {
+        setDashboard(dashboardData);
+      }
     } catch {
       // Silently fail on refresh
     }
-  }, []);
+  }, [mountedRef]);
 
   useEffect(() => {
+    const requestId = ++loadRequestIdRef.current;
     const fetchData = async () => {
+      if (!mountedRef.current) return;
       try {
         setLoading(true);
         setError(null);
@@ -45,18 +62,37 @@ const Bridge = () => {
           bridge.getConfig(),
           bridge.getDashboard(),
         ]);
+        if (
+          !mountedRef.current ||
+          loadRequestIdRef.current !== requestId
+        ) {
+          return;
+        }
         setConfig(configData);
         setDashboard(dashboardData);
       } catch (error_) {
-        setError(error_.message);
+        if (
+          mountedRef.current &&
+          loadRequestIdRef.current === requestId
+        ) {
+          setError(toDisplayError(error_, 'Failed to load bridge configuration'));
+        }
       } finally {
-        setLoading(false);
+        if (
+          mountedRef.current &&
+          loadRequestIdRef.current === requestId
+        ) {
+          setLoading(false);
+        }
       }
     };
 
-    fetchData();
+    void fetchData();
 
-  }, []);
+    return () => {
+      loadRequestIdRef.current += 1;
+    };
+  }, [mountedRef]);
 
   usePolling(fetchDashboard, 10_000, { immediate: false });
 
@@ -68,42 +104,77 @@ const Bridge = () => {
   };
 
   const handleSaveConfig = async () => {
+    if (!mountedRef.current || saving || !config) return;
+    const requestId = ++saveRequestIdRef.current;
     try {
       setSaving(true);
       setError(null);
       setSuccess(null);
       await bridge.updateConfig(config);
-      setSuccess(
-        'Configuration updated. Restart bridge service to apply changes.',
-      );
+      if (
+        mountedRef.current &&
+        saveRequestIdRef.current === requestId
+      ) {
+        setSuccess(
+          'Configuration updated. Restart bridge service to apply changes.',
+        );
+      }
     } catch (error_) {
-      setError(error_.message);
+      if (
+        mountedRef.current &&
+        saveRequestIdRef.current === requestId
+      ) {
+        setError(toDisplayError(error_, 'Failed to save bridge configuration'));
+      }
     } finally {
-      setSaving(false);
+      if (
+        mountedRef.current &&
+        saveRequestIdRef.current === requestId
+      ) {
+        setSaving(false);
+      }
     }
   };
 
   const handleStartBridge = async () => {
+    if (!mountedRef.current || controlAction) return;
+    const requestId = ++controlRequestIdRef.current;
+    const isCurrentRequest = () =>
+      mountedRef.current && controlRequestIdRef.current === requestId;
     try {
+      setControlAction('start');
       setError(null);
       await bridge.startBridge();
       // Refresh dashboard
       const dashboardData = await bridge.getDashboard();
-      setDashboard(dashboardData);
+      if (isCurrentRequest()) setDashboard(dashboardData);
     } catch (error_) {
-      setError(error_.message);
+      if (isCurrentRequest()) {
+        setError(toDisplayError(error_, 'Failed to start bridge'));
+      }
+    } finally {
+      if (isCurrentRequest()) setControlAction('');
     }
   };
 
   const handleStopBridge = async () => {
+    if (!mountedRef.current || controlAction) return;
+    const requestId = ++controlRequestIdRef.current;
+    const isCurrentRequest = () =>
+      mountedRef.current && controlRequestIdRef.current === requestId;
     try {
+      setControlAction('stop');
       setError(null);
       await bridge.stopBridge();
       // Refresh dashboard
       const dashboardData = await bridge.getDashboard();
-      setDashboard(dashboardData);
+      if (isCurrentRequest()) setDashboard(dashboardData);
     } catch (error_) {
-      setError(error_.message);
+      if (isCurrentRequest()) {
+        setError(toDisplayError(error_, 'Failed to stop bridge'));
+      }
+    } finally {
+      if (isCurrentRequest()) setControlAction('');
     }
   };
 
@@ -260,7 +331,8 @@ const Bridge = () => {
               >
                 <Button
                   color="green"
-                  disabled={health?.isHealthy}
+                  disabled={health?.isHealthy || Boolean(controlAction)}
+                  loading={controlAction === 'start'}
                   onClick={handleStartBridge}
                 >
                   <Icon name="play" />
@@ -268,7 +340,8 @@ const Bridge = () => {
                 </Button>
                 <Button
                   color="red"
-                  disabled={!health?.isHealthy}
+                  disabled={!health?.isHealthy || Boolean(controlAction)}
+                  loading={controlAction === 'stop'}
                   onClick={handleStopBridge}
                 >
                   <Icon name="stop" />

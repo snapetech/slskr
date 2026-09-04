@@ -1,4 +1,6 @@
 import * as userNotes from '../../lib/userNotes';
+import { toDisplayError } from '../../lib/errors';
+import { useMountedRef } from '../../lib/useMountedRef';
 import React, { useEffect, useState } from 'react';
 import { Button, Form, Header, Icon, Modal } from 'semantic-ui-react';
 
@@ -77,14 +79,23 @@ const UserNoteModal = ({ onClose, trigger, username }) => {
   const [color, setColor] = useState(null);
   const [isHighPriority, setIsHighPriority] = useState(false);
   const [loading, setLoading] = useState(false);
+  const mountedRef = useMountedRef();
+  const requestIdRef = React.useRef(0);
 
   useEffect(() => {
+    const requestId = ++requestIdRef.current;
     const fetchNote = async () => {
-      if (!username || !open) return;
+      if (!username || !open || !mountedRef.current) return;
 
       setLoading(true);
       try {
         const response = await userNotes.getNote({ username });
+        if (
+          !mountedRef.current ||
+          requestIdRef.current !== requestId
+        ) {
+          return;
+        }
         if (response.data) {
           setNote(response.data.note || '');
           setColor(response.data.color || null);
@@ -96,6 +107,12 @@ const UserNoteModal = ({ onClose, trigger, username }) => {
           setIsHighPriority(false);
         }
       } catch (error) {
+        if (
+          !mountedRef.current ||
+          requestIdRef.current !== requestId
+        ) {
+          return;
+        }
         if (error.response && error.response.status === 404) {
           setNote('');
           setColor(null);
@@ -104,12 +121,21 @@ const UserNoteModal = ({ onClose, trigger, username }) => {
           console.error('Failed to fetch user note', error);
         }
       } finally {
-        setLoading(false);
+        if (
+          mountedRef.current &&
+          requestIdRef.current === requestId
+        ) {
+          setLoading(false);
+        }
       }
     };
 
-    fetchNote();
-  }, [open, username]);
+    void fetchNote();
+
+    return () => {
+      requestIdRef.current += 1;
+    };
+  }, [mountedRef, open, username]);
 
   const handleClose = () => {
     setOpen(false);
@@ -117,6 +143,10 @@ const UserNoteModal = ({ onClose, trigger, username }) => {
   };
 
   const handleSave = async () => {
+    if (!mountedRef.current || loading) return;
+    const requestId = ++requestIdRef.current;
+    const isCurrentRequest = () =>
+      mountedRef.current && requestIdRef.current === requestId;
     setLoading(true);
     try {
       await userNotes.setNote({
@@ -125,11 +155,13 @@ const UserNoteModal = ({ onClose, trigger, username }) => {
         note,
         username,
       });
-      handleClose();
+      if (isCurrentRequest()) handleClose();
     } catch (error) {
-      console.error('Failed to save user note', error);
+      if (isCurrentRequest()) {
+        console.error('Failed to save user note', error);
+      }
     } finally {
-      setLoading(false);
+      if (isCurrentRequest()) setLoading(false);
     }
   };
 

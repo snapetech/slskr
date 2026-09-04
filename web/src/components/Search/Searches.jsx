@@ -1,4 +1,5 @@
 import './Search.css';
+import { toDisplayError } from '../../lib/errors';
 import {
   acquisitionProfiles,
   getAcquisitionProfile,
@@ -9,6 +10,7 @@ import { createSearchHubConnection } from '../../lib/hubFactory';
 import { getCapabilities } from '../../lib/slskr';
 import { mergeSearchRecords } from '../../lib/searchState';
 import { getLocalStorageItem, setLocalStorageItem } from '../../lib/storage';
+import { useMountedRef } from '../../lib/useMountedRef';
 import * as library from '../../lib/searches';
 import ErrorSegment from '../Shared/ErrorSegment';
 import LoaderSegment from '../Shared/LoaderSegment';
@@ -141,6 +143,14 @@ const Searches = ({ runtimeProfile, server } = {}) => {
     getStoredAcquisitionProfileId(getLocalStorageItem),
   );
 
+  const mountedRef = useMountedRef();
+  const loadRequestIdRef = useRef(0);
+  const createRequestIdRef = useRef(0);
+  const removeRequestIdRef = useRef(0);
+  const removeAllRequestIdRef = useRef(0);
+  const stopRequestIdRef = useRef(0);
+  const refreshRequestIdsRef = useRef(new Map());
+
   const inputRef = useRef();
 
   const location = useLocation();
@@ -179,6 +189,9 @@ const Searches = ({ runtimeProfile, server } = {}) => {
         navigate: false,
         search: queryParameter,
       }).then((id) => {
+        if (!mountedRef.current) {
+          return;
+        }
         if (id) {
           routerNavigate(`/searches/${id}`, { replace: true });
           return;
@@ -187,23 +200,35 @@ const Searches = ({ runtimeProfile, server } = {}) => {
         routerNavigate('/searches', { replace: true });
       });
     }
-  }, [location.search, creating, searchId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [location.search, creating, mountedRef, routerNavigate, searchId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onConnecting = () => {
+    if (!mountedRef.current) {
+      return;
+    }
     setConnecting(true);
   };
 
   const onConnected = () => {
+    if (!mountedRef.current) {
+      return;
+    }
     setConnecting(false);
     setError(undefined);
   };
 
   const onConnectionError = (connectionError) => {
+    if (!mountedRef.current) {
+      return;
+    }
     setConnecting(false);
-    setError(connectionError);
+    setError(toDisplayError(connectionError, 'Disconnected'));
   };
 
   const onUpdate = (update) => {
+    if (!mountedRef.current) {
+      return;
+    }
     setSearches(update);
     onConnected();
   };
@@ -213,9 +238,14 @@ const Searches = ({ runtimeProfile, server } = {}) => {
     let restHydrated = false;
 
     const loadSearches = async () => {
+      const requestId = ++loadRequestIdRef.current;
       try {
         const records = await library.getAll();
-        if (!mounted) {
+        if (
+          !mounted ||
+          !mountedRef.current ||
+          requestId !== loadRequestIdRef.current
+        ) {
           return;
         }
         const searchRecords = Array.isArray(records) ? records : [];
@@ -229,13 +259,21 @@ const Searches = ({ runtimeProfile, server } = {}) => {
           }, {}),
         );
       } catch (loadError) {
-        if (!mounted) {
+        if (
+          !mounted ||
+          !mountedRef.current ||
+          requestId !== loadRequestIdRef.current
+        ) {
           return;
         }
         onConnectionError(loadError?.message ?? 'Failed to load searches');
       } finally {
         restHydrated = true;
-        if (mounted) {
+        if (
+          mounted &&
+          mountedRef.current &&
+          requestId === loadRequestIdRef.current
+        ) {
           setInitialSearchesLoaded(true);
         }
       }
@@ -260,9 +298,16 @@ const Searches = ({ runtimeProfile, server } = {}) => {
         return;
       }
 
+      const requestId = (refreshRequestIdsRef.current.get(id) ?? 0) + 1;
+      refreshRequestIdsRef.current.set(id, requestId);
+
       try {
         const search = await library.getStatus({ id });
-        if (!mounted) {
+        if (
+          !mounted ||
+          !mountedRef.current ||
+          refreshRequestIdsRef.current.get(id) !== requestId
+        ) {
           return;
         }
         const searchId = searchEventIdentifier(search) ?? id;
@@ -275,7 +320,13 @@ const Searches = ({ runtimeProfile, server } = {}) => {
         }));
       } catch (refreshError) {
         console.debug('failed to refresh search event payload', refreshError);
-        await loadSearches();
+        if (
+          mounted &&
+          mountedRef.current &&
+          refreshRequestIdsRef.current.get(id) === requestId
+        ) {
+          await loadSearches();
+        }
       }
     };
 
@@ -284,11 +335,11 @@ const Searches = ({ runtimeProfile, server } = {}) => {
     const searchHub = createSearchHubConnection();
 
     searchHub.on('list', (searchesEvent) => {
-      if (restHydrated) {
+      if (!mountedRef.current || restHydrated) {
         return;
       }
       if (!Array.isArray(searchesEvent)) {
-        loadSearches();
+        void loadSearches();
         return;
       }
       onUpdate(
@@ -304,7 +355,7 @@ const Searches = ({ runtimeProfile, server } = {}) => {
     });
 
     searchHub.on('update', (search) => {
-      refreshSearch(search);
+      void refreshSearch(search);
     });
 
     searchHub.on('delete', (search) => {
@@ -320,7 +371,7 @@ const Searches = ({ runtimeProfile, server } = {}) => {
     });
 
     searchHub.on('create', (search) => {
-      refreshSearch(search);
+      void refreshSearch(search);
     });
 
     searchHub.onreconnecting((connectionError) =>
@@ -335,14 +386,19 @@ const Searches = ({ runtimeProfile, server } = {}) => {
       try {
         onConnecting();
         await searchHub.start();
-        await loadSearches();
+        if (mountedRef.current) {
+          await loadSearches();
+        }
       } catch (connectionError) {
-        toast.error(connectionError?.message ?? 'Failed to connect to search updates');
+        if (!mountedRef.current) {
+          return;
+        }
+        toast.error(toDisplayError(connectionError, 'Failed to connect to search updates'));
         await loadSearches();
       }
     };
 
-    connect();
+    void connect();
 
     // Scene ↔ Pod Bridging is opt-in. Do not infer it from generic capabilities,
     // otherwise ordinary searches silently leave the proven Soulseek path.
@@ -356,7 +412,9 @@ const Searches = ({ runtimeProfile, server } = {}) => {
         const enabled =
           capabilities?.feature?.scenePodBridge === true ||
           capabilities?.features?.includes('scene_pod_bridge') === true;
-        setScenePodBridgeEnabled(enabled);
+        if (mountedRef.current) {
+          setScenePodBridgeEnabled(enabled);
+        }
       } catch (error_) {
         // Feature flag check failed - assume disabled
         console.debug(
@@ -370,16 +428,25 @@ const Searches = ({ runtimeProfile, server } = {}) => {
 
     return () => {
       mounted = false;
+      loadRequestIdRef.current += 1;
+      refreshRequestIdsRef.current.clear();
       searchHub.stop();
     };
-  }, [runtimeProfile]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [mountedRef, runtimeProfile]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // create a new search, and optionally navigate to it to display the details
   // we do this if the user clicks the search icon, or repeats an existing search
   const create = async ({ navigate = false, search } = {}) => {
+    if (!mountedRef.current) {
+      return;
+    }
+
     const ref = inputRef?.current?.inputRef?.current;
     const searchText = (search ?? ref?.value ?? '').trim();
     const id = uuidv4();
+    const requestId = ++createRequestIdRef.current;
+    const isCurrentRequest = () =>
+      mountedRef.current && createRequestIdRef.current === requestId;
 
     if (!searchText) {
       toast.error('Please enter a search phrase');
@@ -400,6 +467,10 @@ const Searches = ({ runtimeProfile, server } = {}) => {
         providers,
         searchText,
       });
+
+      if (!isCurrentRequest()) {
+        return;
+      }
 
       const initialSearch = {
         endedAt: null,
@@ -442,6 +513,10 @@ const Searches = ({ runtimeProfile, server } = {}) => {
         console.debug('failed to hydrate newly created search', hydrateError);
       }
 
+      if (!isCurrentRequest()) {
+        return;
+      }
+
       setSearches((old) => ({
         ...old,
         [id]: {
@@ -463,58 +538,109 @@ const Searches = ({ runtimeProfile, server } = {}) => {
 
       return id;
     } catch (createError) {
+      if (!isCurrentRequest()) {
+        return;
+      }
       console.error(createError);
-      toast.error(
-        createError?.response?.data ?? createError?.message ?? createError,
-      );
+      toast.error(toDisplayError(createError, 'Failed to create search'));
     } finally {
-      setCreating(false);
+      if (isCurrentRequest()) {
+        setCreating(false);
+      }
     }
   };
 
   // delete a search
   const remove = async (search) => {
+    if (!mountedRef.current) {
+      return;
+    }
+    const requestId = ++removeRequestIdRef.current;
+
     try {
       setRemoving(true);
 
       await library.remove({ id: search.id });
+      if (
+        !mountedRef.current ||
+        removeRequestIdRef.current !== requestId
+      ) {
+        return;
+      }
       setSearches((old) => {
         const next = { ...old };
         delete next[search.id];
         return next;
       });
     } catch (error_) {
+      if (
+        !mountedRef.current ||
+        removeRequestIdRef.current !== requestId
+      ) {
+        return;
+      }
       console.error(error_);
-      toast.error(error_?.response?.data ?? error_?.message ?? error_);
+      toast.error(toDisplayError(error_, 'Failed to remove search'));
     } finally {
-      setRemoving(false);
+      if (
+        mountedRef.current &&
+        removeRequestIdRef.current === requestId
+      ) {
+        setRemoving(false);
+      }
     }
   };
 
   // delete all searches
   const removeAll = async () => {
+    if (!mountedRef.current) {
+      return;
+    }
+    const requestId = ++removeAllRequestIdRef.current;
+
     try {
       setRemovingAll(true);
       const result = await library.removeAll();
+      if (
+        !mountedRef.current ||
+        removeAllRequestIdRef.current !== requestId
+      ) {
+        return;
+      }
       setSearches({});
       toast.success(`Cleared ${result?.data?.deleted ?? 'all'} searches`);
     } catch (removeAllError) {
+      if (
+        !mountedRef.current ||
+        removeAllRequestIdRef.current !== requestId
+      ) {
+        return;
+      }
       console.error(removeAllError);
-      toast.error(
-        removeAllError?.response?.data ??
-          removeAllError?.message ??
-          removeAllError,
-      );
+      toast.error(toDisplayError(removeAllError, 'Failed to clear searches'));
     } finally {
-      setRemovingAll(false);
+      if (
+        mountedRef.current &&
+        removeAllRequestIdRef.current === requestId
+      ) {
+        setRemovingAll(false);
+      }
     }
   };
 
   // stop an in-progress search
   const stop = async (search) => {
+    if (!mountedRef.current) {
+      return;
+    }
+    const requestId = ++stopRequestIdRef.current;
+
     try {
       setStopping(true);
       await library.stop({ id: search.id });
+      if (!mountedRef.current || stopRequestIdRef.current !== requestId) {
+        return;
+      }
       setSearches((old) => ({
         ...old,
         [search.id]: {
@@ -529,14 +655,18 @@ const Searches = ({ runtimeProfile, server } = {}) => {
         },
       }));
     } catch (stoppingError) {
+      if (!mountedRef.current || stopRequestIdRef.current !== requestId) {
+        return;
+      }
       console.error(stoppingError);
-      toast.error(
-        stoppingError?.response?.data ??
-          stoppingError?.message ??
-          stoppingError,
-      );
+      toast.error(toDisplayError(stoppingError, 'Failed to stop search'));
     } finally {
-      setStopping(false);
+      if (
+        mountedRef.current &&
+        stopRequestIdRef.current === requestId
+      ) {
+        setStopping(false);
+      }
     }
   };
 
@@ -566,7 +696,12 @@ const Searches = ({ runtimeProfile, server } = {}) => {
       try {
         const search = await library.getStatus({ id: searchId });
         const resolvedId = searchEventIdentifier(search);
-        if (cancelled || resolvedId === undefined || resolvedId === null) {
+        if (
+          cancelled ||
+          !mountedRef.current ||
+          resolvedId === undefined ||
+          resolvedId === null
+        ) {
           return;
         }
         onUpdate((old) => ({
@@ -574,19 +709,28 @@ const Searches = ({ runtimeProfile, server } = {}) => {
           [searchId]: { ...search, id: searchId },
         }));
       } catch (loadError) {
-        if (!cancelled) {
+        if (!cancelled && mountedRef.current) {
           console.debug('failed to load search details', loadError);
           routerNavigate('/searches', { replace: true });
         }
       }
     };
 
-    loadSearch();
+    void loadSearch();
 
     return () => {
       cancelled = true;
     };
-  }, [connecting, creating, error, initialSearchesLoaded, routerNavigate, searchId, searches]);
+  }, [
+    connecting,
+    creating,
+    error,
+    initialSearchesLoaded,
+    mountedRef,
+    routerNavigate,
+    searchId,
+    searches,
+  ]);
 
   if (connecting) {
     return <LoaderSegment />;

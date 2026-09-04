@@ -2,6 +2,8 @@ import {
   buildSetupHealthChecks,
   formatSetupHealthReport,
 } from '../../../lib/setupHealthCheck';
+import { toDisplayError } from '../../../lib/errors';
+import { useMountedRef } from '../../../lib/useMountedRef';
 import React, { useMemo, useState } from 'react';
 import { toast } from 'react-toastify';
 import {
@@ -40,6 +42,7 @@ const copyToClipboard = async (value) => {
 const SetupHealthCheckModal = ({ options = {}, state = {} }) => {
   const [activeGroup, setActiveGroup] = useState('All');
   const [open, setOpen] = useState(false);
+  const mountedRef = useMountedRef();
   const summary = useMemo(
     () =>
       buildSetupHealthChecks({
@@ -62,14 +65,22 @@ const SetupHealthCheckModal = ({ options = {}, state = {} }) => {
   );
 
   const copyReport = async () => {
-    const copied = await copyToClipboard(report);
+    if (!mountedRef.current) return;
+    try {
+      const copied = await copyToClipboard(report);
 
-    if (copied) {
-      toast.success('Setup health report copied');
-      return;
+      if (!mountedRef.current) return;
+      if (copied) {
+        toast.success('Setup health report copied');
+        return;
+      }
+
+      toast.info('Select the setup health report text to copy it manually');
+    } catch (error) {
+      if (mountedRef.current) {
+        toast.error(toDisplayError(error, 'Unable to copy setup health report'));
+      }
     }
-
-    toast.info('Select the setup health report text to copy it manually');
   };
 
   return (

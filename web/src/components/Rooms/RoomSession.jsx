@@ -1,6 +1,7 @@
 import * as rooms from '../../lib/rooms';
 import { createRoomsHubConnection } from '../../lib/hubFactory';
 import { createPollingController } from '../../lib/usePolling';
+import { toDisplayError } from '../../lib/errors';
 import React, { Component, createRef } from 'react';
 import UserCard from '../Shared/UserCard';
 import {
@@ -25,6 +26,7 @@ const initialState = {
   },
   loading: false,
   message: '',
+  error: null,
   room: {
     messages: [],
     users: [],
@@ -40,9 +42,15 @@ class RoomSession extends Component {
     this.messageRef = undefined;
     this.roomsHub = undefined;
     this.pollController = null;
+    this.isMountedFlag = false;
+    this.requestIds = {
+      fetch: 0,
+      send: 0,
+    };
   }
 
   componentDidMount() {
+    this.isMountedFlag = true;
     if (this.props.active !== false) {
       this.startPolling();
     }
@@ -51,13 +59,19 @@ class RoomSession extends Component {
   }
 
   componentWillUnmount() {
+    this.isMountedFlag = false;
+    this.requestIds.fetch += 1;
+    this.requestIds.send += 1;
     this.stopPolling();
     document.removeEventListener('click', this.handleCloseContextMenu);
   }
 
   componentDidUpdate(previousProps) {
     if (previousProps.roomName !== this.props.roomName) {
+      this.requestIds.fetch += 1;
+      this.requestIds.send += 1;
       this.setState(initialState, () => {
+        if (!this.isMountedFlag) return;
         if (this.props.active !== false) {
           if (this.pollController) {
             this.pollController.refresh();
@@ -80,20 +94,23 @@ class RoomSession extends Component {
   }
 
   startPolling = () => {
-    if (this.pollController) {
+    if (!this.isMountedFlag || this.pollController) {
       return;
     }
 
     this.pollController = createPollingController(this.fetchRoom, 60_000);
     this.roomsHub = createRoomsHubConnection();
     this.roomsHub.on('changed', (event) => {
+      if (!this.isMountedFlag) return;
       const roomName = event?.resource || event?.data?.resource;
       if (!roomName || roomName === this.props.roomName || roomName === 'rooms') {
-        this.pollController?.refresh();
+        void this.pollController?.refresh();
       }
     });
     this.roomsHub.start().catch((error) => {
-      console.error('Failed to start room event feed:', error);
+      if (this.isMountedFlag) {
+        console.error('Failed to start room event feed:', error);
+      }
     });
   };
 
@@ -112,14 +129,33 @@ class RoomSession extends Component {
 
   fetchRoom = async () => {
     const { roomName } = this.props;
+    const requestId = ++this.requestIds.fetch;
+    const requestedRoomName = roomName;
 
-    if (!roomName || roomName.length === 0) return;
+    if (!this.isMountedFlag || !roomName || roomName.length === 0) return;
+
+    this.setState({ error: null, loading: true });
 
     try {
       const messages = await rooms.getMessages({ roomName });
+      if (
+        !this.isMountedFlag ||
+        requestId !== this.requestIds.fetch ||
+        this.props.roomName !== requestedRoomName
+      ) {
+        return;
+      }
       const users = await rooms.getUsers({ roomName });
+      if (
+        !this.isMountedFlag ||
+        requestId !== this.requestIds.fetch ||
+        this.props.roomName !== requestedRoomName
+      ) {
+        return;
+      }
 
       this.setState({
+        error: null,
         loading: false,
         room: {
           messages,
@@ -128,7 +164,16 @@ class RoomSession extends Component {
       });
     } catch (error) {
       console.error('Failed to fetch room data:', error);
-      this.setState({ loading: false });
+      if (
+        this.isMountedFlag &&
+        requestId === this.requestIds.fetch &&
+        this.props.roomName === requestedRoomName
+      ) {
+        this.setState({
+          error: toDisplayError(error, 'Failed to load room'),
+          loading: false,
+        });
+      }
     }
   };
 
@@ -169,19 +214,35 @@ class RoomSession extends Component {
     const { roomName } = this.props;
     const { message } = this.state;
 
-    if (!this.validInput()) {
+    if (!this.isMountedFlag || !this.validInput()) {
       return;
     }
 
+    const requestId = ++this.requestIds.send;
+    const requestedRoomName = roomName;
     try {
       await rooms.sendMessage({ message: message.trim(), roomName });
-      this.setState({ message: '' });
+      if (
+        this.isMountedFlag &&
+        requestId === this.requestIds.send &&
+        this.props.roomName === requestedRoomName
+      ) {
+        this.setState({ error: null, message: '' });
+      }
     } catch (error) {
       console.error('Failed to send message:', error);
+      if (
+        this.isMountedFlag &&
+        requestId === this.requestIds.send &&
+        this.props.roomName === requestedRoomName
+      ) {
+        this.setState({ error: toDisplayError(error, 'Failed to send message') });
+      }
     }
   };
 
   handleContextMenu = (clickEvent, message) => {
+    if (!this.isMountedFlag) return;
     clickEvent.preventDefault();
     this.setState({
       contextMenu: {
@@ -194,6 +255,7 @@ class RoomSession extends Component {
   };
 
   handleCloseContextMenu = () => {
+    if (!this.isMountedFlag) return;
     this.setState((previousState) => ({
       contextMenu: {
         ...previousState.contextMenu,
@@ -263,7 +325,7 @@ class RoomSession extends Component {
   render() {
     const { onLeaveRoom, roomName } = this.props;
 
-    const { contextMenu, loading, message, room } = this.state;
+    const { contextMenu, error, loading, message, room } = this.state;
 
     if (!roomName || roomName.length === 0) {
       return (
@@ -301,6 +363,7 @@ class RoomSession extends Component {
               />
             </Card.Header>
             <div className="room">
+              {error ? <Segment negative>{error}</Segment> : null}
               {loading ? (
                 <Dimmer
                   active

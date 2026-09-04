@@ -3,7 +3,9 @@
 // </copyright>
 
 import * as jobsLibrary from '../../../lib/jobs';
+import { toDisplayError } from '../../../lib/errors';
 import { formatBytes } from '../../../lib/util';
+import { useMountedRef } from '../../../lib/useMountedRef';
 import { usePolling } from '../../../lib/usePolling';
 import SwarmVisualization from '../SwarmVisualization';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
@@ -44,8 +46,13 @@ const Jobs = () => {
     offset: 0,
     total: 0,
   });
+  const mountedRef = useMountedRef();
+  const jobsRequestIdRef = React.useRef(0);
+  const swarmRequestIdRef = React.useRef(0);
 
   const fetchJobs = useCallback(async () => {
+    if (!mountedRef.current) return;
+    const requestId = ++jobsRequestIdRef.current;
     try {
       setLoading(true);
       const response = await jobsLibrary.getJobs({
@@ -56,39 +63,76 @@ const Jobs = () => {
         status: filters.status || undefined,
         type: filters.type || undefined,
       });
-      setJobs(response.jobs || []);
+      if (
+        !mountedRef.current ||
+        jobsRequestIdRef.current !== requestId
+      ) {
+        return;
+      }
+      setJobs(
+        Array.isArray(response?.jobs)
+          ? response.jobs.filter((job) => job && typeof job === 'object')
+          : [],
+      );
       setPagination((previous) => ({
         ...previous,
-        hasMore: response.has_more || false,
-        total: response.total || 0,
+        hasMore: Boolean(response?.has_more),
+        total: Number.isFinite(response?.total) ? response.total : 0,
       }));
     } catch (error) {
-      toast.error(
-        error?.response?.data?.message ||
-          error?.message ||
-          'Failed to fetch jobs',
-      );
-      console.error('Failed to fetch jobs:', error);
+      if (
+        mountedRef.current &&
+        jobsRequestIdRef.current === requestId
+      ) {
+        toast.error(toDisplayError(error, 'Failed to fetch jobs'));
+        console.error('Failed to fetch jobs:', error);
+      }
     } finally {
-      setLoading(false);
+      if (
+        mountedRef.current &&
+        jobsRequestIdRef.current === requestId
+      ) {
+        setLoading(false);
+      }
     }
-  }, [filters, pagination.limit, pagination.offset]);
+  }, [filters, mountedRef, pagination.limit, pagination.offset]);
 
   const fetchSwarmJobs = useCallback(async () => {
+    if (!mountedRef.current) return;
+    const requestId = ++swarmRequestIdRef.current;
     try {
       setSwarmLoading(true);
       const jobs = await jobsLibrary.getActiveSwarmJobs();
-      setSwarmJobs(jobs);
+      if (
+        mountedRef.current &&
+        swarmRequestIdRef.current === requestId
+      ) {
+        setSwarmJobs(
+          Array.isArray(jobs)
+            ? jobs.filter((job) => job && typeof job === 'object')
+            : [],
+        );
+      }
     } catch (error) {
-      console.debug('Failed to fetch swarm jobs:', error);
-      setSwarmJobs([]);
+      if (
+        mountedRef.current &&
+        swarmRequestIdRef.current === requestId
+      ) {
+        console.debug('Failed to fetch swarm jobs:', error);
+        setSwarmJobs([]);
+      }
     } finally {
-      setSwarmLoading(false);
+      if (
+        mountedRef.current &&
+        swarmRequestIdRef.current === requestId
+      ) {
+        setSwarmLoading(false);
+      }
     }
-  }, []);
+  }, [mountedRef]);
 
   useEffect(() => {
-    fetchJobs();
+    void fetchJobs();
   }, [fetchJobs]);
 
   usePolling(fetchSwarmJobs, 5_000);

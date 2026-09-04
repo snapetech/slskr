@@ -13,9 +13,11 @@ import {
 } from '../../../lib/automationRecipes';
 import { getRunnableWishlistRequests } from '../../../lib/acquisitionRequests';
 import { executeAutomationAction } from '../../../lib/automationActions';
+import { toDisplayError } from '../../../lib/errors';
 import * as libraryHealthAPI from '../../../lib/libraryHealth';
 import * as wishlistAPI from '../../../lib/wishlist';
-import React, { useMemo, useState } from 'react';
+import { useMountedRef } from '../../../lib/useMountedRef';
+import React, { useMemo, useRef, useState } from 'react';
 import { toast } from 'react-toastify';
 import {
   Button,
@@ -55,6 +57,8 @@ const AutomationCenter = () => {
   const [recipeInputs, setRecipeInputs] = useState(getAutomationRecipeInputs);
   const [copyStatus, setCopyStatus] = useState('');
   const [executingRecipe, setExecutingRecipe] = useState('');
+  const mountedRef = useMountedRef();
+  const executionRequestIdRef = useRef(0);
   const summary = useMemo(() => {
     const enabled = automationRecipes.filter(
       (recipe) => recipeState[recipe.id]?.enabled,
@@ -81,8 +85,10 @@ const AutomationCenter = () => {
     toast.info(`${recipe.title} dry run recorded`);
   };
 
-  const executeWishlistRetry = async (recipe) => {
-    const allRequests = await wishlistAPI.getAll();
+  const executeWishlistRetry = async (recipe, isCurrentRequest) => {
+    const response = await wishlistAPI.getAll();
+    if (!isCurrentRequest()) return;
+    const allRequests = Array.isArray(response) ? response : [];
     const runnableRequests = getRunnableWishlistRequests(allRequests, { limit: 3 });
     const result = {
       failed: 0,
@@ -94,12 +100,14 @@ const AutomationCenter = () => {
     for (const request of runnableRequests) {
       try {
         await wishlistAPI.runSearch(request.id);
+        if (!isCurrentRequest()) return;
         result.started += 1;
       } catch {
         result.failed += 1;
       }
     }
 
+    if (!isCurrentRequest()) return;
     result.summary = `Ran ${result.started} Wishlist searches; ${result.failed} failed; ${result.skipped} skipped.`;
     const report = buildAutomationExecutionReport(recipe, result);
     setRecipeState(setAutomationRecipeExecution(recipe.id, report, report.generatedAt));
@@ -108,7 +116,7 @@ const AutomationCenter = () => {
     toast.info(status);
   };
 
-  const executeLibraryHealthScan = async (recipe) => {
+  const executeLibraryHealthScan = async (recipe, isCurrentRequest) => {
     const libraryPath = `${recipeInputs[recipe.id]?.libraryPath || ''}`.trim();
     if (!libraryPath) {
       setCopyStatus('Enter a Library Health path before starting the scan.');
@@ -116,6 +124,7 @@ const AutomationCenter = () => {
     }
 
     const response = await libraryHealthAPI.startScan(libraryPath);
+    if (!isCurrentRequest()) return;
     const scanId = response?.data?.scanId || response?.scanId || 'unknown';
     const report = buildAutomationExecutionReport(recipe, {
       scanId,
@@ -128,8 +137,9 @@ const AutomationCenter = () => {
     toast.info(status);
   };
 
-  const executeReadOnlyRecipe = async (recipe) => {
+  const executeReadOnlyRecipe = async (recipe, isCurrentRequest) => {
     const result = await executeAutomationAction(recipe.id);
+    if (!isCurrentRequest()) return;
     const report = buildAutomationExecutionReport(recipe, result);
     setRecipeState(setAutomationRecipeExecution(recipe.id, report, report.generatedAt));
     setCopyStatus(`${recipe.title}: ${result.summary}`);
@@ -137,24 +147,37 @@ const AutomationCenter = () => {
   };
 
   const executeRecipe = async (recipe) => {
+    if (!mountedRef.current) return;
+    const requestId = ++executionRequestIdRef.current;
+    const isCurrentRequest = () =>
+      mountedRef.current && executionRequestIdRef.current === requestId;
+
     if (!isAutomationRecipeExecutable(recipe)) {
-      setCopyStatus(`${recipe.title} is preview-only because its backend action is unavailable.`);
+      if (isCurrentRequest()) {
+        setCopyStatus(`${recipe.title} is preview-only because its backend action is unavailable.`);
+      }
       return;
     }
 
     setExecutingRecipe(recipe.id);
     try {
       if (recipe.id === 'wishlist-retry') {
-        await executeWishlistRetry(recipe);
+        await executeWishlistRetry(recipe, isCurrentRequest);
       }
       if (recipe.id === 'library-health-scan') {
-        await executeLibraryHealthScan(recipe);
+        await executeLibraryHealthScan(recipe, isCurrentRequest);
       }
       if (['dashboard-refresh', 'local-diagnostics', 'stale-cache-reminders'].includes(recipe.id)) {
-        await executeReadOnlyRecipe(recipe);
+        await executeReadOnlyRecipe(recipe, isCurrentRequest);
+      }
+    } catch (error) {
+      if (isCurrentRequest()) {
+        const message = `${recipe.title} failed: ${toDisplayError(error)}`;
+        setCopyStatus(message);
+        toast.error(message);
       }
     } finally {
-      setExecutingRecipe('');
+      if (isCurrentRequest()) setExecutingRecipe('');
     }
   };
 
@@ -163,6 +186,7 @@ const AutomationCenter = () => {
   };
 
   const copyHistoryReport = async () => {
+    if (!mountedRef.current) return;
     const report = formatAutomationRunHistoryReport(runHistory);
     if (!navigator.clipboard?.writeText) {
       setCopyStatus('Clipboard unavailable; copy the automation history manually.');
@@ -171,9 +195,9 @@ const AutomationCenter = () => {
 
     try {
       await navigator.clipboard.writeText(report);
-      setCopyStatus('Automation history report copied.');
+      if (mountedRef.current) setCopyStatus('Automation history report copied.');
     } catch {
-      setCopyStatus('Unable to copy automation history report.');
+      if (mountedRef.current) setCopyStatus('Unable to copy automation history report.');
     }
   };
 
@@ -396,6 +420,7 @@ const AutomationCenter = () => {
                           disabled={
                             !enabled ||
                             !executable ||
+                            Boolean(executingRecipe) ||
                             executing ||
                             missingRequiredInput
                           }

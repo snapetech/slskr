@@ -1,8 +1,10 @@
 import * as discoveryGraph from '../../lib/discoveryGraph';
+import { toDisplayError } from '../../lib/errors';
 import * as jobs from '../../lib/jobs';
 import * as musicBrainz from '../../lib/musicBrainz';
 import * as searches from '../../lib/searches';
 import * as songId from '../../lib/songid';
+import { useMountedRef } from '../../lib/useMountedRef';
 import DiscoveryGraphCanvas from './DiscoveryGraphCanvas';
 import DiscoveryGraphModal from './DiscoveryGraphModal';
 import React, { useEffect, useRef, useState } from 'react';
@@ -222,6 +224,9 @@ const SongIDPanel = ({ disabled }) => {
   const [graphOpen, setGraphOpen] = useState(false);
   const [graphData, setGraphData] = useState(null);
   const [graphRequest, setGraphRequest] = useState(null);
+  const mountedRef = useMountedRef();
+  const analyzeRequestIdRef = useRef(0);
+  const graphRequestIdRef = useRef(0);
   const currentRunIdRef = useRef(null);
 
   useEffect(() => {
@@ -268,35 +273,42 @@ const SongIDPanel = ({ disabled }) => {
     });
 
     connection.start().catch((error) => {
-      console.warn('SongID hub connection failed', error);
+      if (mountedRef.current && active) {
+        console.warn('SongID hub connection failed', error);
+      }
     });
 
     return () => {
       active = false;
       connection.stop().catch(() => {});
     };
-  }, []);
+  }, [mountedRef]);
 
   const handleAnalyze = async () => {
+    if (!mountedRef.current || disabled || loading) return;
     const trimmed = source.trim();
     if (!trimmed) {
       toast.error('Provide a URL, server-side file path, or text query');
       return;
     }
 
+    const requestId = ++analyzeRequestIdRef.current;
+    const isCurrentRequest = () =>
+      mountedRef.current && analyzeRequestIdRef.current === requestId;
     setLoading(true);
     try {
       const result = await songId.createRun(trimmed);
+      if (!isCurrentRequest()) return;
       setRun(result);
       setRuns((currentRuns) => [result, ...currentRuns.filter((item) => item.id !== result.id)].slice(0, 25));
       toast.success('SongID analysis queued');
     } catch (error) {
-      console.error(error);
-      toast.error(
-        error?.response?.data ?? error?.message ?? 'SongID analysis failed',
-      );
+      if (isCurrentRequest()) {
+        console.error(error);
+        toast.error(toDisplayError(error, 'SongID analysis failed'));
+      }
     } finally {
-      setLoading(false);
+      if (isCurrentRequest()) setLoading(false);
     }
   };
 
@@ -435,23 +447,26 @@ const SongIDPanel = ({ disabled }) => {
   };
 
   const openDiscoveryGraph = async (request) => {
+    if (!mountedRef.current || disabled) return;
+    const requestId = ++graphRequestIdRef.current;
+    const isCurrentRequest = () =>
+      mountedRef.current && graphRequestIdRef.current === requestId;
     setGraphLoading(true);
     setGraphOpen(true);
     setGraphRequest(request);
 
     try {
       const graph = await discoveryGraph.buildDiscoveryGraph(request);
+      if (!isCurrentRequest()) return;
       setGraphData(graph);
     } catch (error) {
-      console.error(error);
-      toast.error(
-        error?.response?.data ??
-          error?.message ??
-          'Failed to build discovery graph',
-      );
-      setGraphOpen(false);
+      if (isCurrentRequest()) {
+        console.error(error);
+        toast.error(toDisplayError(error, 'Failed to build discovery graph'));
+        setGraphOpen(false);
+      }
     } finally {
-      setGraphLoading(false);
+      if (isCurrentRequest()) setGraphLoading(false);
     }
   };
 
@@ -498,8 +513,11 @@ const SongIDPanel = ({ disabled }) => {
     const queries = nodes
       .filter((node) => node.nodeType === 'track')
       .map((node) => {
-        const recordingId = node.nodeId.split(':')[1];
-        const candidate = (run?.tracks || []).find((item) => item.recordingId === recordingId);
+        const recordingId = typeof node.nodeId === 'string'
+          ? node.nodeId.split(':')[1]
+          : '';
+        const candidate = (Array.isArray(run?.tracks) ? run.tracks : [])
+          .find((item) => item.recordingId === recordingId);
         if (candidate?.searchText) {
           return candidate.searchText;
         }
@@ -1912,7 +1930,10 @@ const SongIDPanel = ({ disabled }) => {
       graph={graphData}
       loading={graphLoading}
       onCompare={handleGraphCompare}
-      onClose={() => setGraphOpen(false)}
+      onClose={() => {
+        graphRequestIdRef.current += 1;
+        setGraphOpen(false);
+      }}
       onQueueNearby={handleQueueNearbyFromGraph}
       onRecenter={handleGraphRecenter}
       onRestoreBranch={(branch) => branch?.request && openDiscoveryGraph(branch.request)}

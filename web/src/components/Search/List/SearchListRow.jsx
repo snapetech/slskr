@@ -1,10 +1,12 @@
 import SearchStatusIcon from '../SearchStatusIcon';
 import { buildDiscoveryGraph } from '../../../lib/discoveryGraph';
+import { toDisplayError } from '../../../lib/errors';
 import { formatSearchTime } from '../../../lib/searchState';
+import { useMountedRef } from '../../../lib/useMountedRef';
 import DiscoveryGraphModal from '../DiscoveryGraphModal';
 import * as searches from '../../../lib/searches';
 import SearchActionIcon from './SearchActionIcon';
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Icon, Popup, Table } from 'semantic-ui-react';
 import { toast } from 'react-toastify';
@@ -15,34 +17,48 @@ const SearchListRow = ({ onRemove, onStop, search }) => {
   const [graphLoading, setGraphLoading] = useState(false);
   const [graphOpen, setGraphOpen] = useState(false);
   const [graphRequest, setGraphRequest] = useState(null);
+  const mountedRef = useMountedRef();
+  const actionRequestIdRef = useRef(0);
+  const graphRequestIdRef = useRef(0);
+
   const invoke = async (function_) => {
+    if (!mountedRef.current || working) return;
+    const requestId = ++actionRequestIdRef.current;
+    const isCurrentRequest = () =>
+      mountedRef.current && actionRequestIdRef.current === requestId;
     setWorking(true);
 
     try {
       await function_();
     } catch (error) {
-      console.error(error);
+      if (isCurrentRequest()) console.error(error);
     } finally {
-      setWorking(false);
+      if (isCurrentRequest()) setWorking(false);
     }
   };
 
   const openDiscoveryGraph = async (request) => {
+    if (!mountedRef.current) return;
+    const requestId = ++graphRequestIdRef.current;
+    const isCurrentRequest = () =>
+      mountedRef.current &&
+      graphRequestIdRef.current === requestId;
     setGraphLoading(true);
     setGraphOpen(true);
     setGraphRequest(request);
 
     try {
       const graph = await buildDiscoveryGraph(request);
+      if (!isCurrentRequest()) return;
       setGraphData(graph);
     } catch (error) {
-      console.error(error);
-      toast.error(
-        error?.response?.data ?? error?.message ?? 'Failed to build discovery graph',
-      );
-      setGraphOpen(false);
+      if (isCurrentRequest()) {
+        console.error(error);
+        toast.error(toDisplayError(error, 'Failed to build discovery graph'));
+        setGraphOpen(false);
+      }
     } finally {
-      setGraphLoading(false);
+      if (isCurrentRequest()) setGraphLoading(false);
     }
   };
 
@@ -91,7 +107,8 @@ const SearchListRow = ({ onRemove, onStop, search }) => {
   };
 
   const handleQueueNearby = async (graph) => {
-    const queries = (graph?.nodes || [])
+    if (!mountedRef.current) return;
+    const queries = (Array.isArray(graph?.nodes) ? graph.nodes : [])
       .filter((node) => node.nodeType === 'track')
       .map((node) => node.label || '')
       .filter(Boolean)
@@ -104,12 +121,14 @@ const SearchListRow = ({ onRemove, onStop, search }) => {
 
     try {
       const count = await searches.createBatch({ queries });
-      toast.success(`Started ${count} nearby graph searches`);
+      if (mountedRef.current) {
+        toast.success(`Started ${count} nearby graph searches`);
+      }
     } catch (error) {
-      console.error(error);
-      toast.error(
-        error?.response?.data ?? error?.message ?? 'Failed to queue nearby graph searches',
-      );
+      if (mountedRef.current) {
+        console.error(error);
+        toast.error(toDisplayError(error, 'Failed to queue nearby graph searches'));
+      }
     }
   };
 
@@ -169,7 +188,10 @@ const SearchListRow = ({ onRemove, onStop, search }) => {
       <DiscoveryGraphModal
         graph={graphData}
         loading={graphLoading}
-        onClose={() => setGraphOpen(false)}
+        onClose={() => {
+          graphRequestIdRef.current += 1;
+          setGraphOpen(false);
+        }}
         onCompare={handleGraphCompare}
         onQueueNearby={handleQueueNearby}
         onRecenter={handleGraphRecenter}

@@ -39,6 +39,7 @@ import {
 } from '../../lib/playerAutoQueue';
 import { getPlayerShortcutAction } from '../../lib/playerShortcuts';
 import { getLocalStorageItem, setLocalStorageItem } from '../../lib/storage';
+import { useMountedRef } from '../../lib/useMountedRef';
 import * as searches from '../../lib/searches';
 import * as streaming from '../../lib/streaming';
 import * as wishlistAPI from '../../lib/wishlist';
@@ -272,6 +273,16 @@ const PlayerRadioModal = ({ current, onClose, onOpenSearch, open }) => {
   const [runningSearches, setRunningSearches] = useState(false);
   const [savingWishlist, setSavingWishlist] = useState(false);
   const [status, setStatus] = useState('');
+  const mountedRef = useMountedRef();
+  const openRef = useRef(open);
+  const actionRequestIdRef = useRef(0);
+
+  useEffect(() => {
+    openRef.current = open;
+    if (!open) {
+      actionRequestIdRef.current += 1;
+    }
+  }, [open]);
 
   const copyPlan = () => {
     if (navigator.clipboard && copyText) {
@@ -280,6 +291,10 @@ const PlayerRadioModal = ({ current, onClose, onOpenSearch, open }) => {
   };
 
   const startRadioSearches = async () => {
+    if (!mountedRef.current || !openRef.current) return;
+    const requestId = ++actionRequestIdRef.current;
+    const isCurrentRequest = () =>
+      mountedRef.current && openRef.current && actionRequestIdRef.current === requestId;
     const queries = getPlayerRadioQueries(plan, { limit: 3 });
     if (queries.length === 0) {
       setStatus('No smart-radio queries are ready.');
@@ -289,15 +304,21 @@ const PlayerRadioModal = ({ current, onClose, onOpenSearch, open }) => {
     try {
       setRunningSearches(true);
       const count = await searches.createBatch({ queries });
+      if (!isCurrentRequest()) return;
       setStatus(`Started ${count} smart-radio search${count === 1 ? '' : 'es'}.`);
     } catch {
+      if (!isCurrentRequest()) return;
       setStatus('Unable to start smart-radio searches.');
     } finally {
-      setRunningSearches(false);
+      if (isCurrentRequest()) setRunningSearches(false);
     }
   };
 
   const addRadioWishlist = async () => {
+    if (!mountedRef.current || !openRef.current) return;
+    const requestId = ++actionRequestIdRef.current;
+    const isCurrentRequest = () =>
+      mountedRef.current && openRef.current && actionRequestIdRef.current === requestId;
     const queries = getPlayerRadioQueries(plan, { limit: 4 });
     if (queries.length === 0) {
       setStatus('No smart-radio queries are ready for Wishlist.');
@@ -319,11 +340,13 @@ const PlayerRadioModal = ({ current, onClose, onOpenSearch, open }) => {
           ),
         Promise.resolve(),
       );
+      if (!isCurrentRequest()) return;
       setStatus(`Added ${queries.length} smart-radio seed${queries.length === 1 ? '' : 's'} to Wishlist.`);
     } catch {
+      if (!isCurrentRequest()) return;
       setStatus('Unable to add smart-radio seeds to Wishlist.');
     } finally {
-      setSavingWishlist(false);
+      if (isCurrentRequest()) setSavingWishlist(false);
     }
   };
 
@@ -387,7 +410,7 @@ const PlayerRadioModal = ({ current, onClose, onOpenSearch, open }) => {
           trigger={
             <Button
               data-testid="player-radio-start-searches"
-              disabled={!plan.ready}
+              disabled={!plan.ready || savingWishlist || runningSearches}
               loading={runningSearches}
               onClick={startRadioSearches}
               type="button"
@@ -402,7 +425,7 @@ const PlayerRadioModal = ({ current, onClose, onOpenSearch, open }) => {
           trigger={
             <Button
               data-testid="player-radio-add-wishlist"
-              disabled={!plan.ready}
+              disabled={!plan.ready || savingWishlist || runningSearches}
               loading={savingWishlist}
               onClick={addRadioWishlist}
               type="button"
@@ -464,6 +487,16 @@ const PlayerQueueModal = ({
   const [handoffStatus, setHandoffStatus] = useState('');
   const [searchingSimilar, setSearchingSimilar] = useState(false);
   const [savingSimilarWishlist, setSavingSimilarWishlist] = useState(false);
+  const mountedRef = useMountedRef();
+  const openRef = useRef(open);
+  const actionRequestIdRef = useRef(0);
+
+  useEffect(() => {
+    openRef.current = open;
+    if (!open) {
+      actionRequestIdRef.current += 1;
+    }
+  }, [open]);
   const similarCandidates = buildSimilarQueueCandidates({
     current,
     history,
@@ -471,6 +504,10 @@ const PlayerQueueModal = ({
   });
 
   const startSimilarSearches = async () => {
+    if (!mountedRef.current || !openRef.current) return;
+    const requestId = ++actionRequestIdRef.current;
+    const isCurrentRequest = () =>
+      mountedRef.current && openRef.current && actionRequestIdRef.current === requestId;
     const queries = getSimilarQueueSearchQueries(similarCandidates, { limit: 3 });
     if (queries.length === 0) {
       setHandoffStatus('No similar queue candidates are ready to search.');
@@ -480,15 +517,21 @@ const PlayerQueueModal = ({
     try {
       setSearchingSimilar(true);
       const count = await searches.createBatch({ queries });
+      if (!isCurrentRequest()) return;
       setHandoffStatus(`Started ${count} similar-track search${count === 1 ? '' : 'es'}.`);
     } catch {
+      if (!isCurrentRequest()) return;
       setHandoffStatus('Unable to start similar-track searches.');
     } finally {
-      setSearchingSimilar(false);
+      if (isCurrentRequest()) setSearchingSimilar(false);
     }
   };
 
   const addSimilarWishlist = async () => {
+    if (!mountedRef.current || !openRef.current) return;
+    const requestId = ++actionRequestIdRef.current;
+    const isCurrentRequest = () =>
+      mountedRef.current && openRef.current && actionRequestIdRef.current === requestId;
     const queries = getSimilarQueueSearchQueries(similarCandidates, { limit: 5 });
     if (queries.length === 0) {
       setHandoffStatus('No similar queue candidates are ready for Wishlist.');
@@ -510,11 +553,13 @@ const PlayerQueueModal = ({
           ),
         Promise.resolve(),
       );
+      if (!isCurrentRequest()) return;
       setHandoffStatus(`Added ${queries.length} similar-track seed${queries.length === 1 ? '' : 's'} to Wishlist.`);
     } catch {
+      if (!isCurrentRequest()) return;
       setHandoffStatus('Unable to add similar-track seeds to Wishlist.');
     } finally {
-      setSavingSimilarWishlist(false);
+      if (isCurrentRequest()) setSavingSimilarWishlist(false);
     }
   };
 
@@ -565,8 +610,8 @@ const PlayerQueueModal = ({
                   content="Start up to three searches from similar recent session tracks. This starts search jobs only."
                   trigger={
                     <Button
-                      data-testid="player-search-similar-candidates"
-                      disabled={similarCandidates.length === 0}
+              data-testid="player-search-similar-candidates"
+              disabled={similarCandidates.length === 0 || savingSimilarWishlist || searchingSimilar}
                       loading={searchingSimilar}
                       onClick={startSimilarSearches}
                       size="mini"
@@ -581,8 +626,8 @@ const PlayerQueueModal = ({
                   content="Add similar recent session tracks to Wishlist as manual requests with auto-download off."
                   trigger={
                     <Button
-                      data-testid="player-wishlist-similar-candidates"
-                      disabled={similarCandidates.length === 0}
+              data-testid="player-wishlist-similar-candidates"
+              disabled={similarCandidates.length === 0 || savingSimilarWishlist || searchingSimilar}
                       loading={savingSimilarWishlist}
                       onClick={addSimilarWishlist}
                       size="mini"
@@ -959,6 +1004,18 @@ const PlayerStatsModal = ({ onClose, onOpenSearch, open }) => {
   const [stats, setStats] = useState(() =>
     getListeningStats({ rangeDays: 30 }),
   );
+  const mountedRef = useMountedRef();
+  const openRef = useRef(open);
+  const actionRequestIdRef = useRef(0);
+
+  useEffect(() => {
+    openRef.current = open;
+    if (!open) {
+      actionRequestIdRef.current += 1;
+    }
+  }, [open]);
+
+  const isActive = () => mountedRef.current && openRef.current;
   const recommendationSeeds = getListeningRecommendationSeeds(stats);
   const refreshStats = useCallback((nextRangeDays = rangeDays) => {
     setStats(getListeningStats({ rangeDays: nextRangeDays }));
@@ -1001,6 +1058,10 @@ const PlayerStatsModal = ({ onClose, onOpenSearch, open }) => {
   };
 
   const startSeedSearches = async () => {
+    if (!isActive()) return;
+    const requestId = ++actionRequestIdRef.current;
+    const isCurrentRequest = () =>
+      isActive() && actionRequestIdRef.current === requestId;
     const queries = getListeningRecommendationQueries(stats, { limit: 3 });
     if (queries.length === 0) {
       setImportStatus('No listening seeds are ready to search.');
@@ -1010,15 +1071,21 @@ const PlayerStatsModal = ({ onClose, onOpenSearch, open }) => {
     try {
       setRunningSeedSearches(true);
       const count = await searches.createBatch({ queries });
+      if (!isCurrentRequest()) return;
       setImportStatus(`Started ${count} bounded listening seed search${count === 1 ? '' : 'es'}.`);
     } catch {
+      if (!isCurrentRequest()) return;
       setImportStatus('Unable to start listening seed searches.');
     } finally {
-      setRunningSeedSearches(false);
+      if (isCurrentRequest()) setRunningSeedSearches(false);
     }
   };
 
   const addSeedsToWishlist = async () => {
+    if (!isActive()) return;
+    const requestId = ++actionRequestIdRef.current;
+    const isCurrentRequest = () =>
+      isActive() && actionRequestIdRef.current === requestId;
     const queries = getListeningRecommendationQueries(stats, { limit: 5 });
     if (queries.length === 0) {
       setImportStatus('No listening seeds are ready for Wishlist.');
@@ -1040,29 +1107,37 @@ const PlayerStatsModal = ({ onClose, onOpenSearch, open }) => {
           ),
         Promise.resolve(),
       );
+      if (!isCurrentRequest()) return;
       setImportStatus(`Added ${queries.length} listening seed${queries.length === 1 ? '' : 's'} to Wishlist for manual acquisition.`);
     } catch {
+      if (!isCurrentRequest()) return;
       setImportStatus('Unable to add listening seeds to Wishlist.');
     } finally {
-      setSavingSeedWishlist(false);
+      if (isCurrentRequest()) setSavingSeedWishlist(false);
     }
   };
 
   const scrobbleRecentHistory = async () => {
+    if (!isActive()) return;
+    const requestId = ++actionRequestIdRef.current;
+    const isCurrentRequest = () =>
+      isActive() && actionRequestIdRef.current === requestId;
     try {
       setScrobblingRecent(true);
       const result = await listenBrainz.submitListeningHistory(stats.history, {
         limit: 10,
       });
+      if (!isCurrentRequest()) return;
       setImportStatus(
         result.submitted > 0
           ? `Submitted ${result.submitted} recent listen${result.submitted === 1 ? '' : 's'} to ListenBrainz.`
           : 'No ListenBrainz token or eligible recent listens are available.',
       );
     } catch {
+      if (!isCurrentRequest()) return;
       setImportStatus('Unable to submit recent listens to ListenBrainz.');
     } finally {
-      setScrobblingRecent(false);
+      if (isCurrentRequest()) setScrobblingRecent(false);
     }
   };
 
@@ -1070,10 +1145,16 @@ const PlayerStatsModal = ({ onClose, onOpenSearch, open }) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
+    const requestId = ++actionRequestIdRef.current;
+    const isCurrentRequest = () =>
+      isActive() && actionRequestIdRef.current === requestId;
+
     file.text().then((content) => {
+      if (!isCurrentRequest()) return;
       setImportText(content);
       setImportStatus(`Loaded ${file.name} for review.`);
     }).catch(() => {
+      if (!isCurrentRequest()) return;
       setImportStatus(`Could not read ${file.name}.`);
     });
     event.target.value = '';
@@ -1192,6 +1273,12 @@ const PlayerStatsModal = ({ onClose, onOpenSearch, open }) => {
                 trigger={
                   <Button
                     data-testid="player-stats-start-seed-searches"
+                    disabled={
+                      recommendationSeeds.length === 0 ||
+                      runningSeedSearches ||
+                      savingSeedWishlist ||
+                      scrobblingRecent
+                    }
                     loading={runningSeedSearches}
                     onClick={startSeedSearches}
                     size="mini"
@@ -1207,6 +1294,12 @@ const PlayerStatsModal = ({ onClose, onOpenSearch, open }) => {
                 trigger={
                   <Button
                     data-testid="player-stats-add-seeds-to-wishlist"
+                    disabled={
+                      recommendationSeeds.length === 0 ||
+                      runningSeedSearches ||
+                      savingSeedWishlist ||
+                      scrobblingRecent
+                    }
                     loading={savingSeedWishlist}
                     onClick={addSeedsToWishlist}
                     size="mini"
@@ -1313,7 +1406,12 @@ const PlayerStatsModal = ({ onClose, onOpenSearch, open }) => {
               trigger={
                 <Button
                   data-testid="player-listening-history-scrobble-recent"
-                  disabled={stats.history.length === 0}
+                  disabled={
+                    stats.history.length === 0 ||
+                    runningSeedSearches ||
+                    savingSeedWishlist ||
+                    scrobblingRecent
+                  }
                   loading={scrobblingRecent}
                   onClick={scrobbleRecentHistory}
                   size="mini"
@@ -1363,6 +1461,8 @@ const PlayerStatsModal = ({ onClose, onOpenSearch, open }) => {
 
 const PlayerLauncher = ({ compact = false, onPlayItem }) => {
   const navigate = useNavigate();
+  const mountedRef = useMountedRef();
+  const collectionItemsRequestIdRef = useRef(0);
   const [collections, setCollections] = useState([]);
   const [collectionsOpen, setCollectionsOpen] = useState(false);
   const [selectedCollection, setSelectedCollection] = useState(null);
@@ -1388,18 +1488,18 @@ const PlayerLauncher = ({ compact = false, onPlayItem }) => {
     collectionsAPI
       .getCollections()
       .then((response) => {
-        if (!canceled) {
+        if (!canceled && mountedRef.current) {
           setCollections(Array.isArray(response.data) ? response.data : []);
         }
       })
       .catch(() => {
-        if (!canceled) setCollections([]);
+        if (!canceled && mountedRef.current) setCollections([]);
       });
 
     return () => {
       canceled = true;
     };
-  }, []);
+  }, [mountedRef]);
 
   useEffect(() => {
     if (!filesOpen) return undefined;
@@ -1466,19 +1566,52 @@ const PlayerLauncher = ({ compact = false, onPlayItem }) => {
   }, [browserOffset, browserPath, filesOpen, query]);
 
   const selectCollection = (collection) => {
+    if (!mountedRef.current) return;
+    const requestId = ++collectionItemsRequestIdRef.current;
     setSelectedCollection(collection);
     setCollectionItemsLoading(true);
     collectionsAPI
       .getCollectionItems(collection.id)
-      .then((response) => setCollectionItems(response.data || []))
-      .catch(() => setCollectionItems([]))
-      .finally(() => setCollectionItemsLoading(false));
+      .then((response) => {
+        if (
+          mountedRef.current &&
+          collectionItemsRequestIdRef.current === requestId
+        ) {
+          setCollectionItems(Array.isArray(response.data) ? response.data : []);
+        }
+      })
+      .catch(() => {
+        if (
+          mountedRef.current &&
+          collectionItemsRequestIdRef.current === requestId
+        ) {
+          setCollectionItems([]);
+        }
+      })
+      .finally(() => {
+        if (
+          mountedRef.current &&
+          collectionItemsRequestIdRef.current === requestId
+        ) {
+          setCollectionItemsLoading(false);
+        }
+      });
+  };
+
+  const openCollections = () => {
+    if (!mountedRef.current) return;
+    setCollectionsOpen(true);
+  };
+
+  const closeCollections = () => {
+    collectionItemsRequestIdRef.current += 1;
+    setCollectionsOpen(false);
   };
 
   const playAndClose = (item) => {
     onPlayItem(item);
     setFilesOpen(false);
-    setCollectionsOpen(false);
+    closeCollections();
   };
 
   const openFileBrowser = () => {
@@ -1516,7 +1649,7 @@ const PlayerLauncher = ({ compact = false, onPlayItem }) => {
             data-testid="player-open-collections-browser"
             icon
             labelPosition={compact ? undefined : 'left'}
-            onClick={() => setCollectionsOpen(true)}
+            onClick={openCollections}
             size="small"
             title="Open collections browser"
           >
@@ -1548,7 +1681,7 @@ const PlayerLauncher = ({ compact = false, onPlayItem }) => {
       <Modal
         className="player-browser-modal"
         data-testid="player-collection-browser-modal"
-        onClose={() => setCollectionsOpen(false)}
+        onClose={closeCollections}
         open={collectionsOpen}
         size="large"
       >
@@ -1640,7 +1773,7 @@ const PlayerLauncher = ({ compact = false, onPlayItem }) => {
               <Button
                 data-testid="player-manage-collections"
                 onClick={() => {
-                  setCollectionsOpen(false);
+                  closeCollections();
                   navigate('/collections');
                 }}
               >
@@ -1652,7 +1785,7 @@ const PlayerLauncher = ({ compact = false, onPlayItem }) => {
           <Popup
             content="Close the collection picker without changing playback."
             trigger={
-              <Button onClick={() => setCollectionsOpen(false)}>Close</Button>
+              <Button onClick={closeCollections}>Close</Button>
             }
           />
         </Modal.Actions>
@@ -2094,6 +2227,7 @@ const PlayerAnalyzerTile = ({ audioElement, mode, onModeChange }) => {
 
 const PlayerBar = ({ runtimeProfile } = {}) => {
   const navigate = useNavigate();
+  const mountedRef = useMountedRef();
   const audioRef = useRef(null);
   const fadeAudioRef = useRef(null);
   const fadePauseTimeoutRef = useRef(null);
@@ -2102,6 +2236,10 @@ const PlayerBar = ({ runtimeProfile } = {}) => {
   const playerBarRef = useRef(null);
   const scrobbledRef = useRef('');
   const pipRef = useRef({ raf: null, win: null });
+  const externalStatusRequestIdRef = useRef(0);
+  const externalLaunchRequestIdRef = useRef(0);
+  const streamRequestIdRef = useRef(0);
+  const pipRequestIdRef = useRef(0);
   const {
     clearQueue,
     clear,
@@ -2161,47 +2299,84 @@ const PlayerBar = ({ runtimeProfile } = {}) => {
   const [source, setSource] = useState('');
 
   const refreshExternalVisualizerStatus = useCallback(() => {
+    if (!mountedRef.current) return Promise.resolve(undefined);
+    const requestId = ++externalStatusRequestIdRef.current;
     setExternalVisualizerLoading(true);
     setExternalVisualizerMessage('');
 
     return externalVisualizer.getExternalVisualizerStatus()
       .then((status) => {
-        setExternalVisualizerStatus(status);
+        if (
+          mountedRef.current &&
+          externalStatusRequestIdRef.current === requestId
+        ) {
+          setExternalVisualizerStatus(status);
+        }
         return status;
       })
       .catch(() => {
-        setExternalVisualizerStatus(null);
-        setExternalVisualizerMessage('External visualizer status is unavailable.');
+        if (
+          mountedRef.current &&
+          externalStatusRequestIdRef.current === requestId
+        ) {
+          setExternalVisualizerStatus(null);
+          setExternalVisualizerMessage('External visualizer status is unavailable.');
+        }
       })
       .finally(() => {
-        setExternalVisualizerLoading(false);
+        if (
+          mountedRef.current &&
+          externalStatusRequestIdRef.current === requestId
+        ) {
+          setExternalVisualizerLoading(false);
+        }
       });
-  }, []);
+  }, [mountedRef]);
 
   const launchExternalVisualizer = useCallback(() => {
+    if (!mountedRef.current) return;
+    const requestId = ++externalLaunchRequestIdRef.current;
     setExternalVisualizerLaunching(true);
     setExternalVisualizerMessage('');
 
     externalVisualizer.launchExternalVisualizer()
       .then((result) => {
+        if (
+          !mountedRef.current ||
+          externalLaunchRequestIdRef.current !== requestId
+        ) {
+          return;
+        }
         const name = result?.name || externalVisualizerStatus?.name || 'External visualizer';
         setExternalVisualizerMessage(
           result?.started ? `${name} launched.` : result?.error || 'External visualizer did not launch.',
         );
       })
       .catch((error) => {
-        setExternalVisualizerMessage(getExternalVisualizerError(error));
+        if (
+          mountedRef.current &&
+          externalLaunchRequestIdRef.current === requestId
+        ) {
+          setExternalVisualizerMessage(getExternalVisualizerError(error));
+        }
       })
       .finally(() => {
-        setExternalVisualizerLaunching(false);
+        if (
+          mountedRef.current &&
+          externalLaunchRequestIdRef.current === requestId
+        ) {
+          setExternalVisualizerLaunching(false);
+        }
       });
-  }, [externalVisualizerStatus]);
+  }, [externalVisualizerStatus, mountedRef]);
 
   const bindAudioElement = useCallback((element) => {
     audioRef.current = element;
-    setPlayerAudioElement(element);
-    setAudioElement(element);
-  }, [setAudioElement]);
+    if (element !== null || mountedRef.current) {
+      setPlayerAudioElement(element);
+      setAudioElement(element);
+    }
+  }, [mountedRef, setAudioElement]);
 
   useLayoutEffect(() => {
     const element = playerBarRef.current;
@@ -2220,10 +2395,12 @@ const PlayerBar = ({ runtimeProfile } = {}) => {
   }, [collapsed, current, eqPanelOpen, lyricsOpen]);
 
   const playAudio = useCallback(async () => {
-    if (!audioRef.current) return;
-    await resumeAudioGraph(audioRef.current);
-    await audioRef.current.play();
-  }, []);
+    if (!mountedRef.current || !audioRef.current) return;
+    const element = audioRef.current;
+    await resumeAudioGraph(element);
+    if (!mountedRef.current || audioRef.current !== element) return;
+    await element.play();
+  }, [mountedRef]);
 
   useEffect(() => {
     if (!playerAudioElement) return;
@@ -2259,7 +2436,7 @@ const PlayerBar = ({ runtimeProfile } = {}) => {
 
   useEffect(() => {
     if (integrationsOpen) {
-      refreshExternalVisualizerStatus();
+      void refreshExternalVisualizerStatus();
     }
   }, [integrationsOpen, refreshExternalVisualizerStatus]);
 
@@ -2320,6 +2497,7 @@ const PlayerBar = ({ runtimeProfile } = {}) => {
 
   useEffect(() => {
     let cancelled = false;
+    const requestId = ++streamRequestIdRef.current;
 
     if (!current) {
       setSource('');
@@ -2339,20 +2517,30 @@ const PlayerBar = ({ runtimeProfile } = {}) => {
     streaming
       .createStreamTicket(current.contentId)
       .then((ticket) => {
-        if (!cancelled) {
+        if (
+          !cancelled &&
+          mountedRef.current &&
+          streamRequestIdRef.current === requestId
+        ) {
           setSource(ticket
             ? streaming.buildTicketedStreamUrl(current.contentId, ticket)
             : streaming.buildDirectStreamUrl(current.contentId));
         }
       })
       .catch(() => {
-        if (!cancelled) setSource(streaming.buildDirectStreamUrl(current.contentId));
+        if (
+          !cancelled &&
+          mountedRef.current &&
+          streamRequestIdRef.current === requestId
+        ) {
+          setSource(streaming.buildDirectStreamUrl(current.contentId));
+        }
       });
 
     return () => {
       cancelled = true;
     };
-  }, [current]);
+  }, [current, mountedRef]);
 
   useEffect(() => {
     const handleKeyDown = (event) => {
@@ -2399,6 +2587,18 @@ const PlayerBar = ({ runtimeProfile } = {}) => {
       window.clearTimeout(fadePauseTimeoutRef.current);
       fadePauseTimeoutRef.current = null;
     }
+  }, []);
+
+  useEffect(() => () => {
+    pipRequestIdRef.current += 1;
+    const { raf, win } = pipRef.current;
+    if (raf !== null && win?.cancelAnimationFrame) {
+      win.cancelAnimationFrame(raf);
+    }
+    if (win && !win.closed) {
+      win.close();
+    }
+    pipRef.current = { raf: null, win: null };
   }, []);
 
   useEffect(() => {
@@ -2465,49 +2665,62 @@ const PlayerBar = ({ runtimeProfile } = {}) => {
   const openPictureInPicture = async () => {
     if (!audioRef.current || !window.documentPictureInPicture) return;
 
-    const graph = await resumeAudioGraph(audioRef.current);
-    if (!graph) return;
+    const requestId = ++pipRequestIdRef.current;
+    const isCurrentRequest = () =>
+      mountedRef.current && pipRequestIdRef.current === requestId;
 
-    const pipWindow = await window.documentPictureInPicture.requestWindow({
-      height: 220,
-      width: 360,
-    });
-    pipWindow.document.body.style.margin = '0';
-    pipWindow.document.body.style.background = '#050608';
-    const canvas = pipWindow.document.createElement('canvas');
-    canvas.style.height = '100%';
-    canvas.style.width = '100%';
-    pipWindow.document.body.appendChild(canvas);
-    pipRef.current.win = pipWindow;
+    try {
+      const graph = await resumeAudioGraph(audioRef.current);
+      if (!graph || !isCurrentRequest()) return;
 
-    const draw = () => {
-      if (pipWindow.closed) return;
-      const width = Math.max(1, pipWindow.innerWidth);
-      const height = Math.max(1, pipWindow.innerHeight);
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext('2d');
-      const data = new Uint8Array(graph.analyser.frequencyBinCount);
-      graph.analyser.getByteFrequencyData(data);
-      ctx.fillStyle = '#050608';
-      ctx.fillRect(0, 0, width, height);
-      const barCount = Math.min(72, Math.max(16, Math.floor(width / 7)));
-      const bars = getFrequencyBars(data, barCount);
-      const barWidth = width / bars.length;
-      bars.forEach((value, index) => {
-        const barHeight = (value / 255) * height;
-        ctx.fillStyle = `hsl(${130 - (index / bars.length) * 100}, 75%, 54%)`;
-        ctx.fillRect(
-          index * barWidth,
-          height - barHeight,
-          Math.max(1, barWidth - 1),
-          barHeight,
-        );
+      const pipWindow = await window.documentPictureInPicture.requestWindow({
+        height: 220,
+        width: 360,
       });
-      pipRef.current.raf = pipWindow.requestAnimationFrame(draw);
-    };
+      if (!isCurrentRequest()) {
+        if (!pipWindow.closed) pipWindow.close();
+        return;
+      }
+      pipWindow.document.body.style.margin = '0';
+      pipWindow.document.body.style.background = '#050608';
+      const canvas = pipWindow.document.createElement('canvas');
+      canvas.style.height = '100%';
+      canvas.style.width = '100%';
+      pipWindow.document.body.appendChild(canvas);
+      pipRef.current.win = pipWindow;
 
-    draw();
+      const draw = () => {
+        if (pipWindow.closed || !isCurrentRequest()) return;
+        const width = Math.max(1, pipWindow.innerWidth);
+        const height = Math.max(1, pipWindow.innerHeight);
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+        const data = new Uint8Array(graph.analyser.frequencyBinCount);
+        graph.analyser.getByteFrequencyData(data);
+        ctx.fillStyle = '#050608';
+        ctx.fillRect(0, 0, width, height);
+        const barCount = Math.min(72, Math.max(16, Math.floor(width / 7)));
+        const bars = getFrequencyBars(data, barCount);
+        const barWidth = width / bars.length;
+        bars.forEach((value, index) => {
+          const barHeight = (value / 255) * height;
+          ctx.fillStyle = `hsl(${130 - (index / bars.length) * 100}, 75%, 54%)`;
+          ctx.fillRect(
+            index * barWidth,
+            height - barHeight,
+            Math.max(1, barWidth - 1),
+            barHeight,
+          );
+        });
+        pipRef.current.raf = pipWindow.requestAnimationFrame(draw);
+      };
+
+      draw();
+    } catch {
+      // Browser support and permission can change while the player unmounts.
+    }
   };
 
   useEffect(() => {

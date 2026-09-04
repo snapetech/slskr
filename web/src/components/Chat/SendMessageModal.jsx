@@ -1,17 +1,21 @@
 import './Chat.css';
-import React, { useEffect } from 'react';
-import { Button, Form, Header, Icon, Input, Modal } from 'semantic-ui-react';
-
-const usernameRef = React.createRef();
+import { toDisplayError } from '../../lib/errors';
+import { useMountedRef } from '../../lib/useMountedRef';
+import React, { useEffect, useRef, useState } from 'react';
+import { Button, Form, Header, Icon, Input, Message, Modal } from 'semantic-ui-react';
 
 const SendMessageModal = ({ initiateConversation, ...rest }) => {
   const [open, setOpen] = React.useState(false);
   const [username, setUsername] = React.useState('');
   const [message, setMessage] = React.useState('');
+  const [error, setError] = useState('');
+  const [sending, setSending] = useState(false);
+  const usernameRef = useRef(null);
+  const mountedRef = useMountedRef();
 
   useEffect(() => {
     if (open) {
-      usernameRef.current.focus();
+      usernameRef.current?.focus();
     }
   }, [open]);
 
@@ -20,13 +24,27 @@ const SendMessageModal = ({ initiateConversation, ...rest }) => {
   };
 
   const sendMessage = async () => {
-    if (!validInput()) {
-      usernameRef.current.focus();
+    if (!validInput() || sending || !mountedRef.current) {
+      usernameRef.current?.focus();
       return;
     }
 
-    await initiateConversation(username, message);
-    setOpen(false);
+    setSending(true);
+    setError('');
+    try {
+      await initiateConversation(username, message);
+      if (mountedRef.current) {
+        setOpen(false);
+      }
+    } catch (sendError) {
+      if (mountedRef.current) {
+        setError(toDisplayError(sendError, 'Failed to send message'));
+      }
+    } finally {
+      if (mountedRef.current) {
+        setSending(false);
+      }
+    }
   };
 
   return (
@@ -56,11 +74,13 @@ const SendMessageModal = ({ initiateConversation, ...rest }) => {
             />
           </Form.Field>
         </Form>
+        {error ? <Message negative>{error}</Message> : null}
       </Modal.Content>
       <Modal.Actions>
-        <Button onClick={() => setOpen(false)}>Cancel</Button>
+        <Button disabled={sending} onClick={() => setOpen(false)}>Cancel</Button>
         <Button
-          disabled={!validInput()}
+          disabled={!validInput() || sending}
+          loading={sending}
           onClick={() => sendMessage()}
           positive
         >

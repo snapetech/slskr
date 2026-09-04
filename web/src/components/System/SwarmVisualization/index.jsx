@@ -3,9 +3,11 @@
 // </copyright>
 
 import * as jobsLibrary from '../../../lib/jobs';
+import { toDisplayError } from '../../../lib/errors';
 import { formatBytes } from '../../../lib/util';
+import { useMountedRef } from '../../../lib/useMountedRef';
 import { usePolling } from '../../../lib/usePolling';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Grid,
   Header,
@@ -23,8 +25,12 @@ const SwarmVisualization = ({ jobId }) => {
   const [traceSummary, setTraceSummary] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const mountedRef = useMountedRef();
+  const requestIdRef = useRef(0);
 
   const fetchData = useCallback(async () => {
+    if (!mountedRef.current) return;
+    const requestId = ++requestIdRef.current;
     if (!jobId) {
       setLoading(false);
       return;
@@ -39,23 +45,48 @@ const SwarmVisualization = ({ jobId }) => {
         jobsLibrary.getSwarmTraceSummary(jobId),
       ]);
 
+      if (
+        !mountedRef.current ||
+        requestIdRef.current !== requestId
+      ) {
+        return;
+      }
+
       if (status.status === 'fulfilled') {
-        setJobStatus(status.value);
+        setJobStatus(
+          status.value && typeof status.value === 'object'
+            ? status.value
+            : null,
+        );
       } else {
-        setError(status.reason?.message || 'Failed to fetch job status');
+        setError(toDisplayError(status.reason, 'Failed to fetch job status'));
       }
 
       if (summary.status === 'fulfilled' && summary.value) {
-        setTraceSummary(summary.value);
+        setTraceSummary(
+          summary.value && typeof summary.value === 'object'
+            ? summary.value
+            : null,
+        );
       }
       // Trace summary is optional - don't error if not available
     } catch (error_) {
-      setError(error_?.message || 'Failed to fetch swarm data');
-      console.error('Failed to fetch swarm visualization data:', error_);
+      if (
+        mountedRef.current &&
+        requestIdRef.current === requestId
+      ) {
+        setError(toDisplayError(error_, 'Failed to fetch swarm data'));
+        console.error('Failed to fetch swarm visualization data:', error_);
+      }
     } finally {
-      setLoading(false);
+      if (
+        mountedRef.current &&
+        requestIdRef.current === requestId
+      ) {
+        setLoading(false);
+      }
     }
-  }, [jobId]);
+  }, [jobId, mountedRef]);
 
   usePolling(fetchData, 2_000, {
     enabled: Boolean(jobId),
@@ -67,8 +98,10 @@ const SwarmVisualization = ({ jobId }) => {
   }, [fetchData, jobId]);
 
   const peerContributions = useMemo(() => {
-    if (traceSummary?.peers && traceSummary.peers.length > 0) {
-      return traceSummary.peers.map((peer) => ({
+    if (Array.isArray(traceSummary?.peers) && traceSummary.peers.length > 0) {
+      return traceSummary.peers
+        .filter((peer) => peer && typeof peer === 'object')
+        .map((peer) => ({
         bytesServed: peer.bytesServed || 0,
         chunksCompleted: peer.chunksCompleted || 0,
         chunksFailed: peer.chunksFailed || 0,
@@ -82,7 +115,7 @@ const SwarmVisualization = ({ jobId }) => {
                   peer.chunksTimedOut)) *
               100
             : 0,
-      }));
+        }));
     }
 
     return [];

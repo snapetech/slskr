@@ -1,8 +1,10 @@
 import './Security.css';
 import * as securityApi from '../../../lib/security';
+import { toDisplayError } from '../../../lib/errors';
 import AdversarialSettings from './AdversarialSettings';
+import { useMountedRef } from '../../../lib/useMountedRef';
 import { usePolling } from '../../../lib/usePolling';
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import {
   Button,
   Dimmer,
@@ -21,20 +23,43 @@ const Security = () => {
   const [error, setError] = useState(null);
   const [dashboard, setDashboard] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
+  const mountedRef = useMountedRef();
+  const requestIdRef = useRef(0);
 
   const fetchData = useCallback(async () => {
+    if (!mountedRef.current) return;
+    const requestId = ++requestIdRef.current;
     try {
       setRefreshing(true);
       const dashboardData = await securityApi.getDashboard().catch(() => null);
-      setDashboard(dashboardData);
-      setError(null);
+      if (
+        mountedRef.current &&
+        requestIdRef.current === requestId
+      ) {
+        setDashboard(
+          dashboardData && typeof dashboardData === 'object'
+            ? dashboardData
+            : null,
+        );
+        setError(null);
+      }
     } catch (fetchError) {
-      setError(fetchError.message || 'Failed to load security data');
+      if (
+        mountedRef.current &&
+        requestIdRef.current === requestId
+      ) {
+        setError(toDisplayError(fetchError, 'Failed to load security data'));
+      }
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (
+        mountedRef.current &&
+        requestIdRef.current === requestId
+      ) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
-  }, []);
+  }, [mountedRef]);
 
   usePolling(fetchData, 30_000);
 

@@ -1,5 +1,6 @@
 import './PlaylistIntake.css';
 import * as collectionsAPI from '../../lib/collections';
+import { toDisplayError } from '../../lib/errors';
 import {
   addPlaylistIntake,
   approvePlaylistTagOrganizationPlan,
@@ -18,7 +19,8 @@ import {
   replayGainPolicies,
   updatePlaylistIntakeTrackState,
 } from '../../lib/playlistIntake';
-import React, { useMemo, useState } from 'react';
+import { useMountedRef } from '../../lib/useMountedRef';
+import React, { useMemo, useRef, useState } from 'react';
 import {
   Button,
   Form,
@@ -41,6 +43,9 @@ const PlaylistIntake = () => {
   const [organizationInputs, setOrganizationInputs] = useState({});
   const [status, setStatus] = useState('');
   const [busyPlaylistId, setBusyPlaylistId] = useState('');
+  const mountedRef = useMountedRef();
+  const busyPlaylistRef = useRef('');
+  const createRequestIdRef = useRef(0);
 
   const summary = useMemo(() => buildPlaylistIntakeSummary(items), [items]);
 
@@ -131,12 +136,20 @@ const PlaylistIntake = () => {
   };
 
   const createSlskrPlaylist = async (playlist) => {
+    if (!mountedRef.current || busyPlaylistRef.current) {
+      return;
+    }
+
     const itemsToCreate = buildPlaylistCollectionItems(playlist);
     if (itemsToCreate.length === 0) {
       setStatus(`No matched rows are ready for ${playlist.name}`);
       return;
     }
 
+    const requestId = ++createRequestIdRef.current;
+    const isCurrentRequest = () =>
+      mountedRef.current && createRequestIdRef.current === requestId;
+    busyPlaylistRef.current = playlist.id;
     setBusyPlaylistId(playlist.id);
     try {
       const created = await collectionsAPI.createCollection({
@@ -153,15 +166,31 @@ const PlaylistIntake = () => {
         // Sequential writes preserve playlist order and avoid API bursts.
         // eslint-disable-next-line no-await-in-loop
         await collectionsAPI.addCollectionItem(collectionId, item);
+        if (!isCurrentRequest()) {
+          return;
+        }
+      }
+      if (!isCurrentRequest()) {
+        return;
       }
       setItems(markPlaylistCollectionCreated(playlist.id, collectionId));
       setStatus(
         `Created playlist collection for ${playlist.name} with ${itemsToCreate.length} planned rows`,
       );
     } catch (error) {
-      setStatus(`Playlist creation failed for ${playlist.name}: ${error.message}`);
+      if (isCurrentRequest()) {
+        setStatus(
+          `Playlist creation failed for ${playlist.name}: ${toDisplayError(
+            error,
+            'Request failed',
+          )}`,
+        );
+      }
     } finally {
-      setBusyPlaylistId('');
+      if (isCurrentRequest()) {
+        busyPlaylistRef.current = '';
+        setBusyPlaylistId('');
+      }
     }
   };
 
@@ -317,6 +346,7 @@ const PlaylistIntake = () => {
                       trigger={
                         <Button
                           aria-label={`Create slskr playlist for ${playlist.name}`}
+                          disabled={Boolean(busyPlaylistId)}
                           icon
                           loading={busyPlaylistId === playlist.id}
                           onClick={() => createSlskrPlaylist(playlist)}

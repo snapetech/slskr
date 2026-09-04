@@ -1,6 +1,7 @@
 import './Chat.css';
 import * as chat from '../../lib/chat';
 import { createPollingController } from '../../lib/usePolling';
+import { toDisplayError } from '../../lib/errors';
 import PlaceholderSegment from '../Shared/PlaceholderSegment';
 import UserCard from '../Shared/UserCard';
 import React, { Component, createRef } from 'react';
@@ -21,6 +22,7 @@ class ChatSession extends Component {
 
     this.state = {
       conversation: null,
+      error: null,
       loading: false,
       message: '',
     };
@@ -28,9 +30,15 @@ class ChatSession extends Component {
     this.listRef = createRef();
     this.messageRef = undefined;
     this.pollController = null;
+    this.isMountedFlag = false;
+    this.requestIds = {
+      conversation: 0,
+      send: 0,
+    };
   }
 
   componentDidMount() {
+    this.isMountedFlag = true;
     if (this.props.active === false) {
       return;
     }
@@ -66,6 +74,7 @@ class ChatSession extends Component {
     ) {
       const usernameChanged = previousProps.username !== this.props.username;
       this.setState(usernameChanged ? { message: '' } : {}, () => {
+        if (!this.isMountedFlag) return;
         if (this.pollController) {
           this.pollController.refresh();
         } else {
@@ -87,11 +96,18 @@ class ChatSession extends Component {
   }
 
   componentWillUnmount() {
+    this.isMountedFlag = false;
+    this.requestIds.conversation += 1;
+    this.requestIds.send += 1;
     this.stopPolling();
   }
 
   fetchConversation = async () => {
     const { username } = this.props;
+    const requestId = ++this.requestIds.conversation;
+    const requestedUsername = username;
+    if (!this.isMountedFlag) return;
+
     if (!username) {
       this.setState({ conversation: null, loading: false });
       return;
@@ -101,13 +117,35 @@ class ChatSession extends Component {
 
     try {
       const conversation = await chat.get({ username });
+      if (
+        !this.isMountedFlag ||
+        requestId !== this.requestIds.conversation ||
+        this.props.username !== requestedUsername
+      ) {
+        return;
+      }
 
       // Acknowledge unread messages only when the user is looking at this tab.
       if (this.props.active !== false && conversation?.hasUnAcknowledgedMessages) {
-        await chat.acknowledge({ username });
+        try {
+          await chat.acknowledge({ username });
+        } catch (acknowledgeError) {
+          // A failed acknowledgement must not discard a conversation that was
+          // fetched successfully; the next active poll can retry it.
+          console.debug('Failed to acknowledge conversation:', acknowledgeError);
+        }
       }
 
-      this.setState({ conversation, loading: false }, () => {
+      if (
+        !this.isMountedFlag ||
+        requestId !== this.requestIds.conversation ||
+        this.props.username !== requestedUsername
+      ) {
+        return;
+      }
+
+      this.setState({ conversation, error: null, loading: false }, () => {
+        if (!this.isMountedFlag) return;
         // Scroll to bottom
         try {
           if (this.listRef.current?.lastChild) {
@@ -119,7 +157,17 @@ class ChatSession extends Component {
       });
     } catch (error) {
       console.error('Failed to fetch conversation:', error);
-      this.setState({ conversation: null, loading: false });
+      if (
+        this.isMountedFlag &&
+        requestId === this.requestIds.conversation &&
+        this.props.username === requestedUsername
+      ) {
+        this.setState({
+          conversation: null,
+          error: toDisplayError(error, 'Failed to load conversation'),
+          loading: false,
+        });
+      }
     }
   };
 
@@ -127,14 +175,33 @@ class ChatSession extends Component {
     const { username } = this.props;
     if (!username || !message) return;
 
-    await chat.send({ message, username });
-    this.setState({ message: '' });
+    const requestId = ++this.requestIds.send;
+    const requestedUsername = username;
+    try {
+      await chat.send({ message, username });
+      if (
+        !this.isMountedFlag ||
+        requestId !== this.requestIds.send ||
+        this.props.username !== requestedUsername
+      ) {
+        return;
+      }
+      this.setState({ error: null, message: '' });
 
-    // Refresh to show new message
-    if (this.pollController) {
-      await this.pollController.refresh();
-    } else {
-      await this.fetchConversation();
+      // Refresh to show new message
+      if (this.pollController) {
+        await this.pollController.refresh();
+      } else {
+        await this.fetchConversation();
+      }
+    } catch (error) {
+      if (
+        this.isMountedFlag &&
+        requestId === this.requestIds.send &&
+        this.props.username === requestedUsername
+      ) {
+        this.setState({ error: toDisplayError(error, 'Failed to send message') });
+      }
     }
   };
 
@@ -186,17 +253,16 @@ class ChatSession extends Component {
 
   deleteConversation = async () => {
     const { onDelete, username } = this.props;
-    if (!username) return;
+    if (!username || !this.isMountedFlag) return;
 
-    await chat.remove({ username });
     if (onDelete) {
-      onDelete(username);
+      await onDelete(username);
     }
   };
 
   render() {
     const { user, username } = this.props;
-    const { conversation, loading, message } = this.state;
+    const { conversation, error, loading, message } = this.state;
     const messages = conversation?.messages || [];
 
     if (!username) {
@@ -229,6 +295,7 @@ class ChatSession extends Component {
             />
           </Card.Header>
           <div className="chat">
+            {error ? <Segment negative>{error}</Segment> : null}
             {loading ? (
               <Dimmer
                 active

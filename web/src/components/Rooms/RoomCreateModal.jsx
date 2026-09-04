@@ -1,5 +1,7 @@
 import './Rooms.css';
-import React, { useState } from 'react';
+import { toDisplayError } from '../../lib/errors';
+import { useMountedRef } from '../../lib/useMountedRef';
+import React, { useRef, useState } from 'react';
 import { Button, Header, Icon, Input, Modal, Radio } from 'semantic-ui-react';
 
 const RoomCreateModal = ({ onCreateRoom, ...modalOptions }) => {
@@ -8,28 +10,36 @@ const RoomCreateModal = ({ onCreateRoom, ...modalOptions }) => {
   const [isPrivate, setIsPrivate] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const mountedRef = useMountedRef();
+  const createRequestIdRef = useRef(0);
 
   const handleCreate = async () => {
+    if (!mountedRef.current || loading) return;
     const name = roomName.trim();
     if (!name) {
       setError('Room name cannot be empty');
       return;
     }
 
+    const requestId = ++createRequestIdRef.current;
+    const isCurrentRequest = () =>
+      mountedRef.current && createRequestIdRef.current === requestId;
+
     setLoading(true);
     setError('');
 
     try {
       await onCreateRoom(name, isPrivate);
+      if (!isCurrentRequest()) return;
       setOpen(false);
       setRoomName('');
       setIsPrivate(false);
     } catch (error) {
-      setError(
-        error?.response?.data || error?.message || 'Failed to create room',
-      );
+      if (isCurrentRequest()) {
+        setError(toDisplayError(error, 'Failed to create room'));
+      }
     } finally {
-      setLoading(false);
+      if (isCurrentRequest()) setLoading(false);
     }
   };
 

@@ -1,18 +1,31 @@
 import { clearCompleted } from '../../../lib/transfers';
+import { toDisplayError } from '../../../lib/errors';
+import { useMountedRef } from '../../../lib/useMountedRef';
 import React, { useState } from 'react';
 import { toast } from 'react-toastify';
 import { Button, Divider, Header, Icon } from 'semantic-ui-react';
 
-const clear = async ({ direction, setState }) => {
+const clear = async ({ direction, isMounted, setState }) => {
+  if (!isMounted()) return;
   setState(true);
-  await clearCompleted({ direction });
-  setState(false);
-  toast.success(`Completed ${direction}s cleared!`);
+  try {
+    await clearCompleted({ direction });
+    if (isMounted()) {
+      toast.success(`Completed ${direction}s cleared!`);
+    }
+  } catch (error) {
+    if (isMounted()) {
+      toast.error(toDisplayError(error, `Failed to clear completed ${direction}s`));
+    }
+  } finally {
+    if (isMounted()) setState(false);
+  }
 };
 
 const Data = () => {
   const [up, setUp] = useState(false);
   const [down, setDown] = useState(false);
+  const mountedRef = useMountedRef();
 
   return (
     <div>
@@ -31,16 +44,22 @@ const Data = () => {
         </span>
       </p>
       <Button
+        disabled={up}
         loading={up}
-        onClick={() => clear({ direction: 'upload', setState: setUp })}
+        onClick={() =>
+          clear({ direction: 'upload', isMounted: () => mountedRef.current, setState: setUp })
+        }
         primary
       >
         <Icon name="trash alternate" />
         Clear All Completed Uploads
       </Button>
       <Button
+        disabled={down}
         loading={down}
-        onClick={() => clear({ direction: 'download', setState: setDown })}
+        onClick={() =>
+          clear({ direction: 'download', isMounted: () => mountedRef.current, setState: setDown })
+        }
         primary
       >
         <Icon name="trash alternate" />

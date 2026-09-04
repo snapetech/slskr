@@ -3,9 +3,11 @@
 // </copyright>
 
 import * as swarmAnalyticsLibrary from '../../../lib/swarmAnalytics';
+import { toDisplayError } from '../../../lib/errors';
 import { formatBytes } from '../../../lib/util';
+import { useMountedRef } from '../../../lib/useMountedRef';
 import { usePolling } from '../../../lib/usePolling';
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { toast } from 'react-toastify';
 import {
   Card,
@@ -31,6 +33,8 @@ const SwarmAnalytics = () => {
   const [loading, setLoading] = useState(true);
   const [timeWindow, setTimeWindow] = useState(24);
   const [rankingLimit, setRankingLimit] = useState(20);
+  const mountedRef = useMountedRef();
+  const requestIdRef = useRef(0);
 
   const timeWindowOptions = [
     { key: '1', text: '1 hour', value: 1 },
@@ -41,6 +45,8 @@ const SwarmAnalytics = () => {
   ];
 
   const fetchAnalytics = useCallback(async () => {
+    if (!mountedRef.current) return;
+    const requestId = ++requestIdRef.current;
     try {
       setLoading(true);
       const [performance, peers, efficiency, trendsData, recs] =
@@ -52,20 +58,42 @@ const SwarmAnalytics = () => {
           swarmAnalyticsLibrary.getRecommendations(),
         ]);
 
-      setPerformanceMetrics(performance);
-      setPeerRankings(peers);
-      setEfficiencyMetrics(efficiency);
-      setTrends(trendsData);
-      setRecommendations(recs);
-    } catch (error) {
-      toast.error(
-        error?.response?.data ?? error?.message ?? 'Failed to load analytics',
+      if (
+        !mountedRef.current ||
+        requestIdRef.current !== requestId
+      ) {
+        return;
+      }
+      setPerformanceMetrics(
+        performance && typeof performance === 'object' ? performance : null,
       );
-      console.error('Failed to fetch analytics:', error);
+      setPeerRankings(
+        Array.isArray(peers) ? peers.filter((peer) => peer && typeof peer === 'object') : [],
+      );
+      setEfficiencyMetrics(
+        efficiency && typeof efficiency === 'object' ? efficiency : null,
+      );
+      setTrends(trendsData && typeof trendsData === 'object' ? trendsData : null);
+      setRecommendations(
+        Array.isArray(recs) ? recs.filter((recommendation) => recommendation && typeof recommendation === 'object') : [],
+      );
+    } catch (error) {
+      if (
+        mountedRef.current &&
+        requestIdRef.current === requestId
+      ) {
+        toast.error(toDisplayError(error, 'Failed to load analytics'));
+        console.error('Failed to fetch analytics:', error);
+      }
     } finally {
-      setLoading(false);
+      if (
+        mountedRef.current &&
+        requestIdRef.current === requestId
+      ) {
+        setLoading(false);
+      }
     }
-  }, [rankingLimit, timeWindow]);
+  }, [mountedRef, rankingLimit, timeWindow]);
 
   usePolling(fetchAnalytics, 30_000, {
     resetKey: `${timeWindow}:${rankingLimit}`,

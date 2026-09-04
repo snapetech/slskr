@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Card, Header, Icon, Label, Message, Table } from 'semantic-ui-react';
 import { getMetadataProcessingStatus } from '../../../lib/slskr';
+import { useMountedRef } from '../../../lib/useMountedRef';
 import { usePolling } from '../../../lib/usePolling';
 
 const labelColor = (status) =>
@@ -10,13 +11,20 @@ const labelColor = (status) =>
 
 const MetadataProcessingPanel = () => {
   const [status, setStatus] = useState({ active: [], history: [] });
+  const mountedRef = useMountedRef();
 
   usePolling(async () => {
     const next = await getMetadataProcessingStatus(50);
-    setStatus(next || { active: [], history: [] });
+    if (!mountedRef.current) return;
+    setStatus({
+      active: Array.isArray(next?.active) ? next.active : [],
+      history: Array.isArray(next?.history) ? next.history : [],
+    });
   }, 5_000);
 
-  const rows = [...(status.active || []), ...(status.history || [])];
+  const rows = [...status.active, ...status.history].filter(
+    (item) => item && typeof item === 'object',
+  );
   return (
     <Card fluid>
       <Card.Content>
@@ -44,8 +52,8 @@ const MetadataProcessingPanel = () => {
               </Table.Row>
             </Table.Header>
             <Table.Body>
-              {rows.map((item) => (
-                <Table.Row key={item.id}>
+              {rows.map((item, index) => (
+                <Table.Row key={item.id || `${item.filename || 'item'}-${index}`}>
                   <Table.Cell>{item.filename}</Table.Cell>
                   <Table.Cell>{item.stage}</Table.Cell>
                   <Table.Cell>

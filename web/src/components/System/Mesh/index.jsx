@@ -1,9 +1,11 @@
 import * as mesh from '../../../lib/mesh';
 import * as soulseekDiscovery from '../../../lib/soulseekDiscovery';
+import { toDisplayError } from '../../../lib/errors';
 import MeshEvidencePolicy from './MeshEvidencePolicy';
 import RealmSubjectIndexConflicts from './RealmSubjectIndexConflicts';
+import { useMountedRef } from '../../../lib/useMountedRef';
 import { usePolling } from '../../../lib/usePolling';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Button,
   Card,
@@ -27,56 +29,107 @@ const Mesh = ({ runtimeProfile } = {}) => {
   const [capabilityRecords, setCapabilityRecords] = useState([]);
   const [rendezvousLoading, setRendezvousLoading] = useState(false);
   const [rendezvousMessage, setRendezvousMessage] = useState(null);
+  const mountedRef = useMountedRef();
+  const statsRequestIdRef = useRef(0);
+  const rendezvousStatusRequestIdRef = useRef(0);
+  const rendezvousRequestIdRef = useRef(0);
 
   const fetchStats = useCallback(async () => {
+    if (!mountedRef.current) return;
+    const requestId = ++statsRequestIdRef.current;
     try {
       setLoading(true);
       setError(null);
       const data = await mesh.getStats();
-      setStats(data);
+      if (
+        mountedRef.current &&
+        statsRequestIdRef.current === requestId
+      ) {
+        setStats(data && typeof data === 'object' ? data : null);
+      }
     } catch (error_) {
-      setError(error_.message);
+      if (
+        mountedRef.current &&
+        statsRequestIdRef.current === requestId
+      ) {
+        setError(toDisplayError(error_, 'Failed to load mesh statistics'));
+      }
     } finally {
-      setLoading(false);
+      if (
+        mountedRef.current &&
+        statsRequestIdRef.current === requestId
+      ) {
+        setLoading(false);
+      }
     }
-  }, []);
+  }, [mountedRef]);
 
   const getRendezvousErrorText = (error_, fallback) => {
-    const data = error_?.response?.data;
-    if (typeof data === 'string') return data;
-    if (data?.error) return data.error;
-    if (data?.title) return data.title;
-    return error_?.message || fallback;
+    return toDisplayError(error_, fallback);
   };
 
   usePolling(fetchStats, 30_000);
 
   useEffect(() => {
+    const requestId = ++rendezvousStatusRequestIdRef.current;
     const fetchRendezvousStatus = async () => {
+      if (!mountedRef.current) return;
       try {
         const response = await soulseekDiscovery.getMeshRendezvousStatus();
-        setRendezvousStatus(response.data || {});
+        if (
+          mountedRef.current &&
+          rendezvousStatusRequestIdRef.current === requestId
+        ) {
+          setRendezvousStatus(
+            response.data && typeof response.data === 'object'
+              ? response.data
+              : {},
+          );
+        }
       } catch (error_) {
-        setRendezvousStatus({
-          enabled: false,
-          error: error_?.response?.data || error_.message,
-        });
+        if (
+          mountedRef.current &&
+          rendezvousStatusRequestIdRef.current === requestId
+        ) {
+          setRendezvousStatus({
+            enabled: false,
+            error: toDisplayError(error_, 'Unable to load rendezvous status'),
+          });
+        }
       }
     };
 
-    fetchRendezvousStatus();
-  }, []);
+    void fetchRendezvousStatus();
+
+    return () => {
+      rendezvousStatusRequestIdRef.current += 1;
+    };
+  }, [mountedRef]);
+
+  const beginRendezvousRequest = () => {
+    if (!mountedRef.current || rendezvousLoading) return null;
+    const requestId = ++rendezvousRequestIdRef.current;
+    return {
+      isCurrentRequest: () =>
+        mountedRef.current && rendezvousRequestIdRef.current === requestId,
+      requestId,
+    };
+  };
 
   const handleAddRendezvousInterest = async () => {
+    const request = beginRendezvousRequest();
+    if (!request) return;
     setRendezvousLoading(true);
     setRendezvousMessage(null);
     try {
       await soulseekDiscovery.addMeshRendezvousInterest();
+      if (!request.isCurrentRequest()) return;
       setRendezvousMessage({
         positive: true,
         text: 'Published the slskr mesh rendezvous interest on this Soulseek account.',
       });
     } catch (error_) {
+      if (!request.isCurrentRequest()) return;
       setRendezvousMessage({
         negative: true,
         text:
@@ -85,20 +138,24 @@ const Mesh = ({ runtimeProfile } = {}) => {
             : getRendezvousErrorText(error_, 'Unable to publish rendezvous interest.'),
       });
     } finally {
-      setRendezvousLoading(false);
+      if (request.isCurrentRequest()) setRendezvousLoading(false);
     }
   };
 
   const handleRemoveRendezvousInterest = async () => {
+    const request = beginRendezvousRequest();
+    if (!request) return;
     setRendezvousLoading(true);
     setRendezvousMessage(null);
     try {
       await soulseekDiscovery.removeMeshRendezvousInterest();
+      if (!request.isCurrentRequest()) return;
       setRendezvousMessage({
         positive: true,
         text: 'Removed the slskr mesh rendezvous interest from this Soulseek account.',
       });
     } catch (error_) {
+      if (!request.isCurrentRequest()) return;
       setRendezvousMessage({
         negative: true,
         text:
@@ -107,18 +164,25 @@ const Mesh = ({ runtimeProfile } = {}) => {
             : getRendezvousErrorText(error_, 'Unable to remove rendezvous interest.'),
       });
     } finally {
-      setRendezvousLoading(false);
+      if (request.isCurrentRequest()) setRendezvousLoading(false);
     }
   };
 
   const handleLoadRendezvousUsers = async () => {
+    const request = beginRendezvousRequest();
+    if (!request) return;
     setRendezvousLoading(true);
     setRendezvousMessage(null);
     try {
       const response = await soulseekDiscovery.discoverMeshRendezvous();
-      const data = response.data || {};
-      const users = data.users || [];
-      const records = data.capabilityRecords || [];
+      if (!request.isCurrentRequest()) return;
+      const data = response.data && typeof response.data === 'object'
+        ? response.data
+        : {};
+      const users = Array.isArray(data.users) ? data.users : [];
+      const records = Array.isArray(data.capabilityRecords)
+        ? data.capabilityRecords
+        : [];
       setRendezvousUsers(users);
       setCapabilityRecords(records);
       setRendezvousMessage({
@@ -126,6 +190,7 @@ const Mesh = ({ runtimeProfile } = {}) => {
         text: `Discovered ${users.length} Soulseek rendezvous candidate(s) and ${records.length} runtime capability record(s).`,
       });
     } catch (error_) {
+      if (!request.isCurrentRequest()) return;
       setRendezvousUsers([]);
       setCapabilityRecords([]);
       setRendezvousMessage({
@@ -136,7 +201,7 @@ const Mesh = ({ runtimeProfile } = {}) => {
             : getRendezvousErrorText(error_, 'Unable to load rendezvous users.'),
       });
     } finally {
-      setRendezvousLoading(false);
+      if (request.isCurrentRequest()) setRendezvousLoading(false);
     }
   };
 
