@@ -32,6 +32,7 @@ use crate::{
 
 const SIGNALR_RECORD_SEPARATOR: char = '\x1e';
 const RELAY_RETRY_DELAY: Duration = Duration::from_secs(5);
+const RELAY_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 const RELAY_REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 const RELAY_FILE_CHUNK_BYTES: usize = 64 * 1024;
 const MAX_RELAY_DOWNLOAD_BYTES: u64 = 1024 * 1024 * 1024;
@@ -76,12 +77,18 @@ async fn run_connection(state: &Arc<AppState>, settings: &RelaySettings) -> Resu
     } else {
         None
     };
-    let (mut socket, _) = connect_async_tls_with_config(websocket_url, None, true, connector)
-        .await
-        .map_err(|error| format!("relay controller websocket connection failed: {error}"))?;
+    let (mut socket, _) = time::timeout(
+        RELAY_CONNECT_TIMEOUT,
+        connect_async_tls_with_config(websocket_url, None, true, connector),
+    )
+    .await
+    .map_err(|_| "relay controller websocket connection timed out".to_owned())?
+    .map_err(|error| format!("relay controller websocket connection failed: {error}"))?;
 
     send_signalr_json(&mut socket, &json!({ "protocol": "json", "version": 1 })).await?;
-    let challenge = wait_for_challenge(&mut socket).await?;
+    let challenge = time::timeout(RELAY_REQUEST_TIMEOUT, wait_for_challenge(&mut socket))
+        .await
+        .map_err(|_| "relay controller challenge timed out".to_owned())??;
     let login_id = "relay-login";
     send_invocation(
         &mut socket,
@@ -98,14 +105,23 @@ async fn run_connection(state: &Arc<AppState>, settings: &RelaySettings) -> Resu
         ],
     )
     .await?;
-    wait_for_completion(&mut socket, login_id).await?;
+    time::timeout(
+        RELAY_REQUEST_TIMEOUT,
+        wait_for_completion(&mut socket, login_id),
+    )
+    .await
+    .map_err(|_| "relay controller login timed out".to_owned())??;
 
     let share_token = "relay-share-token";
     send_invocation(&mut socket, share_token, "BeginShareUpload", Vec::new()).await?;
-    let share_token = wait_for_completion(&mut socket, share_token)
-        .await?
-        .and_then(|value| value.as_str().map(str::to_owned))
-        .ok_or_else(|| "relay controller returned an invalid share token".to_owned())?;
+    let share_token = time::timeout(
+        RELAY_REQUEST_TIMEOUT,
+        wait_for_completion(&mut socket, share_token),
+    )
+    .await
+    .map_err(|_| "relay controller share token request timed out".to_owned())??
+    .and_then(|value| value.as_str().map(str::to_owned))
+    .ok_or_else(|| "relay controller returned an invalid share token".to_owned())?;
     upload_shares(
         state,
         settings,
@@ -132,8 +148,13 @@ async fn run_connection(state: &Arc<AppState>, settings: &RelaySettings) -> Resu
             .await?;
         }
         tokio::select! {
-            messages = next_signalr_messages(&mut socket) => {
-                for message in messages? {
+            messages = time::timeout(
+                RELAY_REQUEST_TIMEOUT,
+                next_signalr_messages(&mut socket),
+            ) => {
+                let messages = messages
+                    .map_err(|_| "relay controller read timed out".to_owned())??;
+                for message in messages {
                     if message.get("type").and_then(Value::as_u64) != Some(1) {
                         continue;
                     }
@@ -438,10 +459,13 @@ fn relay_http_url(address: &str, path: &str) -> Result<String, String> {
 async fn send_signalr_json(socket: &mut RelaySocket, value: &Value) -> Result<(), String> {
     let mut text = value.to_string();
     text.push(SIGNALR_RECORD_SEPARATOR);
-    socket
-        .send(Message::Text(text.into()))
-        .await
-        .map_err(|error| format!("relay websocket send failed: {error}"))
+    time::timeout(
+        RELAY_REQUEST_TIMEOUT,
+        socket.send(Message::Text(text.into())),
+    )
+    .await
+    .map_err(|_| "relay websocket send timed out".to_owned())?
+    .map_err(|error| format!("relay websocket send failed: {error}"))
 }
 
 async fn send_invocation(

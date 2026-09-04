@@ -21,6 +21,8 @@ use crate::{relay, AppState};
 const SIGNALR_RECORD_SEPARATOR: char = '\x1e';
 const MAX_SIGNALR_MESSAGE_BYTES: usize = 256 * 1024;
 const MAX_WEBSOCKET_FRAME_BYTES: u64 = 4 * 1024 * 1024;
+pub(crate) const WEBSOCKET_READ_TIMEOUT: Duration = Duration::from_secs(120);
+pub(crate) const SIGNALR_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(15);
 const WEBSOCKET_WRITE_TIMEOUT: Duration = Duration::from_secs(30);
 pub(crate) const HUB_INBOUND_QUEUE_CAPACITY: usize = 8;
 
@@ -43,7 +45,7 @@ where
     R: AsyncRead + Unpin + Send + 'static,
     W: AsyncWrite + Unpin,
 {
-    let handshake = read_ws_frame(&mut reader).await?;
+    let handshake = read_ws_frame_with_timeout(&mut reader, WEBSOCKET_READ_TIMEOUT).await?;
     let WebSocketFrame::Text(handshake) = handshake else {
         return Err("relay SignalR handshake must be a text frame".to_owned());
     };
@@ -100,7 +102,7 @@ where
     let (inbound_tx, mut inbound_rx) = mpsc::channel(HUB_INBOUND_QUEUE_CAPACITY);
     let reader_task = tokio::spawn(async move {
         loop {
-            let frame = read_ws_frame(&mut reader).await;
+            let frame = read_ws_frame_with_timeout(&mut reader, WEBSOCKET_READ_TIMEOUT).await;
             let done = matches!(&frame, Ok(WebSocketFrame::Close(_)) | Err(_));
             if inbound_tx.send(frame).await.is_err() || done {
                 break;
@@ -108,6 +110,8 @@ where
         }
     });
 
+    let mut keepalive = time::interval(SIGNALR_KEEPALIVE_INTERVAL);
+    keepalive.tick().await;
     let remote_ip = remote_addr.map_or(IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED), |addr| {
         addr.ip()
     });
@@ -136,6 +140,9 @@ where
                 outbound = outbound_rx.recv() => match outbound {
                     Some(message) => write_signalr_text(writer, &message).await?,
                     None => return Ok(()),
+                },
+                _ = keepalive.tick() => {
+                    write_signalr_json(writer, &json!({"type": 6})).await?;
                 },
             }
         }
@@ -495,4 +502,34 @@ where
         0xa => WebSocketFrame::Pong,
         _ => unreachable!(),
     })
+}
+
+pub(crate) async fn read_ws_frame_with_timeout<R>(
+    reader: &mut R,
+    timeout: Duration,
+) -> Result<WebSocketFrame, String>
+where
+    R: AsyncRead + Unpin,
+{
+    time::timeout(timeout, read_ws_frame(reader))
+        .await
+        .map_err(|_| "relay websocket read deadline exceeded".to_owned())?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn websocket_read_deadline_releases_blocked_reader() {
+        let (_client, mut reader) = tokio::io::duplex(64);
+        let error = time::timeout(
+            Duration::from_millis(100),
+            read_ws_frame_with_timeout(&mut reader, Duration::from_millis(10)),
+        )
+        .await
+        .expect("read deadline")
+        .expect_err("blocked websocket reader must time out");
+        assert!(error.contains("read deadline exceeded"), "{error}");
+    }
 }

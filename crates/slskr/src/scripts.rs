@@ -14,7 +14,7 @@ const SCRIPT_TIMEOUT: Duration = Duration::from_secs(300);
 
 fn format_timeout(duration: Duration) -> String {
     let milliseconds = duration.as_millis();
-    if milliseconds % 1_000 == 0 {
+    if milliseconds.is_multiple_of(1_000) {
         format!("{}s", milliseconds / 1_000)
     } else {
         format!("{milliseconds}ms")

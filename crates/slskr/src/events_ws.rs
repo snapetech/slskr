@@ -12,6 +12,7 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
 const WEBSOCKET_KEY_DECODED_LEN: usize = 16;
+const WEBSOCKET_READ_TIMEOUT: Duration = Duration::from_secs(120);
 const CLIENT_FRAME_CHANNEL_CAPACITY: usize = 16;
 const WEBSOCKET_WRITE_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -119,7 +120,7 @@ where
     let (frame_tx, mut frame_rx) = mpsc::channel(CLIENT_FRAME_CHANNEL_CAPACITY);
     let reader_task = tokio::spawn(async move {
         loop {
-            let frame = read_client_frame(&mut reader).await;
+            let frame = read_client_frame_with_timeout(&mut reader, WEBSOCKET_READ_TIMEOUT).await;
             let done = matches!(frame, Ok(ClientFrame::Close(_)) | Err(_));
             if frame_tx.send(frame).await.is_err() || done {
                 break;
@@ -273,6 +274,18 @@ where
         0xa => Ok(ClientFrame::Pong),
         _ => unreachable!("validated websocket control opcode"),
     }
+}
+
+async fn read_client_frame_with_timeout<R>(
+    reader: &mut R,
+    timeout: Duration,
+) -> Result<ClientFrame, String>
+where
+    R: AsyncRead + Unpin,
+{
+    time::timeout(timeout, read_client_frame(reader))
+        .await
+        .map_err(|_| "websocket read deadline exceeded".to_owned())?
 }
 
 fn validate_close_payload(payload: &[u8]) -> Result<(), String> {
@@ -703,5 +716,18 @@ mod tests {
                 .await
                 .expect_err("blocked websocket writer must time out");
         assert!(error.contains("deadline exceeded"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn websocket_read_deadline_releases_blocked_reader() {
+        let (_client, mut reader) = tokio::io::duplex(64);
+        let error = time::timeout(
+            Duration::from_millis(100),
+            read_client_frame_with_timeout(&mut reader, Duration::from_millis(10)),
+        )
+        .await
+        .expect("read deadline")
+        .expect_err("blocked websocket reader must time out");
+        assert!(error.contains("read deadline exceeded"), "{error}");
     }
 }

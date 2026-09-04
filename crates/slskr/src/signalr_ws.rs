@@ -126,7 +126,8 @@ where
     R: AsyncRead + Unpin + Send + 'static,
     W: AsyncWrite + Unpin,
 {
-    let handshake = relay_ws::read_ws_frame(&mut reader).await?;
+    let handshake =
+        relay_ws::read_ws_frame_with_timeout(&mut reader, relay_ws::WEBSOCKET_READ_TIMEOUT).await?;
     let relay_ws::WebSocketFrame::Text(handshake) = handshake else {
         return Err("SignalR handshake must be a text frame".to_owned());
     };
@@ -156,7 +157,9 @@ where
     let (inbound_tx, mut inbound_rx) = mpsc::channel(relay_ws::HUB_INBOUND_QUEUE_CAPACITY);
     let reader_task = tokio::spawn(async move {
         loop {
-            let frame = relay_ws::read_ws_frame(&mut reader).await;
+            let frame =
+                relay_ws::read_ws_frame_with_timeout(&mut reader, relay_ws::WEBSOCKET_READ_TIMEOUT)
+                    .await;
             let done = matches!(&frame, Ok(relay_ws::WebSocketFrame::Close(_)) | Err(_));
             if inbound_tx.send(frame).await.is_err() || done {
                 break;
@@ -164,6 +167,8 @@ where
         }
     });
 
+    let mut keepalive = tokio::time::interval(relay_ws::SIGNALR_KEEPALIVE_INTERVAL);
+    keepalive.tick().await;
     let result = async {
         for message in initial_messages {
             handle_client_message(writer, hub, &mut listening_party_groups, &message).await?;
@@ -209,6 +214,9 @@ where
                     }
                     Err(broadcast::error::RecvError::Lagged(_)) => {}
                     Err(broadcast::error::RecvError::Closed) => return Ok(()),
+                },
+                _ = keepalive.tick() => {
+                    relay_ws::write_signalr_json(writer, &json!({"type": 6})).await?;
                 },
             }
         }
