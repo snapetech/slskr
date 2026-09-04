@@ -193,6 +193,11 @@ async def on_complete(event):
     print(event)
 ```
 
+Unexpected disconnects are retried with bounded exponential backoff, and the
+current topic subscriptions are restored after reconnecting. Set
+`ws.max_reconnect_attempts` or `ws.reconnect_delay` when a different retry
+policy is needed.
+
 ## Configuration
 
 ```python

@@ -397,6 +397,7 @@ async def test_websocket_client_cleans_up_after_remote_close():
 
     with patch("slskr.websocket.aiohttp.ClientSession", return_value=session):
         client = WebSocketClient("https://example.test", "token")
+        client.max_reconnect_attempts = 0
         client.on_connection_change(connection_changes.append)
         await client.connect()
         await client._message_task
@@ -405,6 +406,34 @@ async def test_websocket_client_cleans_up_after_remote_close():
     assert client.session is None
     assert connection_changes == [True, False]
     session.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_websocket_client_reconnects_after_unexpected_close():
+    async def closed_messages():
+        if False:
+            yield None
+
+    ws = MagicMock()
+    ws.closed = False
+    ws.close = AsyncMock()
+    ws.__aiter__.side_effect = lambda: closed_messages()
+    session = MagicMock()
+    session.close = AsyncMock()
+    client = WebSocketClient("https://example.test", "token")
+    client.max_reconnect_attempts = 1
+    client.reconnect_delay = 0
+    reconnect = AsyncMock()
+    client.connect = reconnect
+    client.ws = ws
+    client.session = session
+
+    await client._handle_messages(ws)
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+    reconnect.assert_awaited_once()
+    assert client.reconnect_attempts == 1
 
 
 @pytest.mark.asyncio

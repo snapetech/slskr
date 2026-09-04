@@ -47,6 +47,7 @@ class WebSocketClient:
         self.ws: Optional[aiohttp.ClientWebSocketResponse] = None
         self._connect_lock = asyncio.Lock()
         self._message_task: Optional[asyncio.Task] = None
+        self._reconnect_task: Optional[asyncio.Task] = None
         self._outbound_tasks: Set[asyncio.Task] = set()
         self._intentional_disconnect = False
         self.subscribed_topics: Set[str] = set()
@@ -62,9 +63,15 @@ class WebSocketClient:
 
     async def connect(self):
         """Connect to WebSocket"""
+        current_task = asyncio.current_task()
+        reconnect_task = self._reconnect_task
+        if reconnect_task is not None and reconnect_task is not current_task:
+            reconnect_task.cancel()
+            self._reconnect_task = None
         async with self._connect_lock:
             if self.is_connected():
                 raise RuntimeError("WebSocket is already connected")
+            self._intentional_disconnect = True
             await self._close_resources()
             self._intentional_disconnect = False
             try:
@@ -109,9 +116,14 @@ class WebSocketClient:
 
     async def disconnect(self):
         """Disconnect from WebSocket"""
+        self._intentional_disconnect = True
+        current_task = asyncio.current_task()
+        reconnect_task = self._reconnect_task
+        if reconnect_task is not None and reconnect_task is not current_task:
+            reconnect_task.cancel()
+            self._reconnect_task = None
         async with self._connect_lock:
             was_connected = self.is_connected()
-            self._intentional_disconnect = True
             await self._close_resources()
             if was_connected:
                 self._notify_connection_listeners(False)
@@ -139,6 +151,50 @@ class WebSocketClient:
                 self._message_task = None
                 if not self._intentional_disconnect:
                     self._notify_connection_listeners(False)
+                    self._schedule_reconnect()
+
+    def _schedule_reconnect(self):
+        """Start a bounded reconnect loop after an unexpected close."""
+        if (
+            self._intentional_disconnect
+            or self.max_reconnect_attempts <= 0
+            or (
+                self._reconnect_task is not None
+                and not self._reconnect_task.done()
+            )
+        ):
+            return
+        self._reconnect_task = asyncio.create_task(self._reconnect_loop())
+
+    async def _reconnect_loop(self):
+        """Retry a dropped connection with exponential backoff."""
+        current_task = asyncio.current_task()
+        try:
+            attempt_limit = min(max(0, self.max_reconnect_attempts), 32)
+            for attempt in range(1, attempt_limit + 1):
+                if self._intentional_disconnect:
+                    return
+                self.reconnect_attempts = attempt
+                delay = min(
+                    max(0, self.reconnect_delay) * (2 ** min(attempt - 1, 16)),
+                    30,
+                )
+                if delay:
+                    await asyncio.sleep(delay)
+                if self._intentional_disconnect:
+                    return
+                try:
+                    await self.connect()
+                    return
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    # connect() notifies the registered error listeners; keep
+                    # retrying without duplicating that notification.
+                    continue
+        finally:
+            if self._reconnect_task is current_task:
+                self._reconnect_task = None
 
     async def _close_resources(self):
         outbound_tasks = list(self._outbound_tasks)

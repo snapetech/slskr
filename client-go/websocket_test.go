@@ -99,6 +99,65 @@ func TestWebSocketRestoresSubscriptionsOnConnect(t *testing.T) {
 	}
 }
 
+func TestWebSocketReconnectsAfterUnexpectedClose(t *testing.T) {
+	var connectionMu sync.Mutex
+	connectionCount := 0
+	releaseSecond := make(chan struct{})
+	upgrader := websocket.Upgrader{}
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		connection, err := upgrader.Upgrade(writer, request, nil)
+		if err != nil {
+			return
+		}
+		connectionMu.Lock()
+		connectionCount++
+		current := connectionCount
+		connectionMu.Unlock()
+		if current == 1 {
+			_ = connection.Close()
+			return
+		}
+		defer connection.Close()
+		<-releaseSecond
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "token").NewWebSocketClient(false)
+	client.reconnectDelay = 5 * time.Millisecond
+	client.maxReconnectAttempts = 1
+	states := make(chan bool, 4)
+	client.OnConnectionChange(states)
+
+	if err := client.Connect(context.Background()); err != nil {
+		t.Fatalf("connect failed: %v", err)
+	}
+	waitForState := func(expected bool) {
+		t.Helper()
+		select {
+		case actual := <-states:
+			if actual != expected {
+				t.Fatalf("expected connection state %v, got %v", expected, actual)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("timed out waiting for connection state %v", expected)
+		}
+	}
+	waitForState(true)
+	waitForState(false)
+	waitForState(true)
+
+	connectionMu.Lock()
+	if connectionCount != 2 {
+		t.Fatalf("expected one reconnect, got %d connections", connectionCount)
+	}
+	connectionMu.Unlock()
+
+	if err := client.Disconnect(context.Background()); err != nil {
+		t.Fatalf("disconnect failed: %v", err)
+	}
+	close(releaseSecond)
+}
+
 func TestWebSocketRejectsInvalidBaseURLBeforeDial(t *testing.T) {
 	for _, baseURL := range []string{"ftp://example.test", "example.test"} {
 		client := NewClient(baseURL, "token").NewWebSocketClient(false)

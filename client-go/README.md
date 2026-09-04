@@ -103,6 +103,12 @@ func main() {
 - `GetFilters(ctx)` / `UpdateFilters(ctx, filters)` - Read or update filters
 - `GetCacheStats(ctx)` / `InvalidateCache(ctx, keys)` - Inspect or clear the MediaCore cache
 
+### WebSocket Events
+
+Create a WebSocket client with `NewWebSocketClient`, register event and
+connection listeners, and call `Connect`. Unexpected disconnects are retried
+with bounded exponential backoff; subscribed topics are restored automatically.
+
 ## Error Handling
 
 ```go

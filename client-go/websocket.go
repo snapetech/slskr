@@ -22,22 +22,27 @@ const (
 
 // WebSocketClient represents a WebSocket connection to the API
 type WebSocketClient struct {
-	url               string
-	initErr           error
-	token             string
-	debug             bool
-	connectTimeout    time.Duration
-	mu                sync.RWMutex
-	connected         bool
-	connecting        bool
-	disconnectPending bool
-	connectCancel     context.CancelFunc
-	connectingNetConn net.Conn
-	connectingConn    *websocket.Conn
-	writeMu           sync.Mutex
-	subscriptionMu    sync.RWMutex
-	subscribedTopics  map[string]bool
-	conn              *websocket.Conn
+	url                       string
+	initErr                   error
+	token                     string
+	debug                     bool
+	connectTimeout            time.Duration
+	mu                        sync.RWMutex
+	connected                 bool
+	connecting                bool
+	disconnectPending         bool
+	intentionallyDisconnected bool
+	connectCancel             context.CancelFunc
+	connectingNetConn         net.Conn
+	connectingConn            *websocket.Conn
+	reconnectAttempts         int
+	maxReconnectAttempts      int
+	reconnectDelay            time.Duration
+	reconnectTimer            *time.Timer
+	writeMu                   sync.Mutex
+	subscriptionMu            sync.RWMutex
+	subscribedTopics          map[string]bool
+	conn                      *websocket.Conn
 
 	// Channels for events
 	eventChannels map[string][]chan interface{}
@@ -54,18 +59,24 @@ func (c *Client) NewWebSocketClient(debug bool) *WebSocketClient {
 	}
 
 	return &WebSocketClient{
-		url:              wsURL,
-		initErr:          err,
-		token:            c.Token,
-		debug:            debug,
-		connectTimeout:   connectTimeout,
-		subscribedTopics: make(map[string]bool),
-		eventChannels:    make(map[string][]chan interface{}),
+		url:                  wsURL,
+		initErr:              err,
+		token:                c.Token,
+		debug:                debug,
+		connectTimeout:       connectTimeout,
+		maxReconnectAttempts: 5,
+		reconnectDelay:       time.Second,
+		subscribedTopics:     make(map[string]bool),
+		eventChannels:        make(map[string][]chan interface{}),
 	}
 }
 
 // Connect connects to the WebSocket
 func (w *WebSocketClient) Connect(ctx context.Context) error {
+	return w.connect(ctx, false)
+}
+
+func (w *WebSocketClient) connect(ctx context.Context, automatic bool) error {
 	w.mu.Lock()
 	if w.initErr != nil {
 		err := w.initErr
@@ -74,15 +85,33 @@ func (w *WebSocketClient) Connect(ctx context.Context) error {
 	}
 	if w.connected {
 		w.mu.Unlock()
+		if automatic {
+			return context.Canceled
+		}
 		return fmt.Errorf("already connected")
 	}
 	if w.connecting {
 		w.mu.Unlock()
+		if automatic {
+			return context.Canceled
+		}
 		return fmt.Errorf("connection already in progress")
 	}
+	if automatic && w.intentionallyDisconnected {
+		w.mu.Unlock()
+		return context.Canceled
+	}
+	reconnectTimer := w.reconnectTimer
+	w.reconnectTimer = nil
 	w.connecting = true
 	w.disconnectPending = false
+	if !automatic {
+		w.intentionallyDisconnected = false
+	}
 	w.mu.Unlock()
+	if reconnectTimer != nil {
+		reconnectTimer.Stop()
+	}
 
 	headers := http.Header{}
 	if w.token != "" {
@@ -196,6 +225,7 @@ func (w *WebSocketClient) Connect(ctx context.Context) error {
 
 	w.mu.Lock()
 	w.connecting = false
+	w.reconnectAttempts = 0
 	if w.disconnectPending {
 		w.disconnectPending = false
 		w.connectCancel = nil
@@ -246,6 +276,9 @@ func websocketURL(baseURL string) (string, error) {
 // Disconnect closes the WebSocket connection
 func (w *WebSocketClient) Disconnect(ctx context.Context) error {
 	w.mu.Lock()
+	w.intentionallyDisconnected = true
+	reconnectTimer := w.reconnectTimer
+	w.reconnectTimer = nil
 	if !w.connected {
 		if w.connecting {
 			w.disconnectPending = true
@@ -253,6 +286,9 @@ func (w *WebSocketClient) Disconnect(ctx context.Context) error {
 			connectingNetConn := w.connectingNetConn
 			connectingConn := w.connectingConn
 			w.mu.Unlock()
+			if reconnectTimer != nil {
+				reconnectTimer.Stop()
+			}
 			if cancelConnect != nil {
 				cancelConnect()
 			}
@@ -265,6 +301,9 @@ func (w *WebSocketClient) Disconnect(ctx context.Context) error {
 			return nil
 		}
 		w.mu.Unlock()
+		if reconnectTimer != nil {
+			reconnectTimer.Stop()
+		}
 		return fmt.Errorf("not connected")
 	}
 
@@ -272,6 +311,9 @@ func (w *WebSocketClient) Disconnect(ctx context.Context) error {
 	conn := w.conn
 	w.conn = nil
 	w.mu.Unlock()
+	if reconnectTimer != nil {
+		reconnectTimer.Stop()
+	}
 
 	if conn != nil {
 		w.writeMu.Lock()
@@ -422,6 +464,7 @@ func (w *WebSocketClient) handleMessages(conn *websocket.Conn) {
 			if w.clearConnectionIfCurrent(conn) {
 				w.notifyConnectionListeners(false)
 				w.notifyErrorListeners(err)
+				w.scheduleReconnect()
 			}
 			return
 		}
@@ -433,6 +476,56 @@ func (w *WebSocketClient) handleMessages(conn *websocket.Conn) {
 			continue
 		}
 		w.processMessage(msg)
+	}
+}
+
+func (w *WebSocketClient) scheduleReconnect() {
+	w.mu.Lock()
+	if w.intentionallyDisconnected || w.connected || w.connecting ||
+		w.reconnectTimer != nil || w.reconnectAttempts >= w.maxReconnectAttempts {
+		w.mu.Unlock()
+		return
+	}
+	w.reconnectAttempts++
+	attempt := w.reconnectAttempts
+	delay := w.reconnectDelay
+	if delay < 0 {
+		delay = 0
+	}
+	for step := 1; step < attempt; step++ {
+		if delay >= 15*time.Second {
+			delay = 30 * time.Second
+			break
+		}
+		delay *= 2
+	}
+	if delay > 30*time.Second {
+		delay = 30 * time.Second
+	}
+	w.reconnectTimer = time.AfterFunc(delay, w.runReconnect)
+	w.mu.Unlock()
+}
+
+func (w *WebSocketClient) runReconnect() {
+	w.mu.Lock()
+	w.reconnectTimer = nil
+	shouldReconnect := !w.intentionallyDisconnected && !w.connected && !w.connecting
+	w.mu.Unlock()
+	if !shouldReconnect {
+		return
+	}
+	if err := w.connect(context.Background(), true); err != nil {
+		if err == context.Canceled {
+			return
+		}
+		w.mu.RLock()
+		intentionallyDisconnected := w.intentionallyDisconnected
+		w.mu.RUnlock()
+		if intentionallyDisconnected {
+			return
+		}
+		w.notifyErrorListeners(err)
+		w.scheduleReconnect()
 	}
 }
 
