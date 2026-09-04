@@ -218,6 +218,7 @@ pub(crate) async fn write_share_database(
     shares: &[RemoteShare],
 ) -> Result<(), String> {
     validate_share_entries(shares)?;
+    validate_share_database_path(path)?;
     let options = SqliteConnectOptions::new()
         .filename(path)
         .create_if_missing(true);
@@ -366,6 +367,7 @@ pub(crate) async fn read_share_database(
     path: &Path,
     target: ControllerProfile,
 ) -> Result<Vec<RemoteShare>, String> {
+    validate_share_database_path(path)?;
     let options = SqliteConnectOptions::new()
         .filename(path)
         .read_only(true)
@@ -431,6 +433,25 @@ pub(crate) async fn read_share_database(
     .await;
     pool.close().await;
     result
+}
+
+fn validate_share_database_path(path: &Path) -> Result<(), String> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(format!(
+                "relay share database path metadata read failed: {error}"
+            ));
+        }
+    };
+    if metadata.file_type().is_symlink() {
+        return Err("relay share database path must not be a symlink".to_owned());
+    }
+    if !metadata.is_file() {
+        return Err("relay share database path must be a regular file".to_owned());
+    }
+    Ok(())
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1655,6 +1676,42 @@ mod tests {
         .expect_err("unrepresentable relay share size must be rejected");
         assert!(error.contains("SQLite integer range"), "{error}");
         assert!(!path.exists());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn relay_share_database_rejects_symlink_paths() {
+        use std::os::unix::fs::symlink;
+
+        let root = std::env::temp_dir().join(format!(
+            "slskr-relay-share-symlink-{}",
+            Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&root).expect("create relay share symlink fixture");
+        let target = root.join("target.db");
+        let linked = root.join("linked.db");
+        let shares = [RemoteShare {
+            filename: "Remote/Target.flac".to_owned(),
+            size: 1,
+        }];
+        write_share_database(&target, ControllerProfile::Native, &shares)
+            .await
+            .expect("write relay share symlink target");
+        symlink(&target, &linked).expect("create relay share database symlink");
+
+        let read_error = read_share_database(&linked, ControllerProfile::Native)
+            .await
+            .expect_err("read must reject relay share database symlink");
+        assert!(read_error.contains("must not be a symlink"), "{read_error}");
+        let write_error = write_share_database(&linked, ControllerProfile::Native, &shares)
+            .await
+            .expect_err("write must reject relay share database symlink");
+        assert!(
+            write_error.contains("must not be a symlink"),
+            "{write_error}"
+        );
+
+        std::fs::remove_dir_all(root).expect("remove relay share symlink fixture");
     }
 
     #[tokio::test]
