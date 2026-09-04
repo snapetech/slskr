@@ -1939,13 +1939,16 @@ impl Gateway {
                 if let Some(binding) =
                     binding.filter(|binding| binding.kind == "room" && binding.mode == "mirror")
                 {
-                    let _ = super::try_send_session_command(
+                    let room = binding.identifier;
+                    if let Err(error) = super::try_send_session_command(
                         state,
                         super::SessionCommand::SayRoom {
-                            room: binding.identifier,
+                            room: room.clone(),
                             body: format!("[Pod:{}] {}", message.sender_peer_id, message.body),
                         },
-                    );
+                    ) {
+                        super::record_pod_room_mirror_failure(state, &room, &error).await;
+                    }
                 }
                 serde_json::to_vec(&serde_json::json!({
                     "Success": true,

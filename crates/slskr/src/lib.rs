@@ -31591,16 +31591,19 @@ async fn route_http_request_with_headers(
                       if let Some(binding) = binding.filter(|binding| {
                           binding.kind == "room" && binding.mode == "mirror"
                       }) {
-                          let _ = try_send_session_command(
+                          let room = binding.identifier;
+                          if let Err(error) = try_send_session_command(
                               state,
                               SessionCommand::SayRoom {
-                                  room: binding.identifier,
+                                  room: room.clone(),
                                   body: format!(
                                       "[Pod:{}] {}",
                                       message.sender_peer_id, message.body
                                   ),
                               },
-                          );
+                          ) {
+                              record_pod_room_mirror_failure(state, &room, &error).await;
+                          }
                       }
                       Ok(routing::ok_response(
                           serde_json::json!({
@@ -32046,10 +32049,13 @@ async fn route_http_request_with_headers(
                               .await
                               .soulseek_binding(pod_id, channel_id)
                           {
-                              let _ = try_send_session_command(
+                              let room = binding.identifier;
+                              if let Err(error) = try_send_session_command(
                                   state,
-                                  SessionCommand::JoinRoom(binding.identifier),
-                              );
+                                  SessionCommand::JoinRoom(room.clone()),
+                              ) {
+                                  record_room_dispatch_failure(state, "join", &room, &error).await;
+                              }
                           }
                       }
                       let response_key = if action == "bind" { "bound" } else { "unbound" };
@@ -34195,7 +34201,6 @@ async fn route_http_request_with_headers(
             // honest, local-only simplification (every entry reflects a
             // real, currently-active local listen-along event), not the
             // previous behavior of listing unrelated joined chat rooms.
-            const ANNOUNCEMENT_TTL_MS: u64 = 900_000;
             let now_ms = unix_timestamp_millis();
             let events = state
                 .controller_features
@@ -34211,15 +34216,11 @@ async fn route_http_request_with_headers(
                 {
                     continue;
                 }
-                let started_at = event
-                    .get("serverTimeUnixMs")
-                    .and_then(serde_json::Value::as_u64)
-                    .unwrap_or(0);
-                let last_seen = now_ms;
-                let expires_at = last_seen.saturating_add(ANNOUNCEMENT_TTL_MS);
-                if expires_at <= now_ms {
+                let Some((started_at, last_seen, expires_at)) =
+                    listening_party_event_window(&event, now_ms)
+                else {
                     continue;
-                }
+                };
                 let party_id = event
                     .get("partyId")
                     .and_then(serde_json::Value::as_str)
@@ -54432,6 +54433,27 @@ fn listening_party_normalize(
     }))
 }
 
+const LISTENING_PARTY_ANNOUNCEMENT_TTL_MS: u64 = 900_000;
+
+fn listening_party_event_window(
+    event: &serde_json::Value,
+    now_ms: u64,
+) -> Option<(u64, u64, u64)> {
+    let started_at = event
+        .get("serverTimeUnixMs")
+        .and_then(serde_json::Value::as_u64)
+        .filter(|timestamp| *timestamp > 0)?;
+    let last_seen = event
+        .get("lastSeenUnixMs")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(started_at);
+    let expires_at = event
+        .get("expiresAtUnixMs")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or_else(|| last_seen.saturating_add(LISTENING_PARTY_ANNOUNCEMENT_TTL_MS));
+    (expires_at > now_ms).then_some((started_at, last_seen, expires_at))
+}
+
 const BRIDGE_LOGIN: i32 = 1;
 const BRIDGE_LOGIN_RESPONSE: i32 = 2;
 const BRIDGE_SEARCH_REQUEST: i32 = 3;
@@ -55321,21 +55343,43 @@ async fn misc_controller_mutation_response(
         // Matches the oracle's PublishAsync: a "stop" event clears the
         // stored state entirely rather than persisting a "stopped"
         // snapshot -- there is no active listen-along after a stop.
-        let result = if event["action"] == "stop" {
+        let (result, revoke_party_ids) = if event["action"] == "stop" {
+            let previous_party_id = features
+                .get(&key)
+                .and_then(|stored| stored.get("partyId"))
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned);
+            let requested_party_id = event
+                .get("partyId")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned);
             let result = features.remove(&key).map(|_| ());
-            if let Some(party_id) = event.get("partyId").and_then(serde_json::Value::as_str) {
-                state
-                    .stream_tickets
-                    .write()
-                    .await
-                    .revoke_source(&format!("listening-party:{party_id}"));
-            }
-            result
+            let revoke_party_ids = if result.is_ok() {
+                [previous_party_id, requested_party_id]
+                    .into_iter()
+                    .flatten()
+                    .filter(|party_id| !party_id.is_empty())
+                    .fold(Vec::new(), |mut ids, party_id| {
+                        if !ids.iter().any(|existing| existing == &party_id) {
+                            ids.push(party_id);
+                        }
+                        ids
+                    })
+            } else {
+                Vec::new()
+            };
+            (result, revoke_party_ids)
         } else {
-            features.upsert(key.clone(), event.clone())
+            (features.upsert(key.clone(), event.clone()), Vec::new())
         };
         drop(features);
         let succeeded = result.is_ok();
+        if succeeded && !revoke_party_ids.is_empty() {
+            let mut tickets = state.stream_tickets.write().await;
+            for party_id in revoke_party_ids {
+                tickets.revoke_source(&format!("listening-party:{party_id}"));
+            }
+        }
         let response = match result {
             Ok(()) => routing::ok_response(event.to_string()),
             Err(error) => routing::service_unavailable_response(&error),
@@ -65585,6 +65629,7 @@ async fn extended_controller_dynamic_get_response(
             if !state.media_services.read().await.features.streaming {
                 return routing::not_found_response();
             }
+            let now_ms = unix_timestamp_millis();
             let listed = state
                 .controller_features
                 .read()
@@ -65592,7 +65637,9 @@ async fn extended_controller_dynamic_get_response(
                 .values_with_prefix("listening-party/")
                 .into_iter()
                 .any(|event| {
-                    event.get("partyId").and_then(serde_json::Value::as_str) == Some(party_id)
+                    listening_party_event_window(&event, now_ms).is_some()
+                        && event.get("partyId").and_then(serde_json::Value::as_str)
+                            == Some(party_id)
                         && event.get("listed").and_then(serde_json::Value::as_bool) == Some(true)
                         && event
                             .get("allowMeshStreaming")
@@ -79714,6 +79761,15 @@ async fn record_room_dispatch_failure(
     record_daemon_log(state, logging::LogLevel::Error, "rooms", reason).await;
 }
 
+async fn record_pod_room_mirror_failure(state: &AppState, room_name: &str, error: &str) {
+    let reason = format!("pod room mirror for {room_name} dispatch failed: {error}");
+    update_session(state, |snapshot| {
+        snapshot.last_error = Some(reason.clone());
+    })
+    .await;
+    record_daemon_log(state, logging::LogLevel::Error, "podcore", reason).await;
+}
+
 async fn replay_joined_rooms(state: &AppState, session: &mut ServerSession<TcpStream>) {
     let joined_rooms = {
         let rooms = state.rooms.read().await;
@@ -80322,13 +80378,16 @@ async fn handle_incoming_soulseek_pod_message(
     if let Some(binding) =
         binding.filter(|binding| binding.kind == "room" && binding.mode == "mirror")
     {
-        let _ = try_send_session_command(
+        let room = binding.identifier;
+        if let Err(error) = try_send_session_command(
             state,
             SessionCommand::SayRoom {
-                room: binding.identifier,
+                room: room.clone(),
                 body: format!("[Pod:{}] {}", stored.sender_peer_id, stored.body),
             },
-        );
+        ) {
+            record_pod_room_mirror_failure(state, &room, &error).await;
+        }
     }
     record_event(
         state,

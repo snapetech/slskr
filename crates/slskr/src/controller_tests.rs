@@ -33968,6 +33968,45 @@ async fn listening_party_directory_reflects_real_listed_events() {
         entries[0]["expiresAtUnixMs"].as_u64().unwrap()
             > entries[0]["startedAtUnixMs"].as_u64().unwrap()
     );
+    assert_eq!(
+        entries[0]["lastSeenUnixMs"],
+        entries[0]["startedAtUnixMs"],
+        "directory reads must not refresh a persisted party"
+    );
+
+    // A persisted announcement must age out from its event timestamp. If
+    // the directory used the request time as last-seen, this stale record
+    // would incorrectly appear beside the live party.
+    let stale_timestamp = super::unix_timestamp_millis().saturating_sub(
+        super::LISTENING_PARTY_ANNOUNCEMENT_TTL_MS.saturating_add(1),
+    );
+    state
+        .controller_features
+        .write()
+        .await
+        .upsert(
+            "listening-party/stale-pod/stale-channel".to_owned(),
+            serde_json::json!({
+                "partyId": "party:stale",
+                "podId": "pod:stale",
+                "channelId": "stale-channel",
+                "hostPeerId": "stale-peer",
+                "action": "play",
+                "contentId": "stale-content",
+                "serverTimeUnixMs": stale_timestamp,
+                "listed": true,
+                "allowMeshStreaming": false,
+            }),
+        )
+        .expect("persist stale listening-party fixture");
+    let with_stale =
+        super::route_http_request("GET", "/api/v0/listening-party", None, "", &state)
+            .await
+            .expect("directory with stale event");
+    let with_stale_json = serde_json::from_str::<serde_json::Value>(&with_stale.body).unwrap();
+    let with_stale_entries = with_stale_json.as_array().unwrap();
+    assert_eq!(with_stale_entries.len(), 1, "{with_stale_json}");
+    assert_eq!(with_stale_entries[0]["partyId"], party_id);
 
     // Stopping the party removes it from the directory entirely.
     let stopped = super::route_http_request(
@@ -34122,6 +34161,22 @@ async fn listening_party_radio_requires_a_real_ticket_matching_the_content_id() 
     assert_eq!(
         authorized_json["peerIds"],
         serde_json::json!(["peer-a", "peer-b"])
+    );
+
+    let stopped = super::route_http_request(
+        "POST",
+        &format!("/api/v0/listening-party/{pod_id}/{channel_id}"),
+        None,
+        r#"{"action":"stop"}"#,
+        &state,
+    )
+    .await
+    .expect("stop party and revoke ticket");
+    assert_eq!(stopped.status, "200 OK", "{}", stopped.body);
+    let mut tickets = state.stream_tickets.write().await;
+    assert!(
+        tickets.get(&valid_ticket).is_none(),
+        "stopping a party must revoke tickets owned by its stored party id"
     );
 }
 

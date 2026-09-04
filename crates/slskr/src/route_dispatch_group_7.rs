@@ -65,7 +65,6 @@ async fn route_dispatch_group_7(context: &RouteDispatchContext<'_, '_>) -> Route
             // honest, local-only simplification (every entry reflects a
             // real, currently-active local listen-along event), not the
             // previous behavior of listing unrelated joined chat rooms.
-            const ANNOUNCEMENT_TTL_MS: u64 = 900_000;
             let now_ms = unix_timestamp_millis();
             let events = state
                 .controller_features
@@ -81,15 +80,11 @@ async fn route_dispatch_group_7(context: &RouteDispatchContext<'_, '_>) -> Route
                 {
                     continue;
                 }
-                let started_at = event
-                    .get("serverTimeUnixMs")
-                    .and_then(serde_json::Value::as_u64)
-                    .unwrap_or(0);
-                let last_seen = now_ms;
-                let expires_at = last_seen.saturating_add(ANNOUNCEMENT_TTL_MS);
-                if expires_at <= now_ms {
+                let Some((started_at, last_seen, expires_at)) =
+                    listening_party_event_window(&event, now_ms)
+                else {
                     continue;
-                }
+                };
                 let party_id = event
                     .get("partyId")
                     .and_then(serde_json::Value::as_str)

@@ -1220,16 +1220,19 @@ async fn route_dispatch_group_6(context: &RouteDispatchContext<'_, '_>) -> Route
                       if let Some(binding) = binding.filter(|binding| {
                           binding.kind == "room" && binding.mode == "mirror"
                       }) {
-                          let _ = try_send_session_command(
+                          let room = binding.identifier;
+                          if let Err(error) = try_send_session_command(
                               state,
                               SessionCommand::SayRoom {
-                                  room: binding.identifier,
+                                  room: room.clone(),
                                   body: format!(
                                       "[Pod:{}] {}",
                                       message.sender_peer_id, message.body
                                   ),
                               },
-                          );
+                          ) {
+                              record_pod_room_mirror_failure(state, &room, &error).await;
+                          }
                       }
                       Ok(routing::ok_response(
                           serde_json::json!({
@@ -1675,10 +1678,13 @@ async fn route_dispatch_group_6(context: &RouteDispatchContext<'_, '_>) -> Route
                               .await
                               .soulseek_binding(pod_id, channel_id)
                           {
-                              let _ = try_send_session_command(
+                              let room = binding.identifier;
+                              if let Err(error) = try_send_session_command(
                                   state,
-                                  SessionCommand::JoinRoom(binding.identifier),
-                              );
+                                  SessionCommand::JoinRoom(room.clone()),
+                              ) {
+                                  record_room_dispatch_failure(state, "join", &room, &error).await;
+                              }
                           }
                       }
                       let response_key = if action == "bind" { "bound" } else { "unbound" };
