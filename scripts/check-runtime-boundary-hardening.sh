@@ -8,6 +8,7 @@ source_files=(
   crates/slskr/src/lib.rs
   crates/slskr/src/controller_tests.rs
   crates/slskr/src/event_store.rs
+  crates/slskr/src/utils.rs
 )
 http_source="crates/slskr/src/http_server.rs"
 credential_source="crates/slskr/src/credential_store.rs"
