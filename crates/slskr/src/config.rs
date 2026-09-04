@@ -5031,6 +5031,23 @@ pub struct ShareDirectory {
 }
 
 impl ShareDirectory {
+    pub fn from_path(path: &str, alias: Option<&str>) -> Result<Self, String> {
+        let path = path.trim();
+        if path.contains('\0') {
+            return Err("share path contains an invalid NUL character".to_owned());
+        }
+        let raw = match alias.map(str::trim).filter(|alias| !alias.is_empty()) {
+            Some(alias) => {
+                if alias.contains('\0') {
+                    return Err("share alias contains an invalid NUL character".to_owned());
+                }
+                format!("[{alias}]{path}")
+            }
+            None => path.to_owned(),
+        };
+        Self::parse(&raw)
+    }
+
     fn parse(value: &str) -> Result<Self, String> {
         let raw = value.trim().trim_end_matches(['/', '\\']).to_owned();
         let (is_excluded, share) = raw

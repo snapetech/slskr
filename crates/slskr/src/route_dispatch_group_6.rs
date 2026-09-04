@@ -45,15 +45,60 @@ async fn route_dispatch_group_6(context: &RouteDispatchContext<'_, '_>) -> Route
         }
 
         ("POST", "/api/config/shares") => {
-            let path = extract_json_string_field(body, "path").unwrap_or_default();
+            let path = extract_json_string_field(body, "path")
+                .or_else(|| extract_json_string_field(body, "localPath"))
+                .unwrap_or_default()
+                .trim()
+                .to_owned();
             if path.is_empty() {
                 return Ok(routing::bad_request_response("path is required"));
             }
-            let json = format!(
-                "{{\"path\":\"{}\",\"added\":true,\"files\":0,\"bytes\":0}}",
-                json_escape(&path)
-            );
-            Ok(routing::created_response(json))
+            let alias = extract_json_string_field(body, "alias")
+                .or_else(|| extract_json_string_field(body, "name"))
+                .map(|alias| alias.trim().to_owned())
+                .filter(|alias| !alias.is_empty());
+            let (directory, snapshot) = match add_runtime_share(state, &path, alias.as_deref()).await {
+                Ok(result) => result,
+                Err(error) if error == "share path is already configured" || error.starts_with("share alias '") => {
+                    return Ok(HttpResponse {
+                        status: "409 Conflict",
+                        content_type: "application/json",
+                        body: serde_json::json!({"error": error}).to_string(),
+                    });
+                }
+                Err(error)
+                    if error.starts_with("Share ")
+                        || matches!(
+                            error.as_str(),
+                            "share path contains an invalid NUL character"
+                                | "share alias contains an invalid NUL character"
+                        ) =>
+                {
+                    return Ok(routing::bad_request_response(&error));
+                }
+                Err(error) => return Ok(share_rebuild_error_response(&error)),
+            };
+            record_event(
+                state,
+                "share.configuration.updated",
+                "shares",
+                Some(format!("added={}", directory.alias)),
+            )
+            .await;
+            Ok(routing::created_response(
+                serde_json::json!({
+                    "path": path,
+                    "alias": directory.alias,
+                    "added": true,
+                    "files": snapshot.entries.len(),
+                    "bytes": snapshot.entries.iter().map(|entry| entry.size).sum::<u64>(),
+                    "scan_errors": snapshot.scan_errors,
+                    "scanned": true,
+                    "indexPersisted": state.db.is_some(),
+                    "configurationPersisted": false,
+                })
+                .to_string(),
+            ))
         }
 
         ("GET", "/api/config/plugins") => {

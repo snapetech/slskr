@@ -14073,6 +14073,65 @@ async fn share_rescan_route_rebuilds_snapshot() {
 
 #[cfg_attr(test, tokio::test)]
 #[cfg(feature = "full-controller-tests")]
+async fn config_share_add_updates_runtime_index_and_rejects_duplicates() {
+    let root = std::env::temp_dir().join(format!(
+        "slskr-config-share-test-{}-{}",
+        std::process::id(),
+        uuid::Uuid::new_v4().simple()
+    ));
+    std::fs::create_dir_all(&root).expect("share root");
+    std::fs::write(root.join("track.flac"), b"track").expect("share file");
+    let (state, _receiver) = test_state();
+    let existing_files = state.shares.read().await.entries.len();
+    let response = super::route_http_request(
+        "POST",
+        "/api/config/shares",
+        None,
+        &serde_json::json!({
+            "path": root,
+            "alias": "added",
+        })
+        .to_string(),
+        &state,
+    )
+    .await
+    .expect("add runtime share");
+    assert_eq!(response.status, "201 Created");
+    let body = serde_json::from_str::<serde_json::Value>(&response.body).unwrap();
+    assert_eq!(body["added"], true);
+    assert_eq!(body["alias"], "added");
+    assert_eq!(body["files"], existing_files + 1);
+    assert_eq!(body["configurationPersisted"], false);
+    assert!(state
+        .share_settings
+        .read()
+        .await
+        .directories
+        .iter()
+        .any(|directory| directory.alias == "added"));
+    assert!(state
+        .shares
+        .read()
+        .await
+        .entries
+        .iter()
+        .any(|entry| entry.filename == "added/track.flac"));
+
+    let duplicate = super::route_http_request(
+        "POST",
+        "/api/config/shares",
+        None,
+        &serde_json::json!({"path": root}).to_string(),
+        &state,
+    )
+    .await
+    .expect("duplicate runtime share");
+    assert_eq!(duplicate.status, "409 Conflict");
+    std::fs::remove_dir_all(root).expect("remove share root");
+}
+
+#[cfg_attr(test, tokio::test)]
+#[cfg(feature = "full-controller-tests")]
 async fn share_rebuild_routes_reject_concurrent_scans() {
     let (state, _receiver) = test_state();
     let _permit = Arc::clone(&state.share_scans)
