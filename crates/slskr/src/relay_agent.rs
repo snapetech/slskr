@@ -1032,9 +1032,9 @@ pub(crate) async fn download_completed_file(
         ));
     }
     let expected_length = response.content_length();
-    let mut output = fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
+    let mut output_options = private_relay_download_options();
+    output_options.write(true).create_new(true);
+    let mut output = output_options
         .open(&temporary)
         .await
         .map_err(|error| format!("relay download destination create failed: {error}"))?;
@@ -1073,6 +1073,15 @@ pub(crate) async fn download_completed_file(
     temporary_guard.commit();
     sync_download_directory(destination.parent().unwrap_or_else(|| Path::new("."))).await?;
     Ok(())
+}
+
+fn private_relay_download_options() -> fs::OpenOptions {
+    let mut options = fs::OpenOptions::new();
+    #[cfg(unix)]
+    {
+        options.mode(0o600);
+    }
+    options
 }
 
 #[cfg(unix)]
@@ -1176,6 +1185,35 @@ mod tests {
             .await
             .expect_err("embedded controller credentials")
             .contains("embedded credentials"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn relay_download_staging_files_are_private() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let path = std::env::temp_dir().join(format!(
+            "slskr-relay-download-mode-{}.part",
+            uuid::Uuid::new_v4().simple()
+        ));
+        let file = private_relay_download_options()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .await
+            .expect("create private relay download staging file");
+        let mode = file
+            .metadata()
+            .await
+            .expect("read relay staging file metadata")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o600);
+        drop(file);
+        fs::remove_file(path)
+            .await
+            .expect("remove relay staging file fixture");
     }
 
     #[test]
