@@ -334,8 +334,7 @@ fn rewrite_dotnet_numbered_captures(expression: &str) -> Result<String, String> 
                     .checked_add(1)
                     .ok_or_else(|| "regular-expression capture slot is too large".to_owned())?;
             }
-            let slot = next_named_slot;
-            slot
+            next_named_slot
         };
         named_slots.push((slot, name.clone()));
     }
