@@ -15856,10 +15856,33 @@ async fn requeue_persisted_songid_runs(state: &Arc<AppState>) {
             continue;
         }
         if run.get("status").and_then(serde_json::Value::as_str) == Some("running") {
-            let _ = mutate_runtime_compat_state(state, |runtime, _| {
+            match mutate_runtime_compat_state(state, |runtime, _| {
                 runtime.requeue_songid_run(run_id)
             })
-            .await;
+            .await
+            {
+                Ok(Some(_)) => {}
+                Ok(None) => {
+                    record_daemon_log(
+                        state,
+                        logging::LogLevel::Warn,
+                        "songid",
+                        format!("persisted SongID run {run_id} disappeared during recovery"),
+                    )
+                    .await;
+                    continue;
+                }
+                Err(error) => {
+                    record_daemon_log(
+                        state,
+                        logging::LogLevel::Warn,
+                        "songid",
+                        format!("SongID run {run_id} recovery persistence failed: {error}"),
+                    )
+                    .await;
+                    continue;
+                }
+            }
         }
         let job = SongIdJob {
             run_id: run_id.to_owned(),
@@ -15876,7 +15899,31 @@ async fn requeue_persisted_songid_runs(state: &Arc<AppState>) {
                 .map(str::to_owned),
             match_query: state.config.controller_profile != ControllerProfile::Native,
         };
-        let _ = sender.try_send(job);
+        if sender.try_send(job).is_err() {
+            match mutate_runtime_compat_state(state, |runtime, _| runtime.fail_songid_run(run_id))
+                .await
+            {
+                Ok(Some(failed)) => publish_songid_hub_event(state, "update", &failed),
+                Ok(None) => {
+                    record_daemon_log(
+                        state,
+                        logging::LogLevel::Warn,
+                        "songid",
+                        format!("persisted SongID run {run_id} disappeared before queueing"),
+                    )
+                    .await;
+                }
+                Err(error) => {
+                    record_daemon_log(
+                        state,
+                        logging::LogLevel::Warn,
+                        "songid",
+                        format!("SongID run {run_id} could not be marked failed: {error}"),
+                    )
+                    .await;
+                }
+            }
+        }
     }
 }
 
@@ -54003,10 +54050,13 @@ async fn extended_controller_mutation_response(
         drop(runtime);
         return match controller_options_mutation_response(body, next, state.db.is_some()) {
             Ok(value) => {
-                let _ = mutate_runtime_compat_state(state, |runtime, _| {
+                if let Err(error) = mutate_runtime_compat_state(state, |runtime, _| {
                     runtime.record_options_update().to_string()
                 })
-                .await;
+                .await
+                {
+                    return routing::service_unavailable_response(&error);
+                }
                 routing::ok_response(value)
             }
             Err(error) => routing::bad_request_response(&error),
@@ -83751,13 +83801,14 @@ fn outbound_peer_dial_order(
         if regular_available {
             order.push(OutboundPeerTransport::Regular);
         }
-    } else {
-        if regular_available {
-            order.push(OutboundPeerTransport::Regular);
-        }
-        if obfuscated_available {
-            order.push(OutboundPeerTransport::Obfuscated);
-        }
+    } else if regular_available {
+        // Compatibility mode is regular-only when the peer advertises a
+        // regular endpoint. The upstream client does not silently switch to
+        // obfuscation after a failed regular dial; obfuscation is only the
+        // usable path when no regular endpoint was advertised.
+        order.push(OutboundPeerTransport::Regular);
+    } else if obfuscated_available {
+        order.push(OutboundPeerTransport::Obfuscated);
     }
     order
 }

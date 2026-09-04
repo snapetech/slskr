@@ -270,14 +270,32 @@ fn versioned_share_rescan_response(state: &AppState, state_arc: Arc<AppState>) -
         }
     };
     tokio::spawn(async move {
-        if let Ok(snapshot) = rebuild_share_index_with_permit(&state_arc, permit).await {
-            record_event(
-                &state_arc,
-                "share.scan.completed",
-                "shares",
-                Some(format!("{} files", snapshot.entries.len())),
-            )
-            .await;
+        match rebuild_share_index_with_permit(&state_arc, permit).await {
+            Ok(snapshot) => {
+                record_event(
+                    &state_arc,
+                    "share.scan.completed",
+                    "shares",
+                    Some(format!("{} files", snapshot.entries.len())),
+                )
+                .await;
+            }
+            Err(error) => {
+                record_daemon_log(
+                    &state_arc,
+                    crate::logging::LogLevel::Warn,
+                    "shares",
+                    format!("versioned share scan failed: {error}"),
+                )
+                .await;
+                record_event(
+                    &state_arc,
+                    "share.scan.failed",
+                    "shares",
+                    Some("share index unavailable".to_owned()),
+                )
+                .await;
+            }
         }
     });
     HttpResponse {

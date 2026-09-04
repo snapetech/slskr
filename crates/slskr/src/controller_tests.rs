@@ -16969,6 +16969,7 @@ async fn runtime_control_routes_roll_back_when_persistence_fails() {
             "",
             false,
         ),
+        ("POST", "/api/options", r#"{}"#, "", false),
         (
             "POST",
             "/api/songid/runs",
