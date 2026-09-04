@@ -4147,10 +4147,8 @@ impl TransferQueue {
         }
         entry.updated_at = now;
         entry.updated_at_ms = unix_timestamp_millis();
-        if let Err(error) = append_transfer_event(&self.events_path, entry) {
-            self.events_error = Some(error);
-        }
         let entry = entry.clone();
+        self.persist_event(&entry);
         self.persist_state();
         self.updated_at = unix_timestamp();
         Some(entry)
@@ -4182,10 +4180,8 @@ impl TransferQueue {
         }
         entry.updated_at = now;
         entry.updated_at_ms = unix_timestamp_millis();
-        if let Err(error) = append_transfer_event(&self.events_path, entry) {
-            self.events_error = Some(error);
-        }
         let entry = entry.clone();
+        self.persist_event(&entry);
         self.persist_state();
         self.updated_at = unix_timestamp();
         Some(entry)
@@ -4223,10 +4219,8 @@ impl TransferQueue {
         entry.next_attempt_at = None;
         entry.updated_at = now;
         entry.updated_at_ms = unix_timestamp_millis();
-        if let Err(error) = append_transfer_event(&self.events_path, entry) {
-            self.events_error = Some(error);
-        }
         let entry = entry.clone();
+        self.persist_event(&entry);
         self.persist_state();
         self.updated_at = unix_timestamp();
         Some(entry)
@@ -4248,10 +4242,8 @@ impl TransferQueue {
         entry.reason = bounded_transfer_reason(reason);
         entry.updated_at = unix_timestamp();
         entry.updated_at_ms = unix_timestamp_millis();
-        if let Err(error) = append_transfer_event(&self.events_path, entry) {
-            self.events_error = Some(error);
-        }
         let entry = entry.clone();
+        self.persist_event(&entry);
         self.persist_state();
         self.updated_at = unix_timestamp();
         Some(entry)
@@ -4340,10 +4332,8 @@ impl TransferQueue {
         entry.reason = None;
         entry.updated_at = unix_timestamp();
         entry.updated_at_ms = unix_timestamp_millis();
-        if let Err(error) = append_transfer_event(&self.events_path, entry) {
-            self.events_error = Some(error);
-        }
         let entry = entry.clone();
+        self.persist_event(&entry);
         self.persist_state();
         self.updated_at = unix_timestamp();
         Ok(Some(entry))
@@ -4379,10 +4369,8 @@ impl TransferQueue {
         entry.reason = None;
         entry.updated_at = unix_timestamp();
         entry.updated_at_ms = unix_timestamp_millis();
-        if let Err(error) = append_transfer_event(&self.events_path, entry) {
-            self.events_error = Some(error);
-        }
         let entry = entry.clone();
+        self.persist_event(&entry);
         self.persist_state();
         self.updated_at = unix_timestamp();
         Some(entry)
@@ -4418,10 +4406,8 @@ impl TransferQueue {
         entry.reason = None;
         entry.updated_at = unix_timestamp();
         entry.updated_at_ms = unix_timestamp_millis();
-        if let Err(error) = append_transfer_event(&self.events_path, entry) {
-            self.events_error = Some(error);
-        }
         let entry = entry.clone();
+        self.persist_event(&entry);
         self.persist_state();
         self.updated_at = unix_timestamp();
         Some(entry)
@@ -4449,9 +4435,7 @@ impl TransferQueue {
         self.progress_persisted_at
             .retain(|id, _| retained_ids.contains(id));
         self.updated_at = unix_timestamp();
-        if let Err(error) = append_transfer_event(&self.events_path, &entry) {
-            self.events_error = Some(error);
-        }
+        self.persist_event(&entry);
         self.persist_state();
         entry
     }
@@ -4478,6 +4462,10 @@ impl TransferQueue {
 
     fn persist_state(&mut self) {
         self.state_error = write_transfer_state(&self.state_path, &self.entries).err();
+    }
+
+    fn persist_event(&mut self, entry: &TransferEntry) {
+        self.events_error = append_transfer_event(&self.events_path, entry).err();
     }
 
     fn should_persist_progress(&mut self, entry: &TransferEntry) -> bool {
@@ -6420,13 +6408,18 @@ async fn rollback_hash_db_entries_if_unchanged(
     mutated_entries: &[content_discovery::HashDbEntry],
     mutated_latest_seq: u64,
 ) {
-    let mut discovery = state.content_discovery.write().await;
-    if discovery.latest_seq() != mutated_latest_seq
-        || discovery.hash_entries() != mutated_entries
-    {
-        return;
-    }
-    if let Err(error) = discovery.restore_hash_entries(previous_entries, previous_latest_seq) {
+    let rollback_error = {
+        let mut discovery = state.content_discovery.write().await;
+        if discovery.latest_seq() != mutated_latest_seq
+            || discovery.hash_entries() != mutated_entries
+        {
+            return;
+        }
+        discovery
+            .restore_hash_entries(previous_entries, previous_latest_seq)
+            .err()
+    };
+    if let Some(error) = rollback_error {
         record_daemon_log(
             state,
             logging::LogLevel::Error,
@@ -19992,17 +19985,35 @@ async fn route_http_request_with_headers(
                     Err(_) => return Ok(routing::bad_request_response("invalid hash entry")),
                 }
             };
-            let mut discovery = state.content_discovery.write().await;
-            let previous_entries = discovery.hash_entries().to_vec();
-            let previous_latest_seq = discovery.latest_seq();
-            let result = discovery
-                .merge_hash_entries(vec![entry])
-                .map(|_| (discovery.latest_seq(), discovery.hash_entries().to_vec()));
+            let (result, previous_entries, previous_latest_seq, mutated_entries, mutated_latest_seq) = {
+                let mut discovery = state.content_discovery.write().await;
+                let previous_entries = discovery.hash_entries().to_vec();
+                let previous_latest_seq = discovery.latest_seq();
+                let result = discovery
+                    .merge_hash_entries(vec![entry])
+                    .map(|_| (discovery.latest_seq(), discovery.hash_entries().to_vec()));
+                let mutated_entries = discovery.hash_entries().to_vec();
+                let mutated_latest_seq = discovery.latest_seq();
+                (
+                    result,
+                    previous_entries,
+                    previous_latest_seq,
+                    mutated_entries,
+                    mutated_latest_seq,
+                )
+            };
             match result {
                 Ok((latest_seq, entries)) => {
                     if let Err(error) = persist_hash_db_snapshot(state, &entries, latest_seq).await
                     {
-                        let _ = discovery.restore_hash_entries(previous_entries, previous_latest_seq);
+                        rollback_hash_db_entries_if_unchanged(
+                            state,
+                            previous_entries,
+                            previous_latest_seq,
+                            &mutated_entries,
+                            mutated_latest_seq,
+                        )
+                        .await;
                         return Ok(routing::internal_server_error_response(&error));
                     }
                     if route.path.starts_with("/api/v0/") {
@@ -20062,25 +20073,43 @@ async fn route_http_request_with_headers(
                 None => return Ok(routing::bad_request_response("entries are required")),
             };
             let received = entries.len();
-            let mut discovery = state.content_discovery.write().await;
-            let previous_entries = discovery.hash_entries().to_vec();
-            let previous_latest_seq = discovery.latest_seq();
-            let result = if route.path.starts_with("/api/v0/") {
-                discovery
-                    .merge_hash_entries_from_mesh(entries)
-                    .map(|(merged, _skipped)| {
+            let (result, previous_entries, previous_latest_seq, mutated_entries, mutated_latest_seq) = {
+                let mut discovery = state.content_discovery.write().await;
+                let previous_entries = discovery.hash_entries().to_vec();
+                let previous_latest_seq = discovery.latest_seq();
+                let result = if route.path.starts_with("/api/v0/") {
+                    discovery
+                        .merge_hash_entries_from_mesh(entries)
+                        .map(|(merged, _skipped)| {
+                            (merged, discovery.latest_seq(), discovery.hash_entries().to_vec())
+                        })
+                } else {
+                    discovery.merge_hash_entries(entries).map(|merged| {
                         (merged, discovery.latest_seq(), discovery.hash_entries().to_vec())
                     })
-            } else {
-                discovery.merge_hash_entries(entries).map(|merged| {
-                    (merged, discovery.latest_seq(), discovery.hash_entries().to_vec())
-                })
+                };
+                let mutated_entries = discovery.hash_entries().to_vec();
+                let mutated_latest_seq = discovery.latest_seq();
+                (
+                    result,
+                    previous_entries,
+                    previous_latest_seq,
+                    mutated_entries,
+                    mutated_latest_seq,
+                )
             };
             match result {
                 Ok((merged, latest_seq, entries)) => {
                     if let Err(error) = persist_hash_db_snapshot(state, &entries, latest_seq).await
                     {
-                        let _ = discovery.restore_hash_entries(previous_entries, previous_latest_seq);
+                        rollback_hash_db_entries_if_unchanged(
+                            state,
+                            previous_entries,
+                            previous_latest_seq,
+                            &mutated_entries,
+                            mutated_latest_seq,
+                        )
+                        .await;
                         return Ok(routing::internal_server_error_response(&error));
                     }
                     Ok(routing::ok_response(serde_json::json!({
@@ -22957,7 +22986,15 @@ async fn route_http_request_with_headers(
                 transfers.entries = previous.clone();
                 transfers.persist_state();
                 drop(transfers);
-                let _ = persist_transfer_records(state, &previous).await;
+                if let Err(rollback_error) = persist_transfer_records(state, &previous).await {
+                    record_daemon_log(
+                        state,
+                        logging::LogLevel::Error,
+                        "transfers",
+                        format!("failed to persist transfer request-name rollback: {rollback_error}"),
+                    )
+                    .await;
+                }
                 return Ok(routing::service_unavailable_response(&error));
             }
             let attempts = updated.iter().collect::<Vec<_>>();
@@ -23005,7 +23042,15 @@ async fn route_http_request_with_headers(
                 transfers.entries = previous.clone();
                 transfers.persist_state();
                 drop(transfers);
-                let _ = persist_transfer_records(state, &previous).await;
+                if let Err(rollback_error) = persist_transfer_records(state, &previous).await {
+                    record_daemon_log(
+                        state,
+                        logging::LogLevel::Error,
+                        "transfers",
+                        format!("failed to persist transfer cancellation rollback: {rollback_error}"),
+                    )
+                    .await;
+                }
                 return Ok(routing::service_unavailable_response(&error));
             }
             Ok(routing::no_content_response())
@@ -32689,11 +32734,21 @@ async fn route_http_request_with_headers(
               upserts.push(record.clone());
               if let Err(error) = persist_search_transition(state, &upserts, &evicted).await {
                   rollback_searches_if_unchanged(state, previous_searches, &mutated_searches).await;
-                  let _ = state
+                  let job_key = format!("job/discography/{}", record.id);
+                  if let Err(cleanup_error) = state
                       .controller_features
                       .write()
                       .await
-                      .remove(&format!("job/discography/{}", record.id));
+                      .remove(&job_key)
+                  {
+                      record_daemon_log(
+                          state,
+                          logging::LogLevel::Error,
+                          "jobs",
+                          format!("failed to remove rolled-back job projection {job_key}: {cleanup_error}"),
+                      )
+                      .await;
+                  }
                   return Ok(routing::service_unavailable_response(&error));
               }
               for expired_record in &expired {
@@ -32822,11 +32877,21 @@ async fn route_http_request_with_headers(
               upserts.push(record.clone());
               if let Err(error) = persist_search_transition(state, &upserts, &evicted).await {
                   rollback_searches_if_unchanged(state, previous_searches, &mutated_searches).await;
-                  let _ = state
+                  let job_key = format!("job/mb-release/{}", record.id);
+                  if let Err(cleanup_error) = state
                       .controller_features
                       .write()
                       .await
-                      .remove(&format!("job/mb-release/{}", record.id));
+                      .remove(&job_key)
+                  {
+                      record_daemon_log(
+                          state,
+                          logging::LogLevel::Error,
+                          "jobs",
+                          format!("failed to remove rolled-back job projection {job_key}: {cleanup_error}"),
+                      )
+                      .await;
+                  }
                   return Ok(routing::service_unavailable_response(&error));
               }
               for expired_record in &expired {
@@ -84982,9 +85047,11 @@ async fn controller_native_autoreplace_mutation_response(
         _ => return None,
     };
 
-    let (body, persisted) = {
+    let (body, previous_runtime, mutated_runtime, persisted) = {
         let mut runtime = state.runtime.write().await;
+        let previous_runtime = runtime.clone();
         runtime.set_autoreplace(enabled);
+        let mutated_runtime = runtime.clone();
         let relay = state.relay.read().await;
         (
             serde_json::json!({
@@ -84995,6 +85062,8 @@ async fn controller_native_autoreplace_mutation_response(
                 "intervalSeconds": 300,
             })
             .to_string(),
+            previous_runtime,
+            mutated_runtime,
             runtime.persistence_record(&relay),
         )
     };
@@ -85002,8 +85071,24 @@ async fn controller_native_autoreplace_mutation_response(
     // Frozen native profile saves this toggle in a local state file and deliberately
     // does not make controller availability depend on the transfer database.
     // Keep the same response when the optional SQLite mirror is unavailable.
+    let mut database_persisted = false;
     if let Some(db) = state.db.as_ref() {
-        let _ = db.upsert_runtime_compat_state(&persisted).await;
+        let database_result = db
+            .upsert_runtime_compat_state(&persisted)
+            .await
+            .map_err(|error| error.to_string());
+        match database_result {
+            Ok(()) => database_persisted = true,
+            Err(error) => {
+                record_daemon_log(
+                    state,
+                    logging::LogLevel::Warn,
+                    "autoreplace",
+                    format!("runtime compatibility mirror unavailable: {error}"),
+                )
+                .await;
+            }
+        }
     }
     let state_file = state.config.state_dir.join("auto-replace-state.json");
     let state_body = serde_json::json!({
@@ -85011,7 +85096,50 @@ async fn controller_native_autoreplace_mutation_response(
         "UserConfigured": true,
     })
     .to_string();
-    let _ = write_file_atomic(&state_file, state_body.as_bytes());
+    if let Err(error) = write_file_atomic(&state_file, state_body.as_bytes()) {
+        let rolled_back = {
+            let mut runtime = state.runtime.write().await;
+            if *runtime == mutated_runtime {
+                *runtime = previous_runtime.clone();
+                true
+            } else {
+                false
+            }
+        };
+        if database_persisted && rolled_back {
+            let relay = state.relay.read().await;
+            let previous_persisted = previous_runtime.persistence_record(&relay);
+            if let Some(db) = state.db.as_ref() {
+                let rollback_result = db
+                    .upsert_runtime_compat_state(&previous_persisted)
+                    .await
+                    .map_err(|error| error.to_string());
+                if let Err(rollback_error) = rollback_result {
+                    record_daemon_log(
+                        state,
+                        logging::LogLevel::Error,
+                        "autoreplace",
+                        format!(
+                            "failed to roll back runtime compatibility mirror after state-file failure: {rollback_error}"
+                        ),
+                    )
+                    .await;
+                }
+            }
+        }
+        record_daemon_log(
+            state,
+            logging::LogLevel::Error,
+            "autoreplace",
+            format!(
+                "auto-replace state persistence failed: {error}; runtime rolled back={rolled_back}"
+            ),
+        )
+        .await;
+        return Some(routing::service_unavailable_response(
+            "auto-replace state persistence failed",
+        ));
+    }
 
     Some(routing::ok_response(body))
 }

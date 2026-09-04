@@ -2269,11 +2269,21 @@ async fn route_dispatch_group_6(context: &RouteDispatchContext<'_, '_>) -> Route
               upserts.push(record.clone());
               if let Err(error) = persist_search_transition(state, &upserts, &evicted).await {
                   rollback_searches_if_unchanged(state, previous_searches, &mutated_searches).await;
-                  let _ = state
+                  let job_key = format!("job/discography/{}", record.id);
+                  if let Err(cleanup_error) = state
                       .controller_features
                       .write()
                       .await
-                      .remove(&format!("job/discography/{}", record.id));
+                      .remove(&job_key)
+                  {
+                      record_daemon_log(
+                          state,
+                          logging::LogLevel::Error,
+                          "jobs",
+                          format!("failed to remove rolled-back job projection {job_key}: {cleanup_error}"),
+                      )
+                      .await;
+                  }
                   return Ok(routing::service_unavailable_response(&error));
               }
               for expired_record in &expired {
@@ -2402,11 +2412,21 @@ async fn route_dispatch_group_6(context: &RouteDispatchContext<'_, '_>) -> Route
               upserts.push(record.clone());
               if let Err(error) = persist_search_transition(state, &upserts, &evicted).await {
                   rollback_searches_if_unchanged(state, previous_searches, &mutated_searches).await;
-                  let _ = state
+                  let job_key = format!("job/mb-release/{}", record.id);
+                  if let Err(cleanup_error) = state
                       .controller_features
                       .write()
                       .await
-                      .remove(&format!("job/mb-release/{}", record.id));
+                      .remove(&job_key)
+                  {
+                      record_daemon_log(
+                          state,
+                          logging::LogLevel::Error,
+                          "jobs",
+                          format!("failed to remove rolled-back job projection {job_key}: {cleanup_error}"),
+                      )
+                      .await;
+                  }
                   return Ok(routing::service_unavailable_response(&error));
               }
               for expired_record in &expired {

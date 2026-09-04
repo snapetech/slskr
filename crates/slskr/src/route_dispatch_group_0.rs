@@ -749,18 +749,41 @@ async fn route_dispatch_group_0(context: &RouteDispatchContext<'_, '_>) -> Route
                     Err(_) => return Ok(routing::bad_request_response("invalid hash entry")),
                 }
             };
-            let mut discovery = state.content_discovery.write().await;
-            let previous_entries = discovery.hash_entries().to_vec();
-            let previous_latest_seq = discovery.latest_seq();
-            let result = discovery
-                .merge_hash_entries(vec![entry])
-                .map(|_| (discovery.latest_seq(), discovery.hash_entries().to_vec()));
+            let (
+                result,
+                previous_entries,
+                previous_latest_seq,
+                mutated_entries,
+                mutated_latest_seq,
+            ) = {
+                let mut discovery = state.content_discovery.write().await;
+                let previous_entries = discovery.hash_entries().to_vec();
+                let previous_latest_seq = discovery.latest_seq();
+                let result = discovery
+                    .merge_hash_entries(vec![entry])
+                    .map(|_| (discovery.latest_seq(), discovery.hash_entries().to_vec()));
+                let mutated_entries = discovery.hash_entries().to_vec();
+                let mutated_latest_seq = discovery.latest_seq();
+                (
+                    result,
+                    previous_entries,
+                    previous_latest_seq,
+                    mutated_entries,
+                    mutated_latest_seq,
+                )
+            };
             match result {
                 Ok((latest_seq, entries)) => {
                     if let Err(error) = persist_hash_db_snapshot(state, &entries, latest_seq).await
                     {
-                        let _ =
-                            discovery.restore_hash_entries(previous_entries, previous_latest_seq);
+                        rollback_hash_db_entries_if_unchanged(
+                            state,
+                            previous_entries,
+                            previous_latest_seq,
+                            &mutated_entries,
+                            mutated_latest_seq,
+                        )
+                        .await;
                         return Ok(routing::internal_server_error_response(&error));
                     }
                     if route.path.starts_with("/api/v0/") {
@@ -818,34 +841,57 @@ async fn route_dispatch_group_0(context: &RouteDispatchContext<'_, '_>) -> Route
                 None => return Ok(routing::bad_request_response("entries are required")),
             };
             let received = entries.len();
-            let mut discovery = state.content_discovery.write().await;
-            let previous_entries = discovery.hash_entries().to_vec();
-            let previous_latest_seq = discovery.latest_seq();
-            let result = if route.path.starts_with("/api/v0/") {
-                discovery
-                    .merge_hash_entries_from_mesh(entries)
-                    .map(|(merged, _skipped)| {
+            let (
+                result,
+                previous_entries,
+                previous_latest_seq,
+                mutated_entries,
+                mutated_latest_seq,
+            ) = {
+                let mut discovery = state.content_discovery.write().await;
+                let previous_entries = discovery.hash_entries().to_vec();
+                let previous_latest_seq = discovery.latest_seq();
+                let result = if route.path.starts_with("/api/v0/") {
+                    discovery
+                        .merge_hash_entries_from_mesh(entries)
+                        .map(|(merged, _skipped)| {
+                            (
+                                merged,
+                                discovery.latest_seq(),
+                                discovery.hash_entries().to_vec(),
+                            )
+                        })
+                } else {
+                    discovery.merge_hash_entries(entries).map(|merged| {
                         (
                             merged,
                             discovery.latest_seq(),
                             discovery.hash_entries().to_vec(),
                         )
                     })
-            } else {
-                discovery.merge_hash_entries(entries).map(|merged| {
-                    (
-                        merged,
-                        discovery.latest_seq(),
-                        discovery.hash_entries().to_vec(),
-                    )
-                })
+                };
+                let mutated_entries = discovery.hash_entries().to_vec();
+                let mutated_latest_seq = discovery.latest_seq();
+                (
+                    result,
+                    previous_entries,
+                    previous_latest_seq,
+                    mutated_entries,
+                    mutated_latest_seq,
+                )
             };
             match result {
                 Ok((merged, latest_seq, entries)) => {
                     if let Err(error) = persist_hash_db_snapshot(state, &entries, latest_seq).await
                     {
-                        let _ =
-                            discovery.restore_hash_entries(previous_entries, previous_latest_seq);
+                        rollback_hash_db_entries_if_unchanged(
+                            state,
+                            previous_entries,
+                            previous_latest_seq,
+                            &mutated_entries,
+                            mutated_latest_seq,
+                        )
+                        .await;
                         return Ok(routing::internal_server_error_response(&error));
                     }
                     Ok(routing::ok_response(

@@ -917,7 +917,17 @@ async fn route_dispatch_group_2(context: &RouteDispatchContext<'_, '_>) -> Route
                 transfers.entries = previous.clone();
                 transfers.persist_state();
                 drop(transfers);
-                let _ = persist_transfer_records(state, &previous).await;
+                if let Err(rollback_error) = persist_transfer_records(state, &previous).await {
+                    record_daemon_log(
+                        state,
+                        logging::LogLevel::Error,
+                        "transfers",
+                        format!(
+                            "failed to persist transfer request-name rollback: {rollback_error}"
+                        ),
+                    )
+                    .await;
+                }
                 return Ok(routing::service_unavailable_response(&error));
             }
             let attempts = updated.iter().collect::<Vec<_>>();
@@ -965,7 +975,17 @@ async fn route_dispatch_group_2(context: &RouteDispatchContext<'_, '_>) -> Route
                 transfers.entries = previous.clone();
                 transfers.persist_state();
                 drop(transfers);
-                let _ = persist_transfer_records(state, &previous).await;
+                if let Err(rollback_error) = persist_transfer_records(state, &previous).await {
+                    record_daemon_log(
+                        state,
+                        logging::LogLevel::Error,
+                        "transfers",
+                        format!(
+                            "failed to persist transfer cancellation rollback: {rollback_error}"
+                        ),
+                    )
+                    .await;
+                }
                 return Ok(routing::service_unavailable_response(&error));
             }
             Ok(routing::no_content_response())
