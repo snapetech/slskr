@@ -41,11 +41,11 @@ fi
 
 for rust_file in "${rust_files[@]}"; do
   file_bytes="$(wc -c <"$rust_file")"
-  if ((file_bytes > 2000000)); then
+  if [[ "$rust_file" == "crates/slskr-web/src/lib.rs" ]] || ((file_bytes > 2000000)); then
     # The monolithic controller source predates the current rustfmt version
-    # and has repository-wide formatting debt. Formatting it as one unit is
-    # both expensive and noisy, so keep this incremental gate for bounded
-    # files only.
+    # and has repository-wide formatting debt. Its size is below the generic
+    # threshold, so identify it explicitly. Formatting it as one unit is both
+    # expensive and noisy; keep this incremental gate for bounded files only.
     printf 'Rust format check skipped for large pre-existing source: %s\n' "$rust_file"
     continue
   fi

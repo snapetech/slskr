@@ -16,6 +16,7 @@ const STATE_VERSION: u32 = 1;
 const MAX_STATE_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_HASH_ENTRIES: usize = 16_384;
 const MAX_HASH_MERGE_ENTRIES: usize = 1_000;
+const MAX_MESH_MERGE_ENTRIES: usize = MAX_HASH_MERGE_ENTRIES * 2;
 const MAX_SHADOW_RECORDINGS: usize = 4_096;
 const MAX_SHADOW_MERGE_RECORDS: usize = 256;
 const MAX_PEERS_PER_RECORDING: usize = 64;
@@ -553,6 +554,27 @@ impl ContentDiscoveryStore {
             .into_iter()
             .map(|entry| normalize_hash_entry(entry, now))
             .collect::<Result<Vec<_>, _>>()?;
+        let merged = match self.merge_normalized_hash_entries(entries, now) {
+            Ok(merged) => merged,
+            Err(error) => {
+                self.hash_entries = previous_entries;
+                self.latest_seq = previous_seq;
+                return Err(error);
+            }
+        };
+        if let Err(error) = self.persist() {
+            self.hash_entries = previous_entries;
+            self.latest_seq = previous_seq;
+            return Err(error);
+        }
+        Ok(merged)
+    }
+
+    fn merge_normalized_hash_entries(
+        &mut self,
+        entries: Vec<HashDbEntry>,
+        now: u64,
+    ) -> Result<usize, String> {
         self.latest_seq
             .checked_add(entries.len() as u64)
             .ok_or_else(|| "hash database sequence is exhausted".to_owned())?;
@@ -567,8 +589,6 @@ impl ContentDiscoveryStore {
                 !same_hash_identity(&self.hash_entries[index], &incoming)
                     || hash_metadata_conflicts(&self.hash_entries[index], &incoming)
             }) {
-                self.hash_entries = previous_entries;
-                self.latest_seq = previous_seq;
                 return Err("flacKey and size conflict with existing SHA-256 metadata".to_owned());
             }
             let existing = same_key.or_else(|| {
@@ -586,8 +606,6 @@ impl ContentDiscoveryStore {
                 self.hash_entries[index] = incoming;
             } else {
                 if self.hash_entries.len() >= MAX_HASH_ENTRIES {
-                    self.hash_entries = previous_entries;
-                    self.latest_seq = previous_seq;
                     return Err("hash database capacity is full".to_owned());
                 }
                 incoming.first_seen_at = now;
@@ -595,11 +613,6 @@ impl ContentDiscoveryStore {
                 self.hash_entries.push(incoming);
             }
             merged += 1;
-        }
-        if let Err(error) = self.persist() {
-            self.hash_entries = previous_entries;
-            self.latest_seq = previous_seq;
-            return Err(error);
         }
         Ok(merged)
     }
@@ -628,6 +641,13 @@ impl ContentDiscoveryStore {
         &mut self,
         entries: Vec<HashDbEntry>,
     ) -> Result<(usize, usize), String> {
+        if entries.is_empty() || entries.len() > MAX_MESH_MERGE_ENTRIES {
+            return Err(format!(
+                "mesh hash merge requires 1 to {MAX_MESH_MERGE_ENTRIES} entries"
+            ));
+        }
+        let previous_entries = self.hash_entries.clone();
+        let previous_seq = self.latest_seq;
         let now = crate::unix_timestamp();
         let mut valid = Vec::with_capacity(entries.len());
         let mut skipped = 0;
@@ -660,7 +680,19 @@ impl ContentDiscoveryStore {
         if candidates.is_empty() {
             return Ok((0, skipped));
         }
-        let merged = self.merge_hash_entries(candidates)?;
+        let merged = match self.merge_normalized_hash_entries(candidates, now) {
+            Ok(merged) => merged,
+            Err(error) => {
+                self.hash_entries = previous_entries;
+                self.latest_seq = previous_seq;
+                return Err(error);
+            }
+        };
+        if let Err(error) = self.persist() {
+            self.hash_entries = previous_entries;
+            self.latest_seq = previous_seq;
+            return Err(error);
+        }
         Ok((merged, skipped))
     }
 
@@ -1112,6 +1144,25 @@ mod tests {
         assert!(error.contains("64-character SHA-256"));
         assert!(store.hash_entries().is_empty());
         assert_eq!(store.latest_seq(), 0);
+    }
+
+    #[test]
+    fn mesh_hash_merge_accepts_the_validated_double_batch_limit() {
+        let mut store = ContentDiscoveryStore::in_memory();
+        let entries = (0..(MAX_HASH_MERGE_ENTRIES * 2 - 1))
+            .map(|index| HashDbEntry {
+                flac_key: format!("mesh-key-{index}"),
+                file_sha256: format!("{index:064x}"),
+                size: index as u64 + 1,
+                ..HashDbEntry::default()
+            })
+            .collect();
+
+        let result = store
+            .merge_hash_entries_from_mesh(entries)
+            .expect("validated mesh batch should merge");
+        assert_eq!(result, (MAX_HASH_MERGE_ENTRIES * 2 - 1, 0));
+        assert_eq!(store.hash_entries().len(), MAX_HASH_MERGE_ENTRIES * 2 - 1);
     }
 
     #[test]

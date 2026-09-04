@@ -1393,15 +1393,17 @@ impl DatabaseManager {
         )
         .execute(&self.pool)
         .await?;
-        let _ = query("ALTER TABLE messages ADD COLUMN source_id INTEGER")
-            .execute(&self.pool)
-            .await;
-        let _ = query("ALTER TABLE messages ADD COLUMN source_timestamp INTEGER")
-            .execute(&self.pool)
-            .await;
-        let _ = query("ALTER TABLE messages ADD COLUMN was_replayed INTEGER DEFAULT 0")
-            .execute(&self.pool)
-            .await;
+        for statement in [
+            "ALTER TABLE messages ADD COLUMN source_id INTEGER",
+            "ALTER TABLE messages ADD COLUMN source_timestamp INTEGER",
+            "ALTER TABLE messages ADD COLUMN was_replayed INTEGER DEFAULT 0",
+        ] {
+            if let Err(error) = query(statement).execute(&self.pool).await {
+                if !error.to_string().contains("duplicate column name") {
+                    return Err(error.into());
+                }
+            }
+        }
 
         // Create user stats table
         query(
@@ -2175,10 +2177,15 @@ impl DatabaseManager {
     }
 
     async fn ensure_share_file_columns(&self) -> Result<(), Box<dyn std::error::Error>> {
-        let _ =
+        if let Err(error) =
             query("ALTER TABLE share_files ADD COLUMN attributes_json TEXT NOT NULL DEFAULT '[]'")
                 .execute(&self.pool)
-                .await;
+                .await
+        {
+            if !error.to_string().contains("duplicate column name") {
+                return Err(error.into());
+            }
+        }
         Ok(())
     }
 

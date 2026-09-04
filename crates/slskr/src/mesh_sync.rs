@@ -246,6 +246,7 @@ async fn merge_delta(
         incoming.push(entry);
     }
 
+    let incoming_count = incoming.len();
     let merge_result = if incoming.is_empty() {
         Ok((0, 0))
     } else {
@@ -255,7 +256,13 @@ async fn merge_delta(
             .await
             .merge_hash_entries_skipping_invalid(incoming)
     };
-    let (merged, skipped_by_store) = merge_result.unwrap_or((0, 0));
+    let (merged, skipped_by_store) = match merge_result {
+        Ok(result) => result,
+        Err(error) => {
+            tracing::warn!(%username, %error, incoming_count, "mesh-sync delta merge failed");
+            (0, incoming_count)
+        }
+    };
     skipped = skipped.saturating_add(skipped_by_store as u64);
     let latest = state.content_discovery.read().await.latest_seq();
     {

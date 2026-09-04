@@ -9807,12 +9807,29 @@ fn native_stream_shared_manifest(
                         stream_url
                     )
                 };
-                let _ = window_for_request.open_with_url_and_target(&url, "_blank");
-                native_set_action_status(
-                    &document_for_request,
-                    "Stream",
-                    "Opened the shared stream with a short-lived content ticket.",
-                );
+                match window_for_request.open_with_url_and_target_and_features(
+                    &url,
+                    "_blank",
+                    "noopener,noreferrer",
+                ) {
+                    Ok(Some(_)) => native_set_action_status(
+                        &document_for_request,
+                        "Stream",
+                        "Opened the shared stream with a short-lived content ticket.",
+                    ),
+                    Ok(None) => native_set_action_status(
+                        &document_for_request,
+                        "Stream",
+                        "The browser blocked the shared stream window; allow pop-ups and try again.",
+                    ),
+                    Err(error) => native_set_action_status(
+                        &document_for_request,
+                        "Stream",
+                        &error
+                            .as_string()
+                            .unwrap_or_else(|| "unable to open the shared stream window".to_string()),
+                    ),
+                }
             }
             Err(error) => native_set_action_status(
                 &document_for_request,

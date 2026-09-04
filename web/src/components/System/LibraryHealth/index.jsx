@@ -1,4 +1,5 @@
 import * as libraryHealth from '../../../lib/libraryHealth';
+import { copyToClipboard } from '../../../lib/clipboard';
 import { toDisplayError } from '../../../lib/errors';
 import {
   buildLibraryHealthActionPlan,
@@ -352,7 +353,7 @@ const LibraryHealth = () => {
     }
   };
 
-  const handleCopyReport = () => {
+  const handleCopyReport = async () => {
     const report = buildLibraryHealthReport({
       issues,
       issuesByArtist,
@@ -361,14 +362,22 @@ const LibraryHealth = () => {
       summary,
     });
 
-    if (navigator.clipboard?.writeText) {
-      navigator.clipboard.writeText(report).catch(() => {});
+    try {
+      const copied = await copyToClipboard(report);
+      if (!mountedRef.current) return;
+      setReportMessage(
+        copied
+          ? `Library health report copied for ${issues.length} loaded issues.`
+          : `Library health report prepared for ${issues.length} loaded issues; clipboard is unavailable.`,
+      );
+    } catch (error_) {
+      if (mountedRef.current) {
+        setReportMessage(toDisplayError(error_, 'Unable to copy library health report.'));
+      }
     }
-
-    setReportMessage(`Library health report prepared for ${issues.length} loaded issues.`);
   };
 
-  const handleCopyActionPlan = () => {
+  const handleCopyActionPlan = async () => {
     const selectedIssueList = issues.filter((issue) =>
       selectedIssues.has(issue.issueId));
     const plan = buildLibraryHealthActionPlan({
@@ -376,14 +385,22 @@ const LibraryHealth = () => {
       libraryPath,
     });
 
-    if (navigator.clipboard?.writeText) {
-      navigator.clipboard.writeText(plan).catch(() => {});
+    try {
+      const copied = await copyToClipboard(plan);
+      if (!mountedRef.current) return;
+      setReportMessage(
+        copied
+          ? `Library health action plan copied for ${selectedIssueList.length} selected issues.`
+          : `Library health action plan prepared for ${selectedIssueList.length} selected issues; clipboard is unavailable.`,
+      );
+    } catch (error_) {
+      if (mountedRef.current) {
+        setReportMessage(toDisplayError(error_, 'Unable to copy library health action plan.'));
+      }
     }
-
-    setReportMessage(`Library health action plan prepared for ${selectedIssueList.length} selected issues.`);
   };
 
-  const handleCopySafeFixManifest = () => {
+  const handleCopySafeFixManifest = async () => {
     const selectedIssueList = issues.filter((issue) =>
       selectedIssues.has(issue.issueId));
     const manifest = buildLibraryHealthSafeFixManifest({
@@ -391,14 +408,22 @@ const LibraryHealth = () => {
       libraryPath,
     });
 
-    if (navigator.clipboard?.writeText) {
-      navigator.clipboard.writeText(manifest).catch(() => {});
+    try {
+      const copied = await copyToClipboard(manifest);
+      if (!mountedRef.current) return;
+      setReportMessage(
+        copied
+          ? `Library health safe-fix manifest copied for ${selectedIssueList.length} selected issues.`
+          : `Library health safe-fix manifest prepared for ${selectedIssueList.length} selected issues; clipboard is unavailable.`,
+      );
+    } catch (error_) {
+      if (mountedRef.current) {
+        setReportMessage(toDisplayError(error_, 'Unable to copy library health safe-fix manifest.'));
+      }
     }
-
-    setReportMessage(`Library health safe-fix manifest prepared for ${selectedIssueList.length} selected issues.`);
   };
 
-  const handleCopySearchSeeds = () => {
+  const handleCopySearchSeeds = async () => {
     const selectedIssueList = issues.filter((issue) =>
       selectedIssues.has(issue.issueId));
     const seeds = buildLibraryHealthSearchSeeds({
@@ -406,14 +431,22 @@ const LibraryHealth = () => {
       libraryPath,
     });
 
-    if (navigator.clipboard?.writeText) {
-      navigator.clipboard.writeText(seeds).catch(() => {});
+    try {
+      const copied = await copyToClipboard(seeds);
+      if (!mountedRef.current) return;
+      setReportMessage(
+        copied
+          ? `Library health replacement search seeds copied for ${selectedIssueList.length} selected issues.`
+          : `Library health replacement search seeds prepared for ${selectedIssueList.length} selected issues; clipboard is unavailable.`,
+      );
+    } catch (error_) {
+      if (mountedRef.current) {
+        setReportMessage(toDisplayError(error_, 'Unable to copy library health replacement search seeds.'));
+      }
     }
-
-    setReportMessage(`Library health replacement search seeds prepared for ${selectedIssueList.length} selected issues.`);
   };
 
-  const handleCopyQuarantinePacket = () => {
+  const handleCopyQuarantinePacket = async () => {
     const selectedIssueList = issues.filter((issue) =>
       selectedIssues.has(issue.issueId));
     const packet = buildLibraryHealthQuarantinePacket({
@@ -421,11 +454,19 @@ const LibraryHealth = () => {
       libraryPath,
     });
 
-    if (navigator.clipboard?.writeText) {
-      navigator.clipboard.writeText(packet).catch(() => {});
+    try {
+      const copied = await copyToClipboard(packet);
+      if (!mountedRef.current) return;
+      setReportMessage(
+        copied
+          ? `Library health quarantine review packet copied for ${selectedIssueList.length} selected issues.`
+          : `Library health quarantine review packet prepared for ${selectedIssueList.length} selected issues; clipboard is unavailable.`,
+      );
+    } catch (error_) {
+      if (mountedRef.current) {
+        setReportMessage(toDisplayError(error_, 'Unable to copy library health quarantine review packet.'));
+      }
     }
-
-    setReportMessage(`Library health quarantine review packet prepared for ${selectedIssueList.length} selected issues.`);
   };
 
   const handleRunReplacementSearches = async () => {

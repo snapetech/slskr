@@ -1,3 +1,6 @@
+import { copyToClipboard } from '../../../lib/clipboard';
+import { toDisplayError } from '../../../lib/errors';
+import { useMountedRef } from '../../../lib/useMountedRef';
 import React, { useEffect, useState } from 'react';
 import {
   Button,
@@ -107,6 +110,7 @@ const buildReport = (form) =>
 const ExperienceSettings = () => {
   const [form, setForm] = useState(defaults);
   const [message, setMessage] = useState(null);
+  const mountedRef = useMountedRef();
 
   useEffect(() => {
     setForm(readStoredPreferences());
@@ -136,16 +140,21 @@ const ExperienceSettings = () => {
     }
   };
 
-  const copyReport = () => {
+  const copyReport = async () => {
     const report = buildReport(form);
-    if (navigator.clipboard?.writeText) {
-      void navigator.clipboard.writeText(report).catch(() => {});
+    try {
+      const copied = await copyToClipboard(report);
+      if (!mountedRef.current) return;
+      setMessage(
+        copied
+          ? 'Experience preference report copied.'
+          : 'Experience preference report prepared; clipboard is unavailable.',
+      );
+    } catch (error) {
+      if (mountedRef.current) {
+        setMessage(toDisplayError(error, 'Unable to copy experience preference report.'));
+      }
     }
-    setMessage(
-      navigator.clipboard?.writeText
-        ? 'Experience preference report copied.'
-        : 'Experience preference report prepared; clipboard is unavailable.',
-    );
   };
 
   return (

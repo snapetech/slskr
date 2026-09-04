@@ -1,7 +1,7 @@
 import PlaylistIntake from './PlaylistIntake';
 import * as collectionsAPI from '../../lib/collections';
 import { playlistIntakeStorageKey } from '../../lib/playlistIntake';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import React from 'react';
 import { vi } from 'vitest';
 
@@ -44,7 +44,7 @@ describe('PlaylistIntake', () => {
     expect(screen.getByText('Ready for review')).toBeInTheDocument();
   });
 
-  it('supports row review states and playlist previews', () => {
+  it('supports row review states and playlist previews', async () => {
     render(<PlaylistIntake />);
 
     fireEvent.change(screen.getByLabelText('Playlist name'), {
@@ -123,7 +123,7 @@ describe('PlaylistIntake', () => {
     );
   });
 
-  it('previews tag organization plans without writing files', () => {
+  it('previews tag organization plans without writing files', async () => {
     render(<PlaylistIntake />);
 
     fireEvent.change(screen.getByLabelText('Playlist name'), {
@@ -165,9 +165,9 @@ describe('PlaylistIntake', () => {
         name: 'Copy tag organization report for Organization queue',
       }),
     );
-    expect(
+    await waitFor(() => expect(
       screen.getByText(/Prepared tag and organization report for Organization queue/),
-    ).toBeInTheDocument();
+    ).toBeInTheDocument());
 
     fireEvent.click(
       screen.getByRole('button', {

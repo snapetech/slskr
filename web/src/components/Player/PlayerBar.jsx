@@ -38,6 +38,7 @@ import {
   getSimilarQueueSearchQueries,
 } from '../../lib/playerAutoQueue';
 import { getPlayerShortcutAction } from '../../lib/playerShortcuts';
+import { copyToClipboard } from '../../lib/clipboard';
 import { toDisplayError } from '../../lib/errors';
 import { getLocalStorageItem, setLocalStorageItem } from '../../lib/storage';
 import { useMountedRef } from '../../lib/useMountedRef';
@@ -285,9 +286,16 @@ const PlayerRadioModal = ({ current, onClose, onOpenSearch, open }) => {
     }
   }, [open]);
 
-  const copyPlan = () => {
-    if (navigator.clipboard && copyText) {
-      navigator.clipboard.writeText(copyText).catch(() => {});
+  const copyPlan = async () => {
+    if (!copyText) return;
+    try {
+      const copied = await copyToClipboard(copyText);
+      if (!mountedRef.current) return;
+      setStatus(copied ? 'Radio plan copied.' : 'Radio plan prepared; clipboard is unavailable.');
+    } catch (error) {
+      if (mountedRef.current) {
+        setStatus(toDisplayError(error, 'Unable to copy radio plan.'));
+      }
     }
   };
 
@@ -811,6 +819,7 @@ const PlayerDiscoveryShelfModal = ({ onClose, open }) => {
   const [items, setItems] = useState(() => getDiscoveryShelf());
   const [message, setMessage] = useState('');
   const [requireConsensus, setRequireConsensus] = useState(true);
+  const mountedRef = useMountedRef();
   const summary = getDiscoveryShelfSummary();
   const policyPreview = getDiscoveryShelfPolicyPreview({
     expiryDays,
@@ -846,18 +855,26 @@ const PlayerDiscoveryShelfModal = ({ onClose, open }) => {
     setMessage('Discovery shelf cleared from this browser.');
   };
 
-  const copyPolicyReport = () => {
+  const copyPolicyReport = async () => {
     const report = exportDiscoveryShelfPolicyReport({
       expiryDays,
       items,
       requireConsensus,
     });
 
-    if (navigator.clipboard?.writeText) {
-      navigator.clipboard.writeText(report).catch(() => {});
+    try {
+      const copied = await copyToClipboard(report);
+      if (!mountedRef.current) return;
+      setMessage(
+        copied
+          ? `Policy report copied for ${items.length} shelf items.`
+          : `Policy report prepared for ${items.length} shelf items; clipboard is unavailable.`,
+      );
+    } catch (error) {
+      if (mountedRef.current) {
+        setMessage(toDisplayError(error, 'Unable to copy policy report.'));
+      }
     }
-
-    setMessage(`Policy report prepared for ${items.length} shelf items.`);
   };
 
   return (
@@ -1085,16 +1102,24 @@ const PlayerStatsModal = ({ onClose, onOpenSearch, open }) => {
     refreshStats();
   };
 
-  const copyHistory = (format) => {
+  const copyHistory = async (format) => {
     const content = format === 'csv'
       ? exportListeningHistoryCsv()
       : exportListeningHistoryJson();
 
-    if (navigator.clipboard?.writeText) {
-      navigator.clipboard.writeText(content).catch(() => {});
+    try {
+      const copied = await copyToClipboard(content);
+      if (!mountedRef.current) return;
+      setImportStatus(
+        copied
+          ? `${format.toUpperCase()} export copied for ${stats.history.length} plays.`
+          : `Prepared ${format.toUpperCase()} export for ${stats.history.length} plays; clipboard is unavailable.`,
+      );
+    } catch (error) {
+      if (mountedRef.current) {
+        setImportStatus(toDisplayError(error, `Unable to copy ${format.toUpperCase()} export.`));
+      }
     }
-
-    setImportStatus(`Prepared ${format.toUpperCase()} export for ${stats.history.length} plays.`);
   };
 
   const startSeedSearches = async () => {

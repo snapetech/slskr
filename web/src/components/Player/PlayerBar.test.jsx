@@ -500,7 +500,7 @@ describe('PlayerBar', () => {
       '0 consensus gated',
     );
     fireEvent.click(screen.getByTestId('player-shelf-copy-policy-report'));
-    expect(screen.getByText('Policy report prepared for 1 shelf items.')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText(/Policy report (prepared|copied) for 1 shelf items/)).toBeInTheDocument());
     fireEvent.click(screen.getByTestId('player-shelf-preview-content:sha256:test'));
     expect(screen.getByText('Promote preview prepared for Local stream. No files were moved or deleted.')).toBeInTheDocument();
     fireEvent.click(screen.getByTestId('player-close-discovery-shelf'));

@@ -1,4 +1,5 @@
 import './PlaylistIntake.css';
+import { copyToClipboard } from '../../lib/clipboard';
 import * as collectionsAPI from '../../lib/collections';
 import { toDisplayError } from '../../lib/errors';
 import {
@@ -113,12 +114,21 @@ const PlaylistIntake = () => {
     setStatus(`Prepared tag and organization dry run for ${playlist.name}`);
   };
 
-  const copyTagOrganizationReport = (playlist) => {
+  const copyTagOrganizationReport = async (playlist) => {
     const report = formatPlaylistTagOrganizationReport(playlist);
-    if (navigator.clipboard?.writeText) {
-      navigator.clipboard.writeText(report).catch(() => {});
+    try {
+      const copied = await copyToClipboard(report);
+      if (!mountedRef.current) return;
+      setStatus(
+        copied
+          ? `Tag and organization report copied for ${playlist.name}`
+          : `Prepared tag and organization report for ${playlist.name}; clipboard is unavailable`,
+      );
+    } catch (error) {
+      if (mountedRef.current) {
+        setStatus(toDisplayError(error, 'Unable to copy tag and organization report'));
+      }
     }
-    setStatus(`Prepared tag and organization report for ${playlist.name}`);
   };
 
   const approveTagOrganizationSnapshot = (playlist) => {
