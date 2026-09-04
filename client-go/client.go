@@ -84,14 +84,14 @@ func (c *Client) ListSearches(ctx context.Context, limit, offset int) ([]map[str
 	params.Set("limit", fmt.Sprintf("%d", limit))
 	params.Set("offset", fmt.Sprintf("%d", offset))
 
-	result, err := c.getWithParams(ctx, "/api/searches", params, true)
+	result, err := c.getRawWithParams(ctx, "/api/searches", params, true)
 	if err != nil {
 		return nil, err
 	}
 
-	searches, ok := result["searches"].([]interface{})
-	if !ok {
-		return nil, fmt.Errorf("unexpected response format")
+	searches, err := responseArray(result, "searches", "entries")
+	if err != nil {
+		return nil, err
 	}
 
 	var out []map[string]interface{}
@@ -115,7 +115,7 @@ func (c *Client) CreateSearch(ctx context.Context, query string) (map[string]int
 func (c *Client) ListTransfers(ctx context.Context, direction, status string, limit, offset int) ([]map[string]interface{}, error) {
 	params := url.Values{}
 	if direction != "" {
-		params.Set("direction", direction)
+		params.Set("direction", transferDirectionValue(direction))
 	}
 	if status != "" {
 		params.Set("status", status)
@@ -128,9 +128,9 @@ func (c *Client) ListTransfers(ctx context.Context, direction, status string, li
 		return nil, err
 	}
 
-	transfers, ok := result["transfers"].([]interface{})
-	if !ok {
-		return nil, fmt.Errorf("unexpected response format")
+	transfers, err := responseArray(result, "transfers", "entries")
+	if err != nil {
+		return nil, err
 	}
 
 	var out []map[string]interface{}
@@ -153,9 +153,9 @@ func (c *Client) ListMessages(ctx context.Context, limit, offset int) ([]map[str
 		return nil, err
 	}
 
-	messages, ok := result["messages"].([]interface{})
-	if !ok {
-		return nil, fmt.Errorf("unexpected response format")
+	messages, err := responseArray(result, "messages", "entries")
+	if err != nil {
+		return nil, err
 	}
 
 	var out []map[string]interface{}
@@ -177,9 +177,9 @@ func (c *Client) GetUserMessages(ctx context.Context, username string, limit int
 		return nil, err
 	}
 
-	messages, ok := result["messages"].([]interface{})
-	if !ok {
-		return nil, fmt.Errorf("unexpected response format")
+	messages, err := responseArray(result, "messages", "entries")
+	if err != nil {
+		return nil, err
 	}
 
 	var out []map[string]interface{}
@@ -194,15 +194,15 @@ func (c *Client) GetUserMessages(ctx context.Context, username string, limit int
 // SendMessage sends a message to user
 func (c *Client) SendMessage(ctx context.Context, recipient, content string) (map[string]interface{}, error) {
 	body := map[string]interface{}{
-		"recipient": recipient,
-		"content":   content,
+		"username": recipient,
+		"body":     content,
 	}
 	return c.post(ctx, "/api/messages", body, true)
 }
 
 // AcknowledgeMessage marks message as acknowledged
 func (c *Client) AcknowledgeMessage(ctx context.Context, messageID string) error {
-	_, err := c.post(ctx, fmt.Sprintf("/api/messages/%s/acknowledge", pathSegment(messageID)), nil, true)
+	_, err := c.post(ctx, fmt.Sprintf("/api/messages/%s/ack", pathSegment(messageID)), nil, true)
 	return err
 }
 
@@ -226,9 +226,9 @@ func (c *Client) ListUsers(ctx context.Context, limit, offset int) ([]map[string
 		return nil, err
 	}
 
-	users, ok := result["users"].([]interface{})
-	if !ok {
-		return nil, fmt.Errorf("unexpected response format")
+	users, err := responseArray(result, "users", "entries")
+	if err != nil {
+		return nil, err
 	}
 
 	var out []map[string]interface{}
@@ -251,9 +251,9 @@ func (c *Client) ListRooms(ctx context.Context) ([]map[string]interface{}, error
 		return nil, err
 	}
 
-	rooms, ok := result["rooms"].([]interface{})
-	if !ok {
-		return nil, fmt.Errorf("unexpected response format")
+	rooms, err := responseArray(result, "rooms", "entries")
+	if err != nil {
+		return nil, err
 	}
 
 	var out []map[string]interface{}
@@ -275,12 +275,12 @@ func (c *Client) JoinRoom(ctx context.Context, roomName string) (map[string]inte
 	body := map[string]interface{}{
 		"name": roomName,
 	}
-	return c.post(ctx, "/api/rooms/join", body, true)
+	return c.post(ctx, fmt.Sprintf("/api/rooms/%s/join", pathSegment(roomName)), body, true)
 }
 
 // LeaveRoom leaves a room
 func (c *Client) LeaveRoom(ctx context.Context, roomID string) error {
-	_, err := c.post(ctx, fmt.Sprintf("/api/rooms/%s/leave", pathSegment(roomID)), nil, true)
+	_, err := c.delete(ctx, fmt.Sprintf("/api/rooms/%s/join", pathSegment(roomID)), true)
 	return err
 }
 
@@ -299,9 +299,9 @@ func (c *Client) ListShares(ctx context.Context, limit, offset int) ([]map[strin
 		return nil, err
 	}
 
-	shares, ok := result["shares"].([]interface{})
-	if !ok {
-		return nil, fmt.Errorf("unexpected response format")
+	shares, err := responseArray(result, "shares", "local", "entries")
+	if err != nil {
+		return nil, err
 	}
 
 	var out []map[string]interface{}
@@ -315,7 +315,7 @@ func (c *Client) ListShares(ctx context.Context, limit, offset int) ([]map[strin
 
 // RefreshShares refreshes the share list
 func (c *Client) RefreshShares(ctx context.Context) (map[string]interface{}, error) {
-	return c.post(ctx, "/api/shares/refresh", nil, true)
+	return c.post(ctx, "/api/shares/rescan", nil, true)
 }
 
 // ============================================================================
@@ -324,12 +324,12 @@ func (c *Client) RefreshShares(ctx context.Context) (map[string]interface{}, err
 
 // GetFilters gets search filters
 func (c *Client) GetFilters(ctx context.Context) (map[string]interface{}, error) {
-	return c.get(ctx, "/api/filters", true)
+	return c.get(ctx, "/api/config/download-filter", true)
 }
 
 // UpdateFilters updates search filters
 func (c *Client) UpdateFilters(ctx context.Context, filters map[string]interface{}) (map[string]interface{}, error) {
-	return c.post(ctx, "/api/filters", filters, true)
+	return c.put(ctx, "/api/config/download-filter", filters, true)
 }
 
 // ============================================================================
@@ -341,6 +341,19 @@ func (c *Client) get(ctx context.Context, path string, auth bool) (map[string]in
 }
 
 func (c *Client) getWithParams(ctx context.Context, path string, params url.Values, auth bool) (map[string]interface{}, error) {
+	result, err := c.getRawWithParams(ctx, path, params, auth)
+	if err != nil {
+		return nil, err
+	}
+
+	object, ok := result.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("unexpected response format: expected JSON object")
+	}
+	return object, nil
+}
+
+func (c *Client) getRawWithParams(ctx context.Context, path string, params url.Values, auth bool) (interface{}, error) {
 	if c.initErr != nil {
 		return nil, c.initErr
 	}
@@ -354,7 +367,7 @@ func (c *Client) getWithParams(ctx context.Context, path string, params url.Valu
 		return nil, err
 	}
 
-	return c.do(req, auth)
+	return c.doJSON(req, auth)
 }
 
 func (c *Client) post(ctx context.Context, path string, body interface{}, auth bool) (map[string]interface{}, error) {
@@ -377,7 +390,53 @@ func (c *Client) post(ctx context.Context, path string, body interface{}, auth b
 	return c.do(req, auth)
 }
 
+func (c *Client) put(ctx context.Context, path string, body interface{}, auth bool) (map[string]interface{}, error) {
+	if c.initErr != nil {
+		return nil, c.initErr
+	}
+	fullURL := c.BaseURL + path
+
+	bodyBytes, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, fullURL, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	return c.do(req, auth)
+}
+
+func (c *Client) delete(ctx context.Context, path string, auth bool) (map[string]interface{}, error) {
+	if c.initErr != nil {
+		return nil, c.initErr
+	}
+	fullURL := c.BaseURL + path
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, fullURL, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return c.do(req, auth)
+}
+
 func (c *Client) do(req *http.Request, auth bool) (map[string]interface{}, error) {
+	result, err := c.doJSON(req, auth)
+	if err != nil {
+		return nil, err
+	}
+
+	object, ok := result.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("unexpected response format: expected JSON object")
+	}
+	return object, nil
+}
+
+func (c *Client) doJSON(req *http.Request, auth bool) (interface{}, error) {
 	if c.Timeout > 0 {
 		ctx, cancel := context.WithTimeout(req.Context(), c.Timeout)
 		defer cancel()
@@ -421,12 +480,42 @@ func (c *Client) do(req *http.Request, auth bool) (map[string]interface{}, error
 	if err != nil {
 		return nil, err
 	}
-	var result map[string]interface{}
+	if len(bodyBytes) == 0 {
+		return map[string]interface{}{}, nil
+	}
+	var result interface{}
 	if err := json.Unmarshal(bodyBytes, &result); err != nil {
 		return nil, err
 	}
 
 	return result, nil
+}
+
+func responseArray(value interface{}, keys ...string) ([]interface{}, error) {
+	if values, ok := value.([]interface{}); ok {
+		return values, nil
+	}
+	object, ok := value.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("unexpected response format: expected JSON array or object")
+	}
+	for _, key := range keys {
+		if values, ok := object[key].([]interface{}); ok {
+			return values, nil
+		}
+	}
+	return nil, fmt.Errorf("unexpected response format: missing array field")
+}
+
+func transferDirectionValue(direction string) string {
+	switch strings.ToLower(strings.TrimSpace(direction)) {
+	case "download":
+		return "0"
+	case "upload":
+		return "1"
+	default:
+		return direction
+	}
 }
 
 func readBoundedBody(resp *http.Response, maximum int64) ([]byte, error) {

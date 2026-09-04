@@ -64570,14 +64570,52 @@ async fn mediacore_mutation_response(
     }
     if path == "/api/mediacore/retrieve/cache/clear" {
         let mut features = state.controller_features.write().await;
-        let bytes_freed = features
-            .values_with_prefix("mediacore/cache/")
+        let requested_keys = serde_json::from_str::<serde_json::Value>(body)
+            .ok()
+            .and_then(|value| value.get("keys").cloned())
+            .and_then(|value| value.as_array().cloned())
+            .unwrap_or_default();
+        if requested_keys.len() > 100 {
+            return Some(routing::bad_request_response(
+                "At most 100 cache keys may be invalidated",
+            ));
+        }
+        let mut cache_keys = requested_keys
+            .into_iter()
+            .filter_map(|value| {
+                value
+                    .as_str()
+                    .map(str::trim)
+                    .map(ToOwned::to_owned)
+            })
+            .filter(|key| !key.is_empty())
+            .map(|key| {
+                if key.starts_with("mediacore/cache/") {
+                    key.to_owned()
+                } else {
+                    format!("mediacore/cache/{key}")
+                }
+            })
+            .collect::<Vec<_>>();
+        cache_keys.sort_unstable();
+        cache_keys.dedup();
+        let cache_keys = if cache_keys.is_empty() {
+            features
+                .entries_with_prefix("mediacore/cache/")
+                .into_iter()
+                .map(|(key, _)| key)
+                .collect::<Vec<_>>()
+        } else {
+            cache_keys
+        };
+        let bytes_freed = cache_keys
             .iter()
+            .filter_map(|key| features.get(key))
             .filter_map(|record| record.get("descriptor"))
             .filter_map(|descriptor| serde_json::to_vec(descriptor).ok())
             .map(|descriptor| descriptor.len() as u64)
             .sum::<u64>();
-        return Some(match features.remove_prefix("mediacore/cache/") {
+        return Some(match features.remove_keys(&cache_keys) {
             Ok(entries_cleared) => routing::ok_response(
                 serde_json::json!({
                     "success": true,

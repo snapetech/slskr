@@ -18,12 +18,12 @@ export declare class SlskrClient {
     getCapabilities(): Promise<Capabilities>;
     getSessions(): Promise<Session[]>;
     createSession(kind: string, parameters?: Record<string, any>): Promise<Session>;
-    pingSession(id: string): Promise<{
+    pingSession(_id: string): Promise<{
         status: string;
         latency_ms: number;
     }>;
-    disconnectSession(id: string): Promise<void>;
-    getSessionPrivileges(id: string): Promise<SessionPrivileges>;
+    disconnectSession(_id: string): Promise<void>;
+    getSessionPrivileges(_id: string): Promise<SessionPrivileges>;
     listSearches(params?: PaginationParams): Promise<Search[]>;
     createSearch(request: SearchCreateRequest): Promise<Search>;
     getSearchDetails(id: string, params?: PaginationParams): Promise<SearchDetails>;

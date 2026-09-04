@@ -147,7 +147,7 @@ class SlskrClient:
     async def list_searches(self, limit: int = 50, offset: int = 0) -> List[Dict]:
         """List searches"""
         result = await self._get("/api/searches", params={"limit": limit, "offset": offset})
-        return result.get("searches", [])
+        return self._response_list(result, "searches", "entries")
 
     async def create_search(self, query: str, room: str = None, target: str = None) -> Dict:
         """Create new search"""
@@ -168,7 +168,7 @@ class SlskrClient:
     async def list_messages(self, limit: int = 50, offset: int = 0) -> List[Dict]:
         """List messages"""
         result = await self._get("/api/messages", params={"limit": limit, "offset": offset})
-        return result.get("messages", [])
+        return self._response_list(result, "messages", "entries")
 
     async def get_user_messages(self, username: str, limit: int = 50) -> List[Dict]:
         """Get messages from user"""
@@ -176,17 +176,17 @@ class SlskrClient:
             f"/api/messages/{self._path_segment(username)}",
             params={"limit": limit},
         )
-        return result.get("messages", [])
+        return self._response_list(result, "messages", "entries")
 
     async def send_message(self, recipient: str, content: str) -> Dict:
         """Send message to user"""
-        body = {"recipient": recipient, "content": content}
+        body = {"username": recipient, "body": content}
         return await self._post("/api/messages", body)
 
     async def acknowledge_message(self, message_id: str) -> None:
         """Mark message as acknowledged"""
         await self._put(
-            f"/api/messages/{self._path_segment(message_id)}/acknowledge",
+            f"/api/messages/{self._path_segment(message_id)}/ack",
             {},
         )
 
@@ -204,19 +204,19 @@ class SlskrClient:
         """List transfers"""
         params = {"limit": limit, "offset": offset}
         if direction:
-            params["direction"] = direction
+            params["direction"] = self._transfer_direction_value(direction)
         if status:
             params["status"] = status
 
         result = await self._get("/api/transfers", params=params)
-        return result.get("transfers", [])
+        return self._response_list(result, "transfers", "entries")
 
     async def create_transfer(
         self, direction: str, peer_username: str, filename: str
     ) -> Dict:
         """Create transfer"""
         body = {
-            "direction": direction,
+            "direction": self._transfer_direction_value(direction),
             "peer_username": peer_username,
             "filename": filename,
         }
@@ -239,7 +239,7 @@ class SlskrClient:
         path: str,
         params: Dict = None,
         authenticated: bool = True,
-    ) -> Dict:
+    ) -> Any:
         """Make GET request"""
         return await self._request("GET", path, params=params, authenticated=authenticated)
 
@@ -281,7 +281,7 @@ class SlskrClient:
         body: Dict = None,
         authenticated: bool = True,
         attempt: int = 0,
-    ) -> Dict:
+    ) -> Any:
         """Make HTTP request"""
         await self._ensure_session()
 
@@ -342,7 +342,7 @@ class SlskrClient:
 
             raise NetworkError(f"Failed to {method} {url}", cause=e)
 
-    async def _read_json(self, response, maximum: int) -> Dict:
+    async def _read_json(self, response, maximum: int) -> Any:
         content_length = response.content_length
         if content_length is not None and content_length > maximum:
             raise NetworkError(f"HTTP response body exceeds {maximum} bytes")
@@ -358,6 +358,26 @@ class SlskrClient:
 
     def _path_segment(self, value: str) -> str:
         return quote(str(value), safe="")
+
+    @staticmethod
+    def _response_list(result: Any, *keys: str) -> List[Dict]:
+        if isinstance(result, list):
+            return result
+        if isinstance(result, dict):
+            for key in keys:
+                value = result.get(key)
+                if isinstance(value, list):
+                    return value
+        return []
+
+    @staticmethod
+    def _transfer_direction_value(direction: str) -> Any:
+        normalized = str(direction).strip().lower()
+        if normalized == "download":
+            return 0
+        if normalized == "upload":
+            return 1
+        return direction
 
     def _build_url(self, path: str) -> str:
         return self.base_url + (path if path.startswith("/") else f"/{path}")

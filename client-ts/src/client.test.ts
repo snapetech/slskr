@@ -126,4 +126,159 @@ describe('SlskrClient request lifecycle', () => {
     await expect(client.health()).resolves.toMatchObject({ status: 'ok' });
     expect(global.fetch).toHaveBeenCalledTimes(2);
   });
+
+  it('uses daemon wire contracts and accepts daemon collection shapes', async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = [];
+    global.fetch = jest.fn().mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      requests.push({ url, init });
+      const parsed = new URL(url);
+
+      if (parsed.pathname === '/api/searches') {
+        return new Response('[{"id":"search-1"}]', { status: 200 });
+      }
+      if (parsed.pathname === '/api/messages' && init?.method === 'GET') {
+        return new Response('{"entries":[{"id":"message-1"}]}', { status: 200 });
+      }
+      if (parsed.pathname === '/api/messages/alice') {
+        return new Response('{"entries":[{"id":"message-2"}]}', { status: 200 });
+      }
+      if (parsed.pathname === '/api/messages' && init?.method === 'POST') {
+        expect(JSON.parse(String(init.body))).toEqual({ username: 'alice', body: 'hello' });
+        return new Response('{"id":"message-3"}', { status: 200 });
+      }
+      if (parsed.pathname === '/api/messages/7/ack') {
+        return new Response(null, { status: 204 });
+      }
+      if (parsed.pathname === '/api/transfers') {
+        if (parsed.searchParams.get('direction') !== '0') {
+          throw new Error(`unexpected transfer query: ${parsed.search}`);
+        }
+        return new Response('{"entries":[{"id":"transfer-1"}]}', { status: 200 });
+      }
+      if (parsed.pathname === '/api/rooms') {
+        return new Response('{"entries":[{"name":"lounge"}]}', { status: 200 });
+      }
+      if (parsed.pathname === '/api/rooms/lounge%20room/join') {
+        return new Response(null, { status: 204 });
+      }
+      if (parsed.pathname === '/api/rooms/lounge%20room') {
+        return new Response('{"name":"lounge room"}', { status: 200 });
+      }
+      if (parsed.pathname === '/api/events') {
+        return new Response('[{"type":"message"}]', { status: 200 });
+      }
+      return new Response('{}', { status: 200 });
+    });
+
+    const client = new SlskrClient({
+      baseUrl: 'http://localhost:8080',
+      token: 'test-token',
+      retries: 0,
+    });
+
+    await expect(client.listSearches()).resolves.toMatchObject([{ id: 'search-1', status: 'active' }]);
+    await expect(client.listMessages()).resolves.toMatchObject([{ id: 'message-1' }]);
+    await expect(client.getUserMessages('alice')).resolves.toMatchObject([{ id: 'message-2' }]);
+    await expect(client.sendMessage({ recipient: 'alice', content: 'hello' })).resolves.toMatchObject({
+      id: 'message-3',
+    });
+    await expect(client.acknowledgeMessage('7')).resolves.toBeUndefined();
+    await expect(client.listTransfers({ direction: 'download' })).resolves.toMatchObject([
+      { id: 'transfer-1' },
+    ]);
+    await expect(client.listRooms()).resolves.toEqual([{ name: 'lounge' }]);
+    await expect(client.joinRoom('lounge room')).resolves.toBeUndefined();
+    await expect(client.leaveRoom('lounge room')).resolves.toBeUndefined();
+    await expect(client.getEvents()).resolves.toMatchObject([{ type: 'message', data: {} }]);
+
+    expect(requests.find((request) => request.url.includes('/api/messages/7/ack'))?.init?.method).toBe('PUT');
+    const transferRequest = requests.find((request) => request.url.includes('/api/transfers'));
+    expect(transferRequest?.url).toContain('direction=0');
+    expect(requests.some((request) => request.url.endsWith('/api/rooms/lounge%20room/join'))).toBe(true);
+  });
+
+  it('uses canonical session, browse, and MediaCore cache routes', async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = [];
+    global.fetch = jest.fn().mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      requests.push({ url, init });
+      const parsed = new URL(url);
+
+      if (parsed.pathname === '/api/session' && init?.method === 'GET') {
+        return new Response('{"state":"connected","username":"alice","privileges_seconds":120,"connected_at":1700000000}', { status: 200 });
+      }
+      if (parsed.pathname === '/api/server' && init?.method === 'PUT') {
+        expect(JSON.parse(String(init.body))).toEqual({ username: 'alice', password: 'secret' });
+        return new Response('{"accepted":true}', { status: 202 });
+      }
+      if (parsed.pathname === '/api/session/connect' || parsed.pathname === '/api/session/ping' || parsed.pathname === '/api/session/disconnect' || parsed.pathname === '/api/session/privileges/check') {
+        return new Response('{"accepted":true}', { status: 202 });
+      }
+      if (parsed.pathname === '/api/users/alice/browse' && init?.method === 'GET') {
+        return new Response('{"directories":[{"name":"Albums","files":[{"filename":"Albums/track.flac","size":42}]}]}', { status: 200 });
+      }
+      if (parsed.pathname === '/api/users/alice/browse/request') {
+        return new Response('{"username":"alice","status":"requested","requested_at":1700000000}', { status: 202 });
+      }
+      if (parsed.pathname === '/api/browse/requests') {
+        return new Response('{"requests":[{"username":"alice","status":"ready","requested_at":1700000000}]}', { status: 200 });
+      }
+      if (parsed.pathname === '/api/users/alice/browse/cancel') {
+        return new Response('{"entries":[]}', { status: 200 });
+      }
+      if (parsed.pathname === '/api/mediacore/retrieve/stats') {
+        return new Response('{"totalRetrievals":4,"cacheHits":3,"cacheMisses":1,"cacheHitRatio":0.75,"expiredEntriesCleaned":2}', { status: 200 });
+      }
+      if (parsed.pathname === '/api/mediacore/retrieve/cache/clear') {
+        expect(JSON.parse(String(init?.body))).toEqual({ keys: ['content:audio:track:1'] });
+        return new Response('{"success":true}', { status: 200 });
+      }
+      return new Response('{}', { status: 200 });
+    });
+
+    const client = new SlskrClient({
+      baseUrl: 'http://localhost:8080',
+      token: 'test-token',
+      retries: 0,
+    });
+
+    await expect(client.getSessions()).resolves.toMatchObject([
+      { id: 'server', type: 'server', status: 'connected' },
+    ]);
+    await expect(client.createSession('server', { username: 'alice', password: 'secret' })).resolves.toMatchObject({
+      id: 'server',
+      status: 'connected',
+    });
+    await expect(client.pingSession('server')).resolves.toMatchObject({ status: 'accepted' });
+    await expect(client.disconnectSession('server')).resolves.toBeUndefined();
+    await expect(client.getSessionPrivileges('server')).resolves.toEqual({
+      user_id: 'alice',
+      privileges: ['privileged'],
+    });
+    await expect(client.browseUser('alice')).resolves.toEqual({
+      entries: [{ filename: 'Albums/track.flac', size: 42 }],
+    });
+    await expect(client.requestBrowse('alice')).resolves.toMatchObject({
+      id: 'alice',
+      from: 'alice',
+      status: 'pending',
+    });
+    await expect(client.getBrowseRequests()).resolves.toMatchObject([
+      { id: 'alice', status: 'accepted' },
+    ]);
+    await expect(client.respondToBrowseRequest('alice', 'reject')).resolves.toEqual({ entries: [] });
+    await expect(client.getCacheStats()).resolves.toEqual({
+      hits: 3,
+      misses: 1,
+      evictions: 2,
+      total_requests: 4,
+      hit_rate: 0.75,
+    });
+    await expect(client.invalidateCache(['content:audio:track:1'])).resolves.toBeUndefined();
+
+    expect(requests.some((request) => request.url.endsWith('/api/sessions'))).toBe(false);
+    expect(requests.some((request) => request.url.endsWith('/api/cache/stats'))).toBe(false);
+    expect(requests.some((request) => request.url.endsWith('/api/cache/invalidate'))).toBe(false);
+  });
 });

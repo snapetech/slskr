@@ -1,7 +1,7 @@
 import asyncio
 import inspect
 import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 
@@ -26,6 +26,47 @@ def test_client_validates_and_normalizes_rest_base_url():
 
     client = SlskrClient("https://example.test/slskr/?debug=true#fragment", "token")
     assert client.base_url == "https://example.test/slskr"
+
+
+@pytest.mark.asyncio
+async def test_python_client_uses_daemon_wire_contracts():
+    client = SlskrClient("https://example.test", "token")
+    client._get = AsyncMock(
+        side_effect=[
+            [{"id": "search-1"}],
+            {"entries": [{"id": 1}]},
+            {"entries": [{"id": 2}]},
+            {"entries": [{"id": 3}]},
+        ]
+    )
+    client._post = AsyncMock(side_effect=[{"id": 4}, {"id": 5}])
+    client._put = AsyncMock(return_value=None)
+
+    assert await client.list_searches() == [{"id": "search-1"}]
+    assert await client.list_messages() == [{"id": 1}]
+    assert await client.get_user_messages("alice") == [{"id": 2}]
+    assert await client.list_transfers(direction="download") == [{"id": 3}]
+    assert await client.create_transfer("download", "alice", "track.flac") == {"id": 4}
+    assert await client.send_message("alice", "hello") == {"id": 5}
+    await client.acknowledge_message("7")
+
+    assert client._get.await_args_list == [
+        call("/api/searches", params={"limit": 50, "offset": 0}),
+        call("/api/messages", params={"limit": 50, "offset": 0}),
+        call("/api/messages/alice", params={"limit": 50}),
+        call(
+            "/api/transfers",
+            params={"limit": 50, "offset": 0, "direction": 0},
+        ),
+    ]
+    assert client._post.await_args_list == [
+        call(
+            "/api/transfers",
+            {"direction": 0, "peer_username": "alice", "filename": "track.flac"},
+        ),
+        call("/api/messages", {"username": "alice", "body": "hello"}),
+    ]
+    client._put.assert_awaited_once_with("/api/messages/7/ack", {})
 
 
 def test_batch_builder_serializes_and_limits_operations():
