@@ -1,6 +1,6 @@
 ---
 category: fixed
-audience: users, operators, integrators
+audience: users, operators
 area: search
 action: none
 breaking: false
