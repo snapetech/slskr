@@ -22,6 +22,7 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 pub const MAX_REMOTE_PAYLOAD_SIZE: usize = 1024 * 1024;
 pub const MAX_PARSE_DEPTH: usize = 32;
 const MAX_RATE_LIMIT_BUCKETS: usize = 4096;
+const MAX_RATE_LIMIT_KEY_BYTES: usize = 1024;
 const PREVIOUS_PIN_GRACE: u64 = 30 * 24 * 60 * 60;
 const MAX_CERTIFICATE_PIN_PEERS: usize = 1_024;
 const MAX_CERTIFICATE_PINS_PER_PEER: usize = 8;
@@ -123,7 +124,12 @@ impl RateLimiter {
         capacity: u64,
         refill_rate: f64,
     ) -> bool {
-        if capacity == 0 || !refill_rate.is_finite() || refill_rate < 0.0 {
+        if bucket_key.is_empty()
+            || bucket_key.len() > MAX_RATE_LIMIT_KEY_BYTES
+            || capacity == 0
+            || !refill_rate.is_finite()
+            || refill_rate < 0.0
+        {
             return false;
         }
         let mut buckets = self.buckets.lock().expect("mesh rate limiter lock");
@@ -612,6 +618,10 @@ pub struct OverlayBlocklist {
 impl OverlayBlocklist {
     pub const DEFAULT_BAN_DURATION: Duration = Duration::from_secs(24 * 60 * 60);
     pub const PERMANENT_BAN_DURATION: Duration = Duration::from_secs(3_650 * 24 * 60 * 60);
+    pub const MAX_BLOCKED_IPS: usize = 4_096;
+    pub const MAX_BLOCKED_USERNAMES: usize = 4_096;
+    const MAX_USERNAME_BYTES: usize = 512;
+    const MAX_REASON_BYTES: usize = 512;
 
     pub fn new() -> Self {
         Self::default()
@@ -625,7 +635,11 @@ impl OverlayBlocklist {
     }
 
     pub fn is_blocked_username(&self, username: &str) -> bool {
-        if username.trim().is_empty() {
+        let username = username.trim();
+        if username.is_empty()
+            || username.len() > Self::MAX_USERNAME_BYTES
+            || username.chars().any(char::is_control)
+        {
             return false;
         }
         let key = username.to_ascii_lowercase();
@@ -645,10 +659,18 @@ impl OverlayBlocklist {
         duration: Option<Duration>,
         permanent: bool,
     ) {
-        self.ips
-            .lock()
-            .expect("overlay IP blocklist lock")
-            .insert(ip, new_blocklist_entry(reason, duration, permanent));
+        let Some(entry) = new_blocklist_entry(reason, duration, permanent) else {
+            return;
+        };
+        let mut ips = self.ips.lock().expect("overlay IP blocklist lock");
+        if !ips.contains_key(&ip) && ips.len() >= Self::MAX_BLOCKED_IPS {
+            let now = SystemTime::now();
+            ips.retain(|_, existing| existing.expires_at > now);
+            if ips.len() >= Self::MAX_BLOCKED_IPS {
+                return;
+            }
+        }
+        ips.insert(ip, entry);
     }
 
     pub fn block_username(
@@ -658,16 +680,29 @@ impl OverlayBlocklist {
         duration: Option<Duration>,
         permanent: bool,
     ) {
-        if username.trim().is_empty() {
+        let username = username.trim();
+        if username.is_empty()
+            || username.len() > Self::MAX_USERNAME_BYTES
+            || username.chars().any(char::is_control)
+        {
             return;
         }
-        self.usernames
+        let Some(entry) = new_blocklist_entry(reason, duration, permanent) else {
+            return;
+        };
+        let key = username.to_ascii_lowercase();
+        let mut usernames = self
+            .usernames
             .lock()
-            .expect("overlay username blocklist lock")
-            .insert(
-                username.to_ascii_lowercase(),
-                new_blocklist_entry(reason, duration, permanent),
-            );
+            .expect("overlay username blocklist lock");
+        if !usernames.contains_key(&key) && usernames.len() >= Self::MAX_BLOCKED_USERNAMES {
+            let now = SystemTime::now();
+            usernames.retain(|_, existing| existing.expires_at > now);
+            if usernames.len() >= Self::MAX_BLOCKED_USERNAMES {
+                return;
+            }
+        }
+        usernames.insert(key, entry);
     }
 
     pub fn unblock_ip(&self, ip: IpAddr) -> bool {
@@ -679,6 +714,13 @@ impl OverlayBlocklist {
     }
 
     pub fn unblock_username(&self, username: &str) -> bool {
+        let username = username.trim();
+        if username.is_empty()
+            || username.len() > Self::MAX_USERNAME_BYTES
+            || username.chars().any(char::is_control)
+        {
+            return false;
+        }
         self.usernames
             .lock()
             .expect("overlay username blocklist lock")
@@ -708,19 +750,27 @@ fn new_blocklist_entry(
     reason: impl Into<String>,
     duration: Option<Duration>,
     permanent: bool,
-) -> OverlayBlocklistEntry {
+) -> Option<OverlayBlocklistEntry> {
+    let reason = reason.into();
+    if reason.len() > OverlayBlocklist::MAX_REASON_BYTES || reason.chars().any(char::is_control) {
+        return None;
+    }
     let blocked_at = SystemTime::now();
     let duration = if permanent {
         OverlayBlocklist::PERMANENT_BAN_DURATION
     } else {
-        duration.unwrap_or(OverlayBlocklist::DEFAULT_BAN_DURATION)
+        duration
+            .unwrap_or(OverlayBlocklist::DEFAULT_BAN_DURATION)
+            .min(OverlayBlocklist::PERMANENT_BAN_DURATION)
     };
-    OverlayBlocklistEntry {
-        reason: reason.into(),
+    Some(OverlayBlocklistEntry {
+        reason,
         blocked_at,
-        expires_at: blocked_at + duration,
+        expires_at: blocked_at
+            .checked_add(duration)
+            .unwrap_or(UNIX_EPOCH + OverlayBlocklist::PERMANENT_BAN_DURATION),
         permanent,
-    }
+    })
 }
 
 fn is_active_entry<K: std::cmp::Eq + std::hash::Hash>(
@@ -814,6 +864,10 @@ pub struct ConnectionRateLimiter {
 }
 
 impl ConnectionRateLimiter {
+    pub const MAX_TRACKED_PEERS: usize = 4_096;
+    const MAX_PEER_ID_BYTES: usize = 512;
+    const PEER_STATE_RETENTION: Duration = Duration::from_secs(10 * 60);
+
     pub fn new(backoff_base: Duration, max_attempts: u32) -> Self {
         Self {
             attempts: Mutex::new(HashMap::new()),
@@ -823,7 +877,13 @@ impl ConnectionRateLimiter {
     }
 
     pub fn is_connection_allowed(&self, peer_id: &str) -> bool {
+        if !valid_connection_peer_id(peer_id) {
+            return false;
+        }
         let mut attempts = self.attempts.lock().expect("mesh connection limiter lock");
+        if !ensure_connection_peer_capacity(&mut attempts, peer_id) {
+            return false;
+        }
         let info = attempts.entry(peer_id.to_owned()).or_default();
         let now = Instant::now();
         if info.backoff_until.is_some_and(|until| until > now) {
@@ -840,7 +900,13 @@ impl ConnectionRateLimiter {
     }
 
     pub fn record_success(&self, peer_id: &str) {
+        if !valid_connection_peer_id(peer_id) {
+            return;
+        }
         let mut attempts = self.attempts.lock().expect("mesh connection limiter lock");
+        if !ensure_connection_peer_capacity(&mut attempts, peer_id) {
+            return;
+        }
         let info = attempts.entry(peer_id.to_owned()).or_default();
         info.attempt_count = 0;
         info.backoff_until = None;
@@ -848,13 +914,22 @@ impl ConnectionRateLimiter {
     }
 
     pub fn record_failure(&self, peer_id: &str) {
+        if !valid_connection_peer_id(peer_id) {
+            return;
+        }
         let mut attempts = self.attempts.lock().expect("mesh connection limiter lock");
+        if !ensure_connection_peer_capacity(&mut attempts, peer_id) {
+            return;
+        }
         let info = attempts.entry(peer_id.to_owned()).or_default();
         info.attempt_count = info.attempt_count.saturating_add(1);
         info.last_failure = Some(Instant::now());
     }
 
     pub fn attempt_info(&self, peer_id: &str) -> ConnectionAttemptInfo {
+        if !valid_connection_peer_id(peer_id) {
+            return ConnectionAttemptInfo::default();
+        }
         self.attempts
             .lock()
             .expect("mesh connection limiter lock")
@@ -862,6 +937,34 @@ impl ConnectionRateLimiter {
             .cloned()
             .unwrap_or_default()
     }
+}
+
+fn valid_connection_peer_id(peer_id: &str) -> bool {
+    !peer_id.trim().is_empty()
+        && peer_id.len() <= ConnectionRateLimiter::MAX_PEER_ID_BYTES
+        && !peer_id.chars().any(char::is_control)
+}
+
+fn ensure_connection_peer_capacity(
+    attempts: &mut HashMap<String, ConnectionAttemptInfo>,
+    peer_id: &str,
+) -> bool {
+    if attempts.contains_key(peer_id) {
+        return true;
+    }
+    if attempts.len() >= ConnectionRateLimiter::MAX_TRACKED_PEERS {
+        let now = Instant::now();
+        attempts.retain(|_, info| {
+            info.is_in_backoff()
+                || info.last_success.is_some_and(|at| {
+                    now.saturating_duration_since(at) < ConnectionRateLimiter::PEER_STATE_RETENTION
+                })
+                || info.last_failure.is_some_and(|at| {
+                    now.saturating_duration_since(at) < ConnectionRateLimiter::PEER_STATE_RETENTION
+                })
+        });
+    }
+    attempts.len() < ConnectionRateLimiter::MAX_TRACKED_PEERS
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -941,8 +1044,21 @@ impl TransportPolicy {
         global_order: &[MeshTransportType],
     ) -> Vec<MeshTransportType> {
         self.transport_preference_order
-            .clone()
-            .unwrap_or_else(|| global_order.to_vec())
+            .as_ref()
+            .map(|order| {
+                order
+                    .iter()
+                    .copied()
+                    .take(TransportPolicyManager::MAX_TRANSPORT_LIST_ENTRIES)
+                    .collect()
+            })
+            .unwrap_or_else(|| {
+                global_order
+                    .iter()
+                    .copied()
+                    .take(TransportPolicyManager::MAX_TRANSPORT_LIST_ENTRIES)
+                    .collect()
+            })
     }
 
     pub fn is_transport_allowed(
@@ -974,15 +1090,25 @@ pub struct TransportPolicyManager {
 }
 
 impl TransportPolicyManager {
+    pub const MAX_POLICIES: usize = 4_096;
+    const MAX_POLICY_ID_BYTES: usize = 512;
+    const MAX_TRANSPORT_LIST_ENTRIES: usize = 16;
+
     pub fn new() -> Self {
         Self::default()
     }
 
     pub fn add_or_update_policy(&self, policy: TransportPolicy) {
+        if !policy_is_bounded(&policy) {
+            return;
+        }
         let mut policies = self.policies.lock().expect("mesh policy lock");
         policies.retain(|existing| {
             existing.peer_id != policy.peer_id || existing.pod_id != policy.pod_id
         });
+        if policies.len() >= Self::MAX_POLICIES {
+            return;
+        }
         policies.push(policy);
     }
 
@@ -1025,6 +1151,24 @@ impl TransportPolicyManager {
     pub fn all_policies(&self) -> Vec<TransportPolicy> {
         self.policies.lock().expect("mesh policy lock").clone()
     }
+}
+
+fn policy_is_bounded(policy: &TransportPolicy) -> bool {
+    [policy.peer_id.as_deref(), policy.pod_id.as_deref()]
+        .into_iter()
+        .flatten()
+        .all(|value| {
+            value.len() <= TransportPolicyManager::MAX_POLICY_ID_BYTES
+                && !value.chars().any(char::is_control)
+        })
+        && policy
+            .allowed_transport_types
+            .as_ref()
+            .is_none_or(|types| types.len() <= TransportPolicyManager::MAX_TRANSPORT_LIST_ENTRIES)
+        && policy
+            .transport_preference_order
+            .as_ref()
+            .is_none_or(|types| types.len() <= TransportPolicyManager::MAX_TRANSPORT_LIST_ENTRIES)
 }
 
 pub struct SecurityUtils;
@@ -1530,17 +1674,47 @@ pub struct SecurityEventSink {
 
 impl SecurityEventSink {
     pub const MAX_EVENTS: usize = 10_000;
+    const MAX_EVENT_TYPES: usize = 1_024;
+    const MAX_EVENT_TYPE_BYTES: usize = 128;
+    const MAX_MESSAGE_BYTES: usize = 4_096;
+    const MAX_ID_BYTES: usize = 512;
+    const MAX_DETAILS: usize = 32;
+    const MAX_DETAIL_KEY_BYTES: usize = 128;
+    const MAX_DETAIL_VALUE_BYTES: usize = 1_024;
 
     pub fn new() -> Self {
         Self::default()
     }
 
-    pub fn report(&self, event: SecuritySinkEvent) {
+    pub fn report(&self, mut event: SecuritySinkEvent) {
+        event.event_type = truncate_text(event.event_type, Self::MAX_EVENT_TYPE_BYTES);
+        event.message = truncate_text(event.message, Self::MAX_MESSAGE_BYTES);
+        event.username = event
+            .username
+            .map(|value| truncate_text(value, Self::MAX_ID_BYTES));
+        event.source = event
+            .source
+            .map(|value| truncate_text(value, Self::MAX_ID_BYTES));
+        event.details = event
+            .details
+            .into_iter()
+            .take(Self::MAX_DETAILS)
+            .map(|(key, value)| {
+                (
+                    truncate_text(key, Self::MAX_DETAIL_KEY_BYTES),
+                    truncate_text(value, Self::MAX_DETAIL_VALUE_BYTES),
+                )
+            })
+            .collect();
         let mut state = self.state.lock().expect("security event sink lock");
-        *state
-            .event_counts
-            .entry(event.event_type.clone())
-            .or_default() += 1;
+        if state.event_counts.contains_key(&event.event_type)
+            || state.event_counts.len() < Self::MAX_EVENT_TYPES
+        {
+            *state
+                .event_counts
+                .entry(event.event_type.clone())
+                .or_default() += 1;
+        }
         state.events.push_back(event);
         while state.events.len() > Self::MAX_EVENTS {
             state.events.pop_front();
@@ -1644,10 +1818,17 @@ impl SecurityEventSink {
 /// the boundary so diagnostics cannot accidentally expose full identities.
 #[derive(Debug, Default)]
 pub struct SecurityEventLogger {
-    events: Mutex<Vec<SecurityEvent>>,
+    events: Mutex<VecDeque<SecurityEvent>>,
 }
 
 impl SecurityEventLogger {
+    pub const MAX_EVENTS: usize = 10_000;
+    const MAX_KIND_BYTES: usize = 128;
+    const MAX_PEER_ID_BYTES: usize = 512;
+    const MAX_FIELDS: usize = 32;
+    const MAX_FIELD_KEY_BYTES: usize = 128;
+    const MAX_FIELD_VALUE_BYTES: usize = 1_024;
+
     pub fn new() -> Self {
         Self::default()
     }
@@ -1658,14 +1839,25 @@ impl SecurityEventLogger {
         peer_id: &str,
         fields: impl IntoIterator<Item = (String, String)>,
     ) {
-        self.events
-            .lock()
-            .expect("mesh security event lock")
-            .push(SecurityEvent {
-                kind: kind.to_owned(),
-                peer_id: redact_peer_id(peer_id),
-                fields: fields.into_iter().collect(),
-            });
+        let event = SecurityEvent {
+            kind: truncate_text(kind.to_owned(), Self::MAX_KIND_BYTES),
+            peer_id: redact_peer_id(&truncate_text(peer_id.to_owned(), Self::MAX_PEER_ID_BYTES)),
+            fields: fields
+                .into_iter()
+                .take(Self::MAX_FIELDS)
+                .map(|(key, value)| {
+                    (
+                        truncate_text(key, Self::MAX_FIELD_KEY_BYTES),
+                        truncate_text(value, Self::MAX_FIELD_VALUE_BYTES),
+                    )
+                })
+                .collect(),
+        };
+        let mut events = self.events.lock().expect("mesh security event lock");
+        if events.len() >= Self::MAX_EVENTS {
+            events.pop_front();
+        }
+        events.push_back(event);
     }
 
     pub fn log_rate_limit_violation(
@@ -1712,8 +1904,21 @@ impl SecurityEventLogger {
         self.events
             .lock()
             .expect("mesh security event lock")
-            .clone()
+            .iter()
+            .cloned()
+            .collect()
     }
+}
+
+fn truncate_text(mut value: String, maximum: usize) -> String {
+    if value.len() > maximum {
+        let mut end = maximum;
+        while !value.is_char_boundary(end) {
+            end -= 1;
+        }
+        value.truncate(end);
+    }
+    value
 }
 
 fn redact_peer_id(peer_id: &str) -> String {
@@ -1755,6 +1960,88 @@ mod tests {
         assert!(!limiter.is_connection_allowed("peer"));
         limiter.record_success("peer");
         assert!(limiter.is_connection_allowed("peer"));
+    }
+
+    #[test]
+    fn security_state_rejects_or_bounds_untrusted_text() {
+        let rate_limiter = RateLimiter::new();
+        assert!(!rate_limiter.try_consume(&"x".repeat(MAX_RATE_LIMIT_KEY_BYTES + 1), 1, 1, 1.0));
+
+        let connection_limiter = ConnectionRateLimiter::new(Duration::from_secs(1), 1);
+        assert!(!connection_limiter.is_connection_allowed(&"x".repeat(513)));
+        connection_limiter.record_failure(&"x".repeat(513));
+        assert_eq!(
+            connection_limiter
+                .attempt_info(&"x".repeat(513))
+                .attempt_count,
+            0
+        );
+
+        let blocklist = OverlayBlocklist::new();
+        blocklist.block_username(
+            "peer",
+            "x".repeat(OverlayBlocklist::MAX_REASON_BYTES + 1),
+            None,
+            false,
+        );
+        assert!(!blocklist.is_blocked_username("peer"));
+    }
+
+    #[test]
+    fn security_event_logs_have_hard_capacity_and_field_bounds() {
+        let logger = SecurityEventLogger::new();
+        for _ in 0..=SecurityEventLogger::MAX_EVENTS {
+            logger.record(
+                &"k".repeat(256),
+                &"p".repeat(1024),
+                [("f".repeat(256), "v".repeat(2048))],
+            );
+        }
+        let events = logger.snapshot();
+        assert_eq!(events.len(), SecurityEventLogger::MAX_EVENTS);
+        assert_eq!(events[0].kind.len(), SecurityEventLogger::MAX_KIND_BYTES);
+        assert_eq!(
+            events[0].fields.keys().next().map(String::len),
+            Some(SecurityEventLogger::MAX_FIELD_KEY_BYTES)
+        );
+        assert_eq!(
+            events[0].fields.values().next().map(String::len),
+            Some(SecurityEventLogger::MAX_FIELD_VALUE_BYTES)
+        );
+
+        let sink = SecurityEventSink::new();
+        let mut event = SecuritySinkEvent::new(
+            "t".repeat(256),
+            SecuritySinkSeverity::High,
+            "m".repeat(8192),
+            None,
+            Some("u".repeat(1024)),
+            Some("s".repeat(1024)),
+        );
+        for index in 0..64 {
+            event
+                .details
+                .insert(format!("key-{index}"), "value".repeat(512));
+        }
+        sink.report(event);
+        let event = sink
+            .recent_events(1, SecuritySinkSeverity::Info)
+            .pop()
+            .expect("bounded security sink event");
+        assert_eq!(
+            event.event_type.len(),
+            SecurityEventSink::MAX_EVENT_TYPE_BYTES
+        );
+        assert_eq!(event.message.len(), SecurityEventSink::MAX_MESSAGE_BYTES);
+        assert_eq!(
+            event.username.as_deref().map(str::len),
+            Some(SecurityEventSink::MAX_ID_BYTES)
+        );
+        assert_eq!(event.details.len(), SecurityEventSink::MAX_DETAILS);
+        assert_eq!(
+            event.details.values().next().map(String::len),
+            Some(SecurityEventSink::MAX_DETAIL_VALUE_BYTES)
+        );
     }
 
     #[test]

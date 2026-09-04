@@ -249,6 +249,7 @@ pub struct ConsensusStats {
 struct ConsensusSession {
     expected_hash: Option<String>,
     votes: HashMap<u32, HashMap<String, String>>,
+    vote_count: usize,
     finalized: bool,
 }
 
@@ -261,6 +262,9 @@ pub struct ConsensusControl {
 impl ConsensusControl {
     pub const MAX_SESSIONS: usize = 1_000;
     pub const MINIMUM_SOURCES: usize = 3;
+    pub const MAX_CHUNKS_PER_SESSION: usize = 4_096;
+    pub const MAX_VOTES_PER_SESSION: usize = 4_096;
+    pub const MAX_SOURCES_PER_CHUNK: usize = 64;
 
     pub fn new() -> Self {
         Self::default()
@@ -271,7 +275,10 @@ impl ConsensusControl {
         let expected_hash = expected_hash.and_then(|hash| bounded_text(hash, 256));
         let mut sessions = self.sessions.lock().expect("consensus control lock");
         if sessions.len() >= Self::MAX_SESSIONS {
-            return None;
+            let completed_id = sessions
+                .iter()
+                .find_map(|(id, session)| session.finalized.then_some(id.clone()))?;
+            sessions.remove(&completed_id);
         }
         let id = uuid::Uuid::new_v4().simple().to_string();
         sessions.insert(
@@ -279,6 +286,7 @@ impl ConsensusControl {
             ConsensusSession {
                 expected_hash,
                 votes: HashMap::new(),
+                vote_count: 0,
                 finalized: false,
             },
         );
@@ -299,7 +307,25 @@ impl ConsensusControl {
         if session.finalized {
             return false;
         }
-        session.votes.entry(chunk).or_default().insert(source, hash);
+        let replacing_vote = session
+            .votes
+            .get(&chunk)
+            .is_some_and(|votes| votes.contains_key(&source));
+        if !replacing_vote && session.vote_count >= Self::MAX_VOTES_PER_SESSION {
+            return false;
+        }
+        if !session.votes.contains_key(&chunk)
+            && session.votes.len() >= Self::MAX_CHUNKS_PER_SESSION
+        {
+            return false;
+        }
+        let votes = session.votes.entry(chunk).or_default();
+        if !replacing_vote && votes.len() >= Self::MAX_SOURCES_PER_CHUNK {
+            return false;
+        }
+        if votes.insert(source, hash).is_none() {
+            session.vote_count += 1;
+        }
         true
     }
 
@@ -497,7 +523,10 @@ impl CommitmentControl {
         let id = uuid::Uuid::new_v4().simple().to_string()[..16].to_owned();
         let mut commitments = self.commitments.lock().expect("commitment control lock");
         if commitments.len() >= Self::MAX_COMMITMENTS {
-            return None;
+            let completed_id = commitments.iter().find_map(|(id, record)| {
+                (record.verified || record.failed).then_some(id.clone())
+            })?;
+            commitments.remove(&completed_id);
         }
         commitments.insert(
             id.clone(),
@@ -605,7 +634,10 @@ impl VerificationControl {
         let selected = (0..target as u32).collect::<HashSet<_>>();
         let mut sessions = self.sessions.lock().expect("verification control lock");
         if sessions.len() >= Self::MAX_SESSIONS {
-            return None;
+            let completed_id = sessions
+                .iter()
+                .find_map(|(id, session)| session.finalized.then_some(id.clone()))?;
+            sessions.remove(&completed_id);
         }
         let id = uuid::Uuid::new_v4().simple().to_string();
         sessions.insert(
@@ -738,7 +770,10 @@ impl StorageChallengeControl {
             .lock()
             .expect("storage challenge control lock");
         if challenges.len() >= Self::MAX_PENDING_CHALLENGES {
-            return None;
+            let completed_id = challenges.iter().find_map(|(id, record)| {
+                (record.verified || record.failed).then_some(id.clone())
+            })?;
+            challenges.remove(&completed_id);
         }
         challenges.insert(
             challenge.id.clone(),
@@ -1167,7 +1202,16 @@ impl Default for NetworkGuardControl {
 }
 
 impl NetworkGuardControl {
+    pub const MAX_TRACKED_IPS: usize = 16_384;
+    const MAX_MESSAGE_TIMES_PER_IP: usize = 10_000;
+
     pub fn new(config: NetworkGuardConfig) -> Self {
+        let config = NetworkGuardConfig {
+            max_messages_per_minute: config
+                .max_messages_per_minute
+                .min(Self::MAX_MESSAGE_TIMES_PER_IP),
+            ..config
+        };
         Self {
             config,
             ips: Mutex::new(HashMap::new()),
@@ -1186,6 +1230,12 @@ impl NetworkGuardControl {
 
     pub fn register_connection(&self, ip: IpAddr) -> bool {
         let mut ips = self.ips.lock().expect("network guard lock");
+        if !ips.contains_key(&ip) && ips.len() >= Self::MAX_TRACKED_IPS {
+            prune_idle_network_ips(&mut ips, Instant::now());
+            if ips.len() >= Self::MAX_TRACKED_IPS {
+                return false;
+            }
+        }
         let global = ips
             .values()
             .map(|state| state.active_connections)
@@ -1211,6 +1261,12 @@ impl NetworkGuardControl {
     pub fn allow_message(&self, ip: IpAddr, size: usize) -> bool {
         let now = Instant::now();
         let mut ips = self.ips.lock().expect("network guard lock");
+        if !ips.contains_key(&ip) && ips.len() >= Self::MAX_TRACKED_IPS {
+            prune_idle_network_ips(&mut ips, now);
+            if ips.len() >= Self::MAX_TRACKED_IPS {
+                return false;
+            }
+        }
         let state = ips.entry(ip).or_default();
         while state
             .message_times
@@ -1232,6 +1288,12 @@ impl NetworkGuardControl {
 
     pub fn allow_request(&self, ip: IpAddr) -> bool {
         let mut ips = self.ips.lock().expect("network guard lock");
+        if !ips.contains_key(&ip) && ips.len() >= Self::MAX_TRACKED_IPS {
+            prune_idle_network_ips(&mut ips, Instant::now());
+            if ips.len() >= Self::MAX_TRACKED_IPS {
+                return false;
+            }
+        }
         let state = ips.entry(ip).or_default();
         if state.pending_requests >= self.config.max_pending_requests_per_ip {
             return false;
@@ -1262,6 +1324,23 @@ impl NetworkGuardControl {
     }
 }
 
+fn prune_idle_network_ips(ips: &mut HashMap<IpAddr, NetworkIpState>, now: Instant) {
+    for state in ips.values_mut() {
+        while state
+            .message_times
+            .front()
+            .is_some_and(|timestamp| now.duration_since(*timestamp) >= Duration::from_secs(60))
+        {
+            state.message_times.pop_front();
+        }
+    }
+    ips.retain(|_, state| {
+        state.active_connections > 0
+            || state.pending_requests > 0
+            || !state.message_times.is_empty()
+    });
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct ReconnaissanceStats {
     pub tracked_profiles: usize,
@@ -1289,6 +1368,8 @@ pub struct ReconnaissanceControl {
 impl ReconnaissanceControl {
     pub const MAX_PROFILES: usize = 1_000;
     pub const MAX_EVENTS: usize = 5_000;
+    const MAX_PROFILE_VALUES: usize = 64;
+    const MAX_PROFILE_VALUE_BYTES: usize = 256;
 
     pub fn new() -> Self {
         Self::default()
@@ -1310,11 +1391,21 @@ impl ReconnaissanceControl {
         profile.attempts = profile.attempts.saturating_add(1);
         profile.failures = profile.failures.saturating_add(usize::from(!succeeded));
         profile.ports.insert(port);
-        if let Some(protocol) = protocol.filter(|value| !value.trim().is_empty()) {
-            profile.versions.insert(protocol.to_owned());
+        if let Some(protocol) = protocol.filter(|value| {
+            let value = value.trim();
+            !value.is_empty() && value.len() <= Self::MAX_PROFILE_VALUE_BYTES
+        }) {
+            if profile.versions.len() < Self::MAX_PROFILE_VALUES {
+                profile.versions.insert(protocol.trim().to_owned());
+            }
         }
-        if let Some(user_agent) = user_agent.filter(|value| !value.trim().is_empty()) {
-            profile.user_agents.insert(user_agent.to_owned());
+        if let Some(user_agent) = user_agent.filter(|value| {
+            let value = value.trim();
+            !value.is_empty() && value.len() <= Self::MAX_PROFILE_VALUE_BYTES
+        }) {
+            if profile.user_agents.len() < Self::MAX_PROFILE_VALUES {
+                profile.user_agents.insert(user_agent.trim().to_owned());
+            }
         }
         profile.scanner = profile.ports.len() > 3
             || profile.versions.len() > 2
@@ -1632,6 +1723,9 @@ pub struct DnsSecurityControl {
 }
 
 impl DnsSecurityControl {
+    pub const MAX_CACHED_HOSTS: usize = 4_096;
+    pub const MAX_PINNED_TUNNELS: usize = 4_096;
+
     pub fn new() -> Self {
         Self::default()
     }
@@ -1649,10 +1743,12 @@ impl DnsSecurityControl {
         if (private && !allow_private) || (!private && !allow_public) {
             return Err("destination address is not allowed".to_owned());
         }
-        self.cache
-            .lock()
-            .expect("DNS security cache lock")
-            .insert(hostname.to_ascii_lowercase(), ip);
+        let key = hostname.to_ascii_lowercase();
+        let mut cache = self.cache.lock().expect("DNS security cache lock");
+        if !cache.contains_key(&key) && cache.len() >= Self::MAX_CACHED_HOSTS {
+            return Err("DNS security cache capacity is full".to_owned());
+        }
+        cache.insert(key, ip);
         Ok(ip)
     }
 
@@ -1660,10 +1756,11 @@ impl DnsSecurityControl {
         let Some(tunnel_id) = bounded_text(tunnel_id, 128) else {
             return false;
         };
-        self.pins
-            .lock()
-            .expect("DNS security pin lock")
-            .insert(tunnel_id, ip);
+        let mut pins = self.pins.lock().expect("DNS security pin lock");
+        if !pins.contains_key(&tunnel_id) && pins.len() >= Self::MAX_PINNED_TUNNELS {
+            return false;
+        }
+        pins.insert(tunnel_id, ip);
         true
     }
 
@@ -2171,7 +2268,65 @@ impl ShadowRateLimiter {
 
 #[cfg(test)]
 mod tests {
-    use super::{PrivacyLayerControl, WorkBudgetConfig, WorkBudgetControl};
+    use super::{
+        CommitmentControl, ConsensusControl, PrivacyLayerControl, StorageChallengeControl,
+        VerificationControl, WorkBudgetConfig, WorkBudgetControl,
+    };
+
+    #[test]
+    fn consensus_bounds_votes_and_reclaims_finalized_sessions() {
+        let consensus = ConsensusControl::new();
+        let session = consensus
+            .start_session("bounded.flac", None)
+            .expect("consensus session");
+        for source in 0..ConsensusControl::MAX_SOURCES_PER_CHUNK {
+            assert!(consensus.submit_vote(&session, &format!("source-{source}"), 0, "chunk-hash"));
+        }
+        assert!(!consensus.submit_vote(&session, "source-over-capacity", 0, "chunk-hash"));
+        assert!(consensus.finalize(&session, "actual-hash"));
+
+        for index in 1..ConsensusControl::MAX_SESSIONS {
+            assert!(consensus
+                .start_session(&format!("active-{index}.flac"), None)
+                .is_some());
+        }
+        assert!(consensus.start_session("reclaimed.flac", None).is_some());
+    }
+
+    #[test]
+    fn completed_security_records_release_capacity() {
+        let commitment = CommitmentControl::new();
+        let (first_commitment, first_nonce) = commitment
+            .create("hash", "peer", "file")
+            .expect("commitment");
+        assert!(commitment.verify(&first_commitment, "hash", &first_nonce));
+        for index in 1..CommitmentControl::MAX_COMMITMENTS {
+            assert!(commitment
+                .create(&format!("hash-{index}"), "peer", "file")
+                .is_some());
+        }
+        assert!(commitment.create("reclaimed", "peer", "file").is_some());
+
+        let verification = VerificationControl::new();
+        let first_verification = verification.start(4, 0.5).expect("verification");
+        assert!(!verification.finalize(&first_verification));
+        for _ in 1..VerificationControl::MAX_SESSIONS {
+            assert!(verification.start(4, 0.5).is_some());
+        }
+        assert!(verification.start(4, 0.5).is_some());
+
+        let storage = StorageChallengeControl::new();
+        let first_challenge = storage
+            .create("file", 4_096, "peer", 1)
+            .expect("storage challenge");
+        assert!(storage.verify(&first_challenge.id, "response", "response"));
+        for index in 1..StorageChallengeControl::MAX_PENDING_CHALLENGES {
+            assert!(storage
+                .create(&format!("file-{index}"), 4_096, "peer", 1)
+                .is_some());
+        }
+        assert!(storage.create("reclaimed", 4_096, "peer", 1).is_some());
+    }
 
     #[test]
     fn work_budget_near_quota_check_handles_maximum_configuration() {
