@@ -1,6 +1,6 @@
 import { NODES, shouldLaunchNodes } from './env';
 import { MultiPeerHarness } from './harness/MultiPeerHarness';
-import { clickNav, login, waitForHealth } from './helpers';
+import { getAuthToken, login, waitForHealth } from './helpers';
 import { T } from './selectors';
 import { expect, test } from '@playwright/test';
 
@@ -50,42 +50,56 @@ test.describe('search', () => {
     // Music fixture is test-data/slskr-test-fixtures/music/open_goldberg/ (cover.jpg)
     await searchInput.fill('cover');
 
-    // Wait for search request/response (POST /api/v0/searches or compatibility search)
+    // Wait for the actual create request. A background GET /searches can race
+    // this action, so matching only the URL would accept the wrong response.
     const searchResponse = page
       .waitForResponse(
         (resp) =>
-          (resp.url().includes('/api/v0/search') ||
-            resp.url().includes('/searches')) &&
+          resp.request().method() === 'POST' &&
+          resp.url().includes('/api/v0/searches') &&
           (resp.status() === 200 || resp.status() === 201),
         { timeout: 15_000 },
       )
-      .catch(() => null);
+      .then((resp) => resp.json());
 
     await searchInput.press('Enter');
-    await searchResponse; // Wait for API call
+    const createdSearch = await searchResponse;
+    const createdSearchId = createdSearch?.searchId ?? createdSearch?.id;
+    expect(createdSearchId).toBeTruthy();
+    const authHeaders = {
+      Authorization: `Bearer ${await getAuthToken(page)}`,
+    };
 
-    // Result cards use className "result-card" (Search/Response.jsx). Wait for navigation to
-    // /searches/<id> and for at least one card to appear (search detail loads asynchronously).
+    const responseApi = await request.get(
+      `${nodeA.baseUrl}/api/v0/searches/${encodeURIComponent(String(createdSearchId))}/responses`,
+      { failOnStatusCode: false, headers: authHeaders },
+    );
+    const responseBody = await responseApi.json().catch(() => null);
+    expect(responseApi.ok()).toBeTruthy();
+    expect(Array.isArray(responseBody)).toBeTruthy();
+    expect(
+      responseBody.some((response) =>
+        [...(response.files ?? []), ...(response.lockedFiles ?? [])].some(
+          (file) => file.filename?.toLowerCase().includes('cover'),
+        ),
+      ),
+    ).toBeTruthy();
+
+    // Enter queues the search on the list page. Open the returned ID explicitly
+    // so this scenario covers the same detail route that previously rendered a
+    // blank page when the compatibility ID had no UUID dashes.
+    await page.goto(
+      `${nodeA.baseUrl}/searches/${encodeURIComponent(String(createdSearchId))}`,
+      { timeout: 10_000, waitUntil: 'domcontentloaded' },
+    );
+
+    // Result cards use className "result-card" (Search/Response.jsx). Wait for
+    // at least one card to appear; search detail loads asynchronously.
     const results = page.locator(
       '[data-testid*="search-result"], [data-testid*="result-item"], .result-card, .search-result, .result-item',
     );
-    await expect(results.first()).toBeVisible({ timeout: 20_000 }).catch(() => null);
+    await expect(results.first()).toBeVisible({ timeout: 20_000 });
     const count = await results.count();
-
-    // If no results in UI, check API response directly (GET podcore content search)
-    if (count === 0) {
-      const apiResponse = await request.get(
-        `${nodeA.baseUrl}/api/v0/podcore/content/search?query=cover`,
-        { failOnStatusCode: false },
-      );
-      if (apiResponse.ok()) {
-        const body = await apiResponse.json().catch(() => ({}));
-        if (Array.isArray(body) && body.length > 0) {
-          return; // Search works, UI might not be showing yet
-        }
-      }
-    }
-
     expect(count).toBeGreaterThan(0);
   });
 

@@ -297,6 +297,15 @@ const cloneTrigger = (trigger, props) => {
   });
 };
 
+const renderLabel = (label) => {
+  if (label === undefined || label === null || label === false) return null;
+  if (React.isValidElement(label)) return label;
+  if (typeof label === 'object' && !Array.isArray(label)) {
+    return <Label {...label} />;
+  }
+  return <Label>{label}</Label>;
+};
+
 const createComponent = (baseClass, defaultAs = 'div', classFactory = () => null) =>
   React.forwardRef((props, ref) => {
     const {
@@ -364,7 +373,7 @@ export const Button = React.forwardRef((props, ref) => {
   const body = childrenOrContent(children, content);
   const buttonProps = cleanProps(rest);
   const renderedIcon = typeof icon === 'string' ? <Icon name={icon} /> : null;
-  const renderedLabel = label ? <Label>{label}</Label> : null;
+  const renderedLabel = renderLabel(label);
 
   if (Component === 'button' && !buttonProps.type) {
     buttonProps.type = type || 'button';
@@ -404,7 +413,34 @@ Button.Or = ({ children, className, content, text, ...props }) => (
   </div>
 );
 
-export const Label = createComponent('ui label', 'span');
+const renderLabelIcon = (icon) => {
+  if (!icon) return null;
+  if (React.isValidElement(icon)) return icon;
+  if (typeof icon === 'object') return <Icon {...icon} />;
+  return <Icon name={icon} />;
+};
+
+export const Label = React.forwardRef((props, ref) => {
+  const {
+    as: Component = 'span',
+    children,
+    className,
+    content,
+    icon,
+    ...rest
+  } = props;
+
+  return (
+    <Component
+      {...cleanProps(rest)}
+      className={cx('ui label', commonClasses(props), className)}
+      ref={ref}
+    >
+      {renderLabelIcon(icon)}
+      {childrenOrContent(children, content)}
+    </Component>
+  );
+});
 Label.Detail = createComponent('detail', 'span');
 Label.Group = createComponent('ui labels');
 
@@ -631,12 +667,12 @@ export const Input = React.forwardRef((props, ref) => {
         className,
       )}
     >
-      {label && labelPosition === 'left' ? <Label>{label}</Label> : null}
+      {label && labelPosition === 'left' ? renderLabel(label) : null}
       {inputElement}
       {icon ? <Icon name={typeof icon === 'string' ? icon : undefined} /> : null}
       {children}
       {renderInputAction(action)}
-      {label && labelPosition !== 'left' ? <Label>{label}</Label> : null}
+      {label && labelPosition !== 'left' ? renderLabel(label) : null}
     </div>
   );
 });

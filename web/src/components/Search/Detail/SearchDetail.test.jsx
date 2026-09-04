@@ -65,9 +65,11 @@ vi.mock('../../../lib/wishlist', () => ({
   ignoreResult: vi.fn(),
 }));
 vi.mock('../../Shared/ErrorSegment', () => ({ default: () => null }));
-vi.mock('../../Shared/LoaderSegment', () => ({ default: () => null }));
+vi.mock('../../Shared/LoaderSegment', () => ({
+  default: ({ children }) => <div data-testid="search-loader">{children}</div>,
+}));
 vi.mock('../../Shared/Switch', () => ({
-  default: ({ children }) => <>{children}</>,
+  default: ({ children, loading, searching }) => <>{loading || searching || children}</>,
 }));
 vi.mock('../DiscoveryGraphModal', () => ({ default: () => null }));
 vi.mock('../Response', () => ({
@@ -189,6 +191,35 @@ describe('SearchDetail wishlist folder ignores', () => {
     expect(await screen.findByRole('status')).toHaveTextContent(
       'No results were returned for this search.',
     );
+  });
+
+  it('shows hydrated local results while the remote search is still active', async () => {
+    const localResponse = {
+      ...response,
+      fileCount: 1,
+      files: [{ filename: 'music/open_goldberg/cover.jpg', size: 287069 }],
+      responseCount: 0,
+      username: '',
+    };
+    getResponses.mockResolvedValue([localResponse]);
+
+    render(
+      <SearchDetail
+        {...createProps({
+          fileCount: 1,
+          isComplete: false,
+          responseCount: 0,
+          state: 'InProgress',
+        })}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId('visible-files')).toHaveTextContent(
+        'music/open_goldberg/cover.jpg',
+      ),
+    );
+    expect(screen.queryByTestId('search-loader')).not.toBeInTheDocument();
   });
 
   it('confirms and persists a new wishlist folder ignore', async () => {

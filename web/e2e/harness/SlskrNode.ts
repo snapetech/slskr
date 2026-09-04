@@ -105,6 +105,71 @@ async function runCommand(
   });
 }
 
+const BUILD_OUTPUT_DIRECTORIES = new Set([
+  '.git',
+  'build',
+  'coverage',
+  'node_modules',
+  'playwright-report',
+  'target',
+  'test-results',
+]);
+
+async function latestModificationTime(inputPath: string): Promise<number> {
+  let stats;
+  try {
+    stats = await fs.stat(inputPath);
+  } catch {
+    return 0;
+  }
+
+  if (!stats.isDirectory()) {
+    return stats.mtimeMs;
+  }
+
+  let latest = stats.mtimeMs;
+  let entries;
+  try {
+    entries = await fs.readdir(inputPath, { withFileTypes: true });
+  } catch {
+    return latest;
+  }
+
+  for (const entry of entries) {
+    if (entry.isDirectory() && BUILD_OUTPUT_DIRECTORIES.has(entry.name)) {
+      continue;
+    }
+
+    const entryTime = await latestModificationTime(
+      path.join(inputPath, entry.name),
+    );
+    latest = Math.max(latest, entryTime);
+  }
+
+  return latest;
+}
+
+async function buildOutputIsFresh(
+  outputPath: string,
+  inputPaths: string[],
+): Promise<boolean> {
+  let outputStats;
+  try {
+    outputStats = await fs.stat(outputPath);
+  } catch {
+    return false;
+  }
+
+  if (!outputStats.isFile()) {
+    return false;
+  }
+
+  const latestInputTime = Math.max(
+    ...(await Promise.all(inputPaths.map((inputPath) => latestModificationTime(inputPath)))),
+  );
+  return latestInputTime <= outputStats.mtimeMs;
+}
+
 async function getListenSummary(port: number): Promise<string> {
   return new Promise((resolve) => {
     execFile('ss', ['-ltnp'], (error, stdout, stderr) => {
@@ -198,21 +263,24 @@ export class SlskrNode {
   private async getBinaryPath(repoRoot: string): Promise<string> {
     const releasePath = path.join(repoRoot, 'target', 'release', 'slskr');
     const debugPath = path.join(repoRoot, 'target', 'debug', 'slskr');
+    const rustBuildInputs = [
+      path.join(repoRoot, '.cargo'),
+      path.join(repoRoot, 'Cargo.lock'),
+      path.join(repoRoot, 'Cargo.toml'),
+      path.join(repoRoot, 'crates'),
+      path.join(repoRoot, 'rust-toolchain.toml'),
+      path.join(repoRoot, 'vendor', 'mainline'),
+    ];
 
-    try {
-      await fs.access(releasePath);
+    if (await buildOutputIsFresh(releasePath, rustBuildInputs)) {
       return releasePath;
-    } catch {
-      // Fall through to debug, then to a fresh build.
     }
 
-    try {
-      await fs.access(debugPath);
+    if (await buildOutputIsFresh(debugPath, rustBuildInputs)) {
       return debugPath;
-    } catch {
-      // Fall through to building it.
     }
 
+    console.log('[E2E] Rust source is newer than available slskr binary; rebuilding release binary.');
     await this.ensureBinaryBuild(repoRoot);
 
     try {
@@ -252,14 +320,20 @@ export class SlskrNode {
    */
   private async ensureWebBuild(repoRoot: string): Promise<string> {
     const webBuildPath = path.join(repoRoot, 'web', 'build');
+    const webBuildInputs = [
+      path.join(repoRoot, 'web', 'index.html'),
+      path.join(repoRoot, 'web', 'package-lock.json'),
+      path.join(repoRoot, 'web', 'package.json'),
+      path.join(repoRoot, 'web', 'public'),
+      path.join(repoRoot, 'web', 'src'),
+      path.join(repoRoot, 'web', 'vite.config.mjs'),
+    ];
 
-    try {
-      await fs.access(webBuildPath);
+    if (await buildOutputIsFresh(path.join(webBuildPath, 'index.html'), webBuildInputs)) {
       return webBuildPath;
-    } catch {
-      // Fall through to building it.
     }
 
+    console.log('[E2E] Web source is newer than the available bundle; rebuilding web assets.');
     if (!SlskrNode.webBuildPromise) {
       SlskrNode.webBuildPromise = (async () => {
         try {

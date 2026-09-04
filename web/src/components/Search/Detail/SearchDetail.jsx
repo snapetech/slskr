@@ -285,13 +285,13 @@ const SearchDetail = ({
         // Search completion and result persistence are separate events. Retry
         // a bounded number of times when the completed projection already
         // reports results but the response rows have not caught up yet.
-        const attempts = isComplete && hasResults ? 3 : 1;
+        const attempts = hasResults ? 3 : 1;
         for (let attempt = 0; attempt < attempts; attempt += 1) {
           if (cancelled) {
             return;
           }
-          if (isComplete) {
-            await sleep(attempt === 0 ? 500 : 250);
+          if (attempt > 0) {
+            await sleep(isComplete && attempt === 1 ? 500 : 250);
           }
 
           const responses = asArray(await getResponses({ id }));
@@ -644,7 +644,8 @@ const SearchDetail = ({
       <Switch
         loading={loading && <LoaderSegment />}
         searching={
-          !isComplete && (
+          !isComplete &&
+          (results === null || results.length === 0) && (
             <LoaderSegment>
               {state === 'InProgress'
                 ? `Found ${fileCount} files ${
