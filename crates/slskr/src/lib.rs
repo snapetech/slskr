@@ -136,6 +136,7 @@ use slskr_client::{
     },
     connection::ConnectionKind,
     listener::{
+        demux_incoming, demux_obfuscated_incoming, demux_shared_incoming,
         demux_shared_mesh_incoming, IncomingConnection, Listener, SharedIncomingConnection,
         DEFAULT_INIT_HANDSHAKE_TIMEOUT,
     },
@@ -304,6 +305,7 @@ mod upload_peer_cooldown_regression_tests {
 const MAX_WEBHOOK_DELIVERY_TASKS: usize = 32;
 #[cfg(any(test, feature = "bounded-differential"))]
 const MAX_INCOMING_CONNECTION_TASKS: usize = 128;
+const MAX_PENDING_LISTENER_HANDSHAKES: usize = 128;
 const MAX_SHARE_SCAN_TASKS: usize = 1;
 const SHARE_SCAN_BUSY_ERROR: &str = "share scan already in progress";
 const SHARE_SCAN_WORKER_ERROR: &str = "share scan worker failed";
@@ -74342,6 +74344,7 @@ async fn run_listener_manager(
     shared_obfuscation: bool,
     shared_mesh_tcp: bool,
 ) {
+    let handshake_slots = Arc::new(Semaphore::new(MAX_PENDING_LISTENER_HANDSHAKES));
     let mut active_bind = if obfuscated && state.config.obfuscation_enabled {
         state.config.obfuscated_listener_bind.clone()
     } else if obfuscated {
@@ -74416,57 +74419,37 @@ async fn run_listener_manager(
                         }
                     }
                 }
-                accepted = async {
-                    if obfuscated {
-                        active_listener.accept_obfuscated().await
-                            .map(|(incoming, address)| ListenerAccept::Classified(
-                                SharedIncomingConnection::Soulseek(incoming),
-                                address,
-                            ))
-                    } else if shared_mesh_tcp {
-                        active_listener
-                            .accept_raw()
-                            .await
-                            .map(|(stream, address)| ListenerAccept::Raw(stream, address))
-                    } else if shared_obfuscation {
-                        active_listener
-                            .accept_shared()
-                            .await
-                            .map(|(incoming, address)| {
-                                ListenerAccept::Classified(
-                                    SharedIncomingConnection::Soulseek(incoming),
-                                    address,
-                                )
-                            })
-                    } else {
-                        active_listener.accept().await.map(|(incoming, address)| {
-                            ListenerAccept::Classified(
-                                SharedIncomingConnection::Soulseek(incoming),
-                                address,
-                            )
-                        })
-                    }
-                } => {
+                accepted = active_listener.accept_raw() => {
                     match accepted {
-                        Ok(ListenerAccept::Classified(incoming, remote_addr)) => match incoming {
-                            SharedIncomingConnection::Soulseek(incoming) => {
-                                process_listener_incoming(&state, incoming, remote_addr, obfuscated)
-                                    .await;
-                            }
-                            SharedIncomingConnection::MeshOverlay(stream) => {
-                                process_shared_mesh_overlay_connection(
-                                    Arc::clone(&state),
-                                    stream,
-                                    remote_addr,
-                                )
+                        Ok((stream, remote_addr)) => {
+                            let Some(handshake_permit) = handshake_slots.clone().try_acquire_owned().ok() else {
+                                drop(stream);
+                                update_listeners(&state, |snapshot| {
+                                    snapshot.errors += 1;
+                                    snapshot.last_error = Some(format!(
+                                        "{} listener handshake pool is full",
+                                        if obfuscated { "obfuscated" } else { "regular" }
+                                    ));
+                                })
                                 .await;
-                            }
-                        },
-                        Ok(ListenerAccept::Raw(stream, remote_addr)) => {
+                                continue;
+                            };
                             let task_state = Arc::clone(&state);
                             tokio::spawn(async move {
-                                process_shared_mesh_connection(task_state, stream, remote_addr)
+                                let _handshake_permit = handshake_permit;
+                                if shared_mesh_tcp {
+                                    process_shared_mesh_connection(task_state, stream, remote_addr)
+                                        .await;
+                                } else {
+                                    process_listener_connection(
+                                        task_state,
+                                        stream,
+                                        remote_addr,
+                                        obfuscated,
+                                        shared_obfuscation,
+                                    )
                                     .await;
+                                }
                             });
                         }
                         Err(error) => {
@@ -74510,9 +74493,65 @@ async fn run_listener_manager(
     }
 }
 
-enum ListenerAccept {
-    Classified(SharedIncomingConnection<TcpStream>, SocketAddr),
-    Raw(TcpStream, SocketAddr),
+async fn process_listener_connection(
+    state: Arc<AppState>,
+    stream: TcpStream,
+    remote_addr: SocketAddr,
+    obfuscated: bool,
+    shared_obfuscation: bool,
+) {
+    let incoming = match time::timeout(
+        DEFAULT_INIT_HANDSHAKE_TIMEOUT,
+        async move {
+            if obfuscated {
+                demux_obfuscated_incoming(stream).await
+            } else if shared_obfuscation {
+                demux_shared_incoming(stream).await
+            } else {
+                demux_incoming(stream).await
+            }
+        },
+    )
+    .await
+    {
+        Ok(Ok(incoming)) => incoming,
+        Ok(Err(error)) => {
+            update_listeners(&state, |snapshot| {
+                snapshot.errors += 1;
+                snapshot.last_error = Some(format!(
+                    "{} listener initialization failed: {error}",
+                    if obfuscated {
+                        "obfuscated"
+                    } else if shared_obfuscation {
+                        "shared"
+                    } else {
+                        "regular"
+                    }
+                ));
+            })
+            .await;
+            return;
+        }
+        Err(_) => {
+            update_listeners(&state, |snapshot| {
+                snapshot.errors += 1;
+                snapshot.last_error = Some(format!(
+                    "{} listener initialization timed out",
+                    if obfuscated {
+                        "obfuscated"
+                    } else if shared_obfuscation {
+                        "shared"
+                    } else {
+                        "regular"
+                    }
+                ));
+            })
+            .await;
+            return;
+        }
+    };
+
+    process_listener_incoming(&state, incoming, remote_addr, obfuscated).await;
 }
 
 async fn process_shared_mesh_connection(
