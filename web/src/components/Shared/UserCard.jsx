@@ -84,6 +84,7 @@ class UserCard extends Component {
     this.cancelScheduledFetch = null;
     this.mounted = false;
     this.userDataRequested = false;
+    this.interestsRequestId = 0;
   }
 
   componentDidMount() {
@@ -101,6 +102,7 @@ class UserCard extends Component {
     if (previousProps.username !== this.props.username) {
       this.cancelScheduledFetch?.();
       this.userDataRequested = false;
+      this.interestsRequestId += 1;
       const cached = getCachedUserData(this.props.username);
       const nextState = {
         interests: null,
@@ -136,6 +138,7 @@ class UserCard extends Component {
 
   componentWillUnmount() {
     this.mounted = false;
+    this.interestsRequestId += 1;
     this.cancelScheduledFetch?.();
   }
 
@@ -166,12 +169,13 @@ class UserCard extends Component {
       return;
     }
 
+    let userDataPromise;
     try {
       if (this.mounted && this.props.username === username) {
         this.setState({ loading: true });
       }
 
-      let userDataPromise = userDataInflight.get(username);
+      userDataPromise = userDataInflight.get(username);
 
       if (!userDataPromise) {
         userDataPromise = Promise.allSettled([
@@ -200,18 +204,28 @@ class UserCard extends Component {
         }));
 
         userDataInflight.set(username, userDataPromise);
+        const clearInflight = () => {
+          if (userDataInflight.get(username) === userDataPromise) {
+            userDataInflight.delete(username);
+          }
+        };
+        void userDataPromise.then(clearInflight, clearInflight);
       }
 
       const userData = await userDataPromise;
 
       setCachedUserData(username, userData);
-      userDataInflight.delete(username);
+      if (userDataInflight.get(username) === userDataPromise) {
+        userDataInflight.delete(username);
+      }
 
       if (this.mounted && this.props.username === username) {
         this.setState({ ...userData, info: this.props.info || userData.info });
       }
     } catch {
-      userDataInflight.delete(username);
+      if (userDataInflight.get(username) === userDataPromise) {
+        userDataInflight.delete(username);
+      }
       if (this.mounted && this.props.username === username) {
         this.setState({ loading: false });
       }
@@ -229,6 +243,7 @@ class UserCard extends Component {
     const { interests, interestsLoading } = this.state;
     if (!username || interests || interestsLoading) return;
 
+    const requestId = ++this.interestsRequestId;
     this.setState({ interestsError: null, interestsLoading: true });
 
     try {
@@ -240,19 +255,31 @@ class UserCard extends Component {
           ? response.data
           : {};
 
-      this.setState({
-        interests: responseInterests,
-        interestsLoading: false,
-      });
+      if (
+        this.mounted &&
+        requestId === this.interestsRequestId &&
+        this.props.username === username
+      ) {
+        this.setState({
+          interests: responseInterests,
+          interestsLoading: false,
+        });
+      }
     } catch (error) {
-      this.setState({
-        interestsError:
-          error?.response?.data?.message ||
-          error?.response?.data ||
-          error?.message ||
-          'Interests unavailable',
-        interestsLoading: false,
-      });
+      if (
+        this.mounted &&
+        requestId === this.interestsRequestId &&
+        this.props.username === username
+      ) {
+        this.setState({
+          interestsError:
+            error?.response?.data?.message ||
+            error?.response?.data ||
+            error?.message ||
+            'Interests unavailable',
+          interestsLoading: false,
+        });
+      }
     }
   };
 

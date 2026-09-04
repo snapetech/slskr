@@ -9,6 +9,12 @@ const initialState = {
   downloadRequest: undefined,
 };
 
+const getDownloadErrorMessage = (error) => {
+  if (typeof error?.data === 'string') return error.data;
+  if (typeof error?.data?.message === 'string') return error.data.message;
+  return error?.message || 'Download failed';
+};
+
 class Directory extends Component {
   constructor(props) {
     super(props);
@@ -17,6 +23,17 @@ class Directory extends Component {
       ...initialState,
       files: this.props.files.map((f) => ({ selected: false, ...f })),
     };
+    this.isMountedFlag = false;
+    this.downloadRequestId = 0;
+  }
+
+  componentDidMount() {
+    this.isMountedFlag = true;
+  }
+
+  componentWillUnmount() {
+    this.isMountedFlag = false;
+    this.downloadRequestId += 1;
   }
 
   componentDidUpdate(previousProps) {
@@ -37,7 +54,14 @@ class Directory extends Component {
   };
 
   download = (username, files) => {
+    const requestId = ++this.downloadRequestId;
     this.setState({ downloadRequest: 'inProgress' }, async () => {
+      if (
+        !this.isMountedFlag ||
+        requestId !== this.downloadRequestId
+      ) {
+        return;
+      }
       try {
         const requests = (files || []).map(({ filename, size }) => ({
           filename,
@@ -45,12 +69,26 @@ class Directory extends Component {
         }));
         await transfers.download({ files: requests, username });
 
-        this.setState({ downloadRequest: 'complete' });
+        if (
+          this.isMountedFlag &&
+          requestId === this.downloadRequestId
+        ) {
+          this.setState({ downloadRequest: 'complete' });
+        }
       } catch (error) {
-        this.setState({
-          downloadError: error.response,
-          downloadRequest: 'error',
-        });
+        if (
+          this.isMountedFlag &&
+          requestId === this.downloadRequestId
+        ) {
+          this.setState({
+            downloadError: error.response || {
+              data: error.message || 'Download failed',
+              status: 0,
+              statusText: 'Network error',
+            },
+            downloadRequest: 'error',
+          });
+        }
       }
     });
   };
@@ -120,8 +158,10 @@ class Directory extends Component {
                     size="large"
                   />
                   <Label>
-                    {downloadError.data +
-                      ` (HTTP ${downloadError.status} ${downloadError.statusText})`}
+                    {getDownloadErrorMessage(downloadError)}
+                    {downloadError?.status
+                      ? ` (HTTP ${downloadError.status} ${downloadError.statusText})`
+                      : ''}
                   </Label>
                 </span>
               )}

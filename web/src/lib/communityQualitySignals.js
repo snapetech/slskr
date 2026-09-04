@@ -65,7 +65,11 @@ const writeSignals = (signals) => {
   const storage = getStorage();
   if (!storage) return signals;
 
-  storage.setItem(communityQualitySignalStorageKey, JSON.stringify(signals));
+  try {
+    storage.setItem(communityQualitySignalStorageKey, JSON.stringify(signals));
+  } catch (_error) {
+    return signals;
+  }
   return signals;
 };
 
@@ -73,7 +77,11 @@ const writeOverrides = (overrides) => {
   const storage = getStorage();
   if (!storage) return overrides;
 
-  storage.setItem(communityQualityOverrideStorageKey, JSON.stringify(overrides));
+  try {
+    storage.setItem(communityQualityOverrideStorageKey, JSON.stringify(overrides));
+  } catch (_error) {
+    return overrides;
+  }
   return overrides;
 };
 
