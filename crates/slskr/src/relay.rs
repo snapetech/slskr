@@ -35,6 +35,7 @@ pub(crate) const MAX_RELAY_SHARE_ENTRIES: usize = 131_072;
 const MAX_RELAY_SHARE_MANIFEST_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_RELAY_SHARE_UPLOAD_RECORDS: usize = 4_096;
 const MAX_RELAY_SHARE_FILENAME_BYTES: usize = 16 * 1024;
+const MAX_MULTIPART_PARTS: usize = 16;
 pub(crate) const HUB_OUTBOUND_QUEUE_CAPACITY: usize = 64;
 const PBKDF2_ITERATIONS: NonZeroU32 = match NonZeroU32::new(1_000) {
     Some(value) => value,
@@ -430,19 +431,19 @@ pub(crate) async fn read_share_database(
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct MultipartPart {
+pub(crate) struct MultipartPart<'a> {
     pub name: String,
     pub filename: Option<String>,
-    pub data: Vec<u8>,
+    pub data: &'a [u8],
 }
 
 /// Parse the multipart form used by the frozen relay controller without
 /// converting file bytes to UTF-8.  The normal API body parser is text-based,
 /// but relay uploads are allowed to contain arbitrary audio/database bytes.
-pub(crate) fn parse_multipart(
-    body: &[u8],
+pub(crate) fn parse_multipart<'a>(
+    body: &'a [u8],
     content_type: Option<&str>,
-) -> Result<Vec<MultipartPart>, String> {
+) -> Result<Vec<MultipartPart<'a>>, String> {
     let boundary = content_type
         .and_then(|value| {
             let mut parts = value.split(';');
@@ -499,6 +500,11 @@ pub(crate) fn parse_multipart(
         let Some(disposition) = disposition else {
             return Err("multipart Content-Disposition is missing".to_owned());
         };
+        if parts.len() >= MAX_MULTIPART_PARTS {
+            return Err(format!(
+                "multipart body contains more than {MAX_MULTIPART_PARTS} parts"
+            ));
+        }
         let field_name = multipart_parameter(disposition, "name")
             .ok_or_else(|| "multipart field name is missing".to_owned())?;
         let filename = multipart_parameter(disposition, "filename");
@@ -506,7 +512,7 @@ pub(crate) fn parse_multipart(
         parts.push(MultipartPart {
             name: field_name,
             filename,
-            data: body[data_start..part_end].to_vec(),
+            data: &body[data_start..part_end],
         });
         cursor = next;
     }
@@ -1465,6 +1471,50 @@ pub(crate) fn credential_for_test(secret: &str, agent_name: &str, token: &str) -
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn multipart_fixture(part_count: usize) -> Vec<u8> {
+        let mut body = Vec::new();
+        for index in 0..part_count {
+            body.extend_from_slice(
+                format!(
+                    "--boundary\r\nContent-Disposition: form-data; name=\"part{index}\"\r\n\r\n"
+                )
+                .as_bytes(),
+            );
+            body.extend_from_slice(b"payload\r\n");
+        }
+        body.extend_from_slice(b"--boundary--\r\n");
+        body
+    }
+
+    #[test]
+    fn multipart_parser_borrows_binary_payloads() {
+        let body = b"--boundary\r\nContent-Disposition: form-data; name=\"database\"; filename=\"shares.db\"\r\n\r\n\0\xffpayload\r\n--boundary--\r\n";
+        let parts = parse_multipart(body, Some("multipart/form-data; boundary=boundary"))
+            .expect("binary multipart payload must parse");
+        let payload = b"\0\xffpayload";
+        let payload_offset = body
+            .windows(payload.len())
+            .position(|window| window == payload)
+            .expect("payload offset");
+
+        assert_eq!(parts.len(), 1);
+        assert_eq!(parts[0].name, "database");
+        assert_eq!(parts[0].filename.as_deref(), Some("shares.db"));
+        assert_eq!(parts[0].data, payload);
+        assert!(std::ptr::eq(
+            parts[0].data.as_ptr(),
+            body[payload_offset..].as_ptr()
+        ));
+    }
+
+    #[test]
+    fn multipart_parser_rejects_excessive_part_count() {
+        let body = multipart_fixture(MAX_MULTIPART_PARTS + 1);
+        let error = parse_multipart(&body, Some("multipart/form-data; boundary=boundary"))
+            .expect_err("multipart part count must be bounded");
+        assert!(error.contains("more than 16 parts"), "{error}");
+    }
 
     fn credential(secret: &str, agent_name: &str, token: &str) -> String {
         super::credential_for_test(secret, agent_name, token)
