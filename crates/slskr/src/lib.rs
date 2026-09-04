@@ -3007,8 +3007,14 @@ async fn delete_persisted_searches(
     state: &AppState,
     records: &[SearchRecord],
 ) -> Result<(), String> {
-    for record in records {
-        delete_persisted_search(state, record).await?;
+    if let Some(db) = state.db.as_ref() {
+        let ids = records
+            .iter()
+            .map(|record| record.token.to_string())
+            .collect::<Vec<_>>();
+        db.delete_searches(&ids)
+            .await
+            .map_err(|error| format!("failed to delete persisted searches: {error}"))?;
     }
     Ok(())
 }
@@ -16738,36 +16744,51 @@ impl DistributedRuntime {
     }
 
     /// Load persisted distributed tree state
-    pub async fn load_persisted_state(&mut self, db: &crate::persistence::DatabaseManager) {
-        if let Ok(Some((branch_level, branch_root, parent_username))) =
-            db.load_distributed_tree_state().await
+    pub async fn load_persisted_state(
+        &mut self,
+        db: &crate::persistence::DatabaseManager,
+    ) -> Result<(), String> {
+        if let Some((branch_level, branch_root, parent_username)) = db
+            .load_distributed_tree_state()
+            .await
+            .map_err(|error| format!("failed to load distributed tree state: {error}"))?
         {
             self.branch_level = branch_level;
             self.branch_root = branch_root;
             self.parent = parent_username;
         }
 
-        if let Ok(children) = db.load_distributed_children().await {
-            self.child_depths = children.into_iter().collect();
-        }
+        let children = db
+            .load_distributed_children()
+            .await
+            .map_err(|error| format!("failed to load distributed child state: {error}"))?;
+        self.child_depths = children.into_iter().collect();
+        Ok(())
     }
 
     /// Save distributed tree state to database
-    pub async fn save_persisted_state(&self, db: &crate::persistence::DatabaseManager) {
-        let _ = db
+    pub async fn save_persisted_state(
+        &self,
+        db: &crate::persistence::DatabaseManager,
+    ) -> Result<(), String> {
+        db
             .save_distributed_tree_state(
                 self.branch_level,
                 &self.branch_root,
                 self.parent.as_deref(),
             )
-            .await;
+            .await
+            .map_err(|error| format!("failed to save distributed tree state: {error}"))?;
 
         let children: Vec<(String, u32)> = self
             .child_depths
             .iter()
             .map(|(username, depth)| (username.clone(), *depth))
             .collect();
-        let _ = db.save_distributed_children(&children).await;
+        db.save_distributed_children(&children)
+            .await
+            .map_err(|error| format!("failed to save distributed child state: {error}"))?;
+        Ok(())
     }
 }
 
@@ -16775,6 +16796,20 @@ impl DistributedRuntime {
 enum DistributedConnectionRole {
     Parent,
     Child,
+}
+
+async fn record_distributed_persistence_failure(
+    state: &AppState,
+    operation: &str,
+    error: String,
+) {
+    record_daemon_log(
+        state,
+        logging::LogLevel::Error,
+        "distributed",
+        format!("{operation}: {error}"),
+    )
+    .await;
 }
 
 fn resolve_external_visualizer_path(configured: Option<&str>) -> Option<PathBuf> {
@@ -73076,12 +73111,18 @@ fn spawn_session_manager(state: Arc<AppState>, mut receiver: mpsc::Receiver<Sess
 
         // Load persisted distributed tree state
         if let Some(db) = state.db.as_ref() {
-            state
-                .distributed_network
-                .write()
-                .await
-                .load_persisted_state(db)
+            let load_result = {
+                let mut distributed = state.distributed_network.write().await;
+                distributed.load_persisted_state(db).await
+            };
+            if let Err(error) = load_result {
+                record_distributed_persistence_failure(
+                    &state,
+                    "distributed state load failed",
+                    error,
+                )
                 .await;
+            }
         }
 
         let mut next_wishlist_search = Instant::now() + wishlist_scheduler.interval();
@@ -75510,7 +75551,7 @@ async fn connect_distributed_parent(
     .map_err(|_| "distributed parent initialization timed out".to_owned())?
     .map_err(|error| format!("distributed parent initialization failed: {error}"))?;
     let (sender, receiver) = mpsc::channel(state.config.soulseek_connection.buffer_write_queue);
-    {
+    let persistence_result = {
         let mut runtime = state.distributed_network.write().await;
         if runtime.parent.is_some() {
             return Ok(());
@@ -75522,8 +75563,18 @@ async fn connect_distributed_parent(
 
         // Persist distributed tree state after parent connection
         if let Some(db) = state.db.as_ref() {
-            runtime.save_persisted_state(db).await;
+            runtime.save_persisted_state(db).await
+        } else {
+            Ok(())
         }
+    };
+    if let Err(error) = persistence_result {
+        record_distributed_persistence_failure(
+            &state,
+            "distributed parent state save failed",
+            error,
+        )
+        .await;
     }
     record_soulseek_diagnostic(
         &state,
@@ -75585,13 +75636,19 @@ async fn register_distributed_child(
     };
 
     // Persist distributed tree state after child registration
-    if let Some(db) = state.db.as_ref() {
-        state
-            .distributed_network
-            .read()
-            .await
-            .save_persisted_state(db)
-            .await;
+    let persistence_result = if let Some(db) = state.db.as_ref() {
+        let runtime = state.distributed_network.read().await;
+        runtime.save_persisted_state(db).await
+    } else {
+        Ok(())
+    };
+    if let Err(error) = persistence_result {
+        record_distributed_persistence_failure(
+            &state,
+            "distributed child state save failed",
+            error,
+        )
+        .await;
     }
     tokio::spawn(run_distributed_link(
         Arc::clone(&state),
@@ -75680,7 +75737,7 @@ async fn run_distributed_link(
             }
         }
     }
-    {
+    let persistence_result = {
         let mut runtime = state.distributed_network.write().await;
         match role {
             DistributedConnectionRole::Parent => {
@@ -75701,8 +75758,18 @@ async fn run_distributed_link(
 
         // Persist distributed tree state after disconnection
         if let Some(db) = state.db.as_ref() {
-            runtime.save_persisted_state(db).await;
+            runtime.save_persisted_state(db).await
+        } else {
+            Ok(())
         }
+    };
+    if let Err(error) = persistence_result {
+        record_distributed_persistence_failure(
+            &state,
+            "distributed disconnect state save failed",
+            error,
+        )
+        .await;
     }
     if role == DistributedConnectionRole::Parent {
         notify_distributed_branch(&state).await;
@@ -75773,13 +75840,19 @@ async fn handle_distributed_message(
             state.distributed_network.write().await.branch_level = level.saturating_add(1);
 
             // Persist distributed tree state after branch level update
-            if let Some(db) = state.db.as_ref() {
-                state
-                    .distributed_network
-                    .read()
-                    .await
-                    .save_persisted_state(db)
-                    .await;
+            let persistence_result = if let Some(db) = state.db.as_ref() {
+                let runtime = state.distributed_network.read().await;
+                runtime.save_persisted_state(db).await
+            } else {
+                Ok(())
+            };
+            if let Err(error) = persistence_result {
+                record_distributed_persistence_failure(
+                    state,
+                    "distributed branch-level state save failed",
+                    error,
+                )
+                .await;
             }
 
             notify_distributed_branch(state).await;
@@ -75794,13 +75867,19 @@ async fn handle_distributed_message(
             state.distributed_network.write().await.branch_root = root;
 
             // Persist distributed tree state after branch root update
-            if let Some(db) = state.db.as_ref() {
-                state
-                    .distributed_network
-                    .read()
-                    .await
-                    .save_persisted_state(db)
-                    .await;
+            let persistence_result = if let Some(db) = state.db.as_ref() {
+                let runtime = state.distributed_network.read().await;
+                runtime.save_persisted_state(db).await
+            } else {
+                Ok(())
+            };
+            if let Err(error) = persistence_result {
+                record_distributed_persistence_failure(
+                    state,
+                    "distributed branch-root state save failed",
+                    error,
+                )
+                .await;
             }
 
             notify_distributed_branch(state).await;
@@ -79082,10 +79161,19 @@ where
                 return Err(error);
             }
         };
-        let _ = state.controller_features.write().await.upsert(
+        let feature_result = state.controller_features.write().await.upsert(
             "hashdb/peers".to_owned(),
             serde_json::json!({"peers": projection}),
         );
+        if let Err(error) = feature_result {
+            record_daemon_log(
+                state,
+                logging::LogLevel::Error,
+                "distributed",
+                format!("peer capability projection persistence failed: {error}"),
+            )
+            .await;
+        }
         if message_type == PeerCapabilityMessageType::Hello {
             let acknowledgement = PeerCapabilityEnvelope::new(
                 PeerCapabilityMessageType::Acknowledge,
@@ -87359,8 +87447,9 @@ async fn run_retention_once(state: &AppState) {
     let age_minutes = state.config.retention.search_minutes;
     let max_age_days = state.config.search_retention.max_age_days;
     let max_count = state.config.search_retention.max_count;
-    let removed_searches = {
+    let (previous_searches, mutated_searches, removed_searches) = {
         let mut searches = state.searches.write().await;
+        let previous = searches.clone();
         let mut removed = Vec::new();
         searches.records.retain(|record| {
             if record.status == "active" {
@@ -87403,12 +87492,33 @@ async fn run_retention_once(state: &AppState) {
                 }
             });
         }
-        removed
+        let mutated = searches.clone();
+        (previous, mutated, removed)
     };
-    let _ = delete_persisted_searches(state, &removed_searches).await;
+    if !removed_searches.is_empty() {
+        if let Err(error) = delete_persisted_searches(state, &removed_searches).await {
+            rollback_searches_if_unchanged(state, previous_searches, &mutated_searches).await;
+            record_daemon_log(
+                state,
+                logging::LogLevel::Error,
+                "retention",
+                format!("failed to delete expired searches: {error}"),
+            )
+            .await;
+        }
+    }
 
-    let removed_transfers = {
+    let (
+        previous_transfer_entries,
+        previous_transfer_progress,
+        previous_transfer_updated_at,
+        mutated_transfer_entries,
+        removed_transfers,
+    ) = {
         let mut transfers = state.transfers.write().await;
+        let previous_entries = transfers.entries.clone();
+        let previous_progress = transfers.progress_persisted_at.clone();
+        let previous_updated_at = transfers.updated_at;
         let ids = transfers
             .entries
             .iter()
@@ -87424,15 +87534,47 @@ async fn run_retention_once(state: &AppState) {
             })
             .map(|entry| entry.id)
             .collect::<Vec<_>>();
-        transfers.remove_entries(&ids)
+        let removed = transfers.remove_entries(&ids);
+        let mutated_entries = transfers.entries.clone();
+        (
+            previous_entries,
+            previous_progress,
+            previous_updated_at,
+            mutated_entries,
+            removed,
+        )
     };
-    let _ = delete_persisted_transfers(state, &removed_transfers).await;
+    if !removed_transfers.is_empty() {
+        if let Err(error) = delete_persisted_transfers(state, &removed_transfers).await {
+            let rolled_back = {
+                let mut transfers = state.transfers.write().await;
+                if transfers.entries == mutated_transfer_entries {
+                    transfers.entries = previous_transfer_entries;
+                    transfers.progress_persisted_at = previous_transfer_progress;
+                    transfers.updated_at = previous_transfer_updated_at;
+                    transfers.persist_state();
+                    true
+                } else {
+                    false
+                }
+            };
+            record_daemon_log(
+                state,
+                logging::LogLevel::Error,
+                "retention",
+                format!(
+                    "failed to delete expired transfers: {error}; in-memory rollback={rolled_back}"
+                ),
+            )
+            .await;
+        }
+    }
 
     let complete = state.config.retention.files_complete_minutes;
     let incomplete = state.config.retention.files_incomplete_minutes;
     let downloads = effective_downloads_dir(state);
     let incomplete_dir = effective_incomplete_dir(state);
-    let _ = tokio::task::spawn_blocking(move || {
+    let prune_error = tokio::task::spawn_blocking(move || {
         let now = SystemTime::now();
         if let Some(age) = complete {
             prune_files_older_than(&downloads, age, now);
@@ -87441,7 +87583,18 @@ async fn run_retention_once(state: &AppState) {
             prune_files_older_than(&incomplete_dir, age, now);
         }
     })
-    .await;
+    .await
+    .err()
+    .map(|error| error.to_string());
+    if let Some(error) = prune_error {
+        record_daemon_log(
+            state,
+            logging::LogLevel::Error,
+            "retention",
+            format!("file retention worker failed: {error}"),
+        )
+        .await;
+    }
 
     let log_cutoff = SystemTime::now()
         .checked_sub(Duration::from_secs(

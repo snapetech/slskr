@@ -2650,6 +2650,27 @@ impl DatabaseManager {
         Ok(())
     }
 
+    /// Atomically delete a batch of search records and their projections.
+    pub async fn delete_searches(&self, ids: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+        let mut transaction = self.pool.begin().await?;
+        for id in ids {
+            query("DELETE FROM search_results WHERE search_id = ?")
+                .bind(id)
+                .execute(&mut *transaction)
+                .await?;
+            query("DELETE FROM searches WHERE id = ?")
+                .bind(id)
+                .execute(&mut *transaction)
+                .await?;
+            query("DELETE FROM search_identities WHERE search_id = ?")
+                .bind(id)
+                .execute(&mut *transaction)
+                .await?;
+        }
+        transaction.commit().await?;
+        Ok(())
+    }
+
     /// Delete all search records
     pub async fn delete_all_searches(&self) -> Result<(), Box<dyn std::error::Error>> {
         let mut transaction = self.pool.begin().await?;
