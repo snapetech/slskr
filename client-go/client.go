@@ -530,39 +530,64 @@ func decodeJSONResponse(body []byte) (interface{}, error) {
 		return map[string]interface{}{}, nil
 	}
 
-	switch trimmed[0] {
+	return decodeJSONValue(trimmed)
+}
+
+func decodeJSONValue(raw []byte) (interface{}, error) {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 {
+		return nil, fmt.Errorf("invalid JSON response")
+	}
+
+	switch raw[0] {
 	case '{':
-		var result map[string]interface{}
-		if err := json.Unmarshal(trimmed, &result); err != nil {
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &fields); err != nil {
 			return nil, err
+		}
+		result := make(map[string]interface{}, len(fields))
+		for key, value := range fields {
+			decoded, err := decodeJSONValue(value)
+			if err != nil {
+				return nil, err
+			}
+			result[key] = decoded
 		}
 		return result, nil
 	case '[':
-		var result []interface{}
-		if err := json.Unmarshal(trimmed, &result); err != nil {
+		var values []json.RawMessage
+		if err := json.Unmarshal(raw, &values); err != nil {
 			return nil, err
+		}
+		result := make([]interface{}, 0, len(values))
+		for _, value := range values {
+			decoded, err := decodeJSONValue(value)
+			if err != nil {
+				return nil, err
+			}
+			result = append(result, decoded)
 		}
 		return result, nil
 	case '"':
 		var result string
-		if err := json.Unmarshal(trimmed, &result); err != nil {
+		if err := json.Unmarshal(raw, &result); err != nil {
 			return nil, err
 		}
 		return result, nil
 	case 't', 'f':
 		var result bool
-		if err := json.Unmarshal(trimmed, &result); err != nil {
+		if err := json.Unmarshal(raw, &result); err != nil {
 			return nil, err
 		}
 		return result, nil
 	case 'n':
-		if !bytes.Equal(trimmed, []byte("null")) {
+		if !bytes.Equal(raw, []byte("null")) {
 			return nil, fmt.Errorf("invalid JSON response")
 		}
 		return nil, nil
 	default:
 		var result float64
-		if err := json.Unmarshal(trimmed, &result); err != nil {
+		if err := json.Unmarshal(raw, &result); err != nil {
 			return nil, err
 		}
 		return result, nil
