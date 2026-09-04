@@ -50906,7 +50906,7 @@ async fn versioned_relay_request_bytes(
             unix_timestamp(),
         );
         return Some(match authorized {
-            Some(_) => match persist_relay_upload_part(state, token, filename, &file_part.data) {
+            Some(_) => match persist_relay_upload_part(state, token, filename, file_part.data) {
                 Ok(upload) => {
                     let upload_path = upload.path.clone();
                     if relay::RuntimeState::complete_file_stream(token, upload) {
@@ -50977,7 +50977,7 @@ async fn versioned_relay_request_bytes(
                         "Share metadata section is missing",
                     ));
                 };
-                let shares = match serde_json::from_slice::<serde_json::Value>(&share_part.data) {
+                let shares = match serde_json::from_slice::<serde_json::Value>(share_part.data) {
                     Ok(value) if value.is_array() => value,
                     _ => {
                         return Some(routing::bad_request_response(
@@ -51007,7 +51007,7 @@ async fn versioned_relay_request_bytes(
                     state,
                     token,
                     database_part.filename.as_deref().unwrap_or("shares.db"),
-                    &database_part.data,
+                    database_part.data,
                 ) {
                     Ok(database_path) => match relay::read_share_database(
                         &database_path,
