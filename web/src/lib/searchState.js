@@ -58,6 +58,40 @@ export const getSearchStateKind = (search = {}) => {
 export const isSearchComplete = (search = {}) =>
   ['completed', 'cancelled', 'failed'].includes(getSearchStateKind(search));
 
+// Hub updates can arrive out of order with the REST cancellation response.
+// Keep a terminal local record terminal when a stale active projection arrives.
+export const mergeSearchRecords = (previous = {}, incoming = {}) => {
+  const merged = { ...previous, ...incoming };
+  const previousKind = getSearchStateKind(previous);
+  const incomingKind = getSearchStateKind(incoming);
+  const terminal = ['completed', 'cancelled', 'failed'].includes(previousKind);
+
+  if (
+    terminal &&
+    (!isSearchComplete(incoming) || incomingKind !== previousKind)
+  ) {
+    const fallbackStatus = {
+      cancelled: 'cancelled',
+      completed: 'completed',
+      failed: 'failed',
+    }[previousKind];
+    const fallbackState = {
+      cancelled: 'Cancelled',
+      completed: 'Completed',
+      failed: 'Failed',
+    }[previousKind];
+    return {
+      ...merged,
+      status: previous.status ?? fallbackStatus ?? merged.status,
+      state: previous.state ?? fallbackState ?? merged.state,
+      isComplete: true,
+      endedAt: previous.endedAt ?? merged.endedAt,
+    };
+  }
+
+  return merged;
+};
+
 export const parseSearchDate = (value) => {
   if (value === null || value === undefined || value === '') {
     return null;

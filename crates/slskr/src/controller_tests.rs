@@ -14263,6 +14263,26 @@ fn search_response_availability_tracks_durable_payloads_and_completion() {
     let completed = searches.complete(created.token).unwrap().0;
     let completed = serde_json::from_str::<serde_json::Value>(&completed.json()).unwrap();
     assert_eq!(completed["responsesAvailable"], true);
+
+    let cancelled = searches
+        .create(
+            None,
+            "cancelled late completion".to_owned(),
+            "global",
+            None,
+            Vec::new(),
+            60,
+        )
+        .unwrap()
+        .record;
+    let (cancelled, transitioned) = searches
+        .set_status_by_token(cancelled.token, "cancelled")
+        .unwrap();
+    assert!(transitioned);
+    let (cancelled_after_completion, transitioned) = searches.complete(cancelled.token).unwrap();
+    assert!(!transitioned);
+    assert_eq!(cancelled_after_completion.status, "cancelled");
+    assert_eq!(cancelled_after_completion.updated_at, cancelled.updated_at);
 }
 
 #[cfg_attr(test, tokio::test)]
@@ -18571,10 +18591,12 @@ async fn search_response_api_accepts_controller_group_payload() {
     assert_eq!(responses_json[0]["fileCount"], 1);
     assert_eq!(responses_json[0]["lockedFileCount"], 1);
     assert_eq!(responses_json[0]["files"][0]["filename"], "Public/One.flac");
+    assert_eq!(responses_json[0]["files"][0]["resultIndex"], 0);
     assert_eq!(
         responses_json[0]["lockedFiles"][0]["filename"],
         "Private/Two.mp3"
     );
+    assert_eq!(responses_json[0]["lockedFiles"][0]["resultIndex"], 1);
 }
 
 #[cfg_attr(test, tokio::test)]

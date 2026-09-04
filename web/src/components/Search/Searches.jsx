@@ -7,6 +7,7 @@ import {
 } from '../../lib/acquisitionProfiles';
 import { createSearchHubConnection } from '../../lib/hubFactory';
 import { getCapabilities } from '../../lib/slskr';
+import { mergeSearchRecords } from '../../lib/searchState';
 import { getLocalStorageItem, setLocalStorageItem } from '../../lib/storage';
 import * as library from '../../lib/searches';
 import ErrorSegment from '../Shared/ErrorSegment';
@@ -245,7 +246,7 @@ const Searches = ({ runtimeProfile, server } = {}) => {
         }
         onUpdate((old) => ({
           ...old,
-          [id]: { ...old[id], ...eventOrSearch, id },
+          [id]: { ...mergeSearchRecords(old[id], eventOrSearch), id },
         }));
         return;
       }
@@ -263,7 +264,10 @@ const Searches = ({ runtimeProfile, server } = {}) => {
         const searchId = searchEventIdentifier(search) ?? id;
         onUpdate((old) => ({
           ...old,
-          [searchId]: { ...old[searchId], ...search, id: searchId },
+          [searchId]: {
+            ...mergeSearchRecords(old[searchId], search),
+            id: searchId,
+          },
         }));
       } catch (refreshError) {
         console.debug('failed to refresh search event payload', refreshError);

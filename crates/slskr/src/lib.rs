@@ -1604,6 +1604,12 @@ impl SearchResultEntry {
             "sampleRate": self.sample_rate,
         })
     }
+
+    fn controller_file_json_with_index(&self, result_index: usize) -> serde_json::Value {
+        let mut value = self.controller_file_json();
+        value["resultIndex"] = serde_json::json!(result_index);
+        value
+    }
 }
 
 fn file_attribute_value(entry: &FileEntry, code: u32) -> Option<u32> {
@@ -1800,8 +1806,8 @@ impl SearchRecord {
 
     fn controller_responses_json_with_query(&self, query: Option<&str>) -> String {
         let filter = RecordListFilter::from_query(query);
-        let mut grouped: BTreeMap<String, Vec<&SearchResultEntry>> = BTreeMap::new();
-        for result in &self.results {
+        let mut grouped: BTreeMap<String, Vec<(usize, &SearchResultEntry)>> = BTreeMap::new();
+        for (result_index, result) in self.results.iter().enumerate() {
             let username = result.peer_username.clone().unwrap_or_default();
             if filter
                 .username
@@ -1816,7 +1822,10 @@ impl SearchRecord {
             }) {
                 continue;
             }
-            grouped.entry(username).or_default().push(result);
+            grouped
+                .entry(username)
+                .or_default()
+                .push((result_index, result));
         }
         let responses = grouped
             .into_iter()
@@ -1825,17 +1834,21 @@ impl SearchRecord {
             .map(|(username, entries)| {
                 let files = entries
                     .iter()
-                    .filter(|entry| !entry.locked)
-                    .map(|entry| entry.controller_file_json())
+                    .filter(|(_, entry)| !entry.locked)
+                    .map(|(result_index, entry)| {
+                        entry.controller_file_json_with_index(*result_index)
+                    })
                     .collect::<Vec<_>>();
                 let locked_files = entries
                     .iter()
-                    .filter(|entry| entry.locked)
-                    .map(|entry| entry.controller_file_json())
+                    .filter(|(_, entry)| entry.locked)
+                    .map(|(result_index, entry)| {
+                        entry.controller_file_json_with_index(*result_index)
+                    })
                     .collect::<Vec<_>>();
                 let file_count = files.len();
                 let locked_file_count = locked_files.len();
-                let first = entries.first().copied();
+                let first = entries.first().map(|(_, entry)| *entry);
                 serde_json::json!({
                     "username": username,
                     "token": self.token,
@@ -2267,7 +2280,10 @@ impl SearchStore {
             .records
             .iter_mut()
             .find(|record| record.token == token)?;
-        let transitioned = record.status != "completed";
+        if record.status != "active" {
+            return Some((record.clone(), false));
+        }
+        let transitioned = true;
         record.status = "completed";
         record.updated_at = unix_timestamp();
         Some((record.clone(), transitioned))
@@ -2282,6 +2298,9 @@ impl SearchStore {
             .records
             .iter_mut()
             .find(|record| record.token == token)?;
+        if record.status != "active" && record.status != status {
+            return Some((record.clone(), false));
+        }
         let transitioned = record.status != status;
         record.status = status;
         if transitioned {
@@ -2309,7 +2328,7 @@ impl SearchStore {
             }
         }
         if let Some(status) = status.and_then(normalize_search_status) {
-            if status != record.status {
+            if status != record.status && record.status == "active" {
                 record.status = status;
                 updated = true;
             }
@@ -60631,13 +60650,21 @@ async fn search_action_controller_response(path: &str, state: &AppState) -> Http
             .to_string(),
         };
     };
-    let item_index = item_id
-        .split(':')
-        .next()
-        .and_then(|value| value.parse::<usize>().ok());
+    let item_parts = item_id.split(':').collect::<Vec<_>>();
+    let valid_item = (item_parts.len() == 1 || item_parts.len() == 2)
+        && item_parts.iter().all(|part| !part.trim().is_empty());
+    let item_index = valid_item
+        .then(|| item_parts[0].parse::<usize>().ok())
+        .flatten();
     let Some(item_index) = item_index else {
         return routing::bad_request_response("itemId must begin with a result index");
     };
+    if item_parts
+        .get(1)
+        .is_some_and(|value| value.parse::<usize>().ok() != Some(0))
+    {
+        return routing::not_found_response();
+    }
     let Some(result) = search.results.get(item_index).cloned() else {
         return routing::not_found_response();
     };
@@ -74679,6 +74706,16 @@ async fn handle_session_command(
             query,
             target,
         } => {
+            let is_active = state
+                .searches
+                .read()
+                .await
+                .get(token)
+                .is_some_and(|record| record.status == "active");
+            if !is_active {
+                eprintln!("skipping search {token}: search is no longer active");
+                return;
+            }
             send_active_server_message(
                 state,
                 session,

@@ -13,6 +13,7 @@ import {
   recordCommunityQualitySignal,
 } from '../../lib/communityQualitySignals';
 import { getDirectoryContents, getGroup } from '../../lib/users';
+import { getSearchResultItemId } from '../../lib/searchItemId';
 import { formatBytes, getDirectoryName, getFileName } from '../../lib/util';
 import DiscoveryGraphModal from './DiscoveryGraphModal';
 import FileList from '../Shared/FileList';
@@ -24,9 +25,15 @@ import { toast } from 'react-toastify';
 import { Button, Card, Icon, Label, List, Modal, Popup } from 'semantic-ui-react';
 
 const buildTree = (response) => {
-  let { files = [] } = response;
-  const { lockedFiles = [] } = response;
-  files = files.concat(lockedFiles.map((file) => ({ ...file, locked: true })));
+  const files = [
+    ...(Array.isArray(response?.files) ? response.files : []),
+    ...(Array.isArray(response?.lockedFiles)
+      ? response.lockedFiles.map((file) => ({ ...file, locked: true }))
+      : []),
+  ].filter(
+    (file) =>
+      file && typeof file === 'object' && typeof file.filename === 'string',
+  );
 
   return files.reduce((dict, file) => {
     const directory = getDirectoryName(file.filename);
@@ -75,7 +82,12 @@ const getSelectedFiles = (tree) => {
 };
 
 const getSelectedSize = (selectedFiles) => {
-  return formatBytes(selectedFiles.reduce((total, f) => total + f.size, 0));
+  return formatBytes(
+    selectedFiles.reduce((total, file) => {
+      const size = Number(file?.size);
+      return total + (Number.isFinite(size) && size >= 0 ? size : 0);
+    }, 0),
+  );
 };
 
 class Response extends Component {
@@ -160,17 +172,15 @@ class Response extends Component {
           // Use new action routing endpoint for bridged searches
           // Download all selected files
           const downloadPromises = files.map(async (file) => {
-            const fileIndex =
-              response.files?.findIndex((f) => f.filename === file.filename) ??
-              response.lockedFiles?.findIndex(
-                (f) => f.filename === file.filename,
-              ) ??
-              -1;
-            if (fileIndex < 0) {
+            const itemId = getSearchResultItemId({
+              file,
+              response,
+              responseIndex,
+            });
+            if (!itemId) {
               throw new Error(`File ${file.filename} not found in response`);
             }
 
-            const itemId = `${responseIndex ?? 0}:${fileIndex}`;
             return api.post(`/searches/${searchId}/items/${itemId}/download`);
           });
 
@@ -203,7 +213,7 @@ class Response extends Component {
 
     try {
       const oldTree = { ...this.state.tree };
-      const oldFiles = oldTree[directory];
+      const oldFiles = oldTree[directory] || [];
 
       try {
         // some clients might send more than one directory in the response,
@@ -220,7 +230,10 @@ class Response extends Component {
           throw new Error('No directories were included in the response');
         }
 
-        const { files, name } = theRootDirectory;
+        const { name } = theRootDirectory;
+        const files = Array.isArray(theRootDirectory.files)
+          ? theRootDirectory.files
+          : [];
 
         // the api returns file names only, so we need to prepend the directory
         // to make it look like a search result.  we also need to preserve
@@ -537,13 +550,13 @@ class Response extends Component {
                     if (!firstFile || !searchId) return;
 
                     try {
-                      const fileIndex =
-                        responseProperty.files?.findIndex(
-                          (f) => f.filename === firstFile.filename,
-                        ) ?? -1;
-                      if (fileIndex < 0) return;
+                      const itemId = getSearchResultItemId({
+                        file: firstFile,
+                        response: responseProperty,
+                        responseIndex,
+                      });
+                      if (!itemId) return;
 
-                      const itemId = `${responseIndex ?? 0}:${fileIndex}`;
                       const result = await api.post(
                         `/searches/${searchId}/items/${itemId}/stream`,
                       );
