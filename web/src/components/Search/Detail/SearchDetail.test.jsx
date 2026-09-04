@@ -159,6 +159,21 @@ describe('SearchDetail wishlist folder ignores', () => {
     expect(wishlistAPI.getIgnoredResults).toHaveBeenCalledWith('wishlist-1');
   });
 
+  it('retries completed result hydration when rows lag the terminal projection', async () => {
+    getResponses
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([response]);
+
+    render(<SearchDetail {...createProps()} />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId('visible-files')).toHaveTextContent(
+        'Album\\keep.mp3,Album\\ignored.mp3,Other\\allowed.mp3',
+      ),
+    );
+    expect(getResponses).toHaveBeenCalledTimes(2);
+  });
+
   it('confirms and persists a new wishlist folder ignore', async () => {
     render(
       <SearchDetail

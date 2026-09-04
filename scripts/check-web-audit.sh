@@ -14,6 +14,11 @@ fi
 package_dir="${1:-web}"
 report=""
 audit_error=""
+audit_report_is_valid() {
+  jq -e 'type == "object" and (.metadata | type == "object") and (.vulnerabilities | type == "object")' \
+    <<<"$1" >/dev/null 2>&1
+}
+
 for audit_attempt in 1 2 3; do
   report="$(
     npm_config_fetch_retries=2 \
@@ -22,8 +27,7 @@ for audit_attempt in 1 2 3; do
       npm_config_fetch_timeout=30000 \
       npm --prefix "$package_dir" audit --json 2>/dev/null || true
   )"
-  if jq -e 'type == "object" and (.metadata | type == "object") and (.vulnerabilities | type == "object")' \
-    <<<"$report" >/dev/null 2>&1; then
+  if audit_report_is_valid "$report"; then
     break
   fi
   audit_error="$(
@@ -40,11 +44,23 @@ for audit_attempt in 1 2 3; do
   fi
 done
 
-if ! jq -e 'type == "object" and (.metadata | type == "object") and (.vulnerabilities | type == "object")' \
-  <<<"$report" >/dev/null 2>&1; then
-  echo "${package_dir} npm audit did not return a vulnerability report after three attempts." >&2
-  echo "${audit_error:-registry returned no usable audit response}" >&2
-  exit 1
+if ! audit_report_is_valid "$report"; then
+  # The npm registry audit endpoint is an external service and has returned
+  # transient non-report JSON during otherwise healthy installs. npm's cache
+  # contains the package graph and, when its advisory metadata is available,
+  # can still produce the same report without another network request.
+  offline_report="$(
+    npm_config_offline=true \
+      npm --prefix "$package_dir" audit --json 2>/dev/null || true
+  )"
+  if audit_report_is_valid "$offline_report"; then
+    report="$offline_report"
+    echo "${package_dir} npm audit registry unavailable; using the validated offline audit cache." >&2
+  else
+    echo "${package_dir} npm audit did not return a vulnerability report after three attempts." >&2
+    echo "${audit_error:-registry returned no usable audit response}" >&2
+    exit 1
+  fi
 fi
 
 printf '%s\n' "$report" | jq '.metadata, .vulnerabilities'

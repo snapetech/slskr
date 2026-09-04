@@ -833,6 +833,7 @@ mod tests {
     fn metrics_match_target_json_naming() {
         let transfers = TransferQueue {
             entries: Vec::new(),
+            progress_persisted_at: std::collections::BTreeMap::new(),
             next_id: 1,
             next_token: 1,
             history_limit: 0,

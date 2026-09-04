@@ -279,16 +279,26 @@ const SearchDetail = ({
       try {
         setLoading(true);
 
-        if (isComplete) {
-          // the results may not be ready yet. this is very rare, but
-          // if it happens the search will complete with no results.
-          await sleep(500);
-        }
+        // Search completion and result persistence are separate events. Retry
+        // a bounded number of times when the completed projection already
+        // reports results but the response rows have not caught up yet.
+        const attempts = isComplete && hasResults ? 3 : 1;
+        for (let attempt = 0; attempt < attempts; attempt += 1) {
+          if (cancelled) {
+            return;
+          }
+          if (isComplete) {
+            await sleep(attempt === 0 ? 500 : 250);
+          }
 
-        const responses = await getResponses({ id });
-        if (!cancelled) {
-          setResults(responses);
-          setLoading(false);
+          const responses = asArray(await getResponses({ id }));
+          if (responses.length > 0 || attempt === attempts - 1) {
+            if (!cancelled) {
+              setResults(responses);
+              setLoading(false);
+            }
+            return;
+          }
         }
       } catch (getError) {
         if (!cancelled) {

@@ -3266,13 +3266,6 @@ fn transfer_directory_name(filename: &str) -> String {
         .unwrap_or_default()
 }
 
-fn is_terminal_transfer_status(status: &str) -> bool {
-    matches!(
-        status,
-        "succeeded" | "completed" | "cancelled" | "failed" | "rejected"
-    )
-}
-
 fn format_transfer_duration(seconds: u64) -> String {
     let hours = seconds / 3_600;
     let minutes = seconds % 3_600 / 60;
@@ -3284,13 +3277,14 @@ fn public_transfer_reason(status: &str, reason: Option<&str>) -> Option<&'static
     reason.map(|_| match status {
         "failed" => "transfer failed",
         "rejected" => "transfer rejected",
+        "errored" => "transfer failed",
         "cancelled" => "transfer cancelled",
         _ => "transfer operation unavailable",
     })
 }
 
 fn transfer_failure_code(status: &str, reason: Option<&str>) -> Option<&'static str> {
-    if !matches!(status, "failed" | "rejected") {
+    if !matches!(status, "failed" | "rejected" | "errored") {
         return None;
     }
     let reason = reason?.to_ascii_lowercase();
@@ -3418,9 +3412,9 @@ fn download_request_projection(
 fn persisted_transfer_record(entry: &TransferEntry) -> persistence::TransferRecord {
     let completed_at = if matches!(
         entry.status.as_str(),
-        "succeeded" | "completed" | "cancelled" | "failed" | "rejected"
+        "succeeded" | "completed" | "cancelled" | "failed" | "rejected" | "errored"
     ) {
-        Some(entry.updated_at as i64)
+        Some(database_i64(entry.updated_at))
     } else {
         None
     };
@@ -3433,10 +3427,10 @@ fn persisted_transfer_record(entry: &TransferEntry) -> persistence::TransferReco
         },
         filename: entry.filename.clone(),
         peer_username: entry.peer_username.clone().unwrap_or_default(),
-        filesize: entry.size.unwrap_or(0) as i64,
-        progress: entry.bytes_transferred as i64,
+        filesize: database_i64(entry.size.unwrap_or(0)),
+        progress: database_i64(entry.bytes_transferred),
         status: entry.status.clone(),
-        started_at: entry.started_at.unwrap_or(entry.requested_at) as i64,
+        started_at: database_i64(entry.started_at.unwrap_or(entry.requested_at)),
         completed_at,
         request_id: entry.request_id.clone(),
         wishlist_item_id: entry.wishlist_item_id.clone(),
@@ -3456,8 +3450,12 @@ fn persisted_transfer_record(entry: &TransferEntry) -> persistence::TransferReco
         year: entry.year.map(i64::from),
         attempts: i64::from(entry.attempts.max(1)),
         auto_replace_attempts: i64::from(entry.auto_replace_attempts),
-        next_attempt_at: entry.next_attempt_at.map(|value| value as i64),
+        next_attempt_at: entry.next_attempt_at.map(database_i64),
     }
+}
+
+fn database_i64(value: u64) -> i64 {
+    i64::try_from(value).unwrap_or(i64::MAX)
 }
 
 fn persisted_transfer_event_record(entry: &TransferEntry) -> persistence::TransferEventRecord {
@@ -3570,7 +3568,7 @@ fn controller_transfer_state(status: &str) -> &str {
         }
         "succeeded" | "completed" => "Completed",
         "cancelled" => "Cancelled",
-        "failed" | "rejected" => "Failed",
+        "failed" | "rejected" | "errored" => "Failed",
         other => other,
     }
 }
@@ -3581,7 +3579,7 @@ fn native_download_status(status: &str) -> &str {
         "accepted" | "in_progress" => "running",
         "succeeded" | "completed" => "completed",
         "cancelled" => "cancelled",
-        "failed" | "rejected" | "timed_out" => "failed",
+        "failed" | "rejected" | "errored" | "timed_out" => "failed",
         _ => "failed",
     }
 }
@@ -3608,6 +3606,7 @@ fn native_compatibility_download_json(entry: &TransferEntry) -> serde_json::Valu
 #[derive(Debug)]
 struct TransferQueue {
     entries: Vec<TransferEntry>,
+    progress_persisted_at: BTreeMap<u64, u64>,
     next_id: u64,
     next_token: u32,
     history_limit: usize,
@@ -3671,6 +3670,7 @@ impl TransferQueue {
             .max(1);
         let mut queue = Self {
             entries,
+            progress_persisted_at: BTreeMap::new(),
             next_id,
             next_token,
             history_limit: config.transfer_history_limit,
@@ -3698,48 +3698,79 @@ impl TransferQueue {
             .into_iter()
             .filter_map(|record| {
                 let id = record.id.parse::<u64>().ok()?;
+                let token = u32::try_from(id).ok()?.max(1);
+                let size = u64::try_from(record.filesize).ok();
+                let started_at = u64::try_from(record.started_at).ok()?;
                 let direction = if record.direction == "upload" { 1 } else { 0 };
                 let status = match record.status.as_str() {
                     "queued" | "Queued" => "queued",
                     // Convert in_progress to queued for retry after restart
-                    "in_progress" | "InProgress" => "queued",
+                    "in_progress"
+                    | "InProgress"
+                    | "accepted"
+                    | "Accepted"
+                    | "peer_lookup"
+                    | "PeerLookup"
+                    | "peer_negotiating"
+                    | "PeerNegotiating"
+                    | "indirect_pending"
+                    | "IndirectPending" => "queued",
+                    "succeeded" | "Succeeded" => "succeeded",
                     "completed" | "Completed" => "completed",
                     "failed" | "Failed" => "failed",
+                    "rejected" | "Rejected" => "rejected",
                     "cancelled" | "Cancelled" => "cancelled",
+                    "errored" | "Errored" => "errored",
+                    "timed_out" | "TimedOut" | "timeout" | "Timeout" | "aborted"
+                    | "Aborted" => "failed",
                     _ => return None,
                 };
+                let bytes_transferred = u64::try_from(record.progress)
+                    .unwrap_or(0)
+                    .min(size.unwrap_or(u64::MAX));
                 Some(TransferEntry {
                     id,
-                    token: id as u32,
+                    token,
                     direction,
                     peer_username: Some(record.peer_username),
                     filename: record.filename,
-                    size: Some(record.filesize as u64),
+                    size,
                     status: status.to_owned(),
-                    started_at: Some(record.started_at as u64),
-                    updated_at: record.completed_at.unwrap_or(record.started_at) as u64,
+                    started_at: Some(started_at),
+                    updated_at: record
+                        .completed_at
+                        .and_then(|value| u64::try_from(value).ok())
+                        .unwrap_or(started_at),
                     reason: record.reason,
-                    bytes_transferred: record.progress as u64,
+                    bytes_transferred,
                     local_path: record.local_path,
                     destination_directory: record.destination_directory,
                     request_id: record.request_id,
                     wishlist_item_id: record.wishlist_item_id,
                     request_name: record.request_name,
                     batch_id: record.batch_id,
-                    bit_rate: record.bit_rate.map(|rate| rate as u32),
-                    sample_rate: record.sample_rate.map(|rate| rate as u32),
-                    bit_depth: record.bit_depth.map(|depth| depth as u32),
-                    length_seconds: record.length_seconds.map(|secs| secs as u32),
+                    bit_rate: record.bit_rate.and_then(|rate| u32::try_from(rate).ok()),
+                    sample_rate: record
+                        .sample_rate
+                        .and_then(|rate| u32::try_from(rate).ok()),
+                    bit_depth: record.bit_depth.and_then(|depth| u32::try_from(depth).ok()),
+                    length_seconds: record
+                        .length_seconds
+                        .and_then(|secs| u32::try_from(secs).ok()),
                     artist: record.artist,
                     album: record.album,
                     title: record.title,
-                    track_number: record.track_number.map(|num| num as u32),
-                    year: record.year.map(|year| year as u32),
+                    track_number: record
+                        .track_number
+                        .and_then(|number| u32::try_from(number).ok()),
+                    year: record.year.and_then(|year| u32::try_from(year).ok()),
                     attempts: u32::try_from(record.attempts).unwrap_or(1).max(1),
                     auto_replace_attempts: u32::try_from(record.auto_replace_attempts)
                         .unwrap_or(0),
-                    next_attempt_at: record.next_attempt_at.map(|value| value as u64),
-                    requested_at: record.started_at as u64,
+                    next_attempt_at: record
+                        .next_attempt_at
+                        .and_then(|value| u64::try_from(value).ok()),
+                    requested_at: started_at,
                     start_offset: 0,
                     updated_at_ms: 0,
                     previous_status: None,
@@ -3754,6 +3785,7 @@ impl TransferQueue {
             }
         }
         self.entries.truncate(self.history_limit);
+        self.progress_persisted_at.clear();
         self.next_id = self
             .entries
             .iter()
@@ -3790,6 +3822,7 @@ impl TransferQueue {
         let events_error = write_transfer_events_header(&events_path).err();
         Self {
             entries: Vec::new(),
+            progress_persisted_at: BTreeMap::new(),
             next_id: 1,
             next_token: 1,
             history_limit,
@@ -4068,7 +4101,7 @@ impl TransferQueue {
             entry.bytes_transferred = bytes_transferred;
         }
         entry.reason = bounded_transfer_reason(reason);
-        if matches!(status, "succeeded" | "completed" | "cancelled") {
+        if matches!(status, "succeeded" | "completed" | "cancelled" | "errored") {
             entry.next_attempt_at = None;
         }
         entry.updated_at = now;
@@ -4103,7 +4136,7 @@ impl TransferQueue {
             entry.size = size;
         }
         entry.reason = bounded_transfer_reason(reason);
-        if matches!(status, "succeeded" | "completed" | "cancelled") {
+        if matches!(status, "succeeded" | "completed" | "cancelled" | "errored") {
             entry.next_attempt_at = None;
         }
         entry.updated_at = now;
@@ -4134,6 +4167,9 @@ impl TransferQueue {
 
     fn update_progress(&mut self, id: u64, bytes_transferred: u64) -> Option<TransferEntry> {
         let entry = self.entries.iter_mut().find(|entry| entry.id == id)?;
+        if !is_active_transfer_status(&entry.status) {
+            return None;
+        }
         let now = unix_timestamp();
         entry.previous_status = Some(entry.status.clone());
         if entry.started_at.is_none() {
@@ -4364,6 +4400,13 @@ impl TransferQueue {
             let extra = self.entries.len() - self.history_limit;
             self.entries.drain(0..extra);
         }
+        let retained_ids = self
+            .entries
+            .iter()
+            .map(|entry| entry.id)
+            .collect::<std::collections::HashSet<_>>();
+        self.progress_persisted_at
+            .retain(|id, _| retained_ids.contains(id));
         self.updated_at = unix_timestamp();
         if let Err(error) = append_transfer_event(&self.events_path, &entry) {
             self.events_error = Some(error);
@@ -4383,6 +4426,9 @@ impl TransferQueue {
             }
         });
         if !removed.is_empty() {
+            for entry in &removed {
+                self.progress_persisted_at.remove(&entry.id);
+            }
             self.updated_at = unix_timestamp();
             self.persist_state();
         }
@@ -4391,6 +4437,24 @@ impl TransferQueue {
 
     fn persist_state(&mut self) {
         self.state_error = write_transfer_state(&self.state_path, &self.entries).err();
+    }
+
+    fn should_persist_progress(&mut self, entry: &TransferEntry) -> bool {
+        const PROGRESS_PERSIST_INTERVAL_MS: u64 = 1_000;
+        let should_persist = self
+            .progress_persisted_at
+            .get(&entry.id)
+            .is_none_or(|persisted_at| {
+                entry
+                    .updated_at_ms
+                    .saturating_sub(*persisted_at)
+                    >= PROGRESS_PERSIST_INTERVAL_MS
+            });
+        if should_persist {
+            self.progress_persisted_at
+                .insert(entry.id, entry.updated_at_ms);
+        }
+        should_persist
     }
 
     fn stats_json(&self) -> String {
@@ -4417,7 +4481,7 @@ impl TransferQueue {
         let failed = self
             .entries
             .iter()
-            .filter(|entry| entry.status == "failed" || entry.status == "rejected")
+            .filter(|entry| matches!(entry.status.as_str(), "failed" | "rejected" | "errored"))
             .count();
         let bytes_transferred = self
             .entries
@@ -4985,7 +5049,10 @@ fn bounded_transfer_reason(reason: Option<String>) -> Option<String> {
 
 fn bounded_transfer_entry(mut entry: TransferEntry) -> TransferEntry {
     entry.attempts = entry.attempts.max(1);
-    if matches!(entry.status.as_str(), "succeeded" | "completed" | "cancelled") {
+    if matches!(
+        entry.status.as_str(),
+        "succeeded" | "completed" | "cancelled" | "errored"
+    ) {
         entry.next_attempt_at = None;
     }
     if entry.updated_at_ms == 0 {
@@ -13219,7 +13286,7 @@ async fn security_reputation_profile_json(state: &AppState, username: &str) -> s
             bytes = bytes.saturating_add(entry.bytes_transferred);
             match entry.status.as_str() {
                 "succeeded" | "completed" => successful = successful.saturating_add(1),
-                "failed" | "rejected" => failed = failed.saturating_add(1),
+                "failed" | "rejected" | "errored" => failed = failed.saturating_add(1),
                 "cancelled" | "aborted" => aborted = aborted.saturating_add(1),
                 _ => {}
             }
@@ -23238,7 +23305,7 @@ async fn route_http_request_with_headers(
              let shares = state.shares.read().await;
              Ok(routing::ok_response(serde_json::json!({
                  "activeUploads": uploads.iter().filter(|entry| is_active_transfer_status(&entry.status)).count(),
-                 "failedUploads": uploads.iter().filter(|entry| entry.status == "failed").count(),
+                 "failedUploads": uploads.iter().filter(|entry| matches!(entry.status.as_str(), "failed" | "errored")).count(),
                  "succeededUploads": uploads.iter().filter(|entry| entry.status == "succeeded").count(),
                  "totalUploadRecords": uploads.len(),
                  "generatedAt": unix_timestamp(),
@@ -23891,7 +23958,12 @@ async fn route_http_request_with_headers(
                  let remove = entry.direction == direction
                      && matches!(
                         entry.status.as_str(),
-                        "succeeded" | "completed" | "cancelled" | "failed" | "rejected"
+                        "succeeded"
+                            | "completed"
+                            | "cancelled"
+                            | "failed"
+                            | "rejected"
+                            | "errored"
                     );
                  if remove {
                      removed_entries.push(entry.clone());
@@ -23899,6 +23971,9 @@ async fn route_http_request_with_headers(
                  !remove
              });
              let removed = before.saturating_sub(transfers.entries.len());
+             for entry in &removed_entries {
+                 transfers.progress_persisted_at.remove(&entry.id);
+             }
              let mutated_entries = transfers.entries.clone();
              drop(transfers);
              if let Err(error) = delete_persisted_transfers(state, &removed_entries).await {
@@ -24063,7 +24138,7 @@ async fn route_http_request_with_headers(
                         && (entry.direction != 0
                             || !matches!(
                                 entry.status.as_str(),
-                                "failed" | "rejected" | "cancelled"
+                                "failed" | "rejected" | "errored" | "cancelled"
                             ))
                     {
                         return Ok(routing::conflict_response("transfer is not retryable"));
@@ -24114,7 +24189,7 @@ async fn route_http_request_with_headers(
                             && (entry.direction != 0
                                 || !matches!(
                                     entry.status.as_str(),
-                                    "failed" | "rejected" | "cancelled"
+                                    "failed" | "rejected" | "errored" | "cancelled"
                                 ))
                             {
                                 drop(transfers);
@@ -24171,8 +24246,23 @@ async fn route_http_request_with_headers(
                         Ok(routing::not_found_response())
                     }
                 } else if action == "progress" {
-                    let bytes_transferred = extract_json_u64_field(body, "bytes_transferred").unwrap_or(0);
+                    let Some(bytes_transferred) = extract_json_u64_field(body, "bytes_transferred") else {
+                        drop(transfers);
+                        return Ok(routing::bad_request_response("bytes_transferred is required"));
+                    };
                     if let Some(entry) = transfers.entries.iter_mut().find(|t| t.id == id) {
+                        if is_terminal_transfer_status(&entry.status) {
+                            drop(transfers);
+                            return Ok(routing::conflict_response(
+                                "terminal transfers cannot receive progress updates",
+                            ));
+                        }
+                        if entry.size.is_some_and(|size| bytes_transferred > size) {
+                            drop(transfers);
+                            return Ok(routing::bad_request_response(
+                                "bytes_transferred exceeds transfer size",
+                            ));
+                        }
                         entry.previous_status = Some(entry.status.clone());
                         entry.status = "in_progress".to_owned();
                         entry.bytes_transferred = bytes_transferred;
@@ -24188,9 +24278,34 @@ async fn route_http_request_with_headers(
                         Ok(routing::not_found_response())
                     }
                 } else if action == "complete" {
-                    let bytes_transferred = extract_json_u64_field(body, "bytes_transferred").unwrap_or(0);
-                    let status_str = extract_json_string_field(body, "status").unwrap_or_else(|| "succeeded".to_string());
+                    let Some(bytes_transferred) = extract_json_u64_field(body, "bytes_transferred") else {
+                        drop(transfers);
+                        return Ok(routing::bad_request_response("bytes_transferred is required"));
+                    };
+                    let status_str = extract_json_string_field(body, "status")
+                        .map(|status| status.to_ascii_lowercase())
+                        .unwrap_or_else(|| "succeeded".to_string());
+                    if !is_terminal_transfer_status(&status_str) {
+                        drop(transfers);
+                        return Ok(routing::bad_request_response(
+                            "status must be a terminal transfer status",
+                        ));
+                    }
                     if let Some(entry) = transfers.entries.iter_mut().find(|t| t.id == id) {
+                        if entry.size.is_some_and(|size| bytes_transferred > size) {
+                            drop(transfers);
+                            return Ok(routing::bad_request_response(
+                                "bytes_transferred exceeds transfer size",
+                            ));
+                        }
+                        if matches!(status_str.as_str(), "succeeded" | "completed")
+                            && entry.size.is_some_and(|size| bytes_transferred != size)
+                        {
+                            drop(transfers);
+                            return Ok(routing::bad_request_response(
+                                "successful transfers must report their complete size",
+                            ));
+                        }
                         entry.previous_status = Some(entry.status.clone());
                         entry.bytes_transferred = bytes_transferred;
                         entry.status = status_str.clone();
@@ -24200,12 +24315,15 @@ async fn route_http_request_with_headers(
                         let entry_for_persistence = entry.clone();
 
                          // Prepare webhook dispatch
-                         let webhook_event = if status_str == "succeeded" {
-                             webhooks::WebhookEvent::TransferCompleted
-                         } else if status_str == "failed" {
-                             webhooks::WebhookEvent::TransferFailed
-                         } else {
-                             webhooks::WebhookEvent::TransferCompleted
+                         let webhook_event = match status_str.as_str() {
+                             "succeeded" | "completed" => {
+                                 Some(webhooks::WebhookEvent::TransferCompleted)
+                             }
+                             "failed" | "rejected" | "errored" => {
+                                 Some(webhooks::WebhookEvent::TransferFailed)
+                             }
+                             "cancelled" => None,
+                             _ => unreachable!("validated terminal transfer status"),
                          };
 
                          let webhook_data = serde_json::json!({
@@ -24225,12 +24343,15 @@ async fn route_http_request_with_headers(
                          maybe_upload_ftp_completed_download(state, &entry_for_persistence).await;
 
                          // Dispatch webhook
-                         dispatch_webhook_event(
-                             state,
-                             correlation_id,
-                             webhook_event,
-                             webhook_data,
-                         ).await;
+                         if let Some(webhook_event) = webhook_event {
+                             dispatch_webhook_event(
+                                 state,
+                                 correlation_id,
+                                 webhook_event,
+                                 webhook_data,
+                             )
+                             .await;
+                         }
 
                          Ok(routing::ok_response(json_response))
                      } else {
@@ -28858,7 +28979,7 @@ async fn route_http_request_with_headers(
                         "progress": {
                             "releases_total": 0,
                             "releases_done": 0,
-                            "releases_failed": if entry.status == "failed" { 1 } else { 0 },
+                            "releases_failed": if matches!(entry.status.as_str(), "failed" | "errored") { 1 } else { 0 },
                         },
                         "progress_percent": progress,
                         "filename": entry.filename,
@@ -33507,11 +33628,24 @@ async fn route_http_request_with_headers(
             transfers.entries.retain(|entry| {
                 !matches!(
                     entry.status.as_str(),
-                    "succeeded" | "completed" | "cancelled" | "failed" | "rejected"
+                    "succeeded"
+                        | "completed"
+                        | "cancelled"
+                        | "failed"
+                        | "rejected"
+                        | "errored"
                 )
             });
             let pruned = before.saturating_sub(transfers.entries.len());
             transfers.persist_state();
+            let retained_ids = transfers
+                .entries
+                .iter()
+                .map(|entry| entry.id)
+                .collect::<HashSet<_>>();
+            transfers
+                .progress_persisted_at
+                .retain(|id, _| retained_ids.contains(id));
             drop(transfers);
             Ok(routing::ok_response(format!("{{\"pruned\":{}}}", pruned)))
         }
@@ -60804,7 +60938,7 @@ fn bridge_legacy_transfer_state(status: &str) -> &'static str {
         "peer_lookup" | "peer_negotiating" | "indirect_pending" => "Connecting",
         "accepted" | "in_progress" => "Downloading",
         "succeeded" | "completed" => "Complete",
-        "failed" | "rejected" => "Errored",
+        "failed" | "rejected" | "errored" => "Errored",
         "cancelled" => "Cancelled",
         _ => "Unknown",
     }
@@ -70134,7 +70268,7 @@ fn controller_download_stats_json(transfers: &TransferQueue) -> String {
         .count();
     let failed = downloads
         .iter()
-        .filter(|entry| matches!(entry.status.as_str(), "failed" | "rejected"))
+        .filter(|entry| matches!(entry.status.as_str(), "failed" | "rejected" | "errored"))
         .count();
     let cancelled = downloads
         .iter()
@@ -70221,7 +70355,7 @@ fn controller_stuck_downloads_json(query: Option<&str>, transfers: &TransferQueu
         .filter(|entry| entry.direction == 0)
         .filter(|entry| controller_transfer_matches_query(entry, None, username.as_deref()))
         .filter(|entry| {
-            matches!(entry.status.as_str(), "failed" | "rejected")
+            matches!(entry.status.as_str(), "failed" | "rejected" | "errored")
                 || (is_active_transfer_status(&entry.status) && entry.bytes_transferred == 0)
         })
         .collect::<Vec<_>>();
@@ -70274,7 +70408,10 @@ fn controller_download_user_stats_json(_query: Option<&str>, transfers: &Transfe
             stats.1 += 1;
             stats.3 = stats.3.saturating_add(entry.bytes_transferred);
         }
-        if matches!(entry.status.as_str(), "failed" | "rejected" | "cancelled") {
+        if matches!(
+            entry.status.as_str(),
+            "failed" | "rejected" | "errored" | "cancelled"
+        ) {
             stats.2 += 1;
         }
         if is_terminal_transfer_status(&entry.status) {
@@ -71206,7 +71343,7 @@ fn controller_user_transfer_report(username: &str, transfers: &TransferQueue) ->
             "statistics": {
                 "total": selected.len(),
                 "successful": selected.iter().filter(|entry| entry.status == "succeeded").count(),
-                "errored": selected.iter().filter(|entry| matches!(entry.status.as_str(), "failed" | "rejected")).count(),
+                "errored": selected.iter().filter(|entry| matches!(entry.status.as_str(), "failed" | "rejected" | "errored")).count(),
                 "cancelled": selected.iter().filter(|entry| entry.status == "cancelled").count(),
             },
             "exceptions": [],
@@ -73693,6 +73830,7 @@ fn rollback_auto_retry_replacement(
     replacement_next_token: u32,
 ) {
     transfers.entries.retain(|entry| entry.id != replacement_id);
+    transfers.progress_persisted_at.remove(&replacement_id);
     if transfers.next_id == replacement_next_id {
         transfers.next_id = previous_next_id;
     }
@@ -73831,7 +73969,10 @@ async fn run_download_auto_retry_cycle_with_settings(
                 || !transfers
                     .entries
                     .iter()
-                    .any(|entry| entry.id == candidate.source.id && entry.status == "failed")
+                    .any(|entry| {
+                        entry.id == candidate.source.id
+                            && matches!(entry.status.as_str(), "failed" | "errored")
+                    })
             {
                 continue;
             }
@@ -82078,14 +82219,17 @@ async fn upload_file_transfer_with_connection(
         return Err("local path is not a file".to_owned());
     }
     if let Some(expected_size) = transfer.size.or(Some(shared_file.size)) {
-        if metadata.len() > expected_size {
-            return Err("local file exceeds expected transfer size".to_owned());
+        if metadata.len() != expected_size {
+            return Err(format!(
+                "local file size {} does not match expected transfer size {expected_size}",
+                metadata.len()
+            ));
         }
     }
     let size = metadata.len();
-    let offset =
+    let bytes_transferred =
         upload_file_with_progress(state, transfer, connection, &mut file, size, send_token).await?;
-    Ok((size.saturating_sub(offset), size))
+    Ok((bytes_transferred, size))
 }
 
 async fn upload_file_with_progress(
@@ -82124,7 +82268,11 @@ async fn upload_file_with_progress(
     file.seek(SeekFrom::Start(offset))
         .map_err(|error| format!("local file seek failed: {error}"))?;
 
-    let mut sent = 0_u64;
+    // The peer's offset is already present on the remote side.  Report the
+    // complete remote position to the transfer projection, while pacing only
+    // the bytes sent by this attempt.
+    let mut sent = offset;
+    update_transfer_progress(state, transfer.id, sent).await;
     let pacing_started = Instant::now();
     let mut buffer = vec![0_u8; state.config.soulseek_connection.buffer_transfer];
     loop {
@@ -82154,7 +82302,7 @@ async fn upload_file_with_progress(
         .await;
         if speed_limit_kib < i32::MAX as u32 {
             let bytes_per_second = u64::from(speed_limit_kib).saturating_mul(1024).max(1);
-            let expected_nanos = u128::from(sent)
+            let expected_nanos = u128::from(sent.saturating_sub(offset))
                 .saturating_mul(1_000_000_000)
                 .checked_div(u128::from(bytes_per_second))
                 .unwrap_or(u128::MAX)
@@ -82166,7 +82314,7 @@ async fn upload_file_with_progress(
             }
         }
     }
-    Ok(offset)
+    Ok(sent)
 }
 
 async fn effective_upload_speed_limit(state: &AppState, username: &str) -> u32 {
@@ -82656,9 +82804,16 @@ async fn write_download_chunk_if_active(
     file.write_all(chunk)
         .map_err(|error| format!("download file write failed: {error}"))?;
     let updated = transfers.update_progress(transfer_id, bytes_transferred);
+    let should_persist = updated
+        .as_ref()
+        .is_some_and(|entry| transfers.should_persist_progress(entry));
     drop(transfers);
-    if let Some(entry) = updated.as_ref() {
-        publish_transfer_hub_event(state, "progress", entry);
+    if let Some(entry) = updated {
+        if should_persist {
+            persist_transfer_progress_projection(state, &entry).await;
+        } else {
+            publish_transfer_hub_event(state, "progress", &entry);
+        }
     }
     Ok(())
 }
@@ -82674,10 +82829,37 @@ async fn update_transfer_progress(state: &AppState, transfer_id: u64, bytes_tran
         return;
     }
     let updated = transfers.update_progress(transfer_id, bytes_transferred);
+    let should_persist = updated
+        .as_ref()
+        .is_some_and(|entry| transfers.should_persist_progress(entry));
     drop(transfers);
-    if let Some(entry) = updated.as_ref() {
-        publish_transfer_hub_event(state, "progress", entry);
+    if let Some(entry) = updated {
+        if should_persist {
+            persist_transfer_progress_projection(state, &entry).await;
+        } else {
+            publish_transfer_hub_event(state, "progress", &entry);
+        }
     }
+}
+
+async fn persist_transfer_progress_projection(state: &AppState, entry: &TransferEntry) {
+    if let Some(db) = state.db.as_ref() {
+        let persistence_error = db
+            .update_transfer_progress(&entry.id.to_string(), entry.bytes_transferred)
+            .await
+            .err()
+            .map(|error| error.to_string());
+        if let Some(error) = persistence_error {
+            update_session(state, |snapshot| {
+                snapshot.last_error = Some(format!(
+                    "transfer {} progress persistence failed: {error}",
+                    entry.id
+                ));
+            })
+            .await;
+        }
+    }
+    publish_transfer_hub_event(state, "progress", entry);
 }
 
 async fn transfer_is_cancelled(state: &AppState, transfer_id: u64) -> bool {
@@ -82714,6 +82896,9 @@ fn outbound_peer_dial_order(
     } else {
         if regular_available {
             order.push(OutboundPeerTransport::Regular);
+        }
+        if obfuscated_available {
+            order.push(OutboundPeerTransport::Obfuscated);
         }
     }
     order
@@ -84287,7 +84472,10 @@ async fn controller_native_transfer_auto_replace_status_response(
         .iter()
         .filter(|entry| {
             entry.direction == 0
-                && matches!(entry.status.as_str(), "failed" | "rejected" | "cancelled")
+                && matches!(
+                    entry.status.as_str(),
+                    "failed" | "rejected" | "errored" | "cancelled"
+                )
         })
         .count();
     let enabled = state.runtime.read().await.autoreplace_enabled;
@@ -89741,6 +89929,7 @@ fn load_transfer_state(path: &Path, history_limit: usize) -> Result<Vec<Transfer
             entry.started_at = None;
             entry.start_offset = entry.bytes_transferred;
             entry.updated_at = now;
+            entry.updated_at_ms = unix_timestamp_millis();
         }
     }
     state.entries = state

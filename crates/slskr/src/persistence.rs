@@ -3051,7 +3051,7 @@ impl DatabaseManager {
         progress: u64,
     ) -> Result<(), Box<dyn std::error::Error>> {
         query("UPDATE transfers SET progress = ? WHERE id = ?")
-            .bind(progress as i64)
+            .bind(i64::try_from(progress).unwrap_or(i64::MAX))
             .bind(id)
             .execute(&self.pool)
             .await?;
@@ -5789,6 +5789,12 @@ mod tests {
             .unwrap();
         let updated = db.get_transfer("transfer_1").await.unwrap().unwrap();
         assert_eq!(updated.progress, 750000);
+
+        db.update_transfer_progress("transfer_1", u64::MAX)
+            .await
+            .unwrap();
+        let saturated = db.get_transfer("transfer_1").await.unwrap().unwrap();
+        assert_eq!(saturated.progress, i64::MAX);
 
         db.insert_transfer_event(&TransferEventRecord {
             id: 0,

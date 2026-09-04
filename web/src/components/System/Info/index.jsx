@@ -16,11 +16,13 @@ const Info = ({ runtimeProfile, options, state, theme }) => {
   const [contents, setContents] = useState();
 
   useEffect(() => {
-    setTimeout(() => {
+    const timeout = setTimeout(() => {
       setContents(
         YAML.stringify(state, { simpleKeys: true, sortMapEntries: false }),
       );
     }, 250);
+
+    return () => clearTimeout(timeout);
   }, [state]);
 
   const { pendingRestart } = state;
@@ -46,7 +48,9 @@ const Info = ({ runtimeProfile, options, state, theme }) => {
             mediaQuery="(max-width: 686px)"
             onClick={() =>
               safeOpenBlank(
-                `http://www.slsknet.org/qtlogin.php?username=${state?.user?.username}`,
+                `http://www.slsknet.org/qtlogin.php?username=${encodeURIComponent(
+                  state?.user?.username ?? '',
+                )}`,
               )
             }
           >

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { safeOpenBlank } from './safeOpen';
+import { isSafeBlankUrl, safeOpenBlank } from './safeOpen';
 
 describe('safeOpenBlank', () => {
   it('opens links with opener isolation', () => {
@@ -16,4 +16,17 @@ describe('safeOpenBlank', () => {
 
     open.mockRestore();
   });
+
+  it.each(['javascript:alert(1)', 'data:text/html,<script>alert(1)</script>'])(
+    'rejects unsafe URL schemes: %s',
+    (url) => {
+      const open = vi.spyOn(window, 'open');
+
+      expect(isSafeBlankUrl(url)).toBe(false);
+      expect(safeOpenBlank(url)).toBeNull();
+      expect(open).not.toHaveBeenCalled();
+
+      open.mockRestore();
+    },
+  );
 });

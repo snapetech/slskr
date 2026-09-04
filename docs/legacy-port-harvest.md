@@ -38,7 +38,7 @@ These are the pieces worth bringing into this repo first, implemented against th
    - `POST /api/v0/searches/:token/complete`
    - `POST /api/v0/search-responses`
    - Model records with token, query, target, active/completed state, timestamps, flattened results, slot/free/queue/speed fields.
-   - Initial route/state implementation exists for create/list/get/complete with local share-backed results, public-network global/user/room/wishlist dispatch, configurable expiration windows, expired-record pruning, list filtering/pagination, peer-response projection, and `POST /api/v0/search-responses` external result ingestion; richer grouping still needs to be attached.
+   - Route/state implementation exists for create/list/get/complete with local share-backed results, public-network global/user/room/wishlist dispatch, configurable expiration windows, expired-record pruning, list filtering/pagination, peer-response projection, external result ingestion, and controller-compatible grouping by responding peer with locked-file metadata.
 
 4. Transfer API
    - `GET /api/v0/transfers`
@@ -50,7 +50,7 @@ These are the pieces worth bringing into this repo first, implemented against th
    - `POST /api/v0/transfers/:id/cancel`
    - State model: queued, in_progress, succeeded, cancelled, failed, errored.
    - Record direction, peer username, remote virtual path, local target path, expected size, bytes transferred, last error, created/updated timestamps.
-   - Initial app-state projection exists for create/start/progress/complete/cancel/fail plus stats and list filtering/pagination; real peer transfer execution/resume still needs to be attached.
+   - App-state projection exists for create/start/progress/complete/cancel/fail plus stats and list filtering/pagination; direct, obfuscated, and indirect peer transfer execution, resumable partial files, retry, cancellation, and completed-file promotion are attached to the existing `slskr-client` primitives.
 
 5. Shares API
    - Current `/api/shares` and `/api/shares/rescan` are the seed.
@@ -76,7 +76,7 @@ These are the pieces worth bringing into this repo first, implemented against th
    - `POST /api/v0/rooms/:room/join`
    - `POST /api/v0/rooms/:room/messages`
    - Back this with the existing server/private-message and room protocol code rather than a standalone mock.
-   - Initial app-state projection exists for outbound/inbound messages, ack, room join, room list, room messages, and list filtering/pagination. Server PM/ack/room commands and inbound PM/room event projection are attached; richer room membership and delivery semantics still need to be backfilled.
+   - App-state projection exists for outbound/inbound messages, ack, room join, room list, room messages, and list filtering/pagination. Server PM/ack/room commands, inbound PM/room event projection, bounded roster snapshots with presence/stat fields, member operations, tickers, activity, and incremental message reads are attached.
 
 8. Files
    - `GET /api/v0/files/:root` exists now as a flat virtual-file listing under one configured share-root label.

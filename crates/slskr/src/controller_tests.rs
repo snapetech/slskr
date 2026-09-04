@@ -19120,6 +19120,61 @@ async fn controller_api_differential_transfer_api_creates_updates_and_reports_st
     assert_eq!(progress.status, "200 OK");
     assert!(progress.body.contains("\"bytes_transferred\":40"));
 
+    let missing_progress = super::route_http_request(
+        "POST",
+        "/api/v0/transfers/1/progress",
+        None,
+        "{}",
+        &state,
+    )
+    .await
+    .expect("reject missing transfer progress");
+    assert_eq!(missing_progress.status, "400 Bad Request");
+
+    let oversized_progress = super::route_http_request(
+        "POST",
+        "/api/v0/transfers/1/progress",
+        None,
+        "{\"bytes_transferred\":101}",
+        &state,
+    )
+    .await
+    .expect("reject oversized transfer progress");
+    assert_eq!(oversized_progress.status, "400 Bad Request");
+
+    let invalid_status = super::route_http_request(
+        "POST",
+        "/api/v0/transfers/1/complete",
+        None,
+        "{\"bytes_transferred\":40,\"status\":\"running\"}",
+        &state,
+    )
+    .await
+    .expect("reject non-terminal transfer status");
+    assert_eq!(invalid_status.status, "400 Bad Request");
+
+    let partial_success = super::route_http_request(
+        "POST",
+        "/api/v0/transfers/1/complete",
+        None,
+        "{\"bytes_transferred\":99,\"status\":\"succeeded\"}",
+        &state,
+    )
+    .await
+    .expect("reject partial transfer success");
+    assert_eq!(partial_success.status, "400 Bad Request");
+
+    let missing_completion_bytes = super::route_http_request(
+        "POST",
+        "/api/v0/transfers/1/complete",
+        None,
+        "{\"status\":\"failed\"}",
+        &state,
+    )
+    .await
+    .expect("reject missing completion bytes");
+    assert_eq!(missing_completion_bytes.status, "400 Bad Request");
+
     let completed = super::route_http_request(
         "POST",
         "/api/v0/transfers/1/complete",
@@ -19131,6 +19186,17 @@ async fn controller_api_differential_transfer_api_creates_updates_and_reports_st
     .expect("complete transfer");
     assert_eq!(completed.status, "200 OK");
     assert!(completed.body.contains("\"status\":\"succeeded\""));
+
+    let late_progress = super::route_http_request(
+        "POST",
+        "/api/v0/transfers/1/progress",
+        None,
+        "{\"bytes_transferred\":50}",
+        &state,
+    )
+    .await
+    .expect("reject progress after completion");
+    assert_eq!(late_progress.status, "409 Conflict");
 
     let stats = super::route_http_request("GET", "/api/v0/transfers/stats", None, "", &state)
         .await
@@ -19243,6 +19309,12 @@ async fn controller_api_differential_transfer_cleanup_persistence() {
     assert_eq!(persisted.status, "succeeded");
     assert_eq!(persisted.progress, 100);
     assert!(persisted.completed_at.is_some());
+    let mut rehydrated = super::TransferQueue::new_in_memory(state.config.transfer_history_limit);
+    rehydrated.rehydrate_from_database(&db).await;
+    assert!(rehydrated
+        .entries
+        .iter()
+        .any(|entry| entry.id == 1 && entry.status == "succeeded"));
     let events = db
         .list_transfer_events(Some("1"), 10, 0)
         .await
@@ -21421,7 +21493,7 @@ async fn peer_address_response_uploads_accepted_local_file_transfer() {
     let transfers = state.transfers.read().await;
     let record = transfers.entries.first().expect("transfer");
     assert_eq!(record.status, "succeeded", "reason={:?}", record.reason);
-    assert_eq!(record.bytes_transferred, 3);
+    assert_eq!(record.bytes_transferred, 4);
     assert_eq!(record.size, Some(4));
     assert_eq!(record.reason, None);
     let _ = std::fs::remove_file(path);
@@ -21991,7 +22063,7 @@ async fn connect_to_peer_response_executes_indirect_file_upload() {
     let transfers = state.transfers.read().await;
     let record = transfers.entries.first().expect("transfer");
     assert_eq!(record.status, "succeeded");
-    assert_eq!(record.bytes_transferred, 2);
+    assert_eq!(record.bytes_transferred, 3);
     assert_eq!(record.size, Some(3));
     assert_eq!(record.reason, None);
     let _ = std::fs::remove_file(path);
@@ -101611,6 +101683,19 @@ fn outbound_peer_dial_order_honors_compatibility_prefer_and_disabled_modes() {
     assert_eq!(
         super::outbound_peer_dial_order(&compatibility, true, true),
         vec![super::OutboundPeerTransport::Regular]
+    );
+
+    let compatibility_with_obfuscation = super::AppConfig::from_layers(
+        None,
+        FileConfig::default(),
+        &MapEnv::default()
+            .with("SLSKR_CONTROLLER_PROFILE", "native")
+            .with("SLSK_OBFUSCATION", "true"),
+    )
+    .expect("compatibility obfuscation config");
+    assert_eq!(
+        super::outbound_peer_dial_order(&compatibility_with_obfuscation, false, true),
+        vec![super::OutboundPeerTransport::Obfuscated]
     );
 
     let prefer = super::AppConfig::from_layers(

@@ -506,6 +506,14 @@ const Searches = ({ runtimeProfile, server } = {}) => {
     inputRef?.current?.inputRef?.current?.focus();
   }, [connecting, creating, error, runtimeProfile, searchId]);
 
+  useEffect(() => {
+    if (!searchId || connecting || error || creating || searches[searchId]) {
+      return;
+    }
+
+    routerNavigate('/searches', { replace: true });
+  }, [connecting, creating, error, routerNavigate, searchId, searches]);
+
   if (connecting) {
     return <LoaderSegment />;
   }
@@ -538,7 +546,7 @@ const Searches = ({ runtimeProfile, server } = {}) => {
       return <LoaderSegment />;
     }
 
-    routerNavigate('/searches', { replace: true });
+    return <LoaderSegment />;
   }
 
   if (runtimeProfile === 'legacy') {

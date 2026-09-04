@@ -1112,7 +1112,18 @@ pub fn is_active_transfer_status(status: &str) -> bool {
 }
 
 pub fn is_terminal_transfer_status(status: &str) -> bool {
-    matches!(status, "succeeded" | "cancelled" | "failed" | "rejected")
+    matches!(
+        status,
+        "succeeded" | "completed" | "cancelled" | "failed" | "rejected" | "errored"
+    )
+}
+
+pub fn is_successful_transfer_status(status: &str) -> bool {
+    matches!(status, "succeeded" | "completed")
+}
+
+pub fn is_failed_transfer_status(status: &str) -> bool {
+    matches!(status, "failed" | "rejected" | "errored")
 }
 
 // ============================================================================

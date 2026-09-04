@@ -1314,7 +1314,10 @@ async fn route_dispatch_group_2(context: &RouteDispatchContext<'_, '_>) -> Route
                 .iter()
                 .filter(|entry| {
                     entry.direction == 0
-                        && matches!(entry.status.as_str(), "failed" | "rejected" | "cancelled")
+                        && matches!(
+                            entry.status.as_str(),
+                            "failed" | "rejected" | "errored" | "cancelled"
+                        )
                 })
                 .count();
             let enabled = state.runtime.read().await.autoreplace_enabled;
@@ -1349,7 +1352,7 @@ async fn route_dispatch_group_2(context: &RouteDispatchContext<'_, '_>) -> Route
             let shares = state.shares.read().await;
             Ok(routing::ok_response(serde_json::json!({
                  "activeUploads": uploads.iter().filter(|entry| is_active_transfer_status(&entry.status)).count(),
-                 "failedUploads": uploads.iter().filter(|entry| entry.status == "failed").count(),
+                 "failedUploads": uploads.iter().filter(|entry| matches!(entry.status.as_str(), "failed" | "errored")).count(),
                  "succeededUploads": uploads.iter().filter(|entry| entry.status == "succeeded").count(),
                  "totalUploadRecords": uploads.len(),
                  "generatedAt": unix_timestamp(),
@@ -1767,7 +1770,7 @@ async fn route_dispatch_group_2(context: &RouteDispatchContext<'_, '_>) -> Route
                 .iter()
                 .filter(|entry| {
                     entry.direction == 0
-                        && matches!(entry.status.as_str(), "failed" | "rejected")
+                        && matches!(entry.status.as_str(), "failed" | "rejected" | "errored")
                         && requested_transfer_id.is_none_or(|id| entry.id == id)
                 })
                 .cloned()
@@ -2064,7 +2067,7 @@ async fn route_dispatch_group_2(context: &RouteDispatchContext<'_, '_>) -> Route
                 let remove = entry.direction == direction
                     && matches!(
                         entry.status.as_str(),
-                        "succeeded" | "completed" | "cancelled" | "failed" | "rejected"
+                        "succeeded" | "completed" | "cancelled" | "failed" | "rejected" | "errored"
                     );
                 if remove {
                     removed_entries.push(entry.clone());
@@ -2072,6 +2075,9 @@ async fn route_dispatch_group_2(context: &RouteDispatchContext<'_, '_>) -> Route
                 !remove
             });
             let removed = before.saturating_sub(transfers.entries.len());
+            for entry in &removed_entries {
+                transfers.progress_persisted_at.remove(&entry.id);
+            }
             let mutated_entries = transfers.entries.clone();
             drop(transfers);
             if let Err(error) = delete_persisted_transfers(state, &removed_entries).await {
@@ -2280,7 +2286,7 @@ async fn route_dispatch_group_2(context: &RouteDispatchContext<'_, '_>) -> Route
                         && (entry.direction != 0
                             || !matches!(
                                 entry.status.as_str(),
-                                "failed" | "rejected" | "cancelled"
+                                "failed" | "rejected" | "errored" | "cancelled"
                             ))
                     {
                         return Ok(routing::conflict_response("transfer is not retryable"));
@@ -2333,7 +2339,7 @@ async fn route_dispatch_group_2(context: &RouteDispatchContext<'_, '_>) -> Route
                             && (entry.direction != 0
                                 || !matches!(
                                     entry.status.as_str(),
-                                    "failed" | "rejected" | "cancelled"
+                                    "failed" | "rejected" | "errored" | "cancelled"
                                 ))
                         {
                             drop(transfers);
@@ -2393,9 +2399,26 @@ async fn route_dispatch_group_2(context: &RouteDispatchContext<'_, '_>) -> Route
                         Ok(routing::not_found_response())
                     }
                 } else if action == "progress" {
-                    let bytes_transferred =
-                        extract_json_u64_field(body, "bytes_transferred").unwrap_or(0);
+                    let Some(bytes_transferred) = extract_json_u64_field(body, "bytes_transferred")
+                    else {
+                        drop(transfers);
+                        return Ok(routing::bad_request_response(
+                            "bytes_transferred is required",
+                        ));
+                    };
                     if let Some(entry) = transfers.entries.iter_mut().find(|t| t.id == id) {
+                        if is_terminal_transfer_status(&entry.status) {
+                            drop(transfers);
+                            return Ok(routing::conflict_response(
+                                "terminal transfers cannot receive progress updates",
+                            ));
+                        }
+                        if entry.size.is_some_and(|size| bytes_transferred > size) {
+                            drop(transfers);
+                            return Ok(routing::bad_request_response(
+                                "bytes_transferred exceeds transfer size",
+                            ));
+                        }
                         entry.previous_status = Some(entry.status.clone());
                         entry.status = "in_progress".to_owned();
                         entry.bytes_transferred = bytes_transferred;
@@ -2411,11 +2434,37 @@ async fn route_dispatch_group_2(context: &RouteDispatchContext<'_, '_>) -> Route
                         Ok(routing::not_found_response())
                     }
                 } else if action == "complete" {
-                    let bytes_transferred =
-                        extract_json_u64_field(body, "bytes_transferred").unwrap_or(0);
+                    let Some(bytes_transferred) = extract_json_u64_field(body, "bytes_transferred")
+                    else {
+                        drop(transfers);
+                        return Ok(routing::bad_request_response(
+                            "bytes_transferred is required",
+                        ));
+                    };
                     let status_str = extract_json_string_field(body, "status")
+                        .map(|status| status.to_ascii_lowercase())
                         .unwrap_or_else(|| "succeeded".to_string());
+                    if !is_terminal_transfer_status(&status_str) {
+                        drop(transfers);
+                        return Ok(routing::bad_request_response(
+                            "status must be a terminal transfer status",
+                        ));
+                    }
                     if let Some(entry) = transfers.entries.iter_mut().find(|t| t.id == id) {
+                        if entry.size.is_some_and(|size| bytes_transferred > size) {
+                            drop(transfers);
+                            return Ok(routing::bad_request_response(
+                                "bytes_transferred exceeds transfer size",
+                            ));
+                        }
+                        if matches!(status_str.as_str(), "succeeded" | "completed")
+                            && entry.size.is_some_and(|size| bytes_transferred != size)
+                        {
+                            drop(transfers);
+                            return Ok(routing::bad_request_response(
+                                "successful transfers must report their complete size",
+                            ));
+                        }
                         entry.previous_status = Some(entry.status.clone());
                         entry.bytes_transferred = bytes_transferred;
                         entry.status = status_str.clone();
@@ -2425,12 +2474,15 @@ async fn route_dispatch_group_2(context: &RouteDispatchContext<'_, '_>) -> Route
                         let entry_for_persistence = entry.clone();
 
                         // Prepare webhook dispatch
-                        let webhook_event = if status_str == "succeeded" {
-                            webhooks::WebhookEvent::TransferCompleted
-                        } else if status_str == "failed" {
-                            webhooks::WebhookEvent::TransferFailed
-                        } else {
-                            webhooks::WebhookEvent::TransferCompleted
+                        let webhook_event = match status_str.as_str() {
+                            "succeeded" | "completed" => {
+                                Some(webhooks::WebhookEvent::TransferCompleted)
+                            }
+                            "failed" | "rejected" | "errored" => {
+                                Some(webhooks::WebhookEvent::TransferFailed)
+                            }
+                            "cancelled" => None,
+                            _ => unreachable!("validated terminal transfer status"),
                         };
 
                         let webhook_data = serde_json::json!({
@@ -2450,8 +2502,15 @@ async fn route_dispatch_group_2(context: &RouteDispatchContext<'_, '_>) -> Route
                         maybe_upload_ftp_completed_download(state, &entry_for_persistence).await;
 
                         // Dispatch webhook
-                        dispatch_webhook_event(state, correlation_id, webhook_event, webhook_data)
+                        if let Some(webhook_event) = webhook_event {
+                            dispatch_webhook_event(
+                                state,
+                                correlation_id,
+                                webhook_event,
+                                webhook_data,
+                            )
                             .await;
+                        }
 
                         Ok(routing::ok_response(json_response))
                     } else {

@@ -13,29 +13,60 @@ export default function Monitoring({ apiUrl, apiKey }: MonitoringPageProps) {
   const [autoRefresh, setAutoRefresh] = useState(true);
 
   useEffect(() => {
+    let active = true;
+    let controller: AbortController | undefined;
+
     const fetchMetrics = async () => {
+      controller?.abort();
+      const requestController = new AbortController();
+      controller = requestController;
+
       try {
         setLoading(true);
         setError(null);
         const headers: HeadersInit = {};
         if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
 
-        const res = await fetch(`${apiUrl}/api/metrics`, { headers });
+        const res = await fetch(`${apiUrl}/api/metrics`, {
+          headers,
+          signal: requestController.signal,
+        });
         if (!res.ok) throw new Error('Failed to fetch metrics');
-        setMetrics(parseMonitoringMetrics(await res.text()));
+        const nextMetrics = parseMonitoringMetrics(await res.text());
+        if (active && controller === requestController) {
+          setMetrics(nextMetrics);
+        }
       } catch (err) {
+        if (
+          !active ||
+          controller !== requestController ||
+          (err instanceof DOMException && err.name === 'AbortError')
+        ) {
+          return;
+        }
         console.error('Failed to fetch metrics:', err);
         setError(err instanceof Error ? err.message : 'Failed to fetch metrics');
       } finally {
-        setLoading(false);
+        if (active && controller === requestController) {
+          setLoading(false);
+        }
       }
     };
 
     fetchMetrics();
     if (autoRefresh) {
       const interval = setInterval(fetchMetrics, 5000);
-      return () => clearInterval(interval);
+      return () => {
+        active = false;
+        controller?.abort();
+        clearInterval(interval);
+      };
     }
+
+    return () => {
+      active = false;
+      controller?.abort();
+    };
   }, [apiUrl, apiKey, autoRefresh]);
 
   return (
