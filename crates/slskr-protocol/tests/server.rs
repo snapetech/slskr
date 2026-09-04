@@ -344,6 +344,31 @@ fn room_list_round_trips() {
 }
 
 #[test]
+fn room_list_rejects_impossible_user_count_vector() {
+    let mut payload = Writer::new();
+    payload.write_u32_le(0);
+    payload.write_u32_le(u32::MAX);
+
+    let error = ServerMessage::decode(
+        MessageFrame::new(ServerCode::RoomList.as_u32(), payload.into_inner()),
+        Direction::ServerToClient,
+    )
+    .expect_err("an impossible room count must be rejected before allocation");
+
+    let slskr_protocol::DecodeError::InvalidCount {
+        field,
+        count,
+        maximum,
+    } = error
+    else {
+        panic!("expected an invalid room user count");
+    };
+    assert_eq!(field, "room user counts");
+    assert_eq!(count, u32::MAX as usize);
+    assert_eq!(maximum, 0);
+}
+
+#[test]
 fn connection_and_search_messages_round_trip() {
     let messages = [
         (

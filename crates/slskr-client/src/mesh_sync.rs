@@ -28,6 +28,8 @@ pub const MAX_MESH_SYNC_CLIENT_FIELD_UTF16_UNITS: usize = 64;
 pub const MESH_SYNC_FLAC_KEY_HEX_LEN: usize = 16;
 pub const MESH_SYNC_MAX_CHUNK_LENGTH: i32 = 32_768;
 pub const MESH_SYNC_MAX_SIGNATURE_AGE_MS: u64 = 3_600_000;
+const MESH_SYNC_PUBLIC_KEY_BASE64_LEN: usize = 44;
+const MESH_SYNC_SIGNATURE_BASE64_LEN: usize = 88;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(i32)]
@@ -452,6 +454,13 @@ impl MeshSyncMessage {
             return Err(MeshSyncError::StaleTimestamp { age_ms });
         }
 
+        if base.public_key.len() != MESH_SYNC_PUBLIC_KEY_BASE64_LEN {
+            return Err(MeshSyncError::InvalidPublicKey);
+        }
+        if base.signature.len() != MESH_SYNC_SIGNATURE_BASE64_LEN {
+            return Err(MeshSyncError::InvalidSignature);
+        }
+
         let public_key_bytes = BASE64
             .decode(&base.public_key)
             .map_err(|_| MeshSyncError::InvalidBase64("public_key"))?;
@@ -629,6 +638,12 @@ pub fn verify_mesh_hash_entry_signature(entry: &MeshHashEntry) -> Result<[u8; 32
         .as_deref()
         .filter(|value| !value.is_empty())
         .ok_or(MeshSyncError::MissingCredential("sig"))?;
+    if public_key.len() != MESH_SYNC_PUBLIC_KEY_BASE64_LEN {
+        return Err(MeshSyncError::InvalidPublicKey);
+    }
+    if signature.len() != MESH_SYNC_SIGNATURE_BASE64_LEN {
+        return Err(MeshSyncError::InvalidSignature);
+    }
     let public_key_bytes: [u8; 32] = BASE64
         .decode(public_key)
         .map_err(|_| MeshSyncError::InvalidBase64("signer_pk"))?
@@ -1082,6 +1097,39 @@ mod tests {
         assert!(matches!(
             message.verify_signature_at(1_700_000_000_000),
             Err(MeshSyncError::MissingCredential("signature"))
+        ));
+    }
+
+    #[test]
+    fn mesh_sync_rejects_oversized_signature_material_before_decoding() {
+        let signing_key = SigningKey::from_bytes(&[10; 32]);
+        let mut message = hello();
+        message
+            .sign_at(&signing_key, 1_700_000_000_000)
+            .expect("sign mesh hello");
+
+        if let MeshSyncMessage::Hello(message) = &mut message {
+            message.base.public_key = "A".repeat(1_048_576);
+        }
+        assert!(matches!(
+            message.verify_signature_at(1_700_000_000_000),
+            Err(MeshSyncError::InvalidPublicKey)
+        ));
+
+        let mut entry = MeshHashEntry {
+            sequence_id: 1,
+            flac_key: "deadbeefcafebabe".to_owned(),
+            byte_hash: "a".repeat(64),
+            size: 1,
+            metadata_flags: None,
+            signer_public_key: None,
+            signature: None,
+        };
+        sign_mesh_hash_entry(&mut entry, &signing_key).expect("sign hash entry");
+        entry.signature = Some("A".repeat(1_048_576));
+        assert!(matches!(
+            verify_mesh_hash_entry_signature(&entry),
+            Err(MeshSyncError::InvalidSignature)
         ));
     }
 

@@ -431,7 +431,8 @@ fn mesh_hash_entry(
 }
 
 fn hash_db_entry(entry: MeshHashEntry) -> Option<super::content_discovery::HashDbEntry> {
-    if entry.flac_key.is_empty()
+    if entry.flac_key.len() != slskr_client::mesh_sync::MESH_SYNC_FLAC_KEY_HEX_LEN
+        || !entry.flac_key.bytes().all(|byte| byte.is_ascii_hexdigit())
         || entry.byte_hash.len() != 64
         || !entry.byte_hash.bytes().all(|byte| byte.is_ascii_hexdigit())
         || entry.size <= 0
@@ -444,6 +445,41 @@ fn hash_db_entry(entry: MeshHashEntry) -> Option<super::content_discovery::HashD
         size: u64::try_from(entry.size).ok()?,
         ..super::content_discovery::HashDbEntry::default()
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use slskr_client::mesh_sync::MeshHashEntry;
+
+    use super::hash_db_entry;
+
+    fn entry(flac_key: &str) -> MeshHashEntry {
+        MeshHashEntry {
+            sequence_id: 1,
+            flac_key: flac_key.to_owned(),
+            byte_hash: "a".repeat(64),
+            size: 1,
+            metadata_flags: None,
+            signer_public_key: None,
+            signature: None,
+        }
+    }
+
+    #[test]
+    fn mesh_merge_requires_frozen_flac_key_shape() {
+        assert!(hash_db_entry(entry("0123456789abcdef")).is_some());
+        for invalid in [
+            "",
+            "0123456789abcde",
+            "0123456789abcdef0",
+            "0123456789abcdeg",
+        ] {
+            assert!(
+                hash_db_entry(entry(invalid)).is_none(),
+                "accepted {invalid:?}"
+            );
+        }
+    }
 }
 
 #[allow(dead_code)]

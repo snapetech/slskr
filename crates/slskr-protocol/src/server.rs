@@ -2377,7 +2377,7 @@ fn encode_room_list(writer: &mut Writer, value: &RoomList) -> Result<(), EncodeE
 
 fn decode_room_entries(reader: &mut Reader<'_>) -> Result<Vec<RoomListEntry>, DecodeError> {
     let names = decode_string_vec(reader)?;
-    let counts_len = reader.read_u32_le()? as usize;
+    let counts_len = reader.read_bounded_count("room user counts", 4)?;
     if counts_len != names.len() {
         return Err(DecodeError::InvalidVectorLength {
             field: "room user counts",
