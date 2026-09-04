@@ -231,6 +231,7 @@ struct QuicDataClientState {
     connections: HashMap<SocketAddr, Arc<QuicDataClientConnection>>,
     order: VecDeque<SocketAddr>,
     connecting: HashMap<SocketAddr, Arc<Mutex<()>>>,
+    cache_generation: u64,
 }
 
 impl QuicDataClientState {
@@ -258,6 +259,7 @@ impl QuicDataClient {
                 connections: HashMap::new(),
                 order: VecDeque::new(),
                 connecting: HashMap::new(),
+                cache_generation: 0,
             })),
             max_payload_bytes: max_payload_bytes.max(1),
             max_cached_connections: max_cached_connections.max(1),
@@ -320,6 +322,10 @@ impl QuicDataClient {
     pub async fn close_all(&self) {
         let connections = {
             let mut state = self.state.lock().await;
+            // In-flight handshakes may still finish after this lock is
+            // released. Advance the generation so those handshakes cannot
+            // repopulate a cache that the caller explicitly closed.
+            state.cache_generation = state.cache_generation.wrapping_add(1);
             state.order.clear();
             state.connecting.clear();
             state
@@ -338,7 +344,7 @@ impl QuicDataClient {
         endpoint: SocketAddr,
         expected_public_key_sha256: [u8; 32],
     ) -> Result<Arc<QuicDataClientConnection>, QuicDataError> {
-        let gate = {
+        let (gate, cache_generation) = {
             let mut state = self.state.lock().await;
             if let Some(connection) = state.connections.get(&endpoint).cloned() {
                 if connection.expected_public_key_sha256() == expected_public_key_sha256 {
@@ -360,17 +366,20 @@ impl QuicDataClient {
                     max: self.max_cached_connections,
                 });
             }
-            Arc::clone(
-                state
-                    .connecting
-                    .entry(endpoint)
-                    .or_insert_with(|| Arc::new(Mutex::new(()))),
+            (
+                Arc::clone(
+                    state
+                        .connecting
+                        .entry(endpoint)
+                        .or_insert_with(|| Arc::new(Mutex::new(()))),
+                ),
+                state.cache_generation,
             )
         };
 
         let guard = gate.lock().await;
         let result = self
-            .connect_under_gate(endpoint, expected_public_key_sha256)
+            .connect_under_gate(endpoint, expected_public_key_sha256, cache_generation)
             .await;
         drop(guard);
 
@@ -389,6 +398,7 @@ impl QuicDataClient {
         &self,
         endpoint: SocketAddr,
         expected_public_key_sha256: [u8; 32],
+        cache_generation: u64,
     ) -> Result<Arc<QuicDataClientConnection>, QuicDataError> {
         {
             let mut state = self.state.lock().await;
@@ -419,7 +429,7 @@ impl QuicDataClient {
                     evicted.push(stale);
                 }
             }
-            if discarded.is_none() {
+            if discarded.is_none() && state.cache_generation == cache_generation {
                 state.connections.insert(endpoint, Arc::clone(&created));
                 state.touch(endpoint);
                 while state.connections.len() > self.max_cached_connections {
