@@ -1732,15 +1732,10 @@ impl Gateway {
                 )
             }
         };
-        let result = if !service_enabled {
-            Err((2, format!("Service '{}' not found", call.service_name)))
-        } else if call.magic != OVERLAY_MAGIC
-            || call.message_type != "mesh_service_call"
-            || call.version != OVERLAY_VERSION
-            || call.correlation_id.trim().is_empty()
-            || call.payload.len() > MAX_OVERLAY_MESSAGE_BYTES
-        {
+        let result = if !valid_service_call(&call) {
             Err((4, "Invalid service call".to_owned()))
+        } else if !service_enabled {
+            Err((2, format!("Service '{}' not found", call.service_name)))
         } else {
             match call.service_name.as_str() {
                 "private-gateway" => match call.method.as_str() {
@@ -2558,6 +2553,10 @@ fn bounded_required<'a>(
     Ok(value)
 }
 
+fn valid_service_call(call: &MeshServiceCall) -> bool {
+    call.validate().is_ok() && call.payload.len() <= MAX_OVERLAY_MESSAGE_BYTES
+}
+
 fn valid_open_tunnel_request(request: &OpenTunnelRequest) -> bool {
     !request.pod_id.trim().is_empty()
         && request.pod_id.len() <= MAX_POD_ID_BYTES
@@ -3023,6 +3022,19 @@ mod tests {
             &features,
             crate::config::ControllerProfile::Native
         ));
+    }
+
+    #[test]
+    fn inbound_service_calls_use_complete_overlay_validation() {
+        let mut call = MeshServiceCall::new("correlation", "pods", "List", Vec::new()).unwrap();
+        assert!(valid_service_call(&call));
+
+        call.method = "\n".to_owned();
+        assert!(!valid_service_call(&call));
+
+        call.method = "List".to_owned();
+        call.payload = vec![0; MAX_OVERLAY_MESSAGE_BYTES + 1];
+        assert!(!valid_service_call(&call));
     }
 
     #[test]
