@@ -377,9 +377,16 @@ impl ContentDiscoveryStore {
             .map(|entry| entry.seq_id)
             .max()
             .unwrap_or(0);
+        let previous_entries = self.hash_entries.clone();
+        let previous_seq = self.latest_seq;
         self.hash_entries = normalized;
         self.latest_seq = latest_seq.max(max_entry_seq);
-        self.persist()
+        if let Err(error) = self.persist() {
+            self.hash_entries = previous_entries;
+            self.latest_seq = previous_seq;
+            return Err(error);
+        }
+        Ok(())
     }
 
     /// Returns the ordered hash delta after `since_seq`, together with the
@@ -1381,6 +1388,34 @@ mod tests {
         assert_eq!(loaded.hash_entries()[0].first_seen_at, 101);
         assert_eq!(loaded.hash_entries()[0].last_updated_at, 202);
         assert_eq!(loaded.shadow_records()[0].updated_at, 303);
+        fs::remove_dir_all(root).expect("remove state directory");
+    }
+
+    #[test]
+    fn hash_restore_rolls_back_when_persistence_fails() {
+        let root = std::env::temp_dir().join(format!(
+            "slskr-content-discovery-restore-rollback-{}",
+            uuid::Uuid::new_v4()
+        ));
+        fs::create_dir_all(&root).expect("create state directory");
+        let mut store = ContentDiscoveryStore::load(&root).expect("new store");
+        store
+            .merge_hash_entries(vec![hash_entry(HASH, "original")])
+            .expect("persist original hash");
+        let previous_entries = store.hash_entries().to_vec();
+        let previous_seq = store.latest_seq();
+
+        let failed_path = root.join("content-discovery-state-directory");
+        fs::create_dir(&failed_path).expect("create failing state path");
+        store.state_path = Some(failed_path);
+        let replacement = hash_entry(
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "replacement",
+        );
+        assert!(store.restore_hash_entries(vec![replacement], 99).is_err());
+        assert_eq!(store.hash_entries(), previous_entries);
+        assert_eq!(store.latest_seq(), previous_seq);
+
         fs::remove_dir_all(root).expect("remove state directory");
     }
 }
