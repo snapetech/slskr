@@ -12953,13 +12953,21 @@ impl RuntimeCompatState {
     }
 
     fn fail_songid_run(&mut self, id: &str) -> Option<serde_json::Value> {
+        self.fail_songid_run_with_reason(id, "Analysis could not be queued.")
+    }
+
+    fn fail_songid_run_with_reason(
+        &mut self,
+        id: &str,
+        reason: &str,
+    ) -> Option<serde_json::Value> {
         self.update_songid_run(id, |run| {
             run["status"] = serde_json::json!("failed");
             run["summary"] = serde_json::json!("SongID analysis failed.");
             run["currentStage"] = serde_json::json!("failed");
             if let Some(evidence) = run.get_mut("evidence").and_then(|value| value.as_array_mut())
             {
-                evidence.push(serde_json::json!("Analysis could not be queued."));
+                evidence.push(serde_json::json!(reason));
             }
         })
     }
@@ -15723,8 +15731,17 @@ fn spawn_songid_workers(state: Arc<AppState>, receiver: mpsc::Receiver<SongIdJob
                 let Some(job) = job else {
                     break;
                 };
-                let Ok(_permit) = Arc::clone(&state.songid_run_slots).acquire_owned().await else {
-                    break;
+                let _permit = match Arc::clone(&state.songid_run_slots).acquire_owned().await {
+                    Ok(permit) => permit,
+                    Err(_) => {
+                        fail_songid_run_with_reason(
+                            &state,
+                            &job.run_id,
+                            "SongID worker pool is unavailable.",
+                        )
+                        .await;
+                        break;
+                    }
                 };
                 process_songid_job(&state, job).await;
             }
@@ -15733,7 +15750,7 @@ fn spawn_songid_workers(state: Arc<AppState>, receiver: mpsc::Receiver<SongIdJob
 }
 
 async fn process_songid_job(state: &AppState, job: SongIdJob) {
-    if let Ok(Some(run)) = mutate_runtime_compat_state(state, |runtime, _| {
+    match mutate_runtime_compat_state(state, |runtime, _| {
         runtime.update_songid_run(&job.run_id, |run| {
             run["status"] = serde_json::json!("running");
             run["summary"] = serde_json::json!("Starting SongID source analysis.");
@@ -15743,7 +15760,33 @@ async fn process_songid_job(state: &AppState, job: SongIdJob) {
     })
     .await
     {
-        publish_songid_hub_event(state, "update", &run);
+        Ok(Some(run)) => publish_songid_hub_event(state, "update", &run),
+        Ok(None) => {
+            record_daemon_log(
+                state,
+                logging::LogLevel::Warn,
+                "songid",
+                format!("SongID run {} disappeared before processing", job.run_id),
+            )
+            .await;
+            return;
+        }
+        Err(error) => {
+            record_daemon_log(
+                state,
+                logging::LogLevel::Warn,
+                "songid",
+                format!("SongID run {} could not start: {error}", job.run_id),
+            )
+            .await;
+            fail_songid_run_with_reason(
+                state,
+                &job.run_id,
+                "SongID analysis could not be started.",
+            )
+            .await;
+            return;
+        }
     }
 
     let integrations = state.integration_settings.read().await.clone();
@@ -15821,6 +15864,40 @@ async fn process_songid_job(state: &AppState, job: SongIdJob) {
                 logging::LogLevel::Warn,
                 "songid",
                 format!("SongID run {} completion persistence failed: {error}", job.run_id),
+            )
+            .await;
+            fail_songid_run_with_reason(
+                state,
+                &job.run_id,
+                "SongID analysis could not be completed.",
+            )
+            .await;
+        }
+    }
+}
+
+async fn fail_songid_run_with_reason(state: &AppState, run_id: &str, reason: &str) {
+    match mutate_runtime_compat_state(state, |runtime, _| {
+        runtime.fail_songid_run_with_reason(run_id, reason)
+    })
+    .await
+    {
+        Ok(Some(run)) => publish_songid_hub_event(state, "update", &run),
+        Ok(None) => {
+            record_daemon_log(
+                state,
+                logging::LogLevel::Warn,
+                "songid",
+                format!("SongID run {run_id} disappeared before failure was recorded"),
+            )
+            .await;
+        }
+        Err(error) => {
+            record_daemon_log(
+                state,
+                logging::LogLevel::Warn,
+                "songid",
+                format!("SongID run {run_id} failure state could not be persisted: {error}"),
             )
             .await;
         }
@@ -54930,6 +55007,8 @@ const BRIDGE_ROOM_LIST_REQUEST: i32 = 7;
 const BRIDGE_ROOM_LIST_RESPONSE: i32 = 8;
 const BRIDGE_MAX_FRAME_BYTES: usize = 1024 * 1024;
 const BRIDGE_MAX_STRING_BYTES: usize = 1024 * 1024;
+const BRIDGE_READ_TIMEOUT: Duration = Duration::from_secs(120);
+const BRIDGE_WRITE_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// The frozen native profile bridge uses a deliberately small Soulseek-compatible
 /// frame: a little-endian length containing the four-byte message type and
@@ -54937,6 +55016,24 @@ const BRIDGE_MAX_STRING_BYTES: usize = 1024 * 1024;
 /// bounded and independent of the HTTP bridge routes so legacy clients use
 /// the same real protocol boundary as the target service.
 async fn bridge_read_frame(stream: &mut TcpStream) -> Result<Option<(i32, Vec<u8>)>, &'static str> {
+    tokio::time::timeout(BRIDGE_READ_TIMEOUT, bridge_read_frame_inner(stream))
+        .await
+        .map_err(|_| "bridge read timed out")?
+}
+
+#[cfg(feature = "full-controller-tests")]
+async fn bridge_read_frame_with_timeout(
+    stream: &mut TcpStream,
+    timeout_duration: Duration,
+) -> Result<Option<(i32, Vec<u8>)>, &'static str> {
+    tokio::time::timeout(timeout_duration, bridge_read_frame_inner(stream))
+        .await
+        .map_err(|_| "bridge read timed out")?
+}
+
+async fn bridge_read_frame_inner(
+    stream: &mut TcpStream,
+) -> Result<Option<(i32, Vec<u8>)>, &'static str> {
     let mut length_bytes = [0_u8; 4];
     if stream.read_exact(&mut length_bytes).await.is_err() {
         return Ok(None);
@@ -54961,6 +55058,19 @@ async fn bridge_read_frame(stream: &mut TcpStream) -> Result<Option<(i32, Vec<u8
 }
 
 async fn bridge_write_frame(
+    stream: &mut TcpStream,
+    message_type: i32,
+    payload: &[u8],
+) -> Result<(), &'static str> {
+    tokio::time::timeout(
+        BRIDGE_WRITE_TIMEOUT,
+        bridge_write_frame_inner(stream, message_type, payload),
+    )
+    .await
+    .map_err(|_| "bridge write timed out")?
+}
+
+async fn bridge_write_frame_inner(
     stream: &mut TcpStream,
     message_type: i32,
     payload: &[u8],
@@ -55153,8 +55263,18 @@ async fn run_bridge_server(state: Arc<AppState>) {
             accepted = listener.accept() => accepted,
             _ = time::sleep(Duration::from_millis(250)) => continue,
         };
-        let Ok((mut stream, remote)) = accepted else {
-            continue;
+        let (mut stream, remote) = match accepted {
+            Ok(connection) => connection,
+            Err(error) => {
+                record_daemon_log(
+                    &state,
+                    logging::LogLevel::Error,
+                    "bridge",
+                    format!("Soulfind bridge listener failed at {address}: {error}"),
+                )
+                .await;
+                break;
+            }
         };
         let client_id = uuid::Uuid::new_v4().simple().to_string();
         let mut runtime = state.runtime.write().await;
@@ -55247,7 +55367,20 @@ async fn bridge_handle_client(client_id: String, mut stream: TcpStream, state: A
     }
 
     loop {
-        let Ok(Some((message_type, payload))) = bridge_read_frame(&mut stream).await else {
+        let frame = match bridge_read_frame(&mut stream).await {
+            Ok(frame) => frame,
+            Err(error) => {
+                record_daemon_log(
+                    &state,
+                    logging::LogLevel::Warn,
+                    "bridge",
+                    format!("bridge client {client_id} read failed: {error}"),
+                )
+                .await;
+                break;
+            }
+        };
+        let Some((message_type, payload)) = frame else {
             break;
         };
         if !session.consume_request_quota(bridge.max_requests_per_minute) {
@@ -55275,7 +55408,14 @@ async fn bridge_handle_client(client_id: String, mut stream: TcpStream, state: A
                 .await
             }
         };
-        if result.is_err() {
+        if let Err(error) = result {
+            record_daemon_log(
+                &state,
+                logging::LogLevel::Warn,
+                "bridge",
+                format!("bridge client {client_id} request failed: {error}"),
+            )
+            .await;
             break;
         }
     }

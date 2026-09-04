@@ -29268,6 +29268,35 @@ async fn bridge_rejects_oversized_wire_frames() {
 
 #[cfg_attr(test, tokio::test)]
 #[cfg(feature = "full-controller-tests")]
+async fn bridge_frame_reads_have_a_deadline() {
+    use tokio::io::AsyncWriteExt as _;
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bridge timeout listener");
+    let address = listener.local_addr().expect("bridge timeout address");
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener
+            .accept()
+            .await
+            .expect("accept bridge timeout client");
+        super::bridge_read_frame_with_timeout(&mut stream, Duration::from_millis(20)).await
+    });
+    let mut client = tokio::net::TcpStream::connect(address)
+        .await
+        .expect("connect bridge timeout client");
+    client
+        .write_all(&5_u32.to_le_bytes())
+        .await
+        .expect("write partial bridge frame");
+    assert_eq!(
+        server.await.expect("bridge timeout server task"),
+        Err("bridge read timed out")
+    );
+}
+
+#[cfg_attr(test, tokio::test)]
+#[cfg(feature = "full-controller-tests")]
 async fn bridge_admin_clients_never_leaks_unrelated_peer_activity() {
     let (state, _receiver) = test_state_with_env(
         MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "legacy"),
