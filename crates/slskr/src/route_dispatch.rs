@@ -1370,11 +1370,23 @@ async fn route_http_request_inner_with_batch(
         if let Some(token) = authorization.and_then(|value| value.strip_prefix("Bearer ")) {
             let now = unix_timestamp();
             if let Some(claims) = utils::verify_admin_jwt(&state.config, token, now) {
-                state
+                let revoke_result = state
                     .revoked_jwts
                     .write()
                     .await
                     .revoke(claims.jti, claims.exp, now);
+                if let Err(error) = revoke_result {
+                    record_daemon_log(
+                        state,
+                        logging::LogLevel::Error,
+                        "security",
+                        format!("JWT revocation persistence failed: {error}"),
+                    )
+                    .await;
+                    return Ok(routing::service_unavailable_response(
+                        "session revocation persistence failed",
+                    ));
+                }
             }
         }
         return Ok(routing::no_content_response());

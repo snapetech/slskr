@@ -349,15 +349,18 @@ fn revoked_jwt_store_persists_and_reloads_across_restart() {
     let now = super::unix_timestamp();
 
     {
-        let mut store = super::RevokedJwtStore::load(&root);
+        let mut store = super::RevokedJwtStore::load(&root).expect("load JWT revocation store");
         assert!(!store.contains("token-1", now), "fresh store must be empty");
-        store.revoke("token-1".to_owned(), now + 3_600, now);
+        store
+            .revoke("token-1".to_owned(), now + 3_600, now)
+            .expect("persist JWT revocation");
         assert!(store.contains("token-1", now));
     }
 
     // Simulate a restart: a fresh store loaded from the same state
     // directory must still honor the revocation.
-    let mut reloaded = super::RevokedJwtStore::load(&root);
+    let mut reloaded =
+        super::RevokedJwtStore::load(&root).expect("reload JWT revocation store");
     assert!(
         reloaded.contains("token-1", now),
         "revocation must survive a restart"
@@ -381,12 +384,15 @@ fn revoked_jwt_store_prunes_expired_entries_on_reload() {
     let now = super::unix_timestamp();
 
     {
-        let mut store = super::RevokedJwtStore::load(&root);
-        store.revoke("short-lived-token".to_owned(), now + 1, now);
+        let mut store = super::RevokedJwtStore::load(&root).expect("load JWT revocation store");
+        store
+            .revoke("short-lived-token".to_owned(), now + 1, now)
+            .expect("persist JWT revocation");
     }
 
     // Reload well after expiry: the entry must be pruned, not resurrected.
-    let mut reloaded = super::RevokedJwtStore::load(&root);
+    let mut reloaded =
+        super::RevokedJwtStore::load(&root).expect("reload JWT revocation store");
     assert!(!reloaded.contains("short-lived-token", now + 100));
 
     fs::remove_dir_all(root).unwrap();
@@ -121539,28 +121545,34 @@ async fn security_controls_differential_core_security() {
     ));
     fs::create_dir_all(&root).expect("JWT revocation root");
     let now = super::unix_timestamp();
-    let mut store = super::RevokedJwtStore::load(&root);
+    let mut store = super::RevokedJwtStore::load(&root).expect("load JWT revocation store");
     record!(
         "slskdn",
         JWT,
         "activation-default-and-profile",
         !store.contains("missing-token", now)
     );
-    store.revoke("live-token".to_owned(), now + 3_600, now);
+    store
+        .revoke("live-token".to_owned(), now + 3_600, now)
+        .expect("persist JWT revocation");
     record!(
         "slskdn",
         JWT,
         "accepted-nominal-input",
         store.contains("live-token", now)
     );
-    store.revoke("expired-token".to_owned(), now + 1, now);
+    store
+        .revoke("expired-token".to_owned(), now + 1, now)
+        .expect("persist JWT revocation");
     record!(
         "slskdn",
         JWT,
         "rejected-malicious-and-boundary-input",
         !store.contains("expired-token", now + 2) && !store.contains("missing-token", now + 2)
     );
-    store.revoke("second-live-token".to_owned(), now + 3_600, now + 2);
+    store
+        .revoke("second-live-token".to_owned(), now + 3_600, now + 2)
+        .expect("persist JWT revocation");
     record!(
         "slskdn",
         JWT,
@@ -121575,7 +121587,8 @@ async fn security_controls_differential_core_security() {
         "secret-logging-and-privacy-output",
         persisted.contains("live-token") && !persisted.contains("jwt-secret")
     );
-    let mut reloaded = super::RevokedJwtStore::load(&root);
+    let mut reloaded =
+        super::RevokedJwtStore::load(&root).expect("reload JWT revocation store");
     record!(
         "slskdn",
         JWT,

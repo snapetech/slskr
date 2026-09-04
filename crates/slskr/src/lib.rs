@@ -18100,27 +18100,53 @@ struct RevokedJwtStore {
 
 impl RevokedJwtStore {
     const STATE_FILE_NAME: &'static str = "jwt-revocations.json";
+    const MAX_STATE_BYTES: u64 = 8 * 1024 * 1024;
+    const MAX_RECORDS: usize = 100_000;
+    const MAX_JTI_BYTES: usize = 512;
 
-    fn load(state_dir: &Path) -> Self {
+    fn load(state_dir: &Path) -> Result<Self, String> {
         let state_path = state_dir.join(Self::STATE_FILE_NAME);
-        let records = fs::read(&state_path)
-            .ok()
-            .and_then(|bytes| serde_json::from_slice::<BTreeMap<String, u64>>(&bytes).ok())
-            .unwrap_or_default();
+        let records = match fs::symlink_metadata(&state_path) {
+            Ok(metadata) => {
+                if metadata.file_type().is_symlink() || !metadata.is_file() {
+                    return Err("JWT revocation state path must be a regular file".to_owned());
+                }
+                if metadata.len() > Self::MAX_STATE_BYTES {
+                    return Err("JWT revocation state file is too large".to_owned());
+                }
+                let bytes = fs::read(&state_path)
+                    .map_err(|error| format!("JWT revocation state read failed: {error}"))?;
+                serde_json::from_slice::<BTreeMap<String, u64>>(&bytes)
+                    .map_err(|error| format!("JWT revocation state parse failed: {error}"))?
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => BTreeMap::new(),
+            Err(error) => {
+                return Err(format!("JWT revocation state metadata failed: {error}"));
+            }
+        };
+        if records.len() > Self::MAX_RECORDS
+            || records.keys().any(|jti| {
+                jti.is_empty()
+                    || jti.len() > Self::MAX_JTI_BYTES
+                    || jti.chars().any(char::is_control)
+            })
+        {
+            return Err("JWT revocation state exceeds its record or identifier limits".to_owned());
+        }
         let mut store = Self {
             records,
             state_path: Some(state_path),
         };
         store.prune(unix_timestamp());
-        store
+        Ok(store)
     }
 
-    fn revoke(&mut self, jti: String, expires_at: u64, now: u64) {
+    fn revoke(&mut self, jti: String, expires_at: u64, now: u64) -> Result<(), String> {
         self.records.retain(|_, expiry| *expiry > now);
         if expires_at > now {
             self.records.insert(jti, expires_at);
         }
-        self.persist();
+        self.persist()
     }
 
     fn contains(&mut self, jti: &str, now: u64) -> bool {
@@ -18132,17 +18158,22 @@ impl RevokedJwtStore {
         let had_expired = self.records.values().any(|expiry| *expiry <= now);
         self.records.retain(|_, expiry| *expiry > now);
         if had_expired {
-            self.persist();
+            if let Err(error) = self.persist() {
+                // Keeping an expired revocation on disk is fail-closed; report
+                // the failure so operators can repair the state directory.
+                eprintln!("[Error] JWT revocation pruning persistence failed: {error}");
+            }
         }
     }
 
-    fn persist(&self) {
+    fn persist(&self) -> Result<(), String> {
         let Some(path) = self.state_path.as_deref() else {
-            return;
+            return Ok(());
         };
-        if let Ok(body) = serde_json::to_vec(&self.records) {
-            let _ = write_file_atomic(path, body);
-        }
+        let body = serde_json::to_vec(&self.records)
+            .map_err(|error| format!("JWT revocation state serialization failed: {error}"))?;
+        write_file_atomic(path, body)
+            .map_err(|error| format!("JWT revocation state write failed: {error}"))
     }
 }
 
@@ -19156,11 +19187,23 @@ async fn route_http_request_with_headers(
         if let Some(token) = authorization.and_then(|value| value.strip_prefix("Bearer ")) {
             let now = unix_timestamp();
             if let Some(claims) = utils::verify_admin_jwt(&state.config, token, now) {
-                state
+                let revoke_result = state
                     .revoked_jwts
                     .write()
                     .await
                     .revoke(claims.jti, claims.exp, now);
+                if let Err(error) = revoke_result {
+                    record_daemon_log(
+                        state,
+                        logging::LogLevel::Error,
+                        "security",
+                        format!("JWT revocation persistence failed: {error}"),
+                    )
+                    .await;
+                    return Ok(routing::service_unavailable_response(
+                        "session revocation persistence failed",
+                    ));
+                }
             }
         }
         return Ok(routing::no_content_response());
@@ -21772,12 +21815,17 @@ async fn route_http_request_with_headers(
 
                  tokio::spawn(async move {
                      let _delivery_permit = delivery_permit;
-                     let _ = webhooks::WebhookDispatcher::send_webhook(
+                     let webhook_id = webhook_clone.id.clone();
+                     if let Err(error) = webhooks::WebhookDispatcher::send_webhook(
                          &webhook_clone.url,
                          &webhook_clone.secret,
                          &payload.to_string(),
                          webhook_clone.timeout_seconds,
-                     ).await;
+                     )
+                     .await
+                     {
+                         ::tracing::warn!(%webhook_id, %error, "webhook test delivery failed");
+                     }
                  });
 
                  Ok(routing::ok_response(serde_json::json!({"status": "test_sent"}).to_string()))
@@ -26002,13 +26050,17 @@ async fn route_http_request_with_headers(
 
                 tokio::spawn(async move {
                     let _delivery_permit = delivery_permit;
-                    let _ = webhooks::WebhookDispatcher::send_webhook(
+                    let webhook_id = webhook_clone.id.clone();
+                    if let Err(error) = webhooks::WebhookDispatcher::send_webhook(
                         &webhook_clone.url,
                         &webhook_clone.secret,
                         &payload.to_string(),
                         webhook_clone.timeout_seconds,
                     )
-                    .await;
+                    .await
+                    {
+                        ::tracing::warn!(%webhook_id, %error, "webhook test delivery failed");
+                    }
                 });
 
                 Ok(routing::ok_response("{\"status\":\"test_sent\"}".to_owned()))
@@ -49467,7 +49519,17 @@ async fn controller_enqueue_download_batch(body: &str, state: &AppState) -> Http
             .map(|entry| entry.id)
             .collect::<Vec<_>>();
         state.transfers.write().await.remove_entries(&ids);
-        let _ = controller_delete_transfer_batch(state, &batch_id).await;
+        if let Err(cleanup_error) = controller_delete_transfer_batch(state, &batch_id).await {
+            record_daemon_log(
+                state,
+                logging::LogLevel::Error,
+                "transfers",
+                format!(
+                    "failed to remove transfer batch after persistence failure: {cleanup_error}"
+                ),
+            )
+            .await;
+        }
         return routing::service_unavailable_response(&error);
     }
     let public_entries = staged_entries
@@ -49487,8 +49549,28 @@ async fn controller_enqueue_download_batch(body: &str, state: &AppState) -> Http
                 .map(|entry| entry.id)
                 .collect::<Vec<_>>();
             state.transfers.write().await.remove_entries(&ids);
-            let _ = delete_persisted_transfers(state, &staged_entries).await;
-            let _ = controller_delete_transfer_batch(state, &batch_id).await;
+            if let Err(cleanup_error) = delete_persisted_transfers(state, &staged_entries).await {
+                record_daemon_log(
+                    state,
+                    logging::LogLevel::Error,
+                    "transfers",
+                    format!(
+                        "failed to remove staged transfer records after batch persistence failure: {cleanup_error}"
+                    ),
+                )
+                .await;
+            }
+            if let Err(cleanup_error) = controller_delete_transfer_batch(state, &batch_id).await {
+                record_daemon_log(
+                    state,
+                    logging::LogLevel::Error,
+                    "transfers",
+                    format!(
+                        "failed to remove transfer batch after batch persistence failure: {cleanup_error}"
+                    ),
+                )
+                .await;
+            }
             return routing::service_unavailable_response(&error);
         }
     }
@@ -72537,7 +72619,7 @@ async fn serve(invocation: ServeInvocation) -> Result<(), String> {
         config.controller_profile,
     )?;
     let controller_cli_environment = invocation.config_environment.clone();
-    let revoked_jwts = RevokedJwtStore::load(&config.state_dir);
+    let revoked_jwts = RevokedJwtStore::load(&config.state_dir)?;
     let mut mesh_state = MeshState::from_settings(&config.advanced_networking.mesh);
     if let Some(records) = controller_feature_state
         .get("hashdb/peers")
@@ -84760,15 +84842,27 @@ async fn record_daemon_log(
     }
     if state.config.logger.disk {
         let log_dir = state.config.state_dir.join("logs");
-        if tokio::fs::create_dir_all(&log_dir).await.is_ok() {
-            if let Ok(mut file) = tokio::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(log_dir.join(format!("slskr-{}.log", chrono::Utc::now().format("%Y%m%d"))))
-                .await
-            {
-                let line = format!("{} {rendered}\n", logging::format_timestamp());
-                let _ = file.write_all(line.as_bytes()).await;
+        match tokio::fs::create_dir_all(&log_dir).await {
+            Ok(()) => {
+                match tokio::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(log_dir.join(format!("slskr-{}.log", chrono::Utc::now().format("%Y%m%d"))))
+                    .await
+                {
+                    Ok(mut file) => {
+                        let line = format!("{} {rendered}\n", logging::format_timestamp());
+                        if let Err(error) = file.write_all(line.as_bytes()).await {
+                            eprintln!("[Error] daemon disk log write failed: {error}");
+                        }
+                    }
+                    Err(error) => {
+                        eprintln!("[Error] daemon disk log open failed: {error}");
+                    }
+                }
+            }
+            Err(error) => {
+                eprintln!("[Error] daemon log directory creation failed: {error}");
             }
         }
     }
@@ -84788,11 +84882,24 @@ async fn record_daemon_log(
                 "values": [[timestamp_ns, rendered]],
             }],
         });
-        let _ = time::timeout(
+        let loki_result = time::timeout(
             Duration::from_secs(2),
             reqwest::Client::new().post(endpoint).json(&payload).send(),
         )
         .await;
+        match loki_result {
+            Ok(Ok(response)) if response.status().is_success() => {}
+            Ok(Ok(response)) => {
+                eprintln!(
+                    "[Error] Loki log delivery failed with status {}",
+                    response.status()
+                );
+            }
+            Ok(Err(error)) => {
+                eprintln!("[Error] Loki log delivery request failed: {error}");
+            }
+            Err(_) => eprintln!("[Error] Loki log delivery timed out"),
+        }
     }
     let detail = serde_json::json!({
         "level": logging::LogConfig::level_name(level),
