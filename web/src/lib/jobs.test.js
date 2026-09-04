@@ -16,7 +16,11 @@ vi.mock('./api', () => ({
 
 describe('jobs', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    // Clear both call history and rejected/resolved implementations. The
+    // endpoint-compatibility cases deliberately change the same mock from a
+    // 404 to a network failure; retaining implementations makes the outcome
+    // depend on test-file scheduling in CI.
+    vi.resetAllMocks();
   });
 
   describe('getJobs', () => {
