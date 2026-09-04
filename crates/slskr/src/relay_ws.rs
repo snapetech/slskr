@@ -454,6 +454,9 @@ where
     if is_control && header[0] & 0x80 == 0 {
         return Err("relay websocket control frame was fragmented".to_owned());
     }
+    if !is_control && header[0] & 0x80 == 0 {
+        return Err("relay websocket data frame was fragmented".to_owned());
+    }
     if header[1] & 0x80 == 0 {
         return Err("relay websocket frame was not masked".to_owned());
     }
@@ -503,11 +506,29 @@ where
             String::from_utf8(payload)
                 .map_err(|_| "relay websocket text was not UTF-8".to_owned())?,
         ),
-        0x8 => WebSocketFrame::Close(payload),
+        0x8 => {
+            validate_close_payload(&payload)?;
+            WebSocketFrame::Close(payload)
+        }
         0x9 => WebSocketFrame::Ping(payload),
         0xa => WebSocketFrame::Pong,
         _ => unreachable!(),
     })
+}
+
+fn validate_close_payload(payload: &[u8]) -> Result<(), String> {
+    if payload.len() == 1 {
+        return Err("relay websocket close frame used a one-byte payload".to_owned());
+    }
+    if payload.len() >= 2 {
+        let code = u16::from_be_bytes([payload[0], payload[1]]);
+        if !matches!(code, 1000..=1003 | 1007..=1014 | 3000..=4999) {
+            return Err("relay websocket close frame used an invalid status code".to_owned());
+        }
+        std::str::from_utf8(&payload[2..])
+            .map_err(|_| "relay websocket close reason was not valid UTF-8".to_owned())?;
+    }
+    Ok(())
 }
 
 pub(crate) async fn read_ws_frame_with_timeout<R>(
@@ -526,6 +547,15 @@ where
 mod tests {
     use super::*;
 
+    fn masked_frame(first_byte: u8, payload: &[u8]) -> Vec<u8> {
+        let mut frame = Vec::with_capacity(6 + payload.len());
+        frame.push(first_byte);
+        frame.push(0x80 | payload.len() as u8);
+        frame.extend_from_slice(&[0, 0, 0, 0]);
+        frame.extend_from_slice(payload);
+        frame
+    }
+
     #[tokio::test]
     async fn websocket_read_deadline_releases_blocked_reader() {
         let (_client, mut reader) = tokio::io::duplex(64);
@@ -537,6 +567,30 @@ mod tests {
         .expect("read deadline")
         .expect_err("blocked websocket reader must time out");
         assert!(error.contains("read deadline exceeded"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn websocket_rejects_fragmented_data_frames() {
+        let frame = masked_frame(0x01, b"partial");
+        let error = read_ws_frame(&mut &frame[..])
+            .await
+            .expect_err("fragmented data frame");
+        assert_eq!(error, "relay websocket data frame was fragmented");
+    }
+
+    #[tokio::test]
+    async fn websocket_rejects_malformed_close_payloads() {
+        for payload in [
+            vec![0],
+            2000_u16.to_be_bytes().to_vec(),
+            [1000_u16.to_be_bytes().as_slice(), &[0xff]].concat(),
+        ] {
+            let frame = masked_frame(0x88, &payload);
+            let error = read_ws_frame(&mut &frame[..])
+                .await
+                .expect_err("malformed close frame");
+            assert!(error.contains("close"), "{error}");
+        }
     }
 
     #[test]
