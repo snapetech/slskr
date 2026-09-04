@@ -33,7 +33,7 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{lookup_host, tcp::OwnedWriteHalf, TcpListener, TcpStream, UdpSocket},
     sync::{mpsc, Mutex, RwLock, Semaphore},
-    task::JoinSet,
+    task::{AbortHandle, JoinSet},
     time::timeout,
 };
 use tokio_rustls::{
@@ -2129,6 +2129,16 @@ impl Gateway {
         {
             return Err((6, "Tunnel capacity is full".to_owned()));
         }
+        let reader_task = tokio::spawn(async move {
+            let mut buffer = vec![0_u8; TUNNEL_CHUNK_BYTES];
+            while let Ok(read) = reader.read(&mut buffer).await {
+                if read == 0 || incoming_tx.send(buffer[..read].to_vec()).await.is_err() {
+                    break;
+                }
+            }
+        });
+        let reader_abort = reader_task.abort_handle();
+        drop(reader_task);
         tunnels.insert(
             tunnel_id.clone(),
             Arc::new(Tunnel {
@@ -2137,17 +2147,10 @@ impl Gateway {
                 pod_id: request.pod_id,
                 writer: Mutex::new(writer),
                 incoming: Mutex::new(incoming_rx),
+                reader_abort,
             }),
         );
         drop(tunnels);
-        tokio::spawn(async move {
-            let mut buffer = vec![0_u8; TUNNEL_CHUNK_BYTES];
-            while let Ok(read) = reader.read(&mut buffer).await {
-                if read == 0 || incoming_tx.send(buffer[..read].to_vec()).await.is_err() {
-                    break;
-                }
-            }
-        });
         serde_json::to_vec(&OpenTunnelResponse {
             tunnel_id,
             accepted: true,
@@ -2264,6 +2267,13 @@ struct Tunnel {
     pod_id: String,
     writer: Mutex<OwnedWriteHalf>,
     incoming: Mutex<mpsc::Receiver<Vec<u8>>>,
+    reader_abort: AbortHandle,
+}
+
+impl Drop for Tunnel {
+    fn drop(&mut self) {
+        self.reader_abort.abort();
+    }
 }
 
 #[derive(Clone, Debug, serde::Serialize)]
@@ -2839,6 +2849,40 @@ mod tests {
             "2001:4860:4860::8888".parse().unwrap()
         ));
         assert!(!valid_destination_ip("0.0.0.0".parse().unwrap()));
+    }
+
+    #[tokio::test]
+    async fn dropping_tunnel_aborts_idle_destination_reader() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let client = TcpStream::connect(listener.local_addr().unwrap())
+            .await
+            .unwrap();
+        let (destination, _) = listener.accept().await.unwrap();
+        let (reader, writer) = destination.into_split();
+        let (_client_reader, _client_writer) = client.into_split();
+        let (_incoming_tx, incoming_rx) = mpsc::channel(1);
+        let reader_task = tokio::spawn(async move {
+            let mut reader = reader;
+            let mut buffer = [0_u8; 1];
+            let _ = reader.read(&mut buffer).await;
+        });
+        let tunnel = Tunnel {
+            owner: "owner".to_owned(),
+            connection_id: "connection".to_owned(),
+            pod_id: "pod".to_owned(),
+            writer: Mutex::new(writer),
+            incoming: Mutex::new(incoming_rx),
+            reader_abort: reader_task.abort_handle(),
+        };
+
+        drop(tunnel);
+
+        let result = timeout(Duration::from_secs(1), reader_task)
+            .await
+            .expect("dropping the tunnel must stop its reader");
+        assert!(result
+            .expect_err("reader task must be aborted")
+            .is_cancelled());
     }
 
     #[test]
