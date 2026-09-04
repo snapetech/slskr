@@ -65,9 +65,16 @@ class Footer extends Component {
     this.footerRef = React.createRef();
     this.footerResizeObserver = null;
     this.pollController = null;
+    this.isMountedFlag = false;
+    this.requestIds = {
+      buildInfo: 0,
+      speeds: 0,
+      stats: 0,
+    };
   }
 
   componentDidMount() {
+    this.isMountedFlag = true;
     this.updateFooterHeight();
     if (
       typeof window !== 'undefined' &&
@@ -80,7 +87,7 @@ class Footer extends Component {
       this.footerResizeObserver.observe(this.footerRef.current);
     }
 
-    this.fetchBuildInfo();
+    void this.fetchBuildInfo();
 
     if (session.isLoggedIn()) {
       this.pollController = createPollingController(
@@ -93,6 +100,10 @@ class Footer extends Component {
   }
 
   componentWillUnmount() {
+    this.isMountedFlag = false;
+    Object.keys(this.requestIds).forEach((key) => {
+      this.requestIds[key] += 1;
+    });
     this.pollController?.stop();
     this.pollController = null;
     if (this.footerResizeObserver) {
@@ -110,22 +121,25 @@ class Footer extends Component {
   };
 
   fetchStats = async () => {
-    if (!session.isLoggedIn()) {
+    if (!this.isMountedFlag || !session.isLoggedIn()) {
       return;
     }
 
+    const requestId = ++this.requestIds.stats;
     try {
       const [transportStats, slskrStats] = await Promise.allSettled([
         mesh.getStats(),
         slskrAPI.getSlskrStats(),
       ]);
 
-      this.setState({
-        slskrStats:
-          slskrStats.status === 'fulfilled' ? slskrStats.value : null,
-        stats:
-          transportStats.status === 'fulfilled' ? transportStats.value : null,
-      });
+      if (this.isMountedFlag && requestId === this.requestIds.stats) {
+        this.setState({
+          slskrStats:
+            slskrStats.status === 'fulfilled' ? slskrStats.value : null,
+          stats:
+            transportStats.status === 'fulfilled' ? transportStats.value : null,
+        });
+      }
     } catch (error) {
       // Silently fail - stats are non-critical
       console.debug('Failed to fetch mesh stats:', error);
@@ -133,13 +147,16 @@ class Footer extends Component {
   };
 
   fetchSpeeds = async () => {
-    if (!session.isLoggedIn()) {
+    if (!this.isMountedFlag || !session.isLoggedIn()) {
       return;
     }
 
+    const requestId = ++this.requestIds.speeds;
     try {
       const speeds = await transfers.getSpeeds();
-      this.setState({ speeds });
+      if (this.isMountedFlag && requestId === this.requestIds.speeds) {
+        this.setState({ speeds });
+      }
     } catch (error) {
       // Silently fail - speeds are non-critical
       console.debug('Failed to fetch transfer speeds:', error);
@@ -147,13 +164,16 @@ class Footer extends Component {
   };
 
   fetchBuildInfo = async () => {
-    if (this.props.runtimeProfile === 'legacy') {
+    if (!this.isMountedFlag || this.props.runtimeProfile === 'legacy') {
       return;
     }
 
+    const requestId = ++this.requestIds.buildInfo;
     try {
       const buildInfo = await application.getBuild({ checkForUpdates: true });
-      this.setState({ buildInfo });
+      if (this.isMountedFlag && requestId === this.requestIds.buildInfo) {
+        this.setState({ buildInfo });
+      }
     } catch (error) {
       console.debug('Failed to fetch build info:', error);
     }

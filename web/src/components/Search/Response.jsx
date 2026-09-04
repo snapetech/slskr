@@ -109,10 +109,25 @@ class Response extends Component {
       userGroup: null,
       userGroupLoading: false,
     };
+    this.isMountedFlag = false;
+    this.requestIds = {
+      directory: 0,
+      download: 0,
+      graph: 0,
+      userGroup: 0,
+    };
   }
 
   componentDidMount() {
-    this.fetchUserGroup();
+    this.isMountedFlag = true;
+    void this.fetchUserGroup();
+  }
+
+  componentWillUnmount() {
+    this.isMountedFlag = false;
+    Object.keys(this.requestIds).forEach((key) => {
+      this.requestIds[key] += 1;
+    });
   }
 
   componentDidUpdate(previousProps) {
@@ -128,7 +143,7 @@ class Response extends Component {
     }
 
     if (this.props.response.username !== previousProps.response.username) {
-      this.fetchUserGroup();
+      void this.fetchUserGroup();
       this.setState({
         qualitySummary: getCommunityQualitySummary(this.props.response.username),
       });
@@ -137,15 +152,30 @@ class Response extends Component {
 
   fetchUserGroup = async () => {
     const { username } = this.props.response;
+    const requestId = ++this.requestIds.userGroup;
 
-    this.setState({ userGroupLoading: true });
+    if (this.isMountedFlag && requestId === this.requestIds.userGroup) {
+      this.setState({ userGroupLoading: true });
+    }
 
     try {
       const response = await getGroup({ username });
-      this.setState({ userGroup: response.data, userGroupLoading: false });
+      if (
+        this.isMountedFlag &&
+        requestId === this.requestIds.userGroup &&
+        this.props.response.username === username
+      ) {
+        this.setState({ userGroup: response.data, userGroupLoading: false });
+      }
     } catch (error) {
       console.debug('Failed to fetch user group for', username, error);
-      this.setState({ userGroup: null, userGroupLoading: false });
+      if (
+        this.isMountedFlag &&
+        requestId === this.requestIds.userGroup &&
+        this.props.response.username === username
+      ) {
+        this.setState({ userGroup: null, userGroupLoading: false });
+      }
     }
   };
 
@@ -159,7 +189,9 @@ class Response extends Component {
   };
 
   download = (username, files) => {
+    const requestId = ++this.requestIds.download;
     this.setState({ downloadRequest: 'inProgress' }, async () => {
+      if (!this.isMountedFlag || requestId !== this.requestIds.download) return;
       try {
         const { response, responseIndex, searchId } = this.props;
 
@@ -194,21 +226,33 @@ class Response extends Component {
           await transfers.download({ files: requests, username });
         }
 
-        this.setState({ downloadRequest: 'complete' });
+        if (
+          this.isMountedFlag &&
+          requestId === this.requestIds.download
+        ) {
+          this.setState({ downloadRequest: 'complete' });
+        }
       } catch (error) {
-        this.setState({
-          downloadError: error.response || {
-            data: error.message,
-            status: 500,
-            statusText: 'Error',
-          },
-          downloadRequest: 'error',
-        });
+        if (
+          this.isMountedFlag &&
+          requestId === this.requestIds.download
+        ) {
+          this.setState({
+            downloadError: error.response || {
+              data: error.message,
+              status: 500,
+              statusText: 'Error',
+            },
+            downloadRequest: 'error',
+          });
+        }
       }
     });
   };
 
   getFullDirectory = async (username, directory) => {
+    const requestId = ++this.requestIds.directory;
+    if (!this.isMountedFlag) return;
     this.setState({ fetchingDirectoryContents: true });
 
     try {
@@ -248,7 +292,12 @@ class Response extends Component {
         }));
 
         oldTree[name] = fixedFiles;
-        this.setState({ tree: { ...oldTree } });
+        if (
+          this.isMountedFlag &&
+          requestId === this.requestIds.directory
+        ) {
+          this.setState({ tree: { ...oldTree } });
+        }
       } catch (error) {
         throw new Error(`Failed to process directory response: ${error}`, {
           cause: error,
@@ -258,7 +307,12 @@ class Response extends Component {
       console.error(error);
       toast.error(error?.response?.data ?? error?.message ?? error);
     } finally {
-      this.setState({ fetchingDirectoryContents: false });
+      if (
+        this.isMountedFlag &&
+        requestId === this.requestIds.directory
+      ) {
+        this.setState({ fetchingDirectoryContents: false });
+      }
     }
   };
 
@@ -301,6 +355,8 @@ class Response extends Component {
   };
 
   openDiscoveryGraph = async (request) => {
+    const requestId = ++this.requestIds.graph;
+    if (!this.isMountedFlag) return;
     this.setState({
       graphLoading: true,
       graphOpen: true,
@@ -309,21 +365,21 @@ class Response extends Component {
 
     try {
       const graph = await discoveryGraph.buildDiscoveryGraph(request);
-      this.setState({
-        graphData: graph,
-      });
+      if (this.isMountedFlag && requestId === this.requestIds.graph) {
+        this.setState({ graphData: graph });
+      }
     } catch (error) {
       console.error(error);
-      toast.error(
-        error?.response?.data ?? error?.message ?? 'Failed to build discovery graph',
-      );
-      this.setState({
-        graphOpen: false,
-      });
+      if (this.isMountedFlag && requestId === this.requestIds.graph) {
+        toast.error(
+          error?.response?.data ?? error?.message ?? 'Failed to build discovery graph',
+        );
+        this.setState({ graphOpen: false });
+      }
     } finally {
-      this.setState({
-        graphLoading: false,
-      });
+      if (this.isMountedFlag && requestId === this.requestIds.graph) {
+        this.setState({ graphLoading: false });
+      }
     }
   };
 

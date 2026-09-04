@@ -50,16 +50,39 @@ class Contacts extends Component {
     nearbyLoading: false,
   };
 
+  constructor(props) {
+    super(props);
+    this.isMountedFlag = false;
+    this.requestIds = {
+      contacts: 0,
+      invite: 0,
+      nearby: 0,
+    };
+  }
+
   componentDidMount() {
-    this.loadContacts();
-    this.loadNearby();
+    this.isMountedFlag = true;
+    void this.loadContacts();
+    void this.loadNearby();
+  }
+
+  componentWillUnmount() {
+    this.isMountedFlag = false;
+    Object.keys(this.requestIds).forEach((key) => {
+      this.requestIds[key] += 1;
+    });
   }
 
   loadContacts = async () => {
+    const requestId = ++this.requestIds.contacts;
     try {
-      this.setState({ error: null, loading: true });
+      if (this.isMountedFlag && requestId === this.requestIds.contacts) {
+        this.setState({ error: null, loading: true });
+      }
       const response = await identityAPI.getContacts();
-      this.setState({ contacts: response.data || [], loading: false });
+      if (this.isMountedFlag && requestId === this.requestIds.contacts) {
+        this.setState({ contacts: response.data || [], loading: false });
+      }
     } catch (error) {
       // If 401/403/404, feature not enabled or not authenticated - return empty list
       if (
@@ -67,20 +90,31 @@ class Contacts extends Component {
         error.response?.status === 403 ||
         error.response?.status === 404
       ) {
-        this.setState({ contacts: [], error: null, loading: false });
+        if (this.isMountedFlag && requestId === this.requestIds.contacts) {
+          this.setState({ contacts: [], error: null, loading: false });
+        }
       } else {
-        this.setState({ error: error.message, loading: false });
+        if (this.isMountedFlag && requestId === this.requestIds.contacts) {
+          this.setState({ error: error.message, loading: false });
+        }
       }
     }
   };
 
   loadNearby = async () => {
+    const requestId = ++this.requestIds.nearby;
     try {
-      this.setState({ nearbyLoading: true });
+      if (this.isMountedFlag && requestId === this.requestIds.nearby) {
+        this.setState({ nearbyLoading: true });
+      }
       const response = await identityAPI.getNearby();
-      this.setState({ nearby: response.data || [], nearbyLoading: false });
+      if (this.isMountedFlag && requestId === this.requestIds.nearby) {
+        this.setState({ nearby: response.data || [], nearbyLoading: false });
+      }
     } catch {
-      this.setState({ nearbyLoading: false });
+      if (this.isMountedFlag && requestId === this.requestIds.nearby) {
+        this.setState({ nearbyLoading: false });
+      }
       // Nearby may fail if mDNS not available, don't show error
     }
   };
@@ -88,23 +122,30 @@ class Contacts extends Component {
   handleAddFromInvite = async (inviteLink, nickname) => {
     try {
       await identityAPI.addContactFromInvite({ inviteLink, nickname });
+      if (!this.isMountedFlag) return;
       this.setState({ addFriendModalOpen: false });
       await this.loadContacts();
     } catch (error) {
-      this.setState({ error: error.response?.data || error.message });
+      if (this.isMountedFlag) {
+        this.setState({ error: error.response?.data || error.message });
+      }
     }
   };
 
   handleAddFromDiscovery = async (peerId, nickname) => {
     try {
       await identityAPI.addContactFromDiscovery({ nickname, peerId });
+      if (!this.isMountedFlag) return;
       await this.loadContacts();
     } catch (error) {
-      this.setState({ error: error.response?.data || error.message });
+      if (this.isMountedFlag) {
+        this.setState({ error: error.response?.data || error.message });
+      }
     }
   };
 
   handleCreateInvite = async () => {
+    const requestId = ++this.requestIds.invite;
     try {
       const response = await identityAPI.createInvite({ expiresInHours: 24 });
       const inviteLink = response.data.inviteLink;
@@ -115,6 +156,12 @@ class Contacts extends Component {
             scale: 6,
           })
         : null;
+      if (
+        !this.isMountedFlag ||
+        requestId !== this.requestIds.invite
+      ) {
+        return;
+      }
       this.setState({
         createInviteModalOpen: true,
         error: null,
@@ -177,13 +224,18 @@ class Contacts extends Component {
         }
       }
 
-      this.setState({
-        createInviteModalOpen: false,
-        error:
-          errorMessage ||
-          'Failed to create invite. Please ensure Identity & Friends is enabled and configured.',
-        inviteQrDataUrl: null,
-      });
+      if (
+        this.isMountedFlag &&
+        requestId === this.requestIds.invite
+      ) {
+        this.setState({
+          createInviteModalOpen: false,
+          error:
+            errorMessage ||
+            'Failed to create invite. Please ensure Identity & Friends is enabled and configured.',
+          inviteQrDataUrl: null,
+        });
+      }
     }
   };
 
@@ -191,9 +243,12 @@ class Contacts extends Component {
     if (!window.confirm('Delete this contact?')) return;
     try {
       await identityAPI.deleteContact(id);
+      if (!this.isMountedFlag) return;
       await this.loadContacts();
     } catch (error) {
-      this.setState({ error: error.response?.data || error.message });
+      if (this.isMountedFlag) {
+        this.setState({ error: error.response?.data || error.message });
+      }
     }
   };
 
@@ -506,10 +561,21 @@ class AddFriendForm extends Component {
     scanning: false,
   };
 
+  componentDidMount() {
+    this.isMountedFlag = true;
+  }
+
+  componentWillUnmount() {
+    this.isMountedFlag = false;
+    this.scanRequestId = (this.scanRequestId || 0) + 1;
+  }
+
   handleQrFileSelected = async (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
+    this.scanRequestId = (this.scanRequestId || 0) + 1;
+    const requestId = this.scanRequestId;
     this.setState({ scanError: null, scanning: true });
     try {
       if (!('BarcodeDetector' in window) || !window.createImageBitmap) {
@@ -530,15 +596,30 @@ class AddFriendForm extends Component {
           throw new Error('No slskr invite QR code was found in that image.');
         }
 
-        this.setState({ inviteLink, scanError: null });
+        if (
+          this.isMountedFlag &&
+          requestId === this.scanRequestId
+        ) {
+          this.setState({ inviteLink, scanError: null });
+        }
       } finally {
         bitmap.close?.();
       }
     } catch (error) {
-      this.setState({ scanError: error.message || 'QR scan failed.' });
+      if (
+        this.isMountedFlag &&
+        requestId === this.scanRequestId
+      ) {
+        this.setState({ scanError: error.message || 'QR scan failed.' });
+      }
     } finally {
       event.target.value = '';
-      this.setState({ scanning: false });
+      if (
+        this.isMountedFlag &&
+        requestId === this.scanRequestId
+      ) {
+        this.setState({ scanning: false });
+      }
     }
   };
 

@@ -1,3 +1,5 @@
+import { v4 as uuidv4 } from 'uuid';
+
 export const communityQualitySignalStorageKey = 'slskr.communityQualitySignals';
 export const communityQualityOverrideStorageKey =
   'slskr.communityQualityOverrides';
@@ -89,7 +91,7 @@ const normalizeSignal = (signal) => {
     createdAt: signal.createdAt || new Date().toISOString(),
     id:
       signal.id ||
-      `quality-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      `quality-${uuidv4()}`,
     reason: (signal.reason || '').trim(),
     source: signal.source || 'local-review',
     type,

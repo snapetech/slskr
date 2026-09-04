@@ -29,65 +29,94 @@ class Logs extends Component {
     super(props);
 
     this.state = initialState;
+    this.isMountedFlag = false;
+    this.logsRequestId = 0;
+    this.levelRequestId = 0;
   }
 
   componentDidMount() {
-    this.fetchLogs();
+    this.isMountedFlag = true;
+    void this.fetchLogs();
     const logsHub = createLogsHubConnection();
     this.logsHub = logsHub;
 
     logsHub.on('buffer', (buffer) => this.mergeLogs(buffer));
 
     logsHub.on('log', (log) => {
+      if (!this.isMountedFlag) return;
       this.setState((previousState) => ({
         connected: true,
         logs: this.dedupeLogs([this.normalizeLog(log), ...previousState.logs]),
       }));
     });
 
-    logsHub.onreconnecting(() => this.setState({ connected: false }));
+    logsHub.onreconnecting(() => {
+      if (this.isMountedFlag) this.setState({ connected: false });
+    });
     logsHub.onclose((error) => {
-      this.setState({ connected: false });
+      if (this.isMountedFlag) this.setState({ connected: false });
       if (error) {
         console.error('[Logs] Hub connection closed with error:', error);
       }
     });
-    logsHub.onreconnected(() => this.setState({ connected: true }));
+    logsHub.onreconnected(() => {
+      if (this.isMountedFlag) this.setState({ connected: true });
+    });
 
     logsHub.start().catch((error) => {
       console.error('[Logs] Failed to start hub connection:', error);
-      this.setState({ connected: false });
+      if (this.isMountedFlag) this.setState({ connected: false });
     });
   }
 
   componentWillUnmount() {
+    this.isMountedFlag = false;
+    this.logsRequestId += 1;
+    this.levelRequestId += 1;
     this.logsHub?.stop();
   }
 
   fetchLogs = async () => {
+    const requestId = ++this.logsRequestId;
     try {
       const response = await getLogs();
-      this.setState({
-        level: response.level || 'Information',
-        levels: response.levels || initialState.levels,
-        loading: false,
-        logs: (response.entries || []).map(this.normalizeLog).slice(0, maxLogs),
-      });
+      const fetchedLogs = (response.entries || [])
+        .map(this.normalizeLog)
+        .slice(0, maxLogs);
+      if (
+        this.isMountedFlag &&
+        requestId === this.logsRequestId
+      ) {
+        this.setState((previousState) => ({
+          level: response.level || 'Information',
+          levels: response.levels || initialState.levels,
+          loading: false,
+          logs: this.dedupeLogs([...previousState.logs, ...fetchedLogs]),
+        }));
+      }
     } catch (error) {
       console.error('[Logs] Failed to fetch logs:', error);
-      this.setState({ loading: false });
+      if (
+        this.isMountedFlag &&
+        requestId === this.logsRequestId
+      ) {
+        this.setState({ loading: false });
+      }
     }
   };
 
   normalizeLog = (log = {}) => {
     const payload = log.payload || log.data || log;
+    const category = payload.category || payload.resource || 'daemon';
+    const message = payload.message || payload.detail || payload.kind || '';
+    const timestamp = payload.timestamp || payload.created_at || Date.now() / 1000;
     return {
       ...payload,
-      category: payload.category || payload.resource || 'daemon',
-      id: payload.id || payload.timestamp || `${Date.now()}-${Math.random()}`,
+      category,
+      id: payload.id || `${timestamp}:${category}:${message}`,
       level: payload.level || 'Information',
-      message: payload.message || payload.detail || payload.kind || '',
-      timestamp: payload.timestamp || payload.created_at || Date.now() / 1000,
+      message,
+      timestamp,
     };
   };
 
@@ -105,6 +134,7 @@ class Logs extends Component {
   };
 
   mergeLogs = (buffer = []) => {
+    if (!this.isMountedFlag) return;
     this.setState((previousState) => ({
       connected: true,
       logs: this.dedupeLogs([
@@ -137,14 +167,26 @@ class Logs extends Component {
   };
 
   handleLevelChange = async (_, { value }) => {
+    const requestId = ++this.levelRequestId;
     this.setState({ savingLevel: true });
     try {
       const response = await updateLogLevel(value);
+      if (
+        !this.isMountedFlag ||
+        requestId !== this.levelRequestId
+      ) {
+        return;
+      }
       this.setState({ level: response.level || value, savingLevel: false });
       await this.fetchLogs();
     } catch (error) {
       console.error('[Logs] Failed to update log level:', error);
-      this.setState({ savingLevel: false });
+      if (
+        this.isMountedFlag &&
+        requestId === this.levelRequestId
+      ) {
+        this.setState({ savingLevel: false });
+      }
     }
   };
 
@@ -241,7 +283,7 @@ class Logs extends Component {
                 filteredLogs.map((log) => (
                   <Table.Row
                     disabled={log.level === 'Debug' && filterLevel !== 'Debug'}
-                    key={log.timestamp}
+                    key={log.id}
                     negative={log.level === 'Error'}
                     warning={log.level === 'Warning'}
                   >

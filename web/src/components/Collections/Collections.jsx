@@ -43,16 +43,36 @@ export default class Collections extends Component {
       shareModalOpen: false,
       shares: [],
     };
+    this.isMountedFlag = false;
+    this.requestIds = {
+      collectionItems: 0,
+      collections: 0,
+      search: 0,
+      shareGroups: 0,
+      shares: 0,
+      selection: 0,
+    };
   }
 
   componentDidMount() {
-    this.loadData();
-    this.loadShareGroups();
+    this.isMountedFlag = true;
+    void this.loadData();
+    void this.loadShareGroups();
+  }
+
+  componentWillUnmount() {
+    this.isMountedFlag = false;
+    Object.keys(this.requestIds).forEach((key) => {
+      this.requestIds[key] += 1;
+    });
   }
 
   loadData = async () => {
+    const requestId = ++this.requestIds.collections;
     try {
-      this.setState({ error: null, loading: true });
+      if (this.isMountedFlag && requestId === this.requestIds.collections) {
+        this.setState({ error: null, loading: true });
+      }
       const response = await collectionsAPI.getCollections().catch((error) => {
         if (
           error.response?.status === 401 ||
@@ -64,10 +84,12 @@ export default class Collections extends Component {
 
         throw error;
       });
-      this.setState({
-        collections: Array.isArray(response.data) ? response.data : [],
-        loading: false,
-      });
+      if (this.isMountedFlag && requestId === this.requestIds.collections) {
+        this.setState({
+          collections: Array.isArray(response.data) ? response.data : [],
+          loading: false,
+        });
+      }
     } catch (error) {
       let errorMessage = error.message;
       if (error.response?.data) {
@@ -86,16 +108,21 @@ export default class Collections extends Component {
         error.response?.status === 401 ||
         error.response?.status === 403 ||
         error.response?.status === 404;
-      this.setState({
-        error: isAuthOrFeatureError ? null : errorMessage,
-        loading: false,
-      });
+      if (this.isMountedFlag && requestId === this.requestIds.collections) {
+        this.setState({
+          error: isAuthOrFeatureError ? null : errorMessage,
+          loading: false,
+        });
+      }
     }
   };
 
   loadShareGroups = async () => {
+    const requestId = ++this.requestIds.shareGroups;
     try {
-      this.setState({ shareGroupsLoading: true });
+      if (this.isMountedFlag && requestId === this.requestIds.shareGroups) {
+        this.setState({ shareGroupsLoading: true });
+      }
       const response = await collectionsAPI.getShareGroups().catch((error) => {
         if (
           error.response?.status === 401 ||
@@ -108,21 +135,28 @@ export default class Collections extends Component {
         throw error;
       });
       const shareGroups = Array.isArray(response.data) ? response.data : [];
-      this.setState((previousState) => ({
-        shareAudienceId:
-          previousState.shareAudienceId ?? shareGroups[0]?.id ?? null,
-        shareGroups,
-        shareGroupsLoading: false,
-      }));
+      if (this.isMountedFlag && requestId === this.requestIds.shareGroups) {
+        this.setState((previousState) => ({
+          shareAudienceId:
+            previousState.shareAudienceId ?? shareGroups[0]?.id ?? null,
+          shareGroups,
+          shareGroupsLoading: false,
+        }));
+      }
     } catch {
-      this.setState({ shareGroups: [], shareGroupsLoading: false });
+      if (this.isMountedFlag && requestId === this.requestIds.shareGroups) {
+        this.setState({ shareGroups: [], shareGroupsLoading: false });
+      }
     }
   };
 
   loadShares = async (collectionId) => {
+    const requestId = ++this.requestIds.shares;
     try {
       if (!collectionId) {
-        this.setState({ shares: [] });
+        if (this.isMountedFlag && requestId === this.requestIds.shares) {
+          this.setState({ shares: [] });
+        }
         return;
       }
 
@@ -139,18 +173,32 @@ export default class Collections extends Component {
 
           throw error;
         });
-      this.setState({ shares: Array.isArray(response.data) ? response.data : [] });
+      if (this.isMountedFlag && requestId === this.requestIds.shares) {
+        this.setState({
+          shares: Array.isArray(response.data) ? response.data : [],
+        });
+      }
     } catch {
-      this.setState({ shares: [] });
+      if (this.isMountedFlag && requestId === this.requestIds.shares) {
+        this.setState({ shares: [] });
+      }
     }
   };
 
   loadCollectionItems = async (collectionId) => {
+    const requestId = ++this.requestIds.collectionItems;
     try {
       const response = await collectionsAPI.getCollectionItems(collectionId);
-      this.setState({
-        selectedCollectionItems: Array.isArray(response.data) ? response.data : [],
-      });
+      if (
+        this.isMountedFlag &&
+        requestId === this.requestIds.collectionItems
+      ) {
+        this.setState({
+          selectedCollectionItems: Array.isArray(response.data)
+            ? response.data
+            : [],
+        });
+      }
     } catch (error) {
       console.error('[Collections] Error loading items:', error);
     }
@@ -163,6 +211,7 @@ export default class Collections extends Component {
         title: this.state.newCollectionTitle,
         type: this.state.newCollectionType,
       });
+      if (!this.isMountedFlag) return;
       this.setState({
         createModalOpen: false,
         error: null,
@@ -187,7 +236,7 @@ export default class Collections extends Component {
         }
       }
 
-      this.setState({ error: errorMessage });
+      if (this.isMountedFlag) this.setState({ error: errorMessage });
     }
   };
 
@@ -196,6 +245,7 @@ export default class Collections extends Component {
     if (!window.confirm('Delete this collection?')) return;
     try {
       await collectionsAPI.deleteCollection(id);
+      if (!this.isMountedFlag) return;
       await this.loadData();
       if (this.state.selectedCollection?.id === id) {
         this.setState({
@@ -204,38 +254,65 @@ export default class Collections extends Component {
         });
       }
     } catch (error) {
-      this.setState({ error: error.response?.data || error.message });
+      if (this.isMountedFlag) {
+        this.setState({ error: error.response?.data || error.message });
+      }
     }
   };
 
   handleSelectCollection = async (collection) => {
+    const selectionId = ++this.requestIds.selection;
+    if (!this.isMountedFlag) return;
     this.setState({ selectedCollection: collection });
     await this.loadCollectionItems(collection.id);
+    if (
+      !this.isMountedFlag ||
+      selectionId !== this.requestIds.selection
+    ) {
+      return;
+    }
     await this.loadShares(collection.id);
+    if (
+      this.isMountedFlag &&
+      selectionId === this.requestIds.selection &&
+      this.state.selectedCollection?.id === collection.id
+    ) {
+      this.setState({ error: null });
+    }
   };
 
   handleSearchItems = async (query) => {
+    const requestId = ++this.requestIds.search;
     if (!query || query.length < 2) {
-      this.setState({ itemSearchLoading: false, itemSearchResults: [] });
+      if (this.isMountedFlag && requestId === this.requestIds.search) {
+        this.setState({ itemSearchLoading: false, itemSearchResults: [] });
+      }
       return;
     }
 
-    this.setState({ itemSearchLoading: true });
+    if (this.isMountedFlag && requestId === this.requestIds.search) {
+      this.setState({ itemSearchLoading: true });
+    }
     try {
       const response = await collectionsAPI.searchLibraryItems(query, null, 20);
       const items = response.data?.items || [];
-      this.setState({
-        itemSearchLoading: false,
-        itemSearchResults: items,
-      });
+      if (this.isMountedFlag && requestId === this.requestIds.search) {
+        this.setState({
+          itemSearchLoading: false,
+          itemSearchResults: items,
+        });
+      }
     } catch (error) {
       console.error('[Collections] Search error:', error);
-      this.setState({ itemSearchLoading: false, itemSearchResults: [] });
+      if (this.isMountedFlag && requestId === this.requestIds.search) {
+        this.setState({ itemSearchLoading: false, itemSearchResults: [] });
+      }
     }
   };
 
   handleAddItem = async () => {
-    if (!this.state.selectedCollection) return;
+    const selectedCollection = this.state.selectedCollection;
+    if (!selectedCollection) return;
 
     // Use selected search result if available, otherwise use query as fallback
     const selectedResult = this.state.itemSearchResults.find(
@@ -249,20 +326,26 @@ export default class Collections extends Component {
     if (!contentId) return;
 
     try {
-      await collectionsAPI.addCollectionItem(this.state.selectedCollection.id, {
+      await collectionsAPI.addCollectionItem(selectedCollection.id, {
         bytes: selectedResult?.bytes,
         contentId,
         fileName: selectedResult?.fileName,
         mediaKind,
         sha256: selectedResult?.sha256,
       });
+      if (
+        !this.isMountedFlag ||
+        this.state.selectedCollection?.id !== selectedCollection.id
+      ) {
+        return;
+      }
       this.setState({
         addItemModalOpen: false,
         error: null,
         itemSearchQuery: '',
         itemSearchResults: [],
       });
-      await this.loadCollectionItems(this.state.selectedCollection.id);
+      await this.loadCollectionItems(selectedCollection.id);
     } catch (error) {
       let errorMessage = error.message || 'Failed to add item';
       if (error.response?.data) {
@@ -275,7 +358,7 @@ export default class Collections extends Component {
         }
       }
 
-      this.setState({ error: errorMessage });
+      if (this.isMountedFlag) this.setState({ error: errorMessage });
     }
   };
 
@@ -334,10 +417,18 @@ export default class Collections extends Component {
             collectionsAPI.updateShare(response.data.id, { permissions })),
         );
       }
+      if (
+        !this.isMountedFlag ||
+        this.state.selectedCollection?.id !== selectedCollection.id
+      ) {
+        return;
+      }
       this.setState({ error: null, shareModalOpen: false });
       await this.loadShares(selectedCollection.id);
     } catch (error) {
-      this.setState({ error: error.response?.data || error.message });
+      if (this.isMountedFlag) {
+        this.setState({ error: error.response?.data || error.message });
+      }
     }
   };
 
