@@ -2,6 +2,7 @@ package slskr
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -18,16 +19,44 @@ func TestBatchBuilderOwnsNestedRequestBodies(t *testing.T) {
 	filters[0] = "mutated input"
 	body["query"] = "mutated input"
 	first := builder.GetOperations()
-	first[0].Body["query"] = "mutated snapshot"
-	first[0].Body["options"].(map[string]interface{})["filters"].([]interface{})[0] = "mutated snapshot"
+	firstBody := first[0].Body.(map[string]interface{})
+	firstBody["query"] = "mutated snapshot"
+	firstBody["options"].(map[string]interface{})["filters"].([]interface{})[0] = "mutated snapshot"
 
-	stored := builder.GetOperations()[0].Body
+	stored := builder.GetOperations()[0].Body.(map[string]interface{})
 	if stored["query"] != "ambient" {
 		t.Fatalf("builder retained aliased query: %v", stored["query"])
 	}
 	storedFilters := stored["options"].(map[string]interface{})["filters"].([]interface{})
 	if storedFilters[0] != "lossless" {
 		t.Fatalf("builder retained aliased filters: %v", storedFilters)
+	}
+}
+
+func TestBatchBuilderSupportsAnyJSONBody(t *testing.T) {
+	client := NewClient("http://example.test", "token")
+	values := []interface{}{"lossless", map[string]interface{}{"bitrate": 320}}
+	builder := client.NewBatchBuilder().Post("/api/searches", values, nil).Put("/api/config", "compact", nil)
+
+	values[0] = "mutated input"
+	operations := builder.GetOperations()
+	storedValues, ok := operations[0].Body.([]interface{})
+	if !ok {
+		t.Fatalf("expected array body, got %T", operations[0].Body)
+	}
+	if storedValues[0] != "lossless" {
+		t.Fatalf("builder retained aliased array body: %v", storedValues)
+	}
+	if operations[1].Body != "compact" {
+		t.Fatalf("expected scalar body, got %#v", operations[1].Body)
+	}
+
+	wire, err := json.Marshal(map[string]interface{}{"operations": operations})
+	if err != nil {
+		t.Fatalf("marshal batch operations: %v", err)
+	}
+	if !strings.Contains(string(wire), `"body":["lossless"`) || !strings.Contains(string(wire), `"body":"compact"`) {
+		t.Fatalf("batch body shapes were not preserved on the wire: %s", wire)
 	}
 }
 

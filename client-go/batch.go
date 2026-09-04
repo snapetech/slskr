@@ -7,10 +7,10 @@ import (
 
 // BatchOperation represents a single operation in a batch
 type BatchOperation struct {
-	ID     string                 `json:"id"`
-	Method string                 `json:"method"`
-	Path   string                 `json:"path"`
-	Body   map[string]interface{} `json:"body,omitempty"`
+	ID     string      `json:"id"`
+	Method string      `json:"method"`
+	Path   string      `json:"path"`
+	Body   interface{} `json:"body,omitempty"`
 }
 
 // BatchResult represents the result of a batch operation
@@ -62,26 +62,28 @@ func (b *BatchBuilder) Get(path string, opID *string) *BatchBuilder {
 	return b
 }
 
-// Post adds a POST operation
-func (b *BatchBuilder) Post(path string, body map[string]interface{}, opID *string) *BatchBuilder {
+// Post adds a POST operation. The body may be any JSON value accepted by the
+// batch API, including objects, arrays, strings, numbers, booleans, and null.
+func (b *BatchBuilder) Post(path string, body interface{}, opID *string) *BatchBuilder {
 	id := b.operationID(opID)
 	b.operations = append(b.operations, BatchOperation{
 		ID:     id,
 		Method: "POST",
 		Path:   path,
-		Body:   cloneJSONMap(body),
+		Body:   cloneJSONValue(body),
 	})
 	return b
 }
 
-// Put adds a PUT operation
-func (b *BatchBuilder) Put(path string, body map[string]interface{}, opID *string) *BatchBuilder {
+// Put adds a PUT operation. The body may be any JSON value accepted by the
+// batch API, including objects, arrays, strings, numbers, booleans, and null.
+func (b *BatchBuilder) Put(path string, body interface{}, opID *string) *BatchBuilder {
 	id := b.operationID(opID)
 	b.operations = append(b.operations, BatchOperation{
 		ID:     id,
 		Method: "PUT",
 		Path:   path,
-		Body:   cloneJSONMap(body),
+		Body:   cloneJSONValue(body),
 	})
 	return b
 }
@@ -135,7 +137,7 @@ func (b *BatchBuilder) Clear() *BatchBuilder {
 func (b *BatchBuilder) GetOperations() []BatchOperation {
 	ops := make([]BatchOperation, len(b.operations))
 	for index, operation := range b.operations {
-		operation.Body = cloneJSONMap(operation.Body)
+		operation.Body = cloneJSONValue(operation.Body)
 		ops[index] = operation
 	}
 	return ops
