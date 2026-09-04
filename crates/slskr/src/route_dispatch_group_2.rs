@@ -3210,23 +3210,22 @@ async fn route_dispatch_group_2(context: &RouteDispatchContext<'_, '_>) -> Route
                 return Ok(routing::not_found_response());
             };
             let mut rooms = state.rooms.write().await;
-            if state.session.read().await.state == "connected"
-                && rooms.records.iter().any(|record| {
-                    record.name == bounded_room_name(room_name)
-                        && record.joined
-                        && record.last_error.is_none()
-                })
-            {
-                let existing = rooms
+            if state.session.read().await.state == "connected" {
+                if let Some(existing) = rooms
                     .records
                     .iter()
-                    .find(|record| record.name == bounded_room_name(room_name))
+                    .find(|record| {
+                        record.name == bounded_room_name(room_name)
+                            && record.joined
+                            && record.last_error.is_none()
+                    })
                     .cloned()
-                    .expect("joined room exists");
-                drop(rooms);
-                return Ok(routing::ok_response(
-                    existing.controller_room_json().to_string(),
-                ));
+                {
+                    drop(rooms);
+                    return Ok(routing::ok_response(
+                        existing.controller_room_json().to_string(),
+                    ));
+                }
             }
             let previous = rooms.clone();
             let Some(record) = rooms.join(room_name.to_string()) else {

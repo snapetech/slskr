@@ -75,6 +75,14 @@ class Pods extends Component {
     super(props);
 
     this.state = initialState;
+    this.isMountedFlag = false;
+    this.requestIds = {
+      discovery: 0,
+      messages: 0,
+      podDetails: 0,
+      pods: 0,
+      selection: 0,
+    };
     this.pollControllers = {
       messages: null,
       pods: null,
@@ -82,6 +90,7 @@ class Pods extends Component {
   }
 
   componentDidMount() {
+    this.isMountedFlag = true;
     const podId = this.props.params?.podId;
     const channelId = this.props.params?.channelId;
 
@@ -91,14 +100,16 @@ class Pods extends Component {
         activePodId: podId || null,
       },
       async () => {
+        if (!this.isMountedFlag) return;
         this.startPolling();
-        await this.fetchPods();
+        const podsList = await this.fetchPods();
+        if (!this.isMountedFlag) return;
         if (podId) {
           await this.selectPod(podId, channelId);
-        } else if (this.state.pods.length > 0) {
+        } else if (podsList.length > 0) {
           const preferredPod =
-            this.state.pods.find((pod) => pod.podId === GOLD_STAR_CLUB_POD_ID) ||
-            this.state.pods[0];
+            podsList.find((pod) => pod.podId === GOLD_STAR_CLUB_POD_ID) ||
+            podsList[0];
           await this.selectPod(preferredPod.podId, null);
         }
       },
@@ -112,12 +123,20 @@ class Pods extends Component {
     const previousPodId = previousProps.params?.podId;
     const previousChannelId = previousProps.params?.channelId;
 
-    if ((podId !== previousPodId || channelId !== previousChannelId) && podId) {
-      this.selectPod(podId, channelId);
+    if (
+      this.isMountedFlag &&
+      (podId !== previousPodId || channelId !== previousChannelId) &&
+      podId
+    ) {
+      void this.selectPod(podId, channelId);
     }
   }
 
   componentWillUnmount() {
+    this.isMountedFlag = false;
+    Object.keys(this.requestIds).forEach((key) => {
+      this.requestIds[key] += 1;
+    });
     this.stopPolling();
   }
 
@@ -144,12 +163,20 @@ class Pods extends Component {
   };
 
   fetchPods = async () => {
+    const requestId = ++this.requestIds.pods;
     try {
       const podsList = await pods.list();
-      this.setState({ pods: podsList || [] });
+      const normalizedPods = podsList || [];
+      if (this.isMountedFlag && requestId === this.requestIds.pods) {
+        this.setState({ pods: normalizedPods });
+      }
+      return normalizedPods;
     } catch (error) {
       console.error('Failed to fetch pods:', error);
-      this.setState({ pods: [] });
+      if (this.isMountedFlag && requestId === this.requestIds.pods) {
+        this.setState({ pods: [] });
+      }
+      return [];
     }
   };
 
@@ -158,33 +185,51 @@ class Pods extends Component {
   };
 
   fetchPodDetail = async (podId) => {
+    const requestId = ++this.requestIds.podDetails;
     try {
-      const detail = await pods.get(podId);
-      const members = await pods.getMembers(podId);
-      this.setState({ members: members || [], podDetail: detail });
+      const [detail, members] = await Promise.all([
+        pods.get(podId),
+        pods.getMembers(podId),
+      ]);
+      if (this.isMountedFlag && requestId === this.requestIds.podDetails) {
+        this.setState({ members: members || [], podDetail: detail });
+      }
+      return detail;
     } catch (error) {
       console.error('Failed to fetch pod detail:', error);
+      return null;
     }
   };
 
-  fetchMessages = async () => {
-    const { activeChannelId, activePodId, messages } = this.state;
-
-    if (!activePodId || !activeChannelId) {
+  fetchMessages = async (
+    podId = this.state.activePodId,
+    channelId = this.state.activeChannelId,
+  ) => {
+    if (!podId || !channelId) {
       return;
     }
 
+    const requestId = ++this.requestIds.messages;
+    const messageKey = `${podId}:${channelId}`;
+
     try {
       const channelMessages = await pods.getMessages(
-        activePodId,
-        activeChannelId,
+        podId,
+        channelId,
       );
-      this.setState({
-        messages: {
-          ...messages,
-          [`${activePodId}:${activeChannelId}`]: channelMessages || [],
-        },
-      });
+      if (
+        this.isMountedFlag &&
+        requestId === this.requestIds.messages &&
+        this.state.activePodId === podId &&
+        this.state.activeChannelId === channelId
+      ) {
+        this.setState((previousState) => ({
+          messages: {
+            ...previousState.messages,
+            [messageKey]: channelMessages || [],
+          },
+        }));
+      }
     } catch (error) {
       console.error('Failed to fetch messages:', error);
     }
@@ -198,29 +243,62 @@ class Pods extends Component {
     );
 
   selectPod = async (podId, channelId = null) => {
+    const selectionId = ++this.requestIds.selection;
+
     // Avoid redundant updates
     if (
       this.state.activePodId === podId &&
-      this.state.activeChannelId === channelId
+      this.state.activeChannelId === channelId &&
+      this.state.podDetail?.podId === podId
     ) {
       return;
     }
 
+    if (!this.isMountedFlag) return;
     this.setState({ activePodId: podId, loading: true });
 
-    await this.fetchPodDetail(podId);
+    const podDetail = await this.fetchPodDetail(podId);
+    if (
+      !this.isMountedFlag ||
+      selectionId !== this.requestIds.selection ||
+      !podDetail
+    ) {
+      if (
+        this.isMountedFlag &&
+        selectionId === this.requestIds.selection
+      ) {
+        this.setState({ loading: false });
+      }
+      return;
+    }
 
     // Select first channel if none specified
-    const podDetail = this.state.podDetail || (await pods.get(podId));
     if (!channelId && podDetail?.channels?.length > 0) {
       channelId = podDetail.channels[0].channelId;
     }
 
-    this.setState({
-      activeChannelId: channelId,
-      activeDetailTab: this.getChannelIndex(podDetail, channelId),
-      loading: false,
+    if (
+      !this.isMountedFlag ||
+      selectionId !== this.requestIds.selection
+    ) {
+      return;
+    }
+    await new Promise((resolve) => {
+      this.setState(
+        {
+          activeChannelId: channelId,
+          activeDetailTab: this.getChannelIndex(podDetail, channelId),
+          loading: false,
+        },
+        resolve,
+      );
     });
+    if (
+      !this.isMountedFlag ||
+      selectionId !== this.requestIds.selection
+    ) {
+      return;
+    }
 
     // Update URL only if different from current route
     const currentPodId = this.props.params?.podId;
@@ -235,35 +313,46 @@ class Pods extends Component {
 
     // Fetch messages for selected channel
     if (channelId) {
-      await this.fetchMessages();
+      await this.fetchMessages(podId, channelId);
     }
   };
 
-  handleDetailTabChange = (_event, { activeIndex }) => {
+  handleDetailTabChange = async (_event, { activeIndex }) => {
     const { activePodId, podDetail } = this.state;
     const channel = podDetail?.channels?.[activeIndex];
-
-    this.setState({ activeDetailTab: activeIndex });
 
     if (!channel || !activePodId) {
       return;
     }
 
-    this.setState({ activeChannelId: channel.channelId }, async () => {
-      const currentPodId = this.props.params?.podId;
-      const currentChannelId = this.props.params?.channelId;
-
-      if (
-        activePodId !== currentPodId ||
-        channel.channelId !== currentChannelId
-      ) {
-        this.props.navigate(
-          `${urlBase}/pods/${activePodId}/channels/${channel.channelId}`,
-        );
-      }
-
-      await this.fetchMessages();
+    const selectionId = ++this.requestIds.selection;
+    await new Promise((resolve) => {
+      this.setState(
+        {
+          activeChannelId: channel.channelId,
+          activeDetailTab: activeIndex,
+        },
+        resolve,
+      );
     });
+
+    if (!this.isMountedFlag || selectionId !== this.requestIds.selection) {
+      return;
+    }
+
+    const currentPodId = this.props.params?.podId;
+    const currentChannelId = this.props.params?.channelId;
+
+    if (
+      activePodId !== currentPodId ||
+      channel.channelId !== currentChannelId
+    ) {
+      this.props.navigate(
+        `${urlBase}/pods/${activePodId}/channels/${channel.channelId}`,
+      );
+    }
+
+    await this.fetchMessages(activePodId, channel.channelId);
   };
 
   handleSendMessage = async () => {
@@ -284,7 +373,14 @@ class Pods extends Component {
         messageInput,
         senderPeerId,
       );
-      this.setState({ messageInput: '' });
+      if (
+        this.isMountedFlag &&
+        this.state.activePodId === activePodId &&
+        this.state.activeChannelId === activeChannelId &&
+        this.state.messageInput === messageInput
+      ) {
+        this.setState({ messageInput: '' });
+      }
       // Messages will be refreshed by the shared non-overlapping poller.
     } catch (error) {
       console.error('Failed to send message:', error);
@@ -331,6 +427,7 @@ class Pods extends Component {
         visibility: createVisibility,
       }, this.getLocalPeerId());
 
+      if (!this.isMountedFlag) return;
       this.setState({ createModalOpen: false });
       await this.fetchPods();
       await this.selectPod(newPod.podId);
@@ -341,6 +438,7 @@ class Pods extends Component {
   };
 
   handleDiscoverPods = async () => {
+    const requestId = ++this.requestIds.discovery;
     const query = this.state.discoveryQuery.trim();
     this.setState({ discoveryLoading: true });
 
@@ -348,12 +446,22 @@ class Pods extends Component {
       const discovered = query
         ? await pods.discoverByName(query)
         : await pods.discoverAll(50);
-      this.setState({ discoveryResults: discovered || [] });
+      if (
+        this.isMountedFlag &&
+        requestId === this.requestIds.discovery
+      ) {
+        this.setState({ discoveryResults: discovered || [] });
+      }
     } catch (error) {
       console.error('Failed to discover pods:', error);
       toast.error(`Failed to discover pods: ${error.message}`);
     } finally {
-      this.setState({ discoveryLoading: false });
+      if (
+        this.isMountedFlag &&
+        requestId === this.requestIds.discovery
+      ) {
+        this.setState({ discoveryLoading: false });
+      }
     }
   };
 
@@ -383,6 +491,7 @@ class Pods extends Component {
         visibility,
       }, this.getLocalPeerId());
 
+      if (!this.isMountedFlag) return;
       toast.success(`Saved pod ${name}`);
       await this.fetchPods();
       await this.selectPod(savedPod.podId);
@@ -410,6 +519,9 @@ class Pods extends Component {
 
     try {
       await pods.leave(activePodId, peerId);
+      if (!this.isMountedFlag || this.state.activePodId !== activePodId) {
+        return;
+      }
       toast.success(`Left ${podName}`);
       await this.fetchPodDetail(activePodId);
     } catch (error) {

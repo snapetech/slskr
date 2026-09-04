@@ -835,21 +835,11 @@ async fn route_dispatch_group_3(context: &RouteDispatchContext<'_, '_>) -> Route
                         && record.last_error.is_none()
                 })
             {
-                let existing = rooms
-                    .records
-                    .iter()
-                    .find(|record| record.name == bounded_room_name(&room_name))
-                    .cloned()
-                    .expect("joined room exists");
                 drop(rooms);
-                return Ok(if route.path.starts_with("/api/v0/") {
-                    HttpResponse {
-                        status: "200 OK",
-                        content_type: "",
-                        body: String::new(),
-                    }
-                } else {
-                    routing::ok_response(existing.controller_room_json().to_string())
+                return Ok(HttpResponse {
+                    status: "200 OK",
+                    content_type: "",
+                    body: String::new(),
                 });
             }
             let previous = rooms.clone();

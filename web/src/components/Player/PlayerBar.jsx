@@ -2096,6 +2096,8 @@ const PlayerBar = ({ runtimeProfile } = {}) => {
   const navigate = useNavigate();
   const audioRef = useRef(null);
   const fadeAudioRef = useRef(null);
+  const fadePauseTimeoutRef = useRef(null);
+  const fadeGenerationRef = useRef(0);
   const lastSourceRef = useRef('');
   const playerBarRef = useRef(null);
   const scrobbledRef = useRef('');
@@ -2391,18 +2393,37 @@ const PlayerBar = ({ runtimeProfile } = {}) => {
     toggleVisualizer,
   ]);
 
+  useEffect(() => () => {
+    fadeGenerationRef.current += 1;
+    if (fadePauseTimeoutRef.current !== null) {
+      window.clearTimeout(fadePauseTimeoutRef.current);
+      fadePauseTimeoutRef.current = null;
+    }
+  }, []);
+
   useEffect(() => {
+    const fadeGeneration = ++fadeGenerationRef.current;
+    if (fadePauseTimeoutRef.current !== null) {
+      window.clearTimeout(fadePauseTimeoutRef.current);
+      fadePauseTimeoutRef.current = null;
+    }
     if (!audioRef.current || !source) return;
     const previousSource = lastSourceRef.current;
-    if (crossfadeEnabled && previousSource && previousSource !== source && fadeAudioRef.current) {
-      fadeAudioRef.current.src = previousSource;
-      fadeAudioRef.current.currentTime = audioRef.current.currentTime || 0;
-      fadeAudioRef.current.play().then(() => {
-        fadeOutputGain(fadeAudioRef.current, 1, 0, 5);
-        window.setTimeout(() => fadeAudioRef.current?.pause(), 5200);
+    const fadeAudio = fadeAudioRef.current;
+    if (crossfadeEnabled && previousSource && previousSource !== source && fadeAudio) {
+      fadeAudio.src = previousSource;
+      fadeAudio.currentTime = audioRef.current.currentTime || 0;
+      fadeAudio.play().then(() => {
+        if (fadeGenerationRef.current !== fadeGeneration) return;
+        fadeOutputGain(fadeAudio, 1, 0, 5);
+        fadePauseTimeoutRef.current = window.setTimeout(() => {
+          if (fadeGenerationRef.current !== fadeGeneration) return;
+          fadePauseTimeoutRef.current = null;
+          fadeAudio.pause();
+        }, 5200);
       }).catch(() => {});
       setOutputGain(audioRef.current, 0);
-      fadeOutputGain(audioRef.current, 0, 1, 5);
+      fadeOutputGain(fadeAudio, 0, 1, 5);
     } else {
       setOutputGain(audioRef.current, 1);
     }

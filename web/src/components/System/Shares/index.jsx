@@ -3,7 +3,7 @@ import { LoaderSegment, ShrinkableButton, Switch } from '../../Shared';
 import ContentsModal from './ContentsModal';
 import ExclusionTable from './ExclusionTable';
 import ShareTable from './ShareTable';
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'react-toastify';
 import { Divider } from 'semantic-ui-react';
 
@@ -38,10 +38,14 @@ const Shares = ({ state = {}, theme } = {}) => {
   const [working, setWorking] = useState(false);
   const [shares, setShares] = useState([]);
   const [modal, setModal] = useState(false);
+  const mountedRef = useRef(false);
+  const requestIdRef = useRef(0);
+  const initialLoadRef = useRef(true);
 
   const { directories, files, scanPending, scanProgress, scanning } = state;
 
-  const getAll = async (quiet = false) => {
+  const getAll = useCallback(async (quiet = false) => {
+    const requestId = ++requestIdRef.current;
     try {
       if (!quiet) setLoading(true);
 
@@ -60,29 +64,39 @@ const Shares = ({ state = {}, theme } = {}) => {
         [],
       );
 
+      if (!mountedRef.current || requestIdRef.current !== requestId) return;
       setShares(flattened);
     } catch (error) {
+      if (!mountedRef.current || requestIdRef.current !== requestId) return;
       console.error(error);
       toast.error(error?.response?.data ?? error?.message ?? error);
     } finally {
-      setLoading(false);
+      if (mountedRef.current && requestIdRef.current === requestId) {
+        setLoading(false);
+      }
     }
-  };
-
-  useEffect(() => {
-    getAll();
   }, []);
 
   useEffect(() => {
-    getAll(true);
+    mountedRef.current = true;
+    const initialLoad = initialLoadRef.current;
+    initialLoadRef.current = false;
+    void getAll(!initialLoad);
 
-    if (!scanning) {
+    let refreshTimeout;
+    if (!initialLoad && !scanning) {
       // the state change out of scanning can fire before
       // shares are updated, which leaves them stale. wait a second
       // and fetch again.
-      setTimeout(() => getAll(true), 1_000);
+      refreshTimeout = setTimeout(() => getAll(true), 1_000);
     }
-  }, [scanPending, scanning]);
+
+    return () => {
+      if (refreshTimeout) clearTimeout(refreshTimeout);
+      mountedRef.current = false;
+      requestIdRef.current += 1;
+    };
+  }, [getAll, scanPending, scanning]);
 
   const rescan = async () => {
     try {

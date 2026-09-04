@@ -4,6 +4,7 @@ import React, {
   useCallback,
   useContext,
   useEffect,
+  useRef,
   useState,
 } from 'react';
 
@@ -31,6 +32,14 @@ export const PlayerProvider = ({ children }) => {
   const [history, setHistory] = useState([]);
   const [queue, setQueue] = useState([]);
   const [followingParty, setFollowingParty] = useState(null);
+  const playTimeoutRef = useRef(null);
+
+  useEffect(() => () => {
+    if (playTimeoutRef.current !== null) {
+      window.clearTimeout(playTimeoutRef.current);
+      playTimeoutRef.current = null;
+    }
+  }, []);
 
   useEffect(() => {
     if (!current?.artist || !current?.title) return;
@@ -72,10 +81,13 @@ export const PlayerProvider = ({ children }) => {
         options.replaceQueue ? [playable] : [playable, ...existing],
       );
 
-      window.setTimeout(() => {
-        if (audioElement) {
-          audioElement.play().catch(() => {});
-        }
+      if (playTimeoutRef.current !== null) {
+        window.clearTimeout(playTimeoutRef.current);
+      }
+      const scheduledAudioElement = audioElement;
+      playTimeoutRef.current = window.setTimeout(() => {
+        playTimeoutRef.current = null;
+        scheduledAudioElement?.play().catch(() => {});
       }, 0);
     },
     [audioElement, current],
@@ -88,6 +100,10 @@ export const PlayerProvider = ({ children }) => {
   }, [audioElement]);
 
   const clear = useCallback(async () => {
+    if (playTimeoutRef.current !== null) {
+      window.clearTimeout(playTimeoutRef.current);
+      playTimeoutRef.current = null;
+    }
     if (audioElement) {
       audioElement.pause();
       audioElement.removeAttribute('src');

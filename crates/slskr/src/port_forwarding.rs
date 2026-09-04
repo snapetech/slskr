@@ -92,14 +92,19 @@ impl Manager {
             .await
             .map_err(|error| format!("Local forwarding listener bind failed: {error}"))?;
         let (cancel_tx, cancel_rx) = watch::channel(false);
+        let started_at_ms = crate::utils::unix_timestamp_millis();
         let rule = Arc::new(Rule {
             request,
             active_connections: AtomicUsize::new(0),
+            bytes_in: Arc::new(AtomicU64::new(0)),
+            bytes_out: Arc::new(AtomicU64::new(0)),
             bytes_forwarded: Arc::new(AtomicU64::new(0)),
             cancel_tx,
             connection_permits: Arc::clone(&self.connection_permits),
             listener_task: Mutex::new(None),
             last_error: Mutex::new(None),
+            started_at_ms,
+            last_activity_ms: Arc::new(AtomicU64::new(started_at_ms)),
         });
         let task_rule = Arc::clone(&rule);
         let task = tokio::spawn(async move {
@@ -152,11 +157,15 @@ impl Manager {
 struct Rule {
     request: StartRequest,
     active_connections: AtomicUsize,
+    bytes_in: Arc<AtomicU64>,
+    bytes_out: Arc<AtomicU64>,
     bytes_forwarded: Arc<AtomicU64>,
     cancel_tx: watch::Sender<bool>,
     connection_permits: Arc<Semaphore>,
     listener_task: Mutex<Option<JoinHandle<()>>>,
     last_error: Mutex<Option<String>>,
+    started_at_ms: u64,
+    last_activity_ms: Arc<AtomicU64>,
 }
 
 impl Rule {
@@ -278,6 +287,8 @@ impl Rule {
         let send_client = Arc::clone(&client);
         let send_tunnel = tunnel_id.clone();
         let send_bytes = Arc::clone(&self.bytes_forwarded);
+        let send_bytes_out = Arc::clone(&self.bytes_out);
+        let send_last_activity = Arc::clone(&self.last_activity_ms);
         let mut send = tokio::spawn(async move {
             let mut buffer = vec![0_u8; TUNNEL_CHUNK_BYTES];
             loop {
@@ -290,11 +301,15 @@ impl Rule {
                 }
                 send_tunnel_data(&send_client, &send_tunnel, &buffer[..read]).await?;
                 send_bytes.fetch_add(read as u64, Ordering::Relaxed);
+                send_bytes_out.fetch_add(read as u64, Ordering::Relaxed);
+                send_last_activity.store(crate::utils::unix_timestamp_millis(), Ordering::Relaxed);
             }
         });
         let receive_client = Arc::clone(&client);
         let receive_tunnel = tunnel_id.clone();
         let receive_bytes = Arc::clone(&self.bytes_forwarded);
+        let receive_bytes_in = Arc::clone(&self.bytes_in);
+        let receive_last_activity = Arc::clone(&self.last_activity_ms);
         let mut receive = tokio::spawn(async move {
             loop {
                 let data = receive_tunnel_data(&receive_client, &receive_tunnel).await?;
@@ -307,6 +322,9 @@ impl Rule {
                     .await
                     .map_err(|error| format!("Local forwarding write failed: {error}"))?;
                 receive_bytes.fetch_add(data.len() as u64, Ordering::Relaxed);
+                receive_bytes_in.fetch_add(data.len() as u64, Ordering::Relaxed);
+                receive_last_activity
+                    .store(crate::utils::unix_timestamp_millis(), Ordering::Relaxed);
             }
             #[allow(unreachable_code)]
             Ok::<(), String>(())
@@ -328,6 +346,8 @@ impl Rule {
 
     fn status(&self) -> Status {
         let active_connections = self.active_connections.load(Ordering::Relaxed);
+        let bytes_in = self.bytes_in.load(Ordering::Relaxed);
+        let bytes_out = self.bytes_out.load(Ordering::Relaxed);
         let bytes_forwarded = self.bytes_forwarded.load(Ordering::Relaxed);
         Status {
             local_port: self.request.local_port,
@@ -337,7 +357,11 @@ impl Rule {
             service_name: self.request.service_name.clone(),
             is_active: !*self.cancel_tx.borrow(),
             active_connections,
+            bytes_in,
+            bytes_out,
             bytes_forwarded,
+            started_at: self.started_at_ms,
+            last_activity: self.last_activity_ms.load(Ordering::Relaxed),
             stream_mapping_enabled: true,
             stream_stats: None,
             performance: Performance::new(active_connections, bytes_forwarded),
@@ -511,7 +535,11 @@ pub struct Status {
     pub service_name: Option<String>,
     pub is_active: bool,
     pub active_connections: usize,
+    pub bytes_in: u64,
+    pub bytes_out: u64,
     pub bytes_forwarded: u64,
+    pub started_at: u64,
+    pub last_activity: u64,
     pub stream_mapping_enabled: bool,
     pub stream_stats: Option<serde_json::Value>,
     pub performance: Performance,
@@ -607,6 +635,8 @@ mod tests {
         let status = manager.start(request(port)).await.unwrap();
         assert_eq!(status.local_port, port);
         assert!(status.is_active);
+        assert!(status.started_at > 0);
+        assert_eq!(status.last_activity, status.started_at);
         assert!(TcpStream::connect(("127.0.0.1", port)).await.is_ok());
         assert_eq!(manager.statuses().await.len(), 1);
         assert!(manager.stop(port).await);
@@ -868,6 +898,9 @@ mod tests {
             loop {
                 let status = manager.status(local_port).await.unwrap();
                 if status.bytes_forwarded == 10 {
+                    assert_eq!(status.bytes_in, 5);
+                    assert_eq!(status.bytes_out, 5);
+                    assert!(status.last_activity >= status.started_at);
                     break;
                 }
                 sleep(Duration::from_millis(10)).await;

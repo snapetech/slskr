@@ -62,11 +62,14 @@ const Options = ({ options, theme }) => {
   const [contents, setContents] = useState();
 
   useEffect(() => {
-    setTimeout(() => {
+    setContents(undefined);
+    const timeout = setTimeout(() => {
       setContents(
         YAML.stringify(options, { simpleKeys: true, sortMapEntries: false }),
       );
     }, 250);
+
+    return () => clearTimeout(timeout);
   }, [options]);
 
   const { debug, remoteConfiguration } = options;

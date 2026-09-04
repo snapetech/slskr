@@ -1,5 +1,5 @@
 import * as pods from '../../lib/pods';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Button,
   Checkbox,
@@ -16,37 +16,31 @@ import {
   Table,
 } from 'semantic-ui-react';
 
+const defaultVpnPolicy = {
+  allowedDestinations: [],
+  allowPrivateRanges: true,
+  allowPublicDestinations: false,
+  dialTimeout: '00:00:30',
+  enabled: false,
+  gatewayPeerId: '',
+  idleTimeout: '01:00:00',
+  maxBytesPerDayPerPeer: 1_073_741_824,
+  maxConcurrentTunnelsPerPeer: 5,
+  maxConcurrentTunnelsPod: 15,
+  maxLifetime: '24:00:00',
+  maxMembers: 3,
+  maxNewTunnelsPerMinutePerPeer: 10,
+  registeredServices: [],
+};
+
 const VpnGatewayConfig = ({ podDetail, podId }) => {
   const [activeIndex, setActiveIndex] = useState(0);
-  const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
 
   // VPN Policy state
-  const [vpnPolicy, setVpnPolicy] = useState({
-    allowedDestinations: [],
-    allowPrivateRanges: true,
-    allowPublicDestinations: false,
-    dialTimeout: '00:00:30',
-    enabled: false,
-
-    gatewayPeerId: '',
-
-    // 1GB
-    idleTimeout: '01:00:00',
-
-    maxBytesPerDayPerPeer: 1_073_741_824,
-
-    maxConcurrentTunnelsPerPeer: 5,
-
-    maxConcurrentTunnelsPod: 15,
-
-    maxLifetime: '24:00:00',
-    maxMembers: 3,
-    maxNewTunnelsPerMinutePerPeer: 10,
-    registeredServices: [],
-  });
+  const [vpnPolicy, setVpnPolicy] = useState(() => ({ ...defaultVpnPolicy }));
 
   // Modal states for adding destinations and services
   const [showAddDestination, setShowAddDestination] = useState(false);
@@ -64,11 +58,29 @@ const VpnGatewayConfig = ({ podDetail, podId }) => {
     name: '',
     protocol: 'tcp',
   });
+  const mountedRef = useRef(false);
+  const saveRequestIdRef = useRef(0);
 
   useEffect(() => {
-    if (podDetail?.privateServicePolicy) {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      saveRequestIdRef.current += 1;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!podDetail?.privateServicePolicy) {
       setVpnPolicy({
-        ...podDetail.privateServicePolicy,
+        ...defaultVpnPolicy,
+        allowedDestinations: [],
+        registeredServices: [],
+      });
+      return;
+    }
+
+    setVpnPolicy({
+      ...podDetail.privateServicePolicy,
 
         allowedDestinations:
           podDetail.privateServicePolicy.allowedDestinations || [],
@@ -86,23 +98,23 @@ const VpnGatewayConfig = ({ podDetail, podId }) => {
         idleTimeout: podDetail.privateServicePolicy.idleTimeout || '01:00:00',
 
         maxBytesPerDayPerPeer:
-          podDetail.privateServicePolicy.maxBytesPerDayPerPeer || 1_073_741_824,
+          podDetail.privateServicePolicy.maxBytesPerDayPerPeer ??
+          1_073_741_824,
 
         maxConcurrentTunnelsPerPeer:
-          podDetail.privateServicePolicy.maxConcurrentTunnelsPerPeer || 5,
+          podDetail.privateServicePolicy.maxConcurrentTunnelsPerPeer ?? 5,
 
         maxConcurrentTunnelsPod:
-          podDetail.privateServicePolicy.maxConcurrentTunnelsPod || 15,
+          podDetail.privateServicePolicy.maxConcurrentTunnelsPod ?? 15,
 
         maxLifetime: podDetail.privateServicePolicy.maxLifetime || '24:00:00',
         // Ensure defaults for missing fields
-        maxMembers: podDetail.privateServicePolicy.maxMembers || 3,
+        maxMembers: podDetail.privateServicePolicy.maxMembers ?? 3,
         maxNewTunnelsPerMinutePerPeer:
-          podDetail.privateServicePolicy.maxNewTunnelsPerMinutePerPeer || 10,
+          podDetail.privateServicePolicy.maxNewTunnelsPerMinutePerPeer ?? 10,
         registeredServices:
           podDetail.privateServicePolicy.registeredServices || [],
-      });
-    }
+    });
   }, [podDetail]);
 
   const hasVpnCapability = podDetail?.capabilities?.includes(
@@ -112,6 +124,7 @@ const VpnGatewayConfig = ({ podDetail, podId }) => {
   const handleSavePolicy = async () => {
     if (!podId) return;
 
+    const requestId = ++saveRequestIdRef.current;
     setSaving(true);
     setError(null);
     setSuccess(null);
@@ -124,12 +137,27 @@ const VpnGatewayConfig = ({ podDetail, podId }) => {
       };
 
       await pods.update(podId, updatedPod);
-      setSuccess('VPN policy updated successfully');
+      if (
+        mountedRef.current &&
+        requestId === saveRequestIdRef.current
+      ) {
+        setSuccess('VPN policy updated successfully');
+      }
     } catch (error) {
       console.error('Failed to update VPN policy:', error);
-      setError(error.message || 'Failed to update VPN policy');
+      if (
+        mountedRef.current &&
+        requestId === saveRequestIdRef.current
+      ) {
+        setError(error.message || 'Failed to update VPN policy');
+      }
     } finally {
-      setSaving(false);
+      if (
+        mountedRef.current &&
+        requestId === saveRequestIdRef.current
+      ) {
+        setSaving(false);
+      }
     }
   };
 
@@ -280,7 +308,9 @@ const VpnGatewayConfig = ({ podDetail, podId }) => {
                   onChange={(e, { value }) =>
                     setVpnPolicy((previous) => ({
                       ...previous,
-                      maxMembers: Number.parseInt(value, 10) || 3,
+                      maxMembers: Number.isNaN(Number.parseInt(value, 10))
+                        ? 3
+                        : Number.parseInt(value, 10),
                     }))
                   }
                   type="number"
@@ -471,7 +501,9 @@ const VpnGatewayConfig = ({ podDetail, podId }) => {
                     setVpnPolicy((previous) => ({
                       ...previous,
                       maxConcurrentTunnelsPerPeer:
-                        Number.parseInt(value, 10) || 5,
+                        Number.isNaN(Number.parseInt(value, 10))
+                          ? 5
+                          : Number.parseInt(value, 10),
                     }))
                   }
                   type="number"
@@ -487,7 +519,11 @@ const VpnGatewayConfig = ({ podDetail, podId }) => {
                   onChange={(e, { value }) =>
                     setVpnPolicy((previous) => ({
                       ...previous,
-                      maxConcurrentTunnelsPod: Number.parseInt(value, 10) || 15,
+                      maxConcurrentTunnelsPod: Number.isNaN(
+                        Number.parseInt(value, 10),
+                      )
+                        ? 15
+                        : Number.parseInt(value, 10),
                     }))
                   }
                   type="number"
@@ -507,7 +543,9 @@ const VpnGatewayConfig = ({ podDetail, podId }) => {
                     setVpnPolicy((previous) => ({
                       ...previous,
                       maxNewTunnelsPerMinutePerPeer:
-                        Number.parseInt(value, 10) || 10,
+                        Number.isNaN(Number.parseInt(value, 10))
+                          ? 10
+                          : Number.parseInt(value, 10),
                     }))
                   }
                   type="number"
@@ -523,8 +561,9 @@ const VpnGatewayConfig = ({ podDetail, podId }) => {
                     setVpnPolicy((previous) => ({
                       ...previous,
                       maxBytesPerDayPerPeer:
-                        Number.parseInt(value, 10) * 1_024 * 1_024 ||
-                        1_073_741_824,
+                        Number.isNaN(Number.parseInt(value, 10))
+                          ? 1_073_741_824
+                          : Number.parseInt(value, 10) * 1_024 * 1_024,
                     }))
                   }
                   type="number"

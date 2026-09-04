@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Trash2, Database as DatabaseIcon } from 'lucide-react';
 import { isAbortError, requestJson } from '../lib/api';
 
@@ -17,26 +17,32 @@ export default function Database({ apiUrl, apiKey }: DatabasePageProps) {
   const [stats, setStats] = useState<DatabaseStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const requestIdRef = useRef(0);
 
-  useEffect(() => {
-    const controller = new AbortController();
-    void fetchStats(controller.signal);
-    return () => controller.abort();
-  }, [apiUrl, apiKey]);
-
-  const fetchStats = async (signal?: AbortSignal) => {
+  const fetchStats = useCallback(async (signal?: AbortSignal) => {
+    const requestId = ++requestIdRef.current;
     try {
       setLoading(true);
       setError(null);
       const data = await requestJson<DatabaseStats>(`${apiUrl}/api/admin/database/stats`, apiKey, { signal });
+      if (requestId !== requestIdRef.current) return;
       setStats(data);
     } catch (err) {
-      if (isAbortError(err)) return;
+      if (isAbortError(err) || requestId !== requestIdRef.current) return;
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
-      setLoading(false);
+      if (requestId === requestIdRef.current) setLoading(false);
     }
-  };
+  }, [apiKey, apiUrl]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetchStats(controller.signal);
+    return () => {
+      controller.abort();
+      requestIdRef.current += 1;
+    };
+  }, [fetchStats]);
 
   const handleCleanup = async (days: number) => {
     if (!window.confirm(`Delete records older than ${days} days?`)) return;

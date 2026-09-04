@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Plus, Trash2, TestTube } from 'lucide-react';
 import { isAbortError, requestJson } from '../lib/api';
 
@@ -23,6 +23,7 @@ export default function Webhooks({ apiUrl, apiKey }: WebhooksPageProps) {
   const [showForm, setShowForm] = useState(false);
   const [newUrl, setNewUrl] = useState('');
   const [selectedEvents, setSelectedEvents] = useState<string[]>(['search.created']);
+  const requestIdRef = useRef(0);
 
   const availableEvents = [
     'search.created',
@@ -36,6 +37,7 @@ export default function Webhooks({ apiUrl, apiKey }: WebhooksPageProps) {
   ];
 
   const fetchWebhooks = useCallback(async (signal?: AbortSignal) => {
+    const requestId = ++requestIdRef.current;
     try {
       setLoading(true);
       setError(null);
@@ -45,20 +47,23 @@ export default function Webhooks({ apiUrl, apiKey }: WebhooksPageProps) {
         apiKey,
         { signal },
       );
-      if (signal?.aborted) return;
+      if (signal?.aborted || requestId !== requestIdRef.current) return;
       setWebhooks(Array.isArray(data) ? data : data.webhooks || []);
     } catch (err) {
-      if (signal?.aborted || isAbortError(err)) return;
+      if (signal?.aborted || isAbortError(err) || requestId !== requestIdRef.current) return;
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
-      if (!signal?.aborted) setLoading(false);
+      if (!signal?.aborted && requestId === requestIdRef.current) setLoading(false);
     }
   }, [apiKey, apiUrl]);
 
   useEffect(() => {
     const controller = new AbortController();
     void fetchWebhooks(controller.signal);
-    return () => controller.abort();
+    return () => {
+      controller.abort();
+      requestIdRef.current += 1;
+    };
   }, [fetchWebhooks]);
 
   const handleCreateWebhook = async () => {

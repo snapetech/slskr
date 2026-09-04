@@ -370,8 +370,18 @@ const Leaderboard = ({ downloads, end, start, uploads }) => {
   const [rows, setRows] = useState({ download: downloads ?? [], upload: uploads ?? [] });
   const [loading, setLoading] = useState({ download: false, upload: false });
   const sortRequest = useRef(0);
+  const mountedRef = useRef(false);
 
   useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      sortRequest.current += 1;
+    };
+  }, []);
+
+  useEffect(() => {
+    sortRequest.current += 1;
     setRows({ download: downloads ?? [], upload: uploads ?? [] });
     setSortBy('Count');
   }, [downloads, uploads]);
@@ -387,11 +397,15 @@ const Leaderboard = ({ downloads, end, start, uploads }) => {
         reports.getLeaderboard({ direction: 'Upload', end: new Date(end), sortBy: nextSort, start: start ? new Date(start) : undefined }),
         reports.getLeaderboard({ direction: 'Download', end: new Date(end), sortBy: nextSort, start: start ? new Date(start) : undefined }),
       ]);
-      if (requestId === sortRequest.current) setRows({ download, upload });
+      if (mountedRef.current && requestId === sortRequest.current) {
+        setRows({ download, upload });
+      }
     } catch (error) {
       toast.error(error?.response?.data ?? error?.message ?? `${error}`);
     } finally {
-      if (requestId === sortRequest.current) setLoading({ download: false, upload: false });
+      if (mountedRef.current && requestId === sortRequest.current) {
+        setLoading({ download: false, upload: false });
+      }
     }
   };
 
@@ -536,12 +550,28 @@ const TransferErrors = ({ data, end, start }) => {
   const [recentRows, setRecentRows] = useState(null);
   const [paretoLoading, setParetoLoading] = useState(false);
   const [recentLoading, setRecentLoading] = useState(false);
+  const mountedRef = useRef(false);
+  const paretoRequestRef = useRef(0);
+  const recentRequestRef = useRef(0);
 
   useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      paretoRequestRef.current += 1;
+      recentRequestRef.current += 1;
+    };
+  }, []);
+
+  useEffect(() => {
+    paretoRequestRef.current += 1;
+    recentRequestRef.current += 1;
     setParetoDirection('All');
     setRecentDirection('All');
     setParetoRows(null);
     setRecentRows(null);
+    setParetoLoading(false);
+    setRecentLoading(false);
   }, [end, start]);
 
   const fetchRows = async (kind, direction) => {
@@ -563,6 +593,8 @@ const TransferErrors = ({ data, end, start }) => {
   const updateRows = async (kind, direction) => {
     const setLoading = kind === 'pareto' ? setParetoLoading : setRecentLoading;
     const setRows = kind === 'pareto' ? setParetoRows : setRecentRows;
+    const requestRef = kind === 'pareto' ? paretoRequestRef : recentRequestRef;
+    const requestId = ++requestRef.current;
     setLoading(true);
     try {
       if (direction === 'All') {
@@ -570,13 +602,19 @@ const TransferErrors = ({ data, end, start }) => {
           fetchRows(kind, 'Upload'),
           fetchRows(kind, 'Download'),
         ]);
-        setRows(kind === 'pareto' ? mergeParetoRows(upload, download) : mergeDirectionalRows(upload, download));
+        if (mountedRef.current && requestId === requestRef.current) {
+          setRows(kind === 'pareto' ? mergeParetoRows(upload, download) : mergeDirectionalRows(upload, download));
+        }
       } else {
         const rows = await fetchRows(kind, direction);
-        setRows(rows.map((row) => ({ ...row, direction })));
+        if (mountedRef.current && requestId === requestRef.current) {
+          setRows(rows.map((row) => ({ ...row, direction })));
+        }
       }
     } finally {
-      setLoading(false);
+      if (mountedRef.current && requestId === requestRef.current) {
+        setLoading(false);
+      }
     }
   };
 

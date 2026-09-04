@@ -11,7 +11,7 @@ import {
 import { LoaderSegment } from '../../Shared';
 import * as searches from '../../../lib/searches';
 import { usePolling } from '../../../lib/usePolling';
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Button,
   Grid,
@@ -44,9 +44,26 @@ const LibraryHealth = () => {
   const [error, setError] = useState(null);
   const [scanId, setScanId] = useState(null);
   const scanStartedAtRef = useRef(null);
+  const mountedRef = useRef(false);
+  const summaryRequestIdRef = useRef(0);
+  const reloadTimeoutRef = useRef(null);
+
+  useEffect(() => {
+    mountedRef.current = true;
+
+    return () => {
+      mountedRef.current = false;
+      summaryRequestIdRef.current += 1;
+      if (reloadTimeoutRef.current !== null) {
+        clearTimeout(reloadTimeoutRef.current);
+        reloadTimeoutRef.current = null;
+      }
+    };
+  }, []);
 
   const loadSummary = async (path) => {
     if (!path) return;
+    const requestId = ++summaryRequestIdRef.current;
 
     try {
       setLoading(true);
@@ -58,30 +75,45 @@ const LibraryHealth = () => {
           libraryHealth.getIssuesByArtist(10),
           libraryHealth.getIssues({ libraryPath: path, limit: 100 }),
         ]);
+      if (!mountedRef.current || summaryRequestIdRef.current !== requestId) return;
       setSummary(summaryResp.data);
       setIssuesByType(byTypeResp.data.groups || []);
       setIssuesByArtist(byArtistResp.data.groups || []);
       setIssues(issuesResp.data.issues || []);
       setReportMessage('');
     } catch (error_) {
+      if (!mountedRef.current || summaryRequestIdRef.current !== requestId) return;
       setError(
         error_.response?.data?.message ||
           error_.message ||
           'Failed to load library health data',
       );
     } finally {
-      setLoading(false);
+      if (mountedRef.current && summaryRequestIdRef.current === requestId) {
+        setLoading(false);
+      }
     }
+  };
+
+  const scheduleSummaryReload = (path) => {
+    if (reloadTimeoutRef.current !== null) {
+      clearTimeout(reloadTimeoutRef.current);
+    }
+    reloadTimeoutRef.current = setTimeout(() => {
+      reloadTimeoutRef.current = null;
+      void loadSummary(path);
+    }, 1_000);
   };
 
   usePolling(
     async () => {
-      if (!scanId) return;
+      if (!scanId || !mountedRef.current) return;
 
       if (
         scanStartedAtRef.current &&
         Date.now() - scanStartedAtRef.current >= 60_000
       ) {
+        if (!mountedRef.current) return;
         setScanId(null);
         scanStartedAtRef.current = null;
         setScanning(false);
@@ -95,12 +127,14 @@ const LibraryHealth = () => {
           statusResp.data.status === 'Completed' ||
           statusResp.data.status === 'Failed'
         ) {
+          if (!mountedRef.current) return;
           setScanId(null);
           scanStartedAtRef.current = null;
           setScanning(false);
           await loadSummary(libraryPath);
         }
       } catch (error_) {
+        if (!mountedRef.current) return;
         setError(
           error_.response?.data?.message ||
             error_.message ||
@@ -217,20 +251,20 @@ const LibraryHealth = () => {
       setFixing(true);
       setError(null);
       await libraryHealth.createRemediationJob(issueIds);
+      if (!mountedRef.current) return;
       setSelectedIssues(new Set());
       setReportMessage(`Queued remediation job for ${issueIds.length} auto-fixable issue${issueIds.length === 1 ? '' : 's'}.`);
       // Reload issues after a delay
-      setTimeout(() => {
-        loadSummary(libraryPath);
-      }, 1_000);
+      scheduleSummaryReload(libraryPath);
     } catch (error_) {
+      if (!mountedRef.current) return;
       setError(
         error_.response?.data?.message ||
           error_.message ||
           'Failed to create fix job',
       );
     } finally {
-      setFixing(false);
+      if (mountedRef.current) setFixing(false);
     }
   };
 
@@ -239,18 +273,18 @@ const LibraryHealth = () => {
       setFixing(true);
       setError(null);
       await libraryHealth.createRemediationJob([issueId]);
+      if (!mountedRef.current) return;
       setReportMessage('Queued remediation job for 1 auto-fixable issue.');
-      setTimeout(() => {
-        loadSummary(libraryPath);
-      }, 1_000);
+      scheduleSummaryReload(libraryPath);
     } catch (error_) {
+      if (!mountedRef.current) return;
       setError(
         error_.response?.data?.message ||
           error_.message ||
           'Failed to create fix job',
       );
     } finally {
-      setFixing(false);
+      if (mountedRef.current) setFixing(false);
     }
   };
 

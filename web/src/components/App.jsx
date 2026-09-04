@@ -17,7 +17,7 @@ import PlayerBar from './Player/PlayerBar';
 import { PlayerProvider } from './Player/PlayerContext';
 import ErrorSegment from './Shared/ErrorSegment';
 import Footer from './Shared/Footer';
-import React, { Component, lazy, Suspense } from 'react';
+import React, { Component, lazy, Suspense, useEffect } from 'react';
 import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { ToastContainer } from 'react-toastify';
 import {
@@ -632,14 +632,20 @@ const RouteMissRedirect = () => {
 
   if (typeof window !== 'undefined') {
     window.routeMissPath = location.pathname;
+  }
 
-    setTimeout(() => {
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+
+    const timeout = window.setTimeout(() => {
       const element = document.querySelector('[data-testid="route-miss"]');
       if (element) {
         window.routeMissElement = element.textContent;
       }
     }, 100);
-  }
+
+    return () => window.clearTimeout(timeout);
+  }, [location.pathname]);
 
   console.error('[Router] Route miss for:', location.pathname);
 
@@ -679,9 +685,13 @@ class App extends Component {
     this.navigationActivityInterval = undefined;
     this.navigationResizeObserver = undefined;
     this.roomActivityBaselined = false;
+    this.isMountedFlag = false;
+    this.navigationActivityRunning = false;
+    this.navigationActivityRequestId = 0;
   }
 
   componentDidMount() {
+    this.isMountedFlag = true;
     this.init();
     this.startNavigationActivityPolling();
     this.startChromeMeasurement();
@@ -695,6 +705,8 @@ class App extends Component {
   }
 
   componentWillUnmount() {
+    this.isMountedFlag = false;
+    this.navigationActivityRequestId += 1;
     if (this.applicationHub) {
       this.applicationHub.stop().catch(() => {});
       this.applicationHub = undefined;
@@ -801,23 +813,33 @@ class App extends Component {
   };
 
   refreshNavigationActivity = async () => {
+    if (!this.isMountedFlag || this.navigationActivityRunning) return;
+    this.navigationActivityRunning = true;
+    const requestId = ++this.navigationActivityRequestId;
+
     if (['legacy', 'native'].includes(this.runtimeProfileHint)) {
-      this.setState({
-        navActivity: {
-          chat: false,
-          rooms: false,
-        },
-      });
+      if (this.isMountedFlag && requestId === this.navigationActivityRequestId) {
+        this.setState({
+          navActivity: {
+            chat: false,
+            rooms: false,
+          },
+        });
+      }
+      this.navigationActivityRunning = false;
       return;
     }
 
     if (!this.isAuthenticated()) {
-      this.setState({
-        navActivity: {
-          chat: false,
-          rooms: false,
-        },
-      });
+      if (this.isMountedFlag && requestId === this.navigationActivityRequestId) {
+        this.setState({
+          navActivity: {
+            chat: false,
+            rooms: false,
+          },
+        });
+      }
+      this.navigationActivityRunning = false;
       return;
     }
 
@@ -827,18 +849,27 @@ class App extends Component {
         this.getRoomsActivity(),
       ]);
 
-      this.setState({
-        navActivity: {
-          chat: chatActivity,
-          rooms: roomsActivity,
-        },
-      });
+      if (
+        this.isMountedFlag &&
+        requestId === this.navigationActivityRequestId &&
+        this.isAuthenticated()
+      ) {
+        this.setState({
+          navActivity: {
+            chat: chatActivity,
+            rooms: roomsActivity,
+          },
+        });
+      }
     } catch (error) {
       console.error('Failed to refresh navigation activity:', error);
+    } finally {
+      this.navigationActivityRunning = false;
     }
   };
 
   startApplicationHub = () => {
+    if (!this.isMountedFlag) return;
     if (this.applicationHub) {
       this.applicationHub.stop().catch(() => {});
     }
@@ -848,6 +879,7 @@ class App extends Component {
     this.applicationHub = appHub;
 
     appHub.on('state', (state) => {
+      if (!this.isMountedFlag || this.applicationHub !== appHub) return;
       this.setState({
         applicationState: this.runtimeProfileHint
           ? { ...state, runtimeProfile: this.runtimeProfileHint }
@@ -856,16 +888,23 @@ class App extends Component {
     });
 
     appHub.on('options', (options) => {
+      if (!this.isMountedFlag || this.applicationHub !== appHub) return;
       this.setState({ applicationOptions: options });
     });
 
     appHub.onreconnecting(() =>
+      this.isMountedFlag &&
+      this.applicationHub === appHub &&
       this.setState({ error: true, retriesExhausted: false }),
     );
     appHub.onclose(() =>
+      this.isMountedFlag &&
+      this.applicationHub === appHub &&
       this.setState({ error: true, retriesExhausted: true }),
     );
     appHub.onreconnected(() =>
+      this.isMountedFlag &&
+      this.applicationHub === appHub &&
       this.setState({ error: false, retriesExhausted: false }),
     );
 
@@ -880,7 +919,7 @@ class App extends Component {
 
     Promise.race([hubStart, hubTimeout])
       .catch((error) => {
-        if (this.applicationHub !== appHub) {
+        if (!this.isMountedFlag || this.applicationHub !== appHub) {
           return;
         }
 
@@ -906,6 +945,7 @@ class App extends Component {
 
   init = async () => {
     this.setState({ initialized: false }, async () => {
+      if (!this.isMountedFlag) return;
       const INIT_TOTAL_TIMEOUT_MS = 30000;
 
       let initTimedOut = false;
@@ -913,6 +953,7 @@ class App extends Component {
       try {
         const initTask = (async () => {
           const securityEnabled = await session.getSecurityEnabled();
+          if (!this.isMountedFlag) return;
 
           if (!securityEnabled) {
             console.debug('application security is not enabled, per api call');
@@ -923,6 +964,7 @@ class App extends Component {
             !securityEnabled && this.runtimeProfileHint === 'native'
               ? true
               : await session.check();
+          if (!this.isMountedFlag) return;
 
           if (sessionValid) {
             if (this.runtimeProfileHint === 'native') {
@@ -932,6 +974,7 @@ class App extends Component {
               // here changes the observable API surface and makes a native
               // profile look like slskd to target clients.
               await collectionsAPI.getCollections();
+              if (!this.isMountedFlag) return;
               this.setState({
                 applicationOptions: {},
                 applicationState: { runtimeProfile: 'native' },
@@ -951,6 +994,7 @@ class App extends Component {
                   getApplicationState(),
                   getApplicationOptions(),
                 ]);
+              if (!this.isMountedFlag) return;
               this.setState({
                 applicationOptions: initialOptions || {},
                 applicationState: {
@@ -962,6 +1006,7 @@ class App extends Component {
           }
 
           const savedTheme = this.getSavedTheme();
+          if (!this.isMountedFlag) return;
           if (savedTheme != null) {
             this.setState({ theme: savedTheme });
           }
@@ -992,7 +1037,7 @@ class App extends Component {
           console.warn('Init timed out; showing UI (hub/state may reconnect later).');
         }
       } catch (error) {
-        if (!initTimedOut) {
+        if (!initTimedOut && this.isMountedFlag) {
           console.error(error);
           this.setState({ error: true, retriesExhausted: true });
         }
@@ -1000,7 +1045,7 @@ class App extends Component {
         if (initTimeoutId) {
           clearTimeout(initTimeoutId);
         }
-        this.setState({ initialized: true });
+        if (this.isMountedFlag) this.setState({ initialized: true });
       }
     });
   };

@@ -882,6 +882,27 @@ async fn controller_api_differential_controller_file_transfer_room_residuals() {
     );
 }
 
+#[tokio::test]
+async fn room_join_fast_path_does_not_return_stale_duplicate_projection() {
+    let (state, _receiver) = test_state_with_env(MapEnv::default());
+    state.session.write().await.state = "connected";
+
+    let mut rooms = state.rooms.write().await;
+    let healthy = rooms.join("music".to_owned()).expect("healthy room");
+    rooms.records[0].joined = false;
+    rooms.records[0].last_error = Some("stale join failure".to_owned());
+    rooms.records.push(healthy);
+    drop(rooms);
+
+    let response = super::route_http_request("POST", "/api/v0/rooms/music/join", None, "", &state)
+        .await
+        .expect("room join response");
+
+    assert_eq!(response.status, "200 OK");
+    assert!(response.body.contains("\"lastError\":null"));
+    assert!(!response.body.contains("stale join failure"));
+}
+
 #[test]
 fn folder_contents_response_parser_accepts_controller_wire_shape() {
     let entries =
