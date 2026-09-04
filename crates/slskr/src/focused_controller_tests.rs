@@ -973,6 +973,37 @@ async fn batch_operations_reuse_router_statuses_timeouts_and_nested_guard() {
 }
 
 #[tokio::test]
+async fn unversioned_empty_search_put_persists_cancellation() {
+    let (state, _receiver) = test_state_with_env(MapEnv::default());
+    let create = serde_json::json!({
+        "id": "search-stop-fixture",
+        "query": "stop-me"
+    })
+    .to_string();
+    let created = super::route_http_request("POST", "/api/searches", None, &create, &state)
+        .await
+        .expect("create unversioned search");
+    assert_eq!(created.status, "200 OK");
+
+    let stopped =
+        super::route_http_request("PUT", "/api/searches/search-stop-fixture", None, "", &state)
+            .await
+            .expect("stop unversioned search");
+    assert_eq!(stopped.status, "200 OK");
+
+    let record =
+        super::route_http_request("GET", "/api/searches/search-stop-fixture", None, "", &state)
+            .await
+            .expect("read stopped search");
+    let json = serde_json::from_str::<serde_json::Value>(&record.body).expect("search JSON");
+    assert_eq!(json["status"], "cancelled");
+    assert_eq!(json["state"], "Cancelled");
+    assert!(json["endedAt"]
+        .as_str()
+        .is_some_and(|value| !value.is_empty()));
+}
+
+#[tokio::test]
 async fn file_lifecycle_differential_controller_file_service_existing_missing_overwrite() {
     let target = "slskd";
     let (state, _receiver) = test_state_with_env(

@@ -30166,12 +30166,12 @@ async fn route_http_request_with_headers(
             let Some(id) = path_segment_after(path, "/api/searches/") else {
                 return Ok(routing::not_found_response());
             };
-            if route.path.starts_with("/api/v0/")
-                && matches!(
-                    state.config.controller_profile,
-                    ControllerProfile::Legacy | ControllerProfile::Native
-                )
-            {
+            // The WebUI uses the unversioned REST route with an empty body to
+            // stop a search.  Treat that shape as the cancellation contract
+            // for every profile; falling through to update_by_identifier()
+            // leaves an active search running because it has no fields to
+            // update.
+            if body.trim().is_empty() {
                 let mut searches = state.searches.write().await;
                 let previous_searches = searches.clone();
                 let Some(existing) = searches.get_by_identifier(id) else {
@@ -30197,6 +30197,7 @@ async fn route_http_request_with_headers(
                         return Ok(routing::service_unavailable_response(&error));
                     }
                     publish_search_hub_event(state, "update", &record);
+                    record_event(state, "search.cancelled", record.token.to_string(), None).await;
                 }
                 return Ok(routing::ok_response(String::new()));
             }
