@@ -651,12 +651,23 @@ impl ReplayCache {
         }
         let now = Instant::now();
         let mut entries = self.entries.lock().expect("mesh replay cache lock");
-        if entries.len() * 10 >= self.max_cache_size * 9 {
+        let prune_threshold = self.max_cache_size.saturating_mul(9) / 10;
+        if entries.len() >= prune_threshold {
             entries.retain(|_, seen_at| now.duration_since(*seen_at) < self.cache_duration);
         }
         if let Some(seen_at) = entries.get(message_id).copied() {
             if now.duration_since(seen_at) < self.cache_duration {
                 return true;
+            }
+            entries.remove(message_id);
+        }
+        if entries.len() >= self.max_cache_size {
+            let oldest = entries
+                .iter()
+                .min_by_key(|(_, seen_at)| **seen_at)
+                .map(|(message_id, _)| message_id.clone());
+            if let Some(oldest) = oldest {
+                entries.remove(&oldest);
             }
         }
         entries.insert(message_id.to_owned(), now);
@@ -1520,6 +1531,15 @@ mod tests {
         assert!(!limiter.is_connection_allowed("peer"));
         limiter.record_success("peer");
         assert!(limiter.is_connection_allowed("peer"));
+    }
+
+    #[test]
+    fn replay_cache_enforces_configured_capacity_for_unique_messages() {
+        let replay = ReplayCache::new(Duration::from_secs(60), 2);
+        for index in 0..100 {
+            assert!(!replay.check_and_record(&format!("message-{index}")));
+        }
+        assert_eq!(replay.cache_size(), 2);
     }
 
     #[test]
