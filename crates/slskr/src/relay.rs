@@ -661,6 +661,7 @@ impl RuntimeState {
                     completed_at: record.completed_at,
                 },
             );
+            self.prune_completed_share_uploads();
         }
         Ok(())
     }
@@ -702,6 +703,25 @@ impl RuntimeState {
         }
         self.pending_share_uploads
             .retain(|_, request| request.expires_at > now);
+    }
+
+    fn prune_completed_share_uploads(&mut self) {
+        let excess = self
+            .completed_share_uploads
+            .len()
+            .saturating_sub(MAX_RELAY_SHARE_UPLOAD_RECORDS);
+        if excess == 0 {
+            return;
+        }
+        let mut oldest = self
+            .completed_share_uploads
+            .iter()
+            .map(|(token, upload)| (upload.completed_at, token.clone()))
+            .collect::<Vec<_>>();
+        oldest.sort_unstable();
+        for (_, token) in oldest.into_iter().take(excess) {
+            self.completed_share_uploads.remove(&token);
+        }
     }
 
     /// Issue the short-lived challenge sent by the relay hub after a new
@@ -1173,6 +1193,7 @@ impl RuntimeState {
         self.agent_shares.insert(agent_name.clone(), shares.clone());
         self.completed_share_uploads
             .insert(token.to_string(), completed);
+        self.prune_completed_share_uploads();
         Ok(())
     }
 
@@ -1913,6 +1934,35 @@ mod tests {
         assert!(state
             .begin_file_stream("edge-limit", "file.flac", 0, now)
             .is_none());
+    }
+
+    #[test]
+    fn completed_relay_share_upload_history_has_hard_capacity() {
+        let mut state = RuntimeState::new();
+        for index in 0..=MAX_RELAY_SHARE_UPLOAD_RECORDS {
+            let token = format!("token-{index:04}");
+            state.completed_share_uploads.insert(
+                token,
+                CompletedShareUpload {
+                    agent_name: "edge-limit".to_owned(),
+                    share_count: 0,
+                    shares: Vec::new(),
+                    database_path: PathBuf::from("share.db"),
+                    completed_at: index as u64,
+                },
+            );
+        }
+
+        state.prune_completed_share_uploads();
+
+        assert_eq!(
+            state.completed_share_uploads.len(),
+            MAX_RELAY_SHARE_UPLOAD_RECORDS
+        );
+        assert!(!state.completed_share_uploads.contains_key("token-0000"));
+        assert!(state
+            .completed_share_uploads
+            .contains_key(&format!("token-{MAX_RELAY_SHARE_UPLOAD_RECORDS:04}")));
     }
 
     #[test]
