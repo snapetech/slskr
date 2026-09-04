@@ -30,8 +30,20 @@ pub const QUIC_DATA_ALPN: &[u8] = b"slskdn-overlay-data";
 pub const DEFAULT_MAX_PAYLOAD_BYTES: usize = 512 * 1024;
 pub const DEFAULT_MAX_CONCURRENT_STREAMS: u32 = 8;
 pub const DEFAULT_MAX_CACHED_CONNECTIONS: usize = 64;
+/// Absolute upper bound for one QUIC data payload, regardless of caller input.
+pub const MAX_PAYLOAD_BYTES: usize = 64 * 1024 * 1024;
+/// Absolute upper bound for retained endpoint connections.
+pub const MAX_CACHED_CONNECTIONS: usize = 1_024;
 const QUIC_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const QUIC_SEND_GRACE: Duration = Duration::from_millis(100);
+
+fn bounded_payload_bytes(value: usize) -> usize {
+    value.clamp(1, MAX_PAYLOAD_BYTES)
+}
+
+fn bounded_cached_connections(value: usize) -> usize {
+    value.clamp(1, MAX_CACHED_CONNECTIONS)
+}
 
 /// A bounded QUIC data-plane listener using the frozen slskdN ALPN.
 pub struct QuicDataServer {
@@ -88,7 +100,7 @@ impl QuicDataServer {
             .map_err(|error| QuicDataError::Transport(error.to_string()))?;
         Ok(Self {
             endpoint,
-            max_payload_bytes: max_payload_bytes.max(1),
+            max_payload_bytes: bounded_payload_bytes(max_payload_bytes),
         })
     }
 
@@ -261,8 +273,8 @@ impl QuicDataClient {
                 connecting: HashMap::new(),
                 cache_generation: 0,
             })),
-            max_payload_bytes: max_payload_bytes.max(1),
-            max_cached_connections: max_cached_connections.max(1),
+            max_payload_bytes: bounded_payload_bytes(max_payload_bytes),
+            max_cached_connections: bounded_cached_connections(max_cached_connections),
         }
     }
 
@@ -664,7 +676,7 @@ pub async fn send_quic_data_with_limit(
     expected_public_key_sha256: [u8; 32],
     max_payload_bytes: usize,
 ) -> Result<usize, QuicDataError> {
-    let max_payload_bytes = max_payload_bytes.max(1);
+    let max_payload_bytes = bounded_payload_bytes(max_payload_bytes);
     if payload.len() > max_payload_bytes {
         return Err(QuicDataError::OversizedPayload {
             actual: payload.len(),
@@ -725,7 +737,7 @@ pub async fn connect_quic_data(
     Ok(QuicDataClientConnection {
         endpoint: endpoint_client,
         connection,
-        max_payload_bytes: max_payload_bytes.max(1),
+        max_payload_bytes: bounded_payload_bytes(max_payload_bytes),
         expected_public_key_sha256,
     })
 }
@@ -823,7 +835,25 @@ mod tests {
     use tokio::sync::oneshot;
     use tokio_rustls::rustls::pki_types::PrivatePkcs8KeyDer;
 
-    use super::{connect_quic_data, send_quic_data, QuicDataClient, QuicDataServer};
+    use super::{
+        bounded_cached_connections, bounded_payload_bytes, connect_quic_data, send_quic_data,
+        QuicDataClient, QuicDataServer, MAX_CACHED_CONNECTIONS, MAX_PAYLOAD_BYTES,
+    };
+
+    #[test]
+    fn explicit_quic_limits_have_hard_upper_bounds() {
+        assert_eq!(bounded_payload_bytes(0), 1);
+        assert_eq!(bounded_payload_bytes(usize::MAX), MAX_PAYLOAD_BYTES);
+        assert_eq!(bounded_cached_connections(0), 1);
+        assert_eq!(
+            bounded_cached_connections(usize::MAX),
+            MAX_CACHED_CONNECTIONS
+        );
+
+        let client = QuicDataClient::with_connection_limit(usize::MAX, usize::MAX);
+        assert_eq!(client.max_payload_bytes, MAX_PAYLOAD_BYTES);
+        assert_eq!(client.max_cached_connections, MAX_CACHED_CONNECTIONS);
+    }
 
     #[tokio::test]
     async fn data_sender_round_trips_exact_payload_under_the_frozen_alpn() {
