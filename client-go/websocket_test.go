@@ -256,18 +256,27 @@ func TestDisconnectCancelsInFlightWebSocketConnection(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient(server.URL, "token").NewWebSocketClient(false)
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
 	connected := make(chan error, 1)
-	go func() { connected <- client.Connect(ctx) }()
+	go func() { connected <- client.Connect(context.Background()) }()
 	<-requestStarted
 
 	if err := client.Disconnect(context.Background()); err != nil {
 		t.Fatalf("disconnect during dial failed: %v", err)
 	}
-	close(releaseUpgrade)
-	if err := <-connected; err == nil || !strings.Contains(err.Error(), "canceled") {
-		t.Fatalf("expected canceled connection, got %v", err)
+	var connectErr error
+	select {
+	case connectErr = <-connected:
+		close(releaseUpgrade)
+	case <-time.After(time.Second):
+		close(releaseUpgrade)
+		t.Fatal("disconnect did not cancel the in-flight connection promptly")
+	}
+	if connectErr == nil {
+		t.Fatal("expected the in-flight connection to fail after disconnect")
+	}
+	errText := strings.ToLower(connectErr.Error())
+	if !strings.Contains(errText, "canceled") && !strings.Contains(errText, "closed") {
+		t.Fatalf("expected cancellation or close error, got %v", connectErr)
 	}
 	if client.IsConnected() {
 		t.Fatal("connection became active after disconnect")

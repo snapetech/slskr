@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"path"
@@ -30,6 +31,9 @@ type WebSocketClient struct {
 	connected         bool
 	connecting        bool
 	disconnectPending bool
+	connectCancel     context.CancelFunc
+	connectingNetConn net.Conn
+	connectingConn    *websocket.Conn
 	writeMu           sync.Mutex
 	subscriptionMu    sync.RWMutex
 	subscribedTopics  map[string]bool
@@ -86,15 +90,79 @@ func (w *WebSocketClient) Connect(ctx context.Context) error {
 	}
 
 	dialContext, cancelDial := context.WithTimeout(ctx, w.connectTimeout)
-	conn, _, err := websocket.DefaultDialer.DialContext(dialContext, w.url, headers)
+	w.mu.Lock()
+	w.connectCancel = cancelDial
+	disconnectPending := w.disconnectPending
+	w.mu.Unlock()
+	if disconnectPending {
+		cancelDial()
+	}
+	dialer := *websocket.DefaultDialer
+	baseNetDialContext := dialer.NetDialContext
+	baseNetDial := dialer.NetDial
+	baseNetDialTLSContext := dialer.NetDialTLSContext
+	trackConnectingConn := func(conn net.Conn) (net.Conn, error) {
+		w.mu.Lock()
+		disconnectPending := w.disconnectPending
+		if !disconnectPending {
+			w.connectingNetConn = conn
+		}
+		w.mu.Unlock()
+		if disconnectPending {
+			_ = conn.Close()
+			return nil, context.Canceled
+		}
+		return conn, nil
+	}
+	dialer.NetDialContext = func(dialCtx context.Context, network, address string) (net.Conn, error) {
+		var (
+			conn net.Conn
+			err  error
+		)
+		switch {
+		case baseNetDialContext != nil:
+			conn, err = baseNetDialContext(dialCtx, network, address)
+		case baseNetDial != nil:
+			conn, err = baseNetDial(network, address)
+		default:
+			conn, err = (&net.Dialer{}).DialContext(dialCtx, network, address)
+		}
+		if err != nil {
+			return nil, err
+		}
+		return trackConnectingConn(conn)
+	}
+	if baseNetDialTLSContext != nil {
+		dialer.NetDialTLSContext = func(dialCtx context.Context, network, address string) (net.Conn, error) {
+			conn, err := baseNetDialTLSContext(dialCtx, network, address)
+			if err != nil {
+				return nil, err
+			}
+			return trackConnectingConn(conn)
+		}
+	}
+	conn, _, err := dialer.DialContext(dialContext, w.url, headers)
 	cancelDial()
+	w.mu.Lock()
+	w.connectingNetConn = nil
+	disconnectPending = w.disconnectPending
+	w.mu.Unlock()
 	if err != nil {
 		w.mu.Lock()
 		w.connecting = false
+		w.connectCancel = nil
+		w.disconnectPending = false
 		w.mu.Unlock()
 		return err
 	}
 	conn.SetReadLimit(maxWebSocketMessageBytes)
+	w.mu.Lock()
+	w.connectingConn = conn
+	disconnectPending = w.disconnectPending
+	w.mu.Unlock()
+	if disconnectPending {
+		_ = conn.Close()
+	}
 
 	w.subscriptionMu.Lock()
 	retainedTopics := make([]string, 0, len(w.subscribedTopics))
@@ -113,6 +181,9 @@ func (w *WebSocketClient) Connect(ctx context.Context) error {
 			w.subscriptionMu.Unlock()
 			w.mu.Lock()
 			w.connecting = false
+			w.connectCancel = nil
+			w.connectingNetConn = nil
+			w.connectingConn = nil
 			w.mu.Unlock()
 			_ = conn.Close()
 			return fmt.Errorf("restore subscriptions: %w", err)
@@ -127,11 +198,17 @@ func (w *WebSocketClient) Connect(ctx context.Context) error {
 	w.connecting = false
 	if w.disconnectPending {
 		w.disconnectPending = false
+		w.connectCancel = nil
+		w.connectingNetConn = nil
+		w.connectingConn = nil
 		w.mu.Unlock()
 		w.subscriptionMu.Unlock()
 		_ = conn.Close()
 		return fmt.Errorf("connection canceled by disconnect")
 	}
+	w.connectingConn = nil
+	w.connectCancel = nil
+	w.connectingNetConn = nil
 	w.conn = conn
 	w.connected = true
 	w.mu.Unlock()
@@ -172,7 +249,19 @@ func (w *WebSocketClient) Disconnect(ctx context.Context) error {
 	if !w.connected {
 		if w.connecting {
 			w.disconnectPending = true
+			cancelConnect := w.connectCancel
+			connectingNetConn := w.connectingNetConn
+			connectingConn := w.connectingConn
 			w.mu.Unlock()
+			if cancelConnect != nil {
+				cancelConnect()
+			}
+			if connectingNetConn != nil {
+				_ = connectingNetConn.Close()
+			}
+			if connectingConn != nil {
+				_ = connectingConn.Close()
+			}
 			return nil
 		}
 		w.mu.Unlock()
