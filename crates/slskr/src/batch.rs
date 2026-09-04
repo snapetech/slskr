@@ -112,11 +112,15 @@ pub fn parse_batch_request(body: &str) -> Result<(Vec<BatchOperation>, BatchConf
 
         let body = match op.get("body") {
             Some(value) => {
-                let value = value
+                // Accept both the documented serialized form and native JSON
+                // values. The Go and Python SDK builders send object bodies,
+                // so normalize those values once at the request boundary.
+                let serialized = value
                     .as_str()
-                    .ok_or_else(|| format!("Operation {idx} body must be a string"))?;
-                validate_field_size(idx, "body", value, MAX_BATCH_OPERATION_BODY_BYTES)?;
-                Some(value.to_owned())
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| value.to_string());
+                validate_field_size(idx, "body", &serialized, MAX_BATCH_OPERATION_BODY_BYTES)?;
+                Some(serialized)
             }
             None => None,
         };
@@ -282,9 +286,14 @@ pub fn format_batch_response(results: Vec<BatchOperationResult>) -> String {
 
 /// Create an error result for a batch operation
 pub fn create_error_result(id: String, error: String) -> BatchOperationResult {
+    create_failure_result(id, 400, error)
+}
+
+/// Create a failed operation result with the HTTP status that caused it.
+pub fn create_failure_result(id: String, status: u16, error: String) -> BatchOperationResult {
     BatchOperationResult {
         id,
-        status: 400,
+        status,
         body: "".to_string(),
         headers: HashMap::new(),
         error: Some(error),
@@ -435,15 +444,11 @@ mod tests {
     }
 
     #[test]
-    fn test_batch_rejects_malformed_optional_fields() {
+    fn test_batch_accepts_json_value_bodies_and_rejects_malformed_optional_fields() {
         for (body, expected) in [
             (
                 r#"{"operations":[{"id":7,"method":"GET","path":"/api/health"}]}"#,
                 "Operation 0 id must be a string",
-            ),
-            (
-                r#"{"operations":[{"method":"GET","path":"/api/health","body":{}}]}"#,
-                "Operation 0 body must be a string",
             ),
             (
                 r#"{"operations":[{"method":"GET","path":"/api/health","headers":[]}]}"#,
@@ -476,6 +481,15 @@ mod tests {
         ] {
             assert_eq!(parse_batch_request(body).unwrap_err(), expected);
         }
+
+        let (operations, _) = parse_batch_request(
+            r#"{"operations":[{"method":"POST","path":"/api/messages","body":{"username":"peer","body":"hello"}}]}"#,
+        )
+        .expect("SDK object bodies must be normalized");
+        let body = serde_json::from_str::<Value>(operations[0].body.as_deref().unwrap_or(""))
+            .expect("normalized batch body must remain JSON");
+        assert_eq!(body["username"], "peer");
+        assert_eq!(body["body"], "hello");
     }
 
     #[test]

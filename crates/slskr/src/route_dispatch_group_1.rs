@@ -1,3 +1,57 @@
+fn batch_header_value<'a>(operation: &'a batch::BatchOperation, name: &str) -> Option<&'a str> {
+    operation
+        .headers
+        .iter()
+        .find(|(key, _)| key.eq_ignore_ascii_case(name))
+        .map(|(_, value)| value.as_str())
+}
+
+fn batch_security_headers(
+    operation: &batch::BatchOperation,
+    parent: &RequestSecurityHeaders,
+) -> RequestSecurityHeaders {
+    let value = |name: &str, fallback: &Option<String>| {
+        batch_header_value(operation, name)
+            .map(str::to_owned)
+            .or_else(|| fallback.clone())
+    };
+    RequestSecurityHeaders {
+        host: value("host", &parent.host),
+        origin: value("origin", &parent.origin),
+        referer: value("referer", &parent.referer),
+        cookie: value("cookie", &parent.cookie),
+        content_type: value("content-type", &parent.content_type),
+        x_share_token: value("x-share-token", &parent.x_share_token),
+        x_gateway_api_key: value("x-api-key", &parent.x_gateway_api_key)
+            .or_else(|| value("x-gateway-api-key", &parent.x_gateway_api_key)),
+        x_gateway_csrf: value("x-slskdn-csrf", &parent.x_gateway_csrf),
+        x_relay_agent: value("x-relay-agent", &parent.x_relay_agent),
+        x_relay_credential: value("x-relay-credential", &parent.x_relay_credential),
+        date: value("date", &parent.date),
+        digest: value("digest", &parent.digest),
+        signature: value("signature", &parent.signature),
+        remote_addr: parent.remote_addr,
+    }
+}
+
+fn batch_result_from_response(id: String, response: HttpResponse) -> batch::BatchOperationResult {
+    let status = response
+        .status
+        .split(' ')
+        .next()
+        .and_then(|value| value.parse::<u16>().ok())
+        .unwrap_or(500);
+    let error =
+        (!(200..300).contains(&status)).then(|| format!("nested request returned HTTP {status}"));
+    batch::BatchOperationResult {
+        id,
+        status,
+        body: response.body,
+        headers: std::collections::HashMap::new(),
+        error,
+    }
+}
+
 async fn route_dispatch_group_1(context: &RouteDispatchContext<'_, '_>) -> RouteDispatchResult {
     let RouteDispatchContext {
         method,
@@ -7,9 +61,10 @@ async fn route_dispatch_group_1(context: &RouteDispatchContext<'_, '_>) -> Route
         state,
         route,
         headers,
+        state_arc,
         extended_mutation,
         request_is_versioned_v0,
-    } = *context;
+    } = context.clone();
     match (method, normalized_path) {
         ("GET", "/api/dht/peers") if route.path.starts_with("/api/v0/") => {
             let peers = match state.dht.as_ref() {
@@ -428,81 +483,44 @@ async fn route_dispatch_group_1(context: &RouteDispatchContext<'_, '_>) -> Route
             if let Err(error) = batch::validate_batch_operations(&operations) {
                 return Ok(routing::bad_request_response(&error));
             }
+            let started = Instant::now();
             let mut results = Vec::new();
             for operation in operations {
-                let result = match (operation.method.as_str(), operation.path.as_str()) {
-                    ("GET", "/api/health") | ("GET", "/api/v0/health") => {
-                        batch::create_success_result(
-                            operation.id,
-                            200,
-                            health_response(&state.config).body,
-                        )
-                    }
-                    ("GET", "/api/config") | ("GET", "/api/v0/config") => {
-                        batch::create_success_result(
-                            operation.id,
-                            200,
-                            state.config.sanitized_json(),
-                        )
-                    }
-                    ("GET", "/api/capabilities") => batch::create_success_result(
-                        operation.id,
-                        200,
-                        capabilities_response().body,
-                    ),
-                    ("GET", "/api/v0/capabilities")
-                        if state.config.controller_profile == ControllerProfile::Native =>
-                    {
-                        batch::create_success_result(
-                            operation.id,
-                            200,
-                            native_capability_controller_response(state).await.body,
-                        )
-                    }
-                    ("GET", "/api/v0/capabilities") => batch::create_success_result(
-                        operation.id,
-                        200,
-                        capabilities_response().body,
-                    ),
-                    ("GET", "/api/stats") | ("GET", "/api/v0/stats") => {
-                        let session = state.session.read().await;
-                        let shares = state.shares.read().await;
-                        let searches = state.searches.read().await;
-                        let users = state.users.read().await;
-                        let browse = state.browse.read().await;
-                        let messages = state.messages.read().await;
-                        let rooms = state.rooms.read().await;
-                        let transfers = state.transfers.read().await;
-                        let body = format!(
-                            "{{\"session\":{},\"listeners\":{{\"count\":1}},\"shares\":{},\"searches\":{},\"users\":{},\"browse\":{},\"messages\":{},\"rooms\":{},\"transfers\":{}}}",
-                            session.summary_json(),
-                            shares.summary_json(),
-                            searches.summary_json(),
-                            users.summary_json(),
-                            browse.summary_json(),
-                            messages.summary_json(),
-                            rooms.summary_json(),
-                            transfers.summary_json()
-                        );
-                        drop(transfers);
-                        drop(rooms);
-                        drop(messages);
-                        drop(browse);
-                        drop(users);
-                        drop(searches);
-                        drop(shares);
-                        drop(session);
-                        batch::create_success_result(operation.id, 200, body)
-                    }
-                    _ => batch::create_error_result(
-                        operation.id,
+                let operation_id = operation.id.clone();
+                let operation_headers = batch_security_headers(&operation, headers);
+                let operation_authorization =
+                    batch_header_value(&operation, "authorization").or(authorization);
+                let operation_body = operation.body.as_deref().unwrap_or_default();
+                let request = routing::RouteRequest::new(
+                    &operation.method,
+                    &operation.path,
+                    operation_authorization,
+                    operation_body,
+                    &operation_headers,
+                );
+                let response = tokio::time::timeout(
+                    Duration::from_millis(config.timeout_ms),
+                    Box::pin(route_http_request_inner_with_batch(
+                        request,
+                        state,
+                        state_arc.clone(),
+                        false,
+                    )),
+                )
+                .await;
+                let result = match response {
+                    Ok(Ok(response)) => batch_result_from_response(operation_id, response),
+                    Ok(Err(error)) => batch::create_failure_result(operation_id, 500, error),
+                    Err(_) => batch::create_failure_result(
+                        operation_id,
+                        504,
                         format!(
-                            "batch operation {} {} is not supported by the local executor",
-                            operation.method, operation.path
+                            "batch operation {} {} timed out after {} ms",
+                            operation.method, operation.path, config.timeout_ms
                         ),
                     ),
                 };
-                let is_error = result.error.is_some();
+                let is_error = !(200..300).contains(&result.status);
                 results.push(result);
                 if is_error && !config.continue_on_error {
                     break;
@@ -517,11 +535,14 @@ async fn route_dispatch_group_1(context: &RouteDispatchContext<'_, '_>) -> Route
                 serde_json::from_str::<serde_json::Value>(&batch::format_batch_response(results))
                     .unwrap_or_else(|_| serde_json::json!({ "results": [] }));
             if let Some(object) = value.as_object_mut() {
+                let total_time_ms =
+                    u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
                 object.insert("accepted".to_owned(), serde_json::json!(true));
                 object.insert("executed".to_owned(), serde_json::json!(executed));
                 object.insert("failed".to_owned(), serde_json::json!(failed));
                 object.insert("atomic".to_owned(), serde_json::json!(config.atomic));
                 object.insert("timeoutMs".to_owned(), serde_json::json!(config.timeout_ms));
+                object.insert("total_time_ms".to_owned(), serde_json::json!(total_time_ms));
             }
             Ok(routing::accepted_response(value.to_string()))
         }

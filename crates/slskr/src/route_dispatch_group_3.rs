@@ -7,9 +7,10 @@ async fn route_dispatch_group_3(context: &RouteDispatchContext<'_, '_>) -> Route
         state,
         route,
         headers,
+        state_arc,
         extended_mutation,
         request_is_versioned_v0,
-    } = *context;
+    } = context.clone();
     match (method, normalized_path) {
         ("POST", _path) if room_messages_path(normalized_path).is_some() => {
             let Some(room_name) = room_messages_path(normalized_path) else {

@@ -929,6 +929,50 @@ fn folder_request_replaces_previous_browse_entries() {
 }
 
 #[tokio::test]
+async fn batch_operations_reuse_router_statuses_timeouts_and_nested_guard() {
+    let (state, _receiver) = test_state_with_env(MapEnv::default());
+    let body = serde_json::json!({
+        "operations": [
+            {"id": "health", "method": "GET", "path": "/api/health"},
+            {"id": "version", "method": "GET", "path": "/api/version"},
+            {"id": "nested", "method": "POST", "path": "/api/v0/batch"},
+            {"id": "missing", "method": "GET", "path": "/api/not-a-route"}
+        ]
+    })
+    .to_string();
+    let response = super::route_http_request("POST", "/api/batch", None, &body, &state)
+        .await
+        .expect("batch response");
+    assert_eq!(response.status, "202 Accepted");
+    let json = serde_json::from_str::<serde_json::Value>(&response.body).expect("batch JSON");
+    assert_eq!(json["accepted"], true);
+    assert_eq!(json["results"].as_array().map(Vec::len), Some(4));
+    assert_eq!(json["executed"], 2);
+    assert_eq!(json["failed"], 2);
+    assert!(json["total_time_ms"].is_u64());
+    assert_eq!(json["results"][0]["status"], 200);
+    assert_eq!(json["results"][2]["status"], 400);
+    assert_eq!(json["results"][3]["status"], 404);
+
+    let stop_on_error = serde_json::json!({
+        "operations": [
+            {"id": "ok", "method": "GET", "path": "/api/health"},
+            {"id": "missing", "method": "GET", "path": "/api/not-a-route"},
+            {"id": "skipped", "method": "GET", "path": "/api/version"}
+        ],
+        "config": {"continueOnError": false}
+    })
+    .to_string();
+    let response = super::route_http_request("POST", "/api/batch", None, &stop_on_error, &state)
+        .await
+        .expect("batch stop-on-error response");
+    let json = serde_json::from_str::<serde_json::Value>(&response.body).expect("batch JSON");
+    assert_eq!(json["results"].as_array().map(Vec::len), Some(2));
+    assert_eq!(json["executed"], 1);
+    assert_eq!(json["failed"], 1);
+}
+
+#[tokio::test]
 async fn file_lifecycle_differential_controller_file_service_existing_missing_overwrite() {
     let target = "slskd";
     let (state, _receiver) = test_state_with_env(

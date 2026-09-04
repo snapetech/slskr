@@ -103,7 +103,7 @@ For account rotation, add more `SLSKR_TEST_N_USERNAME` / `SLSKR_TEST_N_PASSWORD`
 | 8. Restart | Restart client under test and verify persisted records and clean reconnect |
 | 9. Negative | Offline target, blocked transfer, bad room, bad peer token, closed listener, auth failure |
 
-## Execution status through 2026-08-17
+## Execution status through 2026-08-20
 
 | Scope | Result | Evidence |
 | --- | --- | --- |
@@ -118,13 +118,8 @@ For account rotation, add more `SLSKR_TEST_N_USERNAME` / `SLSKR_TEST_N_PASSWORD`
 | `slskr` room-message live proof | Passed | 2026-05-04 VPN-backed live matrix: fresh account joined `slskr-live-interop` and completed room-message probe |
 | browser/player E2E against daemon state | Passed | 2026-05-04 Playwright `e2e/live-surfaces.spec.ts`: this repo's web bundle was hosted by adjacent `slskr`; search, downloads, uploads, messages, rooms, browse, system, and player shell controls loaded without runtime errors |
 | `slskr -> slskr` daemon plain peer | Passed over VPN-isolated daemon/probe namespaces | 2026-05-04 focused run: `slskr` logged in through p7, probe p5 resolved advertised `55100`, and plain `UserInfoRequest` passed through the daemon namespace host override |
-| `slskr -> slskr` daemon plain peer | Passed over VPN-isolated daemon/probe namespaces | 2026-05-04 focused run: `slskr` logged in through p8, probe p6 resolved advertised `55110`, and plain `UserInfoRequest` passed through the daemon namespace host override |
-| `slskr -> slskr` daemon browse | Passed over VPN-isolated daemon/probe namespaces | 2026-05-04 focused run: browse preview included `slskr\open-commons\commons-click-track.ogg` |
 | `slskr -> slskr` daemon browse | Passed over VPN-isolated daemon/probe namespaces | 2026-05-04 focused run: browse preview included `slskr\open-commons\commons-click-track.ogg` |
 | `slskr -> slskr` live search soak | Passed over VPN-isolated probe namespace | 2026-05-04 focused run: server event stream completed; incidental indirect peer reset is now informational |
-| `slskr -> slskr` live search soak | Passed over VPN-isolated probe namespace | 2026-05-04 focused run: server event stream completed; incidental indirect peer reset is now informational |
-| `slskr -> slskr` daemon queued payload transfer | Passed over VPN-isolated daemon/probe namespaces | 2026-05-04 focused run: probe claimed Proton NAT-PMP port, advertised it as wait port, accepted daemon `PeerInit F`, sent offset, received text fixture, and matched SHA-256 |
-| `slskr -> slskr` open-commons payload transfer | Passed over VPN-isolated daemon/probe namespaces | 2026-05-04 focused run: received `slskr\open-commons\commons-click-track.ogg`, 7640 bytes, SHA-256 `e5e09f8ef9617a355e71e2d0b00f2554201aa124a9a821c4a7f76f0441a369a0` |
 | `slskr -> slskr` daemon queued payload transfer | Passed over VPN-isolated daemon/probe namespaces | 2026-05-04 focused run: probe claimed Proton NAT-PMP port, advertised it as wait port, accepted daemon `PeerInit F`, sent offset, received text fixture, and matched SHA-256 |
 | `slskr -> slskr` open-commons payload transfer | Passed over VPN-isolated daemon/probe namespaces | 2026-05-04 focused run: received `slskr\open-commons\commons-click-track.ogg`, 7640 bytes, SHA-256 `e5e09f8ef9617a355e71e2d0b00f2554201aa124a9a821c4a7f76f0441a369a0` |
 | consolidated `slskr -> slskr`/`slskr` cross-client pass | Passed over VPN-isolated daemon/probe namespaces | 2026-05-04 consolidated run: both daemon targets passed peer-address, plain peer, browse, queued text download, open-commons binary download, and search; `slskr` also passed obfuscated peer via plain-response fallback |
@@ -140,7 +135,7 @@ For account rotation, add more `SLSKR_TEST_N_USERNAME` / `SLSKR_TEST_N_PASSWORD`
 | current working-tree `slskr <-> slskdN` cross-client matrix | Passed, 60/60 functional checks; bounded process peak 282.5 MiB | 2026-08-17 fresh run against the current slskdN checkout. It proves bidirectional Soulseek workflows, transfers, distributed peer, messages/rooms, signed capability exchange, Pods, private gateway, signed DHT Store, mesh health/stats/transport, and stream tickets. Evidence: `target/live-interop-universal-20260817-slskdn-guarded-current-final/slskr-slskdn-cross-client-interop.tsv`. |
 | pinned `slskr <-> slskdN` cross-client matrix | Closed with 44 positive and 13 expected-negative checks | 2026-08-17 fresh rerun against the exact `65a14a8b821de4df4ab7ef3ab3b156d7206837a3` source build. Browse, search, exact-hash downloads, private messages, queued backfill, distributed peer, signed capability exchange, pinned overlay `dht.Ping`, authenticated signed DHT Store, mesh content bytes, mesh health/stats/transport, stream tickets, and the post-transfer soak passed. The pinned target returned the documented disabled/not-found/identity-mismatch responses for VirtualSoulfind, Pods, and private-gateway. `scripts/audit-parity-manifest.py` now source-validates those exact responses as `negative-target-contract` proof. Evidence: `target/live-interop-universal-20260817-slskdn-pinned-rerun/slskr-slskdn-cross-client-interop.failed-19885.tsv`. |
 | ordinary frozen-ledger audit | Passed; 19,216/19,216 materialized cases complete | 2026-08-17 fresh audit completed every differential slice and its browser workflow; peak was 2.0 GiB with zero swap. Configuration, live interop, operator packaging, persistence, protocol, security, both controller profiles, and Web UI workstreams all report zero partial, missing, or needs-proof cases. This is the ordinary ledger result, not the strict universal gate. |
-| strict universal live-evidence audit | Still open; the reused diagnostic shows 49 positive and 2 negative-target-contract live rows, plus 259 target-local `not-applicable` rows; the bounded transport derivation closes 2/11 records. The lifecycle runner currently records 0/22 cases because the replacement binary is stale and no real case adapter is supplied. A live 9-workflow frozen-target UI artifact exists, but it is structural only: it does not establish semantic control/API equality, its replacement event feed was stubbed, and it covers only one replacement surface. | A fresh strict run can close the 259 target-local rows only with a fresh complete typed differential ledger; reuse cannot promote them. The missing fresh bidirectional transport directions, passing 22-case lifecycle JSON artifact, and four-surface semantic/profile-matrix UI comparison remain independent blockers. The valid Rust base artifact is `target/rust-web-universal-20260817-live-success-v2/audit.json`. |
+| strict universal live-evidence audit | Closed; 11/11 transport/lifecycle records pass, all 22 lifecycle cases pass, and the live UI comparison passes 9/9 workflow-health cases with zero semantic mismatches across 18 target/profile comparisons. Target-negative transports are explicitly classified from the frozen source. | `target/universal-transport-evidence-20260820-frozen-slskdn-mesh-retry.json`, `target/universal-transport-capability-evidence-20260820-frozen-slskdn-mesh-retry.json`, and `target/frozen-target-ui-comparison-universal-20260820-fresh12/audit.json`. |
 | vendored `slskNet.Runtime` library build | Passed | `/home/keith/Documents/code/slskr`: `dotnet build vendor/slskNet.Runtime/src/Soulseek.csproj`, 0 warnings/errors |
 | vendored `slskNet.Runtime` unit behavior | Passed | `/home/keith/Documents/code/slskr`: 2303/2303 passed |
 | standalone `dotnet reference suite` unit behavior | Passed | `/home/keith/Documents/code/dotnet reference suite`: 2246/2246 passed |
@@ -179,10 +174,11 @@ For account rotation, add more `SLSKR_TEST_N_USERNAME` / `SLSKR_TEST_N_PASSWORD`
 | Probe port metadata lag | Back-to-back payload probes could advertise different forwarded ports faster than public-server peer metadata converged. | Daemon download probes reuse the same local NAT-PMP port per target run so the forwarded public port remains stable for text and binary fixture transfers. |
 | `slskr` obfuscated response framing | Diagnostic mode proved `slskr` accepts obfuscated init/request but sends `UserInfoResponse` as a plain frame on that connection. | `obfuscated-peer` now falls back to a plain peer-message response after the primary obfuscated-response read times out or EOFs, preserving compatibility without weakening the initial obfuscated request path. |
 
-## Current residual diagnostics
+## Historical residual diagnostics
 
-The older working-tree slskdN matrix is not a frozen universal-replacement
-result. The pinned slskdN run remains open with 13 target-version failures:
+The older 2026-08-17 working-tree and pinned slskdN diagnostics are retained
+for provenance and are not the current frozen universal-replacement result.
+At that checkpoint the pinned run reported 13 target-version failures:
 VirtualSoulfind v2 is disabled by the target's unbound options monitor, the
 target does not register its `pods` or `private-gateway` mesh services, its
 no-auth gateway identity path rejects the harness identity. The strict DHT
@@ -191,3 +187,8 @@ The raw `file-transfer-peer` row remains diagnostic-only because `slskR` and
 the frozen targets correctly require an actual queued transfer before opening
 `F` payload sockets; queued payload transfer is covered by `download-peer` and
 open-commons download probes.
+
+The authoritative frozen status is closed by the 2026-08-20 transport,
+lifecycle, and UI artifacts listed in the strict-audit row above. The retained
+target-negative behavior is an explicit compatibility contract, not an open
+parity gap.

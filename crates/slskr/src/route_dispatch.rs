@@ -918,6 +918,15 @@ async fn route_http_request_inner(
     state: &AppState,
     state_arc: Option<Arc<AppState>>,
 ) -> Result<HttpResponse, String> {
+    route_http_request_inner_with_batch(request, state, state_arc, true).await
+}
+
+async fn route_http_request_inner_with_batch(
+    request: routing::RouteRequest<'_>,
+    state: &AppState,
+    state_arc: Option<Arc<AppState>>,
+    allow_batch: bool,
+) -> Result<HttpResponse, String> {
     let routing::RouteRequest {
         method,
         path,
@@ -972,6 +981,12 @@ async fn route_http_request_inner(
     };
     if route.path == "/api/server/status" {
         normalized_path = "/api/server/status".to_owned();
+    }
+
+    if !allow_batch && method == "POST" && normalized_path == "/api/batch" {
+        return Ok(routing::bad_request_response(
+            "nested batch operations are not supported",
+        ));
     }
 
     // native profile's mesh-gateway middleware short-circuits every /mesh request
@@ -1508,9 +1523,9 @@ async fn route_http_request_inner(
         return Ok(response);
     }
 
-    if let Some(state_arc) = state_arc {
+    if let Some(state_arc) = state_arc.as_ref() {
         if method == "PUT" && route.path == "/api/v0/shares" {
-            return Ok(versioned_share_rescan_response(state, state_arc));
+            return Ok(versioned_share_rescan_response(state, state_arc.clone()));
         }
     }
 
@@ -1527,6 +1542,7 @@ async fn route_http_request_inner(
         state,
         route: &route,
         headers,
+        state_arc: state_arc.clone(),
         extended_mutation,
         request_is_versioned_v0,
     };
@@ -1555,7 +1571,7 @@ async fn route_http_request_inner(
     complete_route_dispatch(response)
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct RouteDispatchContext<'request, 'state> {
     method: &'request str,
     normalized_path: &'request str,
@@ -1564,6 +1580,7 @@ struct RouteDispatchContext<'request, 'state> {
     state: &'state AppState,
     route: &'state routing::ParsedRoute<'request>,
     headers: &'state RequestSecurityHeaders,
+    state_arc: Option<Arc<AppState>>,
     extended_mutation: bool,
     request_is_versioned_v0: bool,
 }

@@ -7,9 +7,10 @@ async fn route_dispatch_group_0(context: &RouteDispatchContext<'_, '_>) -> Route
         state,
         route,
         headers,
+        state_arc,
         extended_mutation,
         request_is_versioned_v0,
-    } = *context;
+    } = context.clone();
     match (method, normalized_path) {
         ("GET", "/api/capabilities")
             if state.config.controller_profile == ControllerProfile::Native

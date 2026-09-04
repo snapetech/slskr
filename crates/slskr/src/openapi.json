@@ -534,7 +534,7 @@
           }
         },
         "responses": {
-          "200": {
+          "202": {
             "description": "Batch results",
             "content": {
               "application/json": {
@@ -1016,13 +1016,24 @@
           },
           "method": {
             "type": "string",
-            "enum": ["GET", "POST", "PUT", "DELETE"]
+            "enum": ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"]
           },
           "path": {
             "type": "string"
           },
           "body": {
-            "type": "object"
+            "oneOf": [
+              {"type": "object"},
+              {"type": "array"},
+              {"type": "string"},
+              {"type": "number"},
+              {"type": "boolean"}
+            ],
+            "nullable": true
+          },
+          "headers": {
+            "type": "object",
+            "additionalProperties": {"type": "string"}
           }
         },
         "required": ["id", "method", "path"]
@@ -1034,6 +1045,15 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/BatchOperation"
+            }
+          },
+          "config": {
+            "type": "object",
+            "properties": {
+              "maxOperations": {"type": "integer", "minimum": 1, "maximum": 100},
+              "timeoutMs": {"type": "integer", "minimum": 1, "maximum": 300000},
+              "atomic": {"type": "boolean"},
+              "continueOnError": {"type": "boolean"}
             }
           }
         },
@@ -1049,7 +1069,11 @@
             "type": "integer"
           },
           "body": {
-            "type": "object"
+            "type": "string"
+          },
+          "error": {
+            "type": "string",
+            "nullable": true
           }
         },
         "required": ["id", "status", "body"]
@@ -1065,9 +1089,27 @@
           },
           "total_time_ms": {
             "type": "integer"
+          },
+          "accepted": {
+            "type": "boolean"
+          },
+          "executed": {
+            "type": "integer"
+          },
+          "failed": {
+            "type": "integer"
+          },
+          "atomic": {
+            "type": "boolean"
+          },
+          "timeoutMs": {
+            "type": "integer"
+          },
+          "timestamp": {
+            "type": "integer"
           }
         },
-        "required": ["results", "total_time_ms"]
+        "required": ["results", "total_time_ms", "accepted", "executed", "failed"]
       },
       "Error": {
         "type": "object",

@@ -7,9 +7,10 @@ async fn route_dispatch_group_7(context: &RouteDispatchContext<'_, '_>) -> Route
         state,
         route,
         headers,
+        state_arc,
         extended_mutation,
         request_is_versioned_v0,
-    } = *context;
+    } = context.clone();
     match (method, normalized_path) {
         ("GET", "/api/musicbrainz/release-radar/subscriptions") => {
             if route.path.starts_with("/api/v0/") {

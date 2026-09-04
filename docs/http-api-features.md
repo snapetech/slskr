@@ -112,11 +112,18 @@ Batch endpoints allow you to execute multiple API operations in a single HTTP re
       "id": "op3",
       "method": "POST",
       "path": "/api/searches",
-      "body": "{\"query\":\"music\"}"
+      "body": {"query":"music"}
     }
   ]
 }
 ```
+
+Operation bodies may be native JSON values or pre-serialized JSON strings.
+Both forms are normalized before dispatch, so the Go and Python SDK builders
+can send their normal object bodies. Each operation is authenticated and run
+through the same router as a standalone request; its result contains the
+actual HTTP status. `config.timeoutMs` bounds each operation, and
+`config.continueOnError` controls whether a non-2xx result stops the batch.
 
 ### Batch Response Format
 
@@ -171,9 +178,9 @@ curl -X POST /api/batch -d '{
 ```json
 {
   "operations": [
-    {"id":"1","method":"POST","path":"/api/v0/messages","body":"{\"username\":\"alice\",\"body\":\"Hi\"}"},
-    {"id":"2","method":"POST","path":"/api/v0/messages","body":"{\"username\":\"bob\",\"body\":\"Hello\"}"},
-    {"id":"3","method":"POST","path":"/api/v0/messages","body":"{\"username\":\"charlie\",\"body\":\"Hey\"}"}
+    {"id":"1","method":"POST","path":"/api/v0/messages","body":{"username":"alice","body":"Hi"}},
+    {"id":"2","method":"POST","path":"/api/v0/messages","body":{"username":"bob","body":"Hello"}},
+    {"id":"3","method":"POST","path":"/api/v0/messages","body":{"username":"charlie","body":"Hey"}}
   ]
 }
 ```
@@ -194,7 +201,7 @@ curl -X POST /api/batch -d '{
 
 - **Reduced Latency**: Single request/response cycle instead of multiple
 - **Lower Overhead**: Amortize HTTP header overhead
-- **Atomic Operations**: All operations processed in sequence
+- **Ordered Execution**: Operations run in request order, with per-operation status
 - **Timing**: See total execution time in response
 
 ### Error Handling

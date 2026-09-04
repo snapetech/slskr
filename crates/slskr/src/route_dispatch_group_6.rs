@@ -7,9 +7,10 @@ async fn route_dispatch_group_6(context: &RouteDispatchContext<'_, '_>) -> Route
         state,
         route,
         headers,
+        state_arc,
         extended_mutation,
         request_is_versioned_v0,
-    } = *context;
+    } = context.clone();
     match (method, normalized_path) {
         ("PUT", path) if path.ends_with("/adversarial") && !path.contains("/api/") => {
             Ok(routing::not_found_response())
