@@ -21,7 +21,6 @@ class WebSocketClient {
         this.connectionTimer = null;
         this.pendingConnectReject = null;
         this.intentionallyDisconnected = false;
-        this.pingInterval = null;
         this.subscribedTopics = new Set();
         this.listeners = new Map();
         this.connectionListeners = new Set();
@@ -82,7 +81,6 @@ class WebSocketClient {
                         this.sendSubscription('subscribe', Array.from(this.subscribedTopics));
                         this.reconnectAttempts = 0;
                         this.notifyConnectionListeners(true);
-                        this.setupPingInterval();
                         settle(resolve);
                     }
                     catch (error) {
@@ -111,7 +109,6 @@ class WebSocketClient {
                     this.ws = null;
                     clearConnectionTimer();
                     this.notifyConnectionListeners(false);
-                    this.clearPingInterval();
                     if (!settled) {
                         settle(() => reject(new Error('WebSocket closed before opening')));
                     }
@@ -133,7 +130,6 @@ class WebSocketClient {
         this.clearReconnectTimer();
         this.clearConnectionTimer();
         this.pendingConnectReject?.(new Error('WebSocket closed before opening'));
-        this.clearPingInterval();
         if (this.ws) {
             this.ws.close();
         }
@@ -267,20 +263,6 @@ class WebSocketClient {
                 console.error('Error in error listener:', e);
             }
         });
-    }
-    setupPingInterval() {
-        this.pingInterval = globalThis.setInterval(() => {
-            if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-                const message = { type: 'ping' };
-                this.ws.send(JSON.stringify(message));
-            }
-        }, 30000); // 30 seconds
-    }
-    clearPingInterval() {
-        if (this.pingInterval !== null) {
-            clearInterval(this.pingInterval);
-            this.pingInterval = null;
-        }
     }
     clearConnectionTimer() {
         if (this.connectionTimer !== null) {

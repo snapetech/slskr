@@ -65,6 +65,18 @@ describe('WebSocketClient reconnect lifecycle', () => {
     expect(client.isConnected()).toBe(false);
   });
 
+  it('does not send text frames as a WebSocket control keepalive', async () => {
+    const client = new WebSocketClient('http://localhost:8080', 'token');
+    const connected = client.connect();
+    MockWebSocket.instances[0].open();
+    await connected;
+
+    jest.advanceTimersByTime(30_000);
+
+    expect(MockWebSocket.instances[0].sent).toEqual([]);
+    client.disconnect();
+  });
+
   it('still reconnects after an unexpected close', async () => {
     const client = new WebSocketClient('http://localhost:8080', 'token');
     const connected = client.connect();

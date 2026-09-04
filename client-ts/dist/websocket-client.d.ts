@@ -19,7 +19,6 @@ export declare class WebSocketClient {
     private connectionTimer;
     private pendingConnectReject;
     private intentionallyDisconnected;
-    private pingInterval;
     private subscribedTopics;
     private listeners;
     private connectionListeners;
@@ -69,8 +68,6 @@ export declare class WebSocketClient {
     private sendSubscription;
     private notifyConnectionListeners;
     private notifyErrorListeners;
-    private setupPingInterval;
-    private clearPingInterval;
     private clearConnectionTimer;
     private attemptReconnect;
     private clearReconnectTimer;

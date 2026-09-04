@@ -27,7 +27,6 @@ export class WebSocketClient {
   private connectionTimer: ReturnType<typeof setTimeout> | null = null;
   private pendingConnectReject: ((error: Error) => void) | null = null;
   private intentionallyDisconnected = false;
-  private pingInterval: number | null = null;
   private subscribedTopics: Set<EventType> = new Set();
 
   private listeners: Map<EventType, Set<EventListener>> = new Map();
@@ -94,7 +93,6 @@ export class WebSocketClient {
             this.sendSubscription('subscribe', Array.from(this.subscribedTopics));
             this.reconnectAttempts = 0;
             this.notifyConnectionListeners(true);
-            this.setupPingInterval();
             settle(resolve);
           } catch (error) {
             settle(() => reject(error instanceof Error ? error : new Error(String(error))));
@@ -122,7 +120,6 @@ export class WebSocketClient {
           this.ws = null;
           clearConnectionTimer();
           this.notifyConnectionListeners(false);
-          this.clearPingInterval();
           if (!settled) {
             settle(() => reject(new Error('WebSocket closed before opening')));
           }
@@ -144,7 +141,6 @@ export class WebSocketClient {
     this.clearReconnectTimer();
     this.clearConnectionTimer();
     this.pendingConnectReject?.(new Error('WebSocket closed before opening'));
-    this.clearPingInterval();
     if (this.ws) {
       this.ws.close();
     }
@@ -291,22 +287,6 @@ export class WebSocketClient {
         console.error('Error in error listener:', e);
       }
     });
-  }
-
-  private setupPingInterval(): void {
-    this.pingInterval = globalThis.setInterval(() => {
-      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-        const message: WebSocketMessage = { type: 'ping' };
-        this.ws.send(JSON.stringify(message));
-      }
-    }, 30000) as unknown as number; // 30 seconds
-  }
-
-  private clearPingInterval(): void {
-    if (this.pingInterval !== null) {
-      clearInterval(this.pingInterval);
-      this.pingInterval = null;
-    }
   }
 
   private clearConnectionTimer(): void {
