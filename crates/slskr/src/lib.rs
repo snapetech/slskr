@@ -2032,6 +2032,19 @@ struct SearchCreateOutcome {
     expired: Vec<SearchRecord>,
 }
 
+fn search_identifier_matches(record: &SearchRecord, identifier: &str) -> bool {
+    if record.id == identifier || record.token.to_string() == identifier {
+        return true;
+    }
+
+    // The versioned controller returns UUID-backed searchId values without
+    // dashes. Keep that compatibility identifier usable for every subsequent
+    // read and mutation without changing the canonical stored id.
+    !identifier.contains('-')
+        && record.id.contains('-')
+        && record.id.replace('-', "") == identifier
+}
+
 fn next_search_token_hint(records: &[SearchRecord]) -> u32 {
     records
         .iter()
@@ -2161,7 +2174,7 @@ impl SearchStore {
         if id.as_deref().is_some_and(|id| {
             self.records
                 .iter()
-                .any(|record| record.id == id || record.token.to_string() == id)
+                .any(|record| search_identifier_matches(record, id))
         }) {
             return Err(SearchCreateError::DuplicateId);
         }
@@ -2261,7 +2274,7 @@ impl SearchStore {
     fn get_by_identifier(&self, id: &str) -> Option<SearchRecord> {
         self.records
             .iter()
-            .find(|record| record.id == id || record.token.to_string() == id)
+            .find(|record| search_identifier_matches(record, id))
             .cloned()
     }
 
@@ -2269,7 +2282,7 @@ impl SearchStore {
         if let Some(pos) = self
             .records
             .iter()
-            .position(|record| record.id == id || record.token.to_string() == id)
+            .position(|record| search_identifier_matches(record, id))
         {
             Some(self.records.remove(pos))
         } else {
@@ -2320,7 +2333,7 @@ impl SearchStore {
         let record = self
             .records
             .iter_mut()
-            .find(|record| record.id == id || record.token.to_string() == id)?;
+            .find(|record| search_identifier_matches(record, id))?;
         let mut updated = false;
         if let Some(query) = query.map(|value| value.trim().to_owned()) {
             let query = truncate_utf8_bytes(query, MAX_SEARCH_QUERY_BYTES);
@@ -49892,8 +49905,7 @@ async fn versioned_get_failure_contract(
         .and_then(|value| value.strip_suffix("/responses"))
     {
         if state.config.controller_profile == ControllerProfile::Native
-            && uuid::Uuid::parse_str(search_id).is_err()
-            && search_id.parse::<u32>().is_err()
+            && !controller_search_identifier_is_valid(search_id)
         {
             // SearchResponsesController binds this route segment as a Guid.
             // Validate it before the missing-record check so malformed input
@@ -60510,7 +60522,7 @@ async fn native_search_action_controller_response(path: &str, state: &AppState) 
     if items != "items" || !matches!(action.as_str(), "download" | "stream") {
         return routing::not_found_response();
     }
-    if uuid::Uuid::parse_str(search_id).is_err() {
+    if !controller_search_id_is_valid(search_id) {
         return search_controller_problem_response(
             400,
             "https://docs.api-versioning.org/problems#invalid-route-value",
@@ -60520,11 +60532,7 @@ async fn native_search_action_controller_response(path: &str, state: &AppState) 
     }
 
     let searches = state.searches.read().await;
-    let Some(search) = searches
-        .records
-        .iter()
-        .find(|record| record.id.eq_ignore_ascii_case(search_id))
-    else {
+    let Some(search) = searches.get_by_identifier(search_id) else {
         return search_controller_problem_response(
             404,
             "search_not_found",
@@ -60636,11 +60644,7 @@ async fn search_action_controller_response(path: &str, state: &AppState) -> Http
         return routing::not_found_response();
     }
     let searches = state.searches.read().await;
-    let Some(search) = searches
-        .records
-        .iter()
-        .find(|record| record.id.eq_ignore_ascii_case(search_id))
-    else {
+    let Some(search) = searches.get_by_identifier(search_id) else {
         return HttpResponse {
             status: "404 Not Found",
             content_type: "application/problem+json",
@@ -84751,6 +84755,15 @@ fn controller_native_search_guid_from_path(path: &str) -> Option<&str> {
     (value.split('/').count() == 1 && !value.is_empty()).then_some(value)
 }
 
+fn controller_search_id_is_valid(value: &str) -> bool {
+    uuid::Uuid::parse_str(value).is_ok()
+        || (value.len() == 32 && value.bytes().all(|byte| byte.is_ascii_hexdigit()))
+}
+
+fn controller_search_identifier_is_valid(value: &str) -> bool {
+    controller_search_id_is_valid(value) || value.parse::<u32>().is_ok()
+}
+
 fn controller_native_search_query_validation(
     method: &str,
     path: &str,
@@ -84806,7 +84819,7 @@ async fn controller_native_search_storage_failure_response(
             // retains its historical numeric-token aliases for the v0
             // compatibility surface, so reject malformed text while
             // allowing those numeric aliases to reach the normal handler.
-            if uuid::Uuid::parse_str(search_id).is_err() && search_id.parse::<u32>().is_err() {
+            if !controller_search_identifier_is_valid(search_id) {
                 return Some(routing::bad_request_response("The request is invalid"));
             }
         }

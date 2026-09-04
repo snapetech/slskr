@@ -41,6 +41,9 @@ function normalizeSearchStatus(value) {
     switch (String(value ?? '').toLowerCase()) {
         case 'failed':
             return 'failed';
+        case 'cancelled':
+        case 'canceled':
+            return 'cancelled';
         case 'completed':
         case 'complete':
         case 'expired':
@@ -69,7 +72,7 @@ function normalizeSearch(response) {
     const results = Array.isArray(object.results) ? object.results : [];
     return {
         ...object,
-        id: String(object.id ?? object.token ?? ''),
+        id: String(object.id ?? object.searchId ?? object.token ?? ''),
         query: String(object.query ?? object.searchText ?? ''),
         status: normalizeSearchStatus(object.status ?? object.state),
         results_count: numberValue(object.results_count ?? object.result_count ?? object.resultsCount, results.length),
@@ -97,11 +100,14 @@ function normalizeMessage(response) {
 }
 function normalizeTransferStatus(value) {
     switch (String(value ?? '').toLowerCase()) {
+        case 'succeeded':
         case 'completed':
         case 'complete':
             return 'completed';
         case 'failed':
         case 'error':
+        case 'errored':
+        case 'rejected':
             return 'failed';
         case 'cancelled':
         case 'canceled':

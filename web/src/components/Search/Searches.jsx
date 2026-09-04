@@ -114,7 +114,10 @@ const CollapsibleSection = ({
 };
 
 const searchEventIdentifier = (eventOrSearch) =>
-  eventOrSearch?.resource ?? eventOrSearch?.id ?? eventOrSearch?.token;
+  eventOrSearch?.resource ??
+  eventOrSearch?.searchId ??
+  eventOrSearch?.id ??
+  eventOrSearch?.token;
 const SEARCH_CREATE_HYDRATION_TIMEOUT_MS = 1_500;
 
 const Searches = ({ runtimeProfile, server } = {}) => {

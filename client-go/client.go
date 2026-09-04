@@ -108,7 +108,24 @@ func (c *Client) CreateSearch(ctx context.Context, query string) (map[string]int
 	body := map[string]interface{}{
 		"query": query,
 	}
-	return c.post(ctx, "/api/searches", body, true)
+	result, err := c.post(ctx, "/api/searches", body, true)
+	if err != nil {
+		return nil, err
+	}
+	if _, hasID := result["id"]; !hasID {
+		if searchID, hasSearchID := result["searchId"]; hasSearchID {
+			result["id"] = searchID
+		}
+	}
+	return result, nil
+}
+
+// GetSearchDetails gets a search and its result page.
+func (c *Client) GetSearchDetails(ctx context.Context, searchID string, limit, offset int) (map[string]interface{}, error) {
+	params := url.Values{}
+	params.Set("limit", fmt.Sprintf("%d", limit))
+	params.Set("offset", fmt.Sprintf("%d", offset))
+	return c.getWithParams(ctx, fmt.Sprintf("/api/searches/%s", pathSegment(searchID)), params, true)
 }
 
 // ListTransfers lists transfers
@@ -140,6 +157,27 @@ func (c *Client) ListTransfers(ctx context.Context, direction, status string, li
 		}
 	}
 	return out, nil
+}
+
+// CreateTransfer queues a transfer.
+func (c *Client) CreateTransfer(ctx context.Context, direction, peerUsername, filename string) (map[string]interface{}, error) {
+	body := map[string]interface{}{
+		"direction":     transferDirectionNumber(direction),
+		"peer_username": peerUsername,
+		"filename":      filename,
+	}
+	return c.post(ctx, "/api/transfers", body, true)
+}
+
+// GetTransfer gets transfer details.
+func (c *Client) GetTransfer(ctx context.Context, transferID string) (map[string]interface{}, error) {
+	return c.get(ctx, fmt.Sprintf("/api/transfers/%s", pathSegment(transferID)), true)
+}
+
+// CancelTransfer cancels a transfer.
+func (c *Client) CancelTransfer(ctx context.Context, transferID string) error {
+	_, err := c.delete(ctx, fmt.Sprintf("/api/transfers/%s", pathSegment(transferID)), true)
+	return err
 }
 
 // ListMessages lists messages
@@ -555,6 +593,15 @@ func transferDirectionValue(direction string) string {
 		return "1"
 	default:
 		return direction
+	}
+}
+
+func transferDirectionNumber(direction string) int {
+	switch strings.ToLower(strings.TrimSpace(direction)) {
+	case "upload":
+		return 1
+	default:
+		return 0
 	}
 }
 

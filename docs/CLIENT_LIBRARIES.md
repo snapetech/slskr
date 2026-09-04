@@ -310,6 +310,7 @@ client.GetCapabilities(ctx)
 // Search
 client.ListSearches(ctx, limit, offset)
 client.CreateSearch(ctx, query)
+client.GetSearchDetails(ctx, searchID, limit, offset)
 
 // Messages
 client.ListMessages(ctx, limit, offset)
@@ -319,6 +320,9 @@ client.AcknowledgeMessage(ctx, messageID)
 
 // Transfers
 client.ListTransfers(ctx, direction, status, limit, offset)
+client.CreateTransfer(ctx, direction, peerUsername, filename)
+client.GetTransfer(ctx, transferID)
+client.CancelTransfer(ctx, transferID)
 client.SendMessage(ctx, recipient, content)
 
 // Users & Rooms

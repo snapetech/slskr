@@ -10603,6 +10603,30 @@ async fn controller_api_differential_automation_compat_routes_use_expected_shape
     assert_eq!(uuid_search_json["query"], "UUID Song");
     let _ = receiver.try_recv();
 
+    let dashless_search_id = uuid_search_json["searchId"]
+        .as_str()
+        .expect("dashless search id");
+    let dashless_detail = super::route_http_request(
+        "GET",
+        &format!("/api/v0/searches/{dashless_search_id}"),
+        None,
+        "",
+        &state,
+    )
+    .await
+    .expect("dashless search detail route");
+    assert_eq!(dashless_detail.status, "200 OK");
+    let dashless_responses = super::route_http_request(
+        "GET",
+        &format!("/api/v0/searches/{dashless_search_id}/responses"),
+        None,
+        "",
+        &state,
+    )
+    .await
+    .expect("dashless search responses route");
+    assert_eq!(dashless_responses.status, "200 OK");
+
     for (method, path) in [
         ("GET", format!("/api/v0/searches/{uuid_search_id}")),
         (
@@ -14240,6 +14264,44 @@ async fn controller_api_differential_search_api_creates_reads_and_completes_reco
         serde_json::to_string_pretty(&ledger).expect("serialize controller-api ledger"),
     )
     .expect("write controller-api ledger");
+}
+
+#[cfg_attr(test, test)]
+#[cfg(feature = "full-controller-tests")]
+fn search_store_resolves_dash_stripped_controller_ids() {
+    let canonical_id = "11111111-1111-4111-8111-111111111111";
+    let compatibility_id = canonical_id.replace('-', "");
+    let mut searches = super::SearchStore::new();
+    let record = searches
+        .create(
+            Some(canonical_id.to_owned()),
+            "compatibility id".to_owned(),
+            "global",
+            None,
+            Vec::new(),
+            300,
+        )
+        .expect("create search")
+        .record;
+
+    assert_eq!(
+        searches
+            .get_by_identifier(&compatibility_id)
+            .map(|search| search.id),
+        Some(canonical_id.to_owned())
+    );
+    assert!(searches
+        .update_by_identifier(&compatibility_id, Some("updated".to_owned()), None)
+        .is_some());
+    assert_eq!(
+        searches
+            .get_by_identifier(canonical_id)
+            .map(|search| search.query),
+        Some("updated".to_owned())
+    );
+    assert!(searches.remove_by_identifier(&compatibility_id).is_some());
+    assert!(searches.records.is_empty());
+    assert!(record.id.contains('-'));
 }
 
 #[cfg_attr(test, test)]
@@ -95156,19 +95218,12 @@ async fn persistence_lifecycle_differential_search_and_message_domains_update_de
         );
         let _ = receiver.try_recv();
         // The creation response's `searchId` is a dash-stripped
-        // display id that does NOT round-trip through `SearchStore`'s
-        // own `get_by_identifier`/`update_by_identifier` lookup
-        // (which matches on the real, dashed `record.id` or the
-        // numeric `record.token`) -- read the real persisted id
-        // back from the store directly rather than relying on that
-        // response field.
-        let search_id = state
-            .searches
-            .read()
-            .await
-            .records
-            .first()
-            .map(|record| record.id.clone())
+        // compatibility id. It must round-trip through the normal
+        // read/update/delete handlers without exposing the canonical
+        // stored id to callers.
+        let search_id = serde_json::from_str::<serde_json::Value>(&created.body)
+            .ok()
+            .and_then(|json| json["searchId"].as_str().map(str::to_owned))
             .expect("differential search id");
 
         let updated = super::route_http_request(

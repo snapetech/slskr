@@ -74,6 +74,7 @@ func main() {
 ### Search
 - `ListSearches(ctx, limit, offset)` - List searches
 - `CreateSearch(ctx, query)` - Create search
+- `GetSearchDetails(ctx, searchID, limit, offset)` - Get search results
 
 ### Messages
 - `ListMessages(ctx, limit, offset)` - List messages
@@ -81,6 +82,9 @@ func main() {
 
 ### Transfers
 - `ListTransfers(ctx, direction, status, limit, offset)` - List transfers
+- `CreateTransfer(ctx, direction, peerUsername, filename)` - Queue a transfer
+- `GetTransfer(ctx, transferID)` - Get transfer details
+- `CancelTransfer(ctx, transferID)` - Cancel a transfer
 
 ## Error Handling
 

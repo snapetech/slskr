@@ -157,7 +157,12 @@ class SlskrClient:
     async def create_search(self, query: str, room: str = None, target: str = None) -> Dict:
         """Create new search"""
         body = {"query": query, "room": room, "target": target}
-        return await self._post("/api/searches", body)
+        result = await self._post("/api/searches", body)
+        if isinstance(result, dict) and "id" not in result:
+            search_id = result.get("searchId")
+            if search_id is not None:
+                result = {**result, "id": search_id}
+        return result
 
     async def get_search_details(self, search_id: str, limit: int = 50) -> Dict:
         """Get search details and results"""

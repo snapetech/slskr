@@ -70,6 +70,19 @@ async def test_python_client_uses_daemon_wire_contracts():
     client._post.assert_any_await("/api/messages/7/ack", {})
 
 
+@pytest.mark.asyncio
+async def test_create_search_exposes_compatibility_search_id_as_id():
+    client = SlskrClient("https://example.test", "token")
+    client._post = AsyncMock(
+        return_value={"searchId": "search-123", "query": "ambient", "results": []}
+    )
+
+    result = await client.create_search("ambient")
+
+    assert result["id"] == "search-123"
+    assert result["searchId"] == "search-123"
+
+
 def test_batch_builder_serializes_and_limits_operations():
     client = SlskrClient("http://localhost:8080", "token")
     builder = BatchBuilder(client)

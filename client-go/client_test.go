@@ -129,6 +129,13 @@ func TestClientUsesDaemonWireContracts(t *testing.T) {
 		switch {
 		case request.Method == http.MethodGet && request.URL.Path == "/api/searches":
 			write(`[{"id":"search-1"}]`)
+		case request.Method == http.MethodPost && request.URL.Path == "/api/searches":
+			write(`{"searchId":"search-123","query":"ambient","results":[]}`)
+		case request.Method == http.MethodGet && request.URL.Path == "/api/searches/search-123":
+			if request.URL.Query().Get("limit") != "10" || request.URL.Query().Get("offset") != "2" {
+				t.Errorf("search details pagination was not encoded: %q", request.URL.RawQuery)
+			}
+			write(`{"id":"search-123","query":"ambient","results":[]}`)
 		case request.Method == http.MethodGet && request.URL.Path == "/api/messages":
 			write(`{"entries":[{"id":1}]}`)
 		case request.Method == http.MethodGet && request.URL.Path == "/api/messages/alice":
@@ -149,6 +156,30 @@ func TestClientUsesDaemonWireContracts(t *testing.T) {
 				t.Errorf("download direction was not encoded as 0: %q", request.URL.RawQuery)
 			}
 			write(`{"entries":[{"id":4}]}`)
+		case request.Method == http.MethodPost && request.URL.Path == "/api/transfers":
+			var payload map[string]interface{}
+			if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+				t.Errorf("decode transfer payload: %v", err)
+			}
+			if payload["peer_username"] == "alice" && (payload["direction"] != float64(0) || payload["filename"] != "track.flac") {
+				t.Errorf("download transfer payload used the wrong wire fields: %#v", payload)
+			}
+			if payload["peer_username"] == "bob" && (payload["direction"] != float64(1) || payload["filename"] != "upload.flac") {
+				t.Errorf("upload transfer payload used the wrong wire fields: %#v", payload)
+			}
+			if (payload["peer_username"] != "alice" && payload["peer_username"] != "bob") ||
+				(payload["filename"] != "track.flac" && payload["filename"] != "upload.flac") {
+				t.Errorf("transfer payload used the wrong wire fields: %#v", payload)
+			}
+			if payload["peer_username"] == "bob" {
+				write(`{"id":6,"status":"queued"}`)
+			} else {
+				write(`{"id":5,"status":"queued"}`)
+			}
+		case request.Method == http.MethodGet && request.URL.Path == "/api/transfers/5":
+			write(`{"id":5,"status":"queued"}`)
+		case request.Method == http.MethodDelete && request.URL.Path == "/api/transfers/5":
+			writer.WriteHeader(http.StatusNoContent)
 		case request.Method == http.MethodGet && request.URL.Path == "/api/users":
 			write(`{"entries":[{"username":"alice"}]}`)
 		case request.Method == http.MethodGet && request.URL.Path == "/api/rooms":
@@ -195,6 +226,14 @@ func TestClientUsesDaemonWireContracts(t *testing.T) {
 	if err != nil || len(searches) != 1 || searches[0]["id"] != "search-1" {
 		t.Fatalf("unexpected searches response: %#v, %v", searches, err)
 	}
+	search, err := client.CreateSearch(ctx, "ambient")
+	if err != nil || search["id"] != "search-123" || search["searchId"] != "search-123" {
+		t.Fatalf("unexpected create search response: %#v, %v", search, err)
+	}
+	searchDetails, err := client.GetSearchDetails(ctx, "search-123", 10, 2)
+	if err != nil || searchDetails["id"] != "search-123" {
+		t.Fatalf("unexpected search details response: %#v, %v", searchDetails, err)
+	}
 	messages, err := client.ListMessages(ctx, 10, 0)
 	if err != nil || len(messages) != 1 {
 		t.Fatalf("unexpected messages response: %#v, %v", messages, err)
@@ -212,6 +251,21 @@ func TestClientUsesDaemonWireContracts(t *testing.T) {
 	transfers, err := client.ListTransfers(ctx, "download", "", 10, 0)
 	if err != nil || len(transfers) != 1 {
 		t.Fatalf("unexpected transfers response: %#v, %v", transfers, err)
+	}
+	createdTransfer, err := client.CreateTransfer(ctx, "download", "alice", "track.flac")
+	if err != nil || createdTransfer["id"] != float64(5) {
+		t.Fatalf("unexpected created transfer response: %#v, %v", createdTransfer, err)
+	}
+	uploadTransfer, err := client.CreateTransfer(ctx, "upload", "bob", "upload.flac")
+	if err != nil || uploadTransfer["id"] != float64(6) {
+		t.Fatalf("unexpected created upload response: %#v, %v", uploadTransfer, err)
+	}
+	transfer, err := client.GetTransfer(ctx, "5")
+	if err != nil || transfer["id"] != float64(5) {
+		t.Fatalf("unexpected transfer details response: %#v, %v", transfer, err)
+	}
+	if err := client.CancelTransfer(ctx, "5"); err != nil {
+		t.Fatalf("cancel transfer failed: %v", err)
 	}
 	users, err := client.ListUsers(ctx, 10, 0)
 	if err != nil || len(users) != 1 {

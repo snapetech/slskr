@@ -62,7 +62,7 @@ export interface SearchResult {
 export interface Search {
     id: string;
     query: string;
-    status: 'active' | 'completed' | 'failed';
+    status: 'active' | 'completed' | 'cancelled' | 'failed';
     results_count: number;
     started_at: string;
 }

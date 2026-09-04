@@ -9,52 +9,47 @@ Classification rule: any accepted row must be ledgered, fixed with behavior
 coverage, sibling-swept, and promoted into a durable gate before closure.
 
 ## Protocol-controlled allocations and lengths
-crates/slskr-client/src/quic_data.rs:554:    pub async fn read_chunk(&mut self, buffer: &mut [u8]) -> Result<usize, QuicDataError> {
-crates/slskr-client/src/mesh_sync.rs:432:        let mut output = Vec::with_capacity(encoded.len());
-crates/slskr-client/src/mesh_sync.rs:1030:            MeshSyncMessage::decode_json(&vec![b' '; MAX_MESH_SYNC_PAYLOAD_BYTES + 1]),
-crates/slskr-client/src/quic_control.rs:41:    let mut encoded = Vec::with_capacity(key_value_len + 5);
-crates/slskr-client/src/overlay_control.rs:77:        let mut encoded = Vec::with_capacity(self.payload.len() + 256);
-crates/slskr-client/src/overlay_control.rs:111:        let payload = reader.read_bytes("payload")?;
-crates/slskr-client/src/overlay_control.rs:357:    fn read_bytes(&mut self, field: &'static str) -> Result<Vec<u8>, ControlEnvelopeError> {
-crates/slskr-client/src/overlay.rs:212:        let mut payload = vec![0_u8; length];
-crates/slskr-client/src/overlay.rs:1270:        let mut payload = vec![0; 15];
-crates/slskr-client/src/overlay.rs:1501:        let mut signature = vec![0_u8; 64];
-crates/slskr-client/src/search.rs:562:        let mut drained = Vec::with_capacity(expired.len());
 crates/slskr-client/src/transfer.rs:208:            connection.read_chunk(remaining).await
-crates/slskr-client/src/io.rs:203:    let mut encoded = Vec::with_capacity(encoded_len);
-crates/slskr-client/src/io.rs:298:    let mut payload = vec![0; length];
-crates/slskr-client/src/io.rs:358:    let mut encoded = Vec::with_capacity(encoded_len);
-crates/slskr-client/src/io.rs:389:    let mut obfuscated = Vec::with_capacity(encoded_len);
+crates/slskr-client/src/quic_data.rs:554:    pub async fn read_chunk(&mut self, buffer: &mut [u8]) -> Result<usize, QuicDataError> {
 crates/slskr-client/src/capabilities.rs:173:        let mut features = Vec::with_capacity(feature_count);
 crates/slskr-client/src/capabilities.rs:596:    String::from_utf8(reader.read_bytes(length)?.to_vec())
 crates/slskr-client/src/capabilities.rs:617:    let bytes = reader.read_bytes(N)?;
 crates/slskr-client/src/capabilities.rs:668:    let mut output = Vec::with_capacity(values.len());
+crates/slskr-client/src/mesh_sync.rs:432:        let mut output = Vec::with_capacity(encoded.len());
+crates/slskr-client/src/mesh_sync.rs:1030:            MeshSyncMessage::decode_json(&vec![b' '; MAX_MESH_SYNC_PAYLOAD_BYTES + 1]),
+crates/slskr-client/src/overlay.rs:212:        let mut payload = vec![0_u8; length];
+crates/slskr-client/src/overlay.rs:1270:        let mut payload = vec![0; 15];
+crates/slskr-client/src/overlay.rs:1501:        let mut signature = vec![0_u8; 64];
+crates/slskr-client/src/quic_control.rs:41:    let mut encoded = Vec::with_capacity(key_value_len + 5);
+crates/slskr-client/src/io.rs:203:    let mut encoded = Vec::with_capacity(encoded_len);
+crates/slskr-client/src/io.rs:298:    let mut payload = vec![0; length];
+crates/slskr-client/src/io.rs:358:    let mut encoded = Vec::with_capacity(encoded_len);
+crates/slskr-client/src/io.rs:389:    let mut obfuscated = Vec::with_capacity(encoded_len);
 crates/slskr-client/src/file_transfer.rs:108:    pub async fn read_chunk(&mut self, length: usize) -> Result<Vec<u8>, ClientError> {
 crates/slskr-client/src/file_transfer.rs:127:        let mut chunk = vec![0; length];
 crates/slskr-client/src/file_transfer.rs:147:        let mut frame = Vec::with_capacity(OBFUSCATED_TRANSFER_FRAME_PREFIX_LEN + payload.len());
 crates/slskr-client/src/file_transfer.rs:168:        let mut payload = Vec::with_capacity(length);
 crates/slskr-client/src/file_transfer.rs:192:        let mut encoded = Vec::with_capacity(first_block.len() + length);
+crates/slskr-client/src/overlay_control.rs:77:        let mut encoded = Vec::with_capacity(self.payload.len() + 256);
+crates/slskr-client/src/overlay_control.rs:111:        let payload = reader.read_bytes("payload")?;
+crates/slskr-client/src/overlay_control.rs:357:    fn read_bytes(&mut self, field: &'static str) -> Result<Vec<u8>, ControlEnvelopeError> {
+crates/slskr-client/src/search.rs:562:        let mut drained = Vec::with_capacity(expired.len());
+crates/slskr-protocol/src/frame.rs:23:        let length = reader.read_u32_le()? as usize;
+crates/slskr-protocol/src/frame.rs:38:        let payload = reader.read_bytes(length - 4)?.to_vec();
+crates/slskr-protocol/src/frame.rs:77:        let length = reader.read_u32_le()? as usize;
+crates/slskr-protocol/src/frame.rs:92:        let payload = reader.read_bytes(length - 1)?.to_vec();
 crates/slskr-protocol/src/distributed.rs:114:                    payload: reader.read_bytes(reader.remaining())?.to_vec(),
+crates/slskr-client/src/listener.rs:240:        let mut encoded = Vec::with_capacity(4 + candidate_length);
+crates/slskr-client/src/listener.rs:268:    let mut obfuscated = Vec::with_capacity(8 + length);
+crates/slskr-client/src/listener.rs:380:            let mut nested = Vec::with_capacity(nested_len);
 crates/slskr-protocol/src/primitives.rs:107:        let length = self.read_u32_le()? as usize;
 crates/slskr-protocol/src/primitives.rs:133:        let length = self.read_u32_le()? as usize;
 crates/slskr-protocol/src/primitives.rs:134:        Ok(self.read_bytes(length)?.to_vec())
 crates/slskr-protocol/src/primitives.rs:142:        let count = self.read_u32_le()? as usize;
 crates/slskr-protocol/src/primitives.rs:159:    pub fn read_bytes(&mut self, length: usize) -> Result<&'a [u8], DecodeError> {
 crates/slskr-protocol/src/primitives.rs:192:            output: Vec::with_capacity(capacity),
-crates/slskr-client/src/listener.rs:240:        let mut encoded = Vec::with_capacity(4 + candidate_length);
-crates/slskr-client/src/listener.rs:268:    let mut obfuscated = Vec::with_capacity(8 + length);
-crates/slskr-client/src/listener.rs:380:            let mut nested = Vec::with_capacity(nested_len);
 crates/slskr-protocol/src/peer.rs:727:        let compressed = compress_zlib(&vec![b'x'; 1024]).expect("compress fixture");
 crates/slskr-protocol/src/peer.rs:740:        let compressed = compress_zlib(&vec![b'x'; MAX_DECOMPRESSED_SEARCH_RESPONSE_BYTES + 1])
-crates/slskr-protocol/src/frame.rs:23:        let length = reader.read_u32_le()? as usize;
-crates/slskr-protocol/src/frame.rs:38:        let payload = reader.read_bytes(length - 4)?.to_vec();
-crates/slskr-protocol/src/frame.rs:77:        let length = reader.read_u32_le()? as usize;
-crates/slskr-protocol/src/frame.rs:92:        let payload = reader.read_bytes(length - 1)?.to_vec();
-crates/slskr-protocol/src/obfuscation.rs:6:    let mut output = Vec::with_capacity(4 + input.len());
-crates/slskr/src/search_fallback.rs:37:    let mut queries = Vec::with_capacity(MAXIMUM_FALLBACK_QUERIES);
-crates/slskr/src/dotnet_regex.rs:309:    let mut unnamed_slots = Vec::with_capacity(unnamed.len());
-crates/slskr/src/dotnet_regex.rs:325:    let mut named_slots = Vec::with_capacity(named.len());
-crates/slskr/src/dotnet_regex.rs:347:    let mut targets = vec![String::new(); maximum_slot + 1];
 crates/slskr-protocol/src/server.rs:1220:                let payload = reader.read_bytes(reader.remaining())?.to_vec();
 crates/slskr-protocol/src/server.rs:2129:    let mut usernames = Vec::with_capacity(user_count);
 crates/slskr-protocol/src/server.rs:2135:    let mut statuses = Vec::with_capacity(user_count);
@@ -67,31 +62,13 @@ crates/slskr-protocol/src/server.rs:2286:    let mut values = Vec::with_capacity
 crates/slskr-protocol/src/server.rs:2341:    let mut values = Vec::with_capacity(count);
 crates/slskr-protocol/src/server.rs:2380:    let counts_len = reader.read_u32_le()? as usize;
 crates/slskr-protocol/src/server.rs:2389:    let mut entries = Vec::with_capacity(names.len());
-crates/slskr/src/multisource.rs:480:        let mut sources = Vec::with_capacity(request.sources.len());
-crates/slskr/src/multisource.rs:522:        let mut source_busy = vec![false; sources.len()];
-crates/slskr/src/multisource.rs:526:        let mut results = Vec::with_capacity(chunks.len());
-crates/slskr/src/multisource.rs:760:    let mut buffer = vec![0_u8; 64 * 1024];
-crates/slskr/src/webhooks.rs:1350:        let mut persisted = vec![invalid; MAX_WEBHOOKS];
-crates/slskr/src/events_ws.rs:257:    let mut payload = vec![0_u8; len as usize];
-crates/slskr/src/events_ws.rs:343:    let mut header = Vec::with_capacity(10);
-crates/slskr/src/events_ws.rs:524:        let mut frame = Vec::with_capacity(6 + payload.len());
-crates/slskr/src/events_ws.rs:700:        let payload = vec![b'x'; 1024 * 1024];
+crates/slskr-protocol/src/obfuscation.rs:6:    let mut output = Vec::with_capacity(4 + input.len());
+crates/slskr-web/src/lib.rs:17772:        let frequency_bins = RefCell::new(vec![0; analyser.frequency_bin_count() as usize]);
+crates/slskr-web/src/lib.rs:17773:        let waveform_bins = RefCell::new(vec![0; analyser.fft_size() as usize]);
+crates/slskr/src/utils.rs:713:    let mut decoded = Vec::with_capacity(bytes.len());
+crates/slskr/src/utils.rs:731:    let mut decoded = Vec::with_capacity(bytes.len());
+crates/slskr/src/utils.rs:1063:    let mut output = Vec::with_capacity(bytes.len());
 crates/slskr/src/bloom_filter.rs:39:            bits: vec![0_u8; bit_size.div_ceil(8)],
-crates/slskr/src/port_forwarding.rs:282:            let mut buffer = vec![0_u8; TUNNEL_CHUNK_BYTES];
-crates/slskr/src/port_forwarding.rs:742:            data: vec![7; TUNNEL_CHUNK_BYTES],
-crates/slskr/src/port_forwarding.rs:752:            data: vec![7; TUNNEL_CHUNK_BYTES + 1],
-crates/slskr/src/relay_ws.rs:400:    let mut header = Vec::with_capacity(10);
-crates/slskr/src/relay_ws.rs:480:    let mut payload = vec![0_u8; length as usize];
-crates/slskr/src/quic_alpn.rs:172:    let mut output = vec![0_u8; length];
-crates/slskr/src/quic_alpn.rs:185:    let mut info = Vec::with_capacity(2 + 1 + full_label.len() + 1);
-crates/slskr/src/private_gateway.rs:1103:            let mut response = vec![0_u8; 65_536];
-crates/slskr/src/private_gateway.rs:1293:    let mut bytes = Vec::with_capacity(256);
-crates/slskr/src/private_gateway.rs:1296:        let read = receive.read_chunk(&mut byte).await?;
-crates/slskr/src/private_gateway.rs:1360:            .read_chunk(&mut buffer[..remaining])
-crates/slskr/src/private_gateway.rs:1808:            let mut bytes = vec![0_u8; length];
-crates/slskr/src/private_gateway.rs:2053:            let mut buffer = vec![0_u8; TUNNEL_CHUNK_BYTES];
-crates/slskr/src/private_gateway.rs:2924:        let mut packet = vec![0_u8; 1_200];
-crates/slskr/src/private_gateway.rs:3124:            vec![1_u8; MAX_CERTIFICATE_BYTES as usize + 1],
 crates/slskr/src/content_discovery.rs:236:        let mut normalized_hashes = Vec::with_capacity(state.hash_entries.len());
 crates/slskr/src/content_discovery.rs:245:        let mut normalized_shadow = Vec::with_capacity(state.shadow_records.len());
 crates/slskr/src/content_discovery.rs:359:        let mut normalized = Vec::with_capacity(entries.len());
@@ -100,112 +77,116 @@ crates/slskr/src/content_discovery.rs:643:        let mut candidates = Vec::with
 crates/slskr/src/content_discovery.rs:795:    let mut peer_ids = Vec::with_capacity(record.peer_ids.len());
 crates/slskr/src/content_discovery.rs:887:    let mut deduped: Vec<HashDbEntry> = Vec::with_capacity(entries.len());
 crates/slskr/src/content_discovery.rs:916:    let mut deduped: Vec<ShadowIndexRecord> = Vec::with_capacity(records.len());
+crates/slskr/src/relay_ws.rs:407:    let mut header = Vec::with_capacity(10);
+crates/slskr/src/relay_ws.rs:487:    let mut payload = vec![0_u8; length as usize];
+crates/slskr/src/quic_alpn.rs:172:    let mut output = vec![0_u8; length];
+crates/slskr/src/quic_alpn.rs:185:    let mut info = Vec::with_capacity(2 + 1 + full_label.len() + 1);
+crates/slskr/src/search_fallback.rs:37:    let mut queries = Vec::with_capacity(MAXIMUM_FALLBACK_QUERIES);
+crates/slskr/src/route_dispatch.rs:82:    let mut normalized = Vec::with_capacity(terms.len());
+crates/slskr/src/route_dispatch_group_4.rs:1834:            let mut visible = Vec::with_capacity(records.len());
 crates/slskr/src/mesh_sync.rs:116:            Some(MeshSyncMessage::RespChunk(read_chunk(state, request).await))
 crates/slskr/src/mesh_sync.rs:228:    let mut incoming = Vec::with_capacity(received);
 crates/slskr/src/mesh_sync.rs:298:async fn read_chunk(state: &super::AppState, request: MeshReqChunkMessage) -> MeshRespChunkMessage {
 crates/slskr/src/mesh_sync.rs:352:    let mut data = vec![0_u8; to_read];
-crates/slskr/src/utils.rs:713:    let mut decoded = Vec::with_capacity(bytes.len());
-crates/slskr/src/utils.rs:731:    let mut decoded = Vec::with_capacity(bytes.len());
-crates/slskr/src/utils.rs:1063:    let mut output = Vec::with_capacity(bytes.len());
-crates/slskr/src/relay_agent.rs:573:        let mut buffer = vec![0_u8; RELAY_FILE_CHUNK_BYTES];
-crates/slskr/src/relay_agent.rs:724:        let mut buffer = vec![0_u8; RELAY_FILE_CHUNK_BYTES];
-crates/slskr/src/route_dispatch.rs:82:    let mut normalized = Vec::with_capacity(terms.len());
-crates/slskr/src/route_dispatch_group_4.rs:1833:            let mut visible = Vec::with_capacity(records.len());
 crates/slskr/src/relay.rs:1247:        let mut quotient = Vec::with_capacity(source.len());
-crates/slskr/src/route_dispatch_group_2.rs:1804:            let mut session_command_permits = Vec::with_capacity(replacements.len());
+crates/slskr/src/config.rs:9883:    let mut peers = Vec::with_capacity(values.len());
+crates/slskr/src/relay_agent.rs:597:        let mut buffer = vec![0_u8; RELAY_FILE_CHUNK_BYTES];
+crates/slskr/src/relay_agent.rs:748:        let mut buffer = vec![0_u8; RELAY_FILE_CHUNK_BYTES];
+crates/slskr/src/events_ws.rs:258:    let mut payload = vec![0_u8; len as usize];
+crates/slskr/src/events_ws.rs:356:    let mut header = Vec::with_capacity(10);
+crates/slskr/src/events_ws.rs:537:        let mut frame = Vec::with_capacity(6 + payload.len());
+crates/slskr/src/events_ws.rs:713:        let payload = vec![b'x'; 1024 * 1024];
+crates/slskr/src/route_dispatch_group_2.rs:1805:            let mut session_command_permits = Vec::with_capacity(replacements.len());
+crates/slskr/src/private_gateway.rs:1134:            let mut response = vec![0_u8; 65_536];
+crates/slskr/src/private_gateway.rs:1324:    let mut bytes = Vec::with_capacity(256);
+crates/slskr/src/private_gateway.rs:1327:        let read = receive.read_chunk(&mut byte).await?;
+crates/slskr/src/private_gateway.rs:1403:            .read_chunk(&mut buffer[..remaining])
+crates/slskr/src/private_gateway.rs:1851:            let mut bytes = vec![0_u8; length];
+crates/slskr/src/private_gateway.rs:2096:            let mut buffer = vec![0_u8; TUNNEL_CHUNK_BYTES];
+crates/slskr/src/private_gateway.rs:2967:        let mut packet = vec![0_u8; 1_200];
+crates/slskr/src/private_gateway.rs:3167:            vec![1_u8; MAX_CERTIFICATE_BYTES as usize + 1],
+crates/slskr/src/multisource.rs:480:        let mut sources = Vec::with_capacity(request.sources.len());
+crates/slskr/src/multisource.rs:522:        let mut source_busy = vec![false; sources.len()];
+crates/slskr/src/multisource.rs:526:        let mut results = Vec::with_capacity(chunks.len());
+crates/slskr/src/multisource.rs:760:    let mut buffer = vec![0_u8; 64 * 1024];
+crates/slskr/src/port_forwarding.rs:282:            let mut buffer = vec![0_u8; TUNNEL_CHUNK_BYTES];
+crates/slskr/src/port_forwarding.rs:742:            data: vec![7; TUNNEL_CHUNK_BYTES],
+crates/slskr/src/port_forwarding.rs:752:            data: vec![7; TUNNEL_CHUNK_BYTES + 1],
+crates/slskr/src/dotnet_regex.rs:309:    let mut unnamed_slots = Vec::with_capacity(unnamed.len());
+crates/slskr/src/dotnet_regex.rs:325:    let mut named_slots = Vec::with_capacity(named.len());
+crates/slskr/src/dotnet_regex.rs:347:    let mut targets = vec![String::new(); maximum_slot + 1];
+crates/slskr/src/security_controls.rs:1819:        let mut transformed = Vec::with_capacity(bucket + 4);
+crates/slskr/src/http_server.rs:453:        let mut buf = vec![0_u8; content_length];
+crates/slskr/src/http_server.rs:557:    let mut decoded = Vec::with_capacity(bytes.len());
+crates/slskr/src/http_server.rs:922:        let mut buffer = vec![0_u8; 64 * 1024];
+crates/slskr/src/http_server.rs:1078:        let body = vec![b'x'; 100 * 1024];
+crates/slskr/src/webhooks.rs:1350:        let mut persisted = vec![invalid; MAX_WEBHOOKS];
 crates/slskr/src/cli.rs:1120:    let bytes = time::timeout(timeout, file.read_chunk(remaining))
 crates/slskr/src/cli.rs:1347:    let bytes = time::timeout(timeout, file.read_chunk(remaining))
 crates/slskr/src/cli.rs:2897:    let downloaded = time::timeout(timeout, file.read_chunk(remaining.len()))
 crates/slskr/src/cli.rs:3209:    let downloaded = time::timeout(timeout, file.read_chunk(expected_bytes.len()))
 crates/slskr/src/cli.rs:3660:        .read_chunk(5)
-crates/slskr/src/http_server.rs:453:        let mut buf = vec![0_u8; content_length];
-crates/slskr/src/http_server.rs:557:    let mut decoded = Vec::with_capacity(bytes.len());
-crates/slskr/src/http_server.rs:922:        let mut buffer = vec![0_u8; 64 * 1024];
-crates/slskr/src/http_server.rs:1078:        let body = vec![b'x'; 100 * 1024];
-crates/slskr/src/security_controls.rs:1819:        let mut transformed = Vec::with_capacity(bucket + 4);
-crates/slskr-web/src/lib.rs:17772:        let frequency_bins = RefCell::new(vec![0; analyser.frequency_bin_count() as usize]);
-crates/slskr-web/src/lib.rs:17773:        let waveform_bins = RefCell::new(vec![0; analyser.fft_size() as usize]);
-crates/slskr/src/config.rs:9883:    let mut peers = Vec::with_capacity(values.len());
-crates/slskr/src/lib.rs:6435:            let mut bytes = Vec::with_capacity(33);
-crates/slskr/src/lib.rs:10212:        let mut updated = Vec::with_capacity(distinct_ids.len());
-crates/slskr/src/lib.rs:14216:    let mut items = Vec::with_capacity(candidates.len());
-crates/slskr/src/lib.rs:15433:        "youtube_url" => vec!["YouTube URL detected; using source query fallback.".to_owned()],
-crates/slskr/src/lib.rs:15435:            vec!["Spotify metadata fetch failed; using source query fallback.".to_owned()]
-crates/slskr/src/lib.rs:15437:        "url" => vec!["URL detected; using source query fallback.".to_owned()],
-crates/slskr/src/lib.rs:23730:            let mut session_command_permits = Vec::with_capacity(replacements.len());
-crates/slskr/src/lib.rs:28141:            let mut visible = Vec::with_capacity(records.len());
-crates/slskr/src/lib.rs:36658:    let mut output = Vec::with_capacity(bytes.len() + metadata.len());
-crates/slskr/src/lib.rs:46230:        let mut records = Vec::with_capacity(raw_records.len());
-crates/slskr/src/lib.rs:48276:    let mut events = Vec::with_capacity(values.len());
-crates/slskr/src/lib.rs:48645:    let mut decoded = Vec::with_capacity(bytes.len());
-crates/slskr/src/lib.rs:49044:    let mut requested_files = Vec::with_capacity(files.len());
-crates/slskr/src/lib.rs:54415:    let mut payload = vec![0_u8; length - 4];
-crates/slskr/src/lib.rs:54506:    let mut provided_padded = vec![0_u8; length];
-crates/slskr/src/lib.rs:54507:    let mut configured_padded = vec![0_u8; length];
-crates/slskr/src/lib.rs:55532:    let mut der = Vec::with_capacity(ED25519_SPKI_PREFIX.len() + 32);
-crates/slskr/src/lib.rs:55642:    let mut lines = Vec::with_capacity(parsed.headers.len());
-crates/slskr/src/lib.rs:62108:            let mut results = Vec::with_capacity(work.len());
-crates/slskr/src/lib.rs:63560:        let mut current = Vec::with_capacity(right.len() + 1);
-crates/slskr/src/lib.rs:64339:        let mut results = Vec::with_capacity(descriptors.len());
-crates/slskr/src/lib.rs:64483:        let mut results = Vec::with_capacity(ids.len());
-crates/slskr/src/lib.rs:67732:                let mut peers = Vec::with_capacity(peer_records.len());
-crates/slskr/src/lib.rs:68264:                let mut entries = Vec::with_capacity(requests.len());
-crates/slskr/src/lib.rs:77403:            let chunk = time::timeout(io_timeout, preview.connection.read_chunk(wanted))
-crates/slskr/src/lib.rs:81472:        connection.read_chunk(wanted),
-crates/slskr/src/lib.rs:82040:    let mut prefix = vec![0_u8; METADATA_HASH_CHUNK_SIZE];
-crates/slskr/src/lib.rs:82336:    let mut buffer = vec![0_u8; state.config.soulseek_connection.buffer_transfer];
-crates/slskr/src/lib.rs:82795:            connection.read_chunk(next_len),
-crates/slskr/src/lib.rs:82947:    let mut order = Vec::with_capacity(2);
-crates/slskr/src/lib.rs:83140:            let mut auth = Vec::with_capacity(3 + username.len() + password.len());
-crates/slskr/src/lib.rs:83219:    let mut bound_address_and_port = vec![0_u8; address_len + 2];
+crates/slskr/src/lib.rs:6456:            let mut bytes = Vec::with_capacity(33);
+crates/slskr/src/lib.rs:10233:        let mut updated = Vec::with_capacity(distinct_ids.len());
+crates/slskr/src/lib.rs:14237:    let mut items = Vec::with_capacity(candidates.len());
+crates/slskr/src/lib.rs:15454:        "youtube_url" => vec!["YouTube URL detected; using source query fallback.".to_owned()],
+crates/slskr/src/lib.rs:15456:            vec!["Spotify metadata fetch failed; using source query fallback.".to_owned()]
+crates/slskr/src/lib.rs:15458:        "url" => vec!["URL detected; using source query fallback.".to_owned()],
+crates/slskr/src/lib.rs:23751:            let mut session_command_permits = Vec::with_capacity(replacements.len());
+crates/slskr/src/lib.rs:28162:            let mut visible = Vec::with_capacity(records.len());
+crates/slskr/src/lib.rs:36680:    let mut output = Vec::with_capacity(bytes.len() + metadata.len());
+crates/slskr/src/lib.rs:46252:        let mut records = Vec::with_capacity(raw_records.len());
+crates/slskr/src/lib.rs:48298:    let mut events = Vec::with_capacity(values.len());
+crates/slskr/src/lib.rs:48667:    let mut decoded = Vec::with_capacity(bytes.len());
+crates/slskr/src/lib.rs:49066:    let mut requested_files = Vec::with_capacity(files.len());
+crates/slskr/src/lib.rs:54437:    let mut payload = vec![0_u8; length - 4];
+crates/slskr/src/lib.rs:54528:    let mut provided_padded = vec![0_u8; length];
+crates/slskr/src/lib.rs:54529:    let mut configured_padded = vec![0_u8; length];
+crates/slskr/src/lib.rs:55554:    let mut der = Vec::with_capacity(ED25519_SPKI_PREFIX.len() + 32);
+crates/slskr/src/lib.rs:55664:    let mut lines = Vec::with_capacity(parsed.headers.len());
+crates/slskr/src/lib.rs:62138:            let mut results = Vec::with_capacity(work.len());
+crates/slskr/src/lib.rs:63590:        let mut current = Vec::with_capacity(right.len() + 1);
+crates/slskr/src/lib.rs:64369:        let mut results = Vec::with_capacity(descriptors.len());
+crates/slskr/src/lib.rs:64513:        let mut results = Vec::with_capacity(ids.len());
+crates/slskr/src/lib.rs:67762:                let mut peers = Vec::with_capacity(peer_records.len());
+crates/slskr/src/lib.rs:68294:                let mut entries = Vec::with_capacity(requests.len());
+crates/slskr/src/lib.rs:77488:            let chunk = time::timeout(io_timeout, preview.connection.read_chunk(wanted))
+crates/slskr/src/lib.rs:81557:        connection.read_chunk(wanted),
+crates/slskr/src/lib.rs:82125:    let mut prefix = vec![0_u8; METADATA_HASH_CHUNK_SIZE];
+crates/slskr/src/lib.rs:82421:    let mut buffer = vec![0_u8; state.config.soulseek_connection.buffer_transfer];
+crates/slskr/src/lib.rs:82880:            connection.read_chunk(next_len),
+crates/slskr/src/lib.rs:83032:    let mut order = Vec::with_capacity(2);
+crates/slskr/src/lib.rs:83225:            let mut auth = Vec::with_capacity(3 + username.len() + password.len());
+crates/slskr/src/lib.rs:83304:    let mut bound_address_and_port = vec![0_u8; address_len + 2];
 crates/slskr/src/controller_tests.rs:814:        vec![0; 12]
 crates/slskr/src/controller_tests.rs:2741:        let chunk = vec![b' '; 64 * 1024];
 crates/slskr/src/controller_tests.rs:2787:                let chunk = vec![b'x'; 64 * 1024];
 crates/slskr/src/controller_tests.rs:8725:    let mut attribute = Vec::with_capacity(8);
 crates/slskr/src/controller_tests.rs:8731:    let mut response = Vec::with_capacity(32);
-crates/slskr/src/controller_tests.rs:19099:        record.results = vec![template.clone(); super::MAX_SEARCH_RESULTS_PER_SEARCH];
-crates/slskr/src/controller_tests.rs:21525:        file.read_chunk(3).await.expect("chunk")
-crates/slskr/src/controller_tests.rs:21901:        file.read_chunk(3).await.expect("chunk")
-crates/slskr/src/controller_tests.rs:22006:        file.read_chunk(2).await.expect("chunk")
-crates/slskr/src/controller_tests.rs:22092:        file.read_chunk(2).await.expect("chunk")
-crates/slskr/src/controller_tests.rs:22257:    assert_eq!(file.read_chunk(2).await.expect("chunk"), vec![3, 4]);
-crates/slskr/src/controller_tests.rs:24057:        record.members = vec![template.clone(); super::MAX_SHARE_GROUP_MEMBERS];
-crates/slskr/src/controller_tests.rs:24219:        record.items = vec![template.clone(); super::MAX_COLLECTION_ITEMS];
-crates/slskr/src/controller_tests.rs:28563:        let mut frame = Vec::with_capacity(4 + length as usize);
-crates/slskr/src/controller_tests.rs:28678:            let mut actual = vec![0_u8; expected.len()];
-crates/slskr/src/controller_tests.rs:103149:        vec![b' '; (super::MAX_TRANSFER_STATE_BYTES as usize) + 1],
-crates/slskr/src/controller_tests.rs:103469:        vec![b' '; (super::MAX_TRANSFER_EVENTS_BYTES as usize) + 1],
-crates/slskr/src/controller_tests.rs:103529:    let mut header = vec![0_u8; 42];
-crates/slskr/src/controller_tests.rs:103571:    let mut header = vec![0_u8; 42];
-crates/slskr/src/controller_tests.rs:103727:            let mut bytes = vec![0_u8; 65_536];
-crates/slskr/src/controller_tests.rs:117834:        vec![0_u8; 64 * 1024 + 1],
-crates/slskr/src/controller_tests.rs:119774:    let low = entropy.check(&vec![0_u8; EntropyControl::SAMPLE_SIZE]);
+crates/slskr/src/controller_tests.rs:19121:        record.results = vec![template.clone(); super::MAX_SEARCH_RESULTS_PER_SEARCH];
+crates/slskr/src/controller_tests.rs:21547:        file.read_chunk(3).await.expect("chunk")
+crates/slskr/src/controller_tests.rs:21923:        file.read_chunk(3).await.expect("chunk")
+crates/slskr/src/controller_tests.rs:22028:        file.read_chunk(2).await.expect("chunk")
+crates/slskr/src/controller_tests.rs:22114:        file.read_chunk(2).await.expect("chunk")
+crates/slskr/src/controller_tests.rs:22279:    assert_eq!(file.read_chunk(2).await.expect("chunk"), vec![3, 4]);
+crates/slskr/src/controller_tests.rs:24079:        record.members = vec![template.clone(); super::MAX_SHARE_GROUP_MEMBERS];
+crates/slskr/src/controller_tests.rs:24241:        record.items = vec![template.clone(); super::MAX_COLLECTION_ITEMS];
+crates/slskr/src/controller_tests.rs:28585:        let mut frame = Vec::with_capacity(4 + length as usize);
+crates/slskr/src/controller_tests.rs:28700:            let mut actual = vec![0_u8; expected.len()];
+crates/slskr/src/controller_tests.rs:103171:        vec![b' '; (super::MAX_TRANSFER_STATE_BYTES as usize) + 1],
+crates/slskr/src/controller_tests.rs:103491:        vec![b' '; (super::MAX_TRANSFER_EVENTS_BYTES as usize) + 1],
+crates/slskr/src/controller_tests.rs:103551:    let mut header = vec![0_u8; 42];
+crates/slskr/src/controller_tests.rs:103593:    let mut header = vec![0_u8; 42];
+crates/slskr/src/controller_tests.rs:103749:            let mut bytes = vec![0_u8; 65_536];
+crates/slskr/src/controller_tests.rs:117856:        vec![0_u8; 64 * 1024 + 1],
+crates/slskr/src/controller_tests.rs:119796:    let low = entropy.check(&vec![0_u8; EntropyControl::SAMPLE_SIZE]);
 
 ## Proxy, redirect, SSRF, and outbound trust boundaries
-crates/slskr/src/route_dispatch_group_7.rs:2152:                    "totalBytesForwarded": rules.iter().map(|rule| rule.bytes_forwarded).sum::<u64>(),
-crates/slskr/src/route_dispatch_group_7.rs:2356:                Err(error) if error.contains("already being forwarded") => {
-crates/slskr/src/multisource.rs:656:    let mut builder = Client::builder()
-crates/slskr/src/multisource.rs:657:        .redirect(Policy::none())
-crates/slskr/src/multisource.rs:661:        builder = builder.resolve(host, SocketAddr::new(address.ip(), port));
-crates/slskr/src/port_forwarding.rs:84:                "Port {} is already being forwarded",
-crates/slskr/src/port_forwarding.rs:98:            bytes_forwarded: Arc::new(AtomicU64::new(0)),
-crates/slskr/src/port_forwarding.rs:155:    bytes_forwarded: Arc<AtomicU64>,
-crates/slskr/src/port_forwarding.rs:280:        let send_bytes = Arc::clone(&self.bytes_forwarded);
-crates/slskr/src/port_forwarding.rs:297:        let receive_bytes = Arc::clone(&self.bytes_forwarded);
-crates/slskr/src/port_forwarding.rs:331:        let bytes_forwarded = self.bytes_forwarded.load(Ordering::Relaxed);
-crates/slskr/src/port_forwarding.rs:340:            bytes_forwarded,
-crates/slskr/src/port_forwarding.rs:343:            performance: Performance::new(active_connections, bytes_forwarded),
-crates/slskr/src/port_forwarding.rs:514:    pub bytes_forwarded: u64,
-crates/slskr/src/port_forwarding.rs:870:                if status.bytes_forwarded == 10 {
-crates/slskr/src/webhooks.rs:579:        let mut client_builder = reqwest::Client::builder()
-crates/slskr/src/webhooks.rs:580:            .redirect(reqwest::redirect::Policy::none())
-crates/slskr/src/webhooks.rs:759:        let mut client_builder = reqwest::Client::builder()
-crates/slskr/src/webhooks.rs:760:            .redirect(reqwest::redirect::Policy::none())
-crates/slskr/src/webhooks.rs:763:            client_builder = client_builder.resolve(&resolved.host, *addr);
-crates/slskr/src/cli.rs:2499:    let forwarded = tree
-crates/slskr/src/cli.rs:2503:    if forwarded != 1 {
-crates/slskr/src/cli.rs:2505:            "distributed search reached {forwarded} children instead of one"
+crates/slskr/src/route_dispatch_group_7.rs:2153:                    "totalBytesForwarded": rules.iter().map(|rule| rule.bytes_forwarded).sum::<u64>(),
+crates/slskr/src/route_dispatch_group_7.rs:2357:                Err(error) if error.contains("already being forwarded") => {
 crates/slskr/src/application_state.rs:43:        "forwardedPort": runtime.vpn.forwarded_port,
+crates/slskr/src/private_gateway.rs:272:    /// DHT port. DHT-shaped datagrams are forwarded to mainline's internal
+crates/slskr/src/private_gateway.rs:3000:        .expect("DHT response should be forwarded")
 crates/slskr/src/vpn.rs:15:    pub forwarded_port: Option<u16>,
 crates/slskr/src/vpn.rs:148:    client: &reqwest::Client,
 crates/slskr/src/vpn.rs:167:    client: &reqwest::Client,
@@ -221,16 +202,14 @@ crates/slskr/src/vpn.rs:305:        forwarded_port,
 crates/slskr/src/vpn.rs:409:        assert_eq!(status.forwarded_port, Some(44_444));
 crates/slskr/src/vpn.rs:445:        assert_eq!(status.forwarded_port, Some(55_555));
 crates/slskr/src/vpn.rs:512:        assert_eq!(status.forwarded_port, Some(45_678));
-crates/slskr/src/relay_agent.rs:210:) -> Result<reqwest::Client, String> {
-crates/slskr/src/relay_agent.rs:211:    let mut builder = reqwest::Client::builder()
-crates/slskr/src/relay_agent.rs:212:        .redirect(reqwest::redirect::Policy::none())
-crates/slskr/src/relay_agent.rs:539:    client: &reqwest::Client,
-crates/slskr/src/relay_agent.rs:605:    client: &reqwest::Client,
-crates/slskr/src/relay_agent.rs:705:    client: &reqwest::Client,
-crates/slskr/src/relay_agent.rs:749:    client: &reqwest::Client,
-crates/slskr/src/relay_agent.rs:782:    client: &reqwest::Client,
-crates/slskr/src/private_gateway.rs:271:    /// DHT port. DHT-shaped datagrams are forwarded to mainline's internal
-crates/slskr/src/private_gateway.rs:2957:        .expect("DHT response should be forwarded")
+crates/slskr/src/relay_agent.rs:231:) -> Result<reqwest::Client, String> {
+crates/slskr/src/relay_agent.rs:232:    let mut builder = reqwest::Client::builder()
+crates/slskr/src/relay_agent.rs:233:        .redirect(reqwest::redirect::Policy::none())
+crates/slskr/src/relay_agent.rs:563:    client: &reqwest::Client,
+crates/slskr/src/relay_agent.rs:629:    client: &reqwest::Client,
+crates/slskr/src/relay_agent.rs:729:    client: &reqwest::Client,
+crates/slskr/src/relay_agent.rs:773:    client: &reqwest::Client,
+crates/slskr/src/relay_agent.rs:806:    client: &reqwest::Client,
 crates/slskr/src/http_server.rs:67:    pub forwarded: Option<String>,
 crates/slskr/src/http_server.rs:68:    pub x_forwarded_for: Option<String>,
 crates/slskr/src/http_server.rs:122:                    "forwarded" => headers.forwarded = Some(value.to_string()),
@@ -241,82 +220,103 @@ crates/slskr/src/http_server.rs:1040:            headers.forwarded,
 crates/slskr/src/http_server.rs:1044:            headers.x_forwarded_for,
 crates/slskr/src/http_server.rs:1241:            request.headers.x_forwarded_for.as_deref(),
 crates/slskr/src/http_server.rs:1245:            request.headers.forwarded.as_deref(),
-crates/slskr/src/lib.rs:15140:        .to_socket_addrs()
-crates/slskr/src/lib.rs:15150:    let client = reqwest::Client::builder()
-crates/slskr/src/lib.rs:15152:        .redirect(reqwest::redirect::Policy::none())
-crates/slskr/src/lib.rs:15320:    let client = reqwest::Client::builder()
-crates/slskr/src/lib.rs:15322:        .redirect(reqwest::redirect::Policy::none())
-crates/slskr/src/lib.rs:36081:                    "totalBytesForwarded": rules.iter().map(|rule| rule.bytes_forwarded).sum::<u64>(),
-crates/slskr/src/lib.rs:36288:                Err(error) if error.contains("already being forwarded") => {
-crates/slskr/src/lib.rs:37391:        let client = reqwest::Client::builder()
-crates/slskr/src/lib.rs:37392:            .redirect(reqwest::redirect::Policy::none())
-crates/slskr/src/lib.rs:42093:                    "Invalid configuration:\n  DhtRendezvous:\n    DHT rendezvous requires an explicit UDP port between 1 and 65535. Configure dht.dht_port to a stable forwarded or allow-listed port."
-crates/slskr/src/lib.rs:43876:    let response = reqwest::Client::builder()
-crates/slskr/src/lib.rs:43878:        .redirect(reqwest::redirect::Policy::none())
-crates/slskr/src/lib.rs:43897:    let response = reqwest::Client::builder()
-crates/slskr/src/lib.rs:43899:        .redirect(reqwest::redirect::Policy::none())
-crates/slskr/src/lib.rs:44131:    let response = reqwest::Client::builder()
-crates/slskr/src/lib.rs:44133:        .redirect(reqwest::redirect::Policy::none())
-crates/slskr/src/lib.rs:44185:    let response = reqwest::Client::builder()
-crates/slskr/src/lib.rs:44187:        .redirect(reqwest::redirect::Policy::none())
-crates/slskr/src/lib.rs:44813:    let response = reqwest::Client::builder()
-crates/slskr/src/lib.rs:44815:        .redirect(reqwest::redirect::Policy::none())
-crates/slskr/src/lib.rs:45087:        .to_socket_addrs()
-crates/slskr/src/lib.rs:45108:    let client = reqwest::Client::builder()
-crates/slskr/src/lib.rs:45110:        .redirect(reqwest::redirect::Policy::none())
-crates/slskr/src/lib.rs:45147:    let client = reqwest::Client::builder()
-crates/slskr/src/lib.rs:45149:        .redirect(reqwest::redirect::Policy::none())
-crates/slskr/src/lib.rs:45178:    let response = reqwest::Client::builder()
-crates/slskr/src/lib.rs:45180:        .redirect(reqwest::redirect::Policy::none())
-crates/slskr/src/lib.rs:45205:    let client = reqwest::Client::builder()
-crates/slskr/src/lib.rs:45207:        .redirect(reqwest::redirect::Policy::none())
-crates/slskr/src/lib.rs:46025:    let mut client_builder = reqwest::Client::builder()
-crates/slskr/src/lib.rs:46027:        .redirect(reqwest::redirect::Policy::none())
-crates/slskr/src/lib.rs:46030:        client_builder = client_builder.resolve(&resolved.host, *addr);
-crates/slskr/src/lib.rs:46067:    let mut client_builder = reqwest::Client::builder()
-crates/slskr/src/lib.rs:46069:        .redirect(reqwest::redirect::Policy::none())
-crates/slskr/src/lib.rs:46072:        client_builder = client_builder.resolve(&resolved.host, *addr);
-crates/slskr/src/lib.rs:46827:    let mut builder = reqwest::Client::builder()
-crates/slskr/src/lib.rs:46829:        .redirect(reqwest::redirect::Policy::none())
-crates/slskr/src/lib.rs:46832:        builder = builder.resolve(&resolved.host, *addr);
-crates/slskr/src/lib.rs:46961:    let mut builder = reqwest::Client::builder()
-crates/slskr/src/lib.rs:46963:        .redirect(reqwest::redirect::Policy::none())
-crates/slskr/src/lib.rs:46966:        builder = builder.resolve(&resolved.host, *addr);
-crates/slskr/src/lib.rs:47594:    let mut builder = reqwest::Client::builder()
-crates/slskr/src/lib.rs:47596:        .redirect(reqwest::redirect::Policy::none())
-crates/slskr/src/lib.rs:47599:        builder = builder.resolve(&resolved.host, *addr);
-crates/slskr/src/lib.rs:47770:    let client = reqwest::Client::builder()
-crates/slskr/src/lib.rs:47772:        .redirect(reqwest::redirect::Policy::none())
-crates/slskr/src/lib.rs:48126:                .to_socket_addrs()
-crates/slskr/src/lib.rs:48143:        .to_socket_addrs()
-crates/slskr/src/lib.rs:48180:        .to_socket_addrs()
-crates/slskr/src/lib.rs:48502:    forwarded_client_ip(config, remote_addr.ip(), headers)
-crates/slskr/src/lib.rs:48507:fn forwarded_client_ip(
-crates/slskr/src/lib.rs:48512:    let forwarded_ips = if let Some(value) = headers.forwarded.as_deref() {
-crates/slskr/src/lib.rs:48513:        forwarded_header_client_ips(value)?
-crates/slskr/src/lib.rs:48515:        let value = headers.x_forwarded_for.as_deref()?;
-crates/slskr/src/lib.rs:48516:        x_forwarded_for_client_ips(value)?
-crates/slskr/src/lib.rs:48519:    forwarded_ips
-crates/slskr/src/lib.rs:48531:fn x_forwarded_for_client_ips(value: &str) -> Option<Vec<IpAddr>> {
-crates/slskr/src/lib.rs:48534:        .map(parse_forwarded_ip_token)
-crates/slskr/src/lib.rs:48539:fn forwarded_header_client_ips(value: &str) -> Option<Vec<IpAddr>> {
-crates/slskr/src/lib.rs:48542:        .map(parse_forwarded_element_ip)
-crates/slskr/src/lib.rs:48547:fn parse_forwarded_element_ip(entry: &str) -> Option<IpAddr> {
-crates/slskr/src/lib.rs:48548:    let mut forwarded_ip = None;
-crates/slskr/src/lib.rs:48554:        if forwarded_ip.is_some() {
-crates/slskr/src/lib.rs:48557:        forwarded_ip = Some(parse_forwarded_ip_token(value)?);
-crates/slskr/src/lib.rs:48559:    forwarded_ip
-crates/slskr/src/lib.rs:48562:fn parse_forwarded_ip_token(value: &str) -> Option<IpAddr> {
-crates/slskr/src/lib.rs:55669:    let mut client_builder = reqwest::Client::builder()
-crates/slskr/src/lib.rs:55671:        .redirect(reqwest::redirect::Policy::none());
-crates/slskr/src/lib.rs:55673:        client_builder = client_builder.resolve(&resolved.host, *addr);
-crates/slskr/src/lib.rs:56827:        let client = match reqwest::Client::builder()
-crates/slskr/src/lib.rs:56829:            .redirect(reqwest::redirect::Policy::none())
-crates/slskr/src/lib.rs:71607:        reqwest::Client::new().post(endpoint).json(&payload).send(),
-crates/slskr/src/lib.rs:73018:                    "primary" => status.forwarded_port,
-crates/slskr/src/lib.rs:73055:/// VPN's forwarded port. The local listener remains bound to the configured
-crates/slskr/src/lib.rs:73062:            .forwarded_port
-crates/slskr/src/lib.rs:84222:            reqwest::Client::new().post(endpoint).json(&payload).send(),
+crates/slskr/src/cli.rs:2499:    let forwarded = tree
+crates/slskr/src/cli.rs:2503:    if forwarded != 1 {
+crates/slskr/src/cli.rs:2505:            "distributed search reached {forwarded} children instead of one"
+crates/slskr/src/port_forwarding.rs:84:                "Port {} is already being forwarded",
+crates/slskr/src/port_forwarding.rs:98:            bytes_forwarded: Arc::new(AtomicU64::new(0)),
+crates/slskr/src/port_forwarding.rs:155:    bytes_forwarded: Arc<AtomicU64>,
+crates/slskr/src/port_forwarding.rs:280:        let send_bytes = Arc::clone(&self.bytes_forwarded);
+crates/slskr/src/port_forwarding.rs:297:        let receive_bytes = Arc::clone(&self.bytes_forwarded);
+crates/slskr/src/port_forwarding.rs:331:        let bytes_forwarded = self.bytes_forwarded.load(Ordering::Relaxed);
+crates/slskr/src/port_forwarding.rs:340:            bytes_forwarded,
+crates/slskr/src/port_forwarding.rs:343:            performance: Performance::new(active_connections, bytes_forwarded),
+crates/slskr/src/port_forwarding.rs:514:    pub bytes_forwarded: u64,
+crates/slskr/src/port_forwarding.rs:870:                if status.bytes_forwarded == 10 {
+crates/slskr/src/multisource.rs:656:    let mut builder = Client::builder()
+crates/slskr/src/multisource.rs:657:        .redirect(Policy::none())
+crates/slskr/src/multisource.rs:661:        builder = builder.resolve(host, SocketAddr::new(address.ip(), port));
+crates/slskr/src/webhooks.rs:579:        let mut client_builder = reqwest::Client::builder()
+crates/slskr/src/webhooks.rs:580:            .redirect(reqwest::redirect::Policy::none())
+crates/slskr/src/webhooks.rs:759:        let mut client_builder = reqwest::Client::builder()
+crates/slskr/src/webhooks.rs:760:            .redirect(reqwest::redirect::Policy::none())
+crates/slskr/src/webhooks.rs:763:            client_builder = client_builder.resolve(&resolved.host, *addr);
+crates/slskr/src/lib.rs:15161:        .to_socket_addrs()
+crates/slskr/src/lib.rs:15171:    let client = reqwest::Client::builder()
+crates/slskr/src/lib.rs:15173:        .redirect(reqwest::redirect::Policy::none())
+crates/slskr/src/lib.rs:15341:    let client = reqwest::Client::builder()
+crates/slskr/src/lib.rs:15343:        .redirect(reqwest::redirect::Policy::none())
+crates/slskr/src/lib.rs:36103:                    "totalBytesForwarded": rules.iter().map(|rule| rule.bytes_forwarded).sum::<u64>(),
+crates/slskr/src/lib.rs:36310:                Err(error) if error.contains("already being forwarded") => {
+crates/slskr/src/lib.rs:37413:        let client = reqwest::Client::builder()
+crates/slskr/src/lib.rs:37414:            .redirect(reqwest::redirect::Policy::none())
+crates/slskr/src/lib.rs:42115:                    "Invalid configuration:\n  DhtRendezvous:\n    DHT rendezvous requires an explicit UDP port between 1 and 65535. Configure dht.dht_port to a stable forwarded or allow-listed port."
+crates/slskr/src/lib.rs:43898:    let response = reqwest::Client::builder()
+crates/slskr/src/lib.rs:43900:        .redirect(reqwest::redirect::Policy::none())
+crates/slskr/src/lib.rs:43919:    let response = reqwest::Client::builder()
+crates/slskr/src/lib.rs:43921:        .redirect(reqwest::redirect::Policy::none())
+crates/slskr/src/lib.rs:44153:    let response = reqwest::Client::builder()
+crates/slskr/src/lib.rs:44155:        .redirect(reqwest::redirect::Policy::none())
+crates/slskr/src/lib.rs:44207:    let response = reqwest::Client::builder()
+crates/slskr/src/lib.rs:44209:        .redirect(reqwest::redirect::Policy::none())
+crates/slskr/src/lib.rs:44835:    let response = reqwest::Client::builder()
+crates/slskr/src/lib.rs:44837:        .redirect(reqwest::redirect::Policy::none())
+crates/slskr/src/lib.rs:45109:        .to_socket_addrs()
+crates/slskr/src/lib.rs:45130:    let client = reqwest::Client::builder()
+crates/slskr/src/lib.rs:45132:        .redirect(reqwest::redirect::Policy::none())
+crates/slskr/src/lib.rs:45169:    let client = reqwest::Client::builder()
+crates/slskr/src/lib.rs:45171:        .redirect(reqwest::redirect::Policy::none())
+crates/slskr/src/lib.rs:45200:    let response = reqwest::Client::builder()
+crates/slskr/src/lib.rs:45202:        .redirect(reqwest::redirect::Policy::none())
+crates/slskr/src/lib.rs:45227:    let client = reqwest::Client::builder()
+crates/slskr/src/lib.rs:45229:        .redirect(reqwest::redirect::Policy::none())
+crates/slskr/src/lib.rs:46047:    let mut client_builder = reqwest::Client::builder()
+crates/slskr/src/lib.rs:46049:        .redirect(reqwest::redirect::Policy::none())
+crates/slskr/src/lib.rs:46052:        client_builder = client_builder.resolve(&resolved.host, *addr);
+crates/slskr/src/lib.rs:46089:    let mut client_builder = reqwest::Client::builder()
+crates/slskr/src/lib.rs:46091:        .redirect(reqwest::redirect::Policy::none())
+crates/slskr/src/lib.rs:46094:        client_builder = client_builder.resolve(&resolved.host, *addr);
+crates/slskr/src/lib.rs:46849:    let mut builder = reqwest::Client::builder()
+crates/slskr/src/lib.rs:46851:        .redirect(reqwest::redirect::Policy::none())
+crates/slskr/src/lib.rs:46854:        builder = builder.resolve(&resolved.host, *addr);
+crates/slskr/src/lib.rs:46983:    let mut builder = reqwest::Client::builder()
+crates/slskr/src/lib.rs:46985:        .redirect(reqwest::redirect::Policy::none())
+crates/slskr/src/lib.rs:46988:        builder = builder.resolve(&resolved.host, *addr);
+crates/slskr/src/lib.rs:47616:    let mut builder = reqwest::Client::builder()
+crates/slskr/src/lib.rs:47618:        .redirect(reqwest::redirect::Policy::none())
+crates/slskr/src/lib.rs:47621:        builder = builder.resolve(&resolved.host, *addr);
+crates/slskr/src/lib.rs:47792:    let client = reqwest::Client::builder()
+crates/slskr/src/lib.rs:47794:        .redirect(reqwest::redirect::Policy::none())
+crates/slskr/src/lib.rs:48148:                .to_socket_addrs()
+crates/slskr/src/lib.rs:48165:        .to_socket_addrs()
+crates/slskr/src/lib.rs:48202:        .to_socket_addrs()
+crates/slskr/src/lib.rs:48524:    forwarded_client_ip(config, remote_addr.ip(), headers)
+crates/slskr/src/lib.rs:48529:fn forwarded_client_ip(
+crates/slskr/src/lib.rs:48534:    let forwarded_ips = if let Some(value) = headers.forwarded.as_deref() {
+crates/slskr/src/lib.rs:48535:        forwarded_header_client_ips(value)?
+crates/slskr/src/lib.rs:48537:        let value = headers.x_forwarded_for.as_deref()?;
+crates/slskr/src/lib.rs:48538:        x_forwarded_for_client_ips(value)?
+crates/slskr/src/lib.rs:48541:    forwarded_ips
+crates/slskr/src/lib.rs:48553:fn x_forwarded_for_client_ips(value: &str) -> Option<Vec<IpAddr>> {
+crates/slskr/src/lib.rs:48556:        .map(parse_forwarded_ip_token)
+crates/slskr/src/lib.rs:48561:fn forwarded_header_client_ips(value: &str) -> Option<Vec<IpAddr>> {
+crates/slskr/src/lib.rs:48564:        .map(parse_forwarded_element_ip)
+crates/slskr/src/lib.rs:48569:fn parse_forwarded_element_ip(entry: &str) -> Option<IpAddr> {
+crates/slskr/src/lib.rs:48570:    let mut forwarded_ip = None;
+crates/slskr/src/lib.rs:48576:        if forwarded_ip.is_some() {
+crates/slskr/src/lib.rs:48579:        forwarded_ip = Some(parse_forwarded_ip_token(value)?);
+crates/slskr/src/lib.rs:48581:    forwarded_ip
+crates/slskr/src/lib.rs:48584:fn parse_forwarded_ip_token(value: &str) -> Option<IpAddr> {
+crates/slskr/src/lib.rs:55691:    let mut client_builder = reqwest::Client::builder()
+crates/slskr/src/lib.rs:55693:        .redirect(reqwest::redirect::Policy::none());
+crates/slskr/src/lib.rs:55695:        client_builder = client_builder.resolve(&resolved.host, *addr);
+crates/slskr/src/lib.rs:56849:        let client = match reqwest::Client::builder()
+crates/slskr/src/lib.rs:56851:            .redirect(reqwest::redirect::Policy::none())
+crates/slskr/src/lib.rs:71637:        reqwest::Client::new().post(endpoint).json(&payload).send(),
+crates/slskr/src/lib.rs:73056:                    "primary" => status.forwarded_port,
+crates/slskr/src/lib.rs:73093:/// VPN's forwarded port. The local listener remains bound to the configured
+crates/slskr/src/lib.rs:73100:            .forwarded_port
+crates/slskr/src/lib.rs:84307:            reqwest::Client::new().post(endpoint).json(&payload).send(),
 crates/slskr/src/controller_tests.rs:2876:fn trusted_proxy_rate_limit_addr_uses_forwarded_headers_only_from_allowlist() {
 crates/slskr/src/controller_tests.rs:2886:        x_forwarded_for: Some("198.51.100.24, 127.0.0.1".to_owned()),
 crates/slskr/src/controller_tests.rs:2891:        .expect("trusted forwarded address");
@@ -338,9 +338,9 @@ crates/slskr/src/controller_tests.rs:3476:        forwarded: Some("for=unknown".
 crates/slskr/src/controller_tests.rs:3477:        x_forwarded_for: Some("203.0.113.99".to_owned()),
 crates/slskr/src/controller_tests.rs:6214:        forwarded_port: Some(44_444),
 crates/slskr/src/controller_tests.rs:6237:            "forwardedPort": 44444,
-crates/slskr/src/controller_tests.rs:93482:            forwarded_port: Some(44_499),
-crates/slskr/src/controller_tests.rs:93507:                && application["vpn"]["forwardedPort"] == 44_499
-crates/slskr/src/controller_tests.rs:99003:        let client = reqwest::Client::new();
+crates/slskr/src/controller_tests.rs:93504:            forwarded_port: Some(44_499),
+crates/slskr/src/controller_tests.rs:93529:                && application["vpn"]["forwardedPort"] == 44_499
+crates/slskr/src/controller_tests.rs:99025:        let client = reqwest::Client::new();
 
 ## Filesystem and persistent-state boundaries
 crates/slskr/src/pod_channels.rs:371:    let mut options = fs::OpenOptions::new();
@@ -352,8 +352,6 @@ crates/slskr/src/pod_channels.rs:531:        std::fs::create_dir_all(&state_dir)
 crates/slskr/src/pod_channels.rs:556:        std::fs::remove_dir_all(state_dir).unwrap();
 crates/slskr/src/pod_channels.rs:565:        std::fs::create_dir_all(&state_dir).unwrap();
 crates/slskr/src/pod_channels.rs:589:        std::fs::remove_dir_all(state_dir).unwrap();
-crates/slskr/src/realm_subject_index.rs:347:            fs::create_dir_all(parent)
-crates/slskr/src/realm_subject_index.rs:353:        fs::rename(&temporary, path)
 crates/slskr/src/mesh_services.rs:57:            let _ = std::fs::remove_file(&self.path);
 crates/slskr/src/mesh_services.rs:288:    let mut options = tokio::fs::OpenOptions::new();
 crates/slskr/src/mesh_services.rs:506:        std::fs::create_dir_all(&root).unwrap();
@@ -364,12 +362,8 @@ crates/slskr/src/mesh_services.rs:601:        std::fs::create_dir_all(&root).unw
 crates/slskr/src/mesh_services.rs:626:        std::fs::remove_dir_all(root).unwrap();
 crates/slskr/src/mesh_services.rs:649:        std::fs::create_dir_all(&root).unwrap();
 crates/slskr/src/mesh_services.rs:690:        std::fs::remove_dir_all(root).unwrap();
-crates/slskr/src/content_discovery.rs:945:    let mut options = fs::OpenOptions::new();
-crates/slskr/src/content_discovery.rs:1285:        fs::create_dir_all(&root).expect("create state directory");
-crates/slskr/src/content_discovery.rs:1309:        fs::remove_dir_all(root).expect("remove state directory");
-crates/slskr/src/scripts.rs:77:    tokio::fs::create_dir_all(script_directory)
-crates/slskr/src/scripts.rs:209:        tokio::fs::remove_dir_all(directory).await.unwrap();
-crates/slskr/src/scripts.rs:266:        tokio::fs::remove_dir_all(directory).await.unwrap();
+crates/slskr/src/realm_subject_index.rs:347:            fs::create_dir_all(parent)
+crates/slskr/src/realm_subject_index.rs:353:        fs::rename(&temporary, path)
 crates/slskr/src/ftp.rs:674:        tokio::fs::create_dir_all(&album).await.unwrap();
 crates/slskr/src/ftp.rs:698:        tokio::fs::remove_dir_all(root).await.unwrap();
 crates/slskr/src/ftp.rs:705:        tokio::fs::create_dir_all(&album).await.unwrap();
@@ -382,66 +376,7 @@ crates/slskr/src/ftp.rs:806:        tokio::fs::remove_dir_all(root).await.unwrap
 crates/slskr/src/ftp.rs:813:        tokio::fs::create_dir_all(&album).await.unwrap();
 crates/slskr/src/ftp.rs:834:        tokio::fs::remove_dir_all(root).await.unwrap();
 crates/slskr/src/ftp.rs:873:        tokio::fs::remove_file(file).await.unwrap();
-crates/slskr/src/relay.rs:1214:    fs::rename(&temporary_path, &manifest_path)
-crates/slskr/src/relay.rs:1417:            tokio::fs::remove_file(path)
-crates/slskr/src/relay.rs:1428:        std::fs::create_dir_all(&incoming).expect("create relay incoming directory");
-crates/slskr/src/relay.rs:1459:        std::fs::remove_dir_all(root).expect("remove relay rehydration fixture");
-crates/slskr/src/relay.rs:1469:        std::fs::create_dir_all(&incoming).expect("create relay incoming directory");
-crates/slskr/src/relay.rs:1491:        std::fs::remove_dir_all(root).expect("remove relay manifest fixture");
-crates/slskr/src/http_server.rs:1727:        std::fs::remove_file(path).unwrap();
-crates/slskr/src/http_server.rs:1769:        std::fs::remove_file(path).unwrap();
-crates/slskr/src/relay_agent.rs:563:    fs::create_dir_all(&relay_directory)
-crates/slskr/src/relay_agent.rs:597:    let _ = fs::remove_file(&database_path).await;
-crates/slskr/src/relay_agent.rs:840:            let _ = fs::remove_file(&temporary).await;
-crates/slskr/src/relay_agent.rs:853:    fs::rename(&temporary, &destination)
-crates/slskr/src/relay_agent.rs:881:            let _ = std::fs::remove_file(&self.path);
-crates/slskr/src/mesh_security.rs:1044:                fs::create_dir_all(&mesh_directory)
-crates/slskr/src/mesh_security.rs:1205:        if let Err(error) = fs::rename(&temporary, &self.storage_path) {
-crates/slskr/src/mesh_security.rs:1206:            let _ = fs::remove_file(&temporary);
-crates/slskr/src/persistence.rs:21:    let file = OpenOptions::new()
-crates/slskr/src/persistence.rs:34:    file.set_permissions(std::fs::Permissions::from_mode(0o600))
-crates/slskr/src/persistence.rs:5627:        std::fs::set_permissions(&db_path, std::fs::Permissions::from_mode(0o666)).unwrap();
-crates/slskr/src/persistence.rs:5643:        std::fs::remove_dir_all(root).unwrap();
-crates/slskr/src/focused_controller_tests.rs:42:    fs::create_dir_all(&state_dir).expect("create focused test state directory");
-crates/slskr/src/focused_controller_tests.rs:236:    fs::create_dir_all(&evidence_dir).expect("create focused evidence directory");
-crates/slskr/src/focused_controller_tests.rs:248:    fs::create_dir_all(&evidence_dir).expect("create focused file evidence directory");
-crates/slskr/src/focused_controller_tests.rs:285:    fs::create_dir_all(downloads.join("Artist/Album")).expect("downloads fixture");
-crates/slskr/src/focused_controller_tests.rs:287:    fs::create_dir_all(incomplete.join("Partial")).expect("incomplete fixture");
-crates/slskr/src/focused_controller_tests.rs:383:        fs::create_dir_all(path.parent().expect("delete fixture parent"))
-crates/slskr/src/focused_controller_tests.rs:386:            fs::create_dir_all(&path).expect("delete fixture directory path");
-crates/slskr/src/focused_controller_tests.rs:609:            fs::create_dir_all(&target_dir).expect("create storage list target");
-crates/slskr/src/focused_controller_tests.rs:638:            let _ = fs::remove_file(link);
-crates/slskr/src/focused_controller_tests.rs:639:            let _ = fs::remove_dir_all(target_dir);
-crates/slskr/src/focused_controller_tests.rs:679:    let _ = fs::remove_file(downloads_conflict);
-crates/slskr/src/focused_controller_tests.rs:680:    let _ = fs::remove_file(incomplete_conflict);
-crates/slskr/src/focused_controller_tests.rs:944:    fs::create_dir_all(managed_file.parent().expect("managed file parent"))
-crates/slskr/src/focused_controller_tests.rs:1201:        let _ = fs::remove_dir_all(&state_dir);
-crates/slskr/src/focused_controller_tests.rs:1205:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/focused_controller_tests.rs:1336:    fs::create_dir_all(root.join("legacy")).expect("create legacy profile root");
-crates/slskr/src/focused_controller_tests.rs:1337:    fs::create_dir_all(root.join("native")).expect("create native profile root");
-crates/slskr/src/focused_controller_tests.rs:1376:    let _ = fs::remove_dir_all(root);
 crates/slskr/src/storage.rs:106:    OpenOptions::new()
-crates/slskr/src/route_dispatch_group_2.rs:2137:                    let _ = fs::remove_file(path);
-crates/slskr/src/route_dispatch_group_2.rs:2185:                    let _ = fs::remove_file(path);
-crates/slskr/src/private_gateway.rs:2619:    fs::create_dir_all(state_dir)
-crates/slskr/src/private_gateway.rs:2645:        return match fs::remove_file(certificate_path) {
-crates/slskr/src/private_gateway.rs:2674:    let mut options = fs::OpenOptions::new();
-crates/slskr/src/private_gateway.rs:2717:    let mut options = fs::OpenOptions::new();
-crates/slskr/src/private_gateway.rs:2729:        let _ = fs::remove_file(&temporary);
-crates/slskr/src/private_gateway.rs:2734:        let _ = fs::remove_file(&temporary);
-crates/slskr/src/private_gateway.rs:2737:    if let Err(error) = fs::remove_file(&temporary) {
-crates/slskr/src/private_gateway.rs:2755:        fs::create_dir_all(&path).unwrap();
-crates/slskr/src/private_gateway.rs:3052:        fs::remove_dir_all(root).unwrap();
-crates/slskr/src/private_gateway.rs:3078:        fs::remove_dir_all(root).unwrap();
-crates/slskr/src/private_gateway.rs:3107:        fs::remove_dir_all(root).unwrap();
-crates/slskr/src/private_gateway.rs:3116:        fs::remove_dir_all(root).unwrap();
-crates/slskr/src/private_gateway.rs:3130:        fs::remove_dir_all(root).unwrap();
-crates/slskr/src/private_gateway.rs:3145:        fs::remove_dir_all(root).unwrap();
-crates/slskr/src/private_gateway.rs:3156:        fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
-crates/slskr/src/private_gateway.rs:3161:        fs::remove_dir_all(root).unwrap();
-crates/slskr/src/private_gateway.rs:3177:        fs::remove_dir_all(root).unwrap();
-crates/slskr/src/private_gateway.rs:3191:        fs::remove_dir_all(root).unwrap();
-crates/slskr/src/private_gateway.rs:3210:        fs::remove_dir_all(root).unwrap();
 crates/slskr/src/credential_store.rs:129:    let mut options = fs::OpenOptions::new();
 crates/slskr/src/credential_store.rs:340:    fs::create_dir_all(parent).map_err(|error| {
 crates/slskr/src/credential_store.rs:368:            fs::set_permissions(parent, fs::Permissions::from_mode(0o700)).map_err(|error| {
@@ -482,6 +417,13 @@ crates/slskr/src/credential_store.rs:641:        let _ = fs::remove_dir_all(&roo
 crates/slskr/src/credential_store.rs:642:        fs::create_dir_all(&root).expect("create fixture directory");
 crates/slskr/src/credential_store.rs:646:        fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
 crates/slskr/src/credential_store.rs:659:        let _ = fs::remove_dir_all(root);
+crates/slskr/src/content_discovery.rs:945:    let mut options = fs::OpenOptions::new();
+crates/slskr/src/content_discovery.rs:1285:        fs::create_dir_all(&root).expect("create state directory");
+crates/slskr/src/content_discovery.rs:1309:        fs::remove_dir_all(root).expect("remove state directory");
+crates/slskr/src/scripts.rs:97:    tokio::fs::create_dir_all(script_directory)
+crates/slskr/src/scripts.rs:230:        tokio::fs::remove_dir_all(directory).await.unwrap();
+crates/slskr/src/scripts.rs:254:        tokio::fs::remove_dir_all(directory).await.unwrap();
+crates/slskr/src/scripts.rs:311:        tokio::fs::remove_dir_all(directory).await.unwrap();
 crates/slskr/src/pods.rs:1402:    let mut options = fs::OpenOptions::new();
 crates/slskr/src/pods.rs:1555:        std::fs::create_dir_all(&state_dir).unwrap();
 crates/slskr/src/pods.rs:1568:        std::fs::remove_dir_all(state_dir).unwrap();
@@ -512,6 +454,65 @@ crates/slskr/src/multisource.rs:1214:        fs::remove_dir_all(root).expect("re
 crates/slskr/src/multisource.rs:1283:        fs::remove_dir_all(root).expect("remove swarm cancellation test root");
 crates/slskr/src/multisource.rs:1312:        fs::remove_dir_all(root).expect("remove mesh preview test root");
 crates/slskr/src/multisource.rs:1373:        fs::remove_dir_all(root).expect("remove mesh preview test root");
+crates/slskr/src/relay.rs:1214:    fs::rename(&temporary_path, &manifest_path)
+crates/slskr/src/relay.rs:1417:            tokio::fs::remove_file(path)
+crates/slskr/src/relay.rs:1428:        std::fs::create_dir_all(&incoming).expect("create relay incoming directory");
+crates/slskr/src/relay.rs:1459:        std::fs::remove_dir_all(root).expect("remove relay rehydration fixture");
+crates/slskr/src/relay.rs:1469:        std::fs::create_dir_all(&incoming).expect("create relay incoming directory");
+crates/slskr/src/relay.rs:1491:        std::fs::remove_dir_all(root).expect("remove relay manifest fixture");
+crates/slskr/src/mesh_security.rs:1044:                fs::create_dir_all(&mesh_directory)
+crates/slskr/src/mesh_security.rs:1205:        if let Err(error) = fs::rename(&temporary, &self.storage_path) {
+crates/slskr/src/mesh_security.rs:1206:            let _ = fs::remove_file(&temporary);
+crates/slskr/src/focused_controller_tests.rs:42:    fs::create_dir_all(&state_dir).expect("create focused test state directory");
+crates/slskr/src/focused_controller_tests.rs:236:    fs::create_dir_all(&evidence_dir).expect("create focused evidence directory");
+crates/slskr/src/focused_controller_tests.rs:248:    fs::create_dir_all(&evidence_dir).expect("create focused file evidence directory");
+crates/slskr/src/focused_controller_tests.rs:285:    fs::create_dir_all(downloads.join("Artist/Album")).expect("downloads fixture");
+crates/slskr/src/focused_controller_tests.rs:287:    fs::create_dir_all(incomplete.join("Partial")).expect("incomplete fixture");
+crates/slskr/src/focused_controller_tests.rs:383:        fs::create_dir_all(path.parent().expect("delete fixture parent"))
+crates/slskr/src/focused_controller_tests.rs:386:            fs::create_dir_all(&path).expect("delete fixture directory path");
+crates/slskr/src/focused_controller_tests.rs:609:            fs::create_dir_all(&target_dir).expect("create storage list target");
+crates/slskr/src/focused_controller_tests.rs:638:            let _ = fs::remove_file(link);
+crates/slskr/src/focused_controller_tests.rs:639:            let _ = fs::remove_dir_all(target_dir);
+crates/slskr/src/focused_controller_tests.rs:679:    let _ = fs::remove_file(downloads_conflict);
+crates/slskr/src/focused_controller_tests.rs:680:    let _ = fs::remove_file(incomplete_conflict);
+crates/slskr/src/focused_controller_tests.rs:1019:    fs::create_dir_all(managed_file.parent().expect("managed file parent"))
+crates/slskr/src/focused_controller_tests.rs:1276:        let _ = fs::remove_dir_all(&state_dir);
+crates/slskr/src/focused_controller_tests.rs:1280:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/focused_controller_tests.rs:1411:    fs::create_dir_all(root.join("legacy")).expect("create legacy profile root");
+crates/slskr/src/focused_controller_tests.rs:1412:    fs::create_dir_all(root.join("native")).expect("create native profile root");
+crates/slskr/src/focused_controller_tests.rs:1451:    let _ = fs::remove_dir_all(root);
+crates/slskr/src/relay_agent.rs:587:    fs::create_dir_all(&relay_directory)
+crates/slskr/src/relay_agent.rs:621:    let _ = fs::remove_file(&database_path).await;
+crates/slskr/src/relay_agent.rs:864:            let _ = fs::remove_file(&temporary).await;
+crates/slskr/src/relay_agent.rs:877:    fs::rename(&temporary, &destination)
+crates/slskr/src/relay_agent.rs:905:            let _ = std::fs::remove_file(&self.path);
+crates/slskr/src/private_gateway.rs:2662:    fs::create_dir_all(state_dir)
+crates/slskr/src/private_gateway.rs:2688:        return match fs::remove_file(certificate_path) {
+crates/slskr/src/private_gateway.rs:2717:    let mut options = fs::OpenOptions::new();
+crates/slskr/src/private_gateway.rs:2760:    let mut options = fs::OpenOptions::new();
+crates/slskr/src/private_gateway.rs:2772:        let _ = fs::remove_file(&temporary);
+crates/slskr/src/private_gateway.rs:2777:        let _ = fs::remove_file(&temporary);
+crates/slskr/src/private_gateway.rs:2780:    if let Err(error) = fs::remove_file(&temporary) {
+crates/slskr/src/private_gateway.rs:2798:        fs::create_dir_all(&path).unwrap();
+crates/slskr/src/private_gateway.rs:3095:        fs::remove_dir_all(root).unwrap();
+crates/slskr/src/private_gateway.rs:3121:        fs::remove_dir_all(root).unwrap();
+crates/slskr/src/private_gateway.rs:3150:        fs::remove_dir_all(root).unwrap();
+crates/slskr/src/private_gateway.rs:3159:        fs::remove_dir_all(root).unwrap();
+crates/slskr/src/private_gateway.rs:3173:        fs::remove_dir_all(root).unwrap();
+crates/slskr/src/private_gateway.rs:3188:        fs::remove_dir_all(root).unwrap();
+crates/slskr/src/private_gateway.rs:3199:        fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
+crates/slskr/src/private_gateway.rs:3204:        fs::remove_dir_all(root).unwrap();
+crates/slskr/src/private_gateway.rs:3220:        fs::remove_dir_all(root).unwrap();
+crates/slskr/src/private_gateway.rs:3234:        fs::remove_dir_all(root).unwrap();
+crates/slskr/src/private_gateway.rs:3253:        fs::remove_dir_all(root).unwrap();
+crates/slskr/src/http_server.rs:1727:        std::fs::remove_file(path).unwrap();
+crates/slskr/src/http_server.rs:1769:        std::fs::remove_file(path).unwrap();
+crates/slskr/src/persistence.rs:21:    let file = OpenOptions::new()
+crates/slskr/src/persistence.rs:34:    file.set_permissions(std::fs::Permissions::from_mode(0o600))
+crates/slskr/src/persistence.rs:5627:        std::fs::set_permissions(&db_path, std::fs::Permissions::from_mode(0o666)).unwrap();
+crates/slskr/src/persistence.rs:5643:        std::fs::remove_dir_all(root).unwrap();
+crates/slskr/src/route_dispatch_group_2.rs:2138:                    let _ = fs::remove_file(path);
+crates/slskr/src/route_dispatch_group_2.rs:2186:                    let _ = fs::remove_file(path);
 crates/slskr/src/config.rs:1974:    let file = fs::OpenOptions::new()
 crates/slskr/src/config.rs:1980:    fs::remove_file(&probe).map_err(|_| format!("{field} writeability probe cleanup failed"))?;
 crates/slskr/src/config.rs:8479:    let mut options = fs::OpenOptions::new();
@@ -588,104 +589,104 @@ crates/slskr/src/config.rs:15073:        std::fs::create_dir_all(&root).unwrap()
 crates/slskr/src/config.rs:15205:        std::fs::remove_dir_all(root).unwrap();
 crates/slskr/src/config.rs:15214:        std::fs::create_dir_all(&root).unwrap();
 crates/slskr/src/config.rs:15229:        std::fs::remove_dir_all(root).unwrap();
-crates/slskr/src/lib.rs:6419:            let mut options = fs::OpenOptions::new();
-crates/slskr/src/lib.rs:6445:                file.set_permissions(fs::Permissions::from_mode(0o600))
-crates/slskr/src/lib.rs:6453:            let mut options = fs::OpenOptions::new();
-crates/slskr/src/lib.rs:6467:            fs::rename(&temporary, &path)
-crates/slskr/src/lib.rs:12290:        let mut options = fs::OpenOptions::new();
-crates/slskr/src/lib.rs:13971:            types: canonicalize(
-crates/slskr/src/lib.rs:13984:            severities: canonicalize("severities", &["Info", "Low", "Medium", "High", "Critical"])?,
-crates/slskr/src/lib.rs:13985:            statuses: canonicalize(
-crates/slskr/src/lib.rs:15299:    let _ = fs::remove_file(&normalized_path);
-crates/slskr/src/lib.rs:15737:    match (path.canonicalize(), root.canonicalize()) {
-crates/slskr/src/lib.rs:16049:                match (normalized.canonicalize(), root.canonicalize()) {
-crates/slskr/src/lib.rs:16089:    let writable = fs::OpenOptions::new()
-crates/slskr/src/lib.rs:16095:        let _ = fs::remove_file(probe);
-crates/slskr/src/lib.rs:16707:            .then(|| fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf()));
-crates/slskr/src/lib.rs:17385:            .then(|| fs::canonicalize(configured).unwrap_or_else(|_| configured.to_path_buf()));
-crates/slskr/src/lib.rs:18409:        fs::rename(&temporary, &path)
-crates/slskr/src/lib.rs:24011:              if remove_file { if let Some(path) = target.local_path.as_deref() { let _ = fs::remove_file(path); } }
-crates/slskr/src/lib.rs:24042:              if remove_file { if let Some(path) = target.local_path.as_deref() { let _ = fs::remove_file(path); } }
-crates/slskr/src/lib.rs:36679:        .canonicalize()
-crates/slskr/src/lib.rs:36708:    let canonical_root = root.canonicalize().ok()?;
-crates/slskr/src/lib.rs:36731:    let canonical_file = file.canonicalize().ok()?;
-crates/slskr/src/lib.rs:36837:    let mut options = fs::OpenOptions::new();
-crates/slskr/src/lib.rs:36884:    let canonical_root = root.canonicalize().map_err(|error| error.to_string())?;
-crates/slskr/src/lib.rs:36885:    let canonical_file = file.canonicalize().map_err(|error| error.to_string())?;
-crates/slskr/src/lib.rs:39480:    let mut options = fs::OpenOptions::new();
-crates/slskr/src/lib.rs:42287:    fs::create_dir_all(parent)
-crates/slskr/src/lib.rs:43763:    let mut options = fs::OpenOptions::new();
-crates/slskr/src/lib.rs:43856:        fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
-crates/slskr/src/lib.rs:43864:    match fs::remove_file(path) {
-crates/slskr/src/lib.rs:46923:    let directory = fs::canonicalize(directory)
-crates/slskr/src/lib.rs:46931:        fs::remove_file(&path).map_err(|error| {
-crates/slskr/src/lib.rs:50432:                                    let _ = fs::remove_file(&database_path);
-crates/slskr/src/lib.rs:50438:                            let _ = fs::remove_file(&database_path);
-crates/slskr/src/lib.rs:50454:    fs::create_dir_all(&directory)
-crates/slskr/src/lib.rs:69827:    fs::create_dir_all(root).map_err(|error| format!("storage root create failed: {error}"))?;
-crates/slskr/src/lib.rs:69844:            .canonicalize()
-crates/slskr/src/lib.rs:69851:                .canonicalize()
-crates/slskr/src/lib.rs:69856:                .canonicalize()
-crates/slskr/src/lib.rs:71539:        fs::remove_file(path)
-crates/slskr/src/lib.rs:71543:        fs::create_dir_all(parent)
-crates/slskr/src/lib.rs:71548:    fs::set_permissions(path, fs::Permissions::from_mode(0o660))
-crates/slskr/src/lib.rs:72659:        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).map_err(
-crates/slskr/src/lib.rs:72671:        std::fs::create_dir_all(path)
-crates/slskr/src/lib.rs:72718:    std::fs::create_dir_all(path).map_err(|error| {
-crates/slskr/src/lib.rs:73854:    let _ = fs::remove_file(output_path);
-crates/slskr/src/lib.rs:76636:        let canonical_path = local_path.canonicalize().ok()?;
-crates/slskr/src/lib.rs:76640:            .filter_map(|root| root.canonicalize().ok())
-crates/slskr/src/lib.rs:76656:    let mut options = fs::OpenOptions::new();
-crates/slskr/src/lib.rs:76845:        let _ = fs::remove_file(&uploaded.path);
-crates/slskr/src/lib.rs:76942:    fs::create_dir_all(&directory)
-crates/slskr/src/lib.rs:76947:        fs::set_permissions(&directory, fs::Permissions::from_mode(0o700))
-crates/slskr/src/lib.rs:76965:    let file = fs::OpenOptions::new()
-crates/slskr/src/lib.rs:76973:        let _ = fs::remove_file(&output_path);
-crates/slskr/src/lib.rs:77038:                let _ = fs::remove_file(&output_path);
-crates/slskr/src/lib.rs:77050:        let _ = fs::remove_file(&output_path);
-crates/slskr/src/lib.rs:77349:            let _ = fs::remove_file(&path);
-crates/slskr/src/lib.rs:77356:            let _ = fs::remove_file(&path);
-crates/slskr/src/lib.rs:77943:    fs::create_dir_all(root).map_err(|error| format!("storage root create failed: {error}"))?;
-crates/slskr/src/lib.rs:77951:            .canonicalize()
-crates/slskr/src/lib.rs:77953:        let canonical_parent = match path.parent().unwrap_or(root).canonicalize() {
-crates/slskr/src/lib.rs:77973:            fs::remove_dir_all(&path)
-crates/slskr/src/lib.rs:77979:            fs::remove_file(&path).map_err(|error| format!("file delete failed: {error}"))?;
-crates/slskr/src/lib.rs:78119:    fs::create_dir_all(&root).map_err(|error| format!("download root create failed: {error}"))?;
-crates/slskr/src/lib.rs:78127:        fs::create_dir_all(parent)
-crates/slskr/src/lib.rs:78131:        .canonicalize()
-crates/slskr/src/lib.rs:78136:        .canonicalize()
-crates/slskr/src/lib.rs:78228:    let mut options = fs::OpenOptions::new();
-crates/slskr/src/lib.rs:78279:        .canonicalize()
-crates/slskr/src/lib.rs:78282:        .canonicalize()
-crates/slskr/src/lib.rs:78287:    fs::OpenOptions::new()
-crates/slskr/src/lib.rs:81878:        if let Err(error) = fs::set_permissions(&path, fs::Permissions::from_mode(mode)) {
-crates/slskr/src/lib.rs:81890:            let _ = fs::set_permissions(parent, fs::Permissions::from_mode(directory_mode));
-crates/slskr/src/lib.rs:82523:            fs::OpenOptions::new()
-crates/slskr/src/lib.rs:82589:        fs::rename(&final_path, &incomplete_path)
-crates/slskr/src/lib.rs:82617:        fs::remove_file(&completed_path)
-crates/slskr/src/lib.rs:82620:    match fs::rename(&incomplete_path, &completed_path) {
-crates/slskr/src/lib.rs:82628:            fs::remove_file(&incomplete_path)
-crates/slskr/src/lib.rs:82740:        fs::create_dir_all(&root)
-crates/slskr/src/lib.rs:82747:        fs::rename(path, destination)
-crates/slskr/src/lib.rs:82750:        fs::remove_file(path)
-crates/slskr/src/lib.rs:84192:        if tokio::fs::create_dir_all(&log_dir).await.is_ok() {
-crates/slskr/src/lib.rs:84193:            if let Ok(mut file) = tokio::fs::OpenOptions::new()
-crates/slskr/src/lib.rs:86794:            let _ = fs::remove_dir(&path);
-crates/slskr/src/lib.rs:86797:            let _ = fs::remove_file(path);
-crates/slskr/src/lib.rs:86904:                let _ = fs::remove_file(entry.path());
-crates/slskr/src/lib.rs:87951:                let _ = fs::remove_file(path);
-crates/slskr/src/lib.rs:89562:        match root.canonicalize() {
-crates/slskr/src/lib.rs:89651:                let Ok(canonical_path) = path.canonicalize() else {
-crates/slskr/src/lib.rs:89914:        fs::remove_file(&rotated_path)
-crates/slskr/src/lib.rs:89917:    fs::rename(path, &rotated_path)
-crates/slskr/src/lib.rs:89942:    let mut options = fs::OpenOptions::new();
-crates/slskr/src/lib.rs:90022:    fs::create_dir_all(parent)?;
-crates/slskr/src/lib.rs:90047:        let mut file = fs::OpenOptions::new()
-crates/slskr/src/lib.rs:90058:            let _ = fs::remove_file(temp_path);
-crates/slskr/src/lib.rs:90066:    fs::rename(source, destination)
-crates/slskr/src/lib.rs:90074:    match fs::remove_file(destination) {
-crates/slskr/src/lib.rs:90079:    fs::rename(source, destination)
-crates/slskr/src/lib.rs:90104:    let mut options = fs::OpenOptions::new();
+crates/slskr/src/lib.rs:6440:            let mut options = fs::OpenOptions::new();
+crates/slskr/src/lib.rs:6466:                file.set_permissions(fs::Permissions::from_mode(0o600))
+crates/slskr/src/lib.rs:6474:            let mut options = fs::OpenOptions::new();
+crates/slskr/src/lib.rs:6488:            fs::rename(&temporary, &path)
+crates/slskr/src/lib.rs:12311:        let mut options = fs::OpenOptions::new();
+crates/slskr/src/lib.rs:13992:            types: canonicalize(
+crates/slskr/src/lib.rs:14005:            severities: canonicalize("severities", &["Info", "Low", "Medium", "High", "Critical"])?,
+crates/slskr/src/lib.rs:14006:            statuses: canonicalize(
+crates/slskr/src/lib.rs:15320:    let _ = fs::remove_file(&normalized_path);
+crates/slskr/src/lib.rs:15758:    match (path.canonicalize(), root.canonicalize()) {
+crates/slskr/src/lib.rs:16070:                match (normalized.canonicalize(), root.canonicalize()) {
+crates/slskr/src/lib.rs:16110:    let writable = fs::OpenOptions::new()
+crates/slskr/src/lib.rs:16116:        let _ = fs::remove_file(probe);
+crates/slskr/src/lib.rs:16728:            .then(|| fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf()));
+crates/slskr/src/lib.rs:17406:            .then(|| fs::canonicalize(configured).unwrap_or_else(|_| configured.to_path_buf()));
+crates/slskr/src/lib.rs:18430:        fs::rename(&temporary, &path)
+crates/slskr/src/lib.rs:24032:              if remove_file { if let Some(path) = target.local_path.as_deref() { let _ = fs::remove_file(path); } }
+crates/slskr/src/lib.rs:24063:              if remove_file { if let Some(path) = target.local_path.as_deref() { let _ = fs::remove_file(path); } }
+crates/slskr/src/lib.rs:36701:        .canonicalize()
+crates/slskr/src/lib.rs:36730:    let canonical_root = root.canonicalize().ok()?;
+crates/slskr/src/lib.rs:36753:    let canonical_file = file.canonicalize().ok()?;
+crates/slskr/src/lib.rs:36859:    let mut options = fs::OpenOptions::new();
+crates/slskr/src/lib.rs:36906:    let canonical_root = root.canonicalize().map_err(|error| error.to_string())?;
+crates/slskr/src/lib.rs:36907:    let canonical_file = file.canonicalize().map_err(|error| error.to_string())?;
+crates/slskr/src/lib.rs:39502:    let mut options = fs::OpenOptions::new();
+crates/slskr/src/lib.rs:42309:    fs::create_dir_all(parent)
+crates/slskr/src/lib.rs:43785:    let mut options = fs::OpenOptions::new();
+crates/slskr/src/lib.rs:43878:        fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
+crates/slskr/src/lib.rs:43886:    match fs::remove_file(path) {
+crates/slskr/src/lib.rs:46945:    let directory = fs::canonicalize(directory)
+crates/slskr/src/lib.rs:46953:        fs::remove_file(&path).map_err(|error| {
+crates/slskr/src/lib.rs:50454:                                    let _ = fs::remove_file(&database_path);
+crates/slskr/src/lib.rs:50460:                            let _ = fs::remove_file(&database_path);
+crates/slskr/src/lib.rs:50476:    fs::create_dir_all(&directory)
+crates/slskr/src/lib.rs:69857:    fs::create_dir_all(root).map_err(|error| format!("storage root create failed: {error}"))?;
+crates/slskr/src/lib.rs:69874:            .canonicalize()
+crates/slskr/src/lib.rs:69881:                .canonicalize()
+crates/slskr/src/lib.rs:69886:                .canonicalize()
+crates/slskr/src/lib.rs:71569:        fs::remove_file(path)
+crates/slskr/src/lib.rs:71573:        fs::create_dir_all(parent)
+crates/slskr/src/lib.rs:71578:    fs::set_permissions(path, fs::Permissions::from_mode(0o660))
+crates/slskr/src/lib.rs:72689:        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).map_err(
+crates/slskr/src/lib.rs:72701:        std::fs::create_dir_all(path)
+crates/slskr/src/lib.rs:72748:    std::fs::create_dir_all(path).map_err(|error| {
+crates/slskr/src/lib.rs:73892:    let _ = fs::remove_file(output_path);
+crates/slskr/src/lib.rs:76721:        let canonical_path = local_path.canonicalize().ok()?;
+crates/slskr/src/lib.rs:76725:            .filter_map(|root| root.canonicalize().ok())
+crates/slskr/src/lib.rs:76741:    let mut options = fs::OpenOptions::new();
+crates/slskr/src/lib.rs:76930:        let _ = fs::remove_file(&uploaded.path);
+crates/slskr/src/lib.rs:77027:    fs::create_dir_all(&directory)
+crates/slskr/src/lib.rs:77032:        fs::set_permissions(&directory, fs::Permissions::from_mode(0o700))
+crates/slskr/src/lib.rs:77050:    let file = fs::OpenOptions::new()
+crates/slskr/src/lib.rs:77058:        let _ = fs::remove_file(&output_path);
+crates/slskr/src/lib.rs:77123:                let _ = fs::remove_file(&output_path);
+crates/slskr/src/lib.rs:77135:        let _ = fs::remove_file(&output_path);
+crates/slskr/src/lib.rs:77434:            let _ = fs::remove_file(&path);
+crates/slskr/src/lib.rs:77441:            let _ = fs::remove_file(&path);
+crates/slskr/src/lib.rs:78028:    fs::create_dir_all(root).map_err(|error| format!("storage root create failed: {error}"))?;
+crates/slskr/src/lib.rs:78036:            .canonicalize()
+crates/slskr/src/lib.rs:78038:        let canonical_parent = match path.parent().unwrap_or(root).canonicalize() {
+crates/slskr/src/lib.rs:78058:            fs::remove_dir_all(&path)
+crates/slskr/src/lib.rs:78064:            fs::remove_file(&path).map_err(|error| format!("file delete failed: {error}"))?;
+crates/slskr/src/lib.rs:78204:    fs::create_dir_all(&root).map_err(|error| format!("download root create failed: {error}"))?;
+crates/slskr/src/lib.rs:78212:        fs::create_dir_all(parent)
+crates/slskr/src/lib.rs:78216:        .canonicalize()
+crates/slskr/src/lib.rs:78221:        .canonicalize()
+crates/slskr/src/lib.rs:78313:    let mut options = fs::OpenOptions::new();
+crates/slskr/src/lib.rs:78364:        .canonicalize()
+crates/slskr/src/lib.rs:78367:        .canonicalize()
+crates/slskr/src/lib.rs:78372:    fs::OpenOptions::new()
+crates/slskr/src/lib.rs:81963:        if let Err(error) = fs::set_permissions(&path, fs::Permissions::from_mode(mode)) {
+crates/slskr/src/lib.rs:81975:            let _ = fs::set_permissions(parent, fs::Permissions::from_mode(directory_mode));
+crates/slskr/src/lib.rs:82608:            fs::OpenOptions::new()
+crates/slskr/src/lib.rs:82674:        fs::rename(&final_path, &incomplete_path)
+crates/slskr/src/lib.rs:82702:        fs::remove_file(&completed_path)
+crates/slskr/src/lib.rs:82705:    match fs::rename(&incomplete_path, &completed_path) {
+crates/slskr/src/lib.rs:82713:            fs::remove_file(&incomplete_path)
+crates/slskr/src/lib.rs:82825:        fs::create_dir_all(&root)
+crates/slskr/src/lib.rs:82832:        fs::rename(path, destination)
+crates/slskr/src/lib.rs:82835:        fs::remove_file(path)
+crates/slskr/src/lib.rs:84277:        if tokio::fs::create_dir_all(&log_dir).await.is_ok() {
+crates/slskr/src/lib.rs:84278:            if let Ok(mut file) = tokio::fs::OpenOptions::new()
+crates/slskr/src/lib.rs:86879:            let _ = fs::remove_dir(&path);
+crates/slskr/src/lib.rs:86882:            let _ = fs::remove_file(path);
+crates/slskr/src/lib.rs:86989:                let _ = fs::remove_file(entry.path());
+crates/slskr/src/lib.rs:88036:                let _ = fs::remove_file(path);
+crates/slskr/src/lib.rs:89647:        match root.canonicalize() {
+crates/slskr/src/lib.rs:89736:                let Ok(canonical_path) = path.canonicalize() else {
+crates/slskr/src/lib.rs:89999:        fs::remove_file(&rotated_path)
+crates/slskr/src/lib.rs:90002:    fs::rename(path, &rotated_path)
+crates/slskr/src/lib.rs:90027:    let mut options = fs::OpenOptions::new();
+crates/slskr/src/lib.rs:90107:    fs::create_dir_all(parent)?;
+crates/slskr/src/lib.rs:90132:        let mut file = fs::OpenOptions::new()
+crates/slskr/src/lib.rs:90143:            let _ = fs::remove_file(temp_path);
+crates/slskr/src/lib.rs:90151:    fs::rename(source, destination)
+crates/slskr/src/lib.rs:90159:    match fs::remove_file(destination) {
+crates/slskr/src/lib.rs:90164:    fs::rename(source, destination)
+crates/slskr/src/lib.rs:90189:    let mut options = fs::OpenOptions::new();
 crates/slskr/src/controller_tests.rs:79:        fs::create_dir_all(&state_dir).unwrap();
 crates/slskr/src/controller_tests.rs:117:        fs::remove_dir_all(state_dir).unwrap();
 crates/slskr/src/controller_tests.rs:299:    fs::create_dir_all(&root).unwrap();
@@ -760,602 +761,720 @@ crates/slskr/src/controller_tests.rs:13287:    let _ = fs::remove_file(conflict_
 crates/slskr/src/controller_tests.rs:13292:    std::fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
 crates/slskr/src/controller_tests.rs:14011:    fs::create_dir_all(&evidence_dir).expect("create application evidence directory");
 crates/slskr/src/controller_tests.rs:14237:    std::fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:14361:    std::fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:14598:    std::fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:16672:    std::fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:19282:    std::fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:19497:    std::fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:19870:    std::fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:20087:    std::fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:20430:    std::fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:20512:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:20950:    let _ = std::fs::remove_file(path);
-crates/slskr/src/controller_tests.rs:21049:    std::fs::create_dir_all(parent).expect("download parent dir");
-crates/slskr/src/controller_tests.rs:21059:    let _ = std::fs::remove_dir_all(state_dir);
-crates/slskr/src/controller_tests.rs:21078:    std::fs::create_dir_all(&root).expect("download root");
-crates/slskr/src/controller_tests.rs:21079:    std::fs::create_dir_all(&outside).expect("outside directory");
-crates/slskr/src/controller_tests.rs:21086:    let _ = std::fs::remove_dir_all(state_dir);
-crates/slskr/src/controller_tests.rs:21105:    std::fs::create_dir_all(&root).expect("download root");
-crates/slskr/src/controller_tests.rs:21106:    std::fs::create_dir_all(&outside).expect("outside directory");
-crates/slskr/src/controller_tests.rs:21115:    let _ = std::fs::remove_dir_all(state_dir);
-crates/slskr/src/controller_tests.rs:21133:    std::fs::create_dir_all(&dir).expect("test dir");
-crates/slskr/src/controller_tests.rs:21139:    std::fs::remove_file(&shared_path).expect("remove shared file");
-crates/slskr/src/controller_tests.rs:21149:    let _ = std::fs::remove_dir_all(dir);
-crates/slskr/src/controller_tests.rs:21170:    std::fs::create_dir_all(&root).unwrap();
-crates/slskr/src/controller_tests.rs:21171:    std::fs::create_dir_all(&outside).unwrap();
-crates/slskr/src/controller_tests.rs:21182:    let _ = std::fs::remove_dir_all(root);
-crates/slskr/src/controller_tests.rs:21183:    let _ = std::fs::remove_dir_all(outside);
-crates/slskr/src/controller_tests.rs:21222:    let _ = std::fs::remove_file(path);
-crates/slskr/src/controller_tests.rs:21545:    let _ = std::fs::remove_file(path);
-crates/slskr/src/controller_tests.rs:21565:    std::fs::create_dir_all(path.parent().unwrap()).expect("download dir");
-crates/slskr/src/controller_tests.rs:21651:    let _ = std::fs::remove_file(path);
-crates/slskr/src/controller_tests.rs:21725:    let _ = std::fs::remove_file(path);
-crates/slskr/src/controller_tests.rs:21816:    let _ = std::fs::remove_file(path);
-crates/slskr/src/controller_tests.rs:21921:    let _ = std::fs::remove_file(path);
-crates/slskr/src/controller_tests.rs:22024:    let _ = std::fs::remove_file(path);
-crates/slskr/src/controller_tests.rs:22115:    let _ = std::fs::remove_file(path);
-crates/slskr/src/controller_tests.rs:22265:    let _ = std::fs::remove_file(path);
-crates/slskr/src/controller_tests.rs:26343:    std::fs::create_dir_all(&root).expect("create stream share root");
-crates/slskr/src/controller_tests.rs:26411:    std::fs::remove_dir_all(root).expect("remove stream fixture");
-crates/slskr/src/controller_tests.rs:26446:    std::fs::create_dir_all(&root).expect("create preview share root");
-crates/slskr/src/controller_tests.rs:26510:    std::fs::remove_dir_all(root).expect("remove preview fixture");
-crates/slskr/src/controller_tests.rs:26826:    std::fs::create_dir_all(&root).expect("trusted mesh preview root");
-crates/slskr/src/controller_tests.rs:26914:    std::fs::remove_file(cleanup).expect("remove trusted preview staging file");
-crates/slskr/src/controller_tests.rs:26917:    let _ = std::fs::remove_dir_all(&remote_state.config.state_dir);
-crates/slskr/src/controller_tests.rs:26918:    let _ = std::fs::remove_dir_all(&local_state.config.state_dir);
-crates/slskr/src/controller_tests.rs:26919:    let _ = std::fs::remove_dir_all(root);
-crates/slskr/src/controller_tests.rs:27090:    std::fs::create_dir_all(&child).unwrap();
-crates/slskr/src/controller_tests.rs:27104:    std::fs::remove_dir_all(root).unwrap();
-crates/slskr/src/controller_tests.rs:27252:    let _ = std::fs::remove_file(&queue.state_path);
-crates/slskr/src/controller_tests.rs:27253:    let _ = std::fs::remove_file(&queue.events_path);
-crates/slskr/src/controller_tests.rs:27725:    fs::create_dir_all(&root).expect("create overlay search state directory");
-crates/slskr/src/controller_tests.rs:27850:    fs::create_dir_all(&evidence_dir).expect("create overlay protocol evidence directory");
-crates/slskr/src/controller_tests.rs:27860:    let _ = fs::remove_dir_all(root);
-crates/slskr/src/controller_tests.rs:27981:    fs::create_dir_all(&root).expect("create mesh-sync fixture directory");
-crates/slskr/src/controller_tests.rs:28228:    fs::create_dir_all(&evidence_dir).expect("create mesh-sync evidence directory");
-crates/slskr/src/controller_tests.rs:28234:    let _ = fs::remove_dir_all(root);
-crates/slskr/src/controller_tests.rs:28533:    fs::create_dir_all(&evidence_dir).expect("create protocol evidence directory");
-crates/slskr/src/controller_tests.rs:28768:    fs::create_dir_all(&evidence_dir).expect("create protocol evidence directory");
-crates/slskr/src/controller_tests.rs:28944:    fs::create_dir_all(&evidence_dir).expect("create bridge dispatch evidence directory");
-crates/slskr/src/controller_tests.rs:29087:    fs::create_dir_all(&evidence_dir).expect("create bridge malformed evidence directory");
-crates/slskr/src/controller_tests.rs:29507:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:29683:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:31274:    fs::create_dir_all(&config.downloads_dir).unwrap();
-crates/slskr/src/controller_tests.rs:31283:    fs::create_dir_all(&outside_dir).unwrap();
-crates/slskr/src/controller_tests.rs:31294:    fs::remove_dir_all(state_dir).unwrap();
-crates/slskr/src/controller_tests.rs:31338:    let _ = fs::remove_file(source);
-crates/slskr/src/controller_tests.rs:31801:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:31947:    fs::create_dir_all(&root).expect("create mesh controller fixture directory");
-crates/slskr/src/controller_tests.rs:32224:    fs::create_dir_all(&evidence_dir).expect("create mesh controller evidence directory");
-crates/slskr/src/controller_tests.rs:32285:    fs::remove_dir_all(state_dir).expect("remove mesh message test state directory");
-crates/slskr/src/controller_tests.rs:32286:    fs::remove_dir_all(root).expect("remove mesh controller fixture directory");
-crates/slskr/src/controller_tests.rs:32621:    fs::create_dir_all(&evidence_dir).expect("create mesh edge-case evidence directory");
-crates/slskr/src/controller_tests.rs:32875:    fs::create_dir_all(&evidence_dir).expect("create mesh runtime evidence directory");
-crates/slskr/src/controller_tests.rs:33115:    fs::create_dir_all(&evidence_dir).expect("create mesh merge/publish evidence directory");
-crates/slskr/src/controller_tests.rs:33127:    fs::remove_dir_all(state_dir).expect("remove mesh merge/publish test state directory");
-crates/slskr/src/controller_tests.rs:33230:    fs::create_dir_all(&evidence_dir).expect("create mesh sync evidence directory");
-crates/slskr/src/controller_tests.rs:34061:    std::fs::create_dir_all(&root).expect("create listening-party share root");
-crates/slskr/src/controller_tests.rs:34152:    std::fs::remove_dir_all(root).expect("remove listening-party fixture");
-crates/slskr/src/controller_tests.rs:34761:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:34945:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:35076:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:35388:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:35540:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:35743:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:36284:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:38918:    std::fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:38999:    std::fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:39174:    std::fs::create_dir_all(&root).expect("mesh gateway state directory");
-crates/slskr/src/controller_tests.rs:39202:    std::fs::remove_dir_all(root).expect("remove mesh gateway state directory");
-crates/slskr/src/controller_tests.rs:40495:    std::fs::create_dir_all(&root).unwrap();
-crates/slskr/src/controller_tests.rs:40506:    std::fs::remove_dir_all(root).unwrap();
-crates/slskr/src/controller_tests.rs:41790:    std::fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:42680:    fs::create_dir_all(root.join("Relay")).expect("relay download root");
-crates/slskr/src/controller_tests.rs:42729:    let _ = fs::remove_dir_all(root);
-crates/slskr/src/controller_tests.rs:42856:    let _ = fs::remove_file(database_source);
-crates/slskr/src/controller_tests.rs:42962:        let _ = fs::remove_file(path);
-crates/slskr/src/controller_tests.rs:42965:    let _ = fs::remove_file(source);
-crates/slskr/src/controller_tests.rs:43569:    std::fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:43868:    std::fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:45465:    std::fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:45569:    std::fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:46762:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:46910:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:47100:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:47316:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:47517:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:47774:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:48067:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:48788:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:49100:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:49485:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:49694:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:49734:        std::fs::create_dir_all(&state_dir).expect("state dir");
-crates/slskr/src/controller_tests.rs:49799:        let _ = std::fs::remove_dir_all(state_dir);
-crates/slskr/src/controller_tests.rs:49805:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:50138:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:50325:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:50699:    fs::create_dir_all(&evidence_dir).expect("create persistence evidence directory");
-crates/slskr/src/controller_tests.rs:50948:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:51411:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:52467:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:52727:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:52873:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:53634:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:53923:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:54099:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:54273:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:54339:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:54421:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:54490:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:54765:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:55096:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:55563:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:55944:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:56050:        fs::remove_file(&pods_path).expect("remove channel create state file");
-crates/slskr/src/controller_tests.rs:56076:        fs::remove_dir(&pods_path).expect("remove blocked channel create state path");
-crates/slskr/src/controller_tests.rs:56163:        fs::remove_file(&pods_path).expect("remove channel update state file");
-crates/slskr/src/controller_tests.rs:56196:        fs::remove_dir(&pods_path).expect("remove blocked channel update state path");
-crates/slskr/src/controller_tests.rs:56284:        fs::remove_file(&pods_path).expect("remove channel delete state file");
-crates/slskr/src/controller_tests.rs:56310:        fs::remove_dir(&pods_path).expect("remove blocked channel delete state path");
-crates/slskr/src/controller_tests.rs:56388:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:56578:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:56817:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:56956:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:57147:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:57346:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:57442:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:57738:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:58280:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:58669:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:59013:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:59454:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:59779:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:60046:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:60165:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:60308:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:61076:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:61313:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:61540:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:61728:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:61821:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:61971:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:62154:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:62435:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:62885:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:63031:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:63208:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:63464:    fs::create_dir_all(&evidence_dir).expect("create ActivityPub open-case evidence directory");
-crates/slskr/src/controller_tests.rs:63598:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:64022:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:64219:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:64593:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:64738:    fs::create_dir_all(&evidence_dir).expect("create discovery graph edge evidence directory");
-crates/slskr/src/controller_tests.rs:65019:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:65264:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:65764:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:66139:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:66467:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:67049:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:67364:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:67592:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:67783:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:68156:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:68592:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:69045:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:69870:    fs::create_dir_all(&evidence_dir).expect("create quarantine-jury evidence directory");
-crates/slskr/src/controller_tests.rs:70109:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:70643:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:71248:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:71529:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:72155:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:72505:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:72946:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:73282:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:73393:            fs::remove_file(&path).expect("remove message storage file");
-crates/slskr/src/controller_tests.rs:73557:        fs::remove_dir(&messages_path).expect("remove blocked global message path");
-crates/slskr/src/controller_tests.rs:73709:        fs::remove_dir(&messages_path).expect("remove blocked channel message path");
-crates/slskr/src/controller_tests.rs:73735:        fs::remove_dir(&messages_path).expect("remove blocked stats message path");
-crates/slskr/src/controller_tests.rs:73766:        fs::remove_dir(&messages_path).expect("remove blocked search message path");
-crates/slskr/src/controller_tests.rs:73817:        fs::remove_dir(&messages_path).expect("remove blocked count message path");
-crates/slskr/src/controller_tests.rs:73954:            fs::remove_dir(&messages_path).expect("remove blocked maintenance path");
-crates/slskr/src/controller_tests.rs:73961:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:74064:            fs::remove_file(&path).expect("remove membership storage file");
-crates/slskr/src/controller_tests.rs:74107:        fs::remove_dir(&pods_path).expect("remove blocked membership delete path");
-crates/slskr/src/controller_tests.rs:74196:        fs::remove_dir(&pods_path).expect("remove blocked membership projection path");
-crates/slskr/src/controller_tests.rs:74215:        fs::remove_dir(&pods_path).expect("remove blocked membership stats path");
-crates/slskr/src/controller_tests.rs:74268:        fs::remove_dir(&pods_path).expect("remove blocked membership moderation path");
-crates/slskr/src/controller_tests.rs:74363:        fs::remove_dir(&pods_path).expect("remove blocked membership publish path");
-crates/slskr/src/controller_tests.rs:74447:        fs::remove_dir(&pods_path).expect("remove blocked membership update path");
-crates/slskr/src/controller_tests.rs:74530:        fs::remove_dir(&pods_path).expect("remove blocked membership cleanup path");
-crates/slskr/src/controller_tests.rs:74559:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:74627:                fs::remove_file(&path).expect("remove discovery feature state file");
-crates/slskr/src/controller_tests.rs:74736:        fs::remove_dir(&feature_path).expect("remove blocked discovery registration path");
-crates/slskr/src/controller_tests.rs:74824:        fs::remove_dir(&feature_path).expect("remove blocked discovery update path");
-crates/slskr/src/controller_tests.rs:74937:        fs::remove_dir(&feature_path).expect("remove blocked discovery unregister path");
-crates/slskr/src/controller_tests.rs:75069:        fs::remove_dir(&feature_path).expect("remove blocked discovery projection path");
-crates/slskr/src/controller_tests.rs:75129:        fs::remove_dir(&feature_path).expect("remove blocked discovery refresh path");
-crates/slskr/src/controller_tests.rs:75218:    fs::create_dir_all(&evidence_dir).expect("create discovery evidence directory");
-crates/slskr/src/controller_tests.rs:76038:    fs::create_dir_all(&evidence_dir).expect("create PodJoinLeave evidence directory");
-crates/slskr/src/controller_tests.rs:76509:    fs::create_dir_all(&evidence_dir).expect("create security ban evidence directory");
-crates/slskr/src/controller_tests.rs:76956:    fs::create_dir_all(&evidence_dir).expect("create security diagnostics evidence directory");
-crates/slskr/src/controller_tests.rs:77816:    fs::create_dir_all(&evidence_dir).expect("create SoulseekDiscovery evidence directory");
-crates/slskr/src/controller_tests.rs:78528:    fs::create_dir_all(&evidence_dir).expect("create MultiSource evidence directory");
-crates/slskr/src/controller_tests.rs:78943:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:79085:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:79341:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:79556:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:79821:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:80048:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:80079:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:81133:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:81392:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:82209:    fs::create_dir_all(&evidence_dir).expect("create discovery evidence directory");
-crates/slskr/src/controller_tests.rs:82953:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:83257:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:83517:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:83818:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:84023:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:84229:                    fs::create_dir_all(&evidence_dir)
-crates/slskr/src/controller_tests.rs:84322:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:84440:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:84648:    let _ = fs::remove_dir_all(root);
-crates/slskr/src/controller_tests.rs:84653:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:84773:    std::fs::create_dir_all(&root).expect("mesh gateway differential state directory");
-crates/slskr/src/controller_tests.rs:84960:    std::fs::remove_dir_all(root).expect("remove mesh gateway differential state directory");
-crates/slskr/src/controller_tests.rs:84965:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:85155:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:85499:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:85748:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:85825:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:85923:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:86013:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:86233:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:86412:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:86514:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:86577:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:86647:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:86689:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:86741:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:86796:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:87119:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:87296:    let _ = fs::remove_file(&validation_path);
-crates/slskr/src/controller_tests.rs:87459:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:87713:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:87845:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:87950:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:88131:    fs::create_dir_all(&evidence_dir).expect("create trace evidence directory");
-crates/slskr/src/controller_tests.rs:88350:    fs::create_dir_all(&evidence_dir).expect("create compatibility evidence directory");
-crates/slskr/src/controller_tests.rs:88510:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:88602:    std::fs::create_dir_all(download_file.parent().unwrap())
-crates/slskr/src/controller_tests.rs:88660:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:88808:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:88894:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:88997:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:89116:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:89168:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:89691:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:90063:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:90132:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:90179:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:90229:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:90283:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:90387:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:90444:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:90505:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:90550:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:90606:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:90663:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:90780:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:90841:    fs::create_dir_all(&custom_path).expect("create destination fixture");
-crates/slskr/src/controller_tests.rs:90898:    let _ = fs::remove_dir_all(root);
-crates/slskr/src/controller_tests.rs:90902:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:90957:    fs::create_dir_all(&root).expect("create destination edge root");
-crates/slskr/src/controller_tests.rs:91191:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:91198:    let _ = fs::remove_dir_all(root);
-crates/slskr/src/controller_tests.rs:91438:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:91957:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:92680:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:92834:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:93074:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:93343:        std::fs::create_dir_all(&root).expect("create differential listening-party share root");
-crates/slskr/src/controller_tests.rs:93398:        let _ = std::fs::remove_dir_all(root);
-crates/slskr/src/controller_tests.rs:93404:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:93634:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:93704:        std::fs::create_dir_all(&root).expect("create differential downloads root");
-crates/slskr/src/controller_tests.rs:93735:        std::fs::create_dir_all(&root).expect("create differential recursive downloads root");
-crates/slskr/src/controller_tests.rs:93786:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:94253:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:94464:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:94567:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:95051:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:95288:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:95449:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:96107:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:96644:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/controller_tests.rs:97554:    fs::create_dir_all(existing.parent().unwrap()).unwrap();
-crates/slskr/src/controller_tests.rs:97783:    fs::create_dir_all(&evidence_dir).expect("create file lifecycle evidence directory");
-crates/slskr/src/controller_tests.rs:98274:    fs::create_dir_all(&new_root).unwrap();
-crates/slskr/src/controller_tests.rs:98275:    fs::create_dir_all(&new_downloads).unwrap();
-crates/slskr/src/controller_tests.rs:98276:    fs::create_dir_all(&new_incomplete).unwrap();
-crates/slskr/src/controller_tests.rs:98674:    fs::create_dir_all(&evidence_dir).expect("create file lifecycle evidence directory");
-crates/slskr/src/controller_tests.rs:98705:        fs::create_dir_all(download_file.parent().unwrap()).expect("downloads fixture root");
-crates/slskr/src/controller_tests.rs:98706:        fs::create_dir_all(incomplete_file.parent().unwrap()).expect("incomplete fixture root");
-crates/slskr/src/controller_tests.rs:98839:    fs::create_dir_all(&evidence_dir).expect("create file lifecycle evidence directory");
-crates/slskr/src/controller_tests.rs:98944:    fs::create_dir_all(&evidence_dir).expect("create file lifecycle evidence directory");
-crates/slskr/src/controller_tests.rs:99162:        let _ = fs::remove_dir_all(state_dir);
-crates/slskr/src/controller_tests.rs:99168:    fs::create_dir_all(&evidence_dir).expect("create file lifecycle evidence directory");
-crates/slskr/src/controller_tests.rs:99192:        fs::create_dir_all(&root).expect("secure writer root");
-crates/slskr/src/controller_tests.rs:99256:        let _ = fs::remove_dir_all(root);
-crates/slskr/src/controller_tests.rs:99262:    fs::create_dir_all(&evidence_dir).expect("create file lifecycle evidence directory");
-crates/slskr/src/controller_tests.rs:99284:    fs::create_dir_all(&root).expect("DHT certificate root");
-crates/slskr/src/controller_tests.rs:99317:        fs::create_dir_all(&linked_root).expect("DHT symlink root");
-crates/slskr/src/controller_tests.rs:99375:    fs::create_dir_all(&evidence_dir).expect("create file lifecycle evidence directory");
-crates/slskr/src/controller_tests.rs:99382:    let _ = fs::remove_dir_all(root);
-crates/slskr/src/controller_tests.rs:100311:    std::fs::create_dir_all(&root).unwrap();
-crates/slskr/src/controller_tests.rs:100336:    let _ = std::fs::remove_dir_all(&root);
-crates/slskr/src/controller_tests.rs:100337:    let _ = std::fs::remove_file(&outside);
-crates/slskr/src/controller_tests.rs:100362:    std::fs::create_dir_all(&root).unwrap();
-crates/slskr/src/controller_tests.rs:100400:    let _ = std::fs::remove_dir_all(&root);
-crates/slskr/src/controller_tests.rs:100519:    std::fs::create_dir_all(&nested).expect("create nested dir");
-crates/slskr/src/controller_tests.rs:100536:    std::fs::create_dir_all(&album).expect("create recursive directory");
-crates/slskr/src/controller_tests.rs:100545:    let _ = std::fs::remove_dir_all(root);
-crates/slskr/src/controller_tests.rs:100566:    std::fs::create_dir_all(&root).expect("create root");
-crates/slskr/src/controller_tests.rs:100567:    std::fs::create_dir_all(&outside).expect("create outside");
-crates/slskr/src/controller_tests.rs:100580:    let _ = std::fs::remove_dir_all(root);
-crates/slskr/src/controller_tests.rs:100581:    let _ = std::fs::remove_dir_all(outside);
-crates/slskr/src/controller_tests.rs:100598:    std::fs::create_dir_all(&root).expect("create root");
-crates/slskr/src/controller_tests.rs:100613:    let _ = std::fs::remove_dir_all(root);
-crates/slskr/src/controller_tests.rs:100633:    std::fs::create_dir_all(&directory).expect("create deep directory tree");
-crates/slskr/src/controller_tests.rs:100643:    let _ = std::fs::remove_dir_all(root);
-crates/slskr/src/controller_tests.rs:101340:    std::fs::create_dir_all(&root).unwrap();
-crates/slskr/src/controller_tests.rs:101347:    std::fs::remove_dir_all(root).unwrap();
-crates/slskr/src/controller_tests.rs:101361:    std::fs::create_dir_all(&root).unwrap();
-crates/slskr/src/controller_tests.rs:101367:    std::fs::remove_dir_all(root).unwrap();
-crates/slskr/src/controller_tests.rs:101426:    std::fs::create_dir_all(&artist).unwrap();
-crates/slskr/src/controller_tests.rs:101428:    std::fs::create_dir_all(root.join(".hidden")).unwrap();
-crates/slskr/src/controller_tests.rs:101445:    std::fs::remove_dir_all(root).unwrap();
-crates/slskr/src/controller_tests.rs:101453:    std::fs::create_dir_all(&root).unwrap();
-crates/slskr/src/controller_tests.rs:101490:    std::fs::remove_dir_all(root).unwrap();
-crates/slskr/src/controller_tests.rs:101500:    std::fs::create_dir_all(&first).unwrap();
-crates/slskr/src/controller_tests.rs:101501:    std::fs::create_dir_all(&second).unwrap();
-crates/slskr/src/controller_tests.rs:101514:    std::fs::remove_dir_all(root).unwrap();
-crates/slskr/src/controller_tests.rs:101553:    std::fs::create_dir_all(&excluded).unwrap();
-crates/slskr/src/controller_tests.rs:101574:    std::fs::remove_dir_all(root).unwrap();
-crates/slskr/src/controller_tests.rs:101598:    std::fs::create_dir_all(&root).unwrap();
-crates/slskr/src/controller_tests.rs:101611:    std::fs::remove_dir_all(root).unwrap();
-crates/slskr/src/controller_tests.rs:101632:    std::fs::create_dir_all(&root).unwrap();
-crates/slskr/src/controller_tests.rs:101633:    std::fs::create_dir_all(&outside).unwrap();
-crates/slskr/src/controller_tests.rs:101647:    let _ = std::fs::remove_dir_all(root);
-crates/slskr/src/controller_tests.rs:101648:    let _ = std::fs::remove_dir_all(outside);
-crates/slskr/src/controller_tests.rs:101687:    std::fs::create_dir_all(&state_dir).unwrap();
-crates/slskr/src/controller_tests.rs:101707:    std::fs::remove_dir_all(state_dir).unwrap();
-crates/slskr/src/controller_tests.rs:101723:    let _ = std::fs::remove_file(queue.events_path);
-crates/slskr/src/controller_tests.rs:102005:    let _ = std::fs::remove_file(queue.events_path);
-crates/slskr/src/controller_tests.rs:102006:    let _ = std::fs::remove_file(queue.state_path);
-crates/slskr/src/controller_tests.rs:102513:    std::fs::create_dir_all(partial_path.parent().unwrap()).expect("create download root");
-crates/slskr/src/controller_tests.rs:102587:    std::fs::remove_dir_all(&state.config.state_dir).expect("remove test state directory");
-crates/slskr/src/controller_tests.rs:102626:    let _ = std::fs::remove_file(&path);
-crates/slskr/src/controller_tests.rs:102627:    let mut file = std::fs::OpenOptions::new()
-crates/slskr/src/controller_tests.rs:102644:    std::fs::remove_file(path).expect("remove cancelled transfer test file");
-crates/slskr/src/controller_tests.rs:102685:    let _ = std::fs::remove_file(queue.events_path);
-crates/slskr/src/controller_tests.rs:102686:    let _ = std::fs::remove_file(queue.state_path);
-crates/slskr/src/controller_tests.rs:102724:    let _ = std::fs::remove_file(queue.events_path);
-crates/slskr/src/controller_tests.rs:102725:    let _ = std::fs::remove_file(queue.state_path);
-crates/slskr/src/controller_tests.rs:102744:    let _ = std::fs::remove_file(queue.events_path);
-crates/slskr/src/controller_tests.rs:102745:    let _ = std::fs::remove_file(queue.state_path);
-crates/slskr/src/controller_tests.rs:102794:    let _ = std::fs::remove_file(queue.events_path);
-crates/slskr/src/controller_tests.rs:102795:    let _ = std::fs::remove_file(queue.state_path);
-crates/slskr/src/controller_tests.rs:102858:    let _ = std::fs::remove_file(queue.events_path);
-crates/slskr/src/controller_tests.rs:102859:    let _ = std::fs::remove_file(queue.state_path);
-crates/slskr/src/controller_tests.rs:102911:    let _ = std::fs::remove_file(queue.events_path);
-crates/slskr/src/controller_tests.rs:102912:    let _ = std::fs::remove_file(queue.state_path);
-crates/slskr/src/controller_tests.rs:102975:    let _ = std::fs::remove_file(queue.events_path);
-crates/slskr/src/controller_tests.rs:102976:    let _ = std::fs::remove_file(queue.state_path);
-crates/slskr/src/controller_tests.rs:102990:    std::fs::create_dir_all(&state_dir).expect("state dir");
-crates/slskr/src/controller_tests.rs:103019:    let _ = std::fs::remove_dir_all(state_dir);
-crates/slskr/src/controller_tests.rs:103033:    std::fs::create_dir_all(&state_dir).expect("state dir");
-crates/slskr/src/controller_tests.rs:103100:    let _ = std::fs::remove_dir_all(state_dir);
-crates/slskr/src/controller_tests.rs:103145:    std::fs::create_dir_all(&state_dir).expect("state dir");
-crates/slskr/src/controller_tests.rs:103156:    let _ = std::fs::remove_dir_all(state_dir);
-crates/slskr/src/controller_tests.rs:103171:    std::fs::create_dir_all(&state_dir).expect("state dir");
-crates/slskr/src/controller_tests.rs:103183:    let _ = std::fs::remove_dir_all(state_dir);
-crates/slskr/src/controller_tests.rs:103200:    std::fs::create_dir_all(&state_dir).expect("state dir");
-crates/slskr/src/controller_tests.rs:103267:    let _ = std::fs::remove_dir_all(state_dir);
-crates/slskr/src/controller_tests.rs:103281:    std::fs::create_dir_all(&state_dir).expect("state dir");
-crates/slskr/src/controller_tests.rs:103294:    let _ = std::fs::remove_dir_all(state_dir);
-crates/slskr/src/controller_tests.rs:103308:    fs::create_dir_all(&state_dir).expect("file lifecycle state dir");
-crates/slskr/src/controller_tests.rs:103417:    fs::create_dir_all(&evidence_dir).expect("create file lifecycle evidence directory");
-crates/slskr/src/controller_tests.rs:103424:    let _ = fs::remove_dir_all(state_dir);
-crates/slskr/src/controller_tests.rs:103439:    std::fs::create_dir_all(&state_dir).expect("state dir");
-crates/slskr/src/controller_tests.rs:103451:    let _ = std::fs::remove_dir_all(state_dir);
-crates/slskr/src/controller_tests.rs:103465:    std::fs::create_dir_all(&state_dir).expect("state dir");
-crates/slskr/src/controller_tests.rs:103521:    let _ = std::fs::remove_dir_all(state_dir);
-crates/slskr/src/controller_tests.rs:103554:    std::fs::create_dir_all(&state_dir).unwrap();
-crates/slskr/src/controller_tests.rs:103563:    let _ = std::fs::remove_dir_all(state_dir);
-crates/slskr/src/controller_tests.rs:104120:    std::fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:104555:    let _ = fs::remove_file(conflict_root);
-crates/slskr/src/controller_tests.rs:104560:    fs::create_dir_all(&evidence_dir).expect("create source-feed evidence directory");
-crates/slskr/src/controller_tests.rs:104731:    std::fs::remove_file(picture).unwrap();
-crates/slskr/src/controller_tests.rs:104924:    std::fs::create_dir_all(downloads_root.join("Artist/Album")).unwrap();
-crates/slskr/src/controller_tests.rs:104926:    std::fs::create_dir_all(incomplete_root.join("Partial")).unwrap();
-crates/slskr/src/controller_tests.rs:105021:        std::fs::create_dir_all(file_path.parent().unwrap()).unwrap();
-crates/slskr/src/controller_tests.rs:105287:        fs::create_dir_all(&downloads_target).expect("create downloads list target");
-crates/slskr/src/controller_tests.rs:105288:        fs::create_dir_all(&incomplete_target).expect("create incomplete list target");
-crates/slskr/src/controller_tests.rs:105323:        let _ = fs::remove_file(downloads_link);
-crates/slskr/src/controller_tests.rs:105324:        let _ = fs::remove_file(incomplete_link);
-crates/slskr/src/controller_tests.rs:105325:        let _ = fs::remove_dir_all(downloads_target);
-crates/slskr/src/controller_tests.rs:105326:        let _ = fs::remove_dir_all(incomplete_target);
-crates/slskr/src/controller_tests.rs:105328:    let _ = fs::remove_file(downloads_conflict_root);
-crates/slskr/src/controller_tests.rs:105329:    let _ = fs::remove_file(incomplete_conflict_root);
-crates/slskr/src/controller_tests.rs:105582:    std::fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:105624:    std::fs::create_dir_all(incomplete_root.join("Nested")).unwrap();
-crates/slskr/src/controller_tests.rs:105876:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:106147:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:106227:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:106561:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:106601:    let _ = std::fs::remove_dir_all(&file_state.config.downloads_dir);
-crates/slskr/src/controller_tests.rs:106602:    let _ = std::fs::remove_dir_all(&file_state.config.incomplete_dir);
-crates/slskr/src/controller_tests.rs:106868:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:106956:    fs::create_dir_all(downloads_root.join("Relay")).expect("relay download root");
-crates/slskr/src/controller_tests.rs:106995:    fs::remove_file(downloads_root.join("Relay/Agent.txt"))
-crates/slskr/src/controller_tests.rs:107124:    fs::remove_dir_all(&incoming_directory).expect("remove relay upload directory");
-crates/slskr/src/controller_tests.rs:107163:    fs::remove_file(&incoming_directory).expect("remove relay upload conflict");
-crates/slskr/src/controller_tests.rs:107164:    fs::create_dir_all(&incoming_directory).expect("restore relay upload directory");
-crates/slskr/src/controller_tests.rs:107289:    fs::remove_dir_all(&incoming_directory).expect("remove relay share upload directory");
-crates/slskr/src/controller_tests.rs:107331:    fs::remove_file(&incoming_directory).expect("remove relay share upload conflict");
-crates/slskr/src/controller_tests.rs:107332:    fs::create_dir_all(&incoming_directory).expect("restore relay share upload directory");
-crates/slskr/src/controller_tests.rs:107333:    let _ = fs::remove_file(database_source);
-crates/slskr/src/controller_tests.rs:107334:    let _ = fs::remove_dir_all(downloads_root);
-crates/slskr/src/controller_tests.rs:107339:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:108287:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:108611:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:108950:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:109419:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:110164:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:110399:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:110687:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:111111:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:111360:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:112268:    fs::create_dir_all(&evidence_dir).expect("create searches evidence directory");
-crates/slskr/src/controller_tests.rs:112526:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:112836:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:113364:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:113643:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:114042:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:114463:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:114841:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:115052:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:115344:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:115773:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:116019:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:116293:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:116812:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:117032:    fs::create_dir_all(&evidence_dir).expect("create runtime security evidence directory");
-crates/slskr/src/controller_tests.rs:117081:        fs::create_dir_all(&root).expect("path guard root");
-crates/slskr/src/controller_tests.rs:117169:        let _ = fs::remove_dir_all(root);
-crates/slskr/src/controller_tests.rs:117251:    fs::create_dir_all(&evidence_dir).expect("create path guard security evidence directory");
-crates/slskr/src/controller_tests.rs:117354:    fs::create_dir_all(&evidence_dir).expect("create share token security evidence directory");
-crates/slskr/src/controller_tests.rs:117517:    fs::create_dir_all(&evidence_dir).expect("create CSRF security evidence directory");
-crates/slskr/src/controller_tests.rs:117646:    fs::create_dir_all(&hash_root).expect("hardening hash config directory");
-crates/slskr/src/controller_tests.rs:117660:    fs::remove_dir_all(&hash_root).expect("remove hardening hash config directory");
-crates/slskr/src/controller_tests.rs:117708:    fs::create_dir_all(&evidence_dir).expect("create hardening security evidence directory");
-crates/slskr/src/controller_tests.rs:117755:    fs::create_dir_all(&root).expect("certificate manager root");
-crates/slskr/src/controller_tests.rs:117814:    fs::create_dir_all(&incomplete_root).expect("incomplete certificate root");
-crates/slskr/src/controller_tests.rs:117831:    fs::create_dir_all(&oversized_root).expect("oversized certificate root");
-crates/slskr/src/controller_tests.rs:117854:        fs::create_dir_all(&symlink_root).expect("symlink certificate root");
-crates/slskr/src/controller_tests.rs:117919:    fs::create_dir_all(&evidence_dir).expect("create certificate security evidence directory");
-crates/slskr/src/controller_tests.rs:117926:    fs::remove_dir_all(&root).expect("remove certificate manager root");
-crates/slskr/src/controller_tests.rs:118094:    fs::create_dir_all(&evidence_dir).expect("create overlay validation evidence directory");
-crates/slskr/src/controller_tests.rs:118240:    fs::create_dir_all(&evidence_dir).expect("create Solid policy security evidence directory");
-crates/slskr/src/controller_tests.rs:118607:    fs::create_dir_all(&certificate_root).expect("certificate root");
-crates/slskr/src/controller_tests.rs:118636:    fs::create_dir_all(&malformed_root).expect("malformed certificate root");
-crates/slskr/src/controller_tests.rs:118665:    let _ = fs::remove_dir_all(&certificate_root);
-crates/slskr/src/controller_tests.rs:118666:    let _ = fs::remove_dir_all(&malformed_root);
-crates/slskr/src/controller_tests.rs:118671:    fs::create_dir_all(&evidence_dir).expect("create security-controls evidence directory");
-crates/slskr/src/controller_tests.rs:118725:    fs::create_dir_all(&root).expect("content-safety root");
-crates/slskr/src/controller_tests.rs:118804:    let _ = fs::remove_dir_all(root);
-crates/slskr/src/controller_tests.rs:118808:    fs::create_dir_all(&evidence_dir).expect("create content-safety evidence directory");
-crates/slskr/src/controller_tests.rs:118927:    fs::create_dir_all(&evidence_dir).expect("create Soulseek safety evidence directory");
-crates/slskr/src/controller_tests.rs:119051:    fs::create_dir_all(&evidence_dir).expect("create security event sink evidence directory");
-crates/slskr/src/controller_tests.rs:119597:    std::fs::create_dir_all(&evidence_dir).expect("create integrity evidence directory");
-crates/slskr/src/controller_tests.rs:120276:    std::fs::create_dir_all(&evidence_dir).expect("create runtime-control evidence directory");
-crates/slskr/src/controller_tests.rs:120486:    std::fs::create_dir_all(&evidence_dir).expect("create route-security evidence directory");
-crates/slskr/src/controller_tests.rs:120885:    let _ = fs::remove_dir_all(&root);
-crates/slskr/src/controller_tests.rs:121183:    fs::create_dir_all(&evidence_dir).expect("create security-controls evidence directory");
-crates/slskr/src/controller_tests.rs:121362:    fs::create_dir_all(&root).expect("JWT revocation root");
-crates/slskr/src/controller_tests.rs:121407:    let _ = fs::remove_dir_all(root);
-crates/slskr/src/controller_tests.rs:121412:    fs::create_dir_all(&evidence_dir).expect("create security-controls evidence directory");
-crates/slskr/src/controller_tests.rs:121533:    fs::create_dir_all(&evidence_dir).expect("create security controller evidence directory");
-crates/slskr/src/controller_tests.rs:121617:    fs::create_dir_all(&evidence_dir).expect("create passthrough security evidence directory");
-crates/slskr/src/controller_tests.rs:121672:        fs::create_dir_all(&root).expect("authentication control state root");
-crates/slskr/src/controller_tests.rs:121831:        let _ = fs::remove_dir_all(root);
-crates/slskr/src/controller_tests.rs:121837:    fs::create_dir_all(&evidence_dir)
-crates/slskr/src/controller_tests.rs:121885:    fs::create_dir_all(&root).expect("pin file lifecycle root");
-crates/slskr/src/controller_tests.rs:121927:        fs::create_dir_all(attack_root.join("mesh")).expect("symlink attack directory");
-crates/slskr/src/controller_tests.rs:121951:    fs::create_dir_all(&evidence_dir).expect("create file-lifecycle evidence directory");
-crates/slskr/src/controller_tests.rs:121958:    let _ = fs::remove_dir_all(root);
-crates/slskr/src/controller_tests.rs:121977:    fs::create_dir_all(&root).expect("Gold Star file lifecycle root");
-crates/slskr/src/controller_tests.rs:122024:        fs::create_dir_all(&linked_root).expect("Gold Star linked state directory");
-crates/slskr/src/controller_tests.rs:122048:    fs::create_dir_all(&evidence_dir).expect("create file-lifecycle evidence directory");
-crates/slskr/src/controller_tests.rs:122055:    let _ = fs::remove_dir_all(root);
-crates/slskr/src/controller_tests.rs:122200:    fs::create_dir_all(&root).expect("create multisource lifecycle root");
-crates/slskr/src/controller_tests.rs:122476:    fs::create_dir_all(&evidence_dir).expect("create multisource evidence directory");
-crates/slskr/src/controller_tests.rs:122485:    let _ = fs::remove_dir_all(root);
-crates/slskr/src/controller_tests.rs:122730:        let _ = fs::remove_file(yaml_failure_root);
-crates/slskr/src/controller_tests.rs:122902:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:123367:    let _ = fs::remove_file(conflict_root);
-crates/slskr/src/controller_tests.rs:123912:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
-crates/slskr/src/controller_tests.rs:124090:    let _ = fs::remove_file(&restart_path);
-crates/slskr/src/controller_tests.rs:124160:    fs::create_dir_all(&evidence_dir).expect("create persistence evidence directory");
-crates/slskr/src/controller_tests.rs:124318:    let _ = fs::remove_file(&restart_path);
-crates/slskr/src/controller_tests.rs:124373:    fs::create_dir_all(&evidence_dir).expect("create persistence evidence directory");
-crates/slskr/src/controller_tests.rs:124534:        let _ = std::fs::remove_file(&restart_path);
-crates/slskr/src/controller_tests.rs:124584:    fs::create_dir_all(&evidence_dir).expect("create persistence evidence directory");
-crates/slskr/src/controller_tests.rs:124827:    let _ = fs::remove_file(&restart_path);
-crates/slskr/src/controller_tests.rs:124965:    fs::create_dir_all(&evidence_dir).expect("create persistence evidence directory");
-crates/slskr/src/controller_tests.rs:125109:    let _ = fs::remove_file(&restart_path);
-crates/slskr/src/controller_tests.rs:125166:    fs::create_dir_all(&evidence_dir).expect("create SongID persistence evidence directory");
-crates/slskr/src/controller_tests.rs:125272:    let _ = fs::remove_file(&restart_path);
-crates/slskr/src/controller_tests.rs:125310:    fs::create_dir_all(&evidence_dir).expect("create TrafficStats evidence directory");
-crates/slskr/src/controller_tests.rs:125934:    fs::create_dir_all(&evidence_dir).expect("create HashDb controller evidence directory");
-crates/slskr/src/controller_tests.rs:126030:            fs::remove_file(&path).expect("remove state file before runtime failure");
-crates/slskr/src/controller_tests.rs:127247:    fs::create_dir_all(&evidence_dir).expect("create PodsController evidence directory");
-crates/slskr/src/controller_tests.rs:128524:    fs::create_dir_all(&evidence_dir).expect("create WishlistController evidence directory");
-crates/slskr/src/controller_tests.rs:128872:    fs::create_dir_all(&evidence_dir)
-crates/slskr/src/controller_tests.rs:129875:    fs::create_dir_all(&evidence_dir).expect("create RoomsController evidence directory");
-crates/slskr/src/controller_tests.rs:130612:    fs::create_dir_all(&evidence_dir).expect("create BridgeController evidence directory");
-crates/slskr/src/controller_tests.rs:130685:            fs::remove_file(&path).expect("remove PodCore state file before blocking it");
-crates/slskr/src/controller_tests.rs:130702:                fs::remove_dir_all(&path).expect("remove prepared PodCore feature directory");
-crates/slskr/src/controller_tests.rs:130704:                fs::remove_file(&path).expect("remove prepared PodCore feature file");
-crates/slskr/src/controller_tests.rs:132770:    fs::create_dir_all(&evidence_dir).expect("create PodCore evidence directory");
-crates/slskr/src/controller_tests.rs:133189:        fs::create_dir_all(&state_dir).expect("create MediaCore residual state directory");
-crates/slskr/src/controller_tests.rs:133231:        let _ = fs::remove_dir_all(&state_dir);
-crates/slskr/src/controller_tests.rs:133254:    fs::create_dir_all(&evidence_dir).expect("create MediaCore evidence directory");
-crates/slskr/src/controller_tests.rs:134048:    fs::create_dir_all(&evidence_dir).expect("create MusicBrainz evidence directory");
-crates/slskr/src/controller_tests.rs:134597:    fs::create_dir_all(&evidence_dir).expect("create Jobs evidence directory");
-crates/slskr/src/controller_tests.rs:134742:    fs::create_dir_all(&item_root).expect("create residual library directory");
-crates/slskr/src/controller_tests.rs:134856:    let _ = fs::remove_dir_all(&item_root);
-crates/slskr/src/controller_tests.rs:135098:    fs::create_dir_all(&evidence_dir).expect("create Library evidence directory");
-crates/slskr/src/controller_tests.rs:136029:    fs::create_dir_all(&evidence_dir).expect("create Security evidence directory");
-crates/slskr/src/controller_tests.rs:136590:        fs::create_dir_all(&connection_path).expect("create Spotify connection conflict");
-crates/slskr/src/controller_tests.rs:137048:    fs::create_dir_all(&evidence_dir).expect("create Integrations evidence directory");
-crates/slskr/src/controller_tests.rs:137808:    fs::create_dir_all(&evidence_dir).expect("create Backfill evidence directory");
-crates/slskr/src/controller_tests.rs:138501:    fs::create_dir_all(&evidence_dir).expect("create slskdn native evidence directory");
-crates/slskr/src/controller_tests.rs:138874:    fs::create_dir_all(&evidence_dir).expect("create audio evidence directory");
-crates/slskr/src/controller_tests.rs:139237:    fs::create_dir_all(&evidence_dir).expect("create taste recommendation evidence directory");
-crates/slskr/src/controller_tests.rs:139725:    fs::create_dir_all(&evidence_dir).expect("create SongID evidence directory");
-crates/slskr/src/controller_tests.rs:140267:    fs::create_dir_all(&evidence_dir).expect("create share-grants evidence directory");
-crates/slskr/src/controller_tests.rs:140712:    fs::create_dir_all(&evidence_dir).expect("create shares evidence directory");
-crates/slskr/src/controller_tests.rs:141323:    fs::create_dir_all(&evidence_dir).expect("create users evidence directory");
-crates/slskr/src/controller_tests.rs:141735:    fs::create_dir_all(&evidence_dir).expect("create telemetry evidence directory");
-crates/slskr/src/controller_tests.rs:142022:    fs::create_dir_all(downloads_root.join("Relay")).expect("relay download directory");
-crates/slskr/src/controller_tests.rs:142541:    let _ = fs::remove_dir_all(super::effective_downloads_dir(&controller_state));
-crates/slskr/src/controller_tests.rs:142542:    let _ = fs::remove_file(share_source);
-crates/slskr/src/controller_tests.rs:142547:    fs::create_dir_all(&evidence_dir).expect("create relay evidence directory");
-crates/slskr/src/controller_tests.rs:143294:    fs::create_dir_all(&evidence_dir).expect("create conversations evidence directory");
-crates/slskr/src/controller_tests.rs:143979:    fs::create_dir_all(&evidence_dir).expect("create downloads evidence directory");
-crates/slskr/src/controller_tests.rs:144094:            fs::create_dir_all(&path).expect("create nominal directory");
-crates/slskr/src/controller_tests.rs:144157:            fs::create_dir_all(&path).expect("create mutation directory");
-crates/slskr/src/controller_tests.rs:144191:            fs::create_dir_all(&path).expect("create concurrent directory");
-crates/slskr/src/controller_tests.rs:144229:            fs::create_dir_all(&root).expect("create file storage root");
-crates/slskr/src/controller_tests.rs:144281:            fs::create_dir_all(&root).expect("create concurrent file root");
-crates/slskr/src/controller_tests.rs:144329:        fs::create_dir_all(&root).expect("create incomplete mutation root");
-crates/slskr/src/controller_tests.rs:144408:            fs::create_dir_all(root.join("Album")).expect("create populated root");
-crates/slskr/src/controller_tests.rs:144427:            fs::create_dir_all(root.join("Album")).expect("create nominal detail root");
-crates/slskr/src/controller_tests.rs:144486:            fs::create_dir_all(&album).expect("create populated detail root");
-crates/slskr/src/controller_tests.rs:144512:    fs::create_dir_all(&evidence_dir).expect("create files evidence directory");
+crates/slskr/src/controller_tests.rs:14381:    std::fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:14618:    std::fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:16692:    std::fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:19304:    std::fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:19519:    std::fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:19892:    std::fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:20109:    std::fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:20452:    std::fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:20534:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:20972:    let _ = std::fs::remove_file(path);
+crates/slskr/src/controller_tests.rs:21071:    std::fs::create_dir_all(parent).expect("download parent dir");
+crates/slskr/src/controller_tests.rs:21081:    let _ = std::fs::remove_dir_all(state_dir);
+crates/slskr/src/controller_tests.rs:21100:    std::fs::create_dir_all(&root).expect("download root");
+crates/slskr/src/controller_tests.rs:21101:    std::fs::create_dir_all(&outside).expect("outside directory");
+crates/slskr/src/controller_tests.rs:21108:    let _ = std::fs::remove_dir_all(state_dir);
+crates/slskr/src/controller_tests.rs:21127:    std::fs::create_dir_all(&root).expect("download root");
+crates/slskr/src/controller_tests.rs:21128:    std::fs::create_dir_all(&outside).expect("outside directory");
+crates/slskr/src/controller_tests.rs:21137:    let _ = std::fs::remove_dir_all(state_dir);
+crates/slskr/src/controller_tests.rs:21155:    std::fs::create_dir_all(&dir).expect("test dir");
+crates/slskr/src/controller_tests.rs:21161:    std::fs::remove_file(&shared_path).expect("remove shared file");
+crates/slskr/src/controller_tests.rs:21171:    let _ = std::fs::remove_dir_all(dir);
+crates/slskr/src/controller_tests.rs:21192:    std::fs::create_dir_all(&root).unwrap();
+crates/slskr/src/controller_tests.rs:21193:    std::fs::create_dir_all(&outside).unwrap();
+crates/slskr/src/controller_tests.rs:21204:    let _ = std::fs::remove_dir_all(root);
+crates/slskr/src/controller_tests.rs:21205:    let _ = std::fs::remove_dir_all(outside);
+crates/slskr/src/controller_tests.rs:21244:    let _ = std::fs::remove_file(path);
+crates/slskr/src/controller_tests.rs:21567:    let _ = std::fs::remove_file(path);
+crates/slskr/src/controller_tests.rs:21587:    std::fs::create_dir_all(path.parent().unwrap()).expect("download dir");
+crates/slskr/src/controller_tests.rs:21673:    let _ = std::fs::remove_file(path);
+crates/slskr/src/controller_tests.rs:21747:    let _ = std::fs::remove_file(path);
+crates/slskr/src/controller_tests.rs:21838:    let _ = std::fs::remove_file(path);
+crates/slskr/src/controller_tests.rs:21943:    let _ = std::fs::remove_file(path);
+crates/slskr/src/controller_tests.rs:22046:    let _ = std::fs::remove_file(path);
+crates/slskr/src/controller_tests.rs:22137:    let _ = std::fs::remove_file(path);
+crates/slskr/src/controller_tests.rs:22287:    let _ = std::fs::remove_file(path);
+crates/slskr/src/controller_tests.rs:26365:    std::fs::create_dir_all(&root).expect("create stream share root");
+crates/slskr/src/controller_tests.rs:26433:    std::fs::remove_dir_all(root).expect("remove stream fixture");
+crates/slskr/src/controller_tests.rs:26468:    std::fs::create_dir_all(&root).expect("create preview share root");
+crates/slskr/src/controller_tests.rs:26532:    std::fs::remove_dir_all(root).expect("remove preview fixture");
+crates/slskr/src/controller_tests.rs:26848:    std::fs::create_dir_all(&root).expect("trusted mesh preview root");
+crates/slskr/src/controller_tests.rs:26936:    std::fs::remove_file(cleanup).expect("remove trusted preview staging file");
+crates/slskr/src/controller_tests.rs:26939:    let _ = std::fs::remove_dir_all(&remote_state.config.state_dir);
+crates/slskr/src/controller_tests.rs:26940:    let _ = std::fs::remove_dir_all(&local_state.config.state_dir);
+crates/slskr/src/controller_tests.rs:26941:    let _ = std::fs::remove_dir_all(root);
+crates/slskr/src/controller_tests.rs:27112:    std::fs::create_dir_all(&child).unwrap();
+crates/slskr/src/controller_tests.rs:27126:    std::fs::remove_dir_all(root).unwrap();
+crates/slskr/src/controller_tests.rs:27274:    let _ = std::fs::remove_file(&queue.state_path);
+crates/slskr/src/controller_tests.rs:27275:    let _ = std::fs::remove_file(&queue.events_path);
+crates/slskr/src/controller_tests.rs:27747:    fs::create_dir_all(&root).expect("create overlay search state directory");
+crates/slskr/src/controller_tests.rs:27872:    fs::create_dir_all(&evidence_dir).expect("create overlay protocol evidence directory");
+crates/slskr/src/controller_tests.rs:27882:    let _ = fs::remove_dir_all(root);
+crates/slskr/src/controller_tests.rs:28003:    fs::create_dir_all(&root).expect("create mesh-sync fixture directory");
+crates/slskr/src/controller_tests.rs:28250:    fs::create_dir_all(&evidence_dir).expect("create mesh-sync evidence directory");
+crates/slskr/src/controller_tests.rs:28256:    let _ = fs::remove_dir_all(root);
+crates/slskr/src/controller_tests.rs:28555:    fs::create_dir_all(&evidence_dir).expect("create protocol evidence directory");
+crates/slskr/src/controller_tests.rs:28790:    fs::create_dir_all(&evidence_dir).expect("create protocol evidence directory");
+crates/slskr/src/controller_tests.rs:28966:    fs::create_dir_all(&evidence_dir).expect("create bridge dispatch evidence directory");
+crates/slskr/src/controller_tests.rs:29109:    fs::create_dir_all(&evidence_dir).expect("create bridge malformed evidence directory");
+crates/slskr/src/controller_tests.rs:29529:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:29705:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:31296:    fs::create_dir_all(&config.downloads_dir).unwrap();
+crates/slskr/src/controller_tests.rs:31305:    fs::create_dir_all(&outside_dir).unwrap();
+crates/slskr/src/controller_tests.rs:31316:    fs::remove_dir_all(state_dir).unwrap();
+crates/slskr/src/controller_tests.rs:31360:    let _ = fs::remove_file(source);
+crates/slskr/src/controller_tests.rs:31823:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:31969:    fs::create_dir_all(&root).expect("create mesh controller fixture directory");
+crates/slskr/src/controller_tests.rs:32246:    fs::create_dir_all(&evidence_dir).expect("create mesh controller evidence directory");
+crates/slskr/src/controller_tests.rs:32307:    fs::remove_dir_all(state_dir).expect("remove mesh message test state directory");
+crates/slskr/src/controller_tests.rs:32308:    fs::remove_dir_all(root).expect("remove mesh controller fixture directory");
+crates/slskr/src/controller_tests.rs:32643:    fs::create_dir_all(&evidence_dir).expect("create mesh edge-case evidence directory");
+crates/slskr/src/controller_tests.rs:32897:    fs::create_dir_all(&evidence_dir).expect("create mesh runtime evidence directory");
+crates/slskr/src/controller_tests.rs:33137:    fs::create_dir_all(&evidence_dir).expect("create mesh merge/publish evidence directory");
+crates/slskr/src/controller_tests.rs:33149:    fs::remove_dir_all(state_dir).expect("remove mesh merge/publish test state directory");
+crates/slskr/src/controller_tests.rs:33252:    fs::create_dir_all(&evidence_dir).expect("create mesh sync evidence directory");
+crates/slskr/src/controller_tests.rs:34083:    std::fs::create_dir_all(&root).expect("create listening-party share root");
+crates/slskr/src/controller_tests.rs:34174:    std::fs::remove_dir_all(root).expect("remove listening-party fixture");
+crates/slskr/src/controller_tests.rs:34783:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:34967:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:35098:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:35410:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:35562:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:35765:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:36306:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:38940:    std::fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:39021:    std::fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:39196:    std::fs::create_dir_all(&root).expect("mesh gateway state directory");
+crates/slskr/src/controller_tests.rs:39224:    std::fs::remove_dir_all(root).expect("remove mesh gateway state directory");
+crates/slskr/src/controller_tests.rs:40517:    std::fs::create_dir_all(&root).unwrap();
+crates/slskr/src/controller_tests.rs:40528:    std::fs::remove_dir_all(root).unwrap();
+crates/slskr/src/controller_tests.rs:41812:    std::fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:42702:    fs::create_dir_all(root.join("Relay")).expect("relay download root");
+crates/slskr/src/controller_tests.rs:42751:    let _ = fs::remove_dir_all(root);
+crates/slskr/src/controller_tests.rs:42878:    let _ = fs::remove_file(database_source);
+crates/slskr/src/controller_tests.rs:42984:        let _ = fs::remove_file(path);
+crates/slskr/src/controller_tests.rs:42987:    let _ = fs::remove_file(source);
+crates/slskr/src/controller_tests.rs:43591:    std::fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:43890:    std::fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:45487:    std::fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:45591:    std::fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:46784:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:46932:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:47122:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:47338:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:47539:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:47796:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:48089:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:48810:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:49122:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:49507:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:49716:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:49756:        std::fs::create_dir_all(&state_dir).expect("state dir");
+crates/slskr/src/controller_tests.rs:49821:        let _ = std::fs::remove_dir_all(state_dir);
+crates/slskr/src/controller_tests.rs:49827:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:50160:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:50347:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:50721:    fs::create_dir_all(&evidence_dir).expect("create persistence evidence directory");
+crates/slskr/src/controller_tests.rs:50970:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:51433:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:52489:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:52749:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:52895:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:53656:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:53945:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:54121:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:54295:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:54361:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:54443:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:54512:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:54787:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:55118:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:55585:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:55966:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:56072:        fs::remove_file(&pods_path).expect("remove channel create state file");
+crates/slskr/src/controller_tests.rs:56098:        fs::remove_dir(&pods_path).expect("remove blocked channel create state path");
+crates/slskr/src/controller_tests.rs:56185:        fs::remove_file(&pods_path).expect("remove channel update state file");
+crates/slskr/src/controller_tests.rs:56218:        fs::remove_dir(&pods_path).expect("remove blocked channel update state path");
+crates/slskr/src/controller_tests.rs:56306:        fs::remove_file(&pods_path).expect("remove channel delete state file");
+crates/slskr/src/controller_tests.rs:56332:        fs::remove_dir(&pods_path).expect("remove blocked channel delete state path");
+crates/slskr/src/controller_tests.rs:56410:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:56600:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:56839:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:56978:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:57169:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:57368:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:57464:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:57760:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:58302:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:58691:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:59035:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:59476:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:59801:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:60068:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:60187:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:60330:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:61098:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:61335:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:61562:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:61750:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:61843:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:61993:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:62176:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:62457:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:62907:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:63053:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:63230:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:63486:    fs::create_dir_all(&evidence_dir).expect("create ActivityPub open-case evidence directory");
+crates/slskr/src/controller_tests.rs:63620:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:64044:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:64241:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:64615:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:64760:    fs::create_dir_all(&evidence_dir).expect("create discovery graph edge evidence directory");
+crates/slskr/src/controller_tests.rs:65041:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:65286:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:65786:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:66161:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:66489:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:67071:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:67386:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:67614:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:67805:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:68178:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:68614:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:69067:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:69892:    fs::create_dir_all(&evidence_dir).expect("create quarantine-jury evidence directory");
+crates/slskr/src/controller_tests.rs:70131:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:70665:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:71270:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:71551:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:72177:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:72527:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:72968:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:73304:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:73415:            fs::remove_file(&path).expect("remove message storage file");
+crates/slskr/src/controller_tests.rs:73579:        fs::remove_dir(&messages_path).expect("remove blocked global message path");
+crates/slskr/src/controller_tests.rs:73731:        fs::remove_dir(&messages_path).expect("remove blocked channel message path");
+crates/slskr/src/controller_tests.rs:73757:        fs::remove_dir(&messages_path).expect("remove blocked stats message path");
+crates/slskr/src/controller_tests.rs:73788:        fs::remove_dir(&messages_path).expect("remove blocked search message path");
+crates/slskr/src/controller_tests.rs:73839:        fs::remove_dir(&messages_path).expect("remove blocked count message path");
+crates/slskr/src/controller_tests.rs:73976:            fs::remove_dir(&messages_path).expect("remove blocked maintenance path");
+crates/slskr/src/controller_tests.rs:73983:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:74086:            fs::remove_file(&path).expect("remove membership storage file");
+crates/slskr/src/controller_tests.rs:74129:        fs::remove_dir(&pods_path).expect("remove blocked membership delete path");
+crates/slskr/src/controller_tests.rs:74218:        fs::remove_dir(&pods_path).expect("remove blocked membership projection path");
+crates/slskr/src/controller_tests.rs:74237:        fs::remove_dir(&pods_path).expect("remove blocked membership stats path");
+crates/slskr/src/controller_tests.rs:74290:        fs::remove_dir(&pods_path).expect("remove blocked membership moderation path");
+crates/slskr/src/controller_tests.rs:74385:        fs::remove_dir(&pods_path).expect("remove blocked membership publish path");
+crates/slskr/src/controller_tests.rs:74469:        fs::remove_dir(&pods_path).expect("remove blocked membership update path");
+crates/slskr/src/controller_tests.rs:74552:        fs::remove_dir(&pods_path).expect("remove blocked membership cleanup path");
+crates/slskr/src/controller_tests.rs:74581:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:74649:                fs::remove_file(&path).expect("remove discovery feature state file");
+crates/slskr/src/controller_tests.rs:74758:        fs::remove_dir(&feature_path).expect("remove blocked discovery registration path");
+crates/slskr/src/controller_tests.rs:74846:        fs::remove_dir(&feature_path).expect("remove blocked discovery update path");
+crates/slskr/src/controller_tests.rs:74959:        fs::remove_dir(&feature_path).expect("remove blocked discovery unregister path");
+crates/slskr/src/controller_tests.rs:75091:        fs::remove_dir(&feature_path).expect("remove blocked discovery projection path");
+crates/slskr/src/controller_tests.rs:75151:        fs::remove_dir(&feature_path).expect("remove blocked discovery refresh path");
+crates/slskr/src/controller_tests.rs:75240:    fs::create_dir_all(&evidence_dir).expect("create discovery evidence directory");
+crates/slskr/src/controller_tests.rs:76060:    fs::create_dir_all(&evidence_dir).expect("create PodJoinLeave evidence directory");
+crates/slskr/src/controller_tests.rs:76531:    fs::create_dir_all(&evidence_dir).expect("create security ban evidence directory");
+crates/slskr/src/controller_tests.rs:76978:    fs::create_dir_all(&evidence_dir).expect("create security diagnostics evidence directory");
+crates/slskr/src/controller_tests.rs:77838:    fs::create_dir_all(&evidence_dir).expect("create SoulseekDiscovery evidence directory");
+crates/slskr/src/controller_tests.rs:78550:    fs::create_dir_all(&evidence_dir).expect("create MultiSource evidence directory");
+crates/slskr/src/controller_tests.rs:78965:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:79107:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:79363:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:79578:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:79843:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:80070:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:80101:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:81155:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:81414:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:82231:    fs::create_dir_all(&evidence_dir).expect("create discovery evidence directory");
+crates/slskr/src/controller_tests.rs:82975:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:83279:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:83539:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:83840:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:84045:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:84251:                    fs::create_dir_all(&evidence_dir)
+crates/slskr/src/controller_tests.rs:84344:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:84462:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:84670:    let _ = fs::remove_dir_all(root);
+crates/slskr/src/controller_tests.rs:84675:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:84795:    std::fs::create_dir_all(&root).expect("mesh gateway differential state directory");
+crates/slskr/src/controller_tests.rs:84982:    std::fs::remove_dir_all(root).expect("remove mesh gateway differential state directory");
+crates/slskr/src/controller_tests.rs:84987:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:85177:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:85521:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:85770:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:85847:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:85945:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:86035:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:86255:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:86434:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:86536:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:86599:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:86669:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:86711:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:86763:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:86818:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:87141:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:87318:    let _ = fs::remove_file(&validation_path);
+crates/slskr/src/controller_tests.rs:87481:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:87735:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:87867:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:87972:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:88153:    fs::create_dir_all(&evidence_dir).expect("create trace evidence directory");
+crates/slskr/src/controller_tests.rs:88372:    fs::create_dir_all(&evidence_dir).expect("create compatibility evidence directory");
+crates/slskr/src/controller_tests.rs:88532:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:88624:    std::fs::create_dir_all(download_file.parent().unwrap())
+crates/slskr/src/controller_tests.rs:88682:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:88830:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:88916:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:89019:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:89138:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:89190:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:89713:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:90085:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:90154:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:90201:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:90251:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:90305:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:90409:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:90466:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:90527:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:90572:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:90628:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:90685:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:90802:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:90863:    fs::create_dir_all(&custom_path).expect("create destination fixture");
+crates/slskr/src/controller_tests.rs:90920:    let _ = fs::remove_dir_all(root);
+crates/slskr/src/controller_tests.rs:90924:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:90979:    fs::create_dir_all(&root).expect("create destination edge root");
+crates/slskr/src/controller_tests.rs:91213:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:91220:    let _ = fs::remove_dir_all(root);
+crates/slskr/src/controller_tests.rs:91460:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:91979:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:92702:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:92856:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:93096:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:93365:        std::fs::create_dir_all(&root).expect("create differential listening-party share root");
+crates/slskr/src/controller_tests.rs:93420:        let _ = std::fs::remove_dir_all(root);
+crates/slskr/src/controller_tests.rs:93426:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:93656:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:93726:        std::fs::create_dir_all(&root).expect("create differential downloads root");
+crates/slskr/src/controller_tests.rs:93757:        std::fs::create_dir_all(&root).expect("create differential recursive downloads root");
+crates/slskr/src/controller_tests.rs:93808:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:94275:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:94486:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:94589:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:95073:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:95310:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:95471:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:96129:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:96666:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/controller_tests.rs:97576:    fs::create_dir_all(existing.parent().unwrap()).unwrap();
+crates/slskr/src/controller_tests.rs:97805:    fs::create_dir_all(&evidence_dir).expect("create file lifecycle evidence directory");
+crates/slskr/src/controller_tests.rs:98296:    fs::create_dir_all(&new_root).unwrap();
+crates/slskr/src/controller_tests.rs:98297:    fs::create_dir_all(&new_downloads).unwrap();
+crates/slskr/src/controller_tests.rs:98298:    fs::create_dir_all(&new_incomplete).unwrap();
+crates/slskr/src/controller_tests.rs:98696:    fs::create_dir_all(&evidence_dir).expect("create file lifecycle evidence directory");
+crates/slskr/src/controller_tests.rs:98727:        fs::create_dir_all(download_file.parent().unwrap()).expect("downloads fixture root");
+crates/slskr/src/controller_tests.rs:98728:        fs::create_dir_all(incomplete_file.parent().unwrap()).expect("incomplete fixture root");
+crates/slskr/src/controller_tests.rs:98861:    fs::create_dir_all(&evidence_dir).expect("create file lifecycle evidence directory");
+crates/slskr/src/controller_tests.rs:98966:    fs::create_dir_all(&evidence_dir).expect("create file lifecycle evidence directory");
+crates/slskr/src/controller_tests.rs:99184:        let _ = fs::remove_dir_all(state_dir);
+crates/slskr/src/controller_tests.rs:99190:    fs::create_dir_all(&evidence_dir).expect("create file lifecycle evidence directory");
+crates/slskr/src/controller_tests.rs:99214:        fs::create_dir_all(&root).expect("secure writer root");
+crates/slskr/src/controller_tests.rs:99278:        let _ = fs::remove_dir_all(root);
+crates/slskr/src/controller_tests.rs:99284:    fs::create_dir_all(&evidence_dir).expect("create file lifecycle evidence directory");
+crates/slskr/src/controller_tests.rs:99306:    fs::create_dir_all(&root).expect("DHT certificate root");
+crates/slskr/src/controller_tests.rs:99339:        fs::create_dir_all(&linked_root).expect("DHT symlink root");
+crates/slskr/src/controller_tests.rs:99397:    fs::create_dir_all(&evidence_dir).expect("create file lifecycle evidence directory");
+crates/slskr/src/controller_tests.rs:99404:    let _ = fs::remove_dir_all(root);
+crates/slskr/src/controller_tests.rs:100333:    std::fs::create_dir_all(&root).unwrap();
+crates/slskr/src/controller_tests.rs:100358:    let _ = std::fs::remove_dir_all(&root);
+crates/slskr/src/controller_tests.rs:100359:    let _ = std::fs::remove_file(&outside);
+crates/slskr/src/controller_tests.rs:100384:    std::fs::create_dir_all(&root).unwrap();
+crates/slskr/src/controller_tests.rs:100422:    let _ = std::fs::remove_dir_all(&root);
+crates/slskr/src/controller_tests.rs:100541:    std::fs::create_dir_all(&nested).expect("create nested dir");
+crates/slskr/src/controller_tests.rs:100558:    std::fs::create_dir_all(&album).expect("create recursive directory");
+crates/slskr/src/controller_tests.rs:100567:    let _ = std::fs::remove_dir_all(root);
+crates/slskr/src/controller_tests.rs:100588:    std::fs::create_dir_all(&root).expect("create root");
+crates/slskr/src/controller_tests.rs:100589:    std::fs::create_dir_all(&outside).expect("create outside");
+crates/slskr/src/controller_tests.rs:100602:    let _ = std::fs::remove_dir_all(root);
+crates/slskr/src/controller_tests.rs:100603:    let _ = std::fs::remove_dir_all(outside);
+crates/slskr/src/controller_tests.rs:100620:    std::fs::create_dir_all(&root).expect("create root");
+crates/slskr/src/controller_tests.rs:100635:    let _ = std::fs::remove_dir_all(root);
+crates/slskr/src/controller_tests.rs:100655:    std::fs::create_dir_all(&directory).expect("create deep directory tree");
+crates/slskr/src/controller_tests.rs:100665:    let _ = std::fs::remove_dir_all(root);
+crates/slskr/src/controller_tests.rs:101362:    std::fs::create_dir_all(&root).unwrap();
+crates/slskr/src/controller_tests.rs:101369:    std::fs::remove_dir_all(root).unwrap();
+crates/slskr/src/controller_tests.rs:101383:    std::fs::create_dir_all(&root).unwrap();
+crates/slskr/src/controller_tests.rs:101389:    std::fs::remove_dir_all(root).unwrap();
+crates/slskr/src/controller_tests.rs:101448:    std::fs::create_dir_all(&artist).unwrap();
+crates/slskr/src/controller_tests.rs:101450:    std::fs::create_dir_all(root.join(".hidden")).unwrap();
+crates/slskr/src/controller_tests.rs:101467:    std::fs::remove_dir_all(root).unwrap();
+crates/slskr/src/controller_tests.rs:101475:    std::fs::create_dir_all(&root).unwrap();
+crates/slskr/src/controller_tests.rs:101512:    std::fs::remove_dir_all(root).unwrap();
+crates/slskr/src/controller_tests.rs:101522:    std::fs::create_dir_all(&first).unwrap();
+crates/slskr/src/controller_tests.rs:101523:    std::fs::create_dir_all(&second).unwrap();
+crates/slskr/src/controller_tests.rs:101536:    std::fs::remove_dir_all(root).unwrap();
+crates/slskr/src/controller_tests.rs:101575:    std::fs::create_dir_all(&excluded).unwrap();
+crates/slskr/src/controller_tests.rs:101596:    std::fs::remove_dir_all(root).unwrap();
+crates/slskr/src/controller_tests.rs:101620:    std::fs::create_dir_all(&root).unwrap();
+crates/slskr/src/controller_tests.rs:101633:    std::fs::remove_dir_all(root).unwrap();
+crates/slskr/src/controller_tests.rs:101654:    std::fs::create_dir_all(&root).unwrap();
+crates/slskr/src/controller_tests.rs:101655:    std::fs::create_dir_all(&outside).unwrap();
+crates/slskr/src/controller_tests.rs:101669:    let _ = std::fs::remove_dir_all(root);
+crates/slskr/src/controller_tests.rs:101670:    let _ = std::fs::remove_dir_all(outside);
+crates/slskr/src/controller_tests.rs:101709:    std::fs::create_dir_all(&state_dir).unwrap();
+crates/slskr/src/controller_tests.rs:101729:    std::fs::remove_dir_all(state_dir).unwrap();
+crates/slskr/src/controller_tests.rs:101745:    let _ = std::fs::remove_file(queue.events_path);
+crates/slskr/src/controller_tests.rs:102027:    let _ = std::fs::remove_file(queue.events_path);
+crates/slskr/src/controller_tests.rs:102028:    let _ = std::fs::remove_file(queue.state_path);
+crates/slskr/src/controller_tests.rs:102535:    std::fs::create_dir_all(partial_path.parent().unwrap()).expect("create download root");
+crates/slskr/src/controller_tests.rs:102609:    std::fs::remove_dir_all(&state.config.state_dir).expect("remove test state directory");
+crates/slskr/src/controller_tests.rs:102648:    let _ = std::fs::remove_file(&path);
+crates/slskr/src/controller_tests.rs:102649:    let mut file = std::fs::OpenOptions::new()
+crates/slskr/src/controller_tests.rs:102666:    std::fs::remove_file(path).expect("remove cancelled transfer test file");
+crates/slskr/src/controller_tests.rs:102707:    let _ = std::fs::remove_file(queue.events_path);
+crates/slskr/src/controller_tests.rs:102708:    let _ = std::fs::remove_file(queue.state_path);
+crates/slskr/src/controller_tests.rs:102746:    let _ = std::fs::remove_file(queue.events_path);
+crates/slskr/src/controller_tests.rs:102747:    let _ = std::fs::remove_file(queue.state_path);
+crates/slskr/src/controller_tests.rs:102766:    let _ = std::fs::remove_file(queue.events_path);
+crates/slskr/src/controller_tests.rs:102767:    let _ = std::fs::remove_file(queue.state_path);
+crates/slskr/src/controller_tests.rs:102816:    let _ = std::fs::remove_file(queue.events_path);
+crates/slskr/src/controller_tests.rs:102817:    let _ = std::fs::remove_file(queue.state_path);
+crates/slskr/src/controller_tests.rs:102880:    let _ = std::fs::remove_file(queue.events_path);
+crates/slskr/src/controller_tests.rs:102881:    let _ = std::fs::remove_file(queue.state_path);
+crates/slskr/src/controller_tests.rs:102933:    let _ = std::fs::remove_file(queue.events_path);
+crates/slskr/src/controller_tests.rs:102934:    let _ = std::fs::remove_file(queue.state_path);
+crates/slskr/src/controller_tests.rs:102997:    let _ = std::fs::remove_file(queue.events_path);
+crates/slskr/src/controller_tests.rs:102998:    let _ = std::fs::remove_file(queue.state_path);
+crates/slskr/src/controller_tests.rs:103012:    std::fs::create_dir_all(&state_dir).expect("state dir");
+crates/slskr/src/controller_tests.rs:103041:    let _ = std::fs::remove_dir_all(state_dir);
+crates/slskr/src/controller_tests.rs:103055:    std::fs::create_dir_all(&state_dir).expect("state dir");
+crates/slskr/src/controller_tests.rs:103122:    let _ = std::fs::remove_dir_all(state_dir);
+crates/slskr/src/controller_tests.rs:103167:    std::fs::create_dir_all(&state_dir).expect("state dir");
+crates/slskr/src/controller_tests.rs:103178:    let _ = std::fs::remove_dir_all(state_dir);
+crates/slskr/src/controller_tests.rs:103193:    std::fs::create_dir_all(&state_dir).expect("state dir");
+crates/slskr/src/controller_tests.rs:103205:    let _ = std::fs::remove_dir_all(state_dir);
+crates/slskr/src/controller_tests.rs:103222:    std::fs::create_dir_all(&state_dir).expect("state dir");
+crates/slskr/src/controller_tests.rs:103289:    let _ = std::fs::remove_dir_all(state_dir);
+crates/slskr/src/controller_tests.rs:103303:    std::fs::create_dir_all(&state_dir).expect("state dir");
+crates/slskr/src/controller_tests.rs:103316:    let _ = std::fs::remove_dir_all(state_dir);
+crates/slskr/src/controller_tests.rs:103330:    fs::create_dir_all(&state_dir).expect("file lifecycle state dir");
+crates/slskr/src/controller_tests.rs:103439:    fs::create_dir_all(&evidence_dir).expect("create file lifecycle evidence directory");
+crates/slskr/src/controller_tests.rs:103446:    let _ = fs::remove_dir_all(state_dir);
+crates/slskr/src/controller_tests.rs:103461:    std::fs::create_dir_all(&state_dir).expect("state dir");
+crates/slskr/src/controller_tests.rs:103473:    let _ = std::fs::remove_dir_all(state_dir);
+crates/slskr/src/controller_tests.rs:103487:    std::fs::create_dir_all(&state_dir).expect("state dir");
+crates/slskr/src/controller_tests.rs:103543:    let _ = std::fs::remove_dir_all(state_dir);
+crates/slskr/src/controller_tests.rs:103576:    std::fs::create_dir_all(&state_dir).unwrap();
+crates/slskr/src/controller_tests.rs:103585:    let _ = std::fs::remove_dir_all(state_dir);
+crates/slskr/src/controller_tests.rs:104142:    std::fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:104577:    let _ = fs::remove_file(conflict_root);
+crates/slskr/src/controller_tests.rs:104582:    fs::create_dir_all(&evidence_dir).expect("create source-feed evidence directory");
+crates/slskr/src/controller_tests.rs:104753:    std::fs::remove_file(picture).unwrap();
+crates/slskr/src/controller_tests.rs:104946:    std::fs::create_dir_all(downloads_root.join("Artist/Album")).unwrap();
+crates/slskr/src/controller_tests.rs:104948:    std::fs::create_dir_all(incomplete_root.join("Partial")).unwrap();
+crates/slskr/src/controller_tests.rs:105043:        std::fs::create_dir_all(file_path.parent().unwrap()).unwrap();
+crates/slskr/src/controller_tests.rs:105309:        fs::create_dir_all(&downloads_target).expect("create downloads list target");
+crates/slskr/src/controller_tests.rs:105310:        fs::create_dir_all(&incomplete_target).expect("create incomplete list target");
+crates/slskr/src/controller_tests.rs:105345:        let _ = fs::remove_file(downloads_link);
+crates/slskr/src/controller_tests.rs:105346:        let _ = fs::remove_file(incomplete_link);
+crates/slskr/src/controller_tests.rs:105347:        let _ = fs::remove_dir_all(downloads_target);
+crates/slskr/src/controller_tests.rs:105348:        let _ = fs::remove_dir_all(incomplete_target);
+crates/slskr/src/controller_tests.rs:105350:    let _ = fs::remove_file(downloads_conflict_root);
+crates/slskr/src/controller_tests.rs:105351:    let _ = fs::remove_file(incomplete_conflict_root);
+crates/slskr/src/controller_tests.rs:105604:    std::fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:105646:    std::fs::create_dir_all(incomplete_root.join("Nested")).unwrap();
+crates/slskr/src/controller_tests.rs:105898:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:106169:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:106249:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:106583:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:106623:    let _ = std::fs::remove_dir_all(&file_state.config.downloads_dir);
+crates/slskr/src/controller_tests.rs:106624:    let _ = std::fs::remove_dir_all(&file_state.config.incomplete_dir);
+crates/slskr/src/controller_tests.rs:106890:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:106978:    fs::create_dir_all(downloads_root.join("Relay")).expect("relay download root");
+crates/slskr/src/controller_tests.rs:107017:    fs::remove_file(downloads_root.join("Relay/Agent.txt"))
+crates/slskr/src/controller_tests.rs:107146:    fs::remove_dir_all(&incoming_directory).expect("remove relay upload directory");
+crates/slskr/src/controller_tests.rs:107185:    fs::remove_file(&incoming_directory).expect("remove relay upload conflict");
+crates/slskr/src/controller_tests.rs:107186:    fs::create_dir_all(&incoming_directory).expect("restore relay upload directory");
+crates/slskr/src/controller_tests.rs:107311:    fs::remove_dir_all(&incoming_directory).expect("remove relay share upload directory");
+crates/slskr/src/controller_tests.rs:107353:    fs::remove_file(&incoming_directory).expect("remove relay share upload conflict");
+crates/slskr/src/controller_tests.rs:107354:    fs::create_dir_all(&incoming_directory).expect("restore relay share upload directory");
+crates/slskr/src/controller_tests.rs:107355:    let _ = fs::remove_file(database_source);
+crates/slskr/src/controller_tests.rs:107356:    let _ = fs::remove_dir_all(downloads_root);
+crates/slskr/src/controller_tests.rs:107361:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:108309:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:108633:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:108972:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:109441:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:110186:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:110421:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:110709:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:111133:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:111382:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:112290:    fs::create_dir_all(&evidence_dir).expect("create searches evidence directory");
+crates/slskr/src/controller_tests.rs:112548:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:112858:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:113386:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:113665:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:114064:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:114485:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:114863:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:115074:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:115366:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:115795:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:116041:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:116315:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:116834:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:117054:    fs::create_dir_all(&evidence_dir).expect("create runtime security evidence directory");
+crates/slskr/src/controller_tests.rs:117103:        fs::create_dir_all(&root).expect("path guard root");
+crates/slskr/src/controller_tests.rs:117191:        let _ = fs::remove_dir_all(root);
+crates/slskr/src/controller_tests.rs:117273:    fs::create_dir_all(&evidence_dir).expect("create path guard security evidence directory");
+crates/slskr/src/controller_tests.rs:117376:    fs::create_dir_all(&evidence_dir).expect("create share token security evidence directory");
+crates/slskr/src/controller_tests.rs:117539:    fs::create_dir_all(&evidence_dir).expect("create CSRF security evidence directory");
+crates/slskr/src/controller_tests.rs:117668:    fs::create_dir_all(&hash_root).expect("hardening hash config directory");
+crates/slskr/src/controller_tests.rs:117682:    fs::remove_dir_all(&hash_root).expect("remove hardening hash config directory");
+crates/slskr/src/controller_tests.rs:117730:    fs::create_dir_all(&evidence_dir).expect("create hardening security evidence directory");
+crates/slskr/src/controller_tests.rs:117777:    fs::create_dir_all(&root).expect("certificate manager root");
+crates/slskr/src/controller_tests.rs:117836:    fs::create_dir_all(&incomplete_root).expect("incomplete certificate root");
+crates/slskr/src/controller_tests.rs:117853:    fs::create_dir_all(&oversized_root).expect("oversized certificate root");
+crates/slskr/src/controller_tests.rs:117876:        fs::create_dir_all(&symlink_root).expect("symlink certificate root");
+crates/slskr/src/controller_tests.rs:117941:    fs::create_dir_all(&evidence_dir).expect("create certificate security evidence directory");
+crates/slskr/src/controller_tests.rs:117948:    fs::remove_dir_all(&root).expect("remove certificate manager root");
+crates/slskr/src/controller_tests.rs:118116:    fs::create_dir_all(&evidence_dir).expect("create overlay validation evidence directory");
+crates/slskr/src/controller_tests.rs:118262:    fs::create_dir_all(&evidence_dir).expect("create Solid policy security evidence directory");
+crates/slskr/src/controller_tests.rs:118629:    fs::create_dir_all(&certificate_root).expect("certificate root");
+crates/slskr/src/controller_tests.rs:118658:    fs::create_dir_all(&malformed_root).expect("malformed certificate root");
+crates/slskr/src/controller_tests.rs:118687:    let _ = fs::remove_dir_all(&certificate_root);
+crates/slskr/src/controller_tests.rs:118688:    let _ = fs::remove_dir_all(&malformed_root);
+crates/slskr/src/controller_tests.rs:118693:    fs::create_dir_all(&evidence_dir).expect("create security-controls evidence directory");
+crates/slskr/src/controller_tests.rs:118747:    fs::create_dir_all(&root).expect("content-safety root");
+crates/slskr/src/controller_tests.rs:118826:    let _ = fs::remove_dir_all(root);
+crates/slskr/src/controller_tests.rs:118830:    fs::create_dir_all(&evidence_dir).expect("create content-safety evidence directory");
+crates/slskr/src/controller_tests.rs:118949:    fs::create_dir_all(&evidence_dir).expect("create Soulseek safety evidence directory");
+crates/slskr/src/controller_tests.rs:119073:    fs::create_dir_all(&evidence_dir).expect("create security event sink evidence directory");
+crates/slskr/src/controller_tests.rs:119619:    std::fs::create_dir_all(&evidence_dir).expect("create integrity evidence directory");
+crates/slskr/src/controller_tests.rs:120298:    std::fs::create_dir_all(&evidence_dir).expect("create runtime-control evidence directory");
+crates/slskr/src/controller_tests.rs:120508:    std::fs::create_dir_all(&evidence_dir).expect("create route-security evidence directory");
+crates/slskr/src/controller_tests.rs:120907:    let _ = fs::remove_dir_all(&root);
+crates/slskr/src/controller_tests.rs:121205:    fs::create_dir_all(&evidence_dir).expect("create security-controls evidence directory");
+crates/slskr/src/controller_tests.rs:121384:    fs::create_dir_all(&root).expect("JWT revocation root");
+crates/slskr/src/controller_tests.rs:121429:    let _ = fs::remove_dir_all(root);
+crates/slskr/src/controller_tests.rs:121434:    fs::create_dir_all(&evidence_dir).expect("create security-controls evidence directory");
+crates/slskr/src/controller_tests.rs:121555:    fs::create_dir_all(&evidence_dir).expect("create security controller evidence directory");
+crates/slskr/src/controller_tests.rs:121639:    fs::create_dir_all(&evidence_dir).expect("create passthrough security evidence directory");
+crates/slskr/src/controller_tests.rs:121694:        fs::create_dir_all(&root).expect("authentication control state root");
+crates/slskr/src/controller_tests.rs:121853:        let _ = fs::remove_dir_all(root);
+crates/slskr/src/controller_tests.rs:121859:    fs::create_dir_all(&evidence_dir)
+crates/slskr/src/controller_tests.rs:121907:    fs::create_dir_all(&root).expect("pin file lifecycle root");
+crates/slskr/src/controller_tests.rs:121949:        fs::create_dir_all(attack_root.join("mesh")).expect("symlink attack directory");
+crates/slskr/src/controller_tests.rs:121973:    fs::create_dir_all(&evidence_dir).expect("create file-lifecycle evidence directory");
+crates/slskr/src/controller_tests.rs:121980:    let _ = fs::remove_dir_all(root);
+crates/slskr/src/controller_tests.rs:121999:    fs::create_dir_all(&root).expect("Gold Star file lifecycle root");
+crates/slskr/src/controller_tests.rs:122046:        fs::create_dir_all(&linked_root).expect("Gold Star linked state directory");
+crates/slskr/src/controller_tests.rs:122070:    fs::create_dir_all(&evidence_dir).expect("create file-lifecycle evidence directory");
+crates/slskr/src/controller_tests.rs:122077:    let _ = fs::remove_dir_all(root);
+crates/slskr/src/controller_tests.rs:122222:    fs::create_dir_all(&root).expect("create multisource lifecycle root");
+crates/slskr/src/controller_tests.rs:122498:    fs::create_dir_all(&evidence_dir).expect("create multisource evidence directory");
+crates/slskr/src/controller_tests.rs:122507:    let _ = fs::remove_dir_all(root);
+crates/slskr/src/controller_tests.rs:122752:        let _ = fs::remove_file(yaml_failure_root);
+crates/slskr/src/controller_tests.rs:122924:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:123389:    let _ = fs::remove_file(conflict_root);
+crates/slskr/src/controller_tests.rs:123934:    fs::create_dir_all(&evidence_dir).expect("create controller-api evidence directory");
+crates/slskr/src/controller_tests.rs:124112:    let _ = fs::remove_file(&restart_path);
+crates/slskr/src/controller_tests.rs:124182:    fs::create_dir_all(&evidence_dir).expect("create persistence evidence directory");
+crates/slskr/src/controller_tests.rs:124340:    let _ = fs::remove_file(&restart_path);
+crates/slskr/src/controller_tests.rs:124395:    fs::create_dir_all(&evidence_dir).expect("create persistence evidence directory");
+crates/slskr/src/controller_tests.rs:124556:        let _ = std::fs::remove_file(&restart_path);
+crates/slskr/src/controller_tests.rs:124606:    fs::create_dir_all(&evidence_dir).expect("create persistence evidence directory");
+crates/slskr/src/controller_tests.rs:124849:    let _ = fs::remove_file(&restart_path);
+crates/slskr/src/controller_tests.rs:124987:    fs::create_dir_all(&evidence_dir).expect("create persistence evidence directory");
+crates/slskr/src/controller_tests.rs:125131:    let _ = fs::remove_file(&restart_path);
+crates/slskr/src/controller_tests.rs:125188:    fs::create_dir_all(&evidence_dir).expect("create SongID persistence evidence directory");
+crates/slskr/src/controller_tests.rs:125294:    let _ = fs::remove_file(&restart_path);
+crates/slskr/src/controller_tests.rs:125332:    fs::create_dir_all(&evidence_dir).expect("create TrafficStats evidence directory");
+crates/slskr/src/controller_tests.rs:125956:    fs::create_dir_all(&evidence_dir).expect("create HashDb controller evidence directory");
+crates/slskr/src/controller_tests.rs:126052:            fs::remove_file(&path).expect("remove state file before runtime failure");
+crates/slskr/src/controller_tests.rs:127269:    fs::create_dir_all(&evidence_dir).expect("create PodsController evidence directory");
+crates/slskr/src/controller_tests.rs:128546:    fs::create_dir_all(&evidence_dir).expect("create WishlistController evidence directory");
+crates/slskr/src/controller_tests.rs:128894:    fs::create_dir_all(&evidence_dir)
+crates/slskr/src/controller_tests.rs:129897:    fs::create_dir_all(&evidence_dir).expect("create RoomsController evidence directory");
+crates/slskr/src/controller_tests.rs:130634:    fs::create_dir_all(&evidence_dir).expect("create BridgeController evidence directory");
+crates/slskr/src/controller_tests.rs:130707:            fs::remove_file(&path).expect("remove PodCore state file before blocking it");
+crates/slskr/src/controller_tests.rs:130724:                fs::remove_dir_all(&path).expect("remove prepared PodCore feature directory");
+crates/slskr/src/controller_tests.rs:130726:                fs::remove_file(&path).expect("remove prepared PodCore feature file");
+crates/slskr/src/controller_tests.rs:132792:    fs::create_dir_all(&evidence_dir).expect("create PodCore evidence directory");
+crates/slskr/src/controller_tests.rs:133211:        fs::create_dir_all(&state_dir).expect("create MediaCore residual state directory");
+crates/slskr/src/controller_tests.rs:133253:        let _ = fs::remove_dir_all(&state_dir);
+crates/slskr/src/controller_tests.rs:133276:    fs::create_dir_all(&evidence_dir).expect("create MediaCore evidence directory");
+crates/slskr/src/controller_tests.rs:134070:    fs::create_dir_all(&evidence_dir).expect("create MusicBrainz evidence directory");
+crates/slskr/src/controller_tests.rs:134619:    fs::create_dir_all(&evidence_dir).expect("create Jobs evidence directory");
+crates/slskr/src/controller_tests.rs:134764:    fs::create_dir_all(&item_root).expect("create residual library directory");
+crates/slskr/src/controller_tests.rs:134878:    let _ = fs::remove_dir_all(&item_root);
+crates/slskr/src/controller_tests.rs:135120:    fs::create_dir_all(&evidence_dir).expect("create Library evidence directory");
+crates/slskr/src/controller_tests.rs:136051:    fs::create_dir_all(&evidence_dir).expect("create Security evidence directory");
+crates/slskr/src/controller_tests.rs:136612:        fs::create_dir_all(&connection_path).expect("create Spotify connection conflict");
+crates/slskr/src/controller_tests.rs:137070:    fs::create_dir_all(&evidence_dir).expect("create Integrations evidence directory");
+crates/slskr/src/controller_tests.rs:137830:    fs::create_dir_all(&evidence_dir).expect("create Backfill evidence directory");
+crates/slskr/src/controller_tests.rs:138523:    fs::create_dir_all(&evidence_dir).expect("create slskdn native evidence directory");
+crates/slskr/src/controller_tests.rs:138896:    fs::create_dir_all(&evidence_dir).expect("create audio evidence directory");
+crates/slskr/src/controller_tests.rs:139259:    fs::create_dir_all(&evidence_dir).expect("create taste recommendation evidence directory");
+crates/slskr/src/controller_tests.rs:139747:    fs::create_dir_all(&evidence_dir).expect("create SongID evidence directory");
+crates/slskr/src/controller_tests.rs:140289:    fs::create_dir_all(&evidence_dir).expect("create share-grants evidence directory");
+crates/slskr/src/controller_tests.rs:140734:    fs::create_dir_all(&evidence_dir).expect("create shares evidence directory");
+crates/slskr/src/controller_tests.rs:141345:    fs::create_dir_all(&evidence_dir).expect("create users evidence directory");
+crates/slskr/src/controller_tests.rs:141757:    fs::create_dir_all(&evidence_dir).expect("create telemetry evidence directory");
+crates/slskr/src/controller_tests.rs:142044:    fs::create_dir_all(downloads_root.join("Relay")).expect("relay download directory");
+crates/slskr/src/controller_tests.rs:142563:    let _ = fs::remove_dir_all(super::effective_downloads_dir(&controller_state));
+crates/slskr/src/controller_tests.rs:142564:    let _ = fs::remove_file(share_source);
+crates/slskr/src/controller_tests.rs:142569:    fs::create_dir_all(&evidence_dir).expect("create relay evidence directory");
+crates/slskr/src/controller_tests.rs:143316:    fs::create_dir_all(&evidence_dir).expect("create conversations evidence directory");
+crates/slskr/src/controller_tests.rs:144001:    fs::create_dir_all(&evidence_dir).expect("create downloads evidence directory");
+crates/slskr/src/controller_tests.rs:144116:            fs::create_dir_all(&path).expect("create nominal directory");
+crates/slskr/src/controller_tests.rs:144179:            fs::create_dir_all(&path).expect("create mutation directory");
+crates/slskr/src/controller_tests.rs:144213:            fs::create_dir_all(&path).expect("create concurrent directory");
+crates/slskr/src/controller_tests.rs:144251:            fs::create_dir_all(&root).expect("create file storage root");
+crates/slskr/src/controller_tests.rs:144303:            fs::create_dir_all(&root).expect("create concurrent file root");
+crates/slskr/src/controller_tests.rs:144351:        fs::create_dir_all(&root).expect("create incomplete mutation root");
+crates/slskr/src/controller_tests.rs:144430:            fs::create_dir_all(root.join("Album")).expect("create populated root");
+crates/slskr/src/controller_tests.rs:144449:            fs::create_dir_all(root.join("Album")).expect("create nominal detail root");
+crates/slskr/src/controller_tests.rs:144508:            fs::create_dir_all(&album).expect("create populated detail root");
+crates/slskr/src/controller_tests.rs:144534:    fs::create_dir_all(&evidence_dir).expect("create files evidence directory");
 
 ## Async task and channel lifecycle boundaries
-crates/slskr/src/route_dispatch_group_7.rs:1331:                tokio::spawn(multisource::execute(
-crates/slskr/src/route_dispatch_group_6.rs:2857:                        tokio::task::spawn_blocking(move || {
+crates/slskr/src/route_dispatch_group_7.rs:1332:                tokio::spawn(multisource::execute(
+crates/slskr/src/batch.rs:410:    fn test_batch_rejects_invalid_timeout() {
+crates/slskr-client/src/quic_data.rs:615:    tokio::spawn(async move {
+crates/slskr-client/src/quic_data.rs:656:    let connection = timeout(QUIC_CONNECT_TIMEOUT, connecting)
+crates/slskr-client/src/quic_data.rs:777:        let server = tokio::spawn(async move {
+crates/slskr-client/src/quic_data.rs:824:        let server = tokio::spawn(async move {
+crates/slskr-client/src/quic_data.rs:865:        let server = tokio::spawn(async move {
+crates/slskr/src/route_dispatch_group_6.rs:2858:                        tokio::task::spawn_blocking(move || {
+crates/slskr/src/events_ws.rs:121:    let reader_task = tokio::spawn(async move {
+crates/slskr/src/events_ws.rs:123:            let frame = read_client_frame_with_timeout(&mut reader, WEBSOCKET_READ_TIMEOUT).await;
+crates/slskr/src/events_ws.rs:131:    let mut heartbeat = time::interval(heartbeat_interval);
+crates/slskr/src/events_ws.rs:286:    time::timeout(timeout, read_client_frame(reader))
+crates/slskr/src/events_ws.rs:335:    write_frame_with_timeout(writer, opcode, payload, WEBSOCKET_WRITE_TIMEOUT).await
+crates/slskr/src/events_ws.rs:347:    time::timeout(timeout, write_frame_inner(writer, opcode, payload))
+crates/slskr/src/events_ws.rs:486:        let (event_tx, _) = broadcast::channel(10);
+crates/slskr/src/events_ws.rs:491:        tokio::spawn(async move {
+crates/slskr/src/events_ws.rs:520:        let message = time::timeout(Duration::from_secs(2), async {
+crates/slskr/src/events_ws.rs:642:        let (_event_tx, receiver) = broadcast::channel(1);
+crates/slskr/src/events_ws.rs:665:        let (event_tx, receiver) = broadcast::channel(1);
+crates/slskr/src/events_ws.rs:689:        let (_event_tx, receiver) = broadcast::channel(1);
+crates/slskr/src/events_ws.rs:692:        let error = time::timeout(
+crates/slskr/src/events_ws.rs:715:            write_frame_with_timeout(&mut writer, 0x82, &payload, Duration::from_millis(50))
+crates/slskr/src/events_ws.rs:724:        let error = time::timeout(
+crates/slskr/src/events_ws.rs:726:            read_client_frame_with_timeout(&mut reader, Duration::from_millis(10)),
+crates/slskr-client/src/quic_control.rs:253:    let connection = timeout(QUIC_CONNECT_TIMEOUT, connecting)
+crates/slskr-client/src/quic_control.rs:386:    let connection = timeout(QUIC_CONNECT_TIMEOUT, connecting)
+crates/slskr-client/src/quic_control.rs:403:    tokio::spawn(async move {
+crates/slskr-client/src/quic_control.rs:452:        let server = tokio::spawn(async move {
+crates/slskr-client/src/quic_control.rs:499:        let server = tokio::spawn(async move {
+crates/slskr/src/http_server.rs:187:    read_http_request_with_timeout(reader, REQUEST_READ_TIMEOUT, body_size_limit).await
+crates/slskr/src/http_server.rs:195:    time::timeout(timeout, read_http_request_inner(reader, body_size_limit))
+crates/slskr/src/http_server.rs:454:        time::timeout(BODY_READ_TIMEOUT, reader.read_exact(&mut buf))
+crates/slskr/src/http_server.rs:666:        let available = time::timeout(timeout, reader.fill_buf())
+crates/slskr/src/http_server.rs:706:    write_http_response_with_timeout(
+crates/slskr/src/http_server.rs:723:    time::timeout(
+crates/slskr/src/http_server.rs:870:                time::timeout(RESPONSE_WRITE_TIMEOUT, async {
+crates/slskr/src/http_server.rs:905:    time::timeout(RESPONSE_WRITE_TIMEOUT, writer.write_all(headers.as_bytes()))
+crates/slskr/src/http_server.rs:913:            time::timeout(
+crates/slskr/src/http_server.rs:926:            let read = time::timeout(RESPONSE_WRITE_TIMEOUT, file.read(&mut buffer[..wanted]))
+crates/slskr/src/http_server.rs:933:            time::timeout(RESPONSE_WRITE_TIMEOUT, writer.write_all(&buffer[..read]))
+crates/slskr/src/http_server.rs:940:    time::timeout(RESPONSE_WRITE_TIMEOUT, writer.flush())
+crates/slskr/src/http_server.rs:1576:        tokio::spawn(async move {
+crates/slskr/src/http_server.rs:1584:        let error = read_http_request_with_timeout(
+crates/slskr/src/http_server.rs:1659:        let error = write_http_response_with_timeout(
+crates/slskr/src/http_server.rs:1805:        tokio::spawn(async move {
+crates/slskr/src/route_dispatch_group_3.rs:748:                tokio::spawn(async move {
+crates/slskr/src/multisource.rs:659:        .timeout(SOURCE_TIMEOUT);
+crates/slskr/src/multisource.rs:699:    timeout(deadline, resolution)
+crates/slskr/src/multisource.rs:905:        let task = tokio::spawn(async move {
+crates/slskr/src/multisource.rs:911:                tokio::spawn(async move {
+crates/slskr/src/multisource.rs:961:        let task = tokio::spawn(async move {
+crates/slskr/src/multisource.rs:1246:        let download = tokio::spawn(execute(
+crates/slskr/src/multisource.rs:1322:        let server = tokio::spawn(async move {
+crates/slskr/src/multisource.rs:1348:        let fetch = tokio::spawn(async move {
+crates/slskr/src/vpn.rs:213:        .timeout(Duration::from_millis(options.gluetun.timeout))
+crates/slskr/src/vpn.rs:340:        let server = tokio::spawn(async move {
+crates/slskr/src/vpn.rs:385:        let server = tokio::spawn(async move {
+crates/slskr/src/vpn.rs:425:        let server = tokio::spawn(async move {
+crates/slskr/src/vpn.rs:460:            let server = tokio::spawn(async move {
+crates/slskr/src/vpn.rs:485:        let server = tokio::spawn(async move {
+crates/slskr/src/mesh_services.rs:407:    timeout(deadline, operation)
+crates/slskr/src/mesh_services.rs:553:        let server = tokio::spawn(async move {
+crates/slskr/src/mesh_services.rs:567:        let fetch = tokio::spawn(async move {
+crates/slskr/src/mesh_services.rs:654:        let server = tokio::spawn(async move {
+crates/slskr/src/mesh_services.rs:668:        let fetch = tokio::spawn(async move {
+crates/slskr/src/signalr_ws.rs:130:        relay_ws::read_ws_frame_with_timeout(&mut reader, relay_ws::WEBSOCKET_READ_TIMEOUT).await?;
+crates/slskr/src/signalr_ws.rs:158:    let reader_task = tokio::spawn(async move {
+crates/slskr/src/signalr_ws.rs:161:                relay_ws::read_ws_frame_with_timeout(&mut reader, relay_ws::WEBSOCKET_READ_TIMEOUT)
+crates/slskr/src/signalr_ws.rs:170:    let mut keepalive = tokio::time::interval(relay_ws::SIGNALR_KEEPALIVE_INTERVAL);
+crates/slskr/src/relay_agent.rs:44:    tokio::spawn(async move {
+crates/slskr/src/relay_agent.rs:80:    let (mut socket, _) = time::timeout(
+crates/slskr/src/relay_agent.rs:89:    let challenge = time::timeout(RELAY_REQUEST_TIMEOUT, wait_for_challenge(&mut socket))
+crates/slskr/src/relay_agent.rs:108:    time::timeout(
+crates/slskr/src/relay_agent.rs:117:    let share_token = time::timeout(
+crates/slskr/src/relay_agent.rs:151:            messages = time::timeout(
+crates/slskr/src/relay_agent.rs:234:        .timeout(RELAY_REQUEST_TIMEOUT)
+crates/slskr/src/relay_agent.rs:462:    time::timeout(
+crates/slskr/src/route_dispatch_group_2.rs:2855:            let interests = match time::timeout(
+crates/slskr-client/src/peer_cache.rs:125:        self.send_to_with_timeout(username, message, DEFAULT_PEER_IO_TIMEOUT)
+crates/slskr-client/src/peer_cache.rs:129:    pub async fn send_to_with_timeout(
+crates/slskr-client/src/peer_cache.rs:146:        match time::timeout(timeout, active.send(message)).await {
+crates/slskr-client/src/peer_cache.rs:167:        self.receive_from_with_timeout(username, DEFAULT_PEER_IO_TIMEOUT)
+crates/slskr-client/src/peer_cache.rs:171:    pub async fn receive_from_with_timeout(
+crates/slskr-client/src/peer_cache.rs:187:        match time::timeout(timeout, active.receive()).await {
 crates/slskr/src/dht.rs:188:        let bootstrapped = timeout(self.lookup_timeout, self.client.bootstrapped())
 crates/slskr/src/dht.rs:201:                match timeout(
 crates/slskr/src/dht.rs:246:        timeout(self.lookup_timeout, async {
-crates/slskr/src/scripts.rs:89:        time::timeout(Duration::from_secs(300), command.output())
-crates/slskr/src/scripts.rs:146:        tokio::spawn(async move {
-crates/slskr/src/relay_ws.rs:101:    let reader_task = tokio::spawn(async move {
-crates/slskr/src/relay_ws.rs:388:    time::timeout(
+crates/slskr-client/src/manager.rs:122:        self.ensure_peer_messages_with_timeout(username, DEFAULT_MANAGER_CONNECT_TIMEOUT)
+crates/slskr-client/src/manager.rs:126:    pub async fn ensure_peer_messages_with_timeout(
+crates/slskr-client/src/manager.rs:136:        time::timeout(timeout, async {
+crates/slskr/src/scripts.rs:15:fn format_timeout(duration: Duration) -> String {
+crates/slskr/src/scripts.rs:87:    run_with_timeout(script, script_directory, target, payload, SCRIPT_TIMEOUT).await
+crates/slskr/src/scripts.rs:90:async fn run_with_timeout(
+crates/slskr/src/scripts.rs:108:    let output = time::timeout(timeout_duration, command.output())
+crates/slskr/src/scripts.rs:113:                format_timeout(timeout_duration)
+crates/slskr/src/scripts.rs:167:        tokio::spawn(async move {
+crates/slskr/src/scripts.rs:243:        let error = run_with_timeout(
+crates/slskr/src/route_dispatch.rs:272:    tokio::spawn(async move {
+crates/slskr-client/src/listener.rs:75:        self.accept_with_timeout(DEFAULT_INIT_HANDSHAKE_TIMEOUT)
+crates/slskr-client/src/listener.rs:79:    pub async fn accept_with_timeout(
+crates/slskr-client/src/listener.rs:83:        time::timeout(timeout, async {
+crates/slskr-client/src/listener.rs:101:        self.accept_obfuscated_with_timeout(DEFAULT_INIT_HANDSHAKE_TIMEOUT)
+crates/slskr-client/src/listener.rs:105:    pub async fn accept_obfuscated_with_timeout(
+crates/slskr-client/src/listener.rs:109:        time::timeout(timeout, async {
+crates/slskr-client/src/listener.rs:123:        self.accept_shared_with_timeout(DEFAULT_INIT_HANDSHAKE_TIMEOUT)
+crates/slskr-client/src/listener.rs:127:    pub async fn accept_shared_with_timeout(
+crates/slskr-client/src/listener.rs:131:        time::timeout(timeout, async {
+crates/slskr-client/src/listener.rs:148:        self.accept_shared_mesh_with_timeout(DEFAULT_INIT_HANDSHAKE_TIMEOUT)
+crates/slskr-client/src/listener.rs:152:    pub async fn accept_shared_mesh_with_timeout(
+crates/slskr-client/src/listener.rs:156:        time::timeout(timeout, async {
+crates/slskr/src/relay_ws.rs:48:    let handshake = read_ws_frame_with_timeout(&mut reader, WEBSOCKET_READ_TIMEOUT).await?;
+crates/slskr/src/relay_ws.rs:103:    let reader_task = tokio::spawn(async move {
+crates/slskr/src/relay_ws.rs:105:            let frame = read_ws_frame_with_timeout(&mut reader, WEBSOCKET_READ_TIMEOUT).await;
+crates/slskr/src/relay_ws.rs:113:    let mut keepalive = time::interval(SIGNALR_KEEPALIVE_INTERVAL);
+crates/slskr/src/relay_ws.rs:395:    time::timeout(
+crates/slskr/src/relay_ws.rs:514:    time::timeout(timeout, read_ws_frame(reader))
+crates/slskr/src/relay_ws.rs:526:        let error = time::timeout(
+crates/slskr/src/relay_ws.rs:528:            read_ws_frame_with_timeout(&mut reader, Duration::from_millis(10)),
+crates/slskr/src/route_dispatch_group_1.rs:501:                let response = tokio::time::timeout(
+crates/slskr/src/route_dispatch_group_1.rs:1464:                tokio::spawn(async move {
+crates/slskr-client/src/distributed_tree.rs:343:        self.send_branch_info_to_parent_with_timeout(DEFAULT_DISTRIBUTED_IO_TIMEOUT)
+crates/slskr-client/src/distributed_tree.rs:347:    pub async fn send_branch_info_to_parent_with_timeout(
+crates/slskr-client/src/distributed_tree.rs:359:        let result = time::timeout(timeout, async {
+crates/slskr-client/src/distributed_tree.rs:385:        self.forward_search_to_children_with_timeout(
+crates/slskr-client/src/distributed_tree.rs:393:    pub async fn forward_search_to_children_with_timeout(
+crates/slskr-client/src/distributed_tree.rs:406:        let result = time::timeout(timeout, async {
+crates/slskr/src/focused_controller_tests.rs:60:    let (event_tx, _) = tokio::sync::broadcast::channel(super::EVENT_HISTORY_LIMIT);
 crates/slskr/src/ftp.rs:202:            let ftp = tokio::time::timeout(timeout, AsyncFtpStream::connect(&endpoint))
 crates/slskr/src/ftp.rs:210:            let ftp = tokio::time::timeout(
 crates/slskr/src/ftp.rs:224:            let ftp = tokio::time::timeout(timeout, AsyncRustlsFtpStream::connect(&endpoint))
@@ -1367,32 +1486,27 @@ crates/slskr/src/ftp.rs:518:        let server = tokio::spawn(async move {
 crates/slskr/src/ftp.rs:553:        let server = tokio::spawn(async move {
 crates/slskr/src/ftp.rs:858:            tokio::time::timeout(Duration::from_millis(50), listener.accept())
 crates/slskr/src/ftp.rs:863:        let attempted = tokio::spawn(async move {
-crates/slskr/src/route_dispatch_group_3.rs:747:                tokio::spawn(async move {
-crates/slskr/src/route_dispatch_group_2.rs:2854:            let interests = match time::timeout(
-crates/slskr/src/events_ws.rs:120:    let reader_task = tokio::spawn(async move {
-crates/slskr/src/events_ws.rs:130:    let mut heartbeat = time::interval(heartbeat_interval);
-crates/slskr/src/events_ws.rs:322:    write_frame_with_timeout(writer, opcode, payload, WEBSOCKET_WRITE_TIMEOUT).await
-crates/slskr/src/events_ws.rs:334:    time::timeout(timeout, write_frame_inner(writer, opcode, payload))
-crates/slskr/src/events_ws.rs:473:        let (event_tx, _) = broadcast::channel(10);
-crates/slskr/src/events_ws.rs:478:        tokio::spawn(async move {
-crates/slskr/src/events_ws.rs:507:        let message = time::timeout(Duration::from_secs(2), async {
-crates/slskr/src/events_ws.rs:629:        let (_event_tx, receiver) = broadcast::channel(1);
-crates/slskr/src/events_ws.rs:652:        let (event_tx, receiver) = broadcast::channel(1);
-crates/slskr/src/events_ws.rs:676:        let (_event_tx, receiver) = broadcast::channel(1);
-crates/slskr/src/events_ws.rs:679:        let error = time::timeout(
-crates/slskr/src/events_ws.rs:702:            write_frame_with_timeout(&mut writer, 0x82, &payload, Duration::from_millis(50))
-crates/slskr/src/batch.rs:401:    fn test_batch_rejects_invalid_timeout() {
-crates/slskr/src/route_dispatch_group_1.rs:1443:                tokio::spawn(async move {
-crates/slskr/src/route_dispatch.rs:272:    tokio::spawn(async move {
-crates/slskr/src/focused_controller_tests.rs:60:    let (event_tx, _) = tokio::sync::broadcast::channel(super::EVENT_HISTORY_LIMIT);
-crates/slskr/src/mesh_sync.rs:316:    let result = tokio::task::spawn_blocking(move || read_file_chunk(path, offset, length)).await;
-crates/slskr/src/mesh_services.rs:407:    timeout(deadline, operation)
-crates/slskr/src/mesh_services.rs:553:        let server = tokio::spawn(async move {
-crates/slskr/src/mesh_services.rs:567:        let fetch = tokio::spawn(async move {
-crates/slskr/src/mesh_services.rs:654:        let server = tokio::spawn(async move {
-crates/slskr/src/mesh_services.rs:668:        let fetch = tokio::spawn(async move {
-crates/slskr/src/relay_agent.rs:43:    tokio::spawn(async move {
-crates/slskr/src/relay_agent.rs:213:        .timeout(RELAY_REQUEST_TIMEOUT)
+crates/slskr-client/src/overlay.rs:57:    let tcp = timeout(TCP_CONNECT_TIMEOUT, TcpStream::connect(endpoint))
+crates/slskr-client/src/overlay.rs:74:    let tls = timeout(TLS_HANDSHAKE_TIMEOUT, connector.connect(server_name, tcp))
+crates/slskr-client/src/overlay.rs:85:    let mut client = timeout(
+crates/slskr-client/src/overlay.rs:751:        self.call_with_timeout(call, SERVICE_CALL_TIMEOUT).await
+crates/slskr-client/src/overlay.rs:758:        self.search_with_timeout(request, SERVICE_CALL_TIMEOUT)
+crates/slskr-client/src/overlay.rs:762:    pub async fn call_with_timeout(
+crates/slskr-client/src/overlay.rs:778:        match timeout(deadline, self.call_inner(call)).await {
+crates/slskr-client/src/overlay.rs:832:    pub async fn search_with_timeout(
+crates/slskr-client/src/overlay.rs:848:        match timeout(deadline, self.search_inner(request)).await {
+crates/slskr-client/src/overlay.rs:1261:        let task = tokio::spawn(async move {
+crates/slskr-client/src/overlay.rs:1285:        let writer = tokio::spawn(async move {
+crates/slskr-client/src/overlay.rs:1289:        let decoded = timeout(
+crates/slskr-client/src/overlay.rs:1524:        let server = tokio::spawn(async move {
+crates/slskr-client/src/overlay.rs:1605:        assert!(timeout(Duration::from_millis(10), wire.read_u8())
+crates/slskr-client/src/overlay.rs:1694:        let server = tokio::spawn(async move {
+crates/slskr-client/src/overlay.rs:1760:        let server = tokio::spawn(async move {
+crates/slskr-client/src/overlay.rs:1924:        let server = tokio::spawn(async move {
+crates/slskr-client/src/overlay.rs:1971:        let server = tokio::spawn(async move {
+crates/slskr-client/src/overlay.rs:1986:        let server = tokio::spawn(async move {
+crates/slskr-client/src/overlay.rs:2016:            .call_with_timeout(&call, Duration::from_millis(10))
+crates/slskr-client/src/overlay.rs:2025:                .call_with_timeout(&call, Duration::from_secs(1))
 crates/slskr/src/cli.rs:559:    let stream = time::timeout(
 crates/slskr/src/cli.rs:595:            let stream = time::timeout(
 crates/slskr/src/cli.rs:653:        time::timeout(timeout, peer.receive())
@@ -1482,24 +1596,24 @@ crates/slskr/src/cli.rs:4802:        match time::timeout(Duration::from_secs(5),
 crates/slskr/src/cli.rs:4848:    match time::timeout(Duration::from_secs(5), peer.receive_user_info_request()).await {
 crates/slskr/src/cli.rs:5384:        let failed = tokio::spawn(async { Err("fixture send failed".to_owned()) });
 crates/slskr/src/cli.rs:5392:        let completed = tokio::spawn(async { Ok(()) });
-crates/slskr/src/vpn.rs:213:        .timeout(Duration::from_millis(options.gluetun.timeout))
-crates/slskr/src/vpn.rs:340:        let server = tokio::spawn(async move {
-crates/slskr/src/vpn.rs:385:        let server = tokio::spawn(async move {
-crates/slskr/src/vpn.rs:425:        let server = tokio::spawn(async move {
-crates/slskr/src/vpn.rs:460:            let server = tokio::spawn(async move {
-crates/slskr/src/vpn.rs:485:        let server = tokio::spawn(async move {
-crates/slskr/src/signalr_ws.rs:157:    let reader_task = tokio::spawn(async move {
-crates/slskr/src/webhooks.rs:605:                .timeout(timeout)
-crates/slskr/src/webhooks.rs:669:            tokio::spawn(async move {
-crates/slskr/src/webhooks.rs:773:            .timeout(request_timeout)
-crates/slskr/src/webhooks.rs:896:    tokio::time::timeout(timeout, resolution)
-crates/slskr/src/webhooks.rs:1042:        let server = tokio::spawn(async move {
-crates/slskr/src/webhooks.rs:1074:        let server = tokio::spawn(async move {
-crates/slskr-client/src/quic_data.rs:615:    tokio::spawn(async move {
-crates/slskr-client/src/quic_data.rs:656:    let connection = timeout(QUIC_CONNECT_TIMEOUT, connecting)
-crates/slskr-client/src/quic_data.rs:777:        let server = tokio::spawn(async move {
-crates/slskr-client/src/quic_data.rs:824:        let server = tokio::spawn(async move {
-crates/slskr-client/src/quic_data.rs:865:        let server = tokio::spawn(async move {
+crates/slskr-client/src/transfer.rs:156:        self.receive_file_from_with_timeout(
+crates/slskr-client/src/transfer.rs:204:        let result = time::timeout(timeout, async {
+crates/slskr-client/src/transfer.rs:451:        self.send_file_to_with_timeout(connection, bytes, DEFAULT_TRANSFER_IO_TIMEOUT)
+crates/slskr-client/src/transfer.rs:481:        let result = time::timeout(timeout, async {
+crates/slskr/src/persistence.rs:1117:            .busy_timeout(Duration::from_secs(30));
+crates/slskr/src/dotnet_regex.rs:58:    pub fn is_match_with_timeout(&self, value: &str, timeout: Duration) -> Result<bool, String> {
+crates/slskr/src/dotnet_regex.rs:76:        match receiver.recv_timeout(timeout) {
+crates/slskr-client/src/stream.rs:35:        Self::connect_with_timeout(address, DEFAULT_CONNECT_TIMEOUT).await
+crates/slskr-client/src/stream.rs:42:        let stream = time::timeout(timeout, TcpStream::connect(address))
+crates/slskr-client/src/search.rs:75:    pub fn next_interval(&self, server_interval: Option<Duration>) -> Duration {
+crates/slskr-client/src/search.rs:122:    pub fn interval(&self) -> Duration {
+crates/slskr-client/src/search.rs:123:        self.options.next_interval(self.server_interval)
+crates/slskr-client/src/search.rs:153:    pub fn set_server_interval(&mut self, seconds: Option<u64>) {
+crates/slskr-client/src/peer_connect.rs:210:    connect_peer_messages_with_timeout(address, username, DEFAULT_CONNECT_TIMEOUT).await
+crates/slskr-client/src/peer_connect.rs:238:    connect_distributed_with_timeout(address, username, DEFAULT_CONNECT_TIMEOUT).await
+crates/slskr-client/src/peer_connect.rs:266:    connect_file_transfer_with_timeout(address, username, DEFAULT_CONNECT_TIMEOUT).await
+crates/slskr-client/src/peer_connect.rs:295:    time::timeout(timeout, future)
+crates/slskr/src/mesh_sync.rs:316:    let result = tokio::task::spawn_blocking(move || read_file_chunk(path, offset, length)).await;
 crates/slskr/src/port_forwarding.rs:105:        let task = tokio::spawn(async move {
 crates/slskr/src/port_forwarding.rs:121:            if timeout(Duration::from_secs(5), &mut task).await.is_err() {
 crates/slskr/src/port_forwarding.rs:184:                            tokio::spawn(async move {
@@ -1515,123 +1629,45 @@ crates/slskr/src/port_forwarding.rs:773:        let gateway = tokio::spawn(async
 crates/slskr/src/port_forwarding.rs:862:        timeout(Duration::from_secs(5), local.read_exact(&mut echoed))
 crates/slskr/src/port_forwarding.rs:867:        timeout(Duration::from_secs(2), async {
 crates/slskr/src/port_forwarding.rs:879:        timeout(Duration::from_secs(5), gateway)
-crates/slskr/src/multisource.rs:659:        .timeout(SOURCE_TIMEOUT);
-crates/slskr/src/multisource.rs:699:    timeout(deadline, resolution)
-crates/slskr/src/multisource.rs:905:        let task = tokio::spawn(async move {
-crates/slskr/src/multisource.rs:911:                tokio::spawn(async move {
-crates/slskr/src/multisource.rs:961:        let task = tokio::spawn(async move {
-crates/slskr/src/multisource.rs:1246:        let download = tokio::spawn(execute(
-crates/slskr/src/multisource.rs:1322:        let server = tokio::spawn(async move {
-crates/slskr/src/multisource.rs:1348:        let fetch = tokio::spawn(async move {
-crates/slskr/src/dotnet_regex.rs:58:    pub fn is_match_with_timeout(&self, value: &str, timeout: Duration) -> Result<bool, String> {
-crates/slskr/src/dotnet_regex.rs:76:        match receiver.recv_timeout(timeout) {
-crates/slskr/src/http_server.rs:187:    read_http_request_with_timeout(reader, REQUEST_READ_TIMEOUT, body_size_limit).await
-crates/slskr/src/http_server.rs:195:    time::timeout(timeout, read_http_request_inner(reader, body_size_limit))
-crates/slskr/src/http_server.rs:454:        time::timeout(BODY_READ_TIMEOUT, reader.read_exact(&mut buf))
-crates/slskr/src/http_server.rs:666:        let available = time::timeout(timeout, reader.fill_buf())
-crates/slskr/src/http_server.rs:706:    write_http_response_with_timeout(
-crates/slskr/src/http_server.rs:723:    time::timeout(
-crates/slskr/src/http_server.rs:870:                time::timeout(RESPONSE_WRITE_TIMEOUT, async {
-crates/slskr/src/http_server.rs:905:    time::timeout(RESPONSE_WRITE_TIMEOUT, writer.write_all(headers.as_bytes()))
-crates/slskr/src/http_server.rs:913:            time::timeout(
-crates/slskr/src/http_server.rs:926:            let read = time::timeout(RESPONSE_WRITE_TIMEOUT, file.read(&mut buffer[..wanted]))
-crates/slskr/src/http_server.rs:933:            time::timeout(RESPONSE_WRITE_TIMEOUT, writer.write_all(&buffer[..read]))
-crates/slskr/src/http_server.rs:940:    time::timeout(RESPONSE_WRITE_TIMEOUT, writer.flush())
-crates/slskr/src/http_server.rs:1576:        tokio::spawn(async move {
-crates/slskr/src/http_server.rs:1584:        let error = read_http_request_with_timeout(
-crates/slskr/src/http_server.rs:1659:        let error = write_http_response_with_timeout(
-crates/slskr/src/http_server.rs:1805:        tokio::spawn(async move {
-crates/slskr/src/private_gateway.rs:569:        tokio::spawn(async move {
-crates/slskr/src/private_gateway.rs:657:            tokio::spawn(async move {
-crates/slskr/src/private_gateway.rs:671:            tokio::spawn(async move {
-crates/slskr/src/private_gateway.rs:677:            tokio::spawn(async move {
-crates/slskr/src/private_gateway.rs:706:            tokio::spawn(forward_dht_responses(
-crates/slskr/src/private_gateway.rs:839:            tokio::spawn(async move {
-crates/slskr/src/private_gateway.rs:869:            tokio::spawn(async move {
-crates/slskr/src/private_gateway.rs:988:                match timeout(DESTINATION_CONNECT_TIMEOUT, TcpStream::connect(destination)).await {
-crates/slskr/src/private_gateway.rs:1008:            let _ = timeout(policy.max_relay_duration.max(Duration::from_secs(1)), relay).await;
-crates/slskr/src/private_gateway.rs:1102:        tokio::spawn(async move {
-crates/slskr/src/private_gateway.rs:1410:        let tls = timeout(Duration::from_secs(5), self.acceptor.accept(tcp))
-crates/slskr/src/private_gateway.rs:1421:        let hello: MeshHello = timeout(Duration::from_secs(5), framer.read())
-crates/slskr/src/private_gateway.rs:1487:                let raw = match timeout(liveness.read_wait(), framer.read_raw()).await {
-crates/slskr/src/private_gateway.rs:1590:        let search = timeout(Duration::from_secs(5), async {
-crates/slskr/src/private_gateway.rs:1806:        let bytes = tokio::task::spawn_blocking(move || {
-crates/slskr/src/private_gateway.rs:2024:        let stream = timeout(DESTINATION_CONNECT_TIMEOUT, TcpStream::connect(destination))
-crates/slskr/src/private_gateway.rs:2052:        tokio::spawn(async move {
-crates/slskr/src/private_gateway.rs:2081:        timeout(DESTINATION_WRITE_TIMEOUT, writer.write_all(&request.data))
-crates/slskr/src/private_gateway.rs:2202:            tokio::spawn(async move {
-crates/slskr/src/private_gateway.rs:2474:    let mut addresses = timeout(DESTINATION_RESOLVE_TIMEOUT, lookup_host((host, port)))
-crates/slskr/src/private_gateway.rs:2484:    let mut addresses = timeout(DESTINATION_RESOLVE_TIMEOUT, lookup_host((host, port)))
-crates/slskr/src/private_gateway.rs:2944:        let forwarder = tokio::spawn(forward_dht_responses(
-crates/slskr/src/private_gateway.rs:2952:        let (size, source) = tokio::time::timeout(
-crates/slskr-client/src/transfer.rs:156:        self.receive_file_from_with_timeout(
-crates/slskr-client/src/transfer.rs:204:        let result = time::timeout(timeout, async {
-crates/slskr-client/src/transfer.rs:451:        self.send_file_to_with_timeout(connection, bytes, DEFAULT_TRANSFER_IO_TIMEOUT)
-crates/slskr-client/src/transfer.rs:481:        let result = time::timeout(timeout, async {
-crates/slskr-client/src/listener.rs:75:        self.accept_with_timeout(DEFAULT_INIT_HANDSHAKE_TIMEOUT)
-crates/slskr-client/src/listener.rs:79:    pub async fn accept_with_timeout(
-crates/slskr-client/src/listener.rs:83:        time::timeout(timeout, async {
-crates/slskr-client/src/listener.rs:101:        self.accept_obfuscated_with_timeout(DEFAULT_INIT_HANDSHAKE_TIMEOUT)
-crates/slskr-client/src/listener.rs:105:    pub async fn accept_obfuscated_with_timeout(
-crates/slskr-client/src/listener.rs:109:        time::timeout(timeout, async {
-crates/slskr-client/src/listener.rs:123:        self.accept_shared_with_timeout(DEFAULT_INIT_HANDSHAKE_TIMEOUT)
-crates/slskr-client/src/listener.rs:127:    pub async fn accept_shared_with_timeout(
-crates/slskr-client/src/listener.rs:131:        time::timeout(timeout, async {
-crates/slskr-client/src/listener.rs:148:        self.accept_shared_mesh_with_timeout(DEFAULT_INIT_HANDSHAKE_TIMEOUT)
-crates/slskr-client/src/listener.rs:152:    pub async fn accept_shared_mesh_with_timeout(
-crates/slskr-client/src/listener.rs:156:        time::timeout(timeout, async {
-crates/slskr-client/src/stream.rs:35:        Self::connect_with_timeout(address, DEFAULT_CONNECT_TIMEOUT).await
-crates/slskr-client/src/stream.rs:42:        let stream = time::timeout(timeout, TcpStream::connect(address))
-crates/slskr-client/src/peer_cache.rs:125:        self.send_to_with_timeout(username, message, DEFAULT_PEER_IO_TIMEOUT)
-crates/slskr-client/src/peer_cache.rs:129:    pub async fn send_to_with_timeout(
-crates/slskr-client/src/peer_cache.rs:146:        match time::timeout(timeout, active.send(message)).await {
-crates/slskr-client/src/peer_cache.rs:167:        self.receive_from_with_timeout(username, DEFAULT_PEER_IO_TIMEOUT)
-crates/slskr-client/src/peer_cache.rs:171:    pub async fn receive_from_with_timeout(
-crates/slskr-client/src/peer_cache.rs:187:        match time::timeout(timeout, active.receive()).await {
-crates/slskr-client/src/quic_control.rs:253:    let connection = timeout(QUIC_CONNECT_TIMEOUT, connecting)
-crates/slskr-client/src/quic_control.rs:386:    let connection = timeout(QUIC_CONNECT_TIMEOUT, connecting)
-crates/slskr-client/src/quic_control.rs:403:    tokio::spawn(async move {
-crates/slskr-client/src/quic_control.rs:452:        let server = tokio::spawn(async move {
-crates/slskr-client/src/quic_control.rs:499:        let server = tokio::spawn(async move {
-crates/slskr-client/src/peer_connect.rs:210:    connect_peer_messages_with_timeout(address, username, DEFAULT_CONNECT_TIMEOUT).await
-crates/slskr-client/src/peer_connect.rs:238:    connect_distributed_with_timeout(address, username, DEFAULT_CONNECT_TIMEOUT).await
-crates/slskr-client/src/peer_connect.rs:266:    connect_file_transfer_with_timeout(address, username, DEFAULT_CONNECT_TIMEOUT).await
-crates/slskr-client/src/peer_connect.rs:295:    time::timeout(timeout, future)
-crates/slskr-client/src/manager.rs:122:        self.ensure_peer_messages_with_timeout(username, DEFAULT_MANAGER_CONNECT_TIMEOUT)
-crates/slskr-client/src/manager.rs:126:    pub async fn ensure_peer_messages_with_timeout(
-crates/slskr-client/src/manager.rs:142:        let connection = time::timeout(timeout, (self.connector)(username.to_owned()))
-crates/slskr-client/src/distributed_tree.rs:343:        self.send_branch_info_to_parent_with_timeout(DEFAULT_DISTRIBUTED_IO_TIMEOUT)
-crates/slskr-client/src/distributed_tree.rs:347:    pub async fn send_branch_info_to_parent_with_timeout(
-crates/slskr-client/src/distributed_tree.rs:359:        let result = time::timeout(timeout, async {
-crates/slskr-client/src/distributed_tree.rs:385:        self.forward_search_to_children_with_timeout(
-crates/slskr-client/src/distributed_tree.rs:393:    pub async fn forward_search_to_children_with_timeout(
-crates/slskr-client/src/distributed_tree.rs:406:        let result = time::timeout(timeout, async {
-crates/slskr/src/persistence.rs:1117:            .busy_timeout(Duration::from_secs(30));
-crates/slskr-client/src/search.rs:75:    pub fn next_interval(&self, server_interval: Option<Duration>) -> Duration {
-crates/slskr-client/src/search.rs:122:    pub fn interval(&self) -> Duration {
-crates/slskr-client/src/search.rs:123:        self.options.next_interval(self.server_interval)
-crates/slskr-client/src/search.rs:153:    pub fn set_server_interval(&mut self, seconds: Option<u64>) {
-crates/slskr-client/src/overlay.rs:57:    let tcp = timeout(TCP_CONNECT_TIMEOUT, TcpStream::connect(endpoint))
-crates/slskr-client/src/overlay.rs:74:    let tls = timeout(TLS_HANDSHAKE_TIMEOUT, connector.connect(server_name, tcp))
-crates/slskr-client/src/overlay.rs:85:    let mut client = timeout(
-crates/slskr-client/src/overlay.rs:751:        self.call_with_timeout(call, SERVICE_CALL_TIMEOUT).await
-crates/slskr-client/src/overlay.rs:758:        self.search_with_timeout(request, SERVICE_CALL_TIMEOUT)
-crates/slskr-client/src/overlay.rs:762:    pub async fn call_with_timeout(
-crates/slskr-client/src/overlay.rs:778:        match timeout(deadline, self.call_inner(call)).await {
-crates/slskr-client/src/overlay.rs:832:    pub async fn search_with_timeout(
-crates/slskr-client/src/overlay.rs:848:        match timeout(deadline, self.search_inner(request)).await {
-crates/slskr-client/src/overlay.rs:1261:        let task = tokio::spawn(async move {
-crates/slskr-client/src/overlay.rs:1285:        let writer = tokio::spawn(async move {
-crates/slskr-client/src/overlay.rs:1289:        let decoded = timeout(
-crates/slskr-client/src/overlay.rs:1524:        let server = tokio::spawn(async move {
-crates/slskr-client/src/overlay.rs:1605:        assert!(timeout(Duration::from_millis(10), wire.read_u8())
-crates/slskr-client/src/overlay.rs:1694:        let server = tokio::spawn(async move {
-crates/slskr-client/src/overlay.rs:1760:        let server = tokio::spawn(async move {
-crates/slskr-client/src/overlay.rs:1924:        let server = tokio::spawn(async move {
-crates/slskr-client/src/overlay.rs:1971:        let server = tokio::spawn(async move {
-crates/slskr-client/src/overlay.rs:1986:        let server = tokio::spawn(async move {
-crates/slskr-client/src/overlay.rs:2016:            .call_with_timeout(&call, Duration::from_millis(10))
-crates/slskr-client/src/overlay.rs:2025:                .call_with_timeout(&call, Duration::from_secs(1))
+crates/slskr/src/webhooks.rs:605:                .timeout(timeout)
+crates/slskr/src/webhooks.rs:669:            tokio::spawn(async move {
+crates/slskr/src/webhooks.rs:773:            .timeout(request_timeout)
+crates/slskr/src/webhooks.rs:896:    tokio::time::timeout(timeout, resolution)
+crates/slskr/src/webhooks.rs:1042:        let server = tokio::spawn(async move {
+crates/slskr/src/webhooks.rs:1074:        let server = tokio::spawn(async move {
+crates/slskr/src/private_gateway.rs:570:        tokio::spawn(async move {
+crates/slskr/src/private_gateway.rs:658:            tokio::spawn(async move {
+crates/slskr/src/private_gateway.rs:672:            tokio::spawn(async move {
+crates/slskr/src/private_gateway.rs:678:            tokio::spawn(async move {
+crates/slskr/src/private_gateway.rs:707:            tokio::spawn(forward_dht_responses(
+crates/slskr/src/private_gateway.rs:840:            tokio::spawn(async move {
+crates/slskr/src/private_gateway.rs:870:            tokio::spawn(async move {
+crates/slskr/src/private_gateway.rs:886:                match timeout(QUIC_DATA_READ_TIMEOUT, connection.accept_inbound_stream()).await {
+crates/slskr/src/private_gateway.rs:912:                        match timeout(QUIC_DATA_READ_TIMEOUT, receive.read_to_end()).await {
+crates/slskr/src/private_gateway.rs:941:        let (line, line_bytes) = match read_quic_data_command_line_with_timeout(&mut receive).await
+crates/slskr/src/private_gateway.rs:964:            let relay_line = match read_quic_data_command_line_with_timeout(&mut receive).await {
+crates/slskr/src/private_gateway.rs:1002:                match timeout(DESTINATION_CONNECT_TIMEOUT, TcpStream::connect(destination)).await {
+crates/slskr/src/private_gateway.rs:1010:            if timeout(DESTINATION_WRITE_TIMEOUT, send.write_all(b"OK\n"))
+crates/slskr/src/private_gateway.rs:1025:            let _ = timeout(policy.max_relay_duration.max(Duration::from_secs(1)), relay).await;
+crates/slskr/src/private_gateway.rs:1030:        let remaining = match timeout(
+crates/slskr/src/private_gateway.rs:1061:                match timeout(OVERLAY_MESSAGE_READ_TIMEOUT, connection.accept_envelope()).await {
+crates/slskr/src/private_gateway.rs:1133:        tokio::spawn(async move {
+crates/slskr/src/private_gateway.rs:1340:async fn read_quic_data_command_line_with_timeout(
+crates/slskr/src/private_gateway.rs:1343:    timeout(QUIC_DATA_READ_TIMEOUT, read_quic_data_command_line(receive))
+crates/slskr/src/private_gateway.rs:1352:    timeout(DESTINATION_WRITE_TIMEOUT, async {
+crates/slskr/src/private_gateway.rs:1453:        let tls = timeout(Duration::from_secs(5), self.acceptor.accept(tcp))
+crates/slskr/src/private_gateway.rs:1464:        let hello: MeshHello = timeout(Duration::from_secs(5), framer.read())
+crates/slskr/src/private_gateway.rs:1530:                let raw = match timeout(liveness.read_wait(), framer.read_raw()).await {
+crates/slskr/src/private_gateway.rs:1633:        let search = timeout(Duration::from_secs(5), async {
+crates/slskr/src/private_gateway.rs:1849:        let bytes = tokio::task::spawn_blocking(move || {
+crates/slskr/src/private_gateway.rs:2067:        let stream = timeout(DESTINATION_CONNECT_TIMEOUT, TcpStream::connect(destination))
+crates/slskr/src/private_gateway.rs:2095:        tokio::spawn(async move {
+crates/slskr/src/private_gateway.rs:2124:        timeout(DESTINATION_WRITE_TIMEOUT, writer.write_all(&request.data))
+crates/slskr/src/private_gateway.rs:2245:            tokio::spawn(async move {
+crates/slskr/src/private_gateway.rs:2517:    let mut addresses = timeout(DESTINATION_RESOLVE_TIMEOUT, lookup_host((host, port)))
+crates/slskr/src/private_gateway.rs:2527:    let mut addresses = timeout(DESTINATION_RESOLVE_TIMEOUT, lookup_host((host, port)))
+crates/slskr/src/private_gateway.rs:2987:        let forwarder = tokio::spawn(forward_dht_responses(
+crates/slskr/src/private_gateway.rs:2995:        let (size, source) = tokio::time::timeout(
 crates/slskr/src/config.rs:1101:        let reconnect_delay = validated_runtime_interval(
 crates/slskr/src/config.rs:1110:        let ping_interval = validated_runtime_interval(
 crates/slskr/src/config.rs:1302:        let peer_response_timeout = validated_runtime_interval(
@@ -1639,166 +1675,167 @@ crates/slskr/src/config.rs:2708:fn validated_runtime_interval(name: &str, second
 crates/slskr/src/config.rs:7533:        let timeout_connect = parse_timeout(
 crates/slskr/src/config.rs:7544:        let timeout_inactivity = parse_timeout(
 crates/slskr/src/config.rs:7559:        let timeout_transfer = parse_timeout(
-crates/slskr/src/lib.rs:7594:    fn compile_with_timeout(
-crates/slskr/src/lib.rs:7612:                .is_match_with_timeout(value, timeout)
-crates/slskr/src/lib.rs:7621:fn controller_regex_timeout(target: ControllerProfile) -> Option<Duration> {
-crates/slskr/src/lib.rs:7630:    let match_timeout = controller_regex_timeout(target);
-crates/slskr/src/lib.rs:7634:            ControllerRegex::compile_with_timeout(expression, case_sensitive, match_timeout)
-crates/slskr/src/lib.rs:15151:        .timeout(Duration::from_secs(10))
-crates/slskr/src/lib.rs:15178:    let output = tokio::time::timeout(Duration::from_secs(30), command.output())
-crates/slskr/src/lib.rs:15321:        .timeout(Duration::from_secs(20))
-crates/slskr/src/lib.rs:15397:        if let Some(metadata) = tokio::time::timeout(
-crates/slskr/src/lib.rs:15564:        tokio::spawn(async move {
-crates/slskr/src/lib.rs:18130:    tokio::spawn(async move {
-crates/slskr/src/lib.rs:18145:    let _ = time::timeout(
-crates/slskr/src/lib.rs:18160:    tokio::spawn(async move {
-crates/slskr/src/lib.rs:21621:                 tokio::spawn(async move {
-crates/slskr/src/lib.rs:24713:            let interests = match time::timeout(
-crates/slskr/src/lib.rs:25836:                tokio::spawn(async move {
-crates/slskr/src/lib.rs:33190:                        tokio::task::spawn_blocking(move || {
-crates/slskr/src/lib.rs:35260:                tokio::spawn(multisource::execute(
-crates/slskr/src/lib.rs:36973:    time::timeout(http_server::RESPONSE_WRITE_TIMEOUT, async {
-crates/slskr/src/lib.rs:37340:    tokio::spawn(async move {
-crates/slskr/src/lib.rs:37393:            .timeout(Duration::from_secs(100))
-crates/slskr/src/lib.rs:39502:    tokio::spawn(async move {
-crates/slskr/src/lib.rs:39506:        let mut interval = time::interval(Duration::from_millis(200));
-crates/slskr/src/lib.rs:43877:        .timeout(Duration::from_secs(spotify.timeout_seconds))
-crates/slskr/src/lib.rs:43898:        .timeout(Duration::from_secs(spotify.timeout_seconds))
-crates/slskr/src/lib.rs:44132:        .timeout(Duration::from_secs(spotify.timeout_seconds))
-crates/slskr/src/lib.rs:44186:        .timeout(Duration::from_secs(spotify.timeout_seconds))
-crates/slskr/src/lib.rs:44814:        .timeout(Duration::from_secs(timeout_seconds))
-crates/slskr/src/lib.rs:45109:        .timeout(Duration::from_secs(timeout_seconds))
-crates/slskr/src/lib.rs:45148:        .timeout(Duration::from_secs(30))
-crates/slskr/src/lib.rs:45179:        .timeout(Duration::from_secs(30))
-crates/slskr/src/lib.rs:45206:        .timeout(Duration::from_secs(30))
-crates/slskr/src/lib.rs:46026:        .timeout(std::time::Duration::from_secs(lidarr.timeout_seconds))
-crates/slskr/src/lib.rs:46068:        .timeout(std::time::Duration::from_secs(lidarr.timeout_seconds))
-crates/slskr/src/lib.rs:46828:        .timeout(std::time::Duration::from_secs(lidarr.timeout_seconds))
-crates/slskr/src/lib.rs:46962:        .timeout(std::time::Duration::from_secs(lidarr.timeout_seconds))
-crates/slskr/src/lib.rs:47573:    tokio::spawn(async move {
-crates/slskr/src/lib.rs:47595:        .timeout(std::time::Duration::from_secs(lidarr.timeout_seconds))
-crates/slskr/src/lib.rs:47771:        .timeout(timeout)
-crates/slskr/src/lib.rs:49500:    tokio::spawn(async move {
-crates/slskr/src/lib.rs:51162:                tokio::spawn(async move {
-crates/slskr/src/lib.rs:54242:    let target = tokio::time::timeout(Duration::from_secs(1), tokio::net::lookup_host(server))
-crates/slskr/src/lib.rs:54252:    let count = tokio::time::timeout(Duration::from_secs(2), socket.recv_from(&mut buf))
-crates/slskr/src/lib.rs:54562:    tokio::spawn(async move {
-crates/slskr/src/lib.rs:54643:        tokio::spawn(async move {
-crates/slskr/src/lib.rs:55670:        .timeout(std::time::Duration::from_secs(5))
-crates/slskr/src/lib.rs:56407:    let reply = match time::timeout(
-crates/slskr/src/lib.rs:56828:            .timeout(solid.timeout)
-crates/slskr/src/lib.rs:57249:        tokio::spawn(multisource::execute(
-crates/slskr/src/lib.rs:71605:    let response = time::timeout(
-crates/slskr/src/lib.rs:71653:    let (event_tx, _) = broadcast::channel(EVENT_HISTORY_LIMIT);
-crates/slskr/src/lib.rs:72469:        tokio::spawn(async move {
-crates/slskr/src/lib.rs:72476:        tokio::spawn(dht.run());
-crates/slskr/src/lib.rs:72534:        tokio::spawn(async move {
-crates/slskr/src/lib.rs:72540:                tokio::spawn(async move {
-crates/slskr/src/lib.rs:72565:            tokio::spawn(async move {
-crates/slskr/src/lib.rs:72572:                    tokio::spawn(async move {
-crates/slskr/src/lib.rs:72631:        tokio::spawn(async move {
-crates/slskr/src/lib.rs:72741:    tokio::spawn(async move {
-crates/slskr/src/lib.rs:72767:                wishlist_scheduler.set_server_interval(server_interval);
-crates/slskr/src/lib.rs:72781:        let mut next_wishlist_search = Instant::now() + wishlist_scheduler.interval();
-crates/slskr/src/lib.rs:72824:                    time::timeout(Duration::from_millis(250), active_session.readable()).await,
-crates/slskr/src/lib.rs:72827:                    match time::timeout(Duration::from_secs(1), active_session.receive()).await {
-crates/slskr/src/lib.rs:72831:                                    Instant::now() + wishlist_scheduler.interval();
-crates/slskr/src/lib.rs:72946:    tokio::spawn(async move {
-crates/slskr/src/lib.rs:72990:    tokio::spawn(async move {
-crates/slskr/src/lib.rs:73150:    tokio::spawn(async move {
-crates/slskr/src/lib.rs:73151:        let mut interval = time::interval(Duration::from_secs(60));
-crates/slskr/src/lib.rs:73160:    tokio::spawn(async move {
-crates/slskr/src/lib.rs:73162:        let mut interval = time::interval(Duration::from_secs(BACKFILL_RUN_INTERVAL_SECONDS));
-crates/slskr/src/lib.rs:73182:    tokio::spawn(async move {
-crates/slskr/src/lib.rs:73215:    tokio::spawn(async move {
-crates/slskr/src/lib.rs:73217:        let mut interval = time::interval(Duration::from_secs(30 * 60));
-crates/slskr/src/lib.rs:73303:    tokio::spawn(async move {
-crates/slskr/src/lib.rs:73346:    tokio::spawn(async move {
-crates/slskr/src/lib.rs:73375:    tokio::spawn(async move {
-crates/slskr/src/lib.rs:73377:        let mut interval = time::interval(state.config.transfer_rescue.check_interval);
-crates/slskr/src/lib.rs:73493:    tokio::spawn(async move {
-crates/slskr/src/lib.rs:73494:        let mut interval = time::interval(Duration::from_secs(SOURCE_DISCOVERY_CYCLE_SECONDS));
-crates/slskr/src/lib.rs:74111:    tokio::spawn(run_listener_manager(
-crates/slskr/src/lib.rs:74118:    tokio::spawn(run_listener_manager(
-crates/slskr/src/lib.rs:74268:    tokio::spawn(async move {
-crates/slskr/src/lib.rs:74431:                            tokio::spawn(async move {
-crates/slskr/src/lib.rs:74487:    let incoming = match time::timeout(
-crates/slskr/src/lib.rs:74795:            tokio::spawn(async move {
-crates/slskr/src/lib.rs:75114:    let stream = time::timeout(
-crates/slskr/src/lib.rs:75148:    tokio::spawn(run_distributed_link(
-crates/slskr/src/lib.rs:75205:    tokio::spawn(run_distributed_link(
-crates/slskr/src/lib.rs:75254:            received = time::timeout(
-crates/slskr/src/lib.rs:75281:                    if time::timeout(
-crates/slskr/src/lib.rs:75742:        let remote_token = time::timeout(
-crates/slskr/src/lib.rs:75825:            match time::timeout(Duration::from_secs(15), peer.receive()).await {
-crates/slskr/src/lib.rs:76419:    let response = time::timeout(
-crates/slskr/src/lib.rs:76477:            match time::timeout(Duration::from_secs(15), peer.receive()).await {
-crates/slskr/src/lib.rs:76516:    time::timeout(
-crates/slskr/src/lib.rs:76529:    time::timeout(
-crates/slskr/src/lib.rs:76765:    let file_info = match time::timeout(Duration::from_secs(30), info_receiver).await {
-crates/slskr/src/lib.rs:76827:    let uploaded = match time::timeout(Duration::from_secs(30), receiver).await {
-crates/slskr/src/lib.rs:76935:    tokio::task::spawn_blocking(move || create_application_dump_file(&state_dir))
-crates/slskr/src/lib.rs:77377:        let received_token = time::timeout(io_timeout, preview.connection.receive_token())
-crates/slskr/src/lib.rs:77384:        time::timeout(io_timeout, preview.connection.send_offset(0))
-crates/slskr/src/lib.rs:77394:    time::timeout(io_timeout, writer.write_all(headers.as_bytes()))
-crates/slskr/src/lib.rs:77403:            let chunk = time::timeout(io_timeout, preview.connection.read_chunk(wanted))
-crates/slskr/src/lib.rs:77410:            time::timeout(io_timeout, writer.write_all(&chunk))
-crates/slskr/src/lib.rs:77417:    time::timeout(io_timeout, writer.flush())
-crates/slskr/src/lib.rs:77439:    time::timeout(io_timeout, async {
-crates/slskr/src/lib.rs:79688:    *next_wishlist_search = Instant::now() + scheduler.interval();
-crates/slskr/src/lib.rs:79940:    tokio::spawn(async move {
-crates/slskr/src/lib.rs:80691:    tokio::spawn(async move {
-crates/slskr/src/lib.rs:81182:    time::timeout(
-crates/slskr/src/lib.rs:81431:            time::timeout(state.config.soulseek_connection.timeout_transfer, receiver).await;
-crates/slskr/src/lib.rs:81451:    let received_token = time::timeout(
-crates/slskr/src/lib.rs:81461:    time::timeout(
-crates/slskr/src/lib.rs:81470:    time::timeout(
-crates/slskr/src/lib.rs:81963:    let byte_hash = tokio::task::spawn_blocking(move || read_file_prefix_hash(hash_file))
-crates/slskr/src/lib.rs:82009:        tokio::task::spawn_blocking(move || read_audio_technical_metadata(file, &filename))
-crates/slskr/src/lib.rs:82305:        time::timeout(
-crates/slskr/src/lib.rs:82313:    let offset = time::timeout(
-crates/slskr/src/lib.rs:82348:        time::timeout(
-crates/slskr/src/lib.rs:82764:    let token = time::timeout(
-crates/slskr/src/lib.rs:82777:    time::timeout(
-crates/slskr/src/lib.rs:82793:        let chunk = time::timeout(
-crates/slskr/src/lib.rs:83077:    let stream = time::timeout(settings.timeout_connect, async {
-crates/slskr/src/lib.rs:83279:                    Ok(stream) => time::timeout(
-crates/slskr/src/lib.rs:83317:    let stream = time::timeout(
-crates/slskr/src/lib.rs:83345:    let stream = time::timeout(
-crates/slskr/src/lib.rs:83371:    let stream = time::timeout(
-crates/slskr/src/lib.rs:83525:    time::timeout(
-crates/slskr/src/lib.rs:83532:    let message = time::timeout(
-crates/slskr/src/lib.rs:83553:    time::timeout(
-crates/slskr/src/lib.rs:83564:    let message = time::timeout(
-crates/slskr/src/lib.rs:83583:    let stream = time::timeout(
-crates/slskr/src/lib.rs:83591:    time::timeout(timeout, peer.send(&PeerMessage::GetShareFileList))
-crates/slskr/src/lib.rs:83595:    let message = time::timeout(timeout, peer.receive())
-crates/slskr/src/lib.rs:83611:    let stream = time::timeout(
-crates/slskr/src/lib.rs:83619:    time::timeout(timeout, peer.send(&PeerMessage::GetShareFileList))
-crates/slskr/src/lib.rs:83623:    let message = time::timeout(timeout, peer.receive())
-crates/slskr/src/lib.rs:83704:                let stream = time::timeout(
-crates/slskr/src/lib.rs:83716:                time::timeout(
-crates/slskr/src/lib.rs:83724:                let stream = time::timeout(
-crates/slskr/src/lib.rs:83732:                time::timeout(
-crates/slskr/src/lib.rs:83792:    let stream = time::timeout(
-crates/slskr/src/lib.rs:83800:    time::timeout(timeout, peer.send(&message))
-crates/slskr/src/lib.rs:83804:    time::timeout(timeout, peer.receive())
-crates/slskr/src/lib.rs:83820:    let stream = time::timeout(
-crates/slskr/src/lib.rs:83828:    time::timeout(timeout, peer.send(&message))
-crates/slskr/src/lib.rs:83832:    time::timeout(timeout, peer.receive())
-crates/slskr/src/lib.rs:83849:    let stream = time::timeout(
-crates/slskr/src/lib.rs:83857:    time::timeout(timeout, peer.send(&message))
-crates/slskr/src/lib.rs:83861:    let response = time::timeout(timeout, peer.receive())
-crates/slskr/src/lib.rs:83879:    let stream = time::timeout(
-crates/slskr/src/lib.rs:83887:    time::timeout(timeout, peer.send(&message))
-crates/slskr/src/lib.rs:83891:    let response = time::timeout(timeout, peer.receive())
-crates/slskr/src/lib.rs:83923:            let queued = time::timeout(timeout, peer.receive_peer_message())
-crates/slskr/src/lib.rs:84220:        let _ = time::timeout(
-crates/slskr/src/lib.rs:86423:        tokio::spawn(async move {
-crates/slskr/src/lib.rs:86880:    let _ = tokio::task::spawn_blocking(move || {
-crates/slskr/src/lib.rs:86911:    tokio::spawn(async move {
-crates/slskr/src/lib.rs:86913:        let mut interval = time::interval(state.config.search_retention.cleanup_interval);
-crates/slskr/src/lib.rs:89199:    let snapshot = tokio::task::spawn_blocking(move || build_share_index(&config))
+crates/slskr/src/lib.rs:7615:    fn compile_with_timeout(
+crates/slskr/src/lib.rs:7633:                .is_match_with_timeout(value, timeout)
+crates/slskr/src/lib.rs:7642:fn controller_regex_timeout(target: ControllerProfile) -> Option<Duration> {
+crates/slskr/src/lib.rs:7651:    let match_timeout = controller_regex_timeout(target);
+crates/slskr/src/lib.rs:7655:            ControllerRegex::compile_with_timeout(expression, case_sensitive, match_timeout)
+crates/slskr/src/lib.rs:15172:        .timeout(Duration::from_secs(10))
+crates/slskr/src/lib.rs:15199:    let output = tokio::time::timeout(Duration::from_secs(30), command.output())
+crates/slskr/src/lib.rs:15342:        .timeout(Duration::from_secs(20))
+crates/slskr/src/lib.rs:15418:        if let Some(metadata) = tokio::time::timeout(
+crates/slskr/src/lib.rs:15585:        tokio::spawn(async move {
+crates/slskr/src/lib.rs:18151:    tokio::spawn(async move {
+crates/slskr/src/lib.rs:18166:    let _ = time::timeout(
+crates/slskr/src/lib.rs:18181:    tokio::spawn(async move {
+crates/slskr/src/lib.rs:21642:                 tokio::spawn(async move {
+crates/slskr/src/lib.rs:24734:            let interests = match time::timeout(
+crates/slskr/src/lib.rs:25857:                tokio::spawn(async move {
+crates/slskr/src/lib.rs:33212:                        tokio::task::spawn_blocking(move || {
+crates/slskr/src/lib.rs:35282:                tokio::spawn(multisource::execute(
+crates/slskr/src/lib.rs:36995:    time::timeout(http_server::RESPONSE_WRITE_TIMEOUT, async {
+crates/slskr/src/lib.rs:37362:    tokio::spawn(async move {
+crates/slskr/src/lib.rs:37415:            .timeout(Duration::from_secs(100))
+crates/slskr/src/lib.rs:39524:    tokio::spawn(async move {
+crates/slskr/src/lib.rs:39528:        let mut interval = time::interval(Duration::from_millis(200));
+crates/slskr/src/lib.rs:43899:        .timeout(Duration::from_secs(spotify.timeout_seconds))
+crates/slskr/src/lib.rs:43920:        .timeout(Duration::from_secs(spotify.timeout_seconds))
+crates/slskr/src/lib.rs:44154:        .timeout(Duration::from_secs(spotify.timeout_seconds))
+crates/slskr/src/lib.rs:44208:        .timeout(Duration::from_secs(spotify.timeout_seconds))
+crates/slskr/src/lib.rs:44836:        .timeout(Duration::from_secs(timeout_seconds))
+crates/slskr/src/lib.rs:45131:        .timeout(Duration::from_secs(timeout_seconds))
+crates/slskr/src/lib.rs:45170:        .timeout(Duration::from_secs(30))
+crates/slskr/src/lib.rs:45201:        .timeout(Duration::from_secs(30))
+crates/slskr/src/lib.rs:45228:        .timeout(Duration::from_secs(30))
+crates/slskr/src/lib.rs:46048:        .timeout(std::time::Duration::from_secs(lidarr.timeout_seconds))
+crates/slskr/src/lib.rs:46090:        .timeout(std::time::Duration::from_secs(lidarr.timeout_seconds))
+crates/slskr/src/lib.rs:46850:        .timeout(std::time::Duration::from_secs(lidarr.timeout_seconds))
+crates/slskr/src/lib.rs:46984:        .timeout(std::time::Duration::from_secs(lidarr.timeout_seconds))
+crates/slskr/src/lib.rs:47595:    tokio::spawn(async move {
+crates/slskr/src/lib.rs:47617:        .timeout(std::time::Duration::from_secs(lidarr.timeout_seconds))
+crates/slskr/src/lib.rs:47793:        .timeout(timeout)
+crates/slskr/src/lib.rs:49522:    tokio::spawn(async move {
+crates/slskr/src/lib.rs:51184:                tokio::spawn(async move {
+crates/slskr/src/lib.rs:54264:    let target = tokio::time::timeout(Duration::from_secs(1), tokio::net::lookup_host(server))
+crates/slskr/src/lib.rs:54274:    let count = tokio::time::timeout(Duration::from_secs(2), socket.recv_from(&mut buf))
+crates/slskr/src/lib.rs:54584:    tokio::spawn(async move {
+crates/slskr/src/lib.rs:54665:        tokio::spawn(async move {
+crates/slskr/src/lib.rs:55692:        .timeout(std::time::Duration::from_secs(5))
+crates/slskr/src/lib.rs:56429:    let reply = match time::timeout(
+crates/slskr/src/lib.rs:56850:            .timeout(solid.timeout)
+crates/slskr/src/lib.rs:57271:        tokio::spawn(multisource::execute(
+crates/slskr/src/lib.rs:71635:    let response = time::timeout(
+crates/slskr/src/lib.rs:71683:    let (event_tx, _) = broadcast::channel(EVENT_HISTORY_LIMIT);
+crates/slskr/src/lib.rs:72499:        tokio::spawn(async move {
+crates/slskr/src/lib.rs:72506:        tokio::spawn(dht.run());
+crates/slskr/src/lib.rs:72564:        tokio::spawn(async move {
+crates/slskr/src/lib.rs:72570:                tokio::spawn(async move {
+crates/slskr/src/lib.rs:72595:            tokio::spawn(async move {
+crates/slskr/src/lib.rs:72602:                    tokio::spawn(async move {
+crates/slskr/src/lib.rs:72661:        tokio::spawn(async move {
+crates/slskr/src/lib.rs:72771:    tokio::spawn(async move {
+crates/slskr/src/lib.rs:72797:                wishlist_scheduler.set_server_interval(server_interval);
+crates/slskr/src/lib.rs:72811:        let mut next_wishlist_search = Instant::now() + wishlist_scheduler.interval();
+crates/slskr/src/lib.rs:72862:                    time::timeout(Duration::from_millis(250), active_session.readable()).await,
+crates/slskr/src/lib.rs:72865:                    match time::timeout(Duration::from_secs(1), active_session.receive()).await {
+crates/slskr/src/lib.rs:72869:                                    Instant::now() + wishlist_scheduler.interval();
+crates/slskr/src/lib.rs:72984:    tokio::spawn(async move {
+crates/slskr/src/lib.rs:73028:    tokio::spawn(async move {
+crates/slskr/src/lib.rs:73188:    tokio::spawn(async move {
+crates/slskr/src/lib.rs:73189:        let mut interval = time::interval(Duration::from_secs(60));
+crates/slskr/src/lib.rs:73198:    tokio::spawn(async move {
+crates/slskr/src/lib.rs:73200:        let mut interval = time::interval(Duration::from_secs(BACKFILL_RUN_INTERVAL_SECONDS));
+crates/slskr/src/lib.rs:73220:    tokio::spawn(async move {
+crates/slskr/src/lib.rs:73253:    tokio::spawn(async move {
+crates/slskr/src/lib.rs:73255:        let mut interval = time::interval(Duration::from_secs(30 * 60));
+crates/slskr/src/lib.rs:73341:    tokio::spawn(async move {
+crates/slskr/src/lib.rs:73384:    tokio::spawn(async move {
+crates/slskr/src/lib.rs:73413:    tokio::spawn(async move {
+crates/slskr/src/lib.rs:73415:        let mut interval = time::interval(state.config.transfer_rescue.check_interval);
+crates/slskr/src/lib.rs:73531:    tokio::spawn(async move {
+crates/slskr/src/lib.rs:73532:        let mut interval = time::interval(Duration::from_secs(SOURCE_DISCOVERY_CYCLE_SECONDS));
+crates/slskr/src/lib.rs:74149:    tokio::spawn(run_listener_manager(
+crates/slskr/src/lib.rs:74156:    tokio::spawn(run_listener_manager(
+crates/slskr/src/lib.rs:74306:    tokio::spawn(async move {
+crates/slskr/src/lib.rs:74438:                            tokio::spawn(async move {
+crates/slskr/src/lib.rs:74503:    let incoming = match time::timeout(
+crates/slskr/src/lib.rs:74562:    let incoming = match time::timeout(
+crates/slskr/src/lib.rs:74880:            tokio::spawn(async move {
+crates/slskr/src/lib.rs:75199:    let stream = time::timeout(
+crates/slskr/src/lib.rs:75233:    tokio::spawn(run_distributed_link(
+crates/slskr/src/lib.rs:75290:    tokio::spawn(run_distributed_link(
+crates/slskr/src/lib.rs:75339:            received = time::timeout(
+crates/slskr/src/lib.rs:75366:                    if time::timeout(
+crates/slskr/src/lib.rs:75827:        let remote_token = time::timeout(
+crates/slskr/src/lib.rs:75910:            match time::timeout(Duration::from_secs(15), peer.receive()).await {
+crates/slskr/src/lib.rs:76504:    let response = time::timeout(
+crates/slskr/src/lib.rs:76562:            match time::timeout(Duration::from_secs(15), peer.receive()).await {
+crates/slskr/src/lib.rs:76601:    time::timeout(
+crates/slskr/src/lib.rs:76614:    time::timeout(
+crates/slskr/src/lib.rs:76850:    let file_info = match time::timeout(Duration::from_secs(30), info_receiver).await {
+crates/slskr/src/lib.rs:76912:    let uploaded = match time::timeout(Duration::from_secs(30), receiver).await {
+crates/slskr/src/lib.rs:77020:    tokio::task::spawn_blocking(move || create_application_dump_file(&state_dir))
+crates/slskr/src/lib.rs:77462:        let received_token = time::timeout(io_timeout, preview.connection.receive_token())
+crates/slskr/src/lib.rs:77469:        time::timeout(io_timeout, preview.connection.send_offset(0))
+crates/slskr/src/lib.rs:77479:    time::timeout(io_timeout, writer.write_all(headers.as_bytes()))
+crates/slskr/src/lib.rs:77488:            let chunk = time::timeout(io_timeout, preview.connection.read_chunk(wanted))
+crates/slskr/src/lib.rs:77495:            time::timeout(io_timeout, writer.write_all(&chunk))
+crates/slskr/src/lib.rs:77502:    time::timeout(io_timeout, writer.flush())
+crates/slskr/src/lib.rs:77524:    time::timeout(io_timeout, async {
+crates/slskr/src/lib.rs:79773:    *next_wishlist_search = Instant::now() + scheduler.interval();
+crates/slskr/src/lib.rs:80025:    tokio::spawn(async move {
+crates/slskr/src/lib.rs:80776:    tokio::spawn(async move {
+crates/slskr/src/lib.rs:81267:    time::timeout(
+crates/slskr/src/lib.rs:81516:            time::timeout(state.config.soulseek_connection.timeout_transfer, receiver).await;
+crates/slskr/src/lib.rs:81536:    let received_token = time::timeout(
+crates/slskr/src/lib.rs:81546:    time::timeout(
+crates/slskr/src/lib.rs:81555:    time::timeout(
+crates/slskr/src/lib.rs:82048:    let byte_hash = tokio::task::spawn_blocking(move || read_file_prefix_hash(hash_file))
+crates/slskr/src/lib.rs:82094:        tokio::task::spawn_blocking(move || read_audio_technical_metadata(file, &filename))
+crates/slskr/src/lib.rs:82390:        time::timeout(
+crates/slskr/src/lib.rs:82398:    let offset = time::timeout(
+crates/slskr/src/lib.rs:82433:        time::timeout(
+crates/slskr/src/lib.rs:82849:    let token = time::timeout(
+crates/slskr/src/lib.rs:82862:    time::timeout(
+crates/slskr/src/lib.rs:82878:        let chunk = time::timeout(
+crates/slskr/src/lib.rs:83162:    let stream = time::timeout(settings.timeout_connect, async {
+crates/slskr/src/lib.rs:83364:                    Ok(stream) => time::timeout(
+crates/slskr/src/lib.rs:83402:    let stream = time::timeout(
+crates/slskr/src/lib.rs:83430:    let stream = time::timeout(
+crates/slskr/src/lib.rs:83456:    let stream = time::timeout(
+crates/slskr/src/lib.rs:83610:    time::timeout(
+crates/slskr/src/lib.rs:83617:    let message = time::timeout(
+crates/slskr/src/lib.rs:83638:    time::timeout(
+crates/slskr/src/lib.rs:83649:    let message = time::timeout(
+crates/slskr/src/lib.rs:83668:    let stream = time::timeout(
+crates/slskr/src/lib.rs:83676:    time::timeout(timeout, peer.send(&PeerMessage::GetShareFileList))
+crates/slskr/src/lib.rs:83680:    let message = time::timeout(timeout, peer.receive())
+crates/slskr/src/lib.rs:83696:    let stream = time::timeout(
+crates/slskr/src/lib.rs:83704:    time::timeout(timeout, peer.send(&PeerMessage::GetShareFileList))
+crates/slskr/src/lib.rs:83708:    let message = time::timeout(timeout, peer.receive())
+crates/slskr/src/lib.rs:83789:                let stream = time::timeout(
+crates/slskr/src/lib.rs:83801:                time::timeout(
+crates/slskr/src/lib.rs:83809:                let stream = time::timeout(
+crates/slskr/src/lib.rs:83817:                time::timeout(
+crates/slskr/src/lib.rs:83877:    let stream = time::timeout(
+crates/slskr/src/lib.rs:83885:    time::timeout(timeout, peer.send(&message))
+crates/slskr/src/lib.rs:83889:    time::timeout(timeout, peer.receive())
+crates/slskr/src/lib.rs:83905:    let stream = time::timeout(
+crates/slskr/src/lib.rs:83913:    time::timeout(timeout, peer.send(&message))
+crates/slskr/src/lib.rs:83917:    time::timeout(timeout, peer.receive())
+crates/slskr/src/lib.rs:83934:    let stream = time::timeout(
+crates/slskr/src/lib.rs:83942:    time::timeout(timeout, peer.send(&message))
+crates/slskr/src/lib.rs:83946:    let response = time::timeout(timeout, peer.receive())
+crates/slskr/src/lib.rs:83964:    let stream = time::timeout(
+crates/slskr/src/lib.rs:83972:    time::timeout(timeout, peer.send(&message))
+crates/slskr/src/lib.rs:83976:    let response = time::timeout(timeout, peer.receive())
+crates/slskr/src/lib.rs:84008:            let queued = time::timeout(timeout, peer.receive_peer_message())
+crates/slskr/src/lib.rs:84305:        let _ = time::timeout(
+crates/slskr/src/lib.rs:86508:        tokio::spawn(async move {
+crates/slskr/src/lib.rs:86965:    let _ = tokio::task::spawn_blocking(move || {
+crates/slskr/src/lib.rs:86996:    tokio::spawn(async move {
+crates/slskr/src/lib.rs:86998:        let mut interval = time::interval(state.config.search_retention.cleanup_interval);
+crates/slskr/src/lib.rs:89284:    let snapshot = tokio::task::spawn_blocking(move || build_share_index(&config))
 crates/slskr/src/controller_tests.rs:130:    let proxy = tokio::spawn(async move {
 crates/slskr/src/controller_tests.rs:208:    let proxy = tokio::spawn(async move {
 crates/slskr/src/controller_tests.rs:451:        let matcher = super::ControllerRegex::compile_with_timeout(expression, true, None)
@@ -1843,86 +1880,86 @@ crates/slskr/src/controller_tests.rs:11506:        let response = tokio::time::t
 crates/slskr/src/controller_tests.rs:11609:        let response = tokio::time::timeout(
 crates/slskr/src/controller_tests.rs:12907:        let task = tokio::spawn(super::handle_http_stream(
 crates/slskr/src/controller_tests.rs:13112:        let task = tokio::spawn(super::handle_http_stream(
-crates/slskr/src/controller_tests.rs:19978:    let server = tokio::spawn(async move {
-crates/slskr/src/controller_tests.rs:21247:    let server = tokio::spawn(async move {
-crates/slskr/src/controller_tests.rs:21323:    let server = tokio::spawn(async move {
-crates/slskr/src/controller_tests.rs:21411:    let server = tokio::spawn(async move {
-crates/slskr/src/controller_tests.rs:21478:    let server = tokio::spawn(async move {
-crates/slskr/src/controller_tests.rs:21585:    let server = tokio::spawn(async move {
-crates/slskr/src/controller_tests.rs:21682:    let server = tokio::spawn(async move {
-crates/slskr/src/controller_tests.rs:21755:    let server = tokio::spawn(async move {
-crates/slskr/src/controller_tests.rs:21789:    let server = tokio::spawn(async move {
-crates/slskr/src/controller_tests.rs:21856:    let server = tokio::spawn(async move {
-crates/slskr/src/controller_tests.rs:21961:    let server = tokio::spawn(async move {
-crates/slskr/src/controller_tests.rs:22078:    let server = tokio::spawn(async move {
-crates/slskr/src/controller_tests.rs:22135:    let server = tokio::spawn(async move {
-crates/slskr/src/controller_tests.rs:22241:    let server = tokio::spawn(async move {
-crates/slskr/src/controller_tests.rs:22296:    let server = tokio::spawn(async move {
-crates/slskr/src/controller_tests.rs:26560:    let peer = tokio::spawn(async move {
-crates/slskr/src/controller_tests.rs:26693:    let source = tokio::spawn(async move {
-crates/slskr/src/controller_tests.rs:26880:    let gateway_server = tokio::spawn(gateway.run(Arc::clone(&remote_state)));
-crates/slskr/src/controller_tests.rs:26943:    let write = tokio::spawn(async move {
-crates/slskr/src/controller_tests.rs:27660:    let server = tokio::spawn(async move {
-crates/slskr/src/controller_tests.rs:27795:    let gateway_server = tokio::spawn(gateway.run(Arc::clone(&state)));
-crates/slskr/src/controller_tests.rs:27937:    match tokio::time::timeout(
-crates/slskr/src/controller_tests.rs:28246:    let server = tokio::spawn(async move {
-crates/slskr/src/controller_tests.rs:28249:            tokio::time::timeout(Duration::from_secs(1), super::bridge_read_frame(&mut first))
-crates/slskr/src/controller_tests.rs:28287:        tokio::time::timeout(
-crates/slskr/src/controller_tests.rs:28304:    let reconnected = match tokio::time::timeout(
-crates/slskr/src/controller_tests.rs:28336:    let server = tokio::spawn(async move {
-crates/slskr/src/controller_tests.rs:28577:        let server = tokio::spawn(async move {
-crates/slskr/src/controller_tests.rs:28610:        let server = tokio::spawn(async move {
-crates/slskr/src/controller_tests.rs:28640:        let server = tokio::spawn(async move {
-crates/slskr/src/controller_tests.rs:28671:    let server = tokio::spawn(async move {
-crates/slskr/src/controller_tests.rs:28805:    let server = tokio::spawn(async move {
-crates/slskr/src/controller_tests.rs:28979:    let server = tokio::spawn(async move {
-crates/slskr/src/controller_tests.rs:29009:    let server = tokio::spawn(async move {
-crates/slskr/src/controller_tests.rs:29032:        tokio::time::timeout(
-crates/slskr/src/controller_tests.rs:29048:    let server = tokio::spawn(async move {
-crates/slskr/src/controller_tests.rs:29072:        tokio::time::timeout(
-crates/slskr/src/controller_tests.rs:29104:    let server = tokio::spawn(async move {
-crates/slskr/src/controller_tests.rs:31348:    let server = tokio::spawn(async move {
-crates/slskr/src/controller_tests.rs:34799:    let server = tokio::spawn(async move {
-crates/slskr/src/controller_tests.rs:34974:    let server = tokio::spawn(async move {
-crates/slskr/src/controller_tests.rs:42897:    let open = tokio::spawn(async move {
-crates/slskr/src/controller_tests.rs:42980:    let server = tokio::spawn(async move {
-crates/slskr/src/controller_tests.rs:43140:    let server = tokio::spawn(async move {
-crates/slskr/src/controller_tests.rs:44226:    let server = tokio::spawn(async move {
-crates/slskr/src/controller_tests.rs:44292:    let server = tokio::spawn(async move {
-crates/slskr/src/controller_tests.rs:44422:    let server = tokio::spawn(async move {
-crates/slskr/src/controller_tests.rs:44495:    let server = tokio::spawn(async move {
-crates/slskr/src/controller_tests.rs:45486:    let task = tokio::spawn(async move {
-crates/slskr/src/controller_tests.rs:50281:        writes.push(tokio::spawn(async move {
-crates/slskr/src/controller_tests.rs:50548:        pod_creates.push(tokio::spawn(async move {
-crates/slskr/src/controller_tests.rs:50583:        message_writes.push(tokio::spawn(async move {
-crates/slskr/src/controller_tests.rs:84506:    let token_server = tokio::spawn(async move {
-crates/slskr/src/controller_tests.rs:84518:    let profile_server = tokio::spawn(async move {
-crates/slskr/src/controller_tests.rs:85113:    let server = tokio::spawn(async move {
-crates/slskr/src/controller_tests.rs:96832:        let server = tokio::spawn(async move {
-crates/slskr/src/controller_tests.rs:99017:        let first_server = tokio::spawn(serve_relay_fixture(
-crates/slskr/src/controller_tests.rs:99059:        let second_server = tokio::spawn(serve_relay_fixture(
-crates/slskr/src/controller_tests.rs:99117:        let partial_server = tokio::spawn(serve_relay_fixture(
-crates/slskr/src/controller_tests.rs:100700:    let (event_tx, _) = tokio::sync::broadcast::channel(super::EVENT_HISTORY_LIMIT);
-crates/slskr/src/controller_tests.rs:103589:    let handler = tokio::spawn(async move {
-crates/slskr/src/controller_tests.rs:103683:    let (request_tx, mut request_rx) = mpsc::unbounded_channel::<String>();
-crates/slskr/src/controller_tests.rs:103684:    let server = tokio::spawn(async move {
-crates/slskr/src/controller_tests.rs:104821:    tokio::time::timeout(Duration::from_secs(1), async {
-crates/slskr/src/controller_tests.rs:104849:    assert!(tokio::time::timeout(Duration::from_secs(1), peer.receive())
-crates/slskr/src/controller_tests.rs:106902:        let task = tokio::spawn(super::handle_http_stream(server, None, false, state));
-crates/slskr/src/controller_tests.rs:110734:        let task = tokio::spawn(super::handle_http_stream(server, None, false, state));
-crates/slskr/src/controller_tests.rs:113914:    let server = tokio::spawn(async move {
-crates/slskr/src/controller_tests.rs:116066:    let server = tokio::spawn(async move {
-crates/slskr/src/controller_tests.rs:118166:    let server = tokio::spawn(async move {
-crates/slskr/src/controller_tests.rs:122109:        let task = tokio::spawn(async move {
-crates/slskr/src/controller_tests.rs:122115:                tokio::spawn(async move {
-crates/slskr/src/controller_tests.rs:122327:        let task = tokio::spawn(async move {
-crates/slskr/src/controller_tests.rs:122392:    let download = tokio::spawn(super::multisource::execute(
-crates/slskr/src/controller_tests.rs:122399:    let stalled = tokio::time::timeout(Duration::from_secs(5), async {
-crates/slskr/src/controller_tests.rs:123030:    let version_server = tokio::spawn(async move {
-crates/slskr/src/controller_tests.rs:123572:        let task = tokio::spawn(super::handle_http_stream(server, None, false, state));
-crates/slskr/src/controller_tests.rs:136083:        let task = tokio::spawn(async move { serve_json_fixture(&listener, response).await });
-crates/slskr/src/controller_tests.rs:141851:        let task = tokio::spawn(super::handle_http_stream(
-crates/slskr/src/controller_tests.rs:142476:    let stream_task = tokio::spawn(async move { live_get(stream_state, &stream_path).await });
+crates/slskr/src/controller_tests.rs:20000:    let server = tokio::spawn(async move {
+crates/slskr/src/controller_tests.rs:21269:    let server = tokio::spawn(async move {
+crates/slskr/src/controller_tests.rs:21345:    let server = tokio::spawn(async move {
+crates/slskr/src/controller_tests.rs:21433:    let server = tokio::spawn(async move {
+crates/slskr/src/controller_tests.rs:21500:    let server = tokio::spawn(async move {
+crates/slskr/src/controller_tests.rs:21607:    let server = tokio::spawn(async move {
+crates/slskr/src/controller_tests.rs:21704:    let server = tokio::spawn(async move {
+crates/slskr/src/controller_tests.rs:21777:    let server = tokio::spawn(async move {
+crates/slskr/src/controller_tests.rs:21811:    let server = tokio::spawn(async move {
+crates/slskr/src/controller_tests.rs:21878:    let server = tokio::spawn(async move {
+crates/slskr/src/controller_tests.rs:21983:    let server = tokio::spawn(async move {
+crates/slskr/src/controller_tests.rs:22100:    let server = tokio::spawn(async move {
+crates/slskr/src/controller_tests.rs:22157:    let server = tokio::spawn(async move {
+crates/slskr/src/controller_tests.rs:22263:    let server = tokio::spawn(async move {
+crates/slskr/src/controller_tests.rs:22318:    let server = tokio::spawn(async move {
+crates/slskr/src/controller_tests.rs:26582:    let peer = tokio::spawn(async move {
+crates/slskr/src/controller_tests.rs:26715:    let source = tokio::spawn(async move {
+crates/slskr/src/controller_tests.rs:26902:    let gateway_server = tokio::spawn(gateway.run(Arc::clone(&remote_state)));
+crates/slskr/src/controller_tests.rs:26965:    let write = tokio::spawn(async move {
+crates/slskr/src/controller_tests.rs:27682:    let server = tokio::spawn(async move {
+crates/slskr/src/controller_tests.rs:27817:    let gateway_server = tokio::spawn(gateway.run(Arc::clone(&state)));
+crates/slskr/src/controller_tests.rs:27959:    match tokio::time::timeout(
+crates/slskr/src/controller_tests.rs:28268:    let server = tokio::spawn(async move {
+crates/slskr/src/controller_tests.rs:28271:            tokio::time::timeout(Duration::from_secs(1), super::bridge_read_frame(&mut first))
+crates/slskr/src/controller_tests.rs:28309:        tokio::time::timeout(
+crates/slskr/src/controller_tests.rs:28326:    let reconnected = match tokio::time::timeout(
+crates/slskr/src/controller_tests.rs:28358:    let server = tokio::spawn(async move {
+crates/slskr/src/controller_tests.rs:28599:        let server = tokio::spawn(async move {
+crates/slskr/src/controller_tests.rs:28632:        let server = tokio::spawn(async move {
+crates/slskr/src/controller_tests.rs:28662:        let server = tokio::spawn(async move {
+crates/slskr/src/controller_tests.rs:28693:    let server = tokio::spawn(async move {
+crates/slskr/src/controller_tests.rs:28827:    let server = tokio::spawn(async move {
+crates/slskr/src/controller_tests.rs:29001:    let server = tokio::spawn(async move {
+crates/slskr/src/controller_tests.rs:29031:    let server = tokio::spawn(async move {
+crates/slskr/src/controller_tests.rs:29054:        tokio::time::timeout(
+crates/slskr/src/controller_tests.rs:29070:    let server = tokio::spawn(async move {
+crates/slskr/src/controller_tests.rs:29094:        tokio::time::timeout(
+crates/slskr/src/controller_tests.rs:29126:    let server = tokio::spawn(async move {
+crates/slskr/src/controller_tests.rs:31370:    let server = tokio::spawn(async move {
+crates/slskr/src/controller_tests.rs:34821:    let server = tokio::spawn(async move {
+crates/slskr/src/controller_tests.rs:34996:    let server = tokio::spawn(async move {
+crates/slskr/src/controller_tests.rs:42919:    let open = tokio::spawn(async move {
+crates/slskr/src/controller_tests.rs:43002:    let server = tokio::spawn(async move {
+crates/slskr/src/controller_tests.rs:43162:    let server = tokio::spawn(async move {
+crates/slskr/src/controller_tests.rs:44248:    let server = tokio::spawn(async move {
+crates/slskr/src/controller_tests.rs:44314:    let server = tokio::spawn(async move {
+crates/slskr/src/controller_tests.rs:44444:    let server = tokio::spawn(async move {
+crates/slskr/src/controller_tests.rs:44517:    let server = tokio::spawn(async move {
+crates/slskr/src/controller_tests.rs:45508:    let task = tokio::spawn(async move {
+crates/slskr/src/controller_tests.rs:50303:        writes.push(tokio::spawn(async move {
+crates/slskr/src/controller_tests.rs:50570:        pod_creates.push(tokio::spawn(async move {
+crates/slskr/src/controller_tests.rs:50605:        message_writes.push(tokio::spawn(async move {
+crates/slskr/src/controller_tests.rs:84528:    let token_server = tokio::spawn(async move {
+crates/slskr/src/controller_tests.rs:84540:    let profile_server = tokio::spawn(async move {
+crates/slskr/src/controller_tests.rs:85135:    let server = tokio::spawn(async move {
+crates/slskr/src/controller_tests.rs:96854:        let server = tokio::spawn(async move {
+crates/slskr/src/controller_tests.rs:99039:        let first_server = tokio::spawn(serve_relay_fixture(
+crates/slskr/src/controller_tests.rs:99081:        let second_server = tokio::spawn(serve_relay_fixture(
+crates/slskr/src/controller_tests.rs:99139:        let partial_server = tokio::spawn(serve_relay_fixture(
+crates/slskr/src/controller_tests.rs:100722:    let (event_tx, _) = tokio::sync::broadcast::channel(super::EVENT_HISTORY_LIMIT);
+crates/slskr/src/controller_tests.rs:103611:    let handler = tokio::spawn(async move {
+crates/slskr/src/controller_tests.rs:103705:    let (request_tx, mut request_rx) = mpsc::unbounded_channel::<String>();
+crates/slskr/src/controller_tests.rs:103706:    let server = tokio::spawn(async move {
+crates/slskr/src/controller_tests.rs:104843:    tokio::time::timeout(Duration::from_secs(1), async {
+crates/slskr/src/controller_tests.rs:104871:    assert!(tokio::time::timeout(Duration::from_secs(1), peer.receive())
+crates/slskr/src/controller_tests.rs:106924:        let task = tokio::spawn(super::handle_http_stream(server, None, false, state));
+crates/slskr/src/controller_tests.rs:110756:        let task = tokio::spawn(super::handle_http_stream(server, None, false, state));
+crates/slskr/src/controller_tests.rs:113936:    let server = tokio::spawn(async move {
+crates/slskr/src/controller_tests.rs:116088:    let server = tokio::spawn(async move {
+crates/slskr/src/controller_tests.rs:118188:    let server = tokio::spawn(async move {
+crates/slskr/src/controller_tests.rs:122131:        let task = tokio::spawn(async move {
+crates/slskr/src/controller_tests.rs:122137:                tokio::spawn(async move {
+crates/slskr/src/controller_tests.rs:122349:        let task = tokio::spawn(async move {
+crates/slskr/src/controller_tests.rs:122414:    let download = tokio::spawn(super::multisource::execute(
+crates/slskr/src/controller_tests.rs:122421:    let stalled = tokio::time::timeout(Duration::from_secs(5), async {
+crates/slskr/src/controller_tests.rs:123052:    let version_server = tokio::spawn(async move {
+crates/slskr/src/controller_tests.rs:123594:        let task = tokio::spawn(super::handle_http_stream(server, None, false, state));
+crates/slskr/src/controller_tests.rs:136105:        let task = tokio::spawn(async move { serve_json_fixture(&listener, response).await });
+crates/slskr/src/controller_tests.rs:141873:        let task = tokio::spawn(super::handle_http_stream(
+crates/slskr/src/controller_tests.rs:142498:    let stream_task = tokio::spawn(async move { live_get(stream_state, &stream_path).await });
 
 ## Browser injection, token storage, and opener boundaries
 dashboard/src/hooks/useLocalStorage.ts:8:  storageName: 'localStorage' | 'sessionStorage',
@@ -1930,13 +1967,15 @@ dashboard/src/hooks/useLocalStorage.ts:42: * Custom hook for managing localStora
 dashboard/src/hooks/useLocalStorage.ts:45:  return useBrowserStorage(key, initialValue, 'localStorage');
 dashboard/src/hooks/useLocalStorage.ts:49: * Custom hook for managing sessionStorage with React state.
 dashboard/src/hooks/useLocalStorage.ts:52:  return useBrowserStorage(key, initialValue, 'sessionStorage');
+dashboard/src/pages/Monitoring.tsx:120:          target="_blank"
 web/scripts/audit-react-webui.mjs:614:      window.localStorage.setItem('slskr-theme', 'slskr');
 web/scripts/audit-react-webui.mjs:615:      window.sessionStorage.setItem('slskr-token', token || 'audit-token');
 web/scripts/audit-react-webui.mjs:616:      if (activeUser) window.localStorage.setItem('slskr-active-user', activeUser);
 web/scripts/audit-react-webui.mjs:618:        window.localStorage.setItem(
+web/scripts/capture-readme-screenshots.mjs:311:  window.localStorage.setItem('slskr-theme', 'slskr');
+web/scripts/capture-readme-screenshots.mjs:312:  window.sessionStorage.setItem('slskr-token', 'readme-screenshot-token');
 dashboard/src/components/Sidebar.tsx:60:            target="_blank"
 dashboard/src/components/Sidebar.tsx:69:            target="_blank"
-dashboard/src/pages/Monitoring.tsx:120:          target="_blank"
 web/e2e/helpers.ts:254:        sessionStorage.getItem('slskr-token') ||
 web/e2e/helpers.ts:255:        localStorage.getItem('slskr-token')
 web/e2e/helpers.ts:273:        localStorage: Object.keys(localStorage).map((k) => ({
@@ -1947,9 +1986,30 @@ web/e2e/helpers.ts:482:        sessionStorage.getItem('slskr-token') ||
 web/e2e/helpers.ts:483:        localStorage.getItem('slskr-token');
 web/e2e/helpers.ts:681:      sessionStorage.getItem('slskr-token') ||
 web/e2e/helpers.ts:682:      localStorage.getItem('slskr-token') ||
-web/scripts/capture-readme-screenshots.mjs:311:  window.localStorage.setItem('slskr-theme', 'slskr');
-web/scripts/capture-readme-screenshots.mjs:312:  window.sessionStorage.setItem('slskr-token', 'readme-screenshot-token');
-web/src/lib/communityQualitySignals.js:21:    return window.localStorage;
+web/src/lib/session.js:18:  setToken(sessionStorage, tokenPassthroughValue);
+web/src/lib/session.js:31:  setToken(sessionStorage, token);
+web/src/components/Rooms/Rooms.jsx:23:// Load tabs from localStorage
+web/src/components/Rooms/Rooms.jsx:41:// Save tabs to localStorage
+web/src/components/Rooms/Rooms.jsx:97:  // Save tabs to localStorage whenever they change
+web/src/components/Browse/Browse.jsx:9:// Load tabs from localStorage
+web/src/components/Browse/Browse.jsx:27:// Save tabs to localStorage
+web/src/components/Browse/Browse.jsx:92:  // Save tabs to localStorage whenever they change
+web/src/components/System/ExperienceSettings/index.jsx:86:    const stored = JSON.parse(localStorage.getItem(storageKey) || '{}');
+web/src/components/System/ExperienceSettings/index.jsx:116:    localStorage.setItem(storageKey, JSON.stringify(form));
+web/src/components/System/ExperienceSettings/index.jsx:121:    localStorage.removeItem(storageKey);
+web/src/lib/searches.js:72:// Blocked users management (localStorage-based)
+web/src/components/Chat/Chat.jsx:20:// Load tabs from localStorage
+web/src/components/Chat/Chat.jsx:38:// Save tabs to localStorage
+web/src/components/Chat/Chat.jsx:164:  // Save tabs to localStorage whenever they change
+web/src/components/Shared/Footer.jsx:173:              target="_blank"
+web/src/components/Shared/Footer.jsx:199:              target="_blank"
+web/src/components/Shared/Footer.jsx:264:                target="_blank"
+web/src/components/Shared/Footer.jsx:284:                  target="_blank"
+web/src/components/Shared/Footer.jsx:293:                  target="_blank"
+web/src/components/Shared/Footer.jsx:305:                  target="_blank"
+web/src/components/Shared/Footer.jsx:315:                target="_blank"
+web/src/lib/safeOpen.js:22:    const opened = window.open(url, '_blank', 'noopener,noreferrer');
+web/src/components/Search/Detail/SearchDetail.jsx:231:  // Sync hasSavedDefault across tabs/searches when localStorage changes
 web/src/lib/storage.js:5:    const value = window.localStorage.getItem(key);
 web/src/lib/storage.js:16:    window.localStorage.setItem(key, value);
 web/src/lib/storage.js:27:    window.localStorage.removeItem(key);
@@ -1958,40 +2018,25 @@ web/src/lib/storage.js:40:      (_, index) => window.localStorage.key(index),
 web/src/lib/storage.js:51:    const value = window.sessionStorage.getItem(key);
 web/src/lib/storage.js:62:    window.sessionStorage.setItem(key, value);
 web/src/lib/storage.js:82:    window.sessionStorage.removeItem(key);
-web/src/lib/session.js:18:  setToken(sessionStorage, tokenPassthroughValue);
-web/src/lib/session.js:31:  setToken(sessionStorage, token);
-web/src/lib/searches.js:72:// Blocked users management (localStorage-based)
-web/src/lib/safeOpen.js:22:    const opened = window.open(url, '_blank', 'noopener,noreferrer');
-web/src/components/Browse/Browse.jsx:9:// Load tabs from localStorage
-web/src/components/Browse/Browse.jsx:27:// Save tabs to localStorage
-web/src/components/Browse/Browse.jsx:92:  // Save tabs to localStorage whenever they change
-web/src/components/Rooms/Rooms.jsx:23:// Load tabs from localStorage
-web/src/components/Rooms/Rooms.jsx:41:// Save tabs to localStorage
-web/src/components/Rooms/Rooms.jsx:97:  // Save tabs to localStorage whenever they change
-web/src/components/Chat/Chat.jsx:20:// Load tabs from localStorage
-web/src/components/Chat/Chat.jsx:38:// Save tabs to localStorage
-web/src/components/Chat/Chat.jsx:164:  // Save tabs to localStorage whenever they change
-web/src/components/System/ExperienceSettings/index.jsx:86:    const stored = JSON.parse(localStorage.getItem(storageKey) || '{}');
-web/src/components/System/ExperienceSettings/index.jsx:116:    localStorage.setItem(storageKey, JSON.stringify(form));
-web/src/components/System/ExperienceSettings/index.jsx:121:    localStorage.removeItem(storageKey);
-web/src/components/Search/Detail/SearchDetail.jsx:228:  // Sync hasSavedDefault across tabs/searches when localStorage changes
-web/src/components/Shared/Footer.jsx:173:              target="_blank"
-web/src/components/Shared/Footer.jsx:199:              target="_blank"
-web/src/components/Shared/Footer.jsx:264:                target="_blank"
-web/src/components/Shared/Footer.jsx:284:                  target="_blank"
-web/src/components/Shared/Footer.jsx:293:                  target="_blank"
-web/src/components/Shared/Footer.jsx:305:                  target="_blank"
-web/src/components/Shared/Footer.jsx:315:                target="_blank"
+web/src/lib/communityQualitySignals.js:21:    return window.localStorage;
 
 ## Suppressed CI and script failures
-scripts/check-public-posture.sh:24:      | rg -v -i 'do not|should not|must not|unless|avoid|remove casual|presenting the repository|not copied|not copy|not import|not say|prohibited|forbidden|current web ui as the reference implementation|based on error type' || true
+.github/workflows/release.yml:348:          previous_tag="$(git describe --tags --match 'release-v*' --abbrev=0 "${GITHUB_SHA}^" 2>/dev/null || true)"
+.github/workflows/release-publish.yml:273:            KRB5CCNAME="FILE:$armor" kdestroy || true
+.github/workflows/release-publish.yml:380:            --jq '.commit.committer.date' 2>/dev/null | { read -r d && date -u -d "$d" +%s; } || true)"
+.github/workflows/release-publish.yml:419:            getent ahosts ppa.launchpad.net || true
+.github/workflows/release-publish.yml:462:            ssh-keyscan -T 30 -t rsa,ecdsa,ed25519 ppa.launchpad.net >> ~/.ssh/known_hosts 2>/dev/null || true
+.github/workflows/release-publish.yml:574:        continue-on-error: true
+scripts/run-council-scan.sh:14:    "$@" >"$tmp" || true
+scripts/check-csp-policy.sh:16:    | rg -v 'assert!\(!' || true
+scripts/run-proton-natpmp-command.sh:35:    natpmpc -g "$gateway" -a "$public_port" "$private_port" tcp "$lifetime" >/dev/null 2>&1 || true
+scripts/run-proton-natpmp-command.sh:42:trap 'kill "$renew_pid" 2>/dev/null || true' EXIT
+scripts/check-proton-wg-labels.sh:38:  set +e
 scripts/start-proton-listener-soak.sh:21:tmux kill-session -t "$session" 2>/dev/null || true
 scripts/start-proton-listener-soak.sh:22:sudo wg-quick down "$interface" 2>/dev/null || true
 scripts/start-proton-listener-soak.sh:23:sudo ip link del "$interface" 2>/dev/null || true
 scripts/start-proton-listener-soak.sh:24:sudo ip netns pids "$namespace" 2>/dev/null | xargs -r sudo kill 2>/dev/null || true
 scripts/start-proton-listener-soak.sh:25:sudo ip netns del "$namespace" 2>/dev/null || true
-scripts/run-proton-natpmp-command.sh:35:    natpmpc -g "$gateway" -a "$public_port" "$private_port" tcp "$lifetime" >/dev/null 2>&1 || true
-scripts/run-proton-natpmp-command.sh:42:trap 'kill "$renew_pid" 2>/dev/null || true' EXIT
 scripts/run-in-proton-wg-netns.sh:37:    sudo ip netns pids "$namespace" 2>/dev/null | xargs -r sudo kill 2>/dev/null || true
 scripts/run-in-proton-wg-netns.sh:38:    sudo ip netns del "$namespace" 2>/dev/null || true
 scripts/run-in-proton-wg-netns.sh:39:    sudo rm -rf "/etc/netns/$namespace" 2>/dev/null || true
@@ -2001,23 +2046,29 @@ scripts/run-in-proton-wg-netns.sh:44:    sudo iptables -t nat -D POSTROUTING -s 
 scripts/run-in-proton-wg-netns.sh:45:    sudo iptables -D FORWARD -i "$host_veth" -j ACCEPT 2>/dev/null || true
 scripts/run-in-proton-wg-netns.sh:46:    sudo iptables -D FORWARD -o "$host_veth" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || true
 scripts/run-in-proton-wg-netns.sh:139:sudo ip netns exec "$namespace" bash -lc 'timeout 3 bash -c "</dev/udp/1.1.1.1/53" 2>/dev/null || true'
-scripts/check-proton-wg-labels.sh:38:  set +e
-scripts/run-council-scan.sh:14:    "$@" >"$tmp" || true
-scripts/check-csp-policy.sh:16:    | rg -v 'assert!\(!' || true
-.github/workflows/release.yml:348:          previous_tag="$(git describe --tags --match 'release-v*' --abbrev=0 "${GITHUB_SHA}^" 2>/dev/null || true)"
-scripts/with-process-memory-guard.sh:70:    systemctl --user stop "$unit_name" >/dev/null 2>&1 || true
-scripts/run-container-shutdown-smoke.sh:8:  docker rm -f "$container_name" >/dev/null 2>&1 || true
-scripts/run-container-shutdown-smoke.sh:22:  state="$(docker inspect -f '{{.State.Status}}' "$container_name" 2>/dev/null || true)"
-scripts/run-container-shutdown-smoke.sh:35:  docker logs "$container_name" 2>&1 || true
-scripts/run-container-shutdown-smoke.sh:41:  state="$(docker inspect -f '{{.State.Status}}' "$container_name" 2>/dev/null || true)"
-scripts/run-container-shutdown-smoke.sh:48:state="$(docker inspect -f '{{.State.Status}}' "$container_name" 2>/dev/null || true)"
-scripts/run-container-shutdown-smoke.sh:51:  docker logs "$container_name" 2>&1 || true
-scripts/run-container-shutdown-smoke.sh:58:  docker logs "$container_name" 2>&1 || true
-scripts/run-container-shutdown-smoke.sh:64:  docker logs "$container_name" 2>&1 || true
-scripts/check-web-audit.sh:28:      npm --prefix "$package_dir" audit --json 2>/dev/null || true
-scripts/check-web-audit.sh:40:    ' <<<"$report" 2>/dev/null || true
-scripts/check-web-audit.sh:54:      npm --prefix "$package_dir" audit --json 2>/dev/null || true
-scripts/validate-changelog.sh:15:unreleased_count="$(rg -c --no-filename '^## \[Unreleased\]$' "$changelog" || true)"
+scripts/check-public-posture.sh:24:      | rg -v -i 'do not|should not|must not|unless|avoid|remove casual|presenting the repository|not copied|not copy|not import|not say|prohibited|forbidden|current web ui as the reference implementation|based on error type' || true
+scripts/check-local-identity-leaks.sh:38:add_token "$(hostname -s 2>/dev/null || true)"
+scripts/check-local-identity-leaks.sh:40:add_token "$(id -un 2>/dev/null || true)"
+scripts/check-local-identity-leaks.sh:41:add_token "$(basename "${HOME:-}" 2>/dev/null || true)"
+scripts/check-local-identity-leaks.sh:85:      sort -u || true
+scripts/check-local-identity-leaks.sh:106:  latest_tag="$(git tag --sort=-creatordate --list 'build-main-*' | head -n 1 || true)"
+scripts/check-local-identity-leaks.sh:108:    latest_tag="$(git describe --tags --abbrev=0 2>/dev/null || true)"
+scripts/check-web-request-body-limit-differential.sh:24:    kill "$daemon_pid" 2>/dev/null || true
+scripts/check-web-request-body-limit-differential.sh:25:    wait "$daemon_pid" 2>/dev/null || true
+scripts/check-web-request-body-limit-differential.sh:102:      tail -120 "$log" >&2 || true
+scripts/check-web-request-body-limit-differential.sh:107:  tail -120 "$log" >&2 || true
+scripts/check-web-cors-differential.sh:34:    kill "$daemon_pid" 2>/dev/null || true
+scripts/check-web-cors-differential.sh:35:    wait "$daemon_pid" 2>/dev/null || true
+scripts/check-web-cors-differential.sh:136:  tail -120 "$log" >&2 || true
+scripts/check-web-cors-differential.sh:148:      tail -120 "$log" >&2 || true
+scripts/check-web-cors-differential.sh:153:  tail -120 "$log" >&2 || true
+scripts/check-web-cors-differential.sh:359:    tail -120 "$log" >&2 || true
+scripts/check-web-cors-differential.sh:363:  wait "$daemon_pid" 2>/dev/null || true
+scripts/check-web-cors-differential.sh:366:    tail -120 "$log" >&2 || true
+scripts/run-council-active-bughunt.sh:35:      "$pattern" "$@" || true
+scripts/run-council-active-bughunt.sh:78:  'continue-on-error:|allow_failure:|\|\|[[:space:]]+true|set[[:space:]]+\+e' \
+scripts/scan-bug-council-candidates.sh:26:    "$pattern" "$@" || true
+scripts/scan-bug-council-candidates.sh:73:  'continue-on-error:|allow_failure:|\|\|[[:space:]]+true|set[[:space:]]+\+e' \
 scripts/check-web-no-auth-passthrough-differential.sh:28:    kill "$daemon_pid" 2>/dev/null || true
 scripts/check-web-no-auth-passthrough-differential.sh:29:    wait "$daemon_pid" 2>/dev/null || true
 scripts/check-web-no-auth-passthrough-differential.sh:110:      tail -120 "$log" >&2 || true
@@ -2040,56 +2091,6 @@ scripts/check-web-enforce-security-differential.sh:125:      tail -120 "$log" >&
 scripts/check-web-enforce-security-differential.sh:130:  tail -120 "$log" >&2 || true
 scripts/check-web-enforce-security-differential.sh:139:      wait "$daemon_pid" 2>/dev/null || true
 scripts/check-web-enforce-security-differential.sh:146:  tail -120 "$log" >&2 || true
-.github/workflows/release-publish.yml:273:            KRB5CCNAME="FILE:$armor" kdestroy || true
-.github/workflows/release-publish.yml:380:            --jq '.commit.committer.date' 2>/dev/null | { read -r d && date -u -d "$d" +%s; } || true)"
-.github/workflows/release-publish.yml:419:            getent ahosts ppa.launchpad.net || true
-.github/workflows/release-publish.yml:462:            ssh-keyscan -T 30 -t rsa,ecdsa,ed25519 ppa.launchpad.net >> ~/.ssh/known_hosts 2>/dev/null || true
-.github/workflows/release-publish.yml:574:        continue-on-error: true
-scripts/run-certification.sh:153:        set +e
-scripts/run-certification.sh:279:        set +e
-scripts/run-certification.sh:332:    set +e
-scripts/run-certification.sh:349:    set +e
-scripts/run-certification.sh:367:    set +e
-scripts/run-certification.sh:386:        server_ip="$(getent ahostsv4 vps.slsknet.org 2>/dev/null | awk 'NR == 1 { print $1 }')" || true
-scripts/run-certification.sh:420:            set +e
-scripts/run-certification.sh:509:    set +e
-scripts/run-certification.sh:531:    set +e
-scripts/run-certification.sh:553:    set +e
-scripts/run-certification.sh:575:    set +e
-scripts/run-certification.sh:601:    tmux kill-session -t "$listener_session" 2>/dev/null || true
-scripts/run-certification.sh:636:    set +e
-scripts/run-certification.sh:664:    set +e
-scripts/run-certification.sh:691:    set +e
-scripts/run-certification.sh:717:    set +e
-scripts/run-certification.sh:744:    set +e
-scripts/run-certification.sh:803:    set +e
-scripts/run-certification.sh:832:    set +e
-scripts/run-certification.sh:857:    set +e
-scripts/run-certification.sh:874:    set +e
-scripts/run-certification.sh:900:    set +e
-scripts/run-certification.sh:931:    set +e
-scripts/run-certification.sh:963:    set +e
-scripts/run-certification.sh:1003:    set +e
-scripts/run-certification.sh:1032:    set +e
-scripts/run-certification.sh:1059:    set +e
-scripts/run-certification.sh:1086:    set +e
-scripts/run-certification.sh:1114:        set +e
-scripts/run-certification.sh:1184:    set +e
-scripts/run-certification.sh:1213:    set +e
-scripts/run-certification.sh:1250:        set +e
-scripts/run-certification.sh:1286:            set +e
-scripts/run-certification.sh:1324:    set +e
-scripts/run-certification.sh:1356:        set +e
-scripts/run-certification.sh:1387:        set +e
-scripts/run-certification.sh:1418:    set +e
-scripts/run-certification.sh:1433:    set +e
-scripts/run-certification.sh:1450:        set +e
-scripts/run-certification.sh:1477:    set +e
-scripts/run-certification.sh:1502:    set +e
-scripts/check-web-request-body-limit-differential.sh:24:    kill "$daemon_pid" 2>/dev/null || true
-scripts/check-web-request-body-limit-differential.sh:25:    wait "$daemon_pid" 2>/dev/null || true
-scripts/check-web-request-body-limit-differential.sh:102:      tail -120 "$log" >&2 || true
-scripts/check-web-request-body-limit-differential.sh:107:  tail -120 "$log" >&2 || true
 scripts/check-web-auth-disabled-differential.sh:22:    kill "$daemon_pid" 2>/dev/null || true
 scripts/check-web-auth-disabled-differential.sh:23:    wait "$daemon_pid" 2>/dev/null || true
 scripts/check-web-auth-disabled-differential.sh:51:    kill "$daemon_pid" 2>/dev/null || true
@@ -2097,24 +2098,8 @@ scripts/check-web-auth-disabled-differential.sh:52:    wait "$daemon_pid" 2>/dev
 scripts/check-web-auth-disabled-differential.sh:118:      tail -120 "$log" >&2 || true
 scripts/check-web-auth-disabled-differential.sh:123:  tail -120 "$log" >&2 || true
 scripts/check-web-auth-disabled-differential.sh:298:      diff -u "$work_dir/$target-upstream-$suffix" "$work_dir/$target-slskr-$suffix" >&2 || true
-scripts/check-web-rate-limiting-differential.sh:29:    kill "$daemon_pid" 2>/dev/null || true
-scripts/check-web-rate-limiting-differential.sh:30:    wait "$daemon_pid" 2>/dev/null || true
-scripts/check-web-rate-limiting-differential.sh:119:      tail -120 "$log" >&2 || true
-scripts/check-web-rate-limiting-differential.sh:124:  tail -120 "$log" >&2 || true
-scripts/check-rust-format.sh:63:    diff -u -- "$rust_file" "$formatted_file" || true
-scripts/check-web-cors-differential.sh:34:    kill "$daemon_pid" 2>/dev/null || true
-scripts/check-web-cors-differential.sh:35:    wait "$daemon_pid" 2>/dev/null || true
-scripts/check-web-cors-differential.sh:136:  tail -120 "$log" >&2 || true
-scripts/check-web-cors-differential.sh:148:      tail -120 "$log" >&2 || true
-scripts/check-web-cors-differential.sh:153:  tail -120 "$log" >&2 || true
-scripts/check-web-cors-differential.sh:359:    tail -120 "$log" >&2 || true
-scripts/check-web-cors-differential.sh:363:  wait "$daemon_pid" 2>/dev/null || true
-scripts/check-web-cors-differential.sh:366:    tail -120 "$log" >&2 || true
-scripts/run-proton-public-matrix.sh:222:    set +e
-scripts/run-proton-public-matrix.sh:302:    set +e
-scripts/run-proton-public-matrix.sh:328:                            natpmpc -g "${PROTON_NATPMP_GATEWAY:-10.2.0.1}" -a "$public_port" "$local_port" tcp 60 >/dev/null 2>&1 || true
-scripts/run-proton-public-matrix.sh:334:                    trap "kill \"$renew_pid\" 2>/dev/null || true" EXIT
-scripts/run-proton-public-matrix.sh:421:    wait_for_metadata "$listener" "$metadata_probe" || true
+scripts/probe-natpmp-mapping.sh:33:            "$collision_private_port" tcp 0 >/dev/null 2>&1 || true
+scripts/probe-natpmp-mapping.sh:37:            "$private_port" tcp 0 >/dev/null 2>&1 || true
 scripts/check-web-auth-credentials-differential.sh:22:    kill "$daemon_pid" 2>/dev/null || true
 scripts/check-web-auth-credentials-differential.sh:23:    wait "$daemon_pid" 2>/dev/null || true
 scripts/check-web-auth-credentials-differential.sh:49:    kill "$daemon_pid" 2>/dev/null || true
@@ -2122,28 +2107,82 @@ scripts/check-web-auth-credentials-differential.sh:50:    wait "$daemon_pid" 2>/
 scripts/check-web-auth-credentials-differential.sh:126:      tail -120 "$log" >&2 || true
 scripts/check-web-auth-credentials-differential.sh:131:  tail -120 "$log" >&2 || true
 scripts/check-web-auth-credentials-differential.sh:535:      diff -u "$work_dir/$target-upstream-$suffix" "$work_dir/$target-slskr-$suffix" >&2 || true
-scripts/run-council-active-bughunt.sh:35:      "$pattern" "$@" || true
-scripts/run-council-active-bughunt.sh:78:  'continue-on-error:|allow_failure:|\|\|[[:space:]]+true|set[[:space:]]+\+e' \
+scripts/with-process-memory-guard.sh:70:    systemctl --user stop "$unit_name" >/dev/null 2>&1 || true
+scripts/run-container-shutdown-smoke.sh:8:  docker rm -f "$container_name" >/dev/null 2>&1 || true
+scripts/run-container-shutdown-smoke.sh:22:  state="$(docker inspect -f '{{.State.Status}}' "$container_name" 2>/dev/null || true)"
+scripts/run-container-shutdown-smoke.sh:35:  docker logs "$container_name" 2>&1 || true
+scripts/run-container-shutdown-smoke.sh:41:  state="$(docker inspect -f '{{.State.Status}}' "$container_name" 2>/dev/null || true)"
+scripts/run-container-shutdown-smoke.sh:48:state="$(docker inspect -f '{{.State.Status}}' "$container_name" 2>/dev/null || true)"
+scripts/run-container-shutdown-smoke.sh:51:  docker logs "$container_name" 2>&1 || true
+scripts/run-container-shutdown-smoke.sh:58:  docker logs "$container_name" 2>&1 || true
+scripts/run-container-shutdown-smoke.sh:64:  docker logs "$container_name" 2>&1 || true
+scripts/validate-changelog.sh:15:unreleased_count="$(rg -c --no-filename '^## \[Unreleased\]$' "$changelog" || true)"
+scripts/check-web-audit.sh:28:      npm --prefix "$package_dir" audit --json 2>/dev/null || true
+scripts/check-web-audit.sh:40:    ' <<<"$report" 2>/dev/null || true
+scripts/check-web-audit.sh:54:      npm --prefix "$package_dir" audit --json 2>/dev/null || true
+scripts/check-web-rate-limiting-differential.sh:29:    kill "$daemon_pid" 2>/dev/null || true
+scripts/check-web-rate-limiting-differential.sh:30:    wait "$daemon_pid" 2>/dev/null || true
+scripts/check-web-rate-limiting-differential.sh:119:      tail -120 "$log" >&2 || true
+scripts/check-web-rate-limiting-differential.sh:124:  tail -120 "$log" >&2 || true
 scripts/check-remediation-baseline.sh:37:    git -C "$upstream_repo" worktree remove --force "$SLSKR_SLSKD_ROOT" >/dev/null 2>&1 || true
 scripts/check-remediation-baseline.sh:40:    git -C "$upstream_repo" worktree remove --force "$SLSKR_SLSKDN_ROOT" >/dev/null 2>&1 || true
-scripts/scan-bug-council-candidates.sh:26:    "$pattern" "$@" || true
-scripts/scan-bug-council-candidates.sh:73:  'continue-on-error:|allow_failure:|\|\|[[:space:]]+true|set[[:space:]]+\+e' \
-scripts/check-local-identity-leaks.sh:38:add_token "$(hostname -s 2>/dev/null || true)"
-scripts/check-local-identity-leaks.sh:40:add_token "$(id -un 2>/dev/null || true)"
-scripts/check-local-identity-leaks.sh:41:add_token "$(basename "${HOME:-}" 2>/dev/null || true)"
-scripts/check-local-identity-leaks.sh:85:      sort -u || true
-scripts/check-local-identity-leaks.sh:106:  latest_tag="$(git tag --sort=-creatordate --list 'build-main-*' | head -n 1 || true)"
-scripts/check-local-identity-leaks.sh:108:    latest_tag="$(git describe --tags --abbrev=0 2>/dev/null || true)"
-scripts/check-controller-auth-profiles.sh:20:    kill "$daemon_pid" 2>/dev/null || true
-scripts/check-controller-auth-profiles.sh:21:    wait "$daemon_pid" 2>/dev/null || true
-scripts/check-controller-auth-profiles.sh:39:    wait "$daemon_pid" 2>/dev/null || true
-scripts/check-controller-auth-profiles.sh:75:  tail -80 "$work_dir/$target.log" >&2 || true
+scripts/check-rust-format.sh:63:    diff -u -- "$rust_file" "$formatted_file" || true
+scripts/generate-vpn-soulseek-accounts.sh:65:  grep -v -E '^(SLSKR_TEST_ACCOUNT_COUNT|SLSKR_TEST_[0-9]+_(USERNAME|PASSWORD))=' "$output_file" > "$tmp" || true
+scripts/generate-vpn-soulseek-accounts.sh:78:  set +e
+scripts/build-rust-web.sh:16:wasm_bindgen_bin="$(command -v wasm-bindgen || true)"
+scripts/run-live-http-transfer-smoke.sh:152:      kill "$pid" 2>/dev/null || true
+scripts/run-live-http-transfer-smoke.sh:153:      wait "$pid" 2>/dev/null || true
+scripts/run-live-http-transfer-smoke.sh:220:      if [[ "$(printf '%s' "$session" | json_field state 2>/dev/null || true)" == "connected" ]]; then
+scripts/run-live-http-transfer-smoke.sh:228:  tail -n 80 "$work_dir/$name.log" >&2 || true
+scripts/run-live-http-transfer-smoke.sh:243:      if [[ "$(printf '%s' "$session" | json_field state 2>/dev/null || true)" == "connected" && "${seen:-0}" -ge 6 ]]; then
+scripts/run-live-http-transfer-smoke.sh:268:      regular_local_addr="$(printf '%s' "$listeners" | json_field regular_local_addr 2>/dev/null || true)"
+scripts/run-live-http-transfer-smoke.sh:309:  tail -n 40 "$stdout_file" >&2 || true
+scripts/run-live-http-transfer-smoke.sh:310:  tail -n 40 "$stderr_file" >&2 || true
+scripts/run-live-http-transfer-smoke.sh:318:    auth_post_json "http://127.0.0.1:$target_http_port/api/v0/users/$source_username/browse/request" '{}' >/dev/null || true
+scripts/run-live-http-transfer-smoke.sh:322:        status="$(printf '%s' "$browse_json" | json_field status 2>/dev/null || true)"
+scripts/run-live-http-transfer-smoke.sh:323:        count="$(printf '%s' "$browse_json" | json_field count 2>/dev/null || true)"
+scripts/run-live-http-transfer-smoke.sh:325:          count="$(printf '%s' "$browse_json" | json_field fileCount 2>/dev/null || true)"
+scripts/run-live-http-transfer-smoke.sh:343:  tail -n 80 "$target_log" >&2 || true
+scripts/run-live-http-transfer-smoke.sh:367:  status="$(printf '%s' "$last_transfer" | json_field status 2>/dev/null || true)"
+scripts/run-live-http-transfer-smoke.sh:368:  bytes="$(printf '%s' "$last_transfer" | json_field bytes_transferred 2>/dev/null || true)"
+scripts/run-live-http-transfer-smoke.sh:374:    tail -n 80 "$source_log" >&2 || true
+scripts/run-live-http-transfer-smoke.sh:375:    tail -n 80 "$target_log" >&2 || true
+scripts/run-live-http-transfer-smoke.sh:381:status="$(printf '%s' "$last_transfer" | json_field status 2>/dev/null || true)"
+scripts/run-live-http-transfer-smoke.sh:382:bytes="$(printf '%s' "$last_transfer" | json_field bytes_transferred 2>/dev/null || true)"
+scripts/run-live-http-transfer-smoke.sh:385:  tail -n 80 "$source_log" >&2 || true
+scripts/run-live-http-transfer-smoke.sh:386:  tail -n 80 "$target_log" >&2 || true
 scripts/run-live-interop-matrix.sh:44:  live_slsk_address="$(getent ahostsv4 vps.slsknet.org | awk 'NR == 1 { print $1 }' || true)"
 scripts/run-live-interop-matrix.sh:125:    tail -n 20 "$stderr_file" || true
 scripts/run-live-interop-matrix.sh:142:  set +e
 scripts/run-live-interop-matrix.sh:172:set +e
 scripts/run-live-interop-matrix.sh:198:set +e
 scripts/run-live-interop-matrix.sh:219:set +e
+scripts/check-controller-auth-profiles.sh:20:    kill "$daemon_pid" 2>/dev/null || true
+scripts/check-controller-auth-profiles.sh:21:    wait "$daemon_pid" 2>/dev/null || true
+scripts/check-controller-auth-profiles.sh:39:    wait "$daemon_pid" 2>/dev/null || true
+scripts/check-controller-auth-profiles.sh:75:  tail -80 "$work_dir/$target.log" >&2 || true
+scripts/run-slskd-api-compat-smoke.sh:36:    kill "$daemon_pid" 2>/dev/null || true
+scripts/run-slskd-api-compat-smoke.sh:37:    wait "$daemon_pid" 2>/dev/null || true
+scripts/run-live-soak-proton-natpmp.sh:65:        renew_ports_once || true
+scripts/run-live-soak-proton-natpmp.sh:75:        kill "$renew_pid" 2>/dev/null || true
+scripts/run-live-soak-proton-natpmp.sh:76:        wait "$renew_pid" 2>/dev/null || true
+scripts/run-live-soak-proton-natpmp.sh:80:            >/dev/null 2>&1 || true
+scripts/run-live-soak-proton-natpmp.sh:84:            >/dev/null 2>&1 || true
+scripts/run-cross-client-validation.sh:83:  set +e
+scripts/run-cross-client-validation.sh:87:  detail="$( { tail -n 40 "$stdout_file"; grep -E '^(error:|FAILED|Failed|Build FAILED|Test Run Failed|warning |thread |panicked|Unhandled exception)' "$stderr_file" || true; } | sanitize_detail )"
+scripts/run-cross-client-validation.sh:155:  set +e
+scripts/run-cross-client-validation.sh:233:  set +e
+scripts/run-cross-client-validation.sh:289:    health="$(curl -fsS --max-time 2 "$health_url" 2>/dev/null | sanitize_detail || true)"
+scripts/run-cross-client-validation.sh:290:    app="$(curl -fsS --max-time 2 "$app_url" 2>/dev/null | sanitize_detail || true)"
+scripts/run-cross-client-validation.sh:425:    set +e
+scripts/run-cross-client-validation.sh:433:    detail="$( { cat "$stdout_file"; grep -E '^(error:|thread |panicked|failed|rejected)' "$stderr_file" || true; } | sanitize_detail )"
+scripts/run-cross-client-validation.sh:458:    kill "$pid" 2>/dev/null || true
+scripts/run-cross-client-validation.sh:459:    wait "$pid" 2>/dev/null || true
+scripts/run-cross-client-validation.sh:477:  wait_for_daemon_preflight "$scope" "$name" "$daemon_host" "$http_port" || true
+scripts/run-cross-client-validation.sh:493:      kill "$pid" 2>/dev/null || true
+scripts/run-cross-client-validation.sh:494:      wait "$pid" 2>/dev/null || true
+scripts/run-cross-client-validation.sh:546:    wait_for_daemon_preflight slskr-to-slskr slskr "$slskr_host" 55130 || true
+scripts/run-cross-client-validation.sh:568:    wait_for_daemon_preflight slskr-to-slskr slskr "$slskr_host" 55131 || true
 scripts/run-slskd-cross-client-interop.sh:145:' "$query" 2>/dev/null || true
 scripts/run-slskd-cross-client-interop.sh:165:      kill "$pid" 2>/dev/null || true
 scripts/run-slskd-cross-client-interop.sh:166:      wait "$pid" 2>/dev/null || true
@@ -2184,60 +2223,6 @@ scripts/run-slskd-cross-client-interop.sh:617:  "http://127.0.0.1:$slskr_http_po
 scripts/run-slskd-cross-client-interop.sh:620:  target_room_messages="$(auth_slskd "http://127.0.0.1:$slskd_http_port/api/v0/rooms/joined/$room_name/messages" 2>/dev/null || true)"
 scripts/run-slskd-cross-client-interop.sh:634:  set +e
 scripts/run-slskd-cross-client-interop.sh:659:  "http://127.0.0.1:$slskd_http_port/api/v0/transfers/downloads/$slskr_username" || true)"
-scripts/run-live-soak-proton-natpmp.sh:65:        renew_ports_once || true
-scripts/run-live-soak-proton-natpmp.sh:75:        kill "$renew_pid" 2>/dev/null || true
-scripts/run-live-soak-proton-natpmp.sh:76:        wait "$renew_pid" 2>/dev/null || true
-scripts/run-live-soak-proton-natpmp.sh:80:            >/dev/null 2>&1 || true
-scripts/run-live-soak-proton-natpmp.sh:84:            >/dev/null 2>&1 || true
-scripts/check-slskdn-controller-parity.sh:34:    kill "$daemon_pid" 2>/dev/null || true
-scripts/check-slskdn-controller-parity.sh:40:      kill -KILL "$daemon_pid" 2>/dev/null || true
-scripts/check-slskdn-controller-parity.sh:42:    wait "$daemon_pid" 2>/dev/null || true
-scripts/check-slskdn-controller-parity.sh:95:  tail -80 "$log_file" >&2 || true
-scripts/check-slskdn-controller-parity.sh:109:  rg -n 'generic_404|compatibility_fallback|AbortError|probe_error' "$report_file" >&2 || true
-scripts/check-slskdn-controller-parity.sh:110:  tail -80 "$log_file" >&2 || true
-scripts/check-slskdn-controller-parity.sh:124:  rg -n 'generic_404|compatibility_fallback|AbortError|probe_error' "$slskd_report_file" >&2 || true
-scripts/check-slskdn-controller-parity.sh:125:  tail -80 "$log_file" >&2 || true
-scripts/probe-natpmp-mapping.sh:33:            "$collision_private_port" tcp 0 >/dev/null 2>&1 || true
-scripts/probe-natpmp-mapping.sh:37:            "$private_port" tcp 0 >/dev/null 2>&1 || true
-scripts/run-live-http-transfer-smoke.sh:152:      kill "$pid" 2>/dev/null || true
-scripts/run-live-http-transfer-smoke.sh:153:      wait "$pid" 2>/dev/null || true
-scripts/run-live-http-transfer-smoke.sh:220:      if [[ "$(printf '%s' "$session" | json_field state 2>/dev/null || true)" == "connected" ]]; then
-scripts/run-live-http-transfer-smoke.sh:228:  tail -n 80 "$work_dir/$name.log" >&2 || true
-scripts/run-live-http-transfer-smoke.sh:243:      if [[ "$(printf '%s' "$session" | json_field state 2>/dev/null || true)" == "connected" && "${seen:-0}" -ge 6 ]]; then
-scripts/run-live-http-transfer-smoke.sh:268:      regular_local_addr="$(printf '%s' "$listeners" | json_field regular_local_addr 2>/dev/null || true)"
-scripts/run-live-http-transfer-smoke.sh:309:  tail -n 40 "$stdout_file" >&2 || true
-scripts/run-live-http-transfer-smoke.sh:310:  tail -n 40 "$stderr_file" >&2 || true
-scripts/run-live-http-transfer-smoke.sh:318:    auth_post_json "http://127.0.0.1:$target_http_port/api/v0/users/$source_username/browse/request" '{}' >/dev/null || true
-scripts/run-live-http-transfer-smoke.sh:322:        status="$(printf '%s' "$browse_json" | json_field status 2>/dev/null || true)"
-scripts/run-live-http-transfer-smoke.sh:323:        count="$(printf '%s' "$browse_json" | json_field count 2>/dev/null || true)"
-scripts/run-live-http-transfer-smoke.sh:325:          count="$(printf '%s' "$browse_json" | json_field fileCount 2>/dev/null || true)"
-scripts/run-live-http-transfer-smoke.sh:343:  tail -n 80 "$target_log" >&2 || true
-scripts/run-live-http-transfer-smoke.sh:367:  status="$(printf '%s' "$last_transfer" | json_field status 2>/dev/null || true)"
-scripts/run-live-http-transfer-smoke.sh:368:  bytes="$(printf '%s' "$last_transfer" | json_field bytes_transferred 2>/dev/null || true)"
-scripts/run-live-http-transfer-smoke.sh:374:    tail -n 80 "$source_log" >&2 || true
-scripts/run-live-http-transfer-smoke.sh:375:    tail -n 80 "$target_log" >&2 || true
-scripts/run-live-http-transfer-smoke.sh:381:status="$(printf '%s' "$last_transfer" | json_field status 2>/dev/null || true)"
-scripts/run-live-http-transfer-smoke.sh:382:bytes="$(printf '%s' "$last_transfer" | json_field bytes_transferred 2>/dev/null || true)"
-scripts/run-live-http-transfer-smoke.sh:385:  tail -n 80 "$source_log" >&2 || true
-scripts/run-live-http-transfer-smoke.sh:386:  tail -n 80 "$target_log" >&2 || true
-scripts/generate-vpn-soulseek-accounts.sh:65:  grep -v -E '^(SLSKR_TEST_ACCOUNT_COUNT|SLSKR_TEST_[0-9]+_(USERNAME|PASSWORD))=' "$output_file" > "$tmp" || true
-scripts/generate-vpn-soulseek-accounts.sh:78:  set +e
-scripts/build-rust-web.sh:16:wasm_bindgen_bin="$(command -v wasm-bindgen || true)"
-scripts/run-cross-client-validation.sh:91:  set +e
-scripts/run-cross-client-validation.sh:95:  detail="$( { tail -n 40 "$stdout_file"; grep -E '^(error:|FAILED|Failed|Build FAILED|Test Run Failed|warning |thread |panicked|Unhandled exception)' "$stderr_file" || true; } | sanitize_detail )"
-scripts/run-cross-client-validation.sh:163:  set +e
-scripts/run-cross-client-validation.sh:241:  set +e
-scripts/run-cross-client-validation.sh:297:    health="$(curl -fsS --max-time 2 "$health_url" 2>/dev/null | sanitize_detail || true)"
-scripts/run-cross-client-validation.sh:298:    app="$(curl -fsS --max-time 2 "$app_url" 2>/dev/null | sanitize_detail || true)"
-scripts/run-cross-client-validation.sh:433:    set +e
-scripts/run-cross-client-validation.sh:441:    detail="$( { cat "$stdout_file"; grep -E '^(error:|thread |panicked|failed|rejected)' "$stderr_file" || true; } | sanitize_detail )"
-scripts/run-cross-client-validation.sh:466:    kill "$pid" 2>/dev/null || true
-scripts/run-cross-client-validation.sh:467:    wait "$pid" 2>/dev/null || true
-scripts/run-cross-client-validation.sh:485:  wait_for_daemon_preflight "$scope" "$name" "$daemon_host" "$http_port" || true
-scripts/run-cross-client-validation.sh:501:      kill "$pid" 2>/dev/null || true
-scripts/run-cross-client-validation.sh:502:      wait "$pid" 2>/dev/null || true
-scripts/run-cross-client-validation.sh:554:    wait_for_daemon_preflight slskr-to-slskr slskr "$slskr_host" 55130 || true
-scripts/run-cross-client-validation.sh:576:    wait_for_daemon_preflight slskr-to-slskr slskr "$slskr_host" 55131 || true
 scripts/run-slskdn-cross-client-interop.sh:198:' 2>/dev/null || true
 scripts/run-slskdn-cross-client-interop.sh:205:  set +e
 scripts/run-slskdn-cross-client-interop.sh:258:  grep -cF -- "$needle" "$slskdn_log" 2>/dev/null || true
@@ -2300,8 +2285,60 @@ scripts/run-slskdn-cross-client-interop.sh:2064:  hash="$(printf '%s' "$response
 scripts/run-slskdn-cross-client-interop.sh:2091:    auth_get "http://127.0.0.1:$slskr_http_port/api/v0/session" || true
 scripts/run-slskdn-cross-client-interop.sh:2093:    auth_get "http://127.0.0.1:$slskr_http_port/api/v0/listeners" || true
 scripts/run-slskdn-cross-client-interop.sh:2095:    auth_get "http://127.0.0.1:$slskdn_http_port/api/v0/users/$slskr_username/endpoint" || true
-scripts/run-slskd-api-compat-smoke.sh:36:    kill "$daemon_pid" 2>/dev/null || true
-scripts/run-slskd-api-compat-smoke.sh:37:    wait "$daemon_pid" 2>/dev/null || true
+scripts/run-certification.sh:153:        set +e
+scripts/run-certification.sh:279:        set +e
+scripts/run-certification.sh:332:    set +e
+scripts/run-certification.sh:349:    set +e
+scripts/run-certification.sh:367:    set +e
+scripts/run-certification.sh:386:        server_ip="$(getent ahostsv4 vps.slsknet.org 2>/dev/null | awk 'NR == 1 { print $1 }')" || true
+scripts/run-certification.sh:420:            set +e
+scripts/run-certification.sh:509:    set +e
+scripts/run-certification.sh:531:    set +e
+scripts/run-certification.sh:553:    set +e
+scripts/run-certification.sh:575:    set +e
+scripts/run-certification.sh:601:    tmux kill-session -t "$listener_session" 2>/dev/null || true
+scripts/run-certification.sh:636:    set +e
+scripts/run-certification.sh:664:    set +e
+scripts/run-certification.sh:691:    set +e
+scripts/run-certification.sh:717:    set +e
+scripts/run-certification.sh:744:    set +e
+scripts/run-certification.sh:803:    set +e
+scripts/run-certification.sh:832:    set +e
+scripts/run-certification.sh:857:    set +e
+scripts/run-certification.sh:874:    set +e
+scripts/run-certification.sh:900:    set +e
+scripts/run-certification.sh:931:    set +e
+scripts/run-certification.sh:963:    set +e
+scripts/run-certification.sh:1003:    set +e
+scripts/run-certification.sh:1032:    set +e
+scripts/run-certification.sh:1059:    set +e
+scripts/run-certification.sh:1086:    set +e
+scripts/run-certification.sh:1114:        set +e
+scripts/run-certification.sh:1184:    set +e
+scripts/run-certification.sh:1213:    set +e
+scripts/run-certification.sh:1250:        set +e
+scripts/run-certification.sh:1286:            set +e
+scripts/run-certification.sh:1324:    set +e
+scripts/run-certification.sh:1356:        set +e
+scripts/run-certification.sh:1387:        set +e
+scripts/run-certification.sh:1418:    set +e
+scripts/run-certification.sh:1433:    set +e
+scripts/run-certification.sh:1450:        set +e
+scripts/run-certification.sh:1477:    set +e
+scripts/run-certification.sh:1502:    set +e
+scripts/run-proton-public-matrix.sh:222:    set +e
+scripts/run-proton-public-matrix.sh:302:    set +e
+scripts/run-proton-public-matrix.sh:328:                            natpmpc -g "${PROTON_NATPMP_GATEWAY:-10.2.0.1}" -a "$public_port" "$local_port" tcp 60 >/dev/null 2>&1 || true
+scripts/run-proton-public-matrix.sh:334:                    trap "kill \"$renew_pid\" 2>/dev/null || true" EXIT
+scripts/run-proton-public-matrix.sh:421:    wait_for_metadata "$listener" "$metadata_probe" || true
+scripts/check-slskdn-controller-parity.sh:34:    kill "$daemon_pid" 2>/dev/null || true
+scripts/check-slskdn-controller-parity.sh:40:      kill -KILL "$daemon_pid" 2>/dev/null || true
+scripts/check-slskdn-controller-parity.sh:42:    wait "$daemon_pid" 2>/dev/null || true
+scripts/check-slskdn-controller-parity.sh:95:  tail -80 "$log_file" >&2 || true
+scripts/check-slskdn-controller-parity.sh:109:  rg -n 'generic_404|compatibility_fallback|AbortError|probe_error' "$report_file" >&2 || true
+scripts/check-slskdn-controller-parity.sh:110:  tail -80 "$log_file" >&2 || true
+scripts/check-slskdn-controller-parity.sh:124:  rg -n 'generic_404|compatibility_fallback|AbortError|probe_error' "$slskd_report_file" >&2 || true
+scripts/check-slskdn-controller-parity.sh:125:  tail -80 "$log_file" >&2 || true
 scripts/check-controller-options-differential.sh:153:    kill "$daemon_pid" 2>/dev/null || true
 scripts/check-controller-options-differential.sh:154:    wait "$daemon_pid" 2>/dev/null || true
 scripts/check-controller-options-differential.sh:164:    kill "$soulseek_fixture_pid" 2>/dev/null || true

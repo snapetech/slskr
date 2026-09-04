@@ -209,6 +209,21 @@ describe('Searches', () => {
     );
   });
 
+  it('accepts compatibility searchId events', async () => {
+    library.getStatus.mockResolvedValue({
+      id: 'search-1',
+      searchText: 'compatibility search',
+      startedAt: '2026-05-15T00:00:00Z',
+    });
+
+    await renderSearches();
+    callbacks.create?.({ id: 42, searchId: 'search-1' });
+
+    await waitFor(() =>
+      expect(library.getStatus).toHaveBeenCalledWith({ id: 'search-1' }),
+    );
+  });
+
   it('keeps ScenePodBridge disabled by default and creates ordinary searches without providers', async () => {
     const input = await renderSearches();
 

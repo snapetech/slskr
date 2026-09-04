@@ -182,7 +182,7 @@ describe('SlskrClient request lifecycle', () => {
         return new Response('{"entries":[{"name":"lounge"}]}', { status: 200 });
       }
       if (parsed.pathname === '/api/rooms/lounge%20room/join') {
-        return new Response(null, { status: 204 });
+        return new Response('{"name":"lounge room","userCount":0,"users":[]}', { status: 201 });
       }
       if (parsed.pathname === '/api/rooms/lounge%20room') {
         return new Response('{"name":"lounge room"}', { status: 200 });
@@ -210,7 +210,9 @@ describe('SlskrClient request lifecycle', () => {
       { id: 'transfer-1' },
     ]);
     await expect(client.listRooms()).resolves.toEqual([{ name: 'lounge' }]);
-    await expect(client.joinRoom('lounge room')).resolves.toBeUndefined();
+    await expect(client.joinRoom('lounge room')).resolves.toMatchObject({
+      name: 'lounge room',
+    });
     await expect(client.leaveRoom('lounge room')).resolves.toBeUndefined();
     await expect(client.getEvents()).resolves.toMatchObject([{ type: 'message', data: {} }]);
 
@@ -218,6 +220,67 @@ describe('SlskrClient request lifecycle', () => {
     const transferRequest = requests.find((request) => request.url.includes('/api/transfers'));
     expect(transferRequest?.url).toContain('direction=0');
     expect(requests.some((request) => request.url.endsWith('/api/rooms/lounge%20room/join'))).toBe(true);
+  });
+
+  it('normalizes the daemon create-search identifier and terminal cancellation', async () => {
+    let searchRequestCount = 0;
+    global.fetch = jest.fn().mockImplementation(async (input: RequestInfo | URL) => {
+      const parsed = new URL(String(input));
+      if (parsed.pathname === '/api/searches' && searchRequestCount === 0) {
+        searchRequestCount += 1;
+        return new Response(
+          '{"searchId":"search-123","query":"ambient","results":[{"filename":"ambient.flac","size":42}]}',
+          { status: 200 },
+        );
+      }
+      return new Response(
+        '{"id":"search-123","query":"ambient","state":"Cancelled"}',
+        { status: 200 },
+      );
+    });
+
+    const client = new SlskrClient({
+      baseUrl: 'http://localhost:8080',
+      token: 'test-token',
+      retries: 0,
+    });
+
+    await expect(client.createSearch({ query: 'ambient' })).resolves.toMatchObject({
+      id: 'search-123',
+      results_count: 1,
+      status: 'active',
+    });
+    await expect(client.getSearchDetails('search-123')).resolves.toMatchObject({
+      id: 'search-123',
+      status: 'cancelled',
+    });
+  });
+
+  it('normalizes all daemon transfer terminal states', async () => {
+    global.fetch = jest.fn().mockResolvedValue(new Response(
+      '{"entries":['
+        + '{"id":"transfer-succeeded","status":"Succeeded"},'
+        + '{"id":"transfer-completed","status":"completed"},'
+        + '{"id":"transfer-errored","status":"Errored"},'
+        + '{"id":"transfer-rejected","status":"Rejected"},'
+        + '{"id":"transfer-cancelled","status":"Cancelled"}'
+        + ']}',
+      { status: 200 },
+    ));
+
+    const client = new SlskrClient({
+      baseUrl: 'http://localhost:8080',
+      token: 'test-token',
+      retries: 0,
+    });
+
+    await expect(client.listTransfers()).resolves.toMatchObject([
+      { id: 'transfer-succeeded', status: 'completed' },
+      { id: 'transfer-completed', status: 'completed' },
+      { id: 'transfer-errored', status: 'failed' },
+      { id: 'transfer-rejected', status: 'failed' },
+      { id: 'transfer-cancelled', status: 'cancelled' },
+    ]);
   });
 
   it('uses canonical session, browse, and MediaCore cache routes', async () => {
