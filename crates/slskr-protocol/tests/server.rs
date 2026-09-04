@@ -369,6 +369,29 @@ fn room_list_rejects_impossible_user_count_vector() {
 }
 
 #[test]
+fn joined_room_rejects_user_count_before_allocating_parallel_vectors() {
+    let mut payload = Writer::new();
+    payload.write_string("").unwrap();
+    payload.write_u32_le(1);
+    payload.write_string("").unwrap();
+
+    let error = ServerMessage::decode(
+        MessageFrame::new(ServerCode::JoinRoom.as_u32(), payload.into_inner()),
+        Direction::ServerToClient,
+    )
+    .expect_err("an incomplete joined-room user vector must be rejected early");
+
+    assert!(matches!(
+        error,
+        slskr_protocol::DecodeError::InvalidCount {
+            field: "room users",
+            count: 1,
+            maximum: 0,
+        }
+    ));
+}
+
+#[test]
 fn connection_and_search_messages_round_trip() {
     let messages = [
         (

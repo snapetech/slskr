@@ -2125,7 +2125,11 @@ fn matching_room_count(
 
 fn decode_joined_room(reader: &mut Reader<'_>) -> Result<JoinedRoom, DecodeError> {
     let room = reader.read_string()?;
-    let user_count = reader.read_bounded_count("room users", 4)?;
+    // Each user is represented in five parallel vectors.  Bound the first
+    // allocation against their combined minimum wire footprint so a
+    // malformed count cannot reserve a large username vector before the
+    // later vector headers are validated.
+    let user_count = reader.read_bounded_count("room users", 36)?;
     let mut usernames = Vec::with_capacity(user_count);
     for _ in 0..user_count {
         usernames.push(reader.read_string()?);
