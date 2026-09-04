@@ -1,4 +1,5 @@
 import * as collectionsAPI from '../../lib/collections';
+import { toDisplayError } from '../../lib/errors';
 import * as identityAPI from '../../lib/identity';
 import ErrorSegment from '../Shared/ErrorSegment';
 import LoaderSegment from '../Shared/LoaderSegment';
@@ -19,6 +20,14 @@ import {
 const Button = TooltipButton;
 
 export default class ShareGroups extends Component {
+  isMountedFlag = false;
+
+  requestIds = {
+    data: 0,
+    members: 0,
+    operation: 0,
+  };
+
   state = {
     addMemberModalOpen: false,
     contacts: [],
@@ -34,12 +43,23 @@ export default class ShareGroups extends Component {
   };
 
   componentDidMount() {
+    this.isMountedFlag = true;
     this.loadData();
   }
 
+  componentWillUnmount() {
+    this.isMountedFlag = false;
+    Object.keys(this.requestIds).forEach((key) => {
+      this.requestIds[key] += 1;
+    });
+  }
+
   loadData = async () => {
+    const requestId = ++this.requestIds.data;
     try {
-      this.setState({ error: null, loading: true });
+      if (this.isMountedFlag && requestId === this.requestIds.data) {
+        this.setState({ error: null, loading: true });
+      }
       const [groupsRes, contactsRes] = await Promise.all([
         collectionsAPI.getShareGroups().catch((error) => {
           // If 401/403/404, feature not enabled or not authenticated - return empty list
@@ -56,11 +76,13 @@ export default class ShareGroups extends Component {
         }),
         identityAPI.getContacts().catch(() => ({ data: [] })), // Gracefully handle if Identity not enabled
       ]);
-      this.setState({
-        contacts: Array.isArray(contactsRes.data) ? contactsRes.data : [],
-        loading: false,
-        shareGroups: Array.isArray(groupsRes.data) ? groupsRes.data : [],
-      });
+      if (this.isMountedFlag && requestId === this.requestIds.data) {
+        this.setState({
+          contacts: Array.isArray(contactsRes.data) ? contactsRes.data : [],
+          loading: false,
+          shareGroups: Array.isArray(groupsRes.data) ? groupsRes.data : [],
+        });
+      }
     } catch (error) {
       // Extract error message from response
       let errorMessage = error.message;
@@ -81,19 +103,64 @@ export default class ShareGroups extends Component {
         error.response?.status === 401 ||
         error.response?.status === 403 ||
         error.response?.status === 404;
-      this.setState({
-        error: isAuthOrFeatureError ? null : errorMessage,
-        loading: false,
-      });
+      if (this.isMountedFlag && requestId === this.requestIds.data) {
+        this.setState({
+          error: isAuthOrFeatureError ? null : errorMessage,
+          loading: false,
+        });
+      }
+    }
+  };
+
+  handleViewMembers = async (groupId) => {
+    const requestId = ++this.requestIds.members;
+    try {
+      const membersRes = await collectionsAPI.getShareGroupMembers(
+        groupId,
+        true,
+      );
+      if (
+        !this.isMountedFlag ||
+        requestId !== this.requestIds.members
+      ) {
+        return;
+      }
+      const members = Array.isArray(membersRes.data) ? membersRes.data : [];
+      window.alert(
+        `Members:\n${members
+          .map((member) => member.contactNickname || member.userId)
+          .join('\n')}`,
+      );
+    } catch (error) {
+      if (
+        this.isMountedFlag &&
+        requestId === this.requestIds.members
+      ) {
+        console.error('[ShareGroups] Failed to load group members:', error);
+        this.setState({ error: toDisplayError(error, 'Failed to load group members') });
+      }
     }
   };
 
   handleCreateGroup = async () => {
+    const requestId = ++this.requestIds.operation;
     try {
       await collectionsAPI.createShareGroup({ name: this.state.newGroupName });
+      if (
+        !this.isMountedFlag ||
+        requestId !== this.requestIds.operation
+      ) {
+        return;
+      }
       this.setState({ createModalOpen: false, error: null, newGroupName: '' });
       await this.loadData();
     } catch (error) {
+      if (
+        !this.isMountedFlag ||
+        requestId !== this.requestIds.operation
+      ) {
+        return;
+      }
       console.error('[ShareGroups] Create group error:', error);
       // Extract error message from response (supports ProblemDetails, object with message/error, or string)
       let errorMessage = error.message || 'Failed to create share group';
@@ -159,6 +226,7 @@ export default class ShareGroups extends Component {
   handleAddMember = async () => {
     if (!this.state.selectedGroup) return;
 
+    const requestId = ++this.requestIds.operation;
     try {
       // POST /sharegroups/:id/members only ever reads a "username" field
       // (verified against the controller's own test suite) — there is no
@@ -173,6 +241,12 @@ export default class ShareGroups extends Component {
         this.state.selectedGroup.id,
         data,
       );
+      if (
+        !this.isMountedFlag ||
+        requestId !== this.requestIds.operation
+      ) {
+        return;
+      }
       this.setState({
         addMemberModalOpen: false,
         error: null,
@@ -181,6 +255,12 @@ export default class ShareGroups extends Component {
       });
       await this.loadData();
     } catch (error) {
+      if (
+        !this.isMountedFlag ||
+        requestId !== this.requestIds.operation
+      ) {
+        return;
+      }
       // Extract error message from response (supports ProblemDetails, object with message/error, or string)
       let errorMessage = error.message;
       if (error.response?.data) {
@@ -209,21 +289,45 @@ export default class ShareGroups extends Component {
 
   handleDeleteGroup = async (id) => {
     if (!window.confirm('Delete this share group?')) return;
+    const requestId = ++this.requestIds.operation;
     try {
       await collectionsAPI.deleteShareGroup(id);
+      if (
+        !this.isMountedFlag ||
+        requestId !== this.requestIds.operation
+      ) {
+        return;
+      }
       await this.loadData();
     } catch (error) {
-      this.setState({ error: error.response?.data || error.message });
+      if (
+        this.isMountedFlag &&
+        requestId === this.requestIds.operation
+      ) {
+        this.setState({ error: toDisplayError(error, 'Failed to delete share group') });
+      }
     }
   };
 
   handleRemoveMember = async (groupId, userId) => {
     if (!window.confirm('Remove this member?')) return;
+    const requestId = ++this.requestIds.operation;
     try {
       await collectionsAPI.removeShareGroupMember(groupId, userId);
+      if (
+        !this.isMountedFlag ||
+        requestId !== this.requestIds.operation
+      ) {
+        return;
+      }
       await this.loadData();
     } catch (error) {
-      this.setState({ error: error.response?.data || error.message });
+      if (
+        this.isMountedFlag &&
+        requestId === this.requestIds.operation
+      ) {
+        this.setState({ error: toDisplayError(error, 'Failed to remove group member') });
+      }
     }
   };
 
@@ -310,23 +414,7 @@ export default class ShareGroups extends Component {
                   <Table.Cell>{group.name}</Table.Cell>
                   <Table.Cell>
                     <Button
-                      onClick={async () => {
-                        try {
-                          const membersRes =
-                            await collectionsAPI.getShareGroupMembers(
-                              group.id,
-                              true,
-                            );
-                          const members = membersRes.data || [];
-                          alert(
-                            `Members:\n${members
-                              .map((m) => m.contactNickname || m.userId)
-                              .join('\n')}`,
-                          );
-                        } catch (error_) {
-                          console.error(error_);
-                        }
-                      }}
+                      onClick={() => this.handleViewMembers(group.id)}
                       size="small"
                       tooltip="Show the contacts or users currently assigned to this group."
                     >

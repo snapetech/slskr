@@ -4,6 +4,7 @@ import {
   createMessagesHubConnection,
   createRoomsHubConnection,
 } from '../../lib/hubFactory';
+import { toDisplayError } from '../../lib/errors';
 import * as pods from '../../lib/pods';
 import * as rooms from '../../lib/rooms';
 import { getLocalStorageItem, setLocalStorageItem } from '../../lib/storage';
@@ -14,7 +15,7 @@ import PlaceholderSegment from '../Shared/PlaceholderSegment';
 import RoomCreateModal from '../Rooms/RoomCreateModal';
 import RoomSession from '../Rooms/RoomSession';
 import UserCard from '../Shared/UserCard';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import {
@@ -105,8 +106,21 @@ const PodChannelSession = ({ channel, state }) => {
   const [body, setBody] = useState('');
   const [members, setMembers] = useState([]);
   const [messages, setMessages] = useState([]);
+  const mountedRef = useRef(false);
+  const refreshRequestIdRef = useRef(0);
+  const sendRequestIdRef = useRef(0);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      refreshRequestIdRef.current += 1;
+      sendRequestIdRef.current += 1;
+    };
+  }, []);
 
   const refresh = useCallback(async () => {
+    const requestId = ++refreshRequestIdRef.current;
     if (!channel?.podId || !channel?.channelId) return;
 
     const [channelMessages, podMembers] = await Promise.all([
@@ -114,6 +128,12 @@ const PodChannelSession = ({ channel, state }) => {
       pods.getMembers(channel.podId).catch(() => []),
     ]);
 
+    if (
+      !mountedRef.current ||
+      requestId !== refreshRequestIdRef.current
+    ) {
+      return;
+    }
     setMessages(channelMessages || []);
     setMembers(podMembers || []);
   }, [channel?.channelId, channel?.podId]);
@@ -134,12 +154,19 @@ const PodChannelSession = ({ channel, state }) => {
     const trimmed = body.trim();
     if (!trimmed || !channel?.podId || !channel?.channelId) return;
 
+    const requestId = ++sendRequestIdRef.current;
     await pods.sendMessage(
       channel.podId,
       channel.channelId,
       trimmed,
       state?.user?.username || 'local-peer',
     );
+    if (
+      !mountedRef.current ||
+      requestId !== sendRequestIdRef.current
+    ) {
+      return;
+    }
     setBody('');
     await refresh();
   };
@@ -267,6 +294,22 @@ const Messaging = ({ runtimeProfile, initialKind = 'mixed', state }) => {
   const [batchSending, setBatchSending] = useState(false);
   const [batchUsernames, setBatchUsernames] = useState('');
   const [roomSearchLoading, setRoomSearchLoading] = useState(false);
+  const mountedRef = useRef(false);
+  const hydrateRequestIdRef = useRef(0);
+  const availableRoomsRequestIdRef = useRef(0);
+  const workspaceActionRequestIdRef = useRef(0);
+  const batchRequestIdRef = useRef(0);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      hydrateRequestIdRef.current += 1;
+      availableRoomsRequestIdRef.current += 1;
+      workspaceActionRequestIdRef.current += 1;
+      batchRequestIdRef.current += 1;
+    };
+  }, []);
 
   const openPanel = useCallback((type, target, metadata = {}) => {
     const trimmed = `${target || ''}`.trim();
@@ -303,6 +346,9 @@ const Messaging = ({ runtimeProfile, initialKind = 'mixed', state }) => {
   }, []);
 
   const hydrate = useCallback(async () => {
+    const requestId = ++hydrateRequestIdRef.current;
+    if (!mountedRef.current) return false;
+
     const [
       serverConversations,
       serverJoinedRooms,
@@ -336,7 +382,14 @@ const Messaging = ({ runtimeProfile, initialKind = 'mixed', state }) => {
                 return pod;
               }
             }),
-          );
+        );
+
+    if (
+      !mountedRef.current ||
+      requestId !== hydrateRequestIdRef.current
+    ) {
+      return false;
+    }
 
     setConversations(
       conversationsList
@@ -352,8 +405,9 @@ const Messaging = ({ runtimeProfile, initialKind = 'mixed', state }) => {
     setJoinedRooms(joinedRoomList.filter(Boolean).sort());
     setPodChannels(
       podDetails
+        .filter(Boolean)
         .flatMap((pod) =>
-          (pod.channels || []).map((channel) => ({
+          (Array.isArray(pod.channels) ? pod.channels : []).map((channel) => ({
             channelId: channel.channelId,
             channelKind: channel.kind,
             channelName: channel.name,
@@ -364,7 +418,17 @@ const Messaging = ({ runtimeProfile, initialKind = 'mixed', state }) => {
         )
         .sort((a, b) => channelLabel(a).localeCompare(channelLabel(b))),
     );
+    return true;
   }, [runtimeProfile]);
+
+  const refreshWorkspace = useCallback(async () => {
+    try {
+      return await hydrate();
+    } catch (error) {
+      console.error('Failed to hydrate messaging workspace:', error);
+      return false;
+    }
+  }, [hydrate]);
 
   const savedChatNames = useMemo(
     () =>
@@ -406,35 +470,35 @@ const Messaging = ({ runtimeProfile, initialKind = 'mixed', state }) => {
     [podChannels],
   );
 
-  usePolling(
-    () =>
-      hydrate().catch((error) => {
-        console.error('Failed to hydrate messaging workspace:', error);
-      }),
-    60_000,
-  );
+  usePolling(refreshWorkspace, 60_000);
 
   useEffect(() => {
+    let disposed = false;
     const messagesHub = createMessagesHubConnection();
     const roomsHub = createRoomsHubConnection();
     const refresh = () => {
-      hydrate().catch((error) => {
-        console.error('Failed to hydrate messaging workspace:', error);
-      });
+      if (disposed || !mountedRef.current) return;
+      void refreshWorkspace();
     };
     messagesHub.on('changed', refresh);
     roomsHub.on('changed', refresh);
     messagesHub.start().catch((error) => {
-      console.error('Failed to start messages event feed:', error);
+      if (!disposed) {
+        console.error('Failed to start messages event feed:', error);
+      }
     });
     roomsHub.start().catch((error) => {
-      console.error('Failed to start rooms event feed:', error);
+      if (!disposed) {
+        console.error('Failed to start rooms event feed:', error);
+      }
     });
     return () => {
+      disposed = true;
+      hydrateRequestIdRef.current += 1;
       messagesHub.stop().catch(() => {});
       roomsHub.stop().catch(() => {});
     };
-  }, [hydrate]);
+  }, [refreshWorkspace]);
 
   useEffect(() => {
     savePanels(panels);
@@ -481,13 +545,32 @@ const Messaging = ({ runtimeProfile, initialKind = 'mixed', state }) => {
   ]);
 
   const fetchAvailableRooms = async () => {
+    const requestId = ++availableRoomsRequestIdRef.current;
+    if (!mountedRef.current) return;
+
     setRoomSearchLoading(true);
     try {
-      setAvailableRooms((await rooms.getAvailable()) || []);
+      const available = await rooms.getAvailable();
+      if (
+        mountedRef.current &&
+        requestId === availableRoomsRequestIdRef.current
+      ) {
+        setAvailableRooms(available || []);
+      }
     } catch {
-      setAvailableRooms([]);
+      if (
+        mountedRef.current &&
+        requestId === availableRoomsRequestIdRef.current
+      ) {
+        setAvailableRooms([]);
+      }
     } finally {
-      setRoomSearchLoading(false);
+      if (
+        mountedRef.current &&
+        requestId === availableRoomsRequestIdRef.current
+      ) {
+        setRoomSearchLoading(false);
+      }
     }
   };
 
@@ -496,10 +579,16 @@ const Messaging = ({ runtimeProfile, initialKind = 'mixed', state }) => {
       return;
     }
 
+    const requestId = ++workspaceActionRequestIdRef.current;
     try {
       await rooms.join({ roomName });
-      await hydrate();
-      openPanel('room', roomName);
+      if (!(await refreshWorkspace())) return;
+      if (
+        mountedRef.current &&
+        requestId === workspaceActionRequestIdRef.current
+      ) {
+        openPanel('room', roomName);
+      }
     } catch (error) {
       console.error('Failed to join room:', error);
     }
@@ -514,14 +603,20 @@ const Messaging = ({ runtimeProfile, initialKind = 'mixed', state }) => {
       return;
     }
 
+    const requestId = ++workspaceActionRequestIdRef.current;
     try {
       await rooms.leave({ roomName });
-      await hydrate();
-      setPanels((previous) =>
-        previous.filter(
-          (panel) => !(panel.type === 'room' && panel.target === roomName),
-        ),
-      );
+      if (!(await refreshWorkspace())) return;
+      if (
+        mountedRef.current &&
+        requestId === workspaceActionRequestIdRef.current
+      ) {
+        setPanels((previous) =>
+          previous.filter(
+            (panel) => !(panel.type === 'room' && panel.target === roomName),
+          ),
+        );
+      }
     } catch (error) {
       console.error('Failed to leave room:', error);
     }
@@ -536,14 +631,20 @@ const Messaging = ({ runtimeProfile, initialKind = 'mixed', state }) => {
       return;
     }
 
+    const requestId = ++workspaceActionRequestIdRef.current;
     try {
       await chat.remove({ username });
-      await hydrate();
-      setPanels((previous) =>
-        previous.filter(
-          (panel) => !(panel.type === 'chat' && panel.target === username),
-        ),
-      );
+      if (!(await refreshWorkspace())) return;
+      if (
+        mountedRef.current &&
+        requestId === workspaceActionRequestIdRef.current
+      ) {
+        setPanels((previous) =>
+          previous.filter(
+            (panel) => !(panel.type === 'chat' && panel.target === username),
+          ),
+        );
+      }
     } catch (error) {
       console.error('Failed to delete conversation:', error);
     }
@@ -565,16 +666,22 @@ const Messaging = ({ runtimeProfile, initialKind = 'mixed', state }) => {
       return;
     }
 
+    const requestId = ++workspaceActionRequestIdRef.current;
     try {
       await pods.leave(channel.podId, peerId);
-      await hydrate();
-      setPanels((previous) =>
-        previous.filter((panel) => {
-          if (panel.type !== 'pod') return true;
-          const { podId } = decodePodTarget(panel.target);
-          return podId !== channel.podId;
-        }),
-      );
+      if (!(await refreshWorkspace())) return;
+      if (
+        mountedRef.current &&
+        requestId === workspaceActionRequestIdRef.current
+      ) {
+        setPanels((previous) =>
+          previous.filter((panel) => {
+            if (panel.type !== 'pod') return true;
+            const { podId } = decodePodTarget(panel.target);
+            return podId !== channel.podId;
+          }),
+        );
+      }
     } catch (error) {
       console.error('Failed to leave pod:', error);
     }
@@ -597,23 +704,35 @@ const Messaging = ({ runtimeProfile, initialKind = 'mixed', state }) => {
       return;
     }
 
+    const requestId = ++batchRequestIdRef.current;
     setBatchSending(true);
     try {
       await chat.sendBatch({ message, usernames });
+      if (
+        !mountedRef.current ||
+        requestId !== batchRequestIdRef.current
+      ) {
+        return;
+      }
       toast.success(`Sent batch message to ${new Set(usernames.map((name) => name.toLowerCase())).size} users`);
       setBatchMessage('');
       setBatchUsernames('');
       setBatchModalOpen(false);
-      await hydrate();
+      await refreshWorkspace();
     } catch (error) {
-      toast.error(
-        error?.response?.data?.message ||
-          error?.response?.data ||
-          error?.message ||
-          'Failed to send batch message',
-      );
+      if (
+        mountedRef.current &&
+        requestId === batchRequestIdRef.current
+      ) {
+        toast.error(toDisplayError(error, 'Failed to send batch message'));
+      }
     } finally {
-      setBatchSending(false);
+      if (
+        mountedRef.current &&
+        requestId === batchRequestIdRef.current
+      ) {
+        setBatchSending(false);
+      }
     }
   };
 
@@ -646,7 +765,7 @@ const Messaging = ({ runtimeProfile, initialKind = 'mixed', state }) => {
                 <Button
                   aria-label="Refresh messages workspace"
                   icon="refresh"
-                  onClick={() => hydrate()}
+                  onClick={() => refreshWorkspace()}
                   size="mini"
                   title="Refresh messages workspace"
                 />

@@ -54,6 +54,20 @@ const Rooms = ({ runtimeProfile } = {}) => {
   const [joinedRooms, setJoinedRooms] = useState([]);
   const [roomSearchLoading, setRoomSearchLoading] = useState(false);
   const closeTabRef = useRef(null);
+  const mountedRef = useRef(false);
+  const hydrateRequestIdRef = useRef(0);
+  const availableRoomsRequestIdRef = useRef(0);
+  const roomActionRequestIdRef = useRef(0);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      hydrateRequestIdRef.current += 1;
+      availableRoomsRequestIdRef.current += 1;
+      roomActionRequestIdRef.current += 1;
+    };
+  }, []);
 
   const closeTab = useCallback((tabKey) => {
     setTabs((previous) => {
@@ -120,8 +134,17 @@ const Rooms = ({ runtimeProfile } = {}) => {
   );
 
   const hydrateJoinedRooms = useCallback(async () => {
+    const requestId = ++hydrateRequestIdRef.current;
+    if (!mountedRef.current) return;
+
     try {
       const joined = await rooms.getJoined();
+      if (
+        !mountedRef.current ||
+        requestId !== hydrateRequestIdRef.current
+      ) {
+        return;
+      }
       const normalized = (joined || []).filter(Boolean).sort();
       setJoinedRooms(normalized);
       if (normalized.length > 0) {
@@ -159,23 +182,48 @@ const Rooms = ({ runtimeProfile } = {}) => {
   }, [hydrateJoinedRooms]);
 
   const fetchAvailableRooms = async () => {
+    const requestId = ++availableRoomsRequestIdRef.current;
+    if (!mountedRef.current) return;
+
     setRoomSearchLoading(true);
     try {
       const available = await rooms.getAvailable();
-      setAvailableRooms(available || []);
+      if (
+        mountedRef.current &&
+        requestId === availableRoomsRequestIdRef.current
+      ) {
+        setAvailableRooms(available || []);
+      }
     } catch {
-      setAvailableRooms([]);
+      if (
+        mountedRef.current &&
+        requestId === availableRoomsRequestIdRef.current
+      ) {
+        setAvailableRooms([]);
+      }
     } finally {
-      setRoomSearchLoading(false);
+      if (
+        mountedRef.current &&
+        requestId === availableRoomsRequestIdRef.current
+      ) {
+        setRoomSearchLoading(false);
+      }
     }
   };
 
   const joinRoom = async (roomName) => {
     try {
+      const requestId = ++roomActionRequestIdRef.current;
       await rooms.join({ roomName });
 
       // Refresh joined rooms
       const joined = await rooms.getJoined();
+      if (
+        !mountedRef.current ||
+        requestId !== roomActionRequestIdRef.current
+      ) {
+        return;
+      }
       setJoinedRooms(joined || []);
       openRoomTab(roomName);
     } catch (error) {
@@ -184,11 +232,18 @@ const Rooms = ({ runtimeProfile } = {}) => {
   };
 
   const leaveRoom = async (roomName) => {
+    const requestId = ++roomActionRequestIdRef.current;
     try {
       await rooms.leave({ roomName });
 
       // Refresh joined rooms
       const joined = await rooms.getJoined();
+      if (
+        !mountedRef.current ||
+        requestId !== roomActionRequestIdRef.current
+      ) {
+        return;
+      }
       setJoinedRooms(joined || []);
 
       // Close the tab for this room

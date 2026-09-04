@@ -1,8 +1,18 @@
 import { deleteDirectory, deleteFile, list } from '../../../lib/files';
+import { toDisplayError } from '../../../lib/errors';
 import { formatBytes, formatDate } from '../../../lib/util';
 import { LoaderSegment } from '../../Shared';
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { toast } from 'react-toastify';
 import { Header, Icon, Modal, Table } from 'semantic-ui-react';
+
+const fileStoragePath = (subdirectory, fullName) =>
+  [...subdirectory, fullName].filter(Boolean).join('/');
+
+const reportFileOperationError = (error) => {
+  console.error('[Files] Remote file operation failed:', error);
+  toast.error(toDisplayError(error, 'File operation failed'));
+};
 
 const FileRow = ({
   fullName,
@@ -12,6 +22,7 @@ const FileRow = ({
   remoteFileManagement,
   root,
   subdirectory,
+  onRefresh,
 }) => (
   <Table.Row key={fullName}>
     <Table.Cell>
@@ -30,11 +41,15 @@ const FileRow = ({
               key: 'done',
               negative: true,
               onClick: async () => {
-                await deleteFile({
-                  path: `${subdirectory.join('/')}/${fullName}`,
-                  root,
-                });
-                fetch();
+                try {
+                  await deleteFile({
+                    path: fileStoragePath(subdirectory, fullName),
+                    root,
+                  });
+                  await onRefresh();
+                } catch (error) {
+                  reportFileOperationError(error);
+                }
               },
             },
           ]}
@@ -69,6 +84,7 @@ const DirectoryRow = ({
   remoteFileManagement,
   root,
   subdirectory,
+  onRefresh,
 }) => (
   <Table.Row key={name}>
     <Table.Cell
@@ -90,11 +106,15 @@ const DirectoryRow = ({
               key: 'done',
               negative: true,
               onClick: async () => {
-                await deleteDirectory({
-                  path: `${subdirectory.join('/')}/${fullName}`,
-                  root,
-                });
-                fetch();
+                try {
+                  await deleteDirectory({
+                    path: fileStoragePath(subdirectory, fullName),
+                    root,
+                  });
+                  await onRefresh();
+                } catch (error) {
+                  reportFileOperationError(error);
+                }
               },
             },
           ]}
@@ -126,28 +146,62 @@ const Explorer = ({ active = true, remoteFileManagement, root }) => {
   const [directory, setDirectory] = useState({ directories: [], files: [] });
   const [subdirectory, setSubdirectory] = useState([]);
   const [loading, setLoading] = useState(false);
+  const mountedRef = useRef(false);
+  const requestIdRef = useRef(0);
 
-  const fetch = async () => {
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      requestIdRef.current += 1;
+    };
+  }, []);
+
+  const refresh = useCallback(async () => {
+    const requestId = ++requestIdRef.current;
     if (!active) {
       return;
     }
 
     setLoading(true);
-    const directoryResult = await list({
-      root,
-      subdirectory: subdirectory.join('/'),
-    });
-    setDirectory(directoryResult);
-    setLoading(false);
-  };
+    try {
+      const directoryResult = await list({
+        root,
+        subdirectory: subdirectory.join('/'),
+      });
+      if (
+        mountedRef.current &&
+        requestId === requestIdRef.current
+      ) {
+        setDirectory(directoryResult || { directories: [], files: [] });
+      }
+    } catch (error) {
+      if (
+        mountedRef.current &&
+        requestId === requestIdRef.current
+      ) {
+        setDirectory({ directories: [], files: [] });
+        reportFileOperationError(error);
+      }
+    } finally {
+      if (
+        mountedRef.current &&
+        requestId === requestIdRef.current
+      ) {
+        setLoading(false);
+      }
+    }
+  }, [active, root, subdirectory]);
 
   useEffect(() => {
     if (!active) {
+      requestIdRef.current += 1;
+      setLoading(false);
       return;
     }
 
-    fetch();
-  }, [active, root, subdirectory]); // eslint-disable-line react-hooks/exhaustive-deps
+    void refresh();
+  }, [active, refresh]);
 
   useEffect(() => {
     setSubdirectory([]);
@@ -245,6 +299,7 @@ const Explorer = ({ active = true, remoteFileManagement, root }) => {
                   root={root}
                   subdirectory={subdirectory}
                   {...d}
+                  onRefresh={refresh}
                 />
               ))}
               {directory?.files?.map((f) => (
@@ -254,6 +309,7 @@ const Explorer = ({ active = true, remoteFileManagement, root }) => {
                   root={root}
                   subdirectory={subdirectory}
                   {...f}
+                  onRefresh={refresh}
                 />
               ))}
             </>

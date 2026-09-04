@@ -1,8 +1,10 @@
 import { createListeningPartyHubConnection } from '../../lib/hubFactory';
+import { toDisplayError } from '../../lib/errors';
 import * as listeningParty from '../../lib/listeningParty';
 import { usePlayer } from './PlayerContext';
 import { usePolling } from '../../lib/usePolling';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { toast } from 'react-toastify';
 import { Button, Checkbox, Icon, Label, List, Popup, Segment } from 'semantic-ui-react';
 
 const applyPartyState = (state, player) => {
@@ -43,6 +45,18 @@ const PodListenAlongPanel = ({ channelId, compact = false, podId, user }) => {
   const [partyState, setPartyState] = useState(null);
   const followingRef = useRef(false);
   const playerRef = useRef(player);
+  const mountedRef = useRef(false);
+  const directoryRequestIdRef = useRef(0);
+  const operationRequestIdRef = useRef(0);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      directoryRequestIdRef.current += 1;
+      operationRequestIdRef.current += 1;
+    };
+  }, []);
 
   useEffect(() => {
     followingRef.current = following;
@@ -59,43 +73,68 @@ const PodListenAlongPanel = ({ channelId, compact = false, podId, user }) => {
     const hub = createListeningPartyHubConnection();
 
     hub.on('partyState', (state) => {
+      if (disposed || !mountedRef.current) return;
       setPartyState(state);
       if (followingRef.current) {
         playerRef.current.followParty(state);
         applyPartyState(state, playerRef.current);
       }
     });
-    hub.onreconnecting(() => setConnected(false));
-    hub.onreconnected(() => setConnected(true));
-    hub.onclose(() => setConnected(false));
+    hub.onreconnecting(() => {
+      if (!disposed && mountedRef.current) setConnected(false);
+    });
+    hub.onreconnected(() => {
+      if (!disposed && mountedRef.current) setConnected(true);
+    });
+    hub.onclose(() => {
+      if (!disposed && mountedRef.current) setConnected(false);
+    });
 
     hub
       .start()
-      .then(() => hub.invoke('JoinParty', podId, channelId))
       .then(() => {
-        if (!disposed) setConnected(true);
+        if (disposed || !mountedRef.current) return undefined;
+        return hub.invoke('JoinParty', podId, channelId);
       })
-      .catch(() => setConnected(false));
+      .then(() => {
+        if (!disposed && mountedRef.current) setConnected(true);
+      })
+      .catch(() => {
+        if (!disposed && mountedRef.current) setConnected(false);
+      });
 
     listeningParty
       .getPartyState(podId, channelId)
       .then((state) => {
-        if (!disposed) setPartyState(state);
+        if (!disposed && mountedRef.current) setPartyState(state);
       })
       .catch(() => {});
 
     return () => {
       disposed = true;
+      operationRequestIdRef.current += 1;
       hub.invoke('LeaveParty', podId, channelId).catch(() => {});
       hub.stop().catch(() => {});
     };
   }, [channelId, podId]);
 
   const refreshDirectory = useCallback(async () => {
+    const requestId = ++directoryRequestIdRef.current;
     try {
-      setDirectory(await listeningParty.getPartyDirectory());
+      const nextDirectory = await listeningParty.getPartyDirectory();
+      if (
+        mountedRef.current &&
+        requestId === directoryRequestIdRef.current
+      ) {
+        setDirectory(nextDirectory || []);
+      }
     } catch {
-      setDirectory([]);
+      if (
+        mountedRef.current &&
+        requestId === directoryRequestIdRef.current
+      ) {
+        setDirectory([]);
+      }
     }
   }, []);
 
@@ -105,20 +144,37 @@ const PodListenAlongPanel = ({ channelId, compact = false, podId, user }) => {
     const current = player.current;
     if (action !== 'stop' && !current?.contentId) return;
 
-    const state = await listeningParty.publishPartyState(podId, channelId, {
-      action,
-      album: current?.album || '',
-      allowMeshStreaming: meshStreaming,
-      artist: current?.artist || user || '',
-      contentId: current?.contentId || '',
-      hostPeerId: user || 'local-peer',
-      listed: globalRadio,
-      partyId: partyState?.partyId || '',
-      positionSeconds: current?.positionSeconds || 0,
-      title: current?.title || current?.fileName || '',
-    });
-    setPartyState(state);
-    await refreshDirectory();
+    const requestId = ++operationRequestIdRef.current;
+    try {
+      const state = await listeningParty.publishPartyState(podId, channelId, {
+        action,
+        album: current?.album || '',
+        allowMeshStreaming: meshStreaming,
+        artist: current?.artist || user || '',
+        contentId: current?.contentId || '',
+        hostPeerId: user || 'local-peer',
+        listed: globalRadio,
+        partyId: partyState?.partyId || '',
+        positionSeconds: current?.positionSeconds || 0,
+        title: current?.title || current?.fileName || '',
+      });
+      if (
+        !mountedRef.current ||
+        requestId !== operationRequestIdRef.current
+      ) {
+        return;
+      }
+      setPartyState(state);
+      await refreshDirectory();
+    } catch (error) {
+      console.error('[Listen Along] Failed to publish party state:', error);
+      if (
+        mountedRef.current &&
+        requestId === operationRequestIdRef.current
+      ) {
+        toast.error(toDisplayError(error, 'Broadcast failed'));
+      }
+    }
   };
 
   const joinListedParty = (party) => {
