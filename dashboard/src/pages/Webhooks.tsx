@@ -108,7 +108,7 @@ export default function Webhooks({ apiUrl, apiKey }: WebhooksPageProps) {
 
       alert('Test webhook sent!');
     } catch (err) {
-      alert('Failed to test webhook');
+      setError(err instanceof Error ? err.message : 'Failed to test webhook');
     }
   };
 

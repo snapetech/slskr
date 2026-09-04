@@ -81,6 +81,15 @@ await client.list_transfers(direction="download", status="active")
 await client.create_transfer(direction, peer_username, filename)
 await client.get_transfer(transfer_id)
 await client.cancel_transfer(transfer_id)
+
+# Sessions, users, rooms, browse, shares, and filters
+await client.get_sessions()
+await client.list_users()
+await client.list_rooms()
+await client.browse_user(username)
+await client.get_events()
+await client.list_shares()
+await client.update_filters({"enabled": True})
 ```
 
 #### Batch Operations

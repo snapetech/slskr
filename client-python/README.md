@@ -134,6 +134,13 @@ Main HTTP client for REST API operations.
 - `get_config()` - Configuration
 - `get_stats()` - Statistics
 
+**Sessions, Users & Rooms**
+- `get_sessions()` / `create_session()` - Read or connect the server session
+- `ping_session()` / `disconnect_session()` - Maintain or close the session
+- `get_session_privileges()` - Read current privileges
+- `list_users()` / `get_user()` - Read watched users
+- `list_rooms()` / `get_room()` / `join_room()` / `leave_room()` - Manage rooms
+
 **Search**
 - `list_searches(limit, offset)` - List searches
 - `create_search(query, room, target)` - Create search
@@ -150,6 +157,14 @@ Main HTTP client for REST API operations.
 - `create_transfer(direction, peer, filename)` - Start transfer
 - `get_transfer(transfer_id)` - Transfer details
 - `cancel_transfer(transfer_id)` - Cancel transfer
+
+**Browse, Events & Administration**
+- `browse_user()` / `request_browse()` - Browse a user's shares
+- `get_browse_requests()` / `respond_to_browse_request()` - Manage browse requests
+- `get_events()` - Read recorded events
+- `list_shares()` / `refresh_shares()` - Read or rescan shares
+- `get_filters()` / `update_filters()` - Read or update filters
+- `get_cache_stats()` / `invalidate_cache()` - Inspect or clear the MediaCore cache
 
 ### BatchClient
 

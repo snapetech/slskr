@@ -71,6 +71,99 @@ async def test_python_client_uses_daemon_wire_contracts():
 
 
 @pytest.mark.asyncio
+async def test_python_client_covers_session_and_extended_api_routes():
+    client = SlskrClient("https://example.test", "token")
+    get_calls = []
+    post_calls = []
+    put_calls = []
+    delete_calls = []
+
+    async def fake_get(path, params=None, authenticated=True):
+        get_calls.append((path, params, authenticated))
+        responses = {
+            "/api/session": {
+                "state": "connected",
+                "username": "alice",
+                "privileges_seconds": 120,
+            },
+            "/api/users": {"entries": [{"username": "bob"}]},
+            "/api/users/bob/info": {"username": "bob", "status": "online"},
+            "/api/rooms": {"rooms": [{"name": "lounge"}]},
+            "/api/rooms/lounge%20room": {"name": "lounge room"},
+            "/api/users/bob/browse": {"entries": [{"filename": "track.flac"}]},
+            "/api/browse/requests": {"requests": [{"username": "bob"}]},
+            "/api/events": {"events": [{"type": "search.completed"}]},
+            "/api/shares": {"local": [{"filename": "track.flac"}]},
+            "/api/config/download-filter": {"enabled": True},
+            "/api/mediacore/retrieve/stats": {"cacheHits": 1},
+        }
+        return responses.get(path, {})
+
+    async def fake_post(path, body, authenticated=True):
+        post_calls.append((path, body, authenticated))
+        return {"accepted": True} if path.startswith("/api/session/") else {}
+
+    async def fake_put(path, body, authenticated=True):
+        put_calls.append((path, body, authenticated))
+        return {"enabled": body.get("enabled", True)}
+
+    async def fake_delete(path, authenticated=True):
+        delete_calls.append((path, authenticated))
+
+    client._get = AsyncMock(side_effect=fake_get)
+    client._post = AsyncMock(side_effect=fake_post)
+    client._put = AsyncMock(side_effect=fake_put)
+    client._delete = AsyncMock(side_effect=fake_delete)
+
+    assert (await client.get_sessions())[0]["username"] == "alice"
+    assert (await client.create_session())["state"] == "connected"
+    assert (await client.create_session(parameters={"username": "alice"}))["state"] == "connected"
+    assert await client.ping_session() == {"accepted": True}
+    await client.disconnect_session()
+    assert await client.get_session_privileges() == {
+        "user_id": "alice",
+        "privileges": ["privileged"],
+    }
+    with pytest.raises(ValueError, match="Unsupported session type"):
+        await client.create_session("peer")
+
+    assert await client.list_users() == [{"username": "bob"}]
+    assert await client.get_user("bob") == {"username": "bob", "status": "online"}
+    assert await client.list_rooms() == [{"name": "lounge"}]
+    assert await client.get_room("lounge room") == {"name": "lounge room"}
+    assert await client.join_room("lounge room") == {}
+    await client.leave_room("lounge room")
+
+    assert await client.browse_user("bob", folder="Albums") == {
+        "entries": [{"filename": "track.flac"}]
+    }
+    assert await client.request_browse("bob") == {}
+    assert await client.get_browse_requests(status="pending") == [{"username": "bob"}]
+    assert await client.respond_to_browse_request("bob", "reject") == {}
+    assert await client.respond_to_browse_request("bob", "accept", folder="Albums") == {}
+    with pytest.raises(ValueError, match="accept.*reject"):
+        await client.respond_to_browse_request("bob", "ignore")
+
+    assert await client.get_events(event_type="search.completed") == [
+        {"type": "search.completed"}
+    ]
+    assert await client.list_shares() == [{"filename": "track.flac"}]
+    assert await client.refresh_shares() == {}
+    assert await client.get_filters() == {"enabled": True}
+    assert await client.update_filters({"enabled": False}) == {"enabled": False}
+    assert await client.get_cache_stats() == {"cacheHits": 1}
+    assert await client.invalidate_cache(["content:track"]) == {}
+
+    assert ("/api/rooms/lounge%20room", None, True) in get_calls
+    assert ("/api/users/bob/browse", {"limit": 50, "offset": 0, "folder": "Albums"}, True) in get_calls
+    assert ("/api/events", {"limit": 50, "offset": 0, "kind": "search.completed"}, True) in get_calls
+    assert ("/api/users/bob/browse/cancel", {"reason": "rejected by client"}, True) in post_calls
+    assert ("/api/users/bob/browse/folder", {"folder": "Albums"}, True) in post_calls
+    assert ("/api/mediacore/retrieve/cache/clear", {"keys": ["content:track"]}, True) in post_calls
+    assert ("/api/rooms/lounge%20room/join", True) in delete_calls
+
+
+@pytest.mark.asyncio
 async def test_create_search_exposes_compatibility_search_id_as_id():
     client = SlskrClient("https://example.test", "token")
     client._post = AsyncMock(
