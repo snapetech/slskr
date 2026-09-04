@@ -50977,6 +50977,11 @@ async fn versioned_relay_request_bytes(
                         "Share metadata section is missing",
                     ));
                 };
+                if share_part.data.len() > relay::MAX_RELAY_SHARE_METADATA_BYTES {
+                    return Some(routing::bad_request_response(
+                        "Share metadata exceeds the maximum size",
+                    ));
+                }
                 let shares = match serde_json::from_slice::<serde_json::Value>(share_part.data) {
                     Ok(value) if value.is_array() => value,
                     _ => {
@@ -50985,6 +50990,14 @@ async fn versioned_relay_request_bytes(
                         ));
                     }
                 };
+                if shares
+                    .as_array()
+                    .is_some_and(|entries| entries.len() > relay::MAX_RELAY_SHARE_ENTRIES)
+                {
+                    return Some(routing::bad_request_response(
+                        "Share metadata contains too many entries",
+                    ));
+                }
                 let metadata_shares = shares
                     .as_array()
                     .into_iter()

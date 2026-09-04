@@ -37,6 +37,9 @@ const MAX_RELAY_SHARE_MANIFEST_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_RELAY_SHARE_UPLOAD_RECORDS: usize = 4_096;
 const MAX_RELAY_SHARE_FILENAME_BYTES: usize = 16 * 1024;
 const MAX_MULTIPART_PARTS: usize = 16;
+const MAX_MULTIPART_HEADER_BYTES: usize = 64 * 1024;
+const MAX_MULTIPART_PARAMETER_BYTES: usize = 16 * 1024;
+pub(crate) const MAX_RELAY_SHARE_METADATA_BYTES: usize = 64 * 1024 * 1024;
 pub(crate) const HUB_OUTBOUND_QUEUE_CAPACITY: usize = 64;
 const PBKDF2_ITERATIONS: NonZeroU32 = match NonZeroU32::new(1_000) {
     Some(value) => value,
@@ -515,6 +518,11 @@ pub(crate) fn parse_multipart<'a>(
         let Some(header_end) = find_bytes(&body[cursor..part_end], b"\r\n\r\n", 0) else {
             return Err("multipart part headers are missing".to_owned());
         };
+        if header_end > MAX_MULTIPART_HEADER_BYTES {
+            return Err(format!(
+                "multipart part headers exceed {MAX_MULTIPART_HEADER_BYTES} bytes"
+            ));
+        }
         let header_text = std::str::from_utf8(&body[cursor..cursor + header_end])
             .map_err(|_| "multipart part headers are not valid UTF-8".to_owned())?;
         let disposition = header_text.lines().find_map(|line| {
@@ -559,7 +567,8 @@ fn multipart_parameter(disposition: &str, parameter: &str) -> Option<String> {
             .strip_prefix('"')
             .and_then(|value| value.strip_suffix('"'))
             .unwrap_or(value);
-        (!value.is_empty()).then(|| value.to_owned())
+        (value.len() <= MAX_MULTIPART_PARAMETER_BYTES && !value.is_empty())
+            .then(|| value.to_owned())
     })
 }
 
@@ -1630,6 +1639,27 @@ mod tests {
         let error = parse_multipart(&body, Some("multipart/form-data; boundary=boundary"))
             .expect_err("multipart part count must be bounded");
         assert!(error.contains("more than 16 parts"), "{error}");
+    }
+
+    #[test]
+    fn multipart_parser_rejects_oversized_part_headers() {
+        let oversized_header = "x".repeat(MAX_MULTIPART_HEADER_BYTES + 1);
+        let body = format!(
+            "--boundary\r\nX-Relay-Metadata: {oversized_header}\r\nContent-Disposition: form-data; name=\"file\"\r\n\r\npayload\r\n--boundary--\r\n"
+        );
+        let error = parse_multipart(
+            body.as_bytes(),
+            Some("multipart/form-data; boundary=boundary"),
+        )
+        .expect_err("multipart part headers must be bounded");
+        assert!(error.contains("headers exceed"), "{error}");
+    }
+
+    #[test]
+    fn multipart_parameters_are_bounded() {
+        let oversized = "x".repeat(MAX_MULTIPART_PARAMETER_BYTES + 1);
+        let disposition = format!("form-data; name=\"{oversized}\"");
+        assert!(multipart_parameter(&disposition, "name").is_none());
     }
 
     fn credential(secret: &str, agent_name: &str, token: &str) -> String {
