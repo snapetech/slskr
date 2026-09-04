@@ -15348,12 +15348,17 @@ async fn songid_acoustid_lookup(
         .as_deref()
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| "AcoustID is enabled without a client id".to_owned())?;
-    let endpoint = format!("{}/lookup", settings.base_url.trim_end_matches('/'));
+    let base_url = reqwest::Url::parse(&settings.base_url)
+        .map_err(|error| format!("AcoustID URL is invalid: {error}"))?;
+    let resolved = validate_lidarr_base_url(base_url.as_str())
+        .map_err(|error| format!("AcoustID URL is invalid: {error}"))?;
+    let endpoint = format!("{}/lookup", base_url.as_str().trim_end_matches('/'));
     let url = reqwest::Url::parse(&endpoint)
         .map_err(|error| format!("AcoustID URL is invalid: {error}"))?;
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(20))
         .redirect(reqwest::redirect::Policy::none())
+        .resolve_to_addrs(&resolved.host, &resolved.addrs)
         .build()
         .map_err(|error| format!("failed to build AcoustID client: {error}"))?;
     let duration = duration_seconds.to_string();
@@ -47801,14 +47806,19 @@ async fn musicbrainz_json_request(
 ) -> Result<Option<serde_json::Value>, String> {
     let timeout = Duration::try_from_secs_f64(settings.timeout_seconds)
         .map_err(|error| format!("MusicBrainz timeout is invalid: {error}"))?;
+    let base_url = reqwest::Url::parse(&settings.base_url)
+        .map_err(|error| format!("MusicBrainz URL is invalid: {error}"))?;
+    let resolved = validate_lidarr_base_url(base_url.as_str())
+        .map_err(|error| format!("MusicBrainz URL is invalid: {error}"))?;
     let client = reqwest::Client::builder()
         .timeout(timeout)
         .redirect(reqwest::redirect::Policy::none())
+        .resolve_to_addrs(&resolved.host, &resolved.addrs)
         .build()
         .map_err(|error| format!("failed to build MusicBrainz client: {error}"))?;
     let url = format!(
         "{}{}",
-        settings.base_url.trim_end_matches('/'),
+        base_url.as_str().trim_end_matches('/'),
         path_and_query
     );
 
@@ -56820,7 +56830,7 @@ async fn feature_controller_mutation_response(
                 "WebID resolution was blocked by policy.",
             ));
         }
-        if !solid.allow_localhost_for_web_id {
+        let resolved_addresses = if !solid.allow_localhost_for_web_id {
             if host == "localhost" || host.ends_with(".local") {
                 return Some(solid_resolution_error(
                     is_versioned_v0,
@@ -56830,7 +56840,18 @@ async fn feature_controller_mutation_response(
                     "WebID resolution was blocked by policy.",
                 ));
             }
-            let port = url.port_or_known_default().unwrap_or(443);
+            let port = match url.port_or_known_default() {
+                Some(port) => port,
+                None => {
+                    return Some(solid_resolution_error(
+                        is_versioned_v0,
+                        400,
+                        "Solid fetch blocked",
+                        "WebID resolution was blocked by policy.",
+                        "WebID resolution was blocked by policy.",
+                    ))
+                }
+            };
             let addresses = match tokio::net::lookup_host((host.as_str(), port)).await {
                 Ok(addresses) => addresses.collect::<Vec<_>>(),
                 Err(_) => {
@@ -56856,12 +56877,18 @@ async fn feature_controller_mutation_response(
                     "WebID resolution was blocked by policy.",
                 ));
             }
-        }
-        let client = match reqwest::Client::builder()
+            Some(addresses)
+        } else {
+            None
+        };
+        let request_host = url.host_str().unwrap_or(host.as_str());
+        let mut client_builder = reqwest::Client::builder()
             .timeout(solid.timeout)
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-        {
+            .redirect(reqwest::redirect::Policy::none());
+        if let Some(addresses) = resolved_addresses.as_deref() {
+            client_builder = client_builder.resolve_to_addrs(request_host, addresses);
+        }
+        let client = match client_builder.build() {
             Ok(client) => client,
             Err(_) => {
                 return Some(solid_resolution_error(
