@@ -26230,6 +26230,9 @@ async fn route_http_request_with_headers(
                     "active": w.active,
                     "created_at": w.created_at,
                     "last_triggered": w.last_triggered,
+                    "retry_count": w.retry_count,
+                    "max_retries": w.max_retries,
+                    "timeout_seconds": w.timeout_seconds,
                 })
             }).collect();
             let total = webhook_list.len();
@@ -87485,7 +87488,7 @@ async fn dispatch_webhook_event(
         &data,
     );
     dispatch_frozen_webhook_event(state, event, &data).await;
-    let webhooks = state.webhooks.read().await;
+    let webhooks = state.webhooks.read().await.clone();
     let request_body = webhooks::WebhookPayload::new(event, correlation_id.clone(), data.clone())
         .to_string()
         .unwrap_or_default();
@@ -87497,7 +87500,6 @@ async fn dispatch_webhook_event(
         &request_body,
     )
     .await;
-    drop(webhooks);
     webhooks::WebhookDispatcher::dispatch(
         Arc::clone(&state.webhooks),
         Arc::clone(&state.webhook_deliveries),

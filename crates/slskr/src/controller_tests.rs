@@ -17666,6 +17666,14 @@ async fn webhook_config_persists_rehydrates_and_records_dispatch_logs() {
         .iter()
         .any(|webhook| webhook.id == webhook_id));
 
+    let admin_list = super::route_http_request("GET", "/api/admin/webhooks", None, "", &state)
+        .await
+        .expect("list admin webhooks");
+    assert_eq!(admin_list.status, "200 OK");
+    assert!(admin_list.body.contains("\"retry_count\":0"));
+    assert!(admin_list.body.contains("\"max_retries\":3"));
+    assert!(admin_list.body.contains("\"timeout_seconds\":30"));
+
     let patched = super::route_http_request(
         "PATCH",
         &format!("/api/webhooks/{webhook_id}"),

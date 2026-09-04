@@ -689,6 +689,9 @@ async fn route_dispatch_group_3(context: &RouteDispatchContext<'_, '_>) -> Route
                         "active": w.active,
                         "created_at": w.created_at,
                         "last_triggered": w.last_triggered,
+                        "retry_count": w.retry_count,
+                        "max_retries": w.max_retries,
+                        "timeout_seconds": w.timeout_seconds,
                     })
                 })
                 .collect();
