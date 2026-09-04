@@ -17,6 +17,22 @@ import {
 import DiscoveryGraphAtlas from './DiscoveryGraphAtlas';
 import DiscoveryGraphCanvas from './DiscoveryGraphCanvas';
 
+const normalizeGraph = (value) => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+
+  return {
+    ...value,
+    edges: Array.isArray(value.edges)
+      ? value.edges.filter((edge) => edge && typeof edge === 'object' && !Array.isArray(edge))
+      : [],
+    nodes: Array.isArray(value.nodes)
+      ? value.nodes.filter((node) => node && typeof node === 'object' && !Array.isArray(node))
+      : [],
+  };
+};
+
 const DiscoveryGraphModal = ({
   graph,
   loading,
@@ -34,12 +50,12 @@ const DiscoveryGraphModal = ({
   const [minNodeWeight, setMinNodeWeight] = useState(0.25);
   const [pinnedNode, setPinnedNode] = useState(null);
   const [savedBranches, setSavedBranches] = useState([]);
+  const safeGraph = normalizeGraph(graph);
 
   const loadSavedBranches = () => {
     try {
       const raw = getLocalStorageItem('slskr.discoveryGraph.savedBranches');
-      const parsed = raw ? JSON.parse(raw) : [];
-      setSavedBranches(Array.isArray(parsed) ? parsed : []);
+      setSavedBranches(discoveryGraph.parseSavedDiscoveryGraphBranches(raw));
     } catch (error) {
       console.warn('Failed to load saved Discovery Graph branches', error);
       setSavedBranches([]);
@@ -54,15 +70,16 @@ const DiscoveryGraphModal = ({
     loadSavedBranches();
   }, [graph?.seedNodeId]);
 
-  const nodes = Array.isArray(graph?.nodes) ? graph.nodes : [];
+  const nodes = safeGraph?.nodes || [];
   const nodeMap = nodes.reduce((accumulator, node) => {
-    accumulator[node.nodeId] = node;
+    if (node.nodeId) accumulator[node.nodeId] = node;
     return accumulator;
   }, {});
+  const edges = safeGraph?.edges || [];
   const availableEdgeTypes = Array.from(
-    new Set((graph?.edges || []).map((edge) => edge.edgeType)),
+    new Set(edges.map((edge) => edge.edgeType).filter(Boolean)),
   ).sort();
-  const visibleEdges = (graph?.edges || []).filter(
+  const visibleEdges = edges.filter(
     (edge) =>
       activeEdgeTypes.length === 0 || activeEdgeTypes.includes(edge.edgeType),
   );
@@ -89,16 +106,16 @@ const DiscoveryGraphModal = ({
   };
 
   const handleSaveBranch = () => {
-    if (!graph) {
+    if (!safeGraph) {
       return;
     }
 
     const nextBranch = {
-      id: `${graph.seedNodeId}-${Date.now()}`,
+      id: `${safeGraph.seedNodeId}-${Date.now()}`,
       savedAt: new Date().toISOString(),
-      seedNodeId: graph.seedNodeId,
-      title: graph.title,
-      request: graph.request || null,
+      seedNodeId: safeGraph.seedNodeId,
+      title: safeGraph.title,
+      request: safeGraph.request || null,
     };
     const nextSavedBranches = [nextBranch, ...savedBranches].slice(0, 12);
     setLocalStorageItem(
@@ -117,12 +134,12 @@ const DiscoveryGraphModal = ({
             Building neighborhood
           </Loader>
         ) : null}
-        {!loading && graph ? (
+        {!loading && safeGraph ? (
           <>
             <p style={{ marginTop: 0 }}>
-              <strong>{graph.title}</strong>
+              <strong>{safeGraph.title}</strong>
               <br />
-              {graph.summary}
+              {safeGraph.summary}
             </p>
             {availableEdgeTypes.length > 0 ? (
               <div style={{ marginBottom: '1em' }}>
@@ -157,13 +174,13 @@ const DiscoveryGraphModal = ({
                 position="top center"
                 trigger={
                   <Button
-                    disabled={!graph?.request}
+                    disabled={!safeGraph?.request}
                     onClick={() => {
-                      if (!graph?.request) {
+                      if (!safeGraph?.request) {
                         return;
                       }
 
-                      const query = discoveryGraph.toQueryString(graph.request);
+                      const query = discoveryGraph.toQueryString(safeGraph.request);
                       navigate(`/discovery-graph?${query}`);
                     }}
                     size="small"
@@ -178,11 +195,11 @@ const DiscoveryGraphModal = ({
                 position="top center"
                 trigger={
                   <Button
-                    disabled={!graph?.seedNodeId}
+                    disabled={!safeGraph?.seedNodeId}
                     onClick={() =>
                       setPinnedNode({
-                        label: graph?.title || graph?.seedNodeId,
-                        nodeId: graph?.seedNodeId,
+                        label: safeGraph?.title || safeGraph?.seedNodeId,
+                        nodeId: safeGraph?.seedNodeId,
                       })
                     }
                     size="small"
@@ -198,7 +215,7 @@ const DiscoveryGraphModal = ({
                 trigger={
                   <Button
                     disabled={!onQueueNearby || nodes.length === 0}
-                    onClick={() => onQueueNearby && onQueueNearby(graph)}
+                    onClick={() => onQueueNearby && onQueueNearby(safeGraph)}
                     size="small"
                     style={{ marginLeft: '0.5em' }}
                   >
@@ -220,7 +237,7 @@ const DiscoveryGraphModal = ({
                 position="top center"
                 trigger={
                   <Button
-                    disabled={!pinnedNode || pinnedNode.nodeId === graph?.seedNodeId}
+                    disabled={!pinnedNode || pinnedNode.nodeId === safeGraph?.seedNodeId}
                     onClick={() =>
                       onCompare &&
                       pinnedNode &&
@@ -285,7 +302,7 @@ const DiscoveryGraphModal = ({
                 </Segment>
                 <DiscoveryGraphAtlas
                   edgeTypes={activeEdgeTypes}
-                  graph={graph}
+                  graph={safeGraph}
                   maxDepth={maxDepth}
                   minNodeWeight={minNodeWeight}
                   onNodeClick={onRecenter}
@@ -295,7 +312,7 @@ const DiscoveryGraphModal = ({
               <Segment secondary>
                 <DiscoveryGraphCanvas
                   edgeTypes={activeEdgeTypes}
-                  graph={graph}
+                  graph={safeGraph}
                   onNodeClick={onRecenter}
                 />
               </Segment>

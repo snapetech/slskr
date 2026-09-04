@@ -4,9 +4,11 @@ import {
   updateYaml,
   validateYaml,
 } from '../../../lib/options';
+import { toDisplayError } from '../../../lib/errors';
 import { Div, PlaceholderSegment, Switch } from '../../Shared';
 import CodeEditor from '../../Shared/CodeEditor';
-import React, { useEffect, useState } from 'react';
+import { useMountedRef } from '../../../lib/useMountedRef';
+import React, { useEffect, useRef, useState } from 'react';
 import { Button, Icon, Message, Modal } from 'semantic-ui-react';
 
 const EditModal = ({ onClose, open, theme }) => {
@@ -23,51 +25,156 @@ const EditModal = ({ onClose, open, theme }) => {
   });
   const [yamlError, setYamlError] = useState();
   const [updateError, setUpdateError] = useState();
+  const [saving, setSaving] = useState(false);
+  const [validating, setValidating] = useState(false);
+  const mountedRef = useMountedRef();
+  const loadRequestIdRef = useRef(0);
+  const validationRequestIdRef = useRef(0);
+  const saveRequestIdRef = useRef(0);
 
-  const get = async () => {
-    setLoading({ error: false, loading: true });
+  const validate = async (newYaml) => {
+    const requestId = ++validationRequestIdRef.current;
+    if (mountedRef.current) {
+      setValidating(true);
+      setYamlError(undefined);
+    }
 
     try {
-      const [locationResult, yamlResult] = await Promise.all([
-        getYamlLocation(),
-        getYaml(),
-      ]);
-
-      setYaml({ isDirty: false, location: locationResult, yaml: yamlResult });
-      setLoading({ error: false, loading: false });
-    } catch (getError) {
-      setLoading({ error: getError.message, loading: false });
+      const response = await validateYaml({ yaml: newYaml });
+      const error =
+        response === undefined || response === null || response === ''
+          ? undefined
+          : typeof response === 'string'
+            ? response
+            : toDisplayError(response, 'YAML validation failed');
+      if (
+        mountedRef.current &&
+        requestId === validationRequestIdRef.current
+      ) {
+        setYamlError(error);
+      }
+      return { error, requestId };
+    } catch (validationError) {
+      const error = toDisplayError(validationError, 'YAML validation failed');
+      if (
+        mountedRef.current &&
+        requestId === validationRequestIdRef.current
+      ) {
+        setYamlError(error);
+      }
+      return { error, requestId };
+    } finally {
+      if (
+        mountedRef.current &&
+        requestId === validationRequestIdRef.current
+      ) {
+        setValidating(false);
+      }
     }
   };
 
-  const validate = async (newYaml) => {
-    const response = await validateYaml({ yaml: newYaml });
-    setYamlError(response);
-  };
-
-  const update = async (newYaml) => {
+  const update = (newYaml) => {
+    if (!mountedRef.current) return;
     setYaml({ isDirty: true, location, yaml: newYaml });
-    validate(newYaml);
+    setUpdateError(undefined);
+    void validate(newYaml);
   };
 
   const save = async (newYaml) => {
-    await validate(newYaml);
+    if (!mountedRef.current || saving || loading || newYaml === undefined) {
+      return;
+    }
 
-    if (!yamlError) {
-      try {
+    const requestId = ++saveRequestIdRef.current;
+    setSaving(true);
+    setUpdateError(undefined);
+
+    try {
+      const validation = await validate(newYaml);
+
+      if (
+        !mountedRef.current ||
+        requestId !== saveRequestIdRef.current ||
+        validation.requestId !== validationRequestIdRef.current
+      ) {
+        return;
+      }
+
+      if (!validation.error) {
         await updateYaml({ yaml: newYaml });
-        onClose();
-      } catch (nextUpdateError) {
-        setUpdateError(nextUpdateError.response.data);
+        if (
+          mountedRef.current &&
+          requestId === saveRequestIdRef.current
+        ) {
+          onClose();
+        }
+      }
+    } catch (nextUpdateError) {
+      if (
+        mountedRef.current &&
+        requestId === saveRequestIdRef.current
+      ) {
+        setUpdateError(
+          toDisplayError(nextUpdateError, 'Failed to update YAML'),
+        );
+      }
+    } finally {
+      if (
+        mountedRef.current &&
+        requestId === saveRequestIdRef.current
+      ) {
+        setSaving(false);
       }
     }
   };
 
   useEffect(() => {
-    if (open) {
-      get();
-    }
-  }, [open]);
+    const requestId = ++loadRequestIdRef.current;
+    validationRequestIdRef.current += 1;
+    if (!open) return undefined;
+
+    setLoading({ error: false, loading: true });
+    setYamlError(undefined);
+    setUpdateError(undefined);
+
+    const load = async () => {
+      try {
+        const [locationResult, yamlResult] = await Promise.all([
+          getYamlLocation(),
+          getYaml(),
+        ]);
+
+        if (
+          mountedRef.current &&
+          requestId === loadRequestIdRef.current
+        ) {
+          setYaml({
+            isDirty: false,
+            location: locationResult,
+            yaml: yamlResult,
+          });
+          setLoading({ error: false, loading: false });
+        }
+      } catch (getError) {
+        if (
+          mountedRef.current &&
+          requestId === loadRequestIdRef.current
+        ) {
+          setLoading({
+            error: toDisplayError(getError, 'Failed to load YAML'),
+            loading: false,
+          });
+        }
+      }
+    };
+
+    void load();
+    return () => {
+      loadRequestIdRef.current += 1;
+      validationRequestIdRef.current += 1;
+      saveRequestIdRef.current += 1;
+    };
+  }, [mountedRef, open]);
 
   return (
     <Modal
@@ -124,7 +231,8 @@ const EditModal = ({ onClose, open, theme }) => {
           </Message>
         )}
         <Button
-          disabled={!isDirty}
+          disabled={!isDirty || saving || validating || loading}
+          loading={saving || validating}
           onClick={() => save(yaml)}
           primary
         >

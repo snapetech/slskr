@@ -28,6 +28,7 @@ const RoomJoinModal = ({ joinRoom: parentJoinRoom, ...modalOptions }) => {
   const mountedRef = useMountedRef();
   const loadRequestIdRef = React.useRef(0);
   const joinRequestIdRef = React.useRef(0);
+  const joinInFlightRef = React.useRef(false);
 
   useEffect(() => {
     const requestId = ++loadRequestIdRef.current;
@@ -113,10 +114,11 @@ const RoomJoinModal = ({ joinRoom: parentJoinRoom, ...modalOptions }) => {
   };
 
   const joinRoom = async () => {
-    if (!selected || !mountedRef.current || joining) return;
+    if (!selected || !mountedRef.current || joining || joinInFlightRef.current) return;
     const requestId = ++joinRequestIdRef.current;
     const isCurrentRequest = () =>
       mountedRef.current && joinRequestIdRef.current === requestId;
+    joinInFlightRef.current = true;
     setJoining(true);
     try {
       await parentJoinRoom(selected);
@@ -127,6 +129,7 @@ const RoomJoinModal = ({ joinRoom: parentJoinRoom, ...modalOptions }) => {
       }
     } finally {
       if (isCurrentRequest()) setJoining(false);
+      joinInFlightRef.current = false;
     }
   };
 

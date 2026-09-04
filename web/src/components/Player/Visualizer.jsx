@@ -6,8 +6,10 @@ import {
   setLocalStorageItem,
 } from '../../lib/storage';
 import { resumeAudioGraph } from './audioGraph';
+import { toDisplayError } from '../../lib/errors';
 import SpectrumAnalyzer from './SpectrumAnalyzer';
 import { createRustyMilkEngine } from './visualizers/rustyMilkEngine';
+import { useMountedRef } from '../../lib/useMountedRef';
 
 const visualizerEngineStorageKey = 'slskr.player.visualizerEngine';
 const rustyMilkPresetStorageKey = 'slskr.player.rustyMilkPreset';
@@ -215,9 +217,9 @@ const getRustyMilkWebGpuDebugLabel = (status = {}) => {
 };
 
 const getVisualizerErrorMessage = (engineType, error) => {
-  const detail = error?.message ? ` ${error.message}` : '';
+  const detail = toDisplayError(error, '');
   return isRustyMilkEngine(engineType)
-    ? `RustyMilk render failed.${detail}`
+    ? `RustyMilk render failed.${detail ? ` ${detail}` : ''}`
     : 'RustyMilk failed. Showing analyzer fallback.';
 };
 
@@ -461,7 +463,7 @@ const readNativeTextureAssets = async (files) => {
     } catch (textureError) {
       skippedTextureAssets.push({
         fileName: file.name,
-        message: textureError?.message || 'Texture asset could not be read.',
+        message: toDisplayError(textureError, 'Texture asset could not be read.'),
       });
       continue;
     }
@@ -580,7 +582,20 @@ const Visualizer = ({
   );
   const [presetName, setPresetName] = useState('');
   const [error, setError] = useState(null);
+  const mountedRef = useMountedRef();
+  const nativeOperationInFlightRef = useRef(false);
+  const nativeEngineGenerationRef = useRef(0);
   const activeEngineType = engineOverride || engineType;
+
+  const beginNativeOperation = useCallback(() => {
+    if (!mountedRef.current || nativeOperationInFlightRef.current) return false;
+    nativeOperationInFlightRef.current = true;
+    return true;
+  }, [mountedRef]);
+
+  const finishNativeOperation = useCallback(() => {
+    nativeOperationInFlightRef.current = false;
+  }, []);
 
   const activeNativePlaylist = rustyMilkPresetPlaylists.find(
     (playlist) => playlist.id === activeNativePlaylistId,
@@ -751,8 +766,17 @@ const Visualizer = ({
   }, []);
 
   const loadRustyMilkPresetEntry = useCallback(async (preset, options = {}) => {
-    if (!preset || !engineRef.current?.loadPresetText) return false;
+    if (
+      !preset ||
+      !engineRef.current?.loadPresetText ||
+      !beginNativeOperation()
+    ) return false;
     const { pushHistory = true } = options;
+    const generation = nativeEngineGenerationRef.current;
+    const isCurrentOperation = () =>
+      mountedRef.current &&
+      generation === nativeEngineGenerationRef.current &&
+      Boolean(engineRef.current);
 
     try {
       setError(null);
@@ -764,6 +788,7 @@ const Visualizer = ({
       if (isPromiseLike(loadedPresetName)) {
         loadedPresetName = await loadedPresetName;
       }
+      if (!isCurrentOperation()) return false;
       setLocalStorageItem(rustyMilkPresetStorageKey, JSON.stringify(preset));
       if (pushHistory && activeRustyMilkPresetId && activeRustyMilkPresetId !== preset.id) {
         setRustyMilkPresetHistory((history) => [
@@ -779,10 +804,21 @@ const Visualizer = ({
     } catch (presetError) {
       // eslint-disable-next-line no-console
       console.error('Failed to load RustyMilk preset from library', presetError);
-      setError(presetError?.message || 'Native preset load failed.');
+      if (isCurrentOperation()) {
+        setError(toDisplayError(presetError, 'Native preset load failed.'));
+      }
       return false;
+    } finally {
+      finishNativeOperation();
     }
-  }, [activeRustyMilkPresetId, refreshRustyMilkFragmentSummary, sizeCanvas]);
+  }, [
+    activeRustyMilkPresetId,
+    beginNativeOperation,
+    finishNativeOperation,
+    mountedRef,
+    refreshRustyMilkFragmentSummary,
+    sizeCanvas,
+  ]);
 
   const loadRustyMilkPresetByOffset = useCallback((offset) => {
     if (visibleRustyMilkPresetLibrary.length === 0) return false;
@@ -796,6 +832,7 @@ const Visualizer = ({
   }, [loadRustyMilkPresetEntry, visibleRustyMilkPresetIndex, visibleRustyMilkPresetLibrary]);
 
   const cyclePreset = useCallback(async () => {
+    if (!mountedRef.current) return;
     if (isRustyMilkEngine(activeEngineType) && rustyMilkPresetLibrary.length > 0) {
       await loadRustyMilkPresetByOffset(1);
       return;
@@ -805,10 +842,15 @@ const Visualizer = ({
     if (isPromiseLike(nextPresetName)) {
       nextPresetName = await nextPresetName;
     }
-    if (nextPresetName) {
+    if (mountedRef.current && nextPresetName) {
       setPresetName(nextPresetName);
     }
-  }, [activeEngineType, loadRustyMilkPresetByOffset, rustyMilkPresetLibrary.length]);
+  }, [
+    activeEngineType,
+    loadRustyMilkPresetByOffset,
+    mountedRef,
+    rustyMilkPresetLibrary.length,
+  ]);
 
   const cycleEngineType = useCallback(() => {
     const nextEngine = getNextEngine(activeEngineType);
@@ -954,12 +996,18 @@ const Visualizer = ({
     let cancelled = false;
     let resizeObserver = null;
     let createdEngine = null;
+    const generation = ++nativeEngineGenerationRef.current;
+    const isCurrent = () =>
+      !cancelled &&
+      mountedRef.current &&
+      generation === nativeEngineGenerationRef.current;
 
     (async () => {
       try {
         setError(null);
         setFallbackMode(false);
         const graph = await resumeAudioGraph(audioElement);
+        if (!isCurrent()) return;
         if (!graph) {
           setError('Web Audio is not available in this browser.');
           setFallbackMode(true);
@@ -980,7 +1028,7 @@ const Visualizer = ({
           rendererBackend: getRustyMilkRendererBackend(activeEngineType),
         });
         createdEngine = engine;
-        if (cancelled) {
+        if (!isCurrent()) {
           engine.dispose();
           return;
         }
@@ -1004,6 +1052,10 @@ const Visualizer = ({
           );
           if (isPromiseLike(importedPresetName)) {
             importedPresetName = await importedPresetName;
+          }
+          if (!isCurrent()) {
+            engine.dispose();
+            return;
           }
           setActiveRustyMilkPresetId(storedRustyMilkPreset.id || '');
           setPresetName(importedPresetName);
@@ -1029,15 +1081,18 @@ const Visualizer = ({
           engineRef.current = null;
           engineAudioNodeRef.current = null;
         }
-        // eslint-disable-next-line no-console
-        console.error('Failed to load RustyMilk visualizer', importError);
-        setError(getVisualizerErrorMessage(activeEngineType, importError));
-        setFallbackMode(true);
+        if (isCurrent()) {
+          // eslint-disable-next-line no-console
+          console.error('Failed to load RustyMilk visualizer', importError);
+          setError(getVisualizerErrorMessage(activeEngineType, importError));
+          setFallbackMode(true);
+        }
       }
     })();
 
     return () => {
       cancelled = true;
+      nativeEngineGenerationRef.current += 1;
       if (rafRef.current) {
         window.cancelAnimationFrame(rafRef.current);
         rafRef.current = null;
@@ -1054,9 +1109,17 @@ const Visualizer = ({
       }
       engineRef.current = null;
       engineAudioNodeRef.current = null;
-      setEngineName('');
+      if (mountedRef.current) setEngineName('');
     };
-  }, [mode, audioElement, activeEngineType, refreshRustyMilkFragmentSummary, renderLoop, sizeCanvas]);
+  }, [
+    mode,
+    audioElement,
+    activeEngineType,
+    mountedRef,
+    refreshRustyMilkFragmentSummary,
+    renderLoop,
+    sizeCanvas,
+  ]);
 
   useEffect(() => {
     if (engineOverride) return;
@@ -1153,129 +1216,156 @@ const Visualizer = ({
   const importRustyMilkPreset = useCallback(async (event) => {
     const files = Array.from(event.target.files || []);
     event.target.value = '';
-    if (files.length === 0 || !engineRef.current?.loadPresetText) return;
+    if (
+      files.length === 0 ||
+      !engineRef.current?.loadPresetText ||
+      !beginNativeOperation()
+    ) return;
 
-    setError(null);
-    const imported = [];
-    let activePresetEntry = null;
-    let importedFragmentCount = 0;
-    const skipped = [];
-    const { skippedTextureAssets, textureAssets } = await readNativeTextureAssets(files);
+    try {
+      setError(null);
+      const imported = [];
+      let activePresetEntry = null;
+      let importedFragmentCount = 0;
+      const skipped = [];
+      const { skippedTextureAssets, textureAssets } = await readNativeTextureAssets(files);
+      if (!mountedRef.current) return;
 
-    for (const file of files.filter(isRustyMilkPresetFile)) {
-      try {
-        const source = await file.text();
-        const presetTextureAssets = selectRustyMilkPresetTextureAssets(source, textureAssets);
-        const importedPresetName = engineRef.current.inspectPresetText
-          ? engineRef.current.inspectPresetText(source, file.name).title
-          : engineRef.current.loadPresetText(source, file.name);
-        imported.push({
-          fileName: file.name,
-          id: getRustyMilkPresetFileId(file),
-          source,
-          textureAssets: presetTextureAssets,
-          title: importedPresetName,
-        });
-      } catch (presetError) {
-        // eslint-disable-next-line no-console
-        console.error('Failed to import RustyMilk preset', presetError);
-        skipped.push({
-          fileName: file.name,
-          message: presetError?.message || 'Unsupported syntax or shader features may be present.',
-        });
-      }
-    }
-
-    if (imported.length > 0) {
-      const activePreset = imported[imported.length - 1];
-      let activePresetName = engineRef.current.loadPresetText(
-        activePreset.source,
-        activePreset.fileName,
-        { textureAssets: activePreset.textureAssets },
-      );
-      if (isPromiseLike(activePresetName)) {
-        activePresetName = await activePresetName;
-      }
-      activePreset.title = activePresetName;
-      activePresetEntry = activePreset;
-      setLocalStorageItem(rustyMilkPresetStorageKey, JSON.stringify(activePreset));
-      setActiveRustyMilkPresetId(activePreset.id);
-      refreshRustyMilkFragmentSummary();
-      setRustyMilkPresetLibrary((library) => {
-        const nextLibrary = imported.reduce(
-          (next, entry) => upsertRustyMilkPresetLibraryEntry(next, entry),
-          library,
-        );
-        writeStoredRustyMilkPresetLibrary(nextLibrary);
-        return nextLibrary;
-      });
-      setPresetName(activePresetName);
-      sizeCanvas();
-    }
-
-    for (const file of files.filter(isRustyMilkFragmentFile)) {
-      if (!engineRef.current?.loadPresetFragmentText) {
-        skipped.push({
-          fileName: file.name,
-          message: 'Native fragment import is not available.',
-        });
-        continue;
-      }
-      try {
-        const source = await file.text();
-        const fragmentTextureAssets = selectRustyMilkPresetTextureAssets(source, textureAssets);
-        const mergedTextureAssets = {
-          ...(activePresetEntry?.textureAssets || {}),
-          ...fragmentTextureAssets,
-        };
-        let result = engineRef.current.loadPresetFragmentText(source, file.name, {
-          textureAssets: mergedTextureAssets,
-        });
-        if (isPromiseLike(result)) {
-          result = await result;
+      for (const file of files.filter(isRustyMilkPresetFile)) {
+        if (!mountedRef.current) return;
+        try {
+          const source = await file.text();
+          if (!mountedRef.current) return;
+          const presetTextureAssets = selectRustyMilkPresetTextureAssets(source, textureAssets);
+          const importedPresetName = engineRef.current.inspectPresetText
+            ? engineRef.current.inspectPresetText(source, file.name).title
+            : engineRef.current.loadPresetText(source, file.name);
+          imported.push({
+            fileName: file.name,
+            id: getRustyMilkPresetFileId(file),
+            source,
+            textureAssets: presetTextureAssets,
+            title: importedPresetName,
+          });
+        } catch (presetError) {
+          // eslint-disable-next-line no-console
+          console.error('Failed to import RustyMilk preset', presetError);
+          skipped.push({
+            fileName: file.name,
+            message: toDisplayError(
+              presetError,
+              'Unsupported syntax or shader features may be present.',
+            ),
+          });
         }
-        const existingPreset = activePresetEntry || readStoredRustyMilkPreset();
-        const mergedPreset = {
-          fileName: existingPreset?.fileName || file.name,
-          id: existingPreset?.id || `fragment:${getRustyMilkPresetFileId(file)}`,
-          source: result.source,
-          textureAssets: {
-            ...(existingPreset?.textureAssets || {}),
-            ...fragmentTextureAssets,
-          },
-          title: result.title,
-        };
-        activePresetEntry = mergedPreset;
-        importedFragmentCount += 1;
-        setLocalStorageItem(rustyMilkPresetStorageKey, JSON.stringify(mergedPreset));
-        setActiveRustyMilkPresetId(mergedPreset.id);
+      }
+
+      if (imported.length > 0) {
+        const activePreset = imported[imported.length - 1];
+        let activePresetName = engineRef.current.loadPresetText(
+          activePreset.source,
+          activePreset.fileName,
+          { textureAssets: activePreset.textureAssets },
+        );
+        if (isPromiseLike(activePresetName)) {
+          activePresetName = await activePresetName;
+        }
+        if (!mountedRef.current) return;
+        activePreset.title = activePresetName;
+        activePresetEntry = activePreset;
+        setLocalStorageItem(rustyMilkPresetStorageKey, JSON.stringify(activePreset));
+        setActiveRustyMilkPresetId(activePreset.id);
         refreshRustyMilkFragmentSummary();
         setRustyMilkPresetLibrary((library) => {
-          const nextLibrary = upsertRustyMilkPresetLibraryEntry(library, mergedPreset);
+          const nextLibrary = imported.reduce(
+            (next, entry) => upsertRustyMilkPresetLibraryEntry(next, entry),
+            library,
+          );
           writeStoredRustyMilkPresetLibrary(nextLibrary);
           return nextLibrary;
         });
-        setPresetName(result.title);
+        setPresetName(activePresetName);
         sizeCanvas();
-      } catch (presetError) {
-        // eslint-disable-next-line no-console
-        console.error('Failed to import RustyMilk fragment', presetError);
-        skipped.push({
-          fileName: file.name,
-          message: presetError?.message || 'Unsupported fragment syntax may be present.',
-        });
       }
-    }
 
-    const importMessage = getRustyMilkPresetImportMessage({
-      importedCount: imported.length + importedFragmentCount,
-      skipped,
-      skippedTextureAssets,
-    });
-    if (importMessage) {
-      setError(importMessage);
+      for (const file of files.filter(isRustyMilkFragmentFile)) {
+        if (!mountedRef.current) return;
+        if (!engineRef.current?.loadPresetFragmentText) {
+          skipped.push({
+            fileName: file.name,
+            message: 'Native fragment import is not available.',
+          });
+          continue;
+        }
+        try {
+          const source = await file.text();
+          if (!mountedRef.current) return;
+          const fragmentTextureAssets = selectRustyMilkPresetTextureAssets(source, textureAssets);
+          const mergedTextureAssets = {
+            ...(activePresetEntry?.textureAssets || {}),
+            ...fragmentTextureAssets,
+          };
+          let result = engineRef.current.loadPresetFragmentText(source, file.name, {
+            textureAssets: mergedTextureAssets,
+          });
+          if (isPromiseLike(result)) {
+            result = await result;
+          }
+          if (!mountedRef.current) return;
+          const existingPreset = activePresetEntry || readStoredRustyMilkPreset();
+          const mergedPreset = {
+            fileName: existingPreset?.fileName || file.name,
+            id: existingPreset?.id || `fragment:${getRustyMilkPresetFileId(file)}`,
+            source: result.source,
+            textureAssets: {
+              ...(existingPreset?.textureAssets || {}),
+              ...fragmentTextureAssets,
+            },
+            title: result.title,
+          };
+          activePresetEntry = mergedPreset;
+          importedFragmentCount += 1;
+          setLocalStorageItem(rustyMilkPresetStorageKey, JSON.stringify(mergedPreset));
+          setActiveRustyMilkPresetId(mergedPreset.id);
+          refreshRustyMilkFragmentSummary();
+          setRustyMilkPresetLibrary((library) => {
+            const nextLibrary = upsertRustyMilkPresetLibraryEntry(library, mergedPreset);
+            writeStoredRustyMilkPresetLibrary(nextLibrary);
+            return nextLibrary;
+          });
+          setPresetName(result.title);
+          sizeCanvas();
+        } catch (presetError) {
+          // eslint-disable-next-line no-console
+          console.error('Failed to import RustyMilk fragment', presetError);
+          skipped.push({
+            fileName: file.name,
+            message: toDisplayError(
+              presetError,
+              'Unsupported fragment syntax may be present.',
+            ),
+          });
+        }
+      }
+
+      const importMessage = getRustyMilkPresetImportMessage({
+        importedCount: imported.length + importedFragmentCount,
+        skipped,
+        skippedTextureAssets,
+      });
+      if (mountedRef.current && importMessage) {
+        setError(importMessage);
+      }
+    } finally {
+      finishNativeOperation();
     }
-  }, [refreshRustyMilkFragmentSummary, sizeCanvas]);
+  }, [
+    beginNativeOperation,
+    finishNativeOperation,
+    mountedRef,
+    refreshRustyMilkFragmentSummary,
+    sizeCanvas,
+  ]);
 
   const exportRustyMilkFragment = useCallback((type) => {
     if (!engineRef.current?.exportPresetFragment) return;
@@ -1291,7 +1381,7 @@ const Visualizer = ({
     } catch (exportError) {
       // eslint-disable-next-line no-console
       console.error('Failed to export RustyMilk fragment', exportError);
-      setError(exportError?.message || 'Native fragment export failed.');
+      setError(toDisplayError(exportError, 'Native fragment export failed.'));
     }
   }, [selectedNativeShapeIndex, selectedNativeWaveIndex]);
 
@@ -1308,12 +1398,15 @@ const Visualizer = ({
     } catch (exportError) {
       // eslint-disable-next-line no-console
       console.error('Failed to export RustyMilk preset', exportError);
-      setError(exportError?.message || 'Native preset export failed.');
+      setError(toDisplayError(exportError, 'Native preset export failed.'));
     }
   }, []);
 
   const removeRustyMilkFragment = useCallback(async (type) => {
-    if (!engineRef.current?.removePresetFragment) return;
+    if (
+      !engineRef.current?.removePresetFragment ||
+      !beginNativeOperation()
+    ) return;
     const selectedIndex = type === 'wave' ? selectedNativeWaveIndex : selectedNativeShapeIndex;
     try {
       const storedPreset = readStoredRustyMilkPreset();
@@ -1323,6 +1416,7 @@ const Visualizer = ({
       if (isPromiseLike(result)) {
         result = await result;
       }
+      if (!mountedRef.current) return;
       if (!result) {
         setError(`No ${type} fragment is available in the active RustyMilk preset.`);
         return;
@@ -1348,9 +1442,16 @@ const Visualizer = ({
     } catch (removeError) {
       // eslint-disable-next-line no-console
       console.error('Failed to remove RustyMilk fragment', removeError);
-      setError(removeError?.message || 'Native fragment removal failed.');
+      if (mountedRef.current) {
+        setError(toDisplayError(removeError, 'Native fragment removal failed.'));
+      }
+    } finally {
+      finishNativeOperation();
     }
   }, [
+    beginNativeOperation,
+    finishNativeOperation,
+    mountedRef,
     refreshRustyMilkFragmentSummary,
     selectedNativeShapeIndex,
     selectedNativeWaveIndex,
@@ -1358,7 +1459,10 @@ const Visualizer = ({
   ]);
 
   const applyRustyMilkParameterEdit = useCallback(async () => {
-    if (!engineRef.current?.updatePresetBaseValue) return;
+    if (
+      !engineRef.current?.updatePresetBaseValue ||
+      !beginNativeOperation()
+    ) return;
     try {
       const storedPreset = readStoredRustyMilkPreset();
       let result = engineRef.current.updatePresetBaseValue(
@@ -1371,6 +1475,7 @@ const Visualizer = ({
       if (isPromiseLike(result)) {
         result = await result;
       }
+      if (!mountedRef.current) return;
       if (!result) {
         setError('Native parameter editing is not available for this value.');
         return;
@@ -1397,12 +1502,26 @@ const Visualizer = ({
     } catch (editError) {
       // eslint-disable-next-line no-console
       console.error('Failed to edit RustyMilk parameter', editError);
-      setError(editError?.message || 'Native parameter edit failed.');
+      if (mountedRef.current) {
+        setError(toDisplayError(editError, 'Native parameter edit failed.'));
+      }
+    } finally {
+      finishNativeOperation();
     }
-  }, [rustyMilkParameterValue, selectedRustyMilkParameter, sizeCanvas]);
+  }, [
+    beginNativeOperation,
+    finishNativeOperation,
+    mountedRef,
+    rustyMilkParameterValue,
+    selectedRustyMilkParameter,
+    sizeCanvas,
+  ]);
 
   const randomizeRustyMilkPresetParameters = useCallback(async () => {
-    if (!engineRef.current?.randomizePresetParameters) return;
+    if (
+      !engineRef.current?.randomizePresetParameters ||
+      !beginNativeOperation()
+    ) return;
     try {
       const storedPreset = readStoredRustyMilkPreset();
       let result = engineRef.current.randomizePresetParameters({
@@ -1411,6 +1530,7 @@ const Visualizer = ({
       if (isPromiseLike(result)) {
         result = await result;
       }
+      if (!mountedRef.current) return;
       if (!result) {
         setError('Native parameter randomization is not available for this preset.');
         return;
@@ -1438,9 +1558,19 @@ const Visualizer = ({
     } catch (randomizeError) {
       // eslint-disable-next-line no-console
       console.error('Failed to randomize RustyMilk preset', randomizeError);
-      setError(randomizeError?.message || 'Native parameter randomization failed.');
+      if (mountedRef.current) {
+        setError(toDisplayError(randomizeError, 'Native parameter randomization failed.'));
+      }
+    } finally {
+      finishNativeOperation();
     }
-  }, [refreshRustyMilkFragmentSummary, sizeCanvas]);
+  }, [
+    beginNativeOperation,
+    finishNativeOperation,
+    mountedRef,
+    refreshRustyMilkFragmentSummary,
+    sizeCanvas,
+  ]);
 
   const loadRustyMilkLibraryPreset = useCallback((event) => {
     const preset = rustyMilkPresetLibrary.find((entry) => entry.id === event.target.value);

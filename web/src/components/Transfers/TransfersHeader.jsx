@@ -61,8 +61,10 @@ const getRemovableFiles = ({ files, removeOption }) => {
 
 const TransfersHeader = ({
   acceleratedEnabled = false,
+  acceleratedChanging = false,
   autoReplaceEnabled = false,
   autoReplaceThreshold = 5,
+  autoReplaceChanging = false,
   cancelling = false,
   direction,
   onAcceleratedChange,
@@ -179,7 +181,7 @@ const TransfersHeader = ({
             <Checkbox
               checked={acceleratedEnabled}
               className="accelerated-downloads-toggle"
-              disabled={!server.isConnected}
+              disabled={!server.isConnected || acceleratedChanging}
               hidden={direction === 'upload'}
               label="Accelerated"
               onChange={(_, data) => onAcceleratedChange?.(data.checked)}
@@ -195,7 +197,7 @@ const TransfersHeader = ({
             <Checkbox
               checked={autoReplaceEnabled}
               className="auto-replace-toggle"
-              disabled={!server.isConnected}
+              disabled={!server.isConnected || autoReplaceChanging}
               hidden={direction === 'upload'}
               label="Auto-Replace"
               onChange={(_, data) => onAutoReplaceChange?.(data.checked)}

@@ -182,6 +182,10 @@ const SpectrumAnalyzer = ({ audioElement, className = '', mode }) => {
     resumeAudioGraph(audioElement).then((graph) => {
       if (cancelled || !graph) return;
       draw(graph.analyser);
+    }).catch((error) => {
+      if (!cancelled) {
+        console.debug('[Player] Unable to start spectrum analyzer:', error);
+      }
     });
 
     return () => {

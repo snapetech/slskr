@@ -1,4 +1,5 @@
 import { urlBase } from '../../config';
+import { toDisplayError } from '../../lib/errors';
 import * as pods from '../../lib/pods';
 import * as portForwarding from '../../lib/portForwarding';
 import { createPollingController } from '../../lib/usePolling';
@@ -77,14 +78,18 @@ class PortForwarding extends Component {
     this.isMountedFlag = false;
     this.requestIds = {
       availablePorts: 0,
+      createForwarding: 0,
       forwardingStatus: 0,
       podDetails: 0,
       pods: 0,
       vpnPodStatus: 0,
+      stopForwarding: 0,
     };
     this.pollControllers = {
       status: null,
     };
+    this.createInFlight = false;
+    this.stopInFlight = false;
   }
 
   componentDidMount() {
@@ -130,7 +135,9 @@ class PortForwarding extends Component {
       ]);
     } catch (error) {
       console.error('Failed to initialize port forwarding:', error);
-      if (this.isMountedFlag) this.setState({ error: error.message });
+      if (this.isMountedFlag) {
+        this.setState({ error: toDisplayError(error, 'Failed to initialize port forwarding') });
+      }
     } finally {
       if (this.isMountedFlag) this.setState({ loading: false });
     }
@@ -140,7 +147,7 @@ class PortForwarding extends Component {
     const requestId = ++this.requestIds.pods;
     try {
       const podsList = await pods.list();
-      const normalizedPods = podsList || [];
+      const normalizedPods = Array.isArray(podsList) ? podsList : [];
       if (
         this.isMountedFlag &&
         requestId === this.requestIds.pods
@@ -168,7 +175,11 @@ class PortForwarding extends Component {
         this.isMountedFlag &&
         requestId === this.requestIds.availablePorts
       ) {
-        this.setState({ availablePorts: result.availablePorts || [] });
+        this.setState({
+          availablePorts: Array.isArray(result?.availablePorts)
+            ? result.availablePorts
+            : [],
+        });
       }
     } catch (error) {
       console.error('Failed to fetch available ports:', error);
@@ -185,7 +196,7 @@ class PortForwarding extends Component {
     const requestId = ++this.requestIds.forwardingStatus;
     try {
       const status = await portForwarding.getForwardingStatus();
-      const normalizedStatus = status || [];
+      const normalizedStatus = Array.isArray(status) ? status : [];
       if (
         this.isMountedFlag &&
         requestId === this.requestIds.forwardingStatus
@@ -265,6 +276,7 @@ class PortForwarding extends Component {
   };
 
   handlePodSelection = async (podId) => {
+    if (!this.isMountedFlag) return;
     const requestId = ++this.requestIds.podDetails;
     this.setState({
       loading: true,
@@ -286,7 +298,9 @@ class PortForwarding extends Component {
         this.isMountedFlag &&
         requestId === this.requestIds.podDetails
       ) {
-        this.setState({ error: `Failed to load pod details: ${error.message}` });
+        this.setState({
+          error: `Failed to load pod details: ${toDisplayError(error)}`,
+        });
       }
     } finally {
       if (
@@ -316,8 +330,10 @@ class PortForwarding extends Component {
       return;
     }
 
-    const localPort = Number.parseInt(createForm.localPort);
-    const destinationPort = Number.parseInt(createForm.destinationPort);
+    if (this.state.creatingForwarding || this.createInFlight) return;
+
+    const localPort = Number.parseInt(createForm.localPort, 10);
+    const destinationPort = Number.parseInt(createForm.destinationPort, 10);
 
     if (isNaN(localPort) || localPort < 1_024 || localPort > 65_535) {
       this.setState({ error: 'Local port must be between 1024 and 65535' });
@@ -333,6 +349,8 @@ class PortForwarding extends Component {
       return;
     }
 
+    const requestId = ++this.requestIds.createForwarding;
+    this.createInFlight = true;
     this.setState({ creatingForwarding: true, error: null });
 
     try {
@@ -344,7 +362,12 @@ class PortForwarding extends Component {
         serviceName: createForm.serviceName || undefined,
       });
 
-      if (!this.isMountedFlag) return;
+      if (
+        !this.isMountedFlag ||
+        requestId !== this.requestIds.createForwarding
+      ) {
+        return;
+      }
       // Reset form and refresh status
       this.setState({
         createForm: initialState.createForm,
@@ -357,13 +380,33 @@ class PortForwarding extends Component {
       ]);
     } catch (error) {
       console.error('Failed to create port forwarding:', error);
-      if (this.isMountedFlag) this.setState({ error: error.message });
+      if (
+        this.isMountedFlag &&
+        requestId === this.requestIds.createForwarding
+      ) {
+        this.setState({
+          error: toDisplayError(error, 'Failed to create port forwarding'),
+        });
+      }
     } finally {
-      if (this.isMountedFlag) this.setState({ creatingForwarding: false });
+      if (
+        this.isMountedFlag &&
+        requestId === this.requestIds.createForwarding
+      ) {
+        this.setState({ creatingForwarding: false });
+      }
+      this.createInFlight = false;
     }
   };
 
   handleStopForwarding = async (localPort) => {
+    if (
+      !this.isMountedFlag ||
+      this.state.stoppingForwarding ||
+      this.stopInFlight
+    ) return;
+    const requestId = ++this.requestIds.stopForwarding;
+    this.stopInFlight = true;
     this.setState({ error: null, stoppingForwarding: true, success: null });
 
     try {
@@ -372,16 +415,32 @@ class PortForwarding extends Component {
         this.fetchAvailablePorts(),
         this.fetchForwardingStatus(),
       ]);
-      if (this.isMountedFlag) {
+      if (
+        this.isMountedFlag &&
+        requestId === this.requestIds.stopForwarding
+      ) {
         this.setState({
           success: `Successfully stopped forwarding on port ${localPort}`,
         });
       }
     } catch (error) {
       console.error('Failed to stop port forwarding:', error);
-      if (this.isMountedFlag) this.setState({ error: error.message });
+      if (
+        this.isMountedFlag &&
+        requestId === this.requestIds.stopForwarding
+      ) {
+        this.setState({
+          error: toDisplayError(error, 'Failed to stop port forwarding'),
+        });
+      }
     } finally {
-      if (this.isMountedFlag) this.setState({ stoppingForwarding: false });
+      if (
+        this.isMountedFlag &&
+        requestId === this.requestIds.stopForwarding
+      ) {
+        this.setState({ stoppingForwarding: false });
+      }
+      this.stopInFlight = false;
     }
   };
 

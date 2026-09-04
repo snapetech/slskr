@@ -1,10 +1,12 @@
 import './Chat.css';
 import * as chat from '../../lib/chat';
+import { toDisplayError } from '../../lib/errors';
 import { getLocalStorageItem, setLocalStorageItem } from '../../lib/storage';
 import { useMountedRef } from '../../lib/useMountedRef';
 import ChatSession from './ChatSession';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
+import { toast } from 'react-toastify';
 import {
   Button,
   Icon,
@@ -18,6 +20,22 @@ import {
 
 let tabCounter = 0;
 
+const normalizeTab = (tab) => {
+  if (!tab || typeof tab !== 'object' || Array.isArray(tab)) return null;
+  const username = `${tab.username ?? ''}`.trim();
+  return {
+    ...tab,
+    key: `${tab.key || `chat-tab-${username || tabCounter}`}`,
+    label: `${tab.label || username || 'New Chat'}`,
+    username,
+  };
+};
+
+const asRecords = (value) =>
+  (Array.isArray(value) ? value : []).filter(
+    (record) => record && typeof record === 'object' && !Array.isArray(record),
+  );
+
 // Load tabs from localStorage
 const loadTabsFromStorage = () => {
   try {
@@ -25,9 +43,14 @@ const loadTabsFromStorage = () => {
 
     if (saved) {
       const parsed = JSON.parse(saved);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return [];
       // Restore tabCounter to avoid key collisions
-      tabCounter = parsed.tabCounter || 0;
-      return parsed.tabs || [];
+      tabCounter = Number.isInteger(parsed.tabCounter) && parsed.tabCounter >= 0
+        ? parsed.tabCounter
+        : 0;
+      return Array.isArray(parsed.tabs)
+        ? parsed.tabs.map(normalizeTab).filter(Boolean)
+        : [];
     }
   } catch {
     // ignore
@@ -53,6 +76,7 @@ const Chat = ({ runtimeProfile, state }) => {
   const mountedRef = useMountedRef();
   const hydrateRequestIdRef = useRef(0);
   const deleteRequestIdRef = useRef(0);
+  const deleteInFlightRef = useRef(false);
   const closeTabRef = useRef(null);
   const updateTabRef = useRef(null);
 
@@ -125,8 +149,13 @@ const Chat = ({ runtimeProfile, state }) => {
       ) {
         return;
       }
-      const activeConversations = (serverConversations || [])
-        .filter((conversation) => conversation.username)
+      const activeConversations = asRecords(serverConversations)
+        .filter((conversation) => typeof conversation.username === 'string' && conversation.username.trim())
+        .map((conversation) => ({
+          ...conversation,
+          hasUnAcknowledgedMessages: Boolean(conversation.hasUnAcknowledgedMessages),
+          username: conversation.username.trim(),
+        }))
         .sort((a, b) => {
           if (a.hasUnAcknowledgedMessages !== b.hasUnAcknowledgedMessages) {
             return a.hasUnAcknowledgedMessages ? -1 : 1;
@@ -220,27 +249,32 @@ const Chat = ({ runtimeProfile, state }) => {
 
   const handleDeleteConversation = useCallback(
     async (username) => {
-      if (!mountedRef.current) return;
+      if (!mountedRef.current || deleteInFlightRef.current) return;
+      deleteInFlightRef.current = true;
       const requestId = ++deleteRequestIdRef.current;
 
-      // Remove the conversation from chat API
       try {
+        // Remove the conversation from chat API
         await chat.remove({ username });
+        if (
+          !mountedRef.current ||
+          deleteRequestIdRef.current !== requestId
+        ) {
+          return;
+        }
+
+        // Close the tab only after the server confirms deletion.
+        const tabToClose = tabs.find((t) => t.username === username);
+        if (tabToClose) {
+          closeTabRef.current?.(tabToClose.key);
+        }
       } catch (error) {
         console.error('Failed to remove conversation:', error);
-      }
-
-      if (
-        !mountedRef.current ||
-        deleteRequestIdRef.current !== requestId
-      ) {
-        return;
-      }
-
-      // Close the tab
-      const tabToClose = tabs.find((t) => t.username === username);
-      if (tabToClose) {
-        closeTabRef.current?.(tabToClose.key);
+        if (mountedRef.current) {
+          toast.error(`Failed to delete conversation: ${toDisplayError(error)}`);
+        }
+      } finally {
+        deleteInFlightRef.current = false;
       }
     },
     [mountedRef, tabs],

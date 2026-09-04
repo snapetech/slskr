@@ -32,6 +32,7 @@ const initialState = {
   browseError: undefined,
   browseState: 'idle',
   browseStatus: 0,
+  downloadPending: false,
   info: {
     directories: 0,
     files: 0,
@@ -70,6 +71,48 @@ export const getBrowseErrorMessage = (error) => {
     : 'Browse failed';
 };
 
+const asRecords = (value) =>
+  (Array.isArray(value) ? value : []).filter(
+    (record) => record && typeof record === 'object' && !Array.isArray(record),
+  );
+
+const toNonNegativeInteger = (value) => {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? Math.floor(number) : 0;
+};
+
+const normalizeBrowseFile = (file) => {
+  if (!file || typeof file !== 'object' || Array.isArray(file)) return null;
+  const filename = typeof file.filename === 'string' ? file.filename : '';
+  if (!filename) return null;
+  return {
+    ...file,
+    filename,
+    length: toNonNegativeInteger(file.length),
+    size: toNonNegativeInteger(file.size),
+  };
+};
+
+const normalizeDirectory = (directory) => {
+  if (!directory || typeof directory !== 'object' || Array.isArray(directory)) {
+    return null;
+  }
+  const name = typeof directory.name === 'string' ? directory.name : '';
+  if (!name) return null;
+  return {
+    ...directory,
+    children: asRecords(directory.children)
+      .map(normalizeDirectory)
+      .filter(Boolean),
+    fileCount: toNonNegativeInteger(directory.fileCount),
+    files: asRecords(directory.files).map(normalizeBrowseFile).filter(Boolean),
+    name,
+  };
+};
+
+const normalizeDirectories = (value) =>
+  asRecords(value).map(normalizeDirectory).filter(Boolean);
+
 // Cleanup old browse cache entries using LRU strategy
 const cleanupBrowseCache = () => {
   try {
@@ -107,6 +150,8 @@ class BrowseSession extends Component {
     this.browseRequestId = 0;
     this.userNoteRequestId = 0;
     this.pollController = null;
+    this.downloadInFlight = false;
+    this.downloadRequestId = 0;
   }
 
   componentDidMount() {
@@ -148,6 +193,7 @@ class BrowseSession extends Component {
     this.isMountedFlag = false;
     this.browseRequestId += 1;
     this.userNoteRequestId += 1;
+    this.downloadRequestId += 1;
     if (this.mountTimeoutId) {
       clearTimeout(this.mountTimeoutId);
       this.mountTimeoutId = null;
@@ -189,9 +235,12 @@ class BrowseSession extends Component {
   };
 
   browse = () => {
-    const username = this.inputtext.inputRef.current.value;
+    if (!this.isMountedFlag) return;
+    const username = this.inputtext?.inputRef?.current?.value;
+    const normalizedUsername =
+      typeof username === 'string' ? username.trim() : '';
 
-    if (!username) {
+    if (!normalizedUsername) {
       return;
     }
 
@@ -199,31 +248,37 @@ class BrowseSession extends Component {
 
     // Notify parent to update tab label
     if (this.props.onUsernameChange) {
-      this.props.onUsernameChange(username);
+      this.props.onUsernameChange(normalizedUsername);
     }
 
     this.setState(
-      { browseError: undefined, browseState: 'pending', username },
+      {
+        browseError: undefined,
+        browseState: 'pending',
+        browseStatus: 0,
+        username: normalizedUsername,
+      },
       () => {
         if (!this.isMountedFlag || requestId !== this.browseRequestId) {
           return;
         }
 
-        this.fetchUserNote(username);
+        this.fetchUserNote(normalizedUsername);
         // Start polling only while browse is in progress
         this.startPolling();
 
         users
-          .browse({ username })
+          .browse({ username: normalizedUsername })
           .then((response) => {
             if (!this.isMountedFlag || requestId !== this.browseRequestId) {
               return;
             }
 
-            let { directories } = response;
-            const { lockedDirectories } = response;
+            const directories = normalizeDirectories(response?.directories);
+            const lockedDirectories = normalizeDirectories(
+              response?.lockedDirectories,
+            );
 
-            // we need to know the directory separator. assume it is \ to start
             let separator;
 
             const directoryCount = directories.length;
@@ -243,7 +298,9 @@ class BrowseSession extends Component {
               0,
             );
 
-            directories = directories.concat(
+            separator ||= initialState.separator;
+
+            const allDirectories = directories.concat(
               lockedDirectories.map((d) => ({ ...d, locked: true })),
             );
 
@@ -255,7 +312,10 @@ class BrowseSession extends Component {
                 lockedFiles: lockedFileCount,
               },
               separator,
-              tree: this.getDirectoryTree({ directories, separator }),
+              tree: this.getDirectoryTree({
+                directories: allDirectories,
+                separator,
+              }),
             });
           })
           .then(() => {
@@ -268,7 +328,9 @@ class BrowseSession extends Component {
             this.setState(
               { browseError: undefined, browseState: 'complete' },
               () => {
-                this.saveState();
+                if (this.isMountedFlag && requestId === this.browseRequestId) {
+                  this.saveState();
+                }
               },
             );
           })
@@ -291,10 +353,13 @@ class BrowseSession extends Component {
   clear = () => {
     this.browseRequestId += 1;
     this.userNoteRequestId += 1;
+    this.downloadRequestId += 1;
     this.stopPolling();
+    this.downloadInFlight = false;
     this.setState(initialState, () => {
+      if (!this.isMountedFlag) return;
       this.saveState();
-      this.inputtext.focus();
+      this.inputtext?.focus?.();
     });
   };
 
@@ -338,10 +403,26 @@ class BrowseSession extends Component {
           lzString.decompress(getLocalStorageItem(key, '') || ''),
         );
 
-        if (savedState && savedState.tree && savedState.tree.length > 0) {
+        const savedTree = normalizeDirectories(savedState?.tree);
+        if (savedState && savedTree.length > 0) {
           // We have cached data - use it instead of re-fetching
           this.setState({
             ...savedState,
+            info: {
+              ...initialState.info,
+              ...(savedState.info || {}),
+            },
+            separator: ['\\', '/'].includes(savedState.separator)
+              ? savedState.separator
+              : initialState.separator,
+            selectedDirectory:
+              normalizeDirectory(savedState.selectedDirectory) ||
+              initialState.selectedDirectory,
+            tree: savedTree,
+            username:
+              typeof savedState.username === 'string'
+                ? savedState.username
+                : username,
             browseState: 'complete',
           });
           return true; // Indicate we loaded cached data
@@ -360,9 +441,18 @@ class BrowseSession extends Component {
     if (browseState === 'pending' && username) {
       try {
         const response = await users.getBrowseStatus({ username });
+        const status =
+          response?.data && typeof response.data === 'object'
+            ? {
+                percentComplete: Math.min(
+                  100,
+                  Math.max(0, Number(response.data.percentComplete) || 0),
+                ),
+              }
+            : 0;
         if (this.isMountedFlag && username === this.state.username) {
           this.setState({
-            browseStatus: response.data,
+            browseStatus: status,
           });
         }
       } catch {
@@ -372,7 +462,12 @@ class BrowseSession extends Component {
   };
 
   getDirectoryTree = ({ directories, separator }) => {
-    if (directories.length === 0 || directories[0].name === undefined) {
+    const normalizedDirectories = normalizeDirectories(directories);
+    const pathSeparator = ['\\', '/'].includes(separator)
+      ? separator
+      : initialState.separator;
+
+    if (normalizedDirectories.length === 0) {
       return [];
     }
 
@@ -381,8 +476,8 @@ class BrowseSession extends Component {
     // - do the split once
     // - future look ups are done from the Map
     const depthMap = new Map();
-    for (const d of directories) {
-      const directoryDepth = d.name.split(separator).length;
+    for (const d of normalizedDirectories) {
+      const directoryDepth = d.name.split(pathSeparator).length;
       if (!depthMap.has(directoryDepth)) {
         depthMap.set(directoryDepth, []);
       }
@@ -395,7 +490,12 @@ class BrowseSession extends Component {
     return depthMap
       .get(depth)
       .map((directory) =>
-        this.getChildDirectories(depthMap, directory, separator, depth + 1),
+        this.getChildDirectories(
+          depthMap,
+          directory,
+          pathSeparator,
+          depth + 1,
+        ),
       );
   };
 
@@ -406,7 +506,7 @@ class BrowseSession extends Component {
 
     const children = depthMap
       .get(depth)
-      .filter((d) => d.name.startsWith(root.name));
+      .filter((d) => d.name.startsWith(root.name + separator));
 
     return {
       ...root,
@@ -450,12 +550,18 @@ class BrowseSession extends Component {
 
     // Collect all files recursively
     const collectFiles = (folder) => {
-      let collected = (folder.files || []).map((f) => ({
-        filename: `${folder.name}${separator}${f.filename}`,
-        size: f.size,
-      }));
+      const folderName = typeof folder?.name === 'string' ? folder.name : '';
+      const pathSeparator = ['\\', '/'].includes(separator)
+        ? separator
+        : initialState.separator;
+      let collected = asRecords(folder?.files)
+        .filter((file) => typeof file.filename === 'string' && file.filename)
+        .map((file) => ({
+          filename: folderName + pathSeparator + file.filename,
+          size: toNonNegativeInteger(file.size),
+        }));
 
-      if (folder.children) {
+      if (Array.isArray(folder?.children)) {
         for (const child of folder.children) {
           collected = collected.concat(collectFiles(child));
         }
@@ -467,24 +573,61 @@ class BrowseSession extends Component {
     const filesToDownload = collectFiles(directory);
 
     if (filesToDownload.length === 0) {
-      toast.info(`No files found in directory: ${directory.name}`);
+      toast.info(
+        'No files found in directory: ' +
+          (typeof directory?.name === 'string'
+            ? directory.name
+            : 'selected folder'),
+      );
       return;
     }
+
+    if (this.downloadInFlight) return;
 
     if (
       // eslint-disable-next-line no-alert
       window.confirm(
-        `Download ${filesToDownload.length} files from ${directory.name}?`,
+        'Download ' +
+          filesToDownload.length +
+          ' files from ' +
+          (directory.name || 'selected folder') +
+          '?',
       )
     ) {
-      transfers
+      const requestId = ++this.downloadRequestId;
+      this.downloadInFlight = true;
+      this.setState({ downloadPending: true });
+      void transfers
         .download({ files: filesToDownload, username })
         .then(() => {
-          toast.success(`Queued ${filesToDownload.length} files for download`);
+          if (
+            this.isMountedFlag &&
+            requestId === this.downloadRequestId
+          ) {
+            toast.success(
+              'Queued ' + filesToDownload.length + ' files for download',
+            );
+          }
         })
         .catch((error) => {
-          console.error(error);
-          toast.error(`Failed to queue download: ${error?.message || error}`);
+          if (
+            this.isMountedFlag &&
+            requestId === this.downloadRequestId
+          ) {
+            console.error(error);
+            toast.error(
+              'Failed to queue download: ' + getBrowseErrorMessage(error),
+            );
+          }
+        })
+        .finally(() => {
+          if (
+            this.isMountedFlag &&
+            requestId === this.downloadRequestId
+          ) {
+            this.downloadInFlight = false;
+            this.setState({ downloadPending: false });
+          }
         });
     }
   };
@@ -494,6 +637,7 @@ class BrowseSession extends Component {
       browseError,
       browseState,
       browseStatus,
+      downloadPending,
       info,
       selectedDirectory,
       separator,
@@ -506,9 +650,12 @@ class BrowseSession extends Component {
     const finished = ['complete', 'error'].includes(browseState);
     const emptyTree = finished && tree.length === 0;
 
-    const files = (selectedDirectory.files || []).map((f) => ({
+    const files = asRecords(selectedDirectory.files).map((f) => ({
       ...f,
-      filename: `${name}${separator}${f.filename}`,
+      filename:
+        (typeof name === 'string' ? name : '') +
+        (['\\', '/'].includes(separator) ? separator : initialState.separator) +
+        f.filename,
     }));
 
     return (
@@ -647,6 +794,7 @@ class BrowseSession extends Component {
                     <Card.Content>
                       <Segment className="browse-folderlist">
                         <DirectoryTree
+                          downloadPending={downloadPending}
                           onDownload={this.handleDownloadDirectory}
                           onSelect={(_, value) => this.selectDirectory(value)}
                           selectedDirectoryName={name}

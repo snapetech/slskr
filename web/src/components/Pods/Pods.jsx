@@ -1,5 +1,6 @@
 import './Pods.css';
 import { urlBase } from '../../config';
+import { toDisplayError } from '../../lib/errors';
 import * as pods from '../../lib/pods';
 import { createPollingController } from '../../lib/usePolling';
 import PlaceholderSegment from '../Shared/PlaceholderSegment';
@@ -42,12 +43,55 @@ const initialState = {
   createName: '',
   createTags: '',
   createVisibility: 'Unlisted',
+  creatingPod: false,
   discoveryLoading: false,
   discoveryQuery: '',
   discoveryResults: [],
+  leavingPod: false,
+  savingPod: false,
+  sendingMessage: false,
 };
 
 const GOLD_STAR_CLUB_POD_ID = 'pod:901d57a2c1bb4e5d90d57a2c1bb4e5d0';
+
+const asRecords = (value) =>
+  (Array.isArray(value) ? value : []).filter(
+    (record) => record && typeof record === 'object' && !Array.isArray(record),
+  );
+
+const normalizeChannel = (channel) => {
+  const channelId = channel.channelId ?? channel.id;
+  if (channelId === undefined || channelId === null || channelId === '') return null;
+  return {
+    ...channel,
+    channelId: String(channelId),
+    kind: String(channel.kind ?? channel.channelKind ?? 'General'),
+    name: String(channel.name ?? channel.channelName ?? channelId),
+  };
+};
+
+const normalizePod = (pod) => {
+  const podId = pod.podId ?? pod.PodId ?? pod.id;
+  if (podId === undefined || podId === null || podId === '') return null;
+  return {
+    ...pod,
+    channels: asRecords(pod.channels).map(normalizeChannel).filter(Boolean),
+    name: String(pod.name ?? pod.Name ?? podId),
+    podId: String(podId),
+    tags: (Array.isArray(pod.tags) ? pod.tags : Array.isArray(pod.Tags) ? pod.Tags : [])
+      .filter((tag) => tag !== undefined && tag !== null)
+      .map((tag) => String(tag)),
+  };
+};
+
+const normalizeMessage = (message) => ({
+  ...message,
+  body: String(message.body ?? message.message ?? ''),
+  senderPeerId: String(message.senderPeerId ?? message.username ?? message.sender ?? 'Unknown peer'),
+  timestampUnixMs: Number.isFinite(Number(message.timestampUnixMs))
+    ? Number(message.timestampUnixMs)
+    : null,
+});
 
 const withRouter = (WrappedComponent) => {
   const RoutedComponent = (props) => {
@@ -86,6 +130,13 @@ class Pods extends Component {
     this.pollControllers = {
       messages: null,
       pods: null,
+    };
+    this.actionInFlight = {
+      create: false,
+      discover: false,
+      leave: false,
+      save: false,
+      send: false,
     };
   }
 
@@ -162,11 +213,21 @@ class Pods extends Component {
     this.pollControllers.pods = null;
   };
 
+  beginAction = (action) => {
+    if (!this.isMountedFlag || this.actionInFlight[action]) return false;
+    this.actionInFlight[action] = true;
+    return true;
+  };
+
+  finishAction = (action) => {
+    this.actionInFlight[action] = false;
+  };
+
   fetchPods = async () => {
     const requestId = ++this.requestIds.pods;
     try {
       const podsList = await pods.list();
-      const normalizedPods = podsList || [];
+      const normalizedPods = asRecords(podsList).map(normalizePod).filter(Boolean);
       if (this.isMountedFlag && requestId === this.requestIds.pods) {
         this.setState({ pods: normalizedPods });
       }
@@ -187,12 +248,14 @@ class Pods extends Component {
   fetchPodDetail = async (podId) => {
     const requestId = ++this.requestIds.podDetails;
     try {
-      const [detail, members] = await Promise.all([
+      const [detailResponse, membersResponse] = await Promise.all([
         pods.get(podId),
         pods.getMembers(podId),
       ]);
+      const detail = normalizePod(detailResponse);
+      const members = asRecords(membersResponse);
       if (this.isMountedFlag && requestId === this.requestIds.podDetails) {
-        this.setState({ members: members || [], podDetail: detail });
+        this.setState({ members, podDetail: detail });
       }
       return detail;
     } catch (error) {
@@ -226,7 +289,7 @@ class Pods extends Component {
         this.setState((previousState) => ({
           messages: {
             ...previousState.messages,
-            [messageKey]: channelMessages || [],
+            [messageKey]: asRecords(channelMessages).map(normalizeMessage),
           },
         }));
       }
@@ -238,8 +301,9 @@ class Pods extends Component {
   getChannelIndex = (podDetail, channelId) =>
     Math.max(
       0,
-      podDetail?.channels?.findIndex((channel) => channel.channelId === channelId) ??
-        0,
+      Array.isArray(podDetail?.channels)
+        ? Math.max(0, podDetail.channels.findIndex((channel) => channel.channelId === channelId))
+        : 0,
     );
 
   selectPod = async (podId, channelId = null) => {
@@ -359,13 +423,19 @@ class Pods extends Component {
     const { activeChannelId, activePodId, messageInput } = this.state;
     const { state: applicationState } = this.props;
 
-    if (!activePodId || !activeChannelId || !messageInput.trim()) {
+    if (
+      !activePodId ||
+      !activeChannelId ||
+      !messageInput.trim() ||
+      !this.beginAction('send')
+    ) {
       return;
     }
 
     // Get peerId from application state (username)
     const senderPeerId = applicationState?.user?.username || 'local-peer';
 
+    this.setState({ sendingMessage: true });
     try {
       await pods.sendMessage(
         activePodId,
@@ -384,7 +454,10 @@ class Pods extends Component {
       // Messages will be refreshed by the shared non-overlapping poller.
     } catch (error) {
       console.error('Failed to send message:', error);
-      toast.error(`Failed to send message: ${error.message}`);
+      toast.error(`Failed to send message: ${toDisplayError(error)}`);
+    } finally {
+      this.finishAction('send');
+      if (this.isMountedFlag) this.setState({ sendingMessage: false });
     }
   };
 
@@ -406,8 +479,9 @@ class Pods extends Component {
       createVisibility,
     } = this.state;
     const name = createName.trim();
-    if (!name) return;
+    if (!name || !this.beginAction('create')) return;
 
+    this.setState({ creatingPod: true });
     try {
       const newPod = await pods.create({
         channels: [
@@ -428,16 +502,22 @@ class Pods extends Component {
       }, this.getLocalPeerId());
 
       if (!this.isMountedFlag) return;
+      const createdPod = normalizePod(newPod);
+      if (!createdPod?.podId) throw new Error('The server returned no pod ID.');
       this.setState({ createModalOpen: false });
       await this.fetchPods();
-      await this.selectPod(newPod.podId);
+      await this.selectPod(createdPod.podId);
     } catch (error) {
       console.error('Failed to create pod:', error);
-      toast.error(`Failed to create pod: ${error.message}`);
+      toast.error(`Failed to create pod: ${toDisplayError(error)}`);
+    } finally {
+      this.finishAction('create');
+      if (this.isMountedFlag) this.setState({ creatingPod: false });
     }
   };
 
   handleDiscoverPods = async () => {
+    if (!this.isMountedFlag || !this.beginAction('discover')) return;
     const requestId = ++this.requestIds.discovery;
     const query = this.state.discoveryQuery.trim();
     this.setState({ discoveryLoading: true });
@@ -450,11 +530,13 @@ class Pods extends Component {
         this.isMountedFlag &&
         requestId === this.requestIds.discovery
       ) {
-        this.setState({ discoveryResults: discovered || [] });
+        this.setState({
+          discoveryResults: asRecords(discovered).map(normalizePod).filter(Boolean),
+        });
       }
     } catch (error) {
       console.error('Failed to discover pods:', error);
-      toast.error(`Failed to discover pods: ${error.message}`);
+      toast.error(`Failed to discover pods: ${toDisplayError(error)}`);
     } finally {
       if (
         this.isMountedFlag &&
@@ -462,18 +544,20 @@ class Pods extends Component {
       ) {
         this.setState({ discoveryLoading: false });
       }
+      this.finishAction('discover');
     }
   };
 
   handleSaveDiscoveredPod = async (pod) => {
     const podId = pod.podId || pod.PodId;
     const name = pod.name || pod.Name || podId;
-    const tags = pod.tags || pod.Tags || [];
+    const tags = Array.isArray(pod.tags) ? pod.tags : Array.isArray(pod.Tags) ? pod.Tags : [];
     const visibility = pod.visibility || pod.Visibility || 'Unlisted';
     const focusContentId = pod.focusContentId || pod.FocusContentId || null;
 
-    if (!podId) return;
+    if (!podId || !this.beginAction('save')) return;
 
+    this.setState({ savingPod: true });
     try {
       const savedPod = await pods.create({
         channels: [
@@ -494,10 +578,14 @@ class Pods extends Component {
       if (!this.isMountedFlag) return;
       toast.success(`Saved pod ${name}`);
       await this.fetchPods();
-      await this.selectPod(savedPod.podId);
+      const normalizedSavedPod = normalizePod(savedPod);
+      if (normalizedSavedPod?.podId) await this.selectPod(normalizedSavedPod.podId);
     } catch (error) {
       console.error('Failed to save discovered pod:', error);
-      toast.error(`Failed to save pod: ${error.message}`);
+      toast.error(`Failed to save pod: ${toDisplayError(error)}`);
+    } finally {
+      this.finishAction('save');
+      if (this.isMountedFlag) this.setState({ savingPod: false });
     }
   };
 
@@ -517,16 +605,35 @@ class Pods extends Component {
       return;
     }
 
+    if (!this.beginAction('leave')) return;
+
+    this.setState({ leavingPod: true });
     try {
       await pods.leave(activePodId, peerId);
       if (!this.isMountedFlag || this.state.activePodId !== activePodId) {
         return;
       }
       toast.success(`Left ${podName}`);
-      await this.fetchPodDetail(activePodId);
+      const remainingPods = await this.fetchPods();
+      if (!this.isMountedFlag) return;
+      const nextPod = remainingPods.find((pod) => pod.podId !== activePodId);
+      if (nextPod) {
+        await this.selectPod(nextPod.podId);
+      } else {
+        this.setState({
+          activeChannelId: null,
+          activePodId: null,
+          members: [],
+          messages: {},
+          podDetail: null,
+        });
+      }
     } catch (error) {
       console.error('Failed to leave pod:', error);
-      toast.error(`Failed to leave pod: ${error.message}`);
+      toast.error(`Failed to leave pod: ${toDisplayError(error)}`);
+    } finally {
+      this.finishAction('leave');
+      if (this.isMountedFlag) this.setState({ leavingPod: false });
     }
   };
 
@@ -534,12 +641,16 @@ class Pods extends Component {
     const {
       activeChannelId,
       activePodId,
+      creatingPod,
+      leavingPod,
       loading,
       members,
       messageInput,
       messages,
       podDetail,
       pods: podsList,
+      savingPod,
+      sendingMessage,
       createDescription,
       createModalOpen,
       createName,
@@ -552,10 +663,13 @@ class Pods extends Component {
 
     const currentMessages =
       activePodId && activeChannelId
-        ? messages[`${activePodId}:${activeChannelId}`] || []
+        ? asRecords(messages[`${activePodId}:${activeChannelId}`]).map(normalizeMessage)
         : [];
     const localPeerId = this.getLocalPeerId();
-    const isMember = members.some((member) => member.peerId === localPeerId);
+    const isMember = members.some(
+      (member) =>
+        (member.peerId || member.username || member.PeerId) === localPeerId,
+    );
     const isGoldStarClub = podDetail?.podId === GOLD_STAR_CLUB_POD_ID;
     const activeChannel = podDetail?.channels?.find(
       (channel) => channel.channelId === activeChannelId,
@@ -584,6 +698,7 @@ class Pods extends Component {
                 content="Find listed pods through the pod discovery index."
                 trigger={
                   <Button
+                    disabled={discoveryLoading}
                     icon="search"
                     loading={discoveryLoading}
                     onClick={this.handleDiscoverPods}
@@ -647,7 +762,9 @@ class Pods extends Component {
                             trigger={
                               <Button
                                 basic
+                                disabled={savingPod}
                                 icon="save"
+                                loading={savingPod}
                                 onClick={(event) => {
                                   event.stopPropagation();
                                   this.handleSaveDiscoveredPod(pod);
@@ -743,8 +860,10 @@ class Pods extends Component {
                     }
                     trigger={
                       <Button
+                        disabled={leavingPod}
                         icon
                         labelPosition="left"
+                        loading={leavingPod}
                         negative={isGoldStarClub}
                         onClick={this.handleLeaveActivePod}
                         size="small"
@@ -810,10 +929,10 @@ class Pods extends Component {
                       ) : (
                         <List relaxed="very">
                           {currentMessages.map((message, index) => (
-                            <List.Item key={index}>
-                              <List.Content>
-                                <List.Header>
-                                  {message.senderPeerId}
+                              <List.Item key={index}>
+                                <List.Content>
+                                  <List.Header>
+                                  {String(message.senderPeerId ?? 'Unknown peer')}
                                   <span
                                     style={{
                                       color: '#999',
@@ -821,12 +940,14 @@ class Pods extends Component {
                                       marginLeft: '10px',
                                     }}
                                   >
-                                    {new Date(
-                                      message.timestampUnixMs,
-                                    ).toLocaleTimeString()}
+                                    {message.timestampUnixMs
+                                      ? new Date(message.timestampUnixMs).toLocaleTimeString()
+                                      : ''}
                                   </span>
                                 </List.Header>
-                                <List.Description>{message.body}</List.Description>
+                                <List.Description>
+                                  {String(message.body ?? '')}
+                                </List.Description>
                               </List.Content>
                             </List.Item>
                           ))}
@@ -840,7 +961,9 @@ class Pods extends Component {
                             content="Send this message to the active pod channel."
                             trigger={
                               <Button
+                                disabled={!messageInput.trim() || sendingMessage}
                                 icon="send"
+                                loading={sendingMessage}
                                 onClick={this.handleSendMessage}
                                 primary
                               />
@@ -968,7 +1091,8 @@ class Pods extends Component {
               Cancel
             </Button>
             <Button
-              disabled={!createName.trim()}
+              disabled={!createName.trim() || creatingPod}
+              loading={creatingPod}
               onClick={this.handleCreatePod}
               primary
             >

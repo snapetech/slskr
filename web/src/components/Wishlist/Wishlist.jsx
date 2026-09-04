@@ -58,9 +58,12 @@ const WishlistItemRow = ({
   const [running, setRunning] = useState(false);
   const mountedRef = useMountedFlag();
   const requestIdRef = useRef(0);
+  const inFlightRef = useRef(false);
   const requestState = getWishlistRequestState(item, []);
 
   const handleRunSearch = async () => {
+    if (inFlightRef.current || !mountedRef.current) return;
+    inFlightRef.current = true;
     const requestId = ++requestIdRef.current;
     setRunning(true);
     try {
@@ -87,6 +90,7 @@ const WishlistItemRow = ({
       ) {
         setRunning(false);
       }
+      inFlightRef.current = false;
     }
   };
 
@@ -201,6 +205,7 @@ const WishlistModal = ({ item, onClose, onSave }) => {
   const [loadingIgnoredResults, setLoadingIgnoredResults] = useState(false);
   const mountedRef = useMountedFlag();
   const operationRequestIdRef = useRef(0);
+  const restoreInFlightRef = useRef(false);
 
   const isEdit = Boolean(item?.id);
 
@@ -234,6 +239,8 @@ const WishlistModal = ({ item, onClose, onSave }) => {
   }, [isEdit, item?.id]);
 
   const restoreIgnoredResult = async (rule) => {
+    if (restoreInFlightRef.current || !mountedRef.current) return;
+    restoreInFlightRef.current = true;
     const requestId = ++operationRequestIdRef.current;
     try {
       await wishlistAPI.removeIgnoredResult(item.id, rule.id);
@@ -255,12 +262,14 @@ const WishlistModal = ({ item, onClose, onSave }) => {
         console.error(error);
         toast.error(toDisplayError(error));
       }
+    } finally {
+      restoreInFlightRef.current = false;
     }
   };
 
   const handleSave = async () => {
-    if (!searchText.trim()) {
-      toast.error('Search text is required');
+    if (!searchText.trim() || saving || !mountedRef.current) {
+      if (!searchText.trim()) toast.error('Search text is required');
       return;
     }
 
@@ -407,6 +416,7 @@ const WishlistModal = ({ item, onClose, onSave }) => {
       <Modal.Actions>
         <Button onClick={onClose}>Cancel</Button>
         <Button
+          disabled={saving}
           loading={saving}
           onClick={handleSave}
           primary
@@ -428,6 +438,7 @@ const CsvImportModal = ({ onClose, onImport }) => {
   const [importing, setImporting] = useState(false);
   const mountedRef = useMountedFlag();
   const operationRequestIdRef = useRef(0);
+  const importInFlightRef = useRef(false);
 
   const handleFile = async (event) => {
     const file = event.target.files?.[0];
@@ -449,6 +460,8 @@ const CsvImportModal = ({ onClose, onImport }) => {
       toast.error('CSV text is required');
       return;
     }
+    if (importInFlightRef.current || !mountedRef.current) return;
+    importInFlightRef.current = true;
 
     const requestId = ++operationRequestIdRef.current;
     setImporting(true);
@@ -482,6 +495,7 @@ const CsvImportModal = ({ onClose, onImport }) => {
       ) {
         setImporting(false);
       }
+      importInFlightRef.current = false;
     }
   };
 
@@ -563,6 +577,7 @@ const CsvImportModal = ({ onClose, onImport }) => {
           content="Create wishlist searches from the parsed CSV rows using the selected options."
           trigger={
             <Button
+              disabled={importing}
               loading={importing}
               onClick={handleImport}
               primary
@@ -589,6 +604,7 @@ const Wishlist = () => {
   const mountedRef = useMountedFlag();
   const loadRequestIdRef = useRef(0);
   const operationRequestIdRef = useRef(0);
+  const operationInFlightRef = useRef(false);
   const requestSummary = useMemo(
     () =>
       buildWishlistRequestSummary({
@@ -600,6 +616,16 @@ const Wishlist = () => {
     () => getRunnableWishlistRequests(items, { limit: 3 }),
     [items],
   );
+
+  const beginOperation = () => {
+    if (!mountedRef.current || operationInFlightRef.current) return false;
+    operationInFlightRef.current = true;
+    return true;
+  };
+
+  const finishOperation = () => {
+    operationInFlightRef.current = false;
+  };
 
   const copyRequestReviewPacket = async () => {
     const packet = buildWishlistRequestReviewPacket({
@@ -625,6 +651,7 @@ const Wishlist = () => {
   };
 
   const runEnabledSearches = async () => {
+    if (!beginOperation()) return;
     const requestId = ++operationRequestIdRef.current;
     setBulkRunning(true);
     const results = [];
@@ -647,7 +674,7 @@ const Wishlist = () => {
           }
           results.push({
             id: item.id,
-            responseCount: result.responseCount ?? result.ResponseCount ?? 0,
+            responseCount: result?.responseCount ?? result?.ResponseCount ?? 0,
             status: 'ran',
           });
         } catch (error) {
@@ -686,6 +713,7 @@ const Wishlist = () => {
       ) {
         setBulkRunning(false);
       }
+      finishOperation();
     }
   };
 
@@ -742,7 +770,7 @@ const Wishlist = () => {
 
   const handleBulkFilter = async () => {
     const ids = [...selectedIds];
-    if (ids.length === 0) return;
+    if (ids.length === 0 || !beginOperation()) return;
 
     const requestId = ++operationRequestIdRef.current;
     setBulkRunning(true);
@@ -773,6 +801,7 @@ const Wishlist = () => {
       ) {
         setBulkRunning(false);
       }
+      finishOperation();
     }
   };
 
@@ -795,20 +824,26 @@ const Wishlist = () => {
   };
 
   const handleSave = async (item) => {
-    if (item.id) {
-      await wishlistAPI.update(item.id, item);
-      if (!mountedRef.current) return;
-      toast.success('Wishlist item updated');
-    } else {
-      await wishlistAPI.create(item);
-      if (!mountedRef.current) return;
-      toast.success('Added to wishlist');
-    }
+    if (!beginOperation()) return;
+    try {
+      if (item.id) {
+        await wishlistAPI.update(item.id, item);
+        if (!mountedRef.current) return;
+        toast.success('Wishlist item updated');
+      } else {
+        await wishlistAPI.create(item);
+        if (!mountedRef.current) return;
+        toast.success('Added to wishlist');
+      }
 
-    await loadItems();
+      await loadItems();
+    } finally {
+      finishOperation();
+    }
   };
 
   const handleDelete = async (id) => {
+    if (!beginOperation()) return;
     const requestId = ++operationRequestIdRef.current;
     try {
       await wishlistAPI.remove(id);
@@ -827,22 +862,34 @@ const Wishlist = () => {
       ) {
         toast.error(`Failed to delete: ${toDisplayError(error)}`);
       }
+    } finally {
+      finishOperation();
     }
   };
 
   const handleRunSearch = async (id) => {
-    const result = await wishlistAPI.runSearch(id);
-    await loadItems();
-    return result;
+    if (!beginOperation()) return undefined;
+    try {
+      const result = await wishlistAPI.runSearch(id);
+      await loadItems();
+      return result;
+    } finally {
+      finishOperation();
+    }
   };
 
   const handleImport = async (request) => {
-    const result = await wishlistAPI.importCsv(request);
-    if (!mountedRef.current) return;
-    toast.success(
-      `Imported ${result?.createdCount ?? 0} searches (${result?.duplicateCount ?? 0} duplicates, ${result?.skippedCount ?? 0} skipped)`,
-    );
-    await loadItems();
+    if (!beginOperation()) return;
+    try {
+      const result = await wishlistAPI.importCsv(request);
+      if (!mountedRef.current) return;
+      toast.success(
+        `Imported ${result?.createdCount ?? 0} searches (${result?.duplicateCount ?? 0} duplicates, ${result?.skippedCount ?? 0} skipped)`,
+      );
+      await loadItems();
+    } finally {
+      finishOperation();
+    }
   };
 
   return (

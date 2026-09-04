@@ -1,4 +1,5 @@
 import * as sharesLibrary from '../../../lib/shares';
+import { toDisplayError } from '../../../lib/errors';
 import { LoaderSegment, ShrinkableButton, Switch } from '../../Shared';
 import ContentsModal from './ContentsModal';
 import ExclusionTable from './ExclusionTable';
@@ -40,11 +41,13 @@ const Shares = ({ state = {}, theme } = {}) => {
   const [modal, setModal] = useState(false);
   const mountedRef = useRef(false);
   const requestIdRef = useRef(0);
+  const operationIdRef = useRef(0);
   const initialLoadRef = useRef(true);
 
   const { directories, files, scanPending, scanProgress, scanning } = state;
 
   const getAll = useCallback(async (quiet = false) => {
+    if (!mountedRef.current) return;
     const requestId = ++requestIdRef.current;
     try {
       if (!quiet) setLoading(true);
@@ -69,7 +72,7 @@ const Shares = ({ state = {}, theme } = {}) => {
     } catch (error) {
       if (!mountedRef.current || requestIdRef.current !== requestId) return;
       console.error(error);
-      toast.error(error?.response?.data ?? error?.message ?? error);
+      toast.error(toDisplayError(error, 'Failed to load shares'));
     } finally {
       if (mountedRef.current && requestIdRef.current === requestId) {
         setLoading(false);
@@ -99,31 +102,50 @@ const Shares = ({ state = {}, theme } = {}) => {
   }, [getAll, scanPending, scanning]);
 
   const rescan = async () => {
+    if (!mountedRef.current || working) return;
+    const operationId = ++operationIdRef.current;
     try {
       setWorking(true);
       await sharesLibrary.rescan();
     } catch (error) {
       console.error(error);
-      toast.error(error?.response?.data ?? error?.message ?? error);
+      if (
+        mountedRef.current &&
+        operationId === operationIdRef.current
+      ) {
+        toast.error(toDisplayError(error, 'Failed to rescan shares'));
+      }
     } finally {
-      setWorking(false);
+      if (
+        mountedRef.current &&
+        operationId === operationIdRef.current
+      ) {
+        setWorking(false);
+      }
     }
   };
 
   const cancel = async () => {
+    if (!mountedRef.current || working) return;
+    const operationId = ++operationIdRef.current;
     try {
       setWorking(true);
       await sharesLibrary.cancel();
     } catch (error) {
       console.error(error);
-      toast.error(
-        error?.response?.data ??
-          error?.message ??
-          error ??
-          'Failed to cancel the scan',
-      );
+      if (
+        mountedRef.current &&
+        operationId === operationIdRef.current
+      ) {
+        toast.error(toDisplayError(error, 'Failed to cancel the scan'));
+      }
     } finally {
-      setWorking(false);
+      if (
+        mountedRef.current &&
+        operationId === operationIdRef.current
+      ) {
+        setWorking(false);
+      }
     }
   };
 

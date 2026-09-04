@@ -13,13 +13,91 @@ import {
   Icon,
   Input,
   Label,
-  List,
   Loader,
   Message,
   Segment,
   Statistic,
   Table,
 } from 'semantic-ui-react';
+
+const isRecord = (value) =>
+  value && typeof value === 'object' && !Array.isArray(value);
+
+const toNonNegativeNumber = (value) => {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : 0;
+};
+
+const normalizeConfig = (value) => {
+  if (!isRecord(value)) return null;
+  return {
+    ...value,
+    enabled: value.enabled === true,
+    max_clients: Math.max(
+      1,
+      Math.floor(toNonNegativeNumber(value.max_clients)) || 10,
+    ),
+    port: Math.max(
+      1,
+      Math.floor(toNonNegativeNumber(value.port)) || 2_242,
+    ),
+    require_auth: value.require_auth === true,
+    soulfind_path:
+      typeof value.soulfind_path === 'string' && value.soulfind_path
+        ? value.soulfind_path
+        : 'soulfind',
+  };
+};
+
+const normalizeDashboard = (value) => {
+  if (!isRecord(value)) return null;
+  const health = isRecord(value.health) ? value.health : {};
+  const healthStatus =
+    typeof value.health === 'string' ? value.health.toLowerCase() : '';
+  const stats = isRecord(value.stats) ? value.stats : {};
+  const meshBenefits = isRecord(value.meshBenefits)
+    ? value.meshBenefits
+    : {};
+  const connectedClients = Array.isArray(value.connectedClients)
+    ? value.connectedClients.filter(isRecord).map((client, index) => ({
+        ...client,
+        clientId:
+          typeof client.clientId === 'string' && client.clientId
+            ? client.clientId
+            : 'client-' + index,
+        clientType:
+          typeof client.clientType === 'string' ? client.clientType : 'Unknown',
+        ipAddress:
+          typeof client.ipAddress === 'string' ? client.ipAddress : 'Unknown',
+        requestCount: toNonNegativeNumber(client.requestCount),
+      }))
+    : [];
+
+  return {
+    ...value,
+    connectedClients,
+    health: {
+      ...health,
+      isHealthy:
+        health.isHealthy === true ||
+        ['healthy', 'running', 'active'].includes(healthStatus),
+      version:
+        typeof health.version === 'string' ? health.version : '',
+    },
+    meshBenefits: {
+      ...meshBenefits,
+      bytesViaMesh: toNonNegativeNumber(meshBenefits.bytesViaMesh),
+      meshPercentage: toNonNegativeNumber(meshBenefits.meshPercentage),
+    },
+    stats: {
+      ...stats,
+      currentConnections: toNonNegativeNumber(stats.currentConnections),
+      totalBytesProxied: toNonNegativeNumber(stats.totalBytesProxied),
+      totalDownloads: toNonNegativeNumber(stats.totalDownloads),
+      totalSearches: toNonNegativeNumber(stats.totalSearches),
+    },
+  };
+};
 
 const Bridge = () => {
   const [config, setConfig] = useState(null);
@@ -34,6 +112,8 @@ const Bridge = () => {
   const loadRequestIdRef = useRef(0);
   const saveRequestIdRef = useRef(0);
   const controlRequestIdRef = useRef(0);
+  const saveInFlightRef = useRef(false);
+  const controlInFlightRef = useRef(false);
 
   const fetchDashboard = useCallback(async () => {
     if (!mountedRef.current) return;
@@ -44,7 +124,7 @@ const Bridge = () => {
         mountedRef.current &&
         dashboardRequestIdRef.current === requestId
       ) {
-        setDashboard(dashboardData);
+        setDashboard(normalizeDashboard(dashboardData));
       }
     } catch {
       // Silently fail on refresh
@@ -68,8 +148,8 @@ const Bridge = () => {
         ) {
           return;
         }
-        setConfig(configData);
-        setDashboard(dashboardData);
+        setConfig(normalizeConfig(configData));
+        setDashboard(normalizeDashboard(dashboardData));
       } catch (error_) {
         if (
           mountedRef.current &&
@@ -97,14 +177,21 @@ const Bridge = () => {
   usePolling(fetchDashboard, 10_000, { immediate: false });
 
   const handleConfigChange = (field, value) => {
-    setConfig((previous) => ({
-      ...previous,
-      [field]: value,
-    }));
+    setConfig((previous) =>
+      previous ? { ...previous, [field]: value } : previous,
+    );
   };
 
   const handleSaveConfig = async () => {
-    if (!mountedRef.current || saving || !config) return;
+    if (
+      !mountedRef.current ||
+      saving ||
+      saveInFlightRef.current ||
+      !config
+    ) {
+      return;
+    }
+    saveInFlightRef.current = true;
     const requestId = ++saveRequestIdRef.current;
     try {
       setSaving(true);
@@ -127,6 +214,7 @@ const Bridge = () => {
         setError(toDisplayError(error_, 'Failed to save bridge configuration'));
       }
     } finally {
+      saveInFlightRef.current = false;
       if (
         mountedRef.current &&
         saveRequestIdRef.current === requestId
@@ -137,7 +225,14 @@ const Bridge = () => {
   };
 
   const handleStartBridge = async () => {
-    if (!mountedRef.current || controlAction) return;
+    if (
+      !mountedRef.current ||
+      controlAction ||
+      controlInFlightRef.current
+    ) {
+      return;
+    }
+    controlInFlightRef.current = true;
     const requestId = ++controlRequestIdRef.current;
     const isCurrentRequest = () =>
       mountedRef.current && controlRequestIdRef.current === requestId;
@@ -147,18 +242,26 @@ const Bridge = () => {
       await bridge.startBridge();
       // Refresh dashboard
       const dashboardData = await bridge.getDashboard();
-      if (isCurrentRequest()) setDashboard(dashboardData);
+      if (isCurrentRequest()) setDashboard(normalizeDashboard(dashboardData));
     } catch (error_) {
       if (isCurrentRequest()) {
         setError(toDisplayError(error_, 'Failed to start bridge'));
       }
     } finally {
+      controlInFlightRef.current = false;
       if (isCurrentRequest()) setControlAction('');
     }
   };
 
   const handleStopBridge = async () => {
-    if (!mountedRef.current || controlAction) return;
+    if (
+      !mountedRef.current ||
+      controlAction ||
+      controlInFlightRef.current
+    ) {
+      return;
+    }
+    controlInFlightRef.current = true;
     const requestId = ++controlRequestIdRef.current;
     const isCurrentRequest = () =>
       mountedRef.current && controlRequestIdRef.current === requestId;
@@ -168,12 +271,13 @@ const Bridge = () => {
       await bridge.stopBridge();
       // Refresh dashboard
       const dashboardData = await bridge.getDashboard();
-      if (isCurrentRequest()) setDashboard(dashboardData);
+      if (isCurrentRequest()) setDashboard(normalizeDashboard(dashboardData));
     } catch (error_) {
       if (isCurrentRequest()) {
         setError(toDisplayError(error_, 'Failed to stop bridge'));
       }
     } finally {
+      controlInFlightRef.current = false;
       if (isCurrentRequest()) setControlAction('');
     }
   };
@@ -305,6 +409,7 @@ const Bridge = () => {
                   </Form.Field>
                 </Form.Group>
                 <Button
+                  disabled={saving}
                   loading={saving}
                   onClick={handleSaveConfig}
                   primary
@@ -457,8 +562,8 @@ const Bridge = () => {
                     </Table.Row>
                   </Table.Header>
                   <Table.Body>
-                    {clients.map((client) => (
-                      <Table.Row key={client.clientId}>
+                    {clients.map((client, index) => (
+                      <Table.Row key={client.clientId || 'client-' + index}>
                         <Table.Cell>{client.clientType}</Table.Cell>
                         <Table.Cell>{client.ipAddress}</Table.Cell>
                         <Table.Cell>{client.requestCount}</Table.Cell>

@@ -80,7 +80,7 @@ class Logs extends Component {
     const requestId = ++this.logsRequestId;
     try {
       const response = await getLogs();
-      const fetchedLogs = (response.entries || [])
+      const fetchedLogs = (Array.isArray(response?.entries) ? response.entries : [])
         .map(this.normalizeLog)
         .slice(0, maxLogs);
       if (
@@ -88,8 +88,10 @@ class Logs extends Component {
         requestId === this.logsRequestId
       ) {
         this.setState((previousState) => ({
-          level: response.level || 'Information',
-          levels: response.levels || initialState.levels,
+          level: response?.level || 'Information',
+          levels: Array.isArray(response?.levels)
+            ? response.levels
+            : initialState.levels,
           loading: false,
           logs: this.dedupeLogs([...previousState.logs, ...fetchedLogs]),
         }));
@@ -106,7 +108,13 @@ class Logs extends Component {
   };
 
   normalizeLog = (log = {}) => {
-    const payload = log.payload || log.data || log;
+    const payloadCandidate = log?.payload || log?.data || log;
+    const payload =
+      payloadCandidate &&
+      typeof payloadCandidate === 'object' &&
+      !Array.isArray(payloadCandidate)
+        ? payloadCandidate
+        : { message: String(payloadCandidate ?? '') };
     const category = payload.category || payload.resource || 'daemon';
     const message = payload.message || payload.detail || payload.kind || '';
     const timestamp = payload.timestamp || payload.created_at || Date.now() / 1000;
@@ -135,10 +143,11 @@ class Logs extends Component {
 
   mergeLogs = (buffer = []) => {
     if (!this.isMountedFlag) return;
+    const entries = Array.isArray(buffer) ? buffer : [];
     this.setState((previousState) => ({
       connected: true,
       logs: this.dedupeLogs([
-        ...buffer.map(this.normalizeLog).reverse(),
+        ...entries.map(this.normalizeLog).reverse(),
         ...previousState.logs,
       ]),
     }));
@@ -177,7 +186,7 @@ class Logs extends Component {
       ) {
         return;
       }
-      this.setState({ level: response.level || value, savingLevel: false });
+      this.setState({ level: response?.level || value, savingLevel: false });
       await this.fetchLogs();
     } catch (error) {
       console.error('[Logs] Failed to update log level:', error);

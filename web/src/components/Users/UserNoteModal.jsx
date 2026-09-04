@@ -2,7 +2,7 @@ import * as userNotes from '../../lib/userNotes';
 import { toDisplayError } from '../../lib/errors';
 import { useMountedRef } from '../../lib/useMountedRef';
 import React, { useEffect, useState } from 'react';
-import { Button, Form, Header, Icon, Modal } from 'semantic-ui-react';
+import { Button, Form, Header, Icon, Message, Modal } from 'semantic-ui-react';
 
 const colors = [
   { icon: 'circle outline', text: 'None', value: null },
@@ -79,8 +79,10 @@ const UserNoteModal = ({ onClose, trigger, username }) => {
   const [color, setColor] = useState(null);
   const [isHighPriority, setIsHighPriority] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
   const mountedRef = useMountedRef();
   const requestIdRef = React.useRef(0);
+  const saveInFlightRef = React.useRef(false);
 
   useEffect(() => {
     const requestId = ++requestIdRef.current;
@@ -88,6 +90,7 @@ const UserNoteModal = ({ onClose, trigger, username }) => {
       if (!username || !open || !mountedRef.current) return;
 
       setLoading(true);
+      setError('');
       try {
         const response = await userNotes.getNote({ username });
         if (
@@ -96,10 +99,20 @@ const UserNoteModal = ({ onClose, trigger, username }) => {
         ) {
           return;
         }
-        if (response.data) {
-          setNote(response.data.note || '');
-          setColor(response.data.color || null);
-          setIsHighPriority(response.data.isHighPriority || false);
+        if (
+          response.data &&
+          typeof response.data === 'object' &&
+          !Array.isArray(response.data)
+        ) {
+          setNote(
+            typeof response.data.note === 'string' ? response.data.note : '',
+          );
+          setColor(
+            typeof response.data.color === 'string'
+              ? response.data.color
+              : null,
+          );
+          setIsHighPriority(response.data.isHighPriority === true);
         } else {
           // Reset if no note exists
           setNote('');
@@ -119,6 +132,7 @@ const UserNoteModal = ({ onClose, trigger, username }) => {
           setIsHighPriority(false);
         } else {
           console.error('Failed to fetch user note', error);
+          setError(toDisplayError(error, 'Failed to load user note'));
         }
       } finally {
         if (
@@ -143,11 +157,20 @@ const UserNoteModal = ({ onClose, trigger, username }) => {
   };
 
   const handleSave = async () => {
-    if (!mountedRef.current || loading) return;
+    if (
+      !mountedRef.current ||
+      loading ||
+      saveInFlightRef.current ||
+      !username
+    ) {
+      return;
+    }
+    saveInFlightRef.current = true;
     const requestId = ++requestIdRef.current;
     const isCurrentRequest = () =>
       mountedRef.current && requestIdRef.current === requestId;
     setLoading(true);
+    setError('');
     try {
       await userNotes.setNote({
         color,
@@ -159,8 +182,10 @@ const UserNoteModal = ({ onClose, trigger, username }) => {
     } catch (error) {
       if (isCurrentRequest()) {
         console.error('Failed to save user note', error);
+        setError(toDisplayError(error, 'Failed to save user note'));
       }
     } finally {
+      saveInFlightRef.current = false;
       if (isCurrentRequest()) setLoading(false);
     }
   };
@@ -201,6 +226,7 @@ const UserNoteModal = ({ onClose, trigger, username }) => {
             onChange={(_, { checked }) => setIsHighPriority(checked)}
           />
         </Form>
+        {error ? <Message negative>{error}</Message> : null}
       </Modal.Content>
       <Modal.Actions>
         <Button onClick={handleClose}>Cancel</Button>

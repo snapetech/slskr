@@ -13,6 +13,8 @@ export default function SolidSettings() {
   const mountedRef = useMountedRef();
   const statusRequestIdRef = useRef(0);
   const resolveRequestIdRef = useRef(0);
+  const resolveInFlightRef = useRef(false);
+  const [resolving, setResolving] = useState(false);
 
   const formatError = (e) => {
     const data = e?.response?.data;
@@ -67,17 +69,23 @@ export default function SolidSettings() {
   }, [mountedRef]);
 
   const resolveWebId = async () => {
-    if (!mountedRef.current) return;
+    const normalizedWebId = typeof webId === 'string' ? webId.trim() : '';
+    if (!mountedRef.current || !normalizedWebId || resolveInFlightRef.current) return;
     const requestId = ++resolveRequestIdRef.current;
     const isCurrentRequest = () =>
       mountedRef.current && resolveRequestIdRef.current === requestId;
     setErr('');
     setResolved(null);
+    resolveInFlightRef.current = true;
+    setResolving(true);
     try {
-      const res = await api.post('/solid/resolve-webid', { webId });
+      const res = await api.post('/solid/resolve-webid', { webId: normalizedWebId });
       if (isCurrentRequest()) setResolved(res.data);
     } catch (e) {
       if (isCurrentRequest()) setErr(toDisplayError(e, formatError(e)));
+    } finally {
+      resolveInFlightRef.current = false;
+      if (mountedRef.current) setResolving(false);
     }
   };
 
@@ -112,6 +120,8 @@ export default function SolidSettings() {
         <TooltipButton
           primary
           type="button"
+          disabled={resolving || !webId.trim()}
+          loading={resolving}
           onClick={resolveWebId}
           data-testid="solid-resolve-webid"
           tooltip="Resolve this WebID and show the Solid identity document returned by the server."

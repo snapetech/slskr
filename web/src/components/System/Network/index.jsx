@@ -1,12 +1,14 @@
 import * as slskrAPI from '../../../lib/slskr';
+import { toDisplayError } from '../../../lib/errors';
 import {
   buildNetworkHealthScore,
   formatNetworkHealthReport,
 } from '../../../lib/networkHealthScore';
 import { getLocalStorageItem, setLocalStorageItem } from '../../../lib/storage';
+import { useMountedRef } from '../../../lib/useMountedRef';
 import { usePolling } from '../../../lib/usePolling';
 import { LoaderSegment, ShrinkableButton } from '../../Shared';
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { toast } from 'react-toastify';
 import {
   Button,
@@ -214,8 +216,14 @@ const Network = ({ options = {}, state = {}, theme }) => {
   const [dhtExposureAcknowledged, setDhtExposureAcknowledged] = useState(() => {
     return getLocalStorageItem(DHT_EXPOSURE_CONSENT_KEY) === 'acknowledged';
   });
+  const mountedRef = useMountedRef();
+  const fetchRequestIdRef = useRef(0);
+  const syncRequestIdsRef = useRef({});
+  const backfillRequestIdRef = useRef(0);
 
   const fetchData = useCallback(async () => {
+    if (!mountedRef.current) return;
+    const requestId = ++fetchRequestIdRef.current;
     try {
       const [statsData, peersData, discoveredData] = await Promise.all([
         slskrAPI.getSlskrStats().catch(() => ({})),
@@ -223,16 +231,30 @@ const Network = ({ options = {}, state = {}, theme }) => {
         slskrAPI.getDiscoveredPeers().catch(() => []),
       ]);
 
-      setStats(statsData || {});
-      setMeshPeers(Array.isArray(peersData) ? peersData : []);
-      setDiscoveredPeers(Array.isArray(discoveredData) ? discoveredData : []);
+      if (
+        mountedRef.current &&
+        requestId === fetchRequestIdRef.current
+      ) {
+        setStats(
+          statsData && typeof statsData === 'object' && !Array.isArray(statsData)
+            ? statsData
+            : {},
+        );
+        setMeshPeers(Array.isArray(peersData) ? peersData : []);
+        setDiscoveredPeers(Array.isArray(discoveredData) ? discoveredData : []);
+      }
     } catch (error) {
       console.error('Failed to fetch network stats:', error);
       // Don't show toast on every poll failure
     } finally {
-      setLoading(false);
+      if (
+        mountedRef.current &&
+        requestId === fetchRequestIdRef.current
+      ) {
+        setLoading(false);
+      }
     }
-  }, []);
+  }, [mountedRef]);
 
   usePolling(fetchData, 5_000);
 
@@ -242,18 +264,42 @@ const Network = ({ options = {}, state = {}, theme }) => {
   };
 
   const handleSync = async (username) => {
+    if (!mountedRef.current || syncRequestIdsRef.current[username]) return;
+    const requestId = (syncRequestIdsRef.current[username] || 0) + 1;
+    syncRequestIdsRef.current[username] = requestId;
     setSyncing((previous) => ({ ...previous, [username]: true }));
     try {
-      await slskrAPI.triggerMeshSync(username);
-      toast.success(`Sync initiated with ${username}`);
-    } catch {
-      toast.error(`Failed to sync with ${username}`);
+      const result = await slskrAPI.triggerMeshSync(username);
+      if (result?.success === false || result?.error) {
+        throw new Error(toDisplayError(result, 'Failed to sync with peer'));
+      }
+      if (
+        mountedRef.current &&
+        syncRequestIdsRef.current[username] === requestId
+      ) {
+        toast.success(`Sync initiated with ${username}`);
+      }
+    } catch (error) {
+      if (
+        mountedRef.current &&
+        syncRequestIdsRef.current[username] === requestId
+      ) {
+        toast.error(toDisplayError(error, `Failed to sync with ${username}`));
+      }
     } finally {
-      setSyncing((previous) => ({ ...previous, [username]: false }));
+      if (
+        mountedRef.current &&
+        syncRequestIdsRef.current[username] === requestId
+      ) {
+        setSyncing((previous) => ({ ...previous, [username]: false }));
+        delete syncRequestIdsRef.current[username];
+      }
     }
   };
 
   const handleBackfillFromHistory = async (reset = false) => {
+    if (!mountedRef.current || backfilling) return;
+    const requestId = ++backfillRequestIdRef.current;
     setBackfilling(true);
     try {
       const result = await slskrAPI.backfillFromSearchHistory({
@@ -261,13 +307,22 @@ const Network = ({ options = {}, state = {}, theme }) => {
         reset,
       });
 
-      if (result.error) {
+      if (
+        !mountedRef.current ||
+        requestId !== backfillRequestIdRef.current
+      ) {
+        return;
+      }
+
+      if (result?.error) {
         toast.error(`Backfill failed: ${result.error}`);
         setBackfillProgress(null);
       } else {
-        setBackfillProgress(result);
+        setBackfillProgress(
+          result && typeof result === 'object' ? result : null,
+        );
 
-        if (result.complete) {
+        if (result?.complete) {
           toast.success(result.message || 'Backfill complete!');
         } else {
           toast.info(
@@ -275,13 +330,23 @@ const Network = ({ options = {}, state = {}, theme }) => {
           );
         }
 
-        fetchData(); // Refresh stats
+        void fetchData(); // Refresh stats
       }
     } catch {
-      toast.error('Failed to trigger backfill from search history');
-      setBackfillProgress(null);
+      if (
+        mountedRef.current &&
+        requestId === backfillRequestIdRef.current
+      ) {
+        toast.error('Failed to trigger backfill from search history');
+        setBackfillProgress(null);
+      }
     } finally {
-      setBackfilling(false);
+      if (
+        mountedRef.current &&
+        requestId === backfillRequestIdRef.current
+      ) {
+        setBackfilling(false);
+      }
     }
   };
 
@@ -327,6 +392,7 @@ const Network = ({ options = {}, state = {}, theme }) => {
   });
 
   const copyNetworkHealthReport = async () => {
+    if (!mountedRef.current) return;
     const report = formatNetworkHealthReport(networkHealth);
     if (navigator.clipboard?.writeText) {
       try {

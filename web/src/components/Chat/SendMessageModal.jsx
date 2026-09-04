@@ -12,6 +12,7 @@ const SendMessageModal = ({ initiateConversation, ...rest }) => {
   const [sending, setSending] = useState(false);
   const usernameRef = useRef(null);
   const mountedRef = useMountedRef();
+  const sendInFlightRef = useRef(false);
 
   useEffect(() => {
     if (open) {
@@ -20,19 +21,20 @@ const SendMessageModal = ({ initiateConversation, ...rest }) => {
   }, [open]);
 
   const validInput = () => {
-    return username.length > 0 && message.length > 0;
+    return username.trim().length > 0 && message.trim().length > 0;
   };
 
   const sendMessage = async () => {
-    if (!validInput() || sending || !mountedRef.current) {
+    if (!validInput() || sending || sendInFlightRef.current || !mountedRef.current) {
       usernameRef.current?.focus();
       return;
     }
 
+    sendInFlightRef.current = true;
     setSending(true);
     setError('');
     try {
-      await initiateConversation(username, message);
+      await initiateConversation(username.trim(), message.trim());
       if (mountedRef.current) {
         setOpen(false);
       }
@@ -44,6 +46,7 @@ const SendMessageModal = ({ initiateConversation, ...rest }) => {
       if (mountedRef.current) {
         setSending(false);
       }
+      sendInFlightRef.current = false;
     }
   };
 

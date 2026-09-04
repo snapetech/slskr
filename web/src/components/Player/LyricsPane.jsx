@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 
 const parseTimestamp = (value) => {
+  if (typeof value !== 'string') return null;
   const match = value.match(/^(\d+):(\d+(?:\.\d+)?)$/);
   if (!match) return null;
   return Number(match[1]) * 60 + Number(match[2]);
@@ -22,10 +23,10 @@ const parseLrc = (text) =>
     .sort((a, b) => a.time - b.time);
 
 const stripAudioExtension = (value) =>
-  value.replace(/\.(aac|aiff?|alac|flac|m4a|mp3|ogg|opus|wav|webm)$/i, '');
+  String(value ?? '').replace(/\.(aac|aiff?|alac|flac|m4a|mp3|ogg|opus|wav|webm)$/i, '');
 
 const cleanTrackText = (value) =>
-  stripAudioExtension(value || '')
+  stripAudioExtension(value)
     .replace(/[_]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
@@ -59,10 +60,15 @@ const getLyricsLookup = (current) => {
 };
 
 const lyricsFromResponse = (data) => {
-  const synced = data?.syncedLyrics ? parseLrc(data.syncedLyrics) : [];
+  const record = data && typeof data === 'object' && !Array.isArray(data)
+    ? data
+    : {};
+  const synced = typeof record.syncedLyrics === 'string'
+    ? parseLrc(record.syncedLyrics)
+    : [];
   if (synced.length) return synced;
 
-  return (data?.plainLyrics || '')
+  return (typeof record.plainLyrics === 'string' ? record.plainLyrics : '')
     .split('\n')
     .map((line) => line.trim())
     .filter(Boolean)
@@ -71,10 +77,12 @@ const lyricsFromResponse = (data) => {
 
 const firstLyricsCandidate = (data) => {
   if (Array.isArray(data)) {
-    return data.find((item) => item?.syncedLyrics) || data.find((item) => item?.plainLyrics) || null;
+    return data.find((item) =>
+      item && typeof item === 'object' && !Array.isArray(item) &&
+      (typeof item.syncedLyrics === 'string' || typeof item.plainLyrics === 'string')) || null;
   }
 
-  return data;
+  return data && typeof data === 'object' && !Array.isArray(data) ? data : null;
 };
 
 const LyricsPane = ({ audioElement, current, visible }) => {
@@ -97,6 +105,7 @@ const LyricsPane = ({ audioElement, current, visible }) => {
     }
 
     const controller = new AbortController();
+    let active = true;
     const params = new URLSearchParams({
       artist_name: lookup.artist,
       track_name: lookup.title,
@@ -117,18 +126,22 @@ const LyricsPane = ({ audioElement, current, visible }) => {
           .then(firstLyricsCandidate);
       })
       .then((data) => {
+        if (!active) return;
         const parsed = lyricsFromResponse(data);
         setLyrics(parsed);
         setStatus(parsed.length ? '' : 'No lyrics found');
       })
       .catch(() => {
-        if (!controller.signal.aborted) {
+        if (active && !controller.signal.aborted) {
           setLyrics([]);
           setStatus('Lyrics unavailable');
         }
       });
 
-    return () => controller.abort();
+    return () => {
+      active = false;
+      controller.abort();
+    };
   }, [current?.artist, current?.title, visible]);
 
   useEffect(() => {

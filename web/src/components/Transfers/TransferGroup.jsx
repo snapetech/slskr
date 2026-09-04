@@ -16,7 +16,7 @@ class TransferGroup extends Component {
   }
 
   handleSelectionChange = (directoryName, file, selected) => {
-    const { selections } = this.state;
+    const selections = new Set(this.state.selections);
     const object = JSON.stringify({
       directory: directoryName,
       filename: file.filename,
@@ -41,11 +41,11 @@ class TransferGroup extends Component {
 
     return Array.from(this.state.selections)
       .map((s) => JSON.parse(s))
-      .map((s) =>
-        user.directories
+        .map((s) =>
+          user.directories
           .find((d) => d.directory === s.directory)
-          .files.find((f) => f.filename === s.filename),
-      )
+          ?.files?.find((f) => f.filename === s.filename),
+        )
       .filter((s) => s !== undefined);
   };
 

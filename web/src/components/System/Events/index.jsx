@@ -1,4 +1,5 @@
 import { list } from '../../../lib/events';
+import { toDisplayError } from '../../../lib/errors';
 import { LoaderSegment } from '../../Shared';
 import React, { useEffect, useState } from 'react';
 import { Icon, Message, Pagination, Popup, Table } from 'semantic-ui-react';
@@ -6,21 +7,27 @@ import { Icon, Message, Pagination, Popup, Table } from 'semantic-ui-react';
 const PER_PAGE = 10;
 
 const replaceHyphensWithNonBreakingEquivalent = (string) =>
-  string?.replaceAll('-', '‑');
+  string == null ? '' : String(string).replaceAll('-', '‑');
 
 const formatEventData = (data) => {
   try {
-    return JSON.stringify(JSON.parse(data), null, 2);
+    return JSON.stringify(
+      typeof data === 'string' ? JSON.parse(data) : data,
+      null,
+      2,
+    );
   } catch {
-    return typeof data === 'string' ? data : JSON.stringify(data);
+    if (typeof data === 'string') return data;
+    try {
+      return JSON.stringify(data);
+    } catch {
+      return String(data);
+    }
   }
 };
 
 const getErrorMessage = (error) =>
-  error?.response?.data?.detail ||
-  error?.response?.data?.error ||
-  error?.message ||
-  'The event history could not be loaded.';
+  toDisplayError(error, 'The event history could not be loaded.');
 
 const Events = () => {
   const [page, setPage] = useState(1);
@@ -52,10 +59,18 @@ const Events = () => {
           return;
         }
 
-        const tp = Math.ceil(totalCount / PER_PAGE);
+        const numericTotalCount = Number(totalCount);
+        const tp = Number.isFinite(numericTotalCount)
+          ? Math.max(0, Math.ceil(numericTotalCount / PER_PAGE))
+          : 0;
 
-        setEvents(Array.isArray(items) ? items : []);
-        setTotalPages(Number.isNaN(tp) ? 0 : tp);
+        setEvents(
+          (Array.isArray(items) ? items : []).filter(
+            (event) =>
+              event && typeof event === 'object' && !Array.isArray(event),
+          ),
+        );
+        setTotalPages(tp);
       } catch (loadError) {
         if (!active) {
           return;
@@ -126,11 +141,11 @@ const Events = () => {
               </Table.Cell>
             </Table.Row>
           ) : (
-            events.map((event) => (
-              <Table.Row key={event.id}>
+            events.map((event, index) => (
+              <Table.Row key={`${event.id ?? 'event'}-${index}`}>
                 <Table.Cell>
                   <Popup
-                    content={event.id}
+                    content={String(event.id ?? '')}
                     on="hover"
                     style={{ fontFamily: 'monospace', width: '400px' }}
                     trigger={<Icon name="info circle" />}
@@ -140,7 +155,7 @@ const Events = () => {
                 <Table.Cell>
                   {replaceHyphensWithNonBreakingEquivalent(event.timestamp)}
                 </Table.Cell>
-                <Table.Cell>{event.type}</Table.Cell>
+                <Table.Cell>{String(event.type ?? '')}</Table.Cell>
                 <Table.Cell className="events-table-data">
                   {formatEventData(event.data)}
                 </Table.Cell>

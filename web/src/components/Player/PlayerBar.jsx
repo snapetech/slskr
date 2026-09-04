@@ -38,6 +38,7 @@ import {
   getSimilarQueueSearchQueries,
 } from '../../lib/playerAutoQueue';
 import { getPlayerShortcutAction } from '../../lib/playerShortcuts';
+import { toDisplayError } from '../../lib/errors';
 import { getLocalStorageItem, setLocalStorageItem } from '../../lib/storage';
 import { useMountedRef } from '../../lib/useMountedRef';
 import * as searches from '../../lib/searches';
@@ -127,10 +128,7 @@ const getExternalVisualizerStatusText = (status, loading) => {
 };
 
 const getExternalVisualizerError = (error) => {
-  const data = error?.response?.data;
-  if (typeof data === 'string') return data;
-  if (data?.error) return data.error;
-  return 'External visualizer did not launch.';
+  return toDisplayError(error, 'External visualizer did not launch.');
 };
 
 const PlayerToolButton = ({
@@ -276,11 +274,14 @@ const PlayerRadioModal = ({ current, onClose, onOpenSearch, open }) => {
   const mountedRef = useMountedRef();
   const openRef = useRef(open);
   const actionRequestIdRef = useRef(0);
+  const actionInFlightRef = useRef(false);
 
   useEffect(() => {
     openRef.current = open;
     if (!open) {
       actionRequestIdRef.current += 1;
+      setRunningSearches(false);
+      setSavingWishlist(false);
     }
   }, [open]);
 
@@ -291,7 +292,13 @@ const PlayerRadioModal = ({ current, onClose, onOpenSearch, open }) => {
   };
 
   const startRadioSearches = async () => {
-    if (!mountedRef.current || !openRef.current) return;
+    if (
+      !mountedRef.current ||
+      !openRef.current ||
+      actionInFlightRef.current
+    ) {
+      return;
+    }
     const requestId = ++actionRequestIdRef.current;
     const isCurrentRequest = () =>
       mountedRef.current && openRef.current && actionRequestIdRef.current === requestId;
@@ -301,6 +308,7 @@ const PlayerRadioModal = ({ current, onClose, onOpenSearch, open }) => {
       return;
     }
 
+    actionInFlightRef.current = true;
     try {
       setRunningSearches(true);
       const count = await searches.createBatch({ queries });
@@ -310,12 +318,19 @@ const PlayerRadioModal = ({ current, onClose, onOpenSearch, open }) => {
       if (!isCurrentRequest()) return;
       setStatus('Unable to start smart-radio searches.');
     } finally {
+      actionInFlightRef.current = false;
       if (isCurrentRequest()) setRunningSearches(false);
     }
   };
 
   const addRadioWishlist = async () => {
-    if (!mountedRef.current || !openRef.current) return;
+    if (
+      !mountedRef.current ||
+      !openRef.current ||
+      actionInFlightRef.current
+    ) {
+      return;
+    }
     const requestId = ++actionRequestIdRef.current;
     const isCurrentRequest = () =>
       mountedRef.current && openRef.current && actionRequestIdRef.current === requestId;
@@ -325,6 +340,7 @@ const PlayerRadioModal = ({ current, onClose, onOpenSearch, open }) => {
       return;
     }
 
+    actionInFlightRef.current = true;
     try {
       setSavingWishlist(true);
       await queries.reduce(
@@ -346,6 +362,7 @@ const PlayerRadioModal = ({ current, onClose, onOpenSearch, open }) => {
       if (!isCurrentRequest()) return;
       setStatus('Unable to add smart-radio seeds to Wishlist.');
     } finally {
+      actionInFlightRef.current = false;
       if (isCurrentRequest()) setSavingWishlist(false);
     }
   };
@@ -490,11 +507,14 @@ const PlayerQueueModal = ({
   const mountedRef = useMountedRef();
   const openRef = useRef(open);
   const actionRequestIdRef = useRef(0);
+  const actionInFlightRef = useRef(false);
 
   useEffect(() => {
     openRef.current = open;
     if (!open) {
       actionRequestIdRef.current += 1;
+      setSearchingSimilar(false);
+      setSavingSimilarWishlist(false);
     }
   }, [open]);
   const similarCandidates = buildSimilarQueueCandidates({
@@ -504,7 +524,13 @@ const PlayerQueueModal = ({
   });
 
   const startSimilarSearches = async () => {
-    if (!mountedRef.current || !openRef.current) return;
+    if (
+      !mountedRef.current ||
+      !openRef.current ||
+      actionInFlightRef.current
+    ) {
+      return;
+    }
     const requestId = ++actionRequestIdRef.current;
     const isCurrentRequest = () =>
       mountedRef.current && openRef.current && actionRequestIdRef.current === requestId;
@@ -514,6 +540,7 @@ const PlayerQueueModal = ({
       return;
     }
 
+    actionInFlightRef.current = true;
     try {
       setSearchingSimilar(true);
       const count = await searches.createBatch({ queries });
@@ -523,12 +550,19 @@ const PlayerQueueModal = ({
       if (!isCurrentRequest()) return;
       setHandoffStatus('Unable to start similar-track searches.');
     } finally {
+      actionInFlightRef.current = false;
       if (isCurrentRequest()) setSearchingSimilar(false);
     }
   };
 
   const addSimilarWishlist = async () => {
-    if (!mountedRef.current || !openRef.current) return;
+    if (
+      !mountedRef.current ||
+      !openRef.current ||
+      actionInFlightRef.current
+    ) {
+      return;
+    }
     const requestId = ++actionRequestIdRef.current;
     const isCurrentRequest = () =>
       mountedRef.current && openRef.current && actionRequestIdRef.current === requestId;
@@ -538,6 +572,7 @@ const PlayerQueueModal = ({
       return;
     }
 
+    actionInFlightRef.current = true;
     try {
       setSavingSimilarWishlist(true);
       await queries.reduce(
@@ -559,6 +594,7 @@ const PlayerQueueModal = ({
       if (!isCurrentRequest()) return;
       setHandoffStatus('Unable to add similar-track seeds to Wishlist.');
     } finally {
+      actionInFlightRef.current = false;
       if (isCurrentRequest()) setSavingSimilarWishlist(false);
     }
   };
@@ -1007,11 +1043,15 @@ const PlayerStatsModal = ({ onClose, onOpenSearch, open }) => {
   const mountedRef = useMountedRef();
   const openRef = useRef(open);
   const actionRequestIdRef = useRef(0);
+  const actionInFlightRef = useRef(false);
 
   useEffect(() => {
     openRef.current = open;
     if (!open) {
       actionRequestIdRef.current += 1;
+      setRunningSeedSearches(false);
+      setScrobblingRecent(false);
+      setSavingSeedWishlist(false);
     }
   }, [open]);
 
@@ -1058,7 +1098,7 @@ const PlayerStatsModal = ({ onClose, onOpenSearch, open }) => {
   };
 
   const startSeedSearches = async () => {
-    if (!isActive()) return;
+    if (!isActive() || actionInFlightRef.current) return;
     const requestId = ++actionRequestIdRef.current;
     const isCurrentRequest = () =>
       isActive() && actionRequestIdRef.current === requestId;
@@ -1068,6 +1108,7 @@ const PlayerStatsModal = ({ onClose, onOpenSearch, open }) => {
       return;
     }
 
+    actionInFlightRef.current = true;
     try {
       setRunningSeedSearches(true);
       const count = await searches.createBatch({ queries });
@@ -1077,12 +1118,13 @@ const PlayerStatsModal = ({ onClose, onOpenSearch, open }) => {
       if (!isCurrentRequest()) return;
       setImportStatus('Unable to start listening seed searches.');
     } finally {
+      actionInFlightRef.current = false;
       if (isCurrentRequest()) setRunningSeedSearches(false);
     }
   };
 
   const addSeedsToWishlist = async () => {
-    if (!isActive()) return;
+    if (!isActive() || actionInFlightRef.current) return;
     const requestId = ++actionRequestIdRef.current;
     const isCurrentRequest = () =>
       isActive() && actionRequestIdRef.current === requestId;
@@ -1092,6 +1134,7 @@ const PlayerStatsModal = ({ onClose, onOpenSearch, open }) => {
       return;
     }
 
+    actionInFlightRef.current = true;
     try {
       setSavingSeedWishlist(true);
       await queries.reduce(
@@ -1113,15 +1156,17 @@ const PlayerStatsModal = ({ onClose, onOpenSearch, open }) => {
       if (!isCurrentRequest()) return;
       setImportStatus('Unable to add listening seeds to Wishlist.');
     } finally {
+      actionInFlightRef.current = false;
       if (isCurrentRequest()) setSavingSeedWishlist(false);
     }
   };
 
   const scrobbleRecentHistory = async () => {
-    if (!isActive()) return;
+    if (!isActive() || actionInFlightRef.current) return;
     const requestId = ++actionRequestIdRef.current;
     const isCurrentRequest = () =>
       isActive() && actionRequestIdRef.current === requestId;
+    actionInFlightRef.current = true;
     try {
       setScrobblingRecent(true);
       const result = await listenBrainz.submitListeningHistory(stats.history, {
@@ -1137,6 +1182,7 @@ const PlayerStatsModal = ({ onClose, onOpenSearch, open }) => {
       if (!isCurrentRequest()) return;
       setImportStatus('Unable to submit recent listens to ListenBrainz.');
     } finally {
+      actionInFlightRef.current = false;
       if (isCurrentRequest()) setScrobblingRecent(false);
     }
   };
@@ -2238,6 +2284,7 @@ const PlayerBar = ({ runtimeProfile } = {}) => {
   const pipRef = useRef({ raf: null, win: null });
   const externalStatusRequestIdRef = useRef(0);
   const externalLaunchRequestIdRef = useRef(0);
+  const externalLaunchInFlightRef = useRef(false);
   const streamRequestIdRef = useRef(0);
   const pipRequestIdRef = useRef(0);
   const {
@@ -2334,7 +2381,8 @@ const PlayerBar = ({ runtimeProfile } = {}) => {
   }, [mountedRef]);
 
   const launchExternalVisualizer = useCallback(() => {
-    if (!mountedRef.current) return;
+    if (!mountedRef.current || externalLaunchInFlightRef.current) return;
+    externalLaunchInFlightRef.current = true;
     const requestId = ++externalLaunchRequestIdRef.current;
     setExternalVisualizerLaunching(true);
     setExternalVisualizerMessage('');
@@ -2347,9 +2395,16 @@ const PlayerBar = ({ runtimeProfile } = {}) => {
         ) {
           return;
         }
-        const name = result?.name || externalVisualizerStatus?.name || 'External visualizer';
+        const name =
+          typeof result?.name === 'string'
+            ? result.name
+            : typeof externalVisualizerStatus?.name === 'string'
+              ? externalVisualizerStatus.name
+              : 'External visualizer';
         setExternalVisualizerMessage(
-          result?.started ? `${name} launched.` : result?.error || 'External visualizer did not launch.',
+          result?.started
+            ? name + ' launched.'
+            : toDisplayError(result, 'External visualizer did not launch.'),
         );
       })
       .catch((error) => {
@@ -2361,6 +2416,7 @@ const PlayerBar = ({ runtimeProfile } = {}) => {
         }
       })
       .finally(() => {
+        externalLaunchInFlightRef.current = false;
         if (
           mountedRef.current &&
           externalLaunchRequestIdRef.current === requestId
@@ -2437,6 +2493,9 @@ const PlayerBar = ({ runtimeProfile } = {}) => {
   useEffect(() => {
     if (integrationsOpen) {
       void refreshExternalVisualizerStatus();
+    } else {
+      externalStatusRequestIdRef.current += 1;
+      externalLaunchRequestIdRef.current += 1;
     }
   }, [integrationsOpen, refreshExternalVisualizerStatus]);
 

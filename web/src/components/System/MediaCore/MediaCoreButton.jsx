@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { Button as SemanticButton, Popup } from 'semantic-ui-react';
 
 const getButtonText = (children) => {
@@ -16,14 +16,37 @@ const getButtonText = (children) => {
 const Button = ({
   'aria-label': ariaLabel,
   children,
+  onClick,
   title,
   tooltip,
   ...props
 }) => {
+  const inFlightRef = useRef(false);
   const label = ariaLabel || title || getButtonText(children) || undefined;
+  const handleClick = (...args) => {
+    if (typeof onClick !== 'function' || inFlightRef.current) {
+      return undefined;
+    }
+
+    inFlightRef.current = true;
+    try {
+      const result = onClick(...args);
+      if (result && typeof result.then === 'function') {
+        return Promise.resolve(result).finally(() => {
+          inFlightRef.current = false;
+        });
+      }
+      inFlightRef.current = false;
+      return result;
+    } catch (error) {
+      inFlightRef.current = false;
+      throw error;
+    }
+  };
   const button = (
     <SemanticButton
       aria-label={ariaLabel || label}
+      onClick={onClick ? handleClick : undefined}
       title={title}
       {...props}
     >

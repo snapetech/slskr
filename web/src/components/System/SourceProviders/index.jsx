@@ -15,29 +15,38 @@ import {
   Statistic,
 } from 'semantic-ui-react';
 
+const asText = (value, fallback = '') =>
+  typeof value === 'string' || typeof value === 'number' ? String(value) : fallback;
+
 const normalizeProvider = (provider) => ({
-  active: provider.active ?? provider.Active ?? false,
-  capabilities: provider.capabilities ?? provider.Capabilities ?? [],
-  description: provider.description ?? provider.Description ?? '',
-  disabledReason: provider.disabledReason ?? provider.DisabledReason ?? '',
-  domain: provider.domain ?? provider.Domain ?? 'Any',
-  id: provider.id ?? provider.Id ?? '',
-  name: provider.name ?? provider.Name ?? '',
-  networkPolicy: provider.networkPolicy ?? provider.NetworkPolicy ?? '',
+  active: Boolean(provider.active ?? provider.Active),
+  capabilities: (Array.isArray(provider.capabilities ?? provider.Capabilities)
+    ? provider.capabilities ?? provider.Capabilities
+    : []).map((capability) => asText(capability)).filter(Boolean),
+  description: asText(provider.description ?? provider.Description),
+  disabledReason: asText(provider.disabledReason ?? provider.DisabledReason),
+  domain: asText(provider.domain ?? provider.Domain, 'Any'),
+  id: asText(provider.id ?? provider.Id),
+  name: asText(provider.name ?? provider.Name, 'Unnamed provider'),
+  networkPolicy: asText(provider.networkPolicy ?? provider.NetworkPolicy),
   registered: provider.registered ?? provider.Registered ?? false,
   requiresConfiguration:
     provider.requiresConfiguration ?? provider.RequiresConfiguration ?? false,
-  riskLevel: provider.riskLevel ?? provider.RiskLevel ?? 'local',
-  sortOrder: provider.sortOrder ?? provider.SortOrder ?? 100,
+  riskLevel: asText(provider.riskLevel ?? provider.RiskLevel, 'local'),
+  sortOrder: Number.isFinite(Number(provider.sortOrder ?? provider.SortOrder))
+    ? Number(provider.sortOrder ?? provider.SortOrder)
+    : 100,
 });
 
 const normalizeProfilePolicy = (policy) => ({
   autoDownloadEnabled:
     policy.autoDownloadEnabled ?? policy.AutoDownloadEnabled ?? false,
-  notes: policy.notes ?? policy.Notes ?? '',
-  profileId: policy.profileId ?? policy.ProfileId ?? '',
-  profileName: policy.profileName ?? policy.ProfileName ?? '',
-  providerPriority: policy.providerPriority ?? policy.ProviderPriority ?? [],
+  notes: asText(policy.notes ?? policy.Notes),
+  profileId: asText(policy.profileId ?? policy.ProfileId),
+  profileName: asText(policy.profileName ?? policy.ProfileName, 'Unnamed profile'),
+  providerPriority: (Array.isArray(policy.providerPriority ?? policy.ProviderPriority)
+    ? policy.providerPriority ?? policy.ProviderPriority
+    : []).map((providerId) => asText(providerId)).filter(Boolean),
 });
 
 // A real risk gradient, not a different hue per category: safest to most
@@ -68,6 +77,7 @@ const SourceProviders = () => {
   const [error, setError] = useState('');
   const mountedRef = useMountedRef();
   const loadRequestIdRef = React.useRef(0);
+  const loadInFlightRef = React.useRef(false);
 
   const providers = useMemo(
     () =>
@@ -91,7 +101,9 @@ const SourceProviders = () => {
 
   const load = async () => {
     if (!mountedRef.current) return;
+    if (loadInFlightRef.current) return;
     const requestId = ++loadRequestIdRef.current;
+    loadInFlightRef.current = true;
     setLoading(true);
     setError('');
 
@@ -124,6 +136,7 @@ const SourceProviders = () => {
       ) {
         setLoading(false);
       }
+      loadInFlightRef.current = false;
     }
   };
 

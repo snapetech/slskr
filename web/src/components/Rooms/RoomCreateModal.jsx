@@ -12,9 +12,10 @@ const RoomCreateModal = ({ onCreateRoom, ...modalOptions }) => {
   const [error, setError] = useState('');
   const mountedRef = useMountedRef();
   const createRequestIdRef = useRef(0);
+  const createInFlightRef = useRef(false);
 
   const handleCreate = async () => {
-    if (!mountedRef.current || loading) return;
+    if (!mountedRef.current || loading || createInFlightRef.current) return;
     const name = roomName.trim();
     if (!name) {
       setError('Room name cannot be empty');
@@ -25,6 +26,7 @@ const RoomCreateModal = ({ onCreateRoom, ...modalOptions }) => {
     const isCurrentRequest = () =>
       mountedRef.current && createRequestIdRef.current === requestId;
 
+    createInFlightRef.current = true;
     setLoading(true);
     setError('');
 
@@ -40,6 +42,7 @@ const RoomCreateModal = ({ onCreateRoom, ...modalOptions }) => {
       }
     } finally {
       if (isCurrentRequest()) setLoading(false);
+      createInFlightRef.current = false;
     }
   };
 

@@ -1,6 +1,8 @@
 import * as optionsApi from '../../../lib/options';
+import { toDisplayError } from '../../../lib/errors';
+import { useMountedRef } from '../../../lib/useMountedRef';
 import * as YAML from 'yaml';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Button,
   Card,
@@ -271,6 +273,8 @@ const AdminPolicies = ({ options = {} }) => {
   const [form, setForm] = useState(() => buildForm(options));
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState(null);
+  const mountedRef = useMountedRef();
+  const saveRequestIdRef = useRef(0);
 
   useEffect(() => {
     setForm(buildForm(options));
@@ -315,6 +319,8 @@ const AdminPolicies = ({ options = {} }) => {
   };
 
   const saveYaml = async () => {
+    if (!mountedRef.current || saving) return;
+    const requestId = ++saveRequestIdRef.current;
     setSaving(true);
     setMessage(null);
 
@@ -528,6 +534,12 @@ const AdminPolicies = ({ options = {} }) => {
       setOptionalNumber(document, ['shares', 'cache', 'retention'], form.shareCacheRetention);
 
       await optionsApi.updateYaml({ yaml: document.toString() });
+      if (
+        !mountedRef.current ||
+        requestId !== saveRequestIdRef.current
+      ) {
+        return;
+      }
       setForm((current) => ({
         ...current,
         apiKeyConfigured: current.apiKeyConfigured || Boolean(current.apiKeyValue.trim()),
@@ -544,16 +556,22 @@ const AdminPolicies = ({ options = {} }) => {
         text: 'Policy settings saved to YAML. Restart-signalled options still require a daemon restart.',
       });
     } catch (error) {
-      setMessage({
-        negative: true,
-        text:
-          error?.response?.data ||
-          error?.response?.statusText ||
-          error?.message ||
-          'Failed to save policy settings.',
-      });
+      if (
+        mountedRef.current &&
+        requestId === saveRequestIdRef.current
+      ) {
+        setMessage({
+          negative: true,
+          text: toDisplayError(error, 'Failed to save policy settings.'),
+        });
+      }
     } finally {
-      setSaving(false);
+      if (
+        mountedRef.current &&
+        requestId === saveRequestIdRef.current
+      ) {
+        setSaving(false);
+      }
     }
   };
 

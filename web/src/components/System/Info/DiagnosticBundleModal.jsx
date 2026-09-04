@@ -1,7 +1,7 @@
 import { buildDiagnosticBundle } from '../../../lib/diagnosticBundle';
 import { toDisplayError } from '../../../lib/errors';
 import { useMountedRef } from '../../../lib/useMountedRef';
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { toast } from 'react-toastify';
 import {
   Button,
@@ -24,6 +24,8 @@ const copyToClipboard = async (value) => {
 
 const DiagnosticBundleModal = ({ options = {}, state = {} }) => {
   const [open, setOpen] = useState(false);
+  const [copying, setCopying] = useState(false);
+  const copyingRef = useRef(false);
   const mountedRef = useMountedRef();
   const bundle = useMemo(
     () =>
@@ -35,7 +37,9 @@ const DiagnosticBundleModal = ({ options = {}, state = {} }) => {
   );
 
   const copyBundle = async () => {
-    if (!mountedRef.current) return;
+    if (!mountedRef.current || copying || copyingRef.current) return;
+    copyingRef.current = true;
+    setCopying(true);
     try {
       const copied = await copyToClipboard(bundle);
 
@@ -50,6 +54,9 @@ const DiagnosticBundleModal = ({ options = {}, state = {} }) => {
       if (mountedRef.current) {
         toast.error(toDisplayError(error, 'Unable to copy diagnostic bundle'));
       }
+    } finally {
+      copyingRef.current = false;
+      if (mountedRef.current) setCopying(false);
     }
   };
 
@@ -105,6 +112,8 @@ const DiagnosticBundleModal = ({ options = {}, state = {} }) => {
             trigger={
               <Button
                 aria-label="Copy diagnostic bundle"
+                disabled={copying}
+                loading={copying}
                 onClick={copyBundle}
                 primary
               >

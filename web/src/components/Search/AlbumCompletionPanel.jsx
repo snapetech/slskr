@@ -21,6 +21,20 @@ const formatDuration = (durationMs) => {
   return `${minutes}:${seconds.toString().padStart(2, '0')} min`;
 };
 
+const asRecords = (value) =>
+  (Array.isArray(value) ? value : []).filter(
+    (item) => item && typeof item === 'object' && !Array.isArray(item),
+  );
+
+const normalizeAlbum = (album, index) => ({
+  ...album,
+  completedTracks: Number(album.completedTracks) || 0,
+  releaseId: album.releaseId || `album-${index}`,
+  title: album.title || 'Untitled album',
+  totalTracks: Number(album.totalTracks) || 0,
+  tracks: asRecords(album.tracks),
+});
+
 const AlbumCompletionPanel = ({ disabled }) => {
   const [albums, setAlbums] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -48,19 +62,14 @@ const AlbumCompletionPanel = ({ disabled }) => {
         return;
       }
       setAlbums(
-        (Array.isArray(response.data?.albums) ? response.data.albums : []).map(
-          (album) => ({
-            ...album,
-            tracks: Array.isArray(album?.tracks) ? album.tracks : [],
-          }),
-        ),
+        asRecords(response.data?.albums).map(normalizeAlbum),
       );
     } catch (loadError) {
-      console.error(loadError);
       if (
         mountedRef.current &&
         requestId === requestIdRef.current
       ) {
+        console.error(loadError);
         setError(toDisplayError(loadError, 'Unable to load album completion data'));
       }
     } finally {

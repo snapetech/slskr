@@ -14,6 +14,7 @@ import {
 } from '../../lib/communityQualitySignals';
 import { getDirectoryContents, getGroup } from '../../lib/users';
 import { getSearchResultItemId } from '../../lib/searchItemId';
+import { toDisplayError } from '../../lib/errors';
 import { formatBytes, getDirectoryName, getFileName } from '../../lib/util';
 import DiscoveryGraphModal from './DiscoveryGraphModal';
 import FileList from '../Shared/FileList';
@@ -180,12 +181,24 @@ class Response extends Component {
   };
 
   handleFileSelectionChange = (file, state) => {
-    file.selected = state;
-    this.setState((previousState) => ({
-      downloadError: '',
-      downloadRequest: undefined,
-      tree: previousState.tree,
-    }));
+    if (!file) return;
+    this.setState((previousState) => {
+      const tree = Object.fromEntries(
+        Object.entries(previousState.tree).map(([directory, files]) => [
+          directory,
+          files.map((candidate) =>
+            candidate === file
+              ? { ...candidate, selected: Boolean(state) }
+              : candidate,
+          ),
+        ]),
+      );
+      return {
+        downloadError: '',
+        downloadRequest: undefined,
+        tree,
+      };
+    });
   };
 
   download = (username, files) => {
@@ -238,11 +251,7 @@ class Response extends Component {
           requestId === this.requestIds.download
         ) {
           this.setState({
-            downloadError: error.response || {
-              data: error.message,
-              status: 500,
-              statusText: 'Error',
-            },
+            downloadError: toDisplayError(error, 'Download failed'),
             downloadRequest: 'error',
           });
         }
@@ -256,9 +265,6 @@ class Response extends Component {
     this.setState({ fetchingDirectoryContents: true });
 
     try {
-      const oldTree = { ...this.state.tree };
-      const oldFiles = oldTree[directory] || [];
-
       try {
         // some clients might send more than one directory in the response,
         // if the requested directory contains subdirectories. the root directory
@@ -274,29 +280,46 @@ class Response extends Component {
           throw new Error('No directories were included in the response');
         }
 
-        const { name } = theRootDirectory;
+        const name =
+          typeof theRootDirectory.name === 'string' &&
+          theRootDirectory.name.trim()
+            ? theRootDirectory.name
+            : directory;
         const files = Array.isArray(theRootDirectory.files)
-          ? theRootDirectory.files
+          ? theRootDirectory.files.filter(
+              (file) =>
+                file &&
+                typeof file === 'object' &&
+                typeof file.filename === 'string',
+            )
           : [];
 
         // the api returns file names only, so we need to prepend the directory
         // to make it look like a search result.  we also need to preserve
         // any file selections, so check the old files and assign accordingly
-        const fixedFiles = files.map((file) => ({
-          ...file,
-          filename: `${directory}\\${file.filename}`,
-          selected:
-            oldFiles.find(
-              (f) => f.filename === `${directory}\\${file.filename}`,
-            )?.selected ?? false,
-        }));
-
-        oldTree[name] = fixedFiles;
         if (
           this.isMountedFlag &&
           requestId === this.requestIds.directory
         ) {
-          this.setState({ tree: { ...oldTree } });
+          this.setState((previousState) => {
+            const oldFiles = previousState.tree[directory] || [];
+            const fixedFiles = files.map((file) => {
+              const filename = `${directory}\\${file.filename}`;
+              return {
+                ...file,
+                filename,
+                selected:
+                  oldFiles.find((candidate) => candidate.filename === filename)
+                    ?.selected ?? false,
+              };
+            });
+            return {
+              tree: {
+                ...previousState.tree,
+                [name]: fixedFiles,
+              },
+            };
+          });
         }
       } catch (error) {
         throw new Error(`Failed to process directory response: ${error}`, {
@@ -305,7 +328,7 @@ class Response extends Component {
       }
     } catch (error) {
       console.error(error);
-      toast.error(error?.response?.data ?? error?.message ?? error);
+      toast.error(toDisplayError(error, 'Failed to load directory contents'));
     } finally {
       if (
         this.isMountedFlag &&
@@ -372,7 +395,7 @@ class Response extends Component {
       console.error(error);
       if (this.isMountedFlag && requestId === this.requestIds.graph) {
         toast.error(
-          error?.response?.data ?? error?.message ?? 'Failed to build discovery graph',
+          toDisplayError(error, 'Failed to build discovery graph'),
         );
         this.setState({ graphOpen: false });
       }
@@ -438,7 +461,7 @@ class Response extends Component {
     } catch (error) {
       console.error(error);
       toast.error(
-        error?.response?.data ?? error?.message ?? 'Failed to queue nearby graph searches',
+        toDisplayError(error, 'Failed to queue nearby graph searches'),
       );
     }
   };
@@ -621,11 +644,7 @@ class Response extends Component {
                         safeOpenBlank(result.data.stream_url);
                       }
                     } catch (error) {
-                      toast.error(
-                        error?.response?.data?.detail ||
-                          error?.message ||
-                          'Stream failed',
-                      );
+                      toast.error(toDisplayError(error, 'Stream failed'));
                     }
                   }}
                 />
@@ -654,9 +673,7 @@ class Response extends Component {
                 size="large"
               />
               <Label>
-                {downloadError?.data ||
-                  downloadError?.message ||
-                  'Download failed'}{' '}
+                {toDisplayError(downloadError, 'Download failed')}{' '}
                 {downloadError?.status &&
                   `(HTTP ${downloadError.status} ${downloadError.statusText || ''})`}
               </Label>

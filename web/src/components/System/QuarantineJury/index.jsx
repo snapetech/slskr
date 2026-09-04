@@ -3,7 +3,9 @@
 // </copyright>
 
 import * as quarantineJuryApi from '../../../lib/quarantineJury';
-import React, { useEffect, useMemo, useState } from 'react';
+import { toDisplayError } from '../../../lib/errors';
+import { useMountedRef } from '../../../lib/useMountedRef';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Button,
   Card,
@@ -29,6 +31,28 @@ const verdictNames = {
   UpholdQuarantine: 'Uphold Quarantine',
 };
 
+const asArray = (value) => (Array.isArray(value) ? value : []);
+const asObject = (value) =>
+  value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+const toText = (value, fallback = '') => {
+  if (typeof value === 'string' || typeof value === 'number') return String(value);
+  return fallback;
+};
+const toCount = (value, fallback = 0) => {
+  const count = Number(value);
+  return Number.isFinite(count) && count >= 0 ? count : fallback;
+};
+const toBoolean = (value, fallback = false) => {
+  if (typeof value === 'boolean') return value;
+  if (value === 1 || value === '1' || value === 'true') return true;
+  if (value === 0 || value === '0' || value === 'false') return false;
+  return fallback;
+};
+const asTextArray = (value) =>
+  asArray(value)
+    .map((item) => toText(item))
+    .filter(Boolean);
+
 const verdictColor = (verdict) => {
   const label = normalizeVerdict(verdict);
   if (label === 'Release Candidate') return 'green';
@@ -37,90 +61,132 @@ const verdictColor = (verdict) => {
 };
 
 const normalizeVerdict = (verdict) =>
-  verdictNames[verdict] || String(verdict || 'Needs Manual Review');
+  verdictNames[verdict] || toText(verdict, 'Needs Manual Review');
 
 const valueOrDash = (value) => {
-  if (Array.isArray(value)) return value.length > 0 ? value.join(', ') : '-';
-  return value || '-';
+  if (Array.isArray(value)) return value.length > 0 ? asTextArray(value).join(', ') || '-' : '-';
+  return toText(value, '-') || '-';
 };
 
-const normalizeRequest = (request = {}) => ({
-  createdAt: request.createdAt ?? request.CreatedAt ?? '',
-  evidence: request.evidence ?? request.Evidence ?? [],
-  id: request.id ?? request.Id ?? '',
-  jurors: request.jurors ?? request.Jurors ?? [],
-  localReason: request.localReason ?? request.LocalReason ?? '',
-  minJurorVotes: request.minJurorVotes ?? request.MinJurorVotes ?? 2,
-});
+const normalizeRequest = (request) => {
+  const source = asObject(request);
+  return {
+    createdAt: toText(source.createdAt ?? source.CreatedAt),
+    evidence: asArray(source.evidence ?? source.Evidence),
+    id: toText(source.id ?? source.Id),
+    jurors: asTextArray(source.jurors ?? source.Jurors),
+    localReason: toText(source.localReason ?? source.LocalReason),
+    minJurorVotes: toCount(source.minJurorVotes ?? source.MinJurorVotes, 2),
+  };
+};
 
-const normalizeEvidence = (evidence = {}) => ({
-  reference: evidence.reference ?? evidence.Reference ?? '',
-  summary: evidence.summary ?? evidence.Summary ?? '',
-  type: evidence.type ?? evidence.Type ?? '',
-});
+const normalizeEvidence = (evidence) => {
+  const source = asObject(evidence);
+  return {
+    reference: toText(source.reference ?? source.Reference),
+    summary: toText(source.summary ?? source.Summary),
+    type: toText(source.type ?? source.Type),
+  };
+};
 
-const normalizeAggregate = (aggregate = {}) => ({
-  dissentingJurors:
-    aggregate.dissentingJurors ?? aggregate.DissentingJurors ?? [],
-  quorumReached: aggregate.quorumReached ?? aggregate.QuorumReached ?? false,
-  reason: aggregate.reason ?? aggregate.Reason ?? '',
-  recommendation:
-    aggregate.recommendation ?? aggregate.Recommendation ?? 'NeedsManualReview',
-  requiredVotes: aggregate.requiredVotes ?? aggregate.RequiredVotes ?? 0,
-  totalVerdicts: aggregate.totalVerdicts ?? aggregate.TotalVerdicts ?? 0,
-  verdictCounts: aggregate.verdictCounts ?? aggregate.VerdictCounts ?? {},
-});
+const normalizeAggregate = (aggregate) => {
+  const source = asObject(aggregate);
+  return {
+    dissentingJurors: asTextArray(
+      source.dissentingJurors ?? source.DissentingJurors,
+    ),
+    quorumReached: toBoolean(source.quorumReached ?? source.QuorumReached),
+    reason: toText(source.reason ?? source.Reason),
+    recommendation:
+      toText(
+        source.recommendation ?? source.Recommendation,
+        'NeedsManualReview',
+      ),
+    requiredVotes: toCount(source.requiredVotes ?? source.RequiredVotes),
+    totalVerdicts: toCount(source.totalVerdicts ?? source.TotalVerdicts),
+    verdictCounts: Object.entries(
+      source.verdictCounts &&
+        typeof source.verdictCounts === 'object' &&
+        !Array.isArray(source.verdictCounts)
+        ? source.verdictCounts
+        : {},
+    ).reduce((counts, [key, value]) => {
+      counts[key] = toCount(value);
+      return counts;
+    }, {}),
+  };
+};
 
-const normalizeVerdictRecord = (verdict = {}) => ({
-  createdAt: verdict.createdAt ?? verdict.CreatedAt ?? '',
-  evidence: verdict.evidence ?? verdict.Evidence ?? [],
-  id: verdict.id ?? verdict.Id ?? '',
-  juror: verdict.juror ?? verdict.Juror ?? '',
-  reason: verdict.reason ?? verdict.Reason ?? '',
-  verdict: verdict.verdict ?? verdict.Verdict ?? 'NeedsManualReview',
-});
+const normalizeVerdictRecord = (verdict) => {
+  const source = asObject(verdict);
+  return {
+    createdAt: toText(source.createdAt ?? source.CreatedAt),
+    evidence: asArray(source.evidence ?? source.Evidence),
+    id: toText(source.id ?? source.Id),
+    juror: toText(source.juror ?? source.Juror),
+    reason: toText(source.reason ?? source.Reason),
+    verdict: source.verdict ?? source.Verdict ?? 'NeedsManualReview',
+  };
+};
 
-const normalizeRouteAttempt = (attempt = {}) => ({
-  channelId: attempt.channelId ?? attempt.ChannelId ?? '',
-  createdAt: attempt.createdAt ?? attempt.CreatedAt ?? '',
-  errorMessage: attempt.errorMessage ?? attempt.ErrorMessage ?? '',
-  failedJurors: attempt.failedJurors ?? attempt.FailedJurors ?? [],
-  id: attempt.id ?? attempt.Id ?? '',
-  podId: attempt.podId ?? attempt.PodId ?? '',
-  routedJurors: attempt.routedJurors ?? attempt.RoutedJurors ?? [],
-  success: attempt.success ?? attempt.Success ?? false,
-  targetJurors: attempt.targetJurors ?? attempt.TargetJurors ?? [],
-});
+const normalizeRouteAttempt = (attempt) => {
+  const source = asObject(attempt);
+  return {
+    channelId: toText(source.channelId ?? source.ChannelId),
+    createdAt: toText(source.createdAt ?? source.CreatedAt),
+    errorMessage: toText(source.errorMessage ?? source.ErrorMessage),
+    failedJurors: asTextArray(source.failedJurors ?? source.FailedJurors),
+    id: toText(source.id ?? source.Id),
+    podId: toText(source.podId ?? source.PodId),
+    routedJurors: asTextArray(source.routedJurors ?? source.RoutedJurors),
+    success: toBoolean(source.success ?? source.Success),
+    targetJurors: asTextArray(source.targetJurors ?? source.TargetJurors),
+  };
+};
 
-const normalizeAcceptance = (acceptance = {}) => ({
-  acceptedBy: acceptance.acceptedBy ?? acceptance.AcceptedBy ?? '',
-  createdAt: acceptance.createdAt ?? acceptance.CreatedAt ?? '',
-  id: acceptance.id ?? acceptance.Id ?? '',
-  note: acceptance.note ?? acceptance.Note ?? '',
-});
+const normalizeAcceptance = (acceptance) => {
+  const source = asObject(acceptance);
+  return {
+    acceptedBy: toText(source.acceptedBy ?? source.AcceptedBy),
+    createdAt: toText(source.createdAt ?? source.CreatedAt),
+    id: toText(source.id ?? source.Id),
+    note: toText(source.note ?? source.Note),
+  };
+};
 
-const normalizeReview = (review = {}) => ({
-  acceptance: review.acceptance ?? review.Acceptance ?? null,
-  acceptanceReason: review.acceptanceReason ?? review.AcceptanceReason ?? '',
-  aggregate: normalizeAggregate(review.aggregate ?? review.Aggregate),
-  canAcceptReleaseCandidate:
-    review.canAcceptReleaseCandidate ??
-    review.CanAcceptReleaseCandidate ??
-    false,
-  request: normalizeRequest(review.request ?? review.Request),
-  routeAttempts: (review.routeAttempts ?? review.RouteAttempts ?? [])
-    .map(normalizeRouteAttempt),
-  verdicts: (review.verdicts ?? review.Verdicts ?? [])
-    .map(normalizeVerdictRecord),
-});
+const normalizeReview = (review) => {
+  const source = asObject(review);
+  return {
+    acceptance: (source.acceptance ?? source.Acceptance)
+      ? normalizeAcceptance(source.acceptance ?? source.Acceptance)
+      : null,
+    acceptanceReason: toText(
+      source.acceptanceReason ?? source.AcceptanceReason,
+    ),
+    aggregate: normalizeAggregate(source.aggregate ?? source.Aggregate),
+    canAcceptReleaseCandidate:
+      toBoolean(
+        source.canAcceptReleaseCandidate ?? source.CanAcceptReleaseCandidate,
+      ),
+    request: normalizeRequest(source.request ?? source.Request),
+    routeAttempts: asArray(
+      source.routeAttempts ?? source.RouteAttempts,
+    ).map(normalizeRouteAttempt),
+    verdicts: asArray(source.verdicts ?? source.Verdicts).map(
+      normalizeVerdictRecord,
+    ),
+  };
+};
 
 const formatDate = (value) => {
-  if (!value) return '-';
-  return new Date(value).toLocaleString();
+  const text = toText(value);
+  if (!text) return '-';
+  const date = new Date(text);
+  return Number.isNaN(date.getTime()) ? '-' : date.toLocaleString();
 };
 
 const getVerdictCount = (counts = {}, key, numericKey) =>
-  counts[key] ?? counts[numericKey] ?? counts[String(numericKey)] ?? 0;
+  toCount(counts[key] ?? counts[numericKey] ?? counts[String(numericKey)]);
 
 const parseJurors = (value = '') =>
   value
@@ -181,6 +247,13 @@ const QuarantineJury = () => {
   });
   const [acceptOpen, setAcceptOpen] = useState(false);
   const [message, setMessage] = useState('');
+  const mountedRef = useMountedRef();
+  const selectedIdRef = useRef('');
+  const requestIdsRef = useRef({
+    mutation: 0,
+    requests: 0,
+    review: 0,
+  });
 
   const normalizedRequests = useMemo(
     () => requests.map(normalizeRequest),
@@ -191,7 +264,8 @@ const QuarantineJury = () => {
   );
 
   const loadReview = async (requestId) => {
-    if (!requestId) return;
+    const reviewRequestId = ++requestIdsRef.current.review;
+    if (!requestId || !mountedRef.current) return;
     setLoadingReview(true);
     setError('');
 
@@ -199,111 +273,179 @@ const QuarantineJury = () => {
       const nextReview = normalizeReview(
         await quarantineJuryApi.getReview(requestId),
       );
-      setReview(nextReview);
-      setRouteForm((current) => ({
-        ...current,
-        targetJurors: nextReview.request.jurors.join(', '),
-      }));
+      if (
+        mountedRef.current &&
+        reviewRequestId === requestIdsRef.current.review &&
+        selectedIdRef.current === requestId
+      ) {
+        setReview(nextReview);
+        setRouteForm((current) => ({
+          ...current,
+          targetJurors: nextReview.request.jurors.join(', '),
+        }));
+      }
     } catch (loadError) {
-      setReview(null);
-      setError(
-        loadError?.response?.data ||
-          loadError?.response?.statusText ||
-          loadError?.message ||
-          'Unable to load Quarantine Jury review',
-      );
+      if (
+        mountedRef.current &&
+        reviewRequestId === requestIdsRef.current.review &&
+        selectedIdRef.current === requestId
+      ) {
+        setReview(null);
+        setError(toDisplayError(loadError, 'Unable to load Quarantine Jury review'));
+      }
     } finally {
-      setLoadingReview(false);
+      if (
+        mountedRef.current &&
+        reviewRequestId === requestIdsRef.current.review
+      ) {
+        setLoadingReview(false);
+      }
     }
   };
 
   const loadRequests = async () => {
+    const requestId = ++requestIdsRef.current.requests;
+    if (!mountedRef.current) return;
     setLoadingRequests(true);
     setError('');
 
     try {
-      const nextRequests = await quarantineJuryApi.getRequests();
+      const response = await quarantineJuryApi.getRequests();
+      const nextRequests = asArray(response);
+      if (
+        !mountedRef.current ||
+        requestId !== requestIdsRef.current.requests
+      ) {
+        return;
+      }
       setRequests(nextRequests);
       const normalized = nextRequests.map(normalizeRequest);
       const nextSelected =
         selectedId && normalized.some((request) => request.id === selectedId)
           ? selectedId
           : normalized[0]?.id || '';
+      selectedIdRef.current = nextSelected;
       setSelectedId(nextSelected);
       if (nextSelected) {
         await loadReview(nextSelected);
-      } else {
+      } else if (
+        mountedRef.current &&
+        requestId === requestIdsRef.current.requests
+      ) {
         setReview(null);
       }
     } catch (loadError) {
-      setError(
-        loadError?.response?.data ||
-          loadError?.response?.statusText ||
-          loadError?.message ||
-          'Unable to load Quarantine Jury requests',
-      );
+      if (
+        mountedRef.current &&
+        requestId === requestIdsRef.current.requests
+      ) {
+        setError(toDisplayError(loadError, 'Unable to load Quarantine Jury requests'));
+      }
     } finally {
-      setLoadingRequests(false);
+      if (
+        mountedRef.current &&
+        requestId === requestIdsRef.current.requests
+      ) {
+        setLoadingRequests(false);
+      }
     }
   };
 
   useEffect(() => {
-    loadRequests();
+    void loadRequests();
+    return () => {
+      requestIdsRef.current.requests += 1;
+      requestIdsRef.current.review += 1;
+      requestIdsRef.current.mutation += 1;
+    };
   }, []);
 
   const selectRequest = (requestId) => {
+    if (!mountedRef.current) return;
+    selectedIdRef.current = requestId;
     setSelectedId(requestId);
     setMessage('');
-    loadReview(requestId);
+    void loadReview(requestId);
   };
 
   const submitRoute = async () => {
-    if (!selectedId) return;
+    if (!selectedId || !mountedRef.current || saving) return;
+    const requestId = ++requestIdsRef.current.mutation;
+    const requestToRoute = selectedId;
     setSaving(true);
     setError('');
 
     try {
-      await quarantineJuryApi.routeRequest(selectedId, {
+      await quarantineJuryApi.routeRequest(requestToRoute, {
         channelId: routeForm.channelId,
         podId: routeForm.podId,
         senderPeerId: routeForm.senderPeerId,
         targetJurors: parseJurors(routeForm.targetJurors),
       });
+      if (
+        !mountedRef.current ||
+        requestId !== requestIdsRef.current.mutation ||
+        selectedIdRef.current !== requestToRoute
+      ) {
+        return;
+      }
       setMessage('Quarantine Jury route attempt recorded.');
-      await loadReview(selectedId);
+      await loadReview(requestToRoute);
     } catch (routeError) {
-      setError(
-        routeError?.response?.data?.errorMessage ||
-          routeError?.response?.data ||
-          routeError?.message ||
-          'Unable to route Quarantine Jury request',
-      );
+      if (
+        mountedRef.current &&
+        requestId === requestIdsRef.current.mutation
+      ) {
+        setError(toDisplayError(routeError, 'Unable to route Quarantine Jury request'));
+      }
     } finally {
-      setSaving(false);
+      if (
+        mountedRef.current &&
+        requestId === requestIdsRef.current.mutation
+      ) {
+        setSaving(false);
+      }
     }
   };
 
   const submitAccept = async () => {
-    if (!selectedId) return;
+    if (!selectedId || !mountedRef.current || saving) return;
+    const requestId = ++requestIdsRef.current.mutation;
+    const requestToAccept = selectedId;
     setSaving(true);
     setError('');
 
     try {
-      await quarantineJuryApi.acceptReleaseCandidate(selectedId, acceptForm);
+      await quarantineJuryApi.acceptReleaseCandidate(requestToAccept, acceptForm);
+      if (
+        !mountedRef.current ||
+        requestId !== requestIdsRef.current.mutation ||
+        selectedIdRef.current !== requestToAccept
+      ) {
+        return;
+      }
       setMessage('Release-candidate recommendation accepted for this review.');
       setAcceptOpen(false);
-      await loadReview(selectedId);
+      await loadReview(requestToAccept);
     } catch (acceptError) {
-      const errors = acceptError?.response?.data?.errors;
-      setError(
-        Array.isArray(errors)
-          ? errors.join(' ')
-          : acceptError?.response?.data ||
-              acceptError?.message ||
-              'Unable to accept release-candidate recommendation',
-      );
+      if (
+        mountedRef.current &&
+        requestId === requestIdsRef.current.mutation
+      ) {
+        setError(
+          toDisplayError(
+            acceptError,
+            'Unable to accept release-candidate recommendation',
+          ),
+        );
+      }
     } finally {
-      setSaving(false);
+      if (
+        mountedRef.current &&
+        requestId === requestIdsRef.current.mutation
+      ) {
+        setSaving(false);
+      }
     }
   };
 

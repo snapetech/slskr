@@ -1,4 +1,5 @@
 import './Rooms.css';
+import { toDisplayError } from '../../lib/errors';
 import { createRoomsHubConnection } from '../../lib/hubFactory';
 import { getLocalStorageItem, setLocalStorageItem } from '../../lib/storage';
 import * as rooms from '../../lib/rooms';
@@ -8,6 +9,7 @@ import RoomCreateModal from './RoomCreateModal';
 import RoomSession from './RoomSession';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { toast } from 'react-toastify';
 import {
   Button,
   Dropdown,
@@ -20,6 +22,22 @@ import {
 
 let tabCounter = 0;
 
+const asRecords = (value) =>
+  (Array.isArray(value) ? value : []).filter(
+    (record) => record && typeof record === 'object' && !Array.isArray(record),
+  );
+
+const normalizeTab = (tab) => {
+  if (!tab || typeof tab !== 'object' || Array.isArray(tab)) return null;
+  const roomName = `${tab.roomName ?? ''}`.trim();
+  return {
+    ...tab,
+    key: `${tab.key || `room-tab-${roomName || tabCounter}`}`,
+    label: `${tab.label || roomName || 'New Room Tab'}`,
+    roomName,
+  };
+};
+
 // Load tabs from localStorage
 const loadTabsFromStorage = () => {
   try {
@@ -27,9 +45,14 @@ const loadTabsFromStorage = () => {
 
     if (saved) {
       const parsed = JSON.parse(saved);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return [];
       // Restore tabCounter to avoid key collisions
-      tabCounter = parsed.tabCounter || 0;
-      return parsed.tabs || [];
+      tabCounter = Number.isInteger(parsed.tabCounter) && parsed.tabCounter >= 0
+        ? parsed.tabCounter
+        : 0;
+      return Array.isArray(parsed.tabs)
+        ? parsed.tabs.map(normalizeTab).filter(Boolean)
+        : [];
     }
   } catch {
     // ignore
@@ -58,6 +81,9 @@ const Rooms = ({ runtimeProfile } = {}) => {
   const hydrateRequestIdRef = useRef(0);
   const availableRoomsRequestIdRef = useRef(0);
   const roomActionRequestIdRef = useRef(0);
+  const roomActionInFlightRef = useRef(false);
+  const roomsRequestInFlightRef = useRef(false);
+  const [roomActionPending, setRoomActionPending] = useState(false);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -82,6 +108,18 @@ const Rooms = ({ runtimeProfile } = {}) => {
   }, []);
 
   closeTabRef.current = closeTab;
+
+  const beginRoomAction = useCallback(() => {
+    if (!mountedRef.current || roomActionInFlightRef.current) return false;
+    roomActionInFlightRef.current = true;
+    setRoomActionPending(true);
+    return true;
+  }, [mountedRef]);
+
+  const finishRoomAction = useCallback(() => {
+    roomActionInFlightRef.current = false;
+    if (mountedRef.current) setRoomActionPending(false);
+  }, [mountedRef]);
 
   const createTab = useCallback((roomName = '') => {
     tabCounter += 1;
@@ -145,7 +183,10 @@ const Rooms = ({ runtimeProfile } = {}) => {
       ) {
         return;
       }
-      const normalized = (joined || []).filter(Boolean).sort();
+      const normalized = (Array.isArray(joined) ? joined : [])
+        .filter((roomName) => typeof roomName === 'string' && roomName.trim())
+        .map((roomName) => roomName.trim())
+        .sort();
       setJoinedRooms(normalized);
       if (normalized.length > 0) {
         setTabs((previous) => {
@@ -169,22 +210,26 @@ const Rooms = ({ runtimeProfile } = {}) => {
   usePolling(hydrateJoinedRooms, 60_000);
 
   useEffect(() => {
+    let disposed = false;
     const roomsHub = createRoomsHubConnection();
     roomsHub.on('changed', () => {
-      hydrateJoinedRooms();
+      if (!disposed && mountedRef.current) void hydrateJoinedRooms();
     });
     roomsHub.start().catch((error) => {
-      console.error('Failed to start rooms event feed:', error);
+      if (!disposed) console.error('Failed to start rooms event feed:', error);
     });
     return () => {
+      disposed = true;
+      hydrateRequestIdRef.current += 1;
       roomsHub.stop().catch(() => {});
     };
-  }, [hydrateJoinedRooms]);
+  }, [hydrateJoinedRooms, mountedRef]);
 
   const fetchAvailableRooms = async () => {
     const requestId = ++availableRoomsRequestIdRef.current;
-    if (!mountedRef.current) return;
+    if (!mountedRef.current || roomsRequestInFlightRef.current) return;
 
+    roomsRequestInFlightRef.current = true;
     setRoomSearchLoading(true);
     try {
       const available = await rooms.getAvailable();
@@ -192,7 +237,17 @@ const Rooms = ({ runtimeProfile } = {}) => {
         mountedRef.current &&
         requestId === availableRoomsRequestIdRef.current
       ) {
-        setAvailableRooms(available || []);
+        setAvailableRooms(
+          asRecords(available)
+            .filter((room) => typeof room.name === 'string' && room.name.trim())
+            .map((room) => ({
+              ...room,
+              name: room.name.trim(),
+              userCount: Number.isFinite(Number(room.userCount))
+                ? Number(room.userCount)
+                : 0,
+            })),
+        );
       }
     } catch {
       if (
@@ -208,13 +263,16 @@ const Rooms = ({ runtimeProfile } = {}) => {
       ) {
         setRoomSearchLoading(false);
       }
+      roomsRequestInFlightRef.current = false;
     }
   };
 
   const joinRoom = async (roomName) => {
+    const trimmedRoomName = `${roomName || ''}`.trim();
+    if (!trimmedRoomName || !beginRoomAction()) return;
+    const requestId = ++roomActionRequestIdRef.current;
     try {
-      const requestId = ++roomActionRequestIdRef.current;
-      await rooms.join({ roomName });
+      await rooms.join({ roomName: trimmedRoomName });
 
       // Refresh joined rooms
       const joined = await rooms.getJoined();
@@ -224,17 +282,28 @@ const Rooms = ({ runtimeProfile } = {}) => {
       ) {
         return;
       }
-      setJoinedRooms(joined || []);
-      openRoomTab(roomName);
+      setJoinedRooms(
+        (Array.isArray(joined) ? joined : [])
+          .filter((name) => typeof name === 'string' && name.trim())
+          .map((name) => name.trim()),
+      );
+      openRoomTab(trimmedRoomName);
     } catch (error) {
       console.error('Failed to join room:', error);
+      if (mountedRef.current) {
+        toast.error(`Failed to join room: ${toDisplayError(error)}`);
+      }
+    } finally {
+      finishRoomAction();
     }
   };
 
   const leaveRoom = async (roomName) => {
+    const trimmedRoomName = `${roomName || ''}`.trim();
+    if (!trimmedRoomName || !beginRoomAction()) return;
     const requestId = ++roomActionRequestIdRef.current;
     try {
-      await rooms.leave({ roomName });
+      await rooms.leave({ roomName: trimmedRoomName });
 
       // Refresh joined rooms
       const joined = await rooms.getJoined();
@@ -244,15 +313,24 @@ const Rooms = ({ runtimeProfile } = {}) => {
       ) {
         return;
       }
-      setJoinedRooms(joined || []);
+      setJoinedRooms(
+        (Array.isArray(joined) ? joined : [])
+          .filter((name) => typeof name === 'string' && name.trim())
+          .map((name) => name.trim()),
+      );
 
       // Close the tab for this room
-      const tabToClose = tabs.find((t) => t.roomName === roomName);
+      const tabToClose = tabs.find((t) => t.roomName === trimmedRoomName);
       if (tabToClose) {
         closeTabRef.current?.(tabToClose.key);
       }
     } catch (error) {
       console.error('Failed to leave room:', error);
+      if (mountedRef.current) {
+        toast.error(`Failed to leave room: ${toDisplayError(error)}`);
+      }
+    } finally {
+      finishRoomAction();
     }
   };
 
@@ -364,6 +442,7 @@ const Rooms = ({ runtimeProfile } = {}) => {
             <Dropdown
               className="rooms-input"
               clearable
+              disabled={roomActionPending}
               fluid
               loading={roomSearchLoading}
               onChange={(_, { value }) => {

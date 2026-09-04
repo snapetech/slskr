@@ -150,6 +150,10 @@ const Searches = ({ runtimeProfile, server } = {}) => {
   const removeAllRequestIdRef = useRef(0);
   const stopRequestIdRef = useRef(0);
   const refreshRequestIdsRef = useRef(new Map());
+  const createInFlightRef = useRef(false);
+  const removeInFlightRef = useRef(false);
+  const removeAllInFlightRef = useRef(false);
+  const stopInFlightRef = useRef(false);
 
   const inputRef = useRef();
 
@@ -248,7 +252,9 @@ const Searches = ({ runtimeProfile, server } = {}) => {
         ) {
           return;
         }
-        const searchRecords = Array.isArray(records) ? records : [];
+        const searchRecords = (Array.isArray(records) ? records : []).filter(
+          (search) => search && typeof search === 'object' && !Array.isArray(search),
+        );
         onUpdate(
           searchRecords.reduce((accumulator, search) => {
             const id = searchEventIdentifier(search);
@@ -266,7 +272,7 @@ const Searches = ({ runtimeProfile, server } = {}) => {
         ) {
           return;
         }
-        onConnectionError(loadError?.message ?? 'Failed to load searches');
+        onConnectionError(toDisplayError(loadError, 'Failed to load searches'));
       } finally {
         restHydrated = true;
         if (
@@ -375,11 +381,11 @@ const Searches = ({ runtimeProfile, server } = {}) => {
     });
 
     searchHub.onreconnecting((connectionError) =>
-      onConnectionError(connectionError?.message ?? 'Disconnected'),
+      onConnectionError(toDisplayError(connectionError, 'Disconnected')),
     );
     searchHub.onreconnected(() => onConnected());
     searchHub.onclose((connectionError) =>
-      onConnectionError(connectionError?.message ?? 'Disconnected'),
+      onConnectionError(toDisplayError(connectionError, 'Disconnected')),
     );
 
     const connect = async () => {
@@ -411,7 +417,8 @@ const Searches = ({ runtimeProfile, server } = {}) => {
         const capabilities = await getCapabilities();
         const enabled =
           capabilities?.feature?.scenePodBridge === true ||
-          capabilities?.features?.includes('scene_pod_bridge') === true;
+          (Array.isArray(capabilities?.features) &&
+            capabilities.features.includes('scene_pod_bridge'));
         if (mountedRef.current) {
           setScenePodBridgeEnabled(enabled);
         }
@@ -430,14 +437,16 @@ const Searches = ({ runtimeProfile, server } = {}) => {
       mounted = false;
       loadRequestIdRef.current += 1;
       refreshRequestIdsRef.current.clear();
-      searchHub.stop();
+      void Promise.resolve()
+        .then(() => searchHub.stop())
+        .catch(() => {});
     };
   }, [mountedRef, runtimeProfile]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // create a new search, and optionally navigate to it to display the details
   // we do this if the user clicks the search icon, or repeats an existing search
   const create = async ({ navigate = false, search } = {}) => {
-    if (!mountedRef.current) {
+    if (!mountedRef.current || createInFlightRef.current) {
       return;
     }
 
@@ -453,6 +462,12 @@ const Searches = ({ runtimeProfile, server } = {}) => {
       return;
     }
 
+    if (scenePodBridgeEnabled && !providerPod && !providerScene) {
+      toast.error('Select at least one search source');
+      return;
+    }
+
+    createInFlightRef.current = true;
     try {
       setCreating(true);
 
@@ -547,14 +562,16 @@ const Searches = ({ runtimeProfile, server } = {}) => {
       if (isCurrentRequest()) {
         setCreating(false);
       }
+      createInFlightRef.current = false;
     }
   };
 
   // delete a search
   const remove = async (search) => {
-    if (!mountedRef.current) {
+    if (!mountedRef.current || removeInFlightRef.current) {
       return;
     }
+    removeInFlightRef.current = true;
     const requestId = ++removeRequestIdRef.current;
 
     try {
@@ -588,14 +605,16 @@ const Searches = ({ runtimeProfile, server } = {}) => {
       ) {
         setRemoving(false);
       }
+      removeInFlightRef.current = false;
     }
   };
 
   // delete all searches
   const removeAll = async () => {
-    if (!mountedRef.current) {
+    if (!mountedRef.current || removeAllInFlightRef.current) {
       return;
     }
+    removeAllInFlightRef.current = true;
     const requestId = ++removeAllRequestIdRef.current;
 
     try {
@@ -625,14 +644,16 @@ const Searches = ({ runtimeProfile, server } = {}) => {
       ) {
         setRemovingAll(false);
       }
+      removeAllInFlightRef.current = false;
     }
   };
 
   // stop an in-progress search
   const stop = async (search) => {
-    if (!mountedRef.current) {
+    if (!mountedRef.current || stopInFlightRef.current) {
       return;
     }
+    stopInFlightRef.current = true;
     const requestId = ++stopRequestIdRef.current;
 
     try {
@@ -667,6 +688,7 @@ const Searches = ({ runtimeProfile, server } = {}) => {
       ) {
         setStopping(false);
       }
+      stopInFlightRef.current = false;
     }
   };
 
@@ -737,7 +759,7 @@ const Searches = ({ runtimeProfile, server } = {}) => {
   }
 
   if (error) {
-    return <ErrorSegment caption={error?.message ?? error} />;
+    return <ErrorSegment caption={toDisplayError(error, 'Failed to load searches')} />;
   }
 
   // if searchId is not null, there's an id in the route.

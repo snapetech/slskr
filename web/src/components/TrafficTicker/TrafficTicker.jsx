@@ -1,11 +1,36 @@
 import './TrafficTicker.css';
 import { createTransfersHubConnection } from '../../lib/hubFactory';
+import { toDisplayError } from '../../lib/errors';
 import React, { useEffect, useState } from 'react';
 import { Icon, List, Popup } from 'semantic-ui-react';
 
 const MAX_ACTIVITIES = 50; // Keep last 50 activities
 
+const normalizeActivity = (activity) => {
+  if (!activity || typeof activity !== 'object' || Array.isArray(activity)) {
+    return null;
+  }
+
+  const numeric = (value, fallback = 0) => {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : fallback;
+  };
+
+  return {
+    ...activity,
+    averageSpeed: Math.max(0, numeric(activity.averageSpeed)),
+    direction: activity.direction === 'Upload' ? 'Upload' : 'Download',
+    filename: typeof activity.filename === 'string' ? activity.filename : 'unknown file',
+    percentComplete: Math.max(0, Math.min(100, numeric(activity.percentComplete))),
+    size: Math.max(0, numeric(activity.size)),
+    state: typeof activity.state === 'string' ? activity.state : 'Unknown',
+    timestamp: activity.timestamp || new Date().toISOString(),
+    username: typeof activity.username === 'string' ? activity.username : 'unknown user',
+  };
+};
+
 const getActivityIcon = (direction, state) => {
+  state = typeof state === 'string' ? state : '';
   const isCompleted = state.includes('Completed');
   const isFailed =
     state.includes('Errored') ||
@@ -29,6 +54,7 @@ const getActivityIcon = (direction, state) => {
 };
 
 const getActivityColor = (direction, state) => {
+  state = typeof state === 'string' ? state : '';
   const isCompleted = state.includes('Completed');
   const isFailed =
     state.includes('Errored') ||
@@ -52,26 +78,30 @@ const formatActivity = (activity) => {
     state,
     username,
   } = activity;
-  const fileName = filename.split('\\').pop().split('/').pop();
+  const fileName = (typeof filename === 'string' ? filename : 'unknown file')
+    .split('\\').pop().split('/').pop();
+  const safeState = typeof state === 'string' ? state : 'Unknown';
+  const safeDirection = direction === 'Download' ? 'Download' : 'Upload';
+  const safeUsername = typeof username === 'string' ? username : 'unknown user';
 
-  if (state.includes('Completed')) {
+  if (safeState.includes('Completed')) {
     const speedText =
       averageSpeed > 0 ? ` @ ${formatBytes(averageSpeed)}/s` : '';
-    return `${direction === 'Download' ? '↓' : '↑'} ${username}/${fileName} ${state}${speedText}`;
+    return `${safeDirection === 'Download' ? '↓' : '↑'} ${safeUsername}/${fileName} ${safeState}${speedText}`;
   }
 
-  if (state.includes('InProgress') && percentComplete > 0) {
-    return `${direction === 'Download' ? '↓' : '↑'} ${username}/${fileName} ${percentComplete.toFixed(1)}%`;
+  if (safeState.includes('InProgress') && percentComplete > 0) {
+    return `${safeDirection === 'Download' ? '↓' : '↑'} ${safeUsername}/${fileName} ${percentComplete.toFixed(1)}%`;
   }
 
-  return `${direction === 'Download' ? '↓' : '↑'} ${username}/${fileName} ${state}`;
+  return `${safeDirection === 'Download' ? '↓' : '↑'} ${safeUsername}/${fileName} ${safeState}`;
 };
 
 const formatBytes = (bytes) => {
-  if (bytes === 0) return '0 B';
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
   const k = 1_024;
   const sizes = ['B', 'KB', 'MB', 'GB'];
-  const index = Math.floor(Math.log(bytes) / Math.log(k));
+  const index = Math.min(sizes.length - 1, Math.floor(Math.log(bytes) / Math.log(k)));
   return (
     Number.parseFloat((bytes / k ** index).toFixed(1)) + ' ' + sizes[index]
   );
@@ -84,10 +114,13 @@ const TrafficTicker = () => {
 
   useEffect(() => {
     const transfersHub = createTransfersHubConnection();
+    let active = true;
 
     transfersHub.on('activity', (activity) => {
+      const normalizedActivity = normalizeActivity(activity);
+      if (!active || !normalizedActivity) return;
       setActivities((previous) => [
-        activity,
+        normalizedActivity,
         ...previous.slice(0, MAX_ACTIVITIES - 1),
       ]);
     });
@@ -96,10 +129,20 @@ const TrafficTicker = () => {
     transfersHub.onreconnected(() => setConnected(true));
     transfersHub.onclose(() => setConnected(false));
 
-    transfersHub.start().then(() => setConnected(true));
+    transfersHub.start()
+      .then(() => {
+        if (active) setConnected(true);
+      })
+      .catch((error) => {
+        if (active) {
+          console.warn('Transfer activity feed failed to start:', toDisplayError(error));
+          setConnected(false);
+        }
+      });
 
     return () => {
-      transfersHub.stop();
+      active = false;
+      transfersHub.stop().catch(() => {});
     };
   }, []);
 

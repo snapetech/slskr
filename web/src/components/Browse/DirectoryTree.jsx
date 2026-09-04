@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Button, Checkbox, Icon, List } from 'semantic-ui-react';
 
 const DirectoryNode = ({
@@ -11,11 +11,16 @@ const DirectoryNode = ({
   selectedDirectoryName,
   selectedPaths,
 }) => {
-  const isExpanded = expandedPaths.has(directory.name);
-  const isSelected = selectedPaths.has(directory.name);
-  const isActive = directory.name === selectedDirectoryName;
-  const hasChildren = directory.children && directory.children.length > 0;
-  const folderName = directory.name.split('\\').pop().split('/').pop();
+  const directoryName =
+    typeof directory?.name === 'string' ? directory.name : 'Unknown folder';
+  const isExpanded = expandedPaths.has(directoryName);
+  const isSelected = selectedPaths.has(directoryName);
+  const isActive = directoryName === selectedDirectoryName;
+  const children = Array.isArray(directory?.children)
+    ? directory.children
+    : [];
+  const hasChildren = children.length > 0;
+  const folderName = directoryName.split('\\').pop().split('/').pop();
 
   return (
     <List.Item style={{ paddingLeft: level > 0 ? '1em' : 0 }}>
@@ -25,7 +30,7 @@ const DirectoryNode = ({
           {hasChildren ? (
             <Icon
               name={isExpanded ? 'caret down' : 'caret right'}
-              onClick={() => onToggleExpand(directory.name)}
+              onClick={() => onToggleExpand(directoryName)}
               style={{ cursor: 'pointer', width: '16px' }}
             />
           ) : (
@@ -53,7 +58,7 @@ const DirectoryNode = ({
             onClick={() => onToggleExpand(directory.name)}
             onKeyDown={(event) => {
               if (event.key === 'Enter' || event.key === ' ') {
-                onToggleExpand(directory.name);
+                onToggleExpand(directoryName);
               }
             }}
             role="button"
@@ -88,7 +93,7 @@ const DirectoryNode = ({
         {/* Children - only show when expanded */}
         {hasChildren && isExpanded && (
           <List.List style={{ marginTop: '4px' }}>
-            {directory.children.map((child) => (
+            {children.map((child) => (
               <DirectoryNode
                 directory={child}
                 expandedPaths={expandedPaths}
@@ -109,13 +114,45 @@ const DirectoryNode = ({
 };
 
 const DirectoryTree = ({
+  downloadPending = false,
   onDownload,
   onSelect,
   selectedDirectoryName,
-  tree,
+  tree = [],
 }) => {
   const [expandedPaths, setExpandedPaths] = useState(new Set());
   const [selectedPaths, setSelectedPaths] = useState(new Set());
+  const safeTree = Array.isArray(tree)
+    ? tree.filter(
+        (directory) =>
+          directory &&
+          typeof directory === 'object' &&
+          typeof directory.name === 'string',
+      )
+    : [];
+
+  useEffect(() => {
+    const names = new Set();
+    const collectNames = (nodes) => {
+      nodes.forEach((node) => {
+        names.add(node.name);
+        if (Array.isArray(node.children)) collectNames(node.children);
+      });
+    };
+    collectNames(safeTree);
+    setSelectedPaths((previous) => {
+      const next = new Set(
+        Array.from(previous).filter((path) => names.has(path)),
+      );
+      return next.size === previous.size ? previous : next;
+    });
+    setExpandedPaths((previous) => {
+      const next = new Set(
+        Array.from(previous).filter((path) => names.has(path)),
+      );
+      return next.size === previous.size ? previous : next;
+    });
+  }, [safeTree]);
 
   const toggleExpand = useCallback((path) => {
     setExpandedPaths((previous) => {
@@ -133,9 +170,10 @@ const DirectoryTree = ({
 
   // Get all descendant paths of a directory
   const getDescendantPaths = useCallback((directory) => {
+    if (!directory || typeof directory.name !== 'string') return [];
     const paths = [directory.name];
 
-    if (directory.children) {
+    if (Array.isArray(directory.children)) {
       for (const child of directory.children) {
         paths.push(...getDescendantPaths(child));
       }
@@ -190,7 +228,7 @@ const DirectoryTree = ({
       return found;
     };
 
-    const selectedDirectories = findSelectedDirectories(tree);
+    const selectedDirectories = findSelectedDirectories(safeTree);
 
     if (selectedDirectories.length === 0) {
       return;
@@ -205,7 +243,7 @@ const DirectoryTree = ({
     };
 
     onDownload(combinedDirectory);
-  }, [onDownload, selectedPaths, tree]);
+  }, [onDownload, safeTree, selectedPaths]);
 
   const expandAll = useCallback(() => {
     const getAllPaths = (nodes) => {
@@ -221,8 +259,8 @@ const DirectoryTree = ({
       return paths;
     };
 
-    setExpandedPaths(new Set(getAllPaths(tree)));
-  }, [tree]);
+    setExpandedPaths(new Set(getAllPaths(safeTree)));
+  }, [safeTree]);
 
   const collapseAll = useCallback(() => {
     setExpandedPaths(new Set());
@@ -273,6 +311,8 @@ const DirectoryTree = ({
             <Button
               color="green"
               compact
+              disabled={downloadPending}
+              loading={downloadPending}
               onClick={handleDownloadSelected}
               size="tiny"
             >
@@ -284,7 +324,7 @@ const DirectoryTree = ({
 
       {/* Tree */}
       <List className="browse-folderlist-list">
-        {tree.map((directory) => (
+        {safeTree.map((directory) => (
           <DirectoryNode
             directory={directory}
             expandedPaths={expandedPaths}

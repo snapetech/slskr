@@ -49,10 +49,12 @@ const Jobs = () => {
   const mountedRef = useMountedRef();
   const jobsRequestIdRef = React.useRef(0);
   const swarmRequestIdRef = React.useRef(0);
+  const jobsInFlightRef = React.useRef(false);
 
   const fetchJobs = useCallback(async () => {
-    if (!mountedRef.current) return;
+    if (!mountedRef.current || jobsInFlightRef.current) return;
     const requestId = ++jobsRequestIdRef.current;
+    jobsInFlightRef.current = true;
     try {
       setLoading(true);
       const response = await jobsLibrary.getJobs({
@@ -94,6 +96,7 @@ const Jobs = () => {
       ) {
         setLoading(false);
       }
+      jobsInFlightRef.current = false;
     }
   }, [filters, mountedRef, pagination.limit, pagination.offset]);
 
@@ -432,6 +435,7 @@ const Jobs = () => {
             {filters.sortOrder === 'asc' ? 'Ascending' : 'Descending'}
           </Button>
           <Button
+            disabled={loading}
             icon
             onClick={fetchJobs}
           >

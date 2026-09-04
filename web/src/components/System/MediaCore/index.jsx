@@ -1,4 +1,5 @@
 import * as mediacore from '../../../lib/mediacore';
+import { toDisplayError } from '../../../lib/errors';
 import Button from './MediaCoreButton';
 import PodWorkflowNotice from './PodWorkflowNotice';
 import {
@@ -375,7 +376,7 @@ const MediaCore = () => {
       const data = await mediacore.getContentIdStats();
       setStats(data);
     } catch (error_) {
-      setError(error_.message);
+      setError(toDisplayError(error_));
     } finally {
       setLoading(false);
     }
@@ -400,7 +401,7 @@ const MediaCore = () => {
       const data = await mediacore.getContentIdStats();
       setStats(data);
     } catch (error_) {
-      setError(`Failed to register: ${error_.message}`);
+      setError(`Failed to register: ${toDisplayError(error_)}`);
     } finally {
       setRegistering(false);
     }
@@ -415,7 +416,7 @@ const MediaCore = () => {
       const result = await mediacore.resolveContentId(resolveId.trim());
       setResolvedContent(result);
     } catch (error_) {
-      setResolvedContent({ error: error_.message });
+      setResolvedContent({ error: toDisplayError(error_) });
     } finally {
       setResolving(false);
     }
@@ -432,7 +433,7 @@ const MediaCore = () => {
       );
       setValidatedContent(result);
     } catch (error_) {
-      setValidatedContent({ error: error_.message });
+      setValidatedContent({ error: toDisplayError(error_) });
     } finally {
       setValidating(false);
     }
@@ -452,7 +453,7 @@ const MediaCore = () => {
         : await mediacore.findContentIdsByDomain(domain.trim());
       setDomainResults(result);
     } catch (error_) {
-      setDomainResults({ error: error_.message });
+      setDomainResults({ error: toDisplayError(error_) });
     } finally {
       setSearchingDomain(false);
     }
@@ -480,7 +481,7 @@ const MediaCore = () => {
       );
       setTraversalResults(result);
     } catch (error_) {
-      setTraversalResults({ error: error_.message });
+      setTraversalResults({ error: toDisplayError(error_) });
     } finally {
       setTraversing(false);
     }
@@ -495,7 +496,7 @@ const MediaCore = () => {
       const result = await mediacore.getContentGraph(graphContentId.trim());
       setGraphResults(result);
     } catch (error_) {
-      setGraphResults({ error: error_.message });
+      setGraphResults({ error: toDisplayError(error_) });
     } finally {
       setGettingGraph(false);
     }
@@ -510,7 +511,7 @@ const MediaCore = () => {
       const result = await mediacore.findInboundLinks(inboundTargetId.trim());
       setInboundResults(result);
     } catch (error_) {
-      setInboundResults({ error: error_.message });
+      setInboundResults({ error: toDisplayError(error_) });
     } finally {
       setFindingInbound(false);
     }
@@ -556,7 +557,7 @@ const MediaCore = () => {
       );
       setAudioHashResult(result);
     } catch (error_) {
-      setAudioHashResult({ error: error_.message });
+      setAudioHashResult({ error: toDisplayError(error_) });
     } finally {
       setComputingAudioHash(false);
     }
@@ -587,7 +588,7 @@ const MediaCore = () => {
       );
       setImageHashResult(result);
     } catch (error_) {
-      setImageHashResult({ error: error_.message });
+      setImageHashResult({ error: toDisplayError(error_) });
     } finally {
       setComputingImageHash(false);
     }
@@ -606,7 +607,7 @@ const MediaCore = () => {
       );
       setSimilarityResult(result);
     } catch (error_) {
-      setSimilarityResult({ error: error_.message });
+      setSimilarityResult({ error: toDisplayError(error_) });
     } finally {
       setComputingSimilarity(false);
     }
@@ -625,7 +626,7 @@ const MediaCore = () => {
       );
       setPerceptualSimilarityResult(result);
     } catch (error_) {
-      setPerceptualSimilarityResult({ error: error_.message });
+      setPerceptualSimilarityResult({ error: toDisplayError(error_) });
     } finally {
       setComputingPerceptualSimilarity(false);
     }
@@ -646,7 +647,7 @@ const MediaCore = () => {
       );
       setFindSimilarResult(result);
     } catch (error_) {
-      setFindSimilarResult({ error: error_.message });
+      setFindSimilarResult({ error: toDisplayError(error_) });
     } finally {
       setFindingSimilarContent(false);
     }
@@ -664,7 +665,7 @@ const MediaCore = () => {
       );
       setTextSimilarityResult(result);
     } catch (error_) {
-      setTextSimilarityResult({ error: error_.message });
+      setTextSimilarityResult({ error: toDisplayError(error_) });
     } finally {
       setComputingTextSimilarity(false);
     }
@@ -683,7 +684,7 @@ const MediaCore = () => {
       const result = await mediacore.exportMetadata(contentIds, includeLinks);
       setExportResult(result);
     } catch (error_) {
-      setExportResult({ error: error_.message });
+      setExportResult({ error: toDisplayError(error_) });
     } finally {
       setExportingMetadata(false);
     }
@@ -710,7 +711,7 @@ const MediaCore = () => {
       );
       setImportResult(result);
     } catch (error_) {
-      setImportResult({ error: error_.message });
+      setImportResult({ error: toDisplayError(error_) });
     } finally {
       setImportingMetadata(false);
     }
@@ -733,7 +734,7 @@ const MediaCore = () => {
       const result = await mediacore.analyzeMetadataConflicts(packageData);
       setConflictAnalysis(result);
     } catch (error_) {
-      setConflictAnalysis({ error: error_.message });
+      setConflictAnalysis({ error: toDisplayError(error_) });
     } finally {
       setAnalyzingConflicts(false);
     }
@@ -756,7 +757,7 @@ const MediaCore = () => {
       const result = await mediacore.publishContentDescriptor(descriptor);
       setPublishResult(result);
     } catch (error_) {
-      setPublishResult({ error: error_.message });
+      setPublishResult({ error: toDisplayError(error_) });
     } finally {
       setPublishingDescriptor(false);
     }
@@ -787,7 +788,7 @@ const MediaCore = () => {
         await mediacore.publishContentDescriptorsBatch(descriptors);
       setBatchPublishResult(result);
     } catch (error_) {
-      setBatchPublishResult({ error: error_.message });
+      setBatchPublishResult({ error: toDisplayError(error_) });
     } finally {
       setPublishingBatch(false);
     }
@@ -816,7 +817,7 @@ const MediaCore = () => {
       );
       setUpdateResult(result);
     } catch (error_) {
-      setUpdateResult({ error: error_.message });
+      setUpdateResult({ error: toDisplayError(error_) });
     } finally {
       setUpdatingDescriptor(false);
     }
@@ -829,7 +830,7 @@ const MediaCore = () => {
       const result = await mediacore.republishExpiringDescriptors();
       setRepublishResult(result);
     } catch (error_) {
-      setRepublishResult({ error: error_.message });
+      setRepublishResult({ error: toDisplayError(error_) });
     } finally {
       setRepublishing(false);
     }
@@ -842,7 +843,7 @@ const MediaCore = () => {
       const result = await mediacore.getPublishingStats();
       setPublishingStats(result);
     } catch (error_) {
-      setPublishingStats({ error: error_.message });
+      setPublishingStats({ error: toDisplayError(error_) });
     } finally {
       setLoadingStats(false);
     }
@@ -860,7 +861,7 @@ const MediaCore = () => {
       );
       setRetrievalResult(result);
     } catch (error_) {
-      setRetrievalResult({ error: error_.message });
+      setRetrievalResult({ error: toDisplayError(error_) });
     } finally {
       setRetrievingDescriptor(false);
     }
@@ -880,7 +881,7 @@ const MediaCore = () => {
         await mediacore.retrieveContentDescriptorsBatch(contentIds);
       setBatchRetrievalResult(result);
     } catch (error_) {
-      setBatchRetrievalResult({ error: error_.message });
+      setBatchRetrievalResult({ error: toDisplayError(error_) });
     } finally {
       setRetrievingBatch(false);
     }
@@ -899,7 +900,7 @@ const MediaCore = () => {
       );
       setQueryResult(result);
     } catch (error_) {
-      setQueryResult({ error: error_.message });
+      setQueryResult({ error: toDisplayError(error_) });
     } finally {
       setQueryingDescriptors(false);
     }
@@ -922,7 +923,7 @@ const MediaCore = () => {
       const result = await mediacore.verifyContentDescriptor(descriptor);
       setVerificationResult(result);
     } catch (error_) {
-      setVerificationResult({ error: error_.message });
+      setVerificationResult({ error: toDisplayError(error_) });
     } finally {
       setVerifyingDescriptor(false);
     }
@@ -935,7 +936,7 @@ const MediaCore = () => {
       const result = await mediacore.getRetrievalStats();
       setRetrievalStats(result);
     } catch (error_) {
-      setRetrievalStats({ error: error_.message });
+      setRetrievalStats({ error: toDisplayError(error_) });
     } finally {
       setLoadingRetrievalStats(false);
     }
@@ -950,7 +951,7 @@ const MediaCore = () => {
         `Cache cleared: ${result.entriesCleared} entries, ${result.bytesFreed} bytes freed`,
       );
     } catch (error_) {
-      toast.error(`Failed to clear cache: ${error_.message}`);
+      toast.error(`Failed to clear cache: ${toDisplayError(error_)}`);
     }
   };
 
@@ -961,7 +962,7 @@ const MediaCore = () => {
       const result = await mediacore.getMediaCoreDashboard();
       setMediaCoreDashboard(result);
     } catch (error_) {
-      setMediaCoreDashboard({ error: error_.message });
+      setMediaCoreDashboard({ error: toDisplayError(error_) });
     } finally {
       setLoadingDashboard(false);
     }
@@ -974,7 +975,7 @@ const MediaCore = () => {
       const result = await mediacore.getContentRegistryStats();
       setContentRegistryStats(result);
     } catch (error_) {
-      setContentRegistryStats({ error: error_.message });
+      setContentRegistryStats({ error: toDisplayError(error_) });
     } finally {
       setLoadingRegistryStats(false);
     }
@@ -987,7 +988,7 @@ const MediaCore = () => {
       const result = await mediacore.getDescriptorStats();
       setDescriptorStats(result);
     } catch (error_) {
-      setDescriptorStats({ error: error_.message });
+      setDescriptorStats({ error: toDisplayError(error_) });
     } finally {
       setLoadingDescriptorStats(false);
     }
@@ -1000,7 +1001,7 @@ const MediaCore = () => {
       const result = await mediacore.getFuzzyMatchingStats();
       setFuzzyMatchingStats(result);
     } catch (error_) {
-      setFuzzyMatchingStats({ error: error_.message });
+      setFuzzyMatchingStats({ error: toDisplayError(error_) });
     } finally {
       setLoadingFuzzyStats(false);
     }
@@ -1013,7 +1014,7 @@ const MediaCore = () => {
       const result = await mediacore.getIpldMappingStats();
       setIpldMappingStats(result);
     } catch (error_) {
-      setIpldMappingStats({ error: error_.message });
+      setIpldMappingStats({ error: toDisplayError(error_) });
     } finally {
       setLoadingIpldStats(false);
     }
@@ -1026,7 +1027,7 @@ const MediaCore = () => {
       const result = await mediacore.getPerceptualHashingStats();
       setPerceptualHashingStats(result);
     } catch (error_) {
-      setPerceptualHashingStats({ error: error_.message });
+      setPerceptualHashingStats({ error: toDisplayError(error_) });
     } finally {
       setLoadingPerceptualStats(false);
     }
@@ -1039,7 +1040,7 @@ const MediaCore = () => {
       const result = await mediacore.getMetadataPortabilityStats();
       setMetadataPortabilityStats(result);
     } catch (error_) {
-      setMetadataPortabilityStats({ error: error_.message });
+      setMetadataPortabilityStats({ error: toDisplayError(error_) });
     } finally {
       setLoadingPortabilityStats(false);
     }
@@ -1052,7 +1053,7 @@ const MediaCore = () => {
       const result = await mediacore.getContentPublishingStats();
       setContentPublishingStats(result);
     } catch (error_) {
-      setContentPublishingStats({ error: error_.message });
+      setContentPublishingStats({ error: toDisplayError(error_) });
     } finally {
       setLoadingPublishingStats(false);
     }
@@ -1080,7 +1081,7 @@ const MediaCore = () => {
       setContentPublishingStats(null);
       toast.success('MediaCore statistics have been reset');
     } catch (error_) {
-      toast.error(`Failed to reset stats: ${error_.message}`);
+      toast.error(`Failed to reset stats: ${toDisplayError(error_)}`);
     }
   };
 
@@ -1099,7 +1100,7 @@ const MediaCore = () => {
       setPodPublishingResult(result);
       setPodToPublish('');
     } catch (error_) {
-      setPodPublishingResult({ error: error_.message });
+      setPodPublishingResult({ error: toDisplayError(error_) });
     } finally {
       setPublishingPod(false);
     }
@@ -1119,7 +1120,7 @@ const MediaCore = () => {
       );
       setPodMetadataResult(result);
     } catch (error_) {
-      setPodMetadataResult({ error: error_.message });
+      setPodMetadataResult({ error: toDisplayError(error_) });
     } finally {
       setRetrievingPodMetadata(false);
     }
@@ -1144,7 +1145,7 @@ const MediaCore = () => {
       setPodUnpublishResult(result);
       setPodToUnpublish('');
     } catch (error_) {
-      setPodUnpublishResult({ error: error_.message });
+      setPodUnpublishResult({ error: toDisplayError(error_) });
     } finally {
       setUnpublishingPod(false);
     }
@@ -1157,7 +1158,7 @@ const MediaCore = () => {
       const result = await mediacore.getPodPublishingStats();
       setPodPublishingStats(result);
     } catch (error_) {
-      setPodPublishingStats({ error: error_.message });
+      setPodPublishingStats({ error: toDisplayError(error_) });
     } finally {
       setLoadingPodStats(false);
     }
@@ -1178,7 +1179,7 @@ const MediaCore = () => {
       setMembershipPublishResult(result);
       setMembershipRecord('');
     } catch (error_) {
-      setMembershipPublishResult({ error: error_.message });
+      setMembershipPublishResult({ error: toDisplayError(error_) });
     } finally {
       setPublishingMembership(false);
     }
@@ -1199,7 +1200,7 @@ const MediaCore = () => {
       );
       setMembershipResult(result);
     } catch (error_) {
-      setMembershipResult({ error: error_.message });
+      setMembershipResult({ error: toDisplayError(error_) });
     } finally {
       setGettingMembership(false);
     }
@@ -1220,7 +1221,7 @@ const MediaCore = () => {
       );
       setMembershipVerification(result);
     } catch (error_) {
-      setMembershipVerification({ error: error_.message });
+      setMembershipVerification({ error: toDisplayError(error_) });
     } finally {
       setVerifyingMembership(false);
     }
@@ -1251,7 +1252,7 @@ const MediaCore = () => {
       setBanResult(result);
       setBanReason('');
     } catch (error_) {
-      setBanResult({ error: error_.message });
+      setBanResult({ error: toDisplayError(error_) });
     } finally {
       setBanningMember(false);
     }
@@ -1273,7 +1274,7 @@ const MediaCore = () => {
       );
       setRoleChangeResult(result);
     } catch (error_) {
-      setRoleChangeResult({ error: error_.message });
+      setRoleChangeResult({ error: toDisplayError(error_) });
     } finally {
       setChangingRole(false);
     }
@@ -1286,7 +1287,7 @@ const MediaCore = () => {
       const result = await mediacore.getMembershipStats();
       setMembershipStats(result);
     } catch (error_) {
-      setMembershipStats({ error: error_.message });
+      setMembershipStats({ error: toDisplayError(error_) });
     } finally {
       setLoadingMembershipStats(false);
     }
@@ -1307,7 +1308,7 @@ const MediaCore = () => {
       // Reload stats to reflect changes
       await handleLoadMembershipStats();
     } catch (error_) {
-      toast.error(`Failed to cleanup: ${error_.message}`);
+      toast.error(`Failed to cleanup: ${toDisplayError(error_)}`);
     }
   };
 
@@ -1327,7 +1328,7 @@ const MediaCore = () => {
       );
       setMembershipVerificationResult(result);
     } catch (error_) {
-      setMembershipVerificationResult({ error: error_.message });
+      setMembershipVerificationResult({ error: toDisplayError(error_) });
     } finally {
       setVerifyingMembership(false);
     }
@@ -1346,7 +1347,7 @@ const MediaCore = () => {
       const result = await mediacore.verifyPodMessage(message);
       setMessageVerificationResult(result);
     } catch (error_) {
-      setMessageVerificationResult({ error: error_.message });
+      setMessageVerificationResult({ error: toDisplayError(error_) });
     } finally {
       setVerifyingMessage(false);
     }
@@ -1368,7 +1369,7 @@ const MediaCore = () => {
       );
       setRoleCheckResult({ hasRole });
     } catch (error_) {
-      setRoleCheckResult({ error: error_.message });
+      setRoleCheckResult({ error: toDisplayError(error_) });
     } finally {
       setCheckingRole(false);
     }
@@ -1381,7 +1382,7 @@ const MediaCore = () => {
       const result = await mediacore.getVerificationStats();
       setVerificationStats(result);
     } catch (error_) {
-      setVerificationStats({ error: error_.message });
+      setVerificationStats({ error: toDisplayError(error_) });
     } finally {
       setLoadingVerificationStats(false);
     }
@@ -1402,7 +1403,7 @@ const MediaCore = () => {
       setPodRegistrationResult(result);
       setPodToRegister('');
     } catch (error_) {
-      setPodRegistrationResult({ error: error_.message });
+      setPodRegistrationResult({ error: toDisplayError(error_) });
     } finally {
       setRegisteringPod(false);
     }
@@ -1422,7 +1423,7 @@ const MediaCore = () => {
       setPodUnregistrationResult(result);
       setPodToUnregister('');
     } catch (error_) {
-      setPodUnregistrationResult({ error: error_.message });
+      setPodUnregistrationResult({ error: toDisplayError(error_) });
     } finally {
       setUnregisteringPod(false);
     }
@@ -1440,7 +1441,7 @@ const MediaCore = () => {
       const result = await mediacore.discoverPodsByName(discoverByName);
       setNameDiscoveryResult(result);
     } catch (error_) {
-      setNameDiscoveryResult({ error: error_.message });
+      setNameDiscoveryResult({ error: toDisplayError(error_) });
     } finally {
       setDiscoveringByName(false);
     }
@@ -1458,7 +1459,7 @@ const MediaCore = () => {
       const result = await mediacore.discoverPodsByTag(discoverByTag);
       setTagDiscoveryResult(result);
     } catch (error_) {
-      setTagDiscoveryResult({ error: error_.message });
+      setTagDiscoveryResult({ error: toDisplayError(error_) });
     } finally {
       setDiscoveringByTag(false);
     }
@@ -1480,7 +1481,7 @@ const MediaCore = () => {
       const result = await mediacore.discoverPodsByTags(tagList);
       setTagsDiscoveryResult(result);
     } catch (error_) {
-      setTagsDiscoveryResult({ error: error_.message });
+      setTagsDiscoveryResult({ error: toDisplayError(error_) });
     } finally {
       setDiscoveringByTags(false);
     }
@@ -1493,7 +1494,7 @@ const MediaCore = () => {
       const result = await mediacore.discoverAllPods(discoverLimit);
       setAllDiscoveryResult(result);
     } catch (error_) {
-      setAllDiscoveryResult({ error: error_.message });
+      setAllDiscoveryResult({ error: toDisplayError(error_) });
     } finally {
       setDiscoveringAll(false);
     }
@@ -1511,7 +1512,7 @@ const MediaCore = () => {
       const result = await mediacore.discoverPodsByContent(discoverByContent);
       setContentDiscoveryResult(result);
     } catch (error_) {
-      setContentDiscoveryResult({ error: error_.message });
+      setContentDiscoveryResult({ error: toDisplayError(error_) });
     } finally {
       setDiscoveringByContent(false);
     }
@@ -1524,7 +1525,7 @@ const MediaCore = () => {
       const result = await mediacore.getPodDiscoveryStats();
       setDiscoveryStats(result);
     } catch (error_) {
-      setDiscoveryStats({ error: error_.message });
+      setDiscoveryStats({ error: toDisplayError(error_) });
     } finally {
       setLoadingDiscoveryStats(false);
     }
@@ -1539,7 +1540,7 @@ const MediaCore = () => {
       // Reload stats to reflect changes
       await handleLoadDiscoveryStats();
     } catch (error_) {
-      toast.error(`Failed to refresh discovery: ${error_.message}`);
+      toast.error(`Failed to refresh discovery: ${toDisplayError(error_)}`);
     }
   };
 
@@ -1558,7 +1559,7 @@ const MediaCore = () => {
       setJoinRequestResult(result);
       setJoinRequestData('');
     } catch (error_) {
-      setJoinRequestResult({ error: error_.message });
+      setJoinRequestResult({ error: toDisplayError(error_) });
     } finally {
       setRequestingJoin(false);
     }
@@ -1578,7 +1579,7 @@ const MediaCore = () => {
       setAcceptanceResult(result);
       setAcceptanceData('');
     } catch (error_) {
-      setAcceptanceResult({ error: error_.message });
+      setAcceptanceResult({ error: toDisplayError(error_) });
     } finally {
       setAcceptingJoin(false);
     }
@@ -1598,7 +1599,7 @@ const MediaCore = () => {
       setLeaveRequestResult(result);
       setLeaveRequestData('');
     } catch (error_) {
-      setLeaveRequestResult({ error: error_.message });
+      setLeaveRequestResult({ error: toDisplayError(error_) });
     } finally {
       setRequestingLeave(false);
     }
@@ -1618,7 +1619,7 @@ const MediaCore = () => {
       setLeaveAcceptanceResult(result);
       setAcceptanceData('');
     } catch (error_) {
-      setLeaveAcceptanceResult({ error: error_.message });
+      setLeaveAcceptanceResult({ error: toDisplayError(error_) });
     } finally {
       setAcceptingLeave(false);
     }
@@ -1643,8 +1644,8 @@ const MediaCore = () => {
       setPendingJoinRequests(joinRequests);
       setPendingLeaveRequests(leaveRequests);
     } catch (error_) {
-      setPendingJoinRequests({ error: error_.message });
-      setPendingLeaveRequests({ error: error_.message });
+      setPendingJoinRequests({ error: toDisplayError(error_) });
+      setPendingLeaveRequests({ error: toDisplayError(error_) });
     } finally {
       setLoadingPendingRequests(false);
     }
@@ -1665,7 +1666,7 @@ const MediaCore = () => {
       setRoutingResult(result);
       setRouteMessageData('');
     } catch (error_) {
-      setRoutingResult({ error: error_.message });
+      setRoutingResult({ error: toDisplayError(error_) });
     } finally {
       setRoutingMessage(false);
     }
@@ -1693,7 +1694,7 @@ const MediaCore = () => {
       setRouteToPeersMessage('');
       setRouteToPeersIds('');
     } catch (error_) {
-      setRoutingToPeersResult({ error: error_.message });
+      setRoutingToPeersResult({ error: toDisplayError(error_) });
     } finally {
       setRoutingToPeers(false);
     }
@@ -1706,7 +1707,7 @@ const MediaCore = () => {
       const result = await mediacore.getPodMessageRoutingStats();
       setRoutingStats(result);
     } catch (error_) {
-      setRoutingStats({ error: error_.message });
+      setRoutingStats({ error: toDisplayError(error_) });
     } finally {
       setLoadingRoutingStats(false);
     }
@@ -1727,7 +1728,7 @@ const MediaCore = () => {
       );
       setMessageSeenResult(result);
     } catch (error_) {
-      setMessageSeenResult({ error: error_.message });
+      setMessageSeenResult({ error: toDisplayError(error_) });
     } finally {
       setCheckingMessageSeen(false);
     }
@@ -1748,7 +1749,7 @@ const MediaCore = () => {
         `Message registered as seen: ${result.wasNewlyRegistered ? 'New' : 'Already known'}`,
       );
     } catch (error_) {
-      toast.error(`Failed to register message: ${error_.message}`);
+      toast.error(`Failed to register message: ${toDisplayError(error_)}`);
     }
   };
 
@@ -1761,7 +1762,7 @@ const MediaCore = () => {
       // Reload stats to reflect changes
       await handleLoadRoutingStats();
     } catch (error_) {
-      toast.error(`Failed to cleanup: ${error_.message}`);
+      toast.error(`Failed to cleanup: ${toDisplayError(error_)}`);
     }
   };
 
@@ -1783,7 +1784,7 @@ const MediaCore = () => {
       setSignedMessageResult(result);
       setMessageToSign('');
     } catch (error_) {
-      setSignedMessageResult({ error: error_.message });
+      setSignedMessageResult({ error: toDisplayError(error_) });
     } finally {
       setSigningMessage(false);
     }
@@ -1802,7 +1803,7 @@ const MediaCore = () => {
       const result = await mediacore.verifyPodMessageSignature(message);
       setVerificationResult(result);
     } catch (error_) {
-      setVerificationResult({ error: error_.message });
+      setVerificationResult({ error: toDisplayError(error_) });
     } finally {
       setVerifyingSignature(false);
     }
@@ -1815,7 +1816,7 @@ const MediaCore = () => {
       const result = await mediacore.generateMessageKeyPair();
       setGeneratedKeyPair(result);
     } catch (error_) {
-      setGeneratedKeyPair({ error: error_.message });
+      setGeneratedKeyPair({ error: toDisplayError(error_) });
     } finally {
       setGeneratingKeyPair(false);
     }
@@ -1828,7 +1829,7 @@ const MediaCore = () => {
       const result = await mediacore.getMessageSigningStats();
       setSigningStats(result);
     } catch (error_) {
-      setSigningStats({ error: error_.message });
+      setSigningStats({ error: toDisplayError(error_) });
     } finally {
       setLoadingSigningStats(false);
     }
@@ -1842,8 +1843,8 @@ const MediaCore = () => {
       const result = await mediacore.getMessageStorageStats();
       setStorageStats(result);
     } catch (error_) {
-      setStorageStats({ error: error_.message });
-      toast.error(`Failed to get storage stats: ${error_.message}`);
+      setStorageStats({ error: toDisplayError(error_) });
+      toast.error(`Failed to get storage stats: ${toDisplayError(error_)}`);
     } finally {
       setStorageStatsLoading(false);
     }
@@ -1858,7 +1859,7 @@ const MediaCore = () => {
       // Refresh stats after cleanup
       await handleGetStorageStats();
     } catch (error_) {
-      toast.error(`Failed to cleanup messages: ${error_.message}`);
+      toast.error(`Failed to cleanup messages: ${toDisplayError(error_)}`);
     } finally {
       setCleanupLoading(false);
     }
@@ -1874,7 +1875,7 @@ const MediaCore = () => {
           : 'Search index rebuild failed',
       );
     } catch (error_) {
-      toast.error(`Failed to rebuild search index: ${error_.message}`);
+      toast.error(`Failed to rebuild search index: ${toDisplayError(error_)}`);
     } finally {
       setRebuildIndexLoading(false);
     }
@@ -1890,7 +1891,7 @@ const MediaCore = () => {
           : 'Database vacuum failed',
       );
     } catch (error_) {
-      toast.error(`Failed to vacuum database: ${error_.message}`);
+      toast.error(`Failed to vacuum database: ${toDisplayError(error_)}`);
     } finally {
       setVacuumLoading(false);
     }
@@ -1911,7 +1912,7 @@ const MediaCore = () => {
       setSearchResults(result);
     } catch (error_) {
       setSearchResults([]);
-      toast.error(`Failed to search messages: ${error_.message}`);
+      toast.error(`Failed to search messages: ${toDisplayError(error_)}`);
     } finally {
       setSearchLoading(false);
     }
@@ -1925,8 +1926,8 @@ const MediaCore = () => {
       const result = await mediacore.getBackfillStats();
       setBackfillStats(result);
     } catch (error_) {
-      setBackfillStats({ error: error_.message });
-      toast.error(`Failed to get backfill stats: ${error_.message}`);
+      setBackfillStats({ error: toDisplayError(error_) });
+      toast.error(`Failed to get backfill stats: ${toDisplayError(error_)}`);
     } finally {
       setBackfillStatsLoading(false);
     }
@@ -1949,7 +1950,7 @@ const MediaCore = () => {
       // Refresh stats
       await handleGetBackfillStats();
     } catch (error_) {
-      toast.error(`Failed to sync pod backfill: ${error_.message}`);
+      toast.error(`Failed to sync pod backfill: ${toDisplayError(error_)}`);
     } finally {
       setSyncBackfillLoading(false);
     }
@@ -1965,7 +1966,7 @@ const MediaCore = () => {
       const timestamps = await mediacore.getLastSeenTimestamps(backfillPodId);
       setLastSeenTimestamps(timestamps);
     } catch (error_) {
-      toast.error(`Failed to get last seen timestamps: ${error_.message}`);
+      toast.error(`Failed to get last seen timestamps: ${toDisplayError(error_)}`);
       setLastSeenTimestamps(null);
     }
   };
@@ -1982,7 +1983,7 @@ const MediaCore = () => {
       const result = await mediacore.getChannels(channelPodId);
       setChannels(result);
     } catch (error_) {
-      toast.error(`Failed to get channels: ${error_.message}`);
+      toast.error(`Failed to get channels: ${toDisplayError(error_)}`);
       setChannels([]);
     } finally {
       setChannelsLoading(false);
@@ -2012,7 +2013,7 @@ const MediaCore = () => {
       // Refresh channels list
       await handleGetChannels();
     } catch (error_) {
-      toast.error(`Failed to create channel: ${error_.message}`);
+      toast.error(`Failed to create channel: ${toDisplayError(error_)}`);
     } finally {
       setCreateChannelLoading(false);
     }
@@ -2038,7 +2039,7 @@ const MediaCore = () => {
       // Refresh channels list
       await handleGetChannels();
     } catch (error_) {
-      toast.error(`Failed to update channel: ${error_.message}`);
+      toast.error(`Failed to update channel: ${toDisplayError(error_)}`);
     } finally {
       setUpdateChannelLoading(false);
     }
@@ -2060,7 +2061,7 @@ const MediaCore = () => {
       // Refresh channels list
       await handleGetChannels();
     } catch (error_) {
-      toast.error(`Failed to delete channel: ${error_.message}`);
+      toast.error(`Failed to delete channel: ${toDisplayError(error_)}`);
     } finally {
       setDeleteChannelLoading(false);
     }
@@ -2095,8 +2096,8 @@ const MediaCore = () => {
         await handleGetContentMetadata();
       }
     } catch (error_) {
-      setContentValidation({ error: error_.message, isValid: false });
-      toast.error(`Failed to validate content ID: ${error_.message}`);
+      setContentValidation({ error: toDisplayError(error_), isValid: false });
+      toast.error(`Failed to validate content ID: ${toDisplayError(error_)}`);
     } finally {
       setContentValidationLoading(false);
     }
@@ -2115,7 +2116,7 @@ const MediaCore = () => {
         setNewPodName(`${metadata.artist} - ${metadata.title}`);
       }
     } catch (error_) {
-      toast.error(`Failed to get content metadata: ${error_.message}`);
+      toast.error(`Failed to get content metadata: ${toDisplayError(error_)}`);
       setContentMetadata(null);
     } finally {
       setContentMetadataLoading(false);
@@ -2135,7 +2136,7 @@ const MediaCore = () => {
       );
       setContentSearchResults(results);
     } catch (error_) {
-      toast.error(`Failed to search content: ${error_.message}`);
+      toast.error(`Failed to search content: ${toDisplayError(error_)}`);
       setContentSearchResults([]);
     } finally {
       setContentSearchLoading(false);
@@ -2190,7 +2191,7 @@ const MediaCore = () => {
       setContentSearchQuery('');
       setContentSearchResults([]);
     } catch (error_) {
-      toast.error(`Failed to create pod: ${error_.message}`);
+      toast.error(`Failed to create pod: ${toDisplayError(error_)}`);
     } finally {
       setCreatePodLoading(false);
     }
@@ -2242,7 +2243,7 @@ const MediaCore = () => {
         await handleGetOpinions();
       }
     } catch (error_) {
-      toast.error(`Failed to publish opinion: ${error_.message}`);
+      toast.error(`Failed to publish opinion: ${toDisplayError(error_)}`);
     } finally {
       setPublishOpinionLoading(false);
     }
@@ -2262,7 +2263,7 @@ const MediaCore = () => {
       );
       setOpinions(result);
     } catch (error_) {
-      toast.error(`Failed to get opinions: ${error_.message}`);
+      toast.error(`Failed to get opinions: ${toDisplayError(error_)}`);
       setOpinions([]);
     } finally {
       setGetOpinionsLoading(false);
@@ -2283,7 +2284,7 @@ const MediaCore = () => {
       );
       setOpinionStatistics(stats);
     } catch (error_) {
-      toast.error(`Failed to get opinion statistics: ${error_.message}`);
+      toast.error(`Failed to get opinion statistics: ${toDisplayError(error_)}`);
       setOpinionStatistics(null);
     } finally {
       setGetStatsLoading(false);
@@ -2306,7 +2307,7 @@ const MediaCore = () => {
         await Promise.all([handleGetOpinions(), handleGetOpinionStatistics()]);
       }
     } catch (error_) {
-      toast.error(`Failed to refresh opinions: ${error_.message}`);
+      toast.error(`Failed to refresh opinions: ${toDisplayError(error_)}`);
     } finally {
       setRefreshOpinionsLoading(false);
     }
@@ -2327,7 +2328,7 @@ const MediaCore = () => {
       );
       setAggregatedOpinions(aggregated);
     } catch (error_) {
-      toast.error(`Failed to get aggregated opinions: ${error_.message}`);
+      toast.error(`Failed to get aggregated opinions: ${toDisplayError(error_)}`);
       setAggregatedOpinions(null);
     } finally {
       setGetAggregatedLoading(false);
@@ -2347,7 +2348,7 @@ const MediaCore = () => {
       );
       setMemberAffinities(affinities);
     } catch (error_) {
-      toast.error(`Failed to get member affinities: ${error_.message}`);
+      toast.error(`Failed to get member affinities: ${toDisplayError(error_)}`);
       setMemberAffinities({});
     } finally {
       setGetAffinitiesLoading(false);
@@ -2368,7 +2369,7 @@ const MediaCore = () => {
       );
       setConsensusRecommendations(recommendations);
     } catch (error_) {
-      toast.error(`Failed to get consensus recommendations: ${error_.message}`);
+      toast.error(`Failed to get consensus recommendations: ${toDisplayError(error_)}`);
       setConsensusRecommendations([]);
     } finally {
       setGetRecommendationsLoading(false);
@@ -2391,7 +2392,7 @@ const MediaCore = () => {
       // Refresh affinities display
       await handleGetMemberAffinities();
     } catch (error_) {
-      toast.error(`Failed to update member affinities: ${error_.message}`);
+      toast.error(`Failed to update member affinities: ${toDisplayError(error_)}`);
     } finally {
       setUpdateAffinitiesLoading(false);
     }

@@ -59,6 +59,7 @@ const AutomationCenter = () => {
   const [executingRecipe, setExecutingRecipe] = useState('');
   const mountedRef = useMountedRef();
   const executionRequestIdRef = useRef(0);
+  const executionInFlightRef = useRef(false);
   const summary = useMemo(() => {
     const enabled = automationRecipes.filter(
       (recipe) => recipeState[recipe.id]?.enabled,
@@ -88,7 +89,14 @@ const AutomationCenter = () => {
   const executeWishlistRetry = async (recipe, isCurrentRequest) => {
     const response = await wishlistAPI.getAll();
     if (!isCurrentRequest()) return;
-    const allRequests = Array.isArray(response) ? response : [];
+    const allRequests = Array.isArray(response)
+      ? response.filter(
+          (request) =>
+            request &&
+            typeof request === 'object' &&
+            !Array.isArray(request),
+        )
+      : [];
     const runnableRequests = getRunnableWishlistRequests(allRequests, { limit: 3 });
     const result = {
       failed: 0,
@@ -125,7 +133,11 @@ const AutomationCenter = () => {
 
     const response = await libraryHealthAPI.startScan(libraryPath);
     if (!isCurrentRequest()) return;
-    const scanId = response?.data?.scanId || response?.scanId || 'unknown';
+    const rawScanId = response?.data?.scanId || response?.scanId;
+    const scanId =
+      typeof rawScanId === 'string' || typeof rawScanId === 'number'
+        ? String(rawScanId)
+        : 'unknown';
     const report = buildAutomationExecutionReport(recipe, {
       scanId,
       started: 1,
@@ -142,12 +154,16 @@ const AutomationCenter = () => {
     if (!isCurrentRequest()) return;
     const report = buildAutomationExecutionReport(recipe, result);
     setRecipeState(setAutomationRecipeExecution(recipe.id, report, report.generatedAt));
-    setCopyStatus(`${recipe.title}: ${result.summary}`);
+    const summary =
+      typeof result?.summary === 'string'
+        ? result.summary
+        : toDisplayError(result, `${recipe.title} completed`);
+    setCopyStatus(`${recipe.title}: ${summary}`);
     toast.info(`${recipe.title} completed`);
   };
 
   const executeRecipe = async (recipe) => {
-    if (!mountedRef.current) return;
+    if (!mountedRef.current || executionInFlightRef.current) return;
     const requestId = ++executionRequestIdRef.current;
     const isCurrentRequest = () =>
       mountedRef.current && executionRequestIdRef.current === requestId;
@@ -159,6 +175,7 @@ const AutomationCenter = () => {
       return;
     }
 
+    executionInFlightRef.current = true;
     setExecutingRecipe(recipe.id);
     try {
       if (recipe.id === 'wishlist-retry') {
@@ -177,6 +194,7 @@ const AutomationCenter = () => {
         toast.error(message);
       }
     } finally {
+      executionInFlightRef.current = false;
       if (isCurrentRequest()) setExecutingRecipe('');
     }
   };
@@ -291,7 +309,10 @@ const AutomationCenter = () => {
           const enabled = state.enabled === true;
           const executable = isAutomationRecipeExecutable(recipe);
           const executing = executingRecipe === recipe.id;
-          const libraryHealthPath = recipeInputs[recipe.id]?.libraryPath || '';
+          const libraryHealthPath =
+            typeof recipeInputs[recipe.id]?.libraryPath === 'string'
+              ? recipeInputs[recipe.id].libraryPath
+              : '';
           const missingRequiredInput =
             recipe.id === 'library-health-scan' && !libraryHealthPath.trim();
 

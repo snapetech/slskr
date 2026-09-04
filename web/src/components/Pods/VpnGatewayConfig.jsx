@@ -1,4 +1,5 @@
 import * as pods from '../../lib/pods';
+import { toDisplayError } from '../../lib/errors';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Button,
@@ -33,6 +34,62 @@ const defaultVpnPolicy = {
   registeredServices: [],
 };
 
+const asRecords = (value) =>
+  (Array.isArray(value) ? value : []).filter(
+    (record) => record && typeof record === 'object' && !Array.isArray(record),
+  );
+
+const boundedPort = (value, fallback = null) => {
+  const port = Number.parseInt(value, 10);
+  return Number.isInteger(port) && port >= 1 && port <= 65_535 ? port : fallback;
+};
+
+const normalizeVpnPolicy = (policy = {}) => ({
+  ...defaultVpnPolicy,
+  ...policy,
+  allowedDestinations: asRecords(policy.allowedDestinations)
+    .map((destination) => ({
+      ...destination,
+      hostPattern: String(destination.hostPattern ?? '').trim(),
+      port: boundedPort(destination.port),
+      protocol: String(destination.protocol ?? 'tcp').toLowerCase(),
+    }))
+    .filter((destination) => destination.hostPattern && destination.port),
+  allowPrivateRanges: policy.allowPrivateRanges ?? true,
+  allowPublicDestinations: policy.allowPublicDestinations ?? false,
+  dialTimeout: String(policy.dialTimeout || defaultVpnPolicy.dialTimeout),
+  enabled: Boolean(policy.enabled),
+  gatewayPeerId: String(policy.gatewayPeerId || ''),
+  idleTimeout: String(policy.idleTimeout || defaultVpnPolicy.idleTimeout),
+  maxBytesPerDayPerPeer: Number.isFinite(Number(policy.maxBytesPerDayPerPeer))
+    ? Math.max(0, Number(policy.maxBytesPerDayPerPeer))
+    : defaultVpnPolicy.maxBytesPerDayPerPeer,
+  maxConcurrentTunnelsPerPeer: Number.isFinite(Number(policy.maxConcurrentTunnelsPerPeer))
+    ? Math.max(1, Number(policy.maxConcurrentTunnelsPerPeer))
+    : defaultVpnPolicy.maxConcurrentTunnelsPerPeer,
+  maxConcurrentTunnelsPod: Number.isFinite(Number(policy.maxConcurrentTunnelsPod))
+    ? Math.max(1, Number(policy.maxConcurrentTunnelsPod))
+    : defaultVpnPolicy.maxConcurrentTunnelsPod,
+  maxLifetime: String(policy.maxLifetime || defaultVpnPolicy.maxLifetime),
+  maxMembers: Number.isFinite(Number(policy.maxMembers))
+    ? Math.max(1, Number(policy.maxMembers))
+    : defaultVpnPolicy.maxMembers,
+  maxNewTunnelsPerMinutePerPeer: Number.isFinite(Number(policy.maxNewTunnelsPerMinutePerPeer))
+    ? Math.max(1, Number(policy.maxNewTunnelsPerMinutePerPeer))
+    : defaultVpnPolicy.maxNewTunnelsPerMinutePerPeer,
+  registeredServices: asRecords(policy.registeredServices)
+    .map((service) => ({
+      ...service,
+      description: String(service.description ?? ''),
+      destinationHost: String(service.destinationHost ?? '').trim(),
+      destinationPort: boundedPort(service.destinationPort),
+      kind: String(service.kind || 'Custom'),
+      name: String(service.name ?? '').trim(),
+      protocol: String(service.protocol || 'tcp').toLowerCase(),
+    }))
+    .filter((service) => service.name && service.destinationHost && service.destinationPort),
+});
+
 const VpnGatewayConfig = ({ podDetail, podId }) => {
   const [activeIndex, setActiveIndex] = useState(0);
   const [saving, setSaving] = useState(false);
@@ -60,6 +117,7 @@ const VpnGatewayConfig = ({ podDetail, podId }) => {
   });
   const mountedRef = useRef(false);
   const saveRequestIdRef = useRef(0);
+  const saveInFlightRef = useRef(false);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -71,59 +129,20 @@ const VpnGatewayConfig = ({ podDetail, podId }) => {
 
   useEffect(() => {
     if (!podDetail?.privateServicePolicy) {
-      setVpnPolicy({
-        ...defaultVpnPolicy,
-        allowedDestinations: [],
-        registeredServices: [],
-      });
+      setVpnPolicy(normalizeVpnPolicy());
       return;
     }
 
-    setVpnPolicy({
-      ...podDetail.privateServicePolicy,
-
-        allowedDestinations:
-          podDetail.privateServicePolicy.allowedDestinations || [],
-
-        allowPrivateRanges:
-          podDetail.privateServicePolicy.allowPrivateRanges ?? true,
-
-        allowPublicDestinations:
-          podDetail.privateServicePolicy.allowPublicDestinations ?? false,
-
-        dialTimeout: podDetail.privateServicePolicy.dialTimeout || '00:00:30',
-
-        gatewayPeerId: podDetail.privateServicePolicy.gatewayPeerId || '',
-
-        idleTimeout: podDetail.privateServicePolicy.idleTimeout || '01:00:00',
-
-        maxBytesPerDayPerPeer:
-          podDetail.privateServicePolicy.maxBytesPerDayPerPeer ??
-          1_073_741_824,
-
-        maxConcurrentTunnelsPerPeer:
-          podDetail.privateServicePolicy.maxConcurrentTunnelsPerPeer ?? 5,
-
-        maxConcurrentTunnelsPod:
-          podDetail.privateServicePolicy.maxConcurrentTunnelsPod ?? 15,
-
-        maxLifetime: podDetail.privateServicePolicy.maxLifetime || '24:00:00',
-        // Ensure defaults for missing fields
-        maxMembers: podDetail.privateServicePolicy.maxMembers ?? 3,
-        maxNewTunnelsPerMinutePerPeer:
-          podDetail.privateServicePolicy.maxNewTunnelsPerMinutePerPeer ?? 10,
-        registeredServices:
-          podDetail.privateServicePolicy.registeredServices || [],
-    });
+    setVpnPolicy(normalizeVpnPolicy(podDetail.privateServicePolicy));
   }, [podDetail]);
 
-  const hasVpnCapability = podDetail?.capabilities?.includes(
-    'PrivateServiceGateway',
-  );
+  const hasVpnCapability = Array.isArray(podDetail?.capabilities) &&
+    podDetail.capabilities.includes('PrivateServiceGateway');
 
   const handleSavePolicy = async () => {
-    if (!podId) return;
+    if (!podId || saveInFlightRef.current || !mountedRef.current) return;
 
+    saveInFlightRef.current = true;
     const requestId = ++saveRequestIdRef.current;
     setSaving(true);
     setError(null);
@@ -133,7 +152,7 @@ const VpnGatewayConfig = ({ podDetail, podId }) => {
       // Create updated pod with VPN policy
       const updatedPod = {
         ...podDetail,
-        privateServicePolicy: vpnPolicy.enabled ? vpnPolicy : null,
+        privateServicePolicy: vpnPolicy.enabled ? normalizeVpnPolicy(vpnPolicy) : null,
       };
 
       await pods.update(podId, updatedPod);
@@ -149,7 +168,7 @@ const VpnGatewayConfig = ({ podDetail, podId }) => {
         mountedRef.current &&
         requestId === saveRequestIdRef.current
       ) {
-        setError(error.message || 'Failed to update VPN policy');
+        setError(toDisplayError(error, 'Failed to update VPN policy'));
       }
     } finally {
       if (
@@ -158,24 +177,26 @@ const VpnGatewayConfig = ({ podDetail, podId }) => {
       ) {
         setSaving(false);
       }
+      saveInFlightRef.current = false;
     }
   };
 
   const handleAddDestination = () => {
     if (!newDestination.hostPattern || !newDestination.port) return;
 
-    const updatedDestinations = [
-      ...vpnPolicy.allowedDestinations,
-      {
-        hostPattern: newDestination.hostPattern,
-        port: Number.parseInt(newDestination.port, 10),
-        protocol: newDestination.protocol,
-      },
-    ];
+    const port = boundedPort(newDestination.port);
+    if (!port) return;
 
     setVpnPolicy((previous) => ({
       ...previous,
-      allowedDestinations: updatedDestinations,
+      allowedDestinations: [
+        ...previous.allowedDestinations,
+        {
+          hostPattern: newDestination.hostPattern.trim(),
+          port,
+          protocol: newDestination.protocol,
+        },
+      ],
     }));
     setNewDestination({ hostPattern: '', port: '', protocol: 'tcp' });
     setShowAddDestination(false);
@@ -199,21 +220,22 @@ const VpnGatewayConfig = ({ podDetail, podId }) => {
     )
       return;
 
-    const updatedServices = [
-      ...vpnPolicy.registeredServices,
-      {
-        description: newService.description,
-        destinationHost: newService.destinationHost,
-        destinationPort: Number.parseInt(newService.destinationPort, 10),
-        kind: newService.kind,
-        name: newService.name,
-        protocol: newService.protocol,
-      },
-    ];
+    const destinationPort = boundedPort(newService.destinationPort);
+    if (!destinationPort) return;
 
     setVpnPolicy((previous) => ({
       ...previous,
-      registeredServices: updatedServices,
+      registeredServices: [
+        ...previous.registeredServices,
+        {
+          description: newService.description,
+          destinationHost: newService.destinationHost.trim(),
+          destinationPort,
+          kind: newService.kind,
+          name: newService.name.trim(),
+          protocol: newService.protocol,
+        },
+      ],
     }));
     setNewService({
       description: '',
@@ -238,7 +260,7 @@ const VpnGatewayConfig = ({ podDetail, podId }) => {
 
   const formatBytes = (bytes) => {
     const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-    let value = bytes;
+    let value = Number.isFinite(Number(bytes)) ? Math.max(0, Number(bytes)) : 0;
     let unitIndex = 0;
 
     while (value >= 1_024 && unitIndex < units.length - 1) {
@@ -660,7 +682,7 @@ const VpnGatewayConfig = ({ podDetail, podId }) => {
 
       <div style={{ marginTop: '20px', textAlign: 'right' }}>
         <Button
-          disabled={!vpnPolicy.enabled}
+          disabled={!vpnPolicy.enabled || saving}
           loading={saving}
           onClick={handleSavePolicy}
           primary

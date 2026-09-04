@@ -17,6 +17,27 @@ import {
   Segment,
 } from 'semantic-ui-react';
 
+const asRecords = (value) =>
+  (Array.isArray(value) ? value : []).filter(
+    (record) => record && typeof record === 'object' && !Array.isArray(record),
+  );
+
+const normalizeRoomMessage = (message) => ({
+  ...message,
+  message: String(message.message ?? message.body ?? ''),
+  username: String(message.username ?? message.sender ?? 'Unknown peer'),
+});
+
+const normalizeRoom = (messages, users) => ({
+  messages: asRecords(messages).map(normalizeRoomMessage),
+  users: asRecords(users)
+    .map((user) => ({
+      ...user,
+      username: String(user.username ?? user.Username ?? 'Unknown peer'),
+    }))
+    .filter((user) => user.username !== 'Unknown peer'),
+});
+
 const initialState = {
   contextMenu: {
     message: null,
@@ -26,6 +47,7 @@ const initialState = {
   },
   loading: false,
   message: '',
+  sending: false,
   error: null,
   room: {
     messages: [],
@@ -47,6 +69,7 @@ class RoomSession extends Component {
       fetch: 0,
       send: 0,
     };
+    this.sendInFlight = false;
   }
 
   componentDidMount() {
@@ -157,10 +180,7 @@ class RoomSession extends Component {
       this.setState({
         error: null,
         loading: false,
-        room: {
-          messages,
-          users,
-        },
+        room: normalizeRoom(messages, users),
       });
     } catch (error) {
       console.error('Failed to fetch room data:', error);
@@ -214,12 +234,18 @@ class RoomSession extends Component {
     const { roomName } = this.props;
     const { message } = this.state;
 
-    if (!this.isMountedFlag || !this.validInput()) {
+    if (
+      !this.isMountedFlag ||
+      !this.validInput() ||
+      this.sendInFlight
+    ) {
       return;
     }
 
+    this.sendInFlight = true;
     const requestId = ++this.requestIds.send;
     const requestedRoomName = roomName;
+    this.setState({ sending: true });
     try {
       await rooms.sendMessage({ message: message.trim(), roomName });
       if (
@@ -237,6 +263,15 @@ class RoomSession extends Component {
         this.props.roomName === requestedRoomName
       ) {
         this.setState({ error: toDisplayError(error, 'Failed to send message') });
+      }
+    } finally {
+      this.sendInFlight = false;
+      if (
+        this.isMountedFlag &&
+        requestId === this.requestIds.send &&
+        this.props.roomName === requestedRoomName
+      ) {
+        this.setState({ sending: false });
       }
     }
   };
@@ -325,7 +360,7 @@ class RoomSession extends Component {
   render() {
     const { onLeaveRoom, roomName } = this.props;
 
-    const { contextMenu, error, loading, message, room } = this.state;
+    const { contextMenu, error, loading, message, room, sending } = this.state;
 
     if (!roomName || roomName.length === 0) {
       return (
@@ -391,10 +426,10 @@ class RoomSession extends Component {
                                   {this.formatTimestamp(message.timestamp)}
                                 </span>
                                 <span className="room-message-name">
-                                  {message.username}:{' '}
+                                  {String(message.username ?? 'Unknown peer')}:{' '}
                                 </span>
                                 <span className="room-message-message">
-                                  {message.message}
+                                  {String(message.message ?? '')}
                                 </span>
                               </List.Content>
                             </div>
@@ -407,13 +442,14 @@ class RoomSession extends Component {
                       <Input
                         action={{
                           className: 'room-message-button',
-                          disabled: !this.validInput(),
+                          disabled: !this.validInput() || sending,
                           icon: (
                             <Icon
                               color="green"
                               name="send"
                             />
                           ),
+                          loading: sending,
                           onClick: this.sendMessage,
                         }}
                         fluid
@@ -453,7 +489,7 @@ class RoomSession extends Component {
                           <List.Content>
                             <List.Header><UserCard username={user.username}>{user.username}</UserCard></List.Header>
                             <List.Description>
-                              {user.status === 1 ? 'Away' : 'Online'}
+                              {Number(user.status) === 1 ? 'Away' : 'Online'}
                             </List.Description>
                           </List.Content>
                         </List.Item>

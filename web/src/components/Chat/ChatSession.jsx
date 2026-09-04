@@ -16,6 +16,20 @@ import {
   Segment,
 } from 'semantic-ui-react';
 
+const asRecords = (value) =>
+  (Array.isArray(value) ? value : []).filter(
+    (record) => record && typeof record === 'object' && !Array.isArray(record),
+  );
+
+const normalizeConversation = (value) => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return {
+    ...value,
+    hasUnAcknowledgedMessages: Boolean(value.hasUnAcknowledgedMessages),
+    messages: asRecords(value.messages),
+  };
+};
+
 class ChatSession extends Component {
   constructor(props) {
     super(props);
@@ -25,6 +39,7 @@ class ChatSession extends Component {
       error: null,
       loading: false,
       message: '',
+      sending: false,
     };
 
     this.listRef = createRef();
@@ -35,6 +50,7 @@ class ChatSession extends Component {
       conversation: 0,
       send: 0,
     };
+    this.sendInFlight = false;
   }
 
   componentDidMount() {
@@ -116,7 +132,7 @@ class ChatSession extends Component {
     this.setState({ loading: true });
 
     try {
-      const conversation = await chat.get({ username });
+      const conversation = normalizeConversation(await chat.get({ username }));
       if (
         !this.isMountedFlag ||
         requestId !== this.requestIds.conversation ||
@@ -173,10 +189,12 @@ class ChatSession extends Component {
 
   sendMessage = async (message) => {
     const { username } = this.props;
-    if (!username || !message) return;
+    if (!username || !message || this.sendInFlight || !this.isMountedFlag) return;
 
+    this.sendInFlight = true;
     const requestId = ++this.requestIds.send;
     const requestedUsername = username;
+    this.setState({ sending: true });
     try {
       await chat.send({ message, username });
       if (
@@ -201,6 +219,15 @@ class ChatSession extends Component {
         this.props.username === requestedUsername
       ) {
         this.setState({ error: toDisplayError(error, 'Failed to send message') });
+      }
+    } finally {
+      this.sendInFlight = false;
+      if (
+        this.isMountedFlag &&
+        requestId === this.requestIds.send &&
+        this.props.username === requestedUsername
+      ) {
+        this.setState({ sending: false });
       }
     }
   };
@@ -262,8 +289,8 @@ class ChatSession extends Component {
 
   render() {
     const { user, username } = this.props;
-    const { conversation, error, loading, message } = this.state;
-    const messages = conversation?.messages || [];
+    const { conversation, error, loading, message, sending } = this.state;
+    const messages = asRecords(conversation?.messages);
 
     if (!username) {
       return (
@@ -319,11 +346,11 @@ class ChatSession extends Component {
                           <span className="chat-message-name">
                             {message.direction === 'Out'
                               ? user?.username || 'You'
-                              : message.username}
+                              : String(message.username ?? username)}
                             :{' '}
                           </span>
                           <span className="chat-message-message">
-                            {message.message}
+                            {String(message.message ?? '')}
                           </span>
                         </List.Content>
                       ))}
@@ -335,13 +362,14 @@ class ChatSession extends Component {
                   <Input
                     action={{
                       className: 'chat-message-button',
-                      disabled: !this.validInput(),
+                      disabled: !this.validInput() || sending,
                       icon: (
                         <Icon
                           color="green"
                           name="send"
                         />
                       ),
+                      loading: sending,
                       onClick: this.sendReply,
                     }}
                     fluid

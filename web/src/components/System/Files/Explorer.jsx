@@ -9,6 +9,21 @@ import { Header, Icon, Modal, Table } from 'semantic-ui-react';
 const fileStoragePath = (subdirectory, fullName) =>
   [...subdirectory, fullName].filter(Boolean).join('/');
 
+const isRecord = (value) =>
+  value && typeof value === 'object' && !Array.isArray(value);
+
+const asRecords = (value) =>
+  (Array.isArray(value) ? value : []).filter(isRecord);
+
+const normalizeListing = (value) => ({
+  directories: asRecords(value?.directories).filter(
+    (entry) => typeof entry.name === 'string' && entry.name,
+  ),
+  files: asRecords(value?.files).filter(
+    (entry) => typeof entry.name === 'string' && entry.name,
+  ),
+});
+
 const reportFileOperationError = (error) => {
   console.error('[Files] Remote file operation failed:', error);
   toast.error(toDisplayError(error, 'File operation failed'));
@@ -19,10 +34,11 @@ const FileRow = ({
   length,
   modifiedAt,
   name,
+  onDelete,
+  deleting = false,
   remoteFileManagement,
   root,
   subdirectory,
-  onRefresh,
 }) => (
   <Table.Row key={fullName}>
     <Table.Cell>
@@ -40,17 +56,7 @@ const FileRow = ({
               content: 'Delete',
               key: 'done',
               negative: true,
-              onClick: async () => {
-                try {
-                  await deleteFile({
-                    path: fileStoragePath(subdirectory, fullName),
-                    root,
-                  });
-                  await onRefresh();
-                } catch (error) {
-                  reportFileOperationError(error);
-                }
-              },
+              onClick: onDelete,
             },
           ]}
           centered
@@ -65,8 +71,10 @@ const FileRow = ({
           trigger={
             <Icon
               color="red"
+              disabled={deleting}
+              loading={deleting}
               name="trash alternate"
-              style={{ cursor: 'pointer' }}
+              style={{ cursor: deleting ? 'wait' : 'pointer' }}
             />
           }
         />
@@ -81,10 +89,11 @@ const DirectoryRow = ({
   modifiedAt,
   name,
   onClick = () => {},
+  onDelete,
+  deleting = false,
   remoteFileManagement,
   root,
   subdirectory,
-  onRefresh,
 }) => (
   <Table.Row key={name}>
     <Table.Cell
@@ -105,17 +114,7 @@ const DirectoryRow = ({
               content: 'Delete',
               key: 'done',
               negative: true,
-              onClick: async () => {
-                try {
-                  await deleteDirectory({
-                    path: fileStoragePath(subdirectory, fullName),
-                    root,
-                  });
-                  await onRefresh();
-                } catch (error) {
-                  reportFileOperationError(error);
-                }
-              },
+              onClick: onDelete,
             },
           ]}
           centered
@@ -130,8 +129,10 @@ const DirectoryRow = ({
           trigger={
             <Icon
               color="red"
+              disabled={deleting}
+              loading={deleting}
               name="trash alternate"
-              style={{ cursor: 'pointer' }}
+              style={{ cursor: deleting ? 'wait' : 'pointer' }}
             />
           }
         />
@@ -146,8 +147,10 @@ const Explorer = ({ active = true, remoteFileManagement, root }) => {
   const [directory, setDirectory] = useState({ directories: [], files: [] });
   const [subdirectory, setSubdirectory] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [deletingPath, setDeletingPath] = useState('');
   const mountedRef = useRef(false);
   const requestIdRef = useRef(0);
+  const deletingPathRef = useRef('');
 
   useEffect(() => {
     mountedRef.current = true;
@@ -173,7 +176,7 @@ const Explorer = ({ active = true, remoteFileManagement, root }) => {
         mountedRef.current &&
         requestId === requestIdRef.current
       ) {
-        setDirectory(directoryResult || { directories: [], files: [] });
+        setDirectory(normalizeListing(directoryResult));
       }
     } catch (error) {
       if (
@@ -193,6 +196,34 @@ const Explorer = ({ active = true, remoteFileManagement, root }) => {
     }
   }, [active, root, subdirectory]);
 
+  const handleDelete = useCallback(
+    async ({ kind, path }) => {
+      const operationKey = kind + ':' + path;
+      if (
+        !mountedRef.current ||
+        deletingPathRef.current
+      ) {
+        return;
+      }
+      deletingPathRef.current = operationKey;
+      setDeletingPath(operationKey);
+      try {
+        if (kind === 'file') {
+          await deleteFile({ path, root });
+        } else {
+          await deleteDirectory({ path, root });
+        }
+        await refresh();
+      } catch (error) {
+        if (mountedRef.current) reportFileOperationError(error);
+      } finally {
+        deletingPathRef.current = '';
+        if (mountedRef.current) setDeletingPath('');
+      }
+    },
+    [refresh, root],
+  );
+
   useEffect(() => {
     if (!active) {
       requestIdRef.current += 1;
@@ -208,13 +239,14 @@ const Explorer = ({ active = true, remoteFileManagement, root }) => {
   }, [root]);
 
   const select = ({ path }) => {
-    setSubdirectory([...subdirectory, path]);
+    if (typeof path !== 'string' || !path || path === '.' || path === '..') {
+      return;
+    }
+    setSubdirectory((previous) => [...previous, path]);
   };
 
   const upOneSubdirectory = () => {
-    const copy = [...subdirectory];
-    copy.pop();
-    setSubdirectory(copy);
+    setSubdirectory((previous) => previous.slice(0, -1));
   };
 
   if (!active) {
@@ -233,9 +265,11 @@ const Explorer = ({ active = true, remoteFileManagement, root }) => {
     return <LoaderSegment />;
   }
 
-  const total =
-    (directory?.directories?.length ?? 0) +
-    (directory?.files?.length ?? 0);
+  const directories = Array.isArray(directory?.directories)
+    ? directory.directories
+    : [];
+  const files = Array.isArray(directory?.files) ? directory.files : [];
+  const total = directories.length + files.length;
 
   return (
     <>
@@ -285,31 +319,52 @@ const Explorer = ({ active = true, remoteFileManagement, root }) => {
                   deletable={false}
                   fullName=".."
                   name=".."
-                  onClick={upOneSubdirectory}
-                  remoteFileManagement={remoteFileManagement}
-                  root={root}
-                  subdirectory={subdirectory}
+                onClick={upOneSubdirectory}
+                remoteFileManagement={remoteFileManagement}
+                root={root}
+                subdirectory={subdirectory}
                 />
               )}
-              {directory?.directories?.map((d) => (
+              {directories.map((d) => (
                 <DirectoryRow
                   key={d.name}
+                  deleting={
+                    deletingPath ===
+                    'directory:' + fileStoragePath(subdirectory, d.fullName || d.name)
+                  }
                   onClick={() => select({ path: d.name })}
+                  onDelete={() =>
+                    handleDelete({
+                      kind: 'directory',
+                      path: fileStoragePath(
+                        subdirectory,
+                        d.fullName || d.name,
+                      ),
+                    })
+                  }
                   remoteFileManagement={remoteFileManagement}
                   root={root}
                   subdirectory={subdirectory}
                   {...d}
-                  onRefresh={refresh}
                 />
               ))}
-              {directory?.files?.map((f) => (
+              {files.map((f) => (
                 <FileRow
                   key={f.name}
+                  deleting={
+                    deletingPath ===
+                    'file:' + fileStoragePath(subdirectory, f.fullName || f.name)
+                  }
+                  onDelete={() =>
+                    handleDelete({
+                      kind: 'file',
+                      path: fileStoragePath(subdirectory, f.fullName || f.name),
+                    })
+                  }
                   remoteFileManagement={remoteFileManagement}
                   root={root}
                   subdirectory={subdirectory}
                   {...f}
-                  onRefresh={refresh}
                 />
               ))}
             </>

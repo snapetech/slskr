@@ -171,10 +171,12 @@ const Metrics = () => {
   const [lastUpdated, setLastUpdated] = useState(null);
   const mountedRef = useMountedRef();
   const requestIdRef = useRef(0);
+  const inFlightRef = useRef(false);
 
   const fetchMetrics = useCallback(async () => {
-    if (!mountedRef.current) return;
+    if (!mountedRef.current || inFlightRef.current) return;
     const requestId = ++requestIdRef.current;
+    inFlightRef.current = true;
     setLoading(true);
     setError(null);
     try {
@@ -201,6 +203,7 @@ const Metrics = () => {
       ) {
         setLoading(false);
       }
+      inFlightRef.current = false;
     }
   }, [mountedRef]);
 

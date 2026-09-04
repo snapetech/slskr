@@ -1,4 +1,5 @@
 import './UserCard.css';
+import { toDisplayError } from '../../lib/errors';
 import * as opinions from '../../lib/opinions';
 import * as security from '../../lib/security';
 import * as soulseekDiscovery from '../../lib/soulseekDiscovery';
@@ -6,7 +7,10 @@ import * as users from '../../lib/users';
 import React, { Component } from 'react';
 import { Icon, Popup } from 'semantic-ui-react';
 
-const asArray = (value) => (Array.isArray(value) ? value : []);
+const asArray = (value) =>
+  (Array.isArray(value) ? value : [])
+    .filter((item) => typeof item === 'string' || typeof item === 'number')
+    .map((item) => String(item));
 const USER_DATA_CACHE_TTL_MS = 5 * 60 * 1000;
 const USER_DATA_MAX_CONCURRENT = 4;
 const userDataCache = new Map();
@@ -272,11 +276,7 @@ class UserCard extends Component {
         this.props.username === username
       ) {
         this.setState({
-          interestsError:
-            error?.response?.data?.message ||
-            error?.response?.data ||
-            error?.message ||
-            'Interests unavailable',
+          interestsError: toDisplayError(error, 'Interests unavailable'),
           interestsLoading: false,
         });
       }

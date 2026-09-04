@@ -33,6 +33,7 @@ const Mesh = ({ runtimeProfile } = {}) => {
   const statsRequestIdRef = useRef(0);
   const rendezvousStatusRequestIdRef = useRef(0);
   const rendezvousRequestIdRef = useRef(0);
+  const rendezvousInFlightRef = useRef(false);
 
   const fetchStats = useCallback(async () => {
     if (!mountedRef.current) return;
@@ -107,8 +108,13 @@ const Mesh = ({ runtimeProfile } = {}) => {
   }, [mountedRef]);
 
   const beginRendezvousRequest = () => {
-    if (!mountedRef.current || rendezvousLoading) return null;
+    if (
+      !mountedRef.current ||
+      rendezvousLoading ||
+      rendezvousInFlightRef.current
+    ) return null;
     const requestId = ++rendezvousRequestIdRef.current;
+    rendezvousInFlightRef.current = true;
     return {
       isCurrentRequest: () =>
         mountedRef.current && rendezvousRequestIdRef.current === requestId,
@@ -139,6 +145,7 @@ const Mesh = ({ runtimeProfile } = {}) => {
       });
     } finally {
       if (request.isCurrentRequest()) setRendezvousLoading(false);
+      rendezvousInFlightRef.current = false;
     }
   };
 
@@ -165,6 +172,7 @@ const Mesh = ({ runtimeProfile } = {}) => {
       });
     } finally {
       if (request.isCurrentRequest()) setRendezvousLoading(false);
+      rendezvousInFlightRef.current = false;
     }
   };
 
@@ -179,9 +187,24 @@ const Mesh = ({ runtimeProfile } = {}) => {
       const data = response.data && typeof response.data === 'object'
         ? response.data
         : {};
-      const users = Array.isArray(data.users) ? data.users : [];
+      const users = Array.isArray(data.users)
+        ? data.users
+          .filter((user) => user && typeof user === 'object' && !Array.isArray(user))
+          .map((user) => ({
+            ...user,
+            username: user.username || user.Username || 'unknown user',
+          }))
+        : [];
       const records = Array.isArray(data.capabilityRecords)
         ? data.capabilityRecords
+          .filter((record) => record && typeof record === 'object' && !Array.isArray(record))
+          .map((record) => ({
+            ...record,
+            features: Array.isArray(record.features)
+              ? record.features.filter((feature) => typeof feature === 'string')
+              : [],
+            username: record.username || 'unknown user',
+          }))
         : [];
       setRendezvousUsers(users);
       setCapabilityRecords(records);
@@ -202,6 +225,7 @@ const Mesh = ({ runtimeProfile } = {}) => {
       });
     } finally {
       if (request.isCurrentRequest()) setRendezvousLoading(false);
+      rendezvousInFlightRef.current = false;
     }
   };
 

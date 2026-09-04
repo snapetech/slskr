@@ -84,7 +84,12 @@ const options = {
 const readStoredPreferences = () => {
   try {
     const stored = JSON.parse(localStorage.getItem(storageKey) || '{}');
-    return { ...defaults, ...stored };
+    return {
+      ...defaults,
+      ...(stored && typeof stored === 'object' && !Array.isArray(stored)
+        ? stored
+        : {}),
+    };
   } catch {
     return defaults;
   }
@@ -113,19 +118,34 @@ const ExperienceSettings = () => {
   };
 
   const save = () => {
-    localStorage.setItem(storageKey, JSON.stringify(form));
-    setMessage('Experience preferences saved locally in this browser.');
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(form));
+      setMessage('Experience preferences saved locally in this browser.');
+    } catch {
+      setMessage('Unable to save experience preferences in this browser.');
+    }
   };
 
   const reset = () => {
-    localStorage.removeItem(storageKey);
-    setForm(defaults);
-    setMessage('Experience preferences reset to defaults.');
+    try {
+      localStorage.removeItem(storageKey);
+      setForm(defaults);
+      setMessage('Experience preferences reset to defaults.');
+    } catch {
+      setMessage('Unable to reset experience preferences in this browser.');
+    }
   };
 
   const copyReport = () => {
-    navigator.clipboard?.writeText(buildReport(form));
-    setMessage('Experience preference report copied.');
+    const report = buildReport(form);
+    if (navigator.clipboard?.writeText) {
+      void navigator.clipboard.writeText(report).catch(() => {});
+    }
+    setMessage(
+      navigator.clipboard?.writeText
+        ? 'Experience preference report copied.'
+        : 'Experience preference report prepared; clipboard is unavailable.',
+    );
   };
 
   return (

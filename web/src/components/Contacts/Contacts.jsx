@@ -1,4 +1,5 @@
 import * as identityAPI from '../../lib/identity';
+import { toDisplayError } from '../../lib/errors';
 import ErrorSegment from '../Shared/ErrorSegment';
 import LoaderSegment from '../Shared/LoaderSegment';
 import TooltipButton from '../Shared/TooltipButton';
@@ -19,6 +20,26 @@ import {
 } from 'semantic-ui-react';
 
 const Button = TooltipButton;
+
+const asRecords = (value) =>
+  (Array.isArray(value) ? value : []).filter(
+    (item) => item && typeof item === 'object' && !Array.isArray(item),
+  );
+
+const normalizeContact = (contact, index) => ({
+  ...contact,
+  id: contact.id ?? `contact-${index}`,
+  nickname: typeof contact.nickname === 'string' ? contact.nickname : '',
+  peerId: String(contact.peerId ?? ''),
+});
+
+const normalizeNearbyPeer = (peer, index) => ({
+  ...peer,
+  displayName: String(peer.displayName ?? peer.peerId ?? 'Unknown peer'),
+  endpoint: String(peer.endpoint ?? ''),
+  peerCode: String(peer.peerCode ?? ''),
+  peerId: String(peer.peerId ?? `nearby-${index}`),
+});
 
 const withNavigate = (WrappedComponent) => {
   const RoutedComponent = (props) => {
@@ -46,6 +67,7 @@ class Contacts extends Component {
     inviteLink: null,
     inviteQrDataUrl: null,
     loading: true,
+    mutating: false,
     nearby: [],
     nearbyLoading: false,
   };
@@ -58,6 +80,7 @@ class Contacts extends Component {
       invite: 0,
       nearby: 0,
     };
+    this.mutationInFlight = false;
   }
 
   componentDidMount() {
@@ -81,21 +104,27 @@ class Contacts extends Component {
       }
       const response = await identityAPI.getContacts();
       if (this.isMountedFlag && requestId === this.requestIds.contacts) {
-        this.setState({ contacts: response.data || [], loading: false });
+        this.setState({
+          contacts: asRecords(response?.data).map(normalizeContact),
+          loading: false,
+        });
       }
     } catch (error) {
       // If 401/403/404, feature not enabled or not authenticated - return empty list
       if (
-        error.response?.status === 401 ||
-        error.response?.status === 403 ||
-        error.response?.status === 404
+        error?.response?.status === 401 ||
+        error?.response?.status === 403 ||
+        error?.response?.status === 404
       ) {
         if (this.isMountedFlag && requestId === this.requestIds.contacts) {
           this.setState({ contacts: [], error: null, loading: false });
         }
       } else {
         if (this.isMountedFlag && requestId === this.requestIds.contacts) {
-          this.setState({ error: error.message, loading: false });
+          this.setState({
+            error: toDisplayError(error, 'Failed to load contacts'),
+            loading: false,
+          });
         }
       }
     }
@@ -109,7 +138,10 @@ class Contacts extends Component {
       }
       const response = await identityAPI.getNearby();
       if (this.isMountedFlag && requestId === this.requestIds.nearby) {
-        this.setState({ nearby: response.data || [], nearbyLoading: false });
+        this.setState({
+          nearby: asRecords(response?.data).map(normalizeNearbyPeer),
+          nearbyLoading: false,
+        });
       }
     } catch {
       if (this.isMountedFlag && requestId === this.requestIds.nearby) {
@@ -119,7 +151,20 @@ class Contacts extends Component {
     }
   };
 
+  beginMutation = () => {
+    if (!this.isMountedFlag || this.mutationInFlight) return false;
+    this.mutationInFlight = true;
+    this.setState({ mutating: true });
+    return true;
+  };
+
+  finishMutation = () => {
+    this.mutationInFlight = false;
+    if (this.isMountedFlag) this.setState({ mutating: false });
+  };
+
   handleAddFromInvite = async (inviteLink, nickname) => {
+    if (!this.beginMutation()) return;
     try {
       await identityAPI.addContactFromInvite({ inviteLink, nickname });
       if (!this.isMountedFlag) return;
@@ -127,28 +172,49 @@ class Contacts extends Component {
       await this.loadContacts();
     } catch (error) {
       if (this.isMountedFlag) {
-        this.setState({ error: error.response?.data || error.message });
+        this.setState({
+          error: toDisplayError(error, 'Failed to add contact from invite'),
+        });
       }
+    } finally {
+      this.finishMutation();
     }
   };
 
   handleAddFromDiscovery = async (peerId, nickname) => {
+    if (!this.beginMutation()) return;
     try {
       await identityAPI.addContactFromDiscovery({ nickname, peerId });
       if (!this.isMountedFlag) return;
       await this.loadContacts();
     } catch (error) {
       if (this.isMountedFlag) {
-        this.setState({ error: error.response?.data || error.message });
+        this.setState({
+          error: toDisplayError(error, 'Failed to add discovered contact'),
+        });
       }
+    } finally {
+      this.finishMutation();
     }
   };
 
   handleCreateInvite = async () => {
+    if (!this.beginMutation()) return;
     const requestId = ++this.requestIds.invite;
     try {
       const response = await identityAPI.createInvite({ expiresInHours: 24 });
-      const inviteLink = response.data.inviteLink;
+      const responseData =
+        response?.data && typeof response.data === 'object'
+          ? response.data
+          : {};
+      const inviteLink =
+        typeof responseData.inviteLink === 'string'
+          ? responseData.inviteLink
+          : '';
+      const inviteFriendCode =
+        responseData.friendCode == null
+          ? null
+          : String(responseData.friendCode);
       const inviteQrDataUrl = inviteLink
         ? await QRCode.toDataURL(inviteLink, {
             errorCorrectionLevel: 'M',
@@ -165,64 +231,28 @@ class Contacts extends Component {
       this.setState({
         createInviteModalOpen: true,
         error: null,
-        inviteFriendCode: response.data.friendCode,
+        inviteFriendCode,
         inviteLink,
         inviteQrDataUrl,
       });
     } catch (error) {
       console.error('[Contacts] Create invite error:', error);
-      // Extract error message from response (supports ProblemDetails, object with message/error, or string)
-      let errorMessage = error.message || 'Failed to create invite';
-      if (error.response) {
-        const status = error.response.status;
-        const url = error.response.config?.url || 'unknown';
-        const contentLength = error.response.headers['content-length'];
-
-        console.error('[Contacts] Response status:', status);
-        console.error('[Contacts] Response URL:', url);
-        console.error('[Contacts] Response data:', error.response.data);
-
-        // Check for empty body
-        if (contentLength === '0' || contentLength === 0) {
-          console.error(
-            `[Contacts] HTTP ${status} with empty body from ${url}`,
-          );
-        }
-
-        if (error.response.data) {
-          if (typeof error.response.data === 'string') {
-            errorMessage = error.response.data;
-          } else if (error.response.data.detail) {
-            errorMessage = error.response.data.detail; // ProblemDetails format
-          } else if (error.response.data.message) {
-            errorMessage = error.response.data.message;
-          } else if (error.response.data.error) {
-            errorMessage = error.response.data.error;
-          } else if (error.response.data.title) {
-            errorMessage = error.response.data.title; // ProblemDetails title as fallback
-          } else {
-            errorMessage = JSON.stringify(error.response.data);
-          }
-        } else if (status === 400) {
-          // 400 with empty body likely means CSRF validation failed or user identity missing
-          errorMessage =
-            'Request failed. This may be due to: missing CSRF token (try refreshing the page), user identity not available (configure Soulseek username or enable Identity & Friends), or invalid input.';
-        } else if (status === 401) {
-          errorMessage = 'Authentication required. Please refresh the page.';
-        } else if (status === 403) {
-          errorMessage = 'Not authorized.';
-        } else if (status === 404) {
-          // 404 could be route mismatch (double prefix bug) or feature disabled
-          if (url.includes('/api/v0/api/v0')) {
-            errorMessage = `Endpoint not found: ${url} (possible route mismatch - check browser console)`;
-          } else {
-            errorMessage =
-              'Identity & Friends feature is not enabled, or endpoint not found.';
-          }
-        } else if (status >= 500) {
-          errorMessage = 'Server error. Please check server logs.';
-        }
-      }
+      const status = error?.response?.status;
+      const url = error?.response?.config?.url || '';
+      const errorMessage =
+        status === 400
+          ? 'Request failed. Check the CSRF token, local identity, and invite configuration.'
+          : status === 401
+            ? 'Authentication required. Please refresh the page.'
+            : status === 403
+              ? 'Not authorized.'
+              : status === 404
+                ? url.includes('/api/v0/api/v0')
+                  ? `Endpoint not found: ${url} (possible route mismatch)`
+                  : 'Identity & Friends is disabled, or the invite endpoint was not found.'
+                : status >= 500
+                  ? 'Server error. Please check server logs.'
+                  : toDisplayError(error, 'Failed to create invite');
 
       if (
         this.isMountedFlag &&
@@ -236,19 +266,26 @@ class Contacts extends Component {
           inviteQrDataUrl: null,
         });
       }
+    } finally {
+      this.finishMutation();
     }
   };
 
   handleDeleteContact = async (id) => {
     if (!window.confirm('Delete this contact?')) return;
+    if (!this.beginMutation()) return;
     try {
       await identityAPI.deleteContact(id);
       if (!this.isMountedFlag) return;
       await this.loadContacts();
     } catch (error) {
       if (this.isMountedFlag) {
-        this.setState({ error: error.response?.data || error.message });
+        this.setState({
+          error: toDisplayError(error, 'Failed to delete contact'),
+        });
       }
+    } finally {
+      this.finishMutation();
     }
   };
 
@@ -273,6 +310,7 @@ class Contacts extends Component {
       inviteLink,
       inviteQrDataUrl,
       loading,
+      mutating,
       nearby,
       nearbyLoading,
     } = this.state;
@@ -293,6 +331,7 @@ class Contacts extends Component {
                 <Button
                   as="button"
                   data-testid="contacts-create-invite-empty"
+                  disabled={mutating}
                   onClick={this.handleCreateInvite}
                   primary
                 >
@@ -313,13 +352,13 @@ class Contacts extends Component {
                 <Table.Body>
                   {contacts.map((contact) => (
                     <Table.Row
-                      data-testid={`contact-row-${contact.nickname || contact.peerId.slice(0, 8)}`}
-                      key={contact.id}
+                      data-testid={`contact-row-${contact.nickname || String(contact.peerId ?? '').slice(0, 8)}`}
+                      key={contact.id || contact.peerId}
                     >
                       <Table.Cell>{contact.nickname || 'Unnamed'}</Table.Cell>
                       <Table.Cell>
                         <code style={{ fontSize: '0.85em' }}>
-                          {contact.peerId.slice(0, 16)}...
+                          {String(contact.peerId ?? '').slice(0, 16)}...
                         </code>
                       </Table.Cell>
                       <Table.Cell>
@@ -358,6 +397,7 @@ class Contacts extends Component {
                             content="Remove this saved contact."
                             trigger={
                               <Button
+                                disabled={mutating}
                                 icon="trash"
                                 negative
                                 onClick={() =>
@@ -389,7 +429,9 @@ class Contacts extends Component {
                   No nearby peers found
                 </Header>
                 <p>Make sure you're on the same network and mDNS is working.</p>
-                <Button onClick={this.loadNearby}>Refresh</Button>
+                <Button disabled={nearbyLoading} onClick={this.loadNearby}>
+                  Refresh
+                </Button>
               </Segment>
             ) : (
               <List
@@ -399,14 +441,15 @@ class Contacts extends Component {
                 {nearby.map((peer, index) => (
                   <List.Item key={index}>
                     <List.Content>
-                      <List.Header>{peer.displayName}</List.Header>
-                      <List.Description>
-                        Code: <code>{peer.peerCode}</code>
+                        <List.Header>{String(peer.displayName)}</List.Header>
+                        <List.Description>
+                        Code: <code>{String(peer.peerCode)}</code>
                         <br />
-                        Endpoint: {peer.endpoint}
+                        Endpoint: {String(peer.endpoint)}
                       </List.Description>
-                      <Button
-                        onClick={() => {
+                        <Button
+                          disabled={mutating}
+                          onClick={() => {
                           const nickname = prompt(
                             'Enter nickname for this contact:',
                           );
@@ -448,6 +491,7 @@ class Contacts extends Component {
             <Button
               as="button"
               data-testid="contacts-create-invite"
+              disabled={mutating}
               onClick={this.handleCreateInvite}
               primary
             >
@@ -457,12 +501,13 @@ class Contacts extends Component {
             <Button
               as="button"
               data-testid="contacts-add-friend"
+              disabled={mutating}
               onClick={() => this.setState({ addFriendModalOpen: true })}
             >
               <Icon name="user plus" />
               Add Friend
             </Button>
-            <Button onClick={this.loadNearby}>
+            <Button disabled={nearbyLoading} onClick={this.loadNearby}>
               <Icon name="refresh" />
               Refresh Nearby
             </Button>
@@ -610,7 +655,7 @@ class AddFriendForm extends Component {
         this.isMountedFlag &&
         requestId === this.scanRequestId
       ) {
-        this.setState({ scanError: error.message || 'QR scan failed.' });
+        this.setState({ scanError: toDisplayError(error, 'QR scan failed.') });
       }
     } finally {
       event.target.value = '';

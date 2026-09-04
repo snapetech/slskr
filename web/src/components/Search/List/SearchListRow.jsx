@@ -20,12 +20,15 @@ const SearchListRow = ({ onRemove, onStop, search }) => {
   const mountedRef = useMountedRef();
   const actionRequestIdRef = useRef(0);
   const graphRequestIdRef = useRef(0);
+  const actionInFlightRef = useRef(false);
+  const queueInFlightRef = useRef(false);
 
   const invoke = async (function_) => {
-    if (!mountedRef.current || working) return;
+    if (!mountedRef.current || working || actionInFlightRef.current) return;
     const requestId = ++actionRequestIdRef.current;
     const isCurrentRequest = () =>
       mountedRef.current && actionRequestIdRef.current === requestId;
+    actionInFlightRef.current = true;
     setWorking(true);
 
     try {
@@ -34,17 +37,19 @@ const SearchListRow = ({ onRemove, onStop, search }) => {
       if (isCurrentRequest()) console.error(error);
     } finally {
       if (isCurrentRequest()) setWorking(false);
+      actionInFlightRef.current = false;
     }
   };
 
   const openDiscoveryGraph = async (request) => {
-    if (!mountedRef.current) return;
+    if (!mountedRef.current || graphLoading) return;
     const requestId = ++graphRequestIdRef.current;
     const isCurrentRequest = () =>
       mountedRef.current &&
       graphRequestIdRef.current === requestId;
     setGraphLoading(true);
     setGraphOpen(true);
+    setGraphData(null);
     setGraphRequest(request);
 
     try {
@@ -107,10 +112,10 @@ const SearchListRow = ({ onRemove, onStop, search }) => {
   };
 
   const handleQueueNearby = async (graph) => {
-    if (!mountedRef.current) return;
+    if (!mountedRef.current || queueInFlightRef.current) return;
     const queries = (Array.isArray(graph?.nodes) ? graph.nodes : [])
-      .filter((node) => node.nodeType === 'track')
-      .map((node) => node.label || '')
+      .filter((node) => node && typeof node === 'object' && node.nodeType === 'track')
+      .map((node) => (typeof node.label === 'string' ? node.label.trim() : ''))
       .filter(Boolean)
       .slice(0, 8);
 
@@ -119,16 +124,24 @@ const SearchListRow = ({ onRemove, onStop, search }) => {
       return;
     }
 
+    queueInFlightRef.current = true;
     try {
       const count = await searches.createBatch({ queries });
       if (mountedRef.current) {
-        toast.success(`Started ${count} nearby graph searches`);
+        const startedCount = typeof count === 'number'
+          ? count
+          : typeof count?.count === 'number'
+            ? count.count
+            : queries.length;
+        toast.success(`Started ${startedCount} nearby graph searches`);
       }
     } catch (error) {
       if (mountedRef.current) {
         console.error(error);
         toast.error(toDisplayError(error, 'Failed to queue nearby graph searches'));
       }
+    } finally {
+      queueInFlightRef.current = false;
     }
   };
 
@@ -191,6 +204,7 @@ const SearchListRow = ({ onRemove, onStop, search }) => {
         onClose={() => {
           graphRequestIdRef.current += 1;
           setGraphOpen(false);
+          setGraphLoading(false);
         }}
         onCompare={handleGraphCompare}
         onQueueNearby={handleQueueNearby}

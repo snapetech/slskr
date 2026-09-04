@@ -25,11 +25,27 @@ const normalizeResolvedTarget = (data) => {
   }
 
   if (isObject(data.album)) {
-    return { album: data.album };
+    return {
+      album: {
+        ...data.album,
+        artist: typeof data.album.artist === 'string' ? data.album.artist : '',
+        title: typeof data.album.title === 'string' ? data.album.title : 'Untitled album',
+        tracks: Array.isArray(data.album.tracks)
+          ? data.album.tracks.filter((track) => isObject(track))
+          : [],
+      },
+    };
   }
 
   if (isObject(data.track)) {
-    return { track: data.track };
+    return {
+      track: {
+        ...data.track,
+        artist: typeof data.track.artist === 'string' ? data.track.artist : '',
+        title: typeof data.track.title === 'string' ? data.track.title : 'Untitled track',
+        duration: typeof data.track.duration === 'number' ? data.track.duration : 0,
+      },
+    };
   }
 
   return null;
@@ -48,12 +64,15 @@ const MusicBrainzLookup = ({ disabled }) => {
   const mountedRef = useMountedRef();
   const lookupRequestIdRef = useRef(0);
   const graphRequestIdRef = useRef(0);
+  const queueInFlightRef = useRef(false);
+  const [queueLoading, setQueueLoading] = useState(false);
 
   const openDiscoveryGraph = async (request) => {
+    if (!mountedRef.current || disabled || graphLoading) return;
     const requestId = ++graphRequestIdRef.current;
-    if (!mountedRef.current || disabled) return;
     setGraphLoading(true);
     setGraphOpen(true);
+    setGraphData(null);
     setGraphRequest(request);
 
     try {
@@ -85,22 +104,21 @@ const MusicBrainzLookup = ({ disabled }) => {
   };
 
   const handleLookup = async () => {
-    if (!releaseInput && !recordingInput && !discogsInput) {
+    if (!mountedRef.current || disabled || loading) return;
+    const payload = {
+      discogsReleaseId: typeof discogsInput === 'string' ? discogsInput.trim() || undefined : undefined,
+      recordingId: typeof recordingInput === 'string' ? recordingInput.trim() || undefined : undefined,
+      releaseId: typeof releaseInput === 'string' ? releaseInput.trim() || undefined : undefined,
+    };
+    if (!payload.releaseId && !payload.recordingId && !payload.discogsReleaseId) {
       toast.error('Provide at least one MusicBrainz or Discogs identifier');
       return;
     }
 
     const requestId = ++lookupRequestIdRef.current;
-    if (!mountedRef.current || disabled) return;
     setLoading(true);
 
     try {
-      const payload = {
-        discogsReleaseId: discogsInput.trim() || undefined,
-        recordingId: recordingInput.trim() || undefined,
-        releaseId: releaseInput.trim() || undefined,
-      };
-
       const response = await resolveTarget(payload);
       const resolvedTarget = normalizeResolvedTarget(response.data);
       if (!resolvedTarget) {
@@ -231,9 +249,10 @@ const MusicBrainzLookup = ({ disabled }) => {
   };
 
   const handleQueueNearby = async (graph) => {
-    const queries = (graph?.nodes || [])
-      .filter((node) => node.nodeType === 'track')
-      .map((node) => node.label || '')
+    if (!mountedRef.current || disabled || queueInFlightRef.current) return;
+    const queries = (Array.isArray(graph?.nodes) ? graph.nodes : [])
+      .filter((node) => isObject(node) && node.nodeType === 'track')
+      .map((node) => (typeof node.label === 'string' ? node.label.trim() : ''))
       .filter(Boolean)
       .slice(0, 8);
 
@@ -242,16 +261,26 @@ const MusicBrainzLookup = ({ disabled }) => {
       return;
     }
 
+    queueInFlightRef.current = true;
+    setQueueLoading(true);
     try {
       const count = await searches.createBatch({ queries });
       if (mountedRef.current) {
-        toast.success(`Started ${count} nearby graph searches`);
+        const startedCount = typeof count === 'number'
+          ? count
+          : typeof count?.count === 'number'
+            ? count.count
+            : queries.length;
+        toast.success(`Started ${startedCount} nearby graph searches`);
       }
     } catch (error) {
       console.error(error);
       if (mountedRef.current) {
         toast.error(toDisplayError(error, 'Failed to queue nearby searches'));
       }
+    } finally {
+      queueInFlightRef.current = false;
+      if (mountedRef.current) setQueueLoading(false);
     }
   };
 
@@ -308,8 +337,8 @@ const MusicBrainzLookup = ({ disabled }) => {
             content="Open the Discovery Graph around the resolved MusicBrainz target to branch into nearby releases, tracks, and artists."
             position="top center"
             trigger={
-              <Button
-                disabled={!target}
+            <Button
+                disabled={!target || graphLoading}
                 onClick={handleOpenGraph}
                 style={{ marginLeft: '0.5em' }}
               >
@@ -321,8 +350,8 @@ const MusicBrainzLookup = ({ disabled }) => {
             content="Open the same canonical target as a wider atlas-style discovery surface for neighborhood browsing."
             position="top center"
             trigger={
-              <Button
-                disabled={!target}
+            <Button
+                disabled={!target || graphLoading}
                 onClick={handleOpenGraph}
                 style={{ marginLeft: '0.5em' }}
               >
@@ -336,7 +365,11 @@ const MusicBrainzLookup = ({ disabled }) => {
       <DiscoveryGraphModal
         graph={graphData}
         loading={graphLoading}
-        onClose={() => setGraphOpen(false)}
+        onClose={() => {
+          graphRequestIdRef.current += 1;
+          setGraphOpen(false);
+          setGraphLoading(false);
+        }}
         onCompare={handleGraphCompare}
         onQueueNearby={handleQueueNearby}
         onRecenter={handleGraphRecenter}

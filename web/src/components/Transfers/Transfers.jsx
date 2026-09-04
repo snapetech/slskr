@@ -34,12 +34,92 @@ const OPTIMISTIC_HIDE_MS = 15_000;
 const QUEUE_POSITION_REFRESH_MS = 30_000;
 const MAX_QUEUE_POSITION_LOOKUPS_PER_FETCH = 5;
 
+const asRecords = (value) =>
+  (Array.isArray(value) ? value : []).filter(
+    (record) => record && typeof record === 'object' && !Array.isArray(record),
+  );
+
+const toText = (value, fallback = '') => {
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number') return String(value);
+  return fallback;
+};
+
+const toNonNegativeNumber = (value, fallback = 0) => {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : fallback;
+};
+
+const transferDirectory = (filename) => {
+  const separator = Math.max(filename.lastIndexOf('/'), filename.lastIndexOf('\\'));
+  return separator >= 0 ? filename.slice(0, separator) : '';
+};
+
+const normalizeTransferFile = (file, username) => {
+  if (!file || typeof file !== 'object' || Array.isArray(file)) return null;
+
+  const filename = toText(file.filename ?? file.name);
+  const id = file.id === undefined || file.id === null ? '' : String(file.id);
+  const direction = toText(file.direction);
+  const directionName = direction.toLowerCase();
+
+  if (!filename || !id || !['download', 'upload'].includes(directionName)) {
+    return null;
+  }
+
+  const normalizedUsername = toText(file.username ?? file.user, username) || 'Unknown';
+  const percentComplete = Math.min(
+    100,
+    toNonNegativeNumber(file.percentComplete, 0),
+  );
+
+  return {
+    ...file,
+    averageSpeed: toNonNegativeNumber(file.averageSpeed, 0),
+    bytesTransferred: toNonNegativeNumber(file.bytesTransferred, 0),
+    direction: directionName === 'download' ? 'Download' : 'Upload',
+    filename,
+    id,
+    percentComplete,
+    size: toNonNegativeNumber(file.size, 0),
+    state: toText(file.state),
+    username: normalizedUsername,
+  };
+};
+
+const normalizeTransferGroups = (users, expectedDirection) =>
+  asRecords(users)
+    .map((user) => {
+      const username = toText(user.username ?? user.user, 'Unknown') || 'Unknown';
+      const directories = asRecords(user.directories)
+        .map((directory) => ({
+          ...directory,
+          directory: toText(directory.directory ?? directory.name),
+          files: asRecords(directory.files)
+            .map((file) => normalizeTransferFile(file, username))
+            .filter(
+              (file) =>
+                file &&
+                (!expectedDirection ||
+                  file.direction.toLowerCase() === expectedDirection),
+            )
+            .filter(Boolean),
+        }))
+        .filter((directory) => directory.files.length > 0);
+
+      return { ...user, directories, username };
+    })
+    .filter((user) => user.directories.length > 0);
+
 const groupFlatTransfers = (records) => {
   const groups = new Map();
 
-  records.forEach((record) => {
-    const username = record?.username || record?.user || 'Unknown';
-    const directory = record?.directory || record?.directoryName || '';
+  asRecords(records).forEach((record) => {
+    const username = toText(record.username ?? record.user, 'Unknown') || 'Unknown';
+    const filename = toText(record.filename ?? record.name);
+    const directory =
+      toText(record.directory ?? record.directoryName) ||
+      transferDirectory(filename);
     let user = groups.get(username);
 
     if (!user) {
@@ -55,7 +135,7 @@ const groupFlatTransfers = (records) => {
       user.directories.push(directoryGroup);
     }
 
-    directoryGroup.files.push(record);
+    directoryGroup.files.push({ ...record, filename });
   });
 
   return Array.from(groups.values());
@@ -85,6 +165,9 @@ const Transfers = ({ runtimeProfile, direction, server }) => {
   const queuePositionRequestsRef = useRef(new Set());
   const mountedRef = useRef(false);
   const modeRequestIdsRef = useRef({ autoReplace: 0, accelerated: 0 });
+  const modeInFlightRef = useRef({ autoReplace: false, accelerated: false });
+  const [autoReplaceChanging, setAutoReplaceChanging] = useState(false);
+  const [acceleratedChanging, setAcceleratedChanging] = useState(false);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -126,7 +209,7 @@ const Transfers = ({ runtimeProfile, direction, server }) => {
   const filterHiddenTransfers = (users) => {
     const now = Date.now();
 
-    return users
+    return normalizeTransferGroups(users, direction)
       .map((user) => ({
         ...user,
         directories: user.directories
@@ -223,9 +306,9 @@ const Transfers = ({ runtimeProfile, direction, server }) => {
     runBulkQueue();
   };
 
-  const refreshQueuePositions = async (users) => {
+  const refreshQueuePositions = async (users, fetchId) => {
     if (direction !== 'download') {
-      return;
+      return users;
     }
 
     const now = Date.now();
@@ -233,18 +316,27 @@ const Transfers = ({ runtimeProfile, direction, server }) => {
       .flatMap((user) => user.directories.flatMap((dir) => dir.files))
       .filter((file) => file.state && file.state.includes('Queued'));
 
-    queuedDownloads.forEach((file) => {
-      const cached = queuePositionCacheRef.current.get(getTransferKey({ file }));
-      if (cached?.placeInQueue) {
-        file.placeInQueue = cached.placeInQueue;
-      }
-    });
+    const applyQueuePositionCache = (groups) =>
+      groups.map((user) => ({
+        ...user,
+        directories: user.directories.map((directory) => ({
+          ...directory,
+          files: directory.files.map((file) => {
+            const cached = queuePositionCacheRef.current.get(
+              getTransferKey({ file }),
+            );
+            return cached && cached.placeInQueue !== null
+              ? { ...file, placeInQueue: cached.placeInQueue }
+              : file;
+          }),
+        })),
+      }));
 
     if (
       lastQueuePositionBatchAtRef.current > 0 &&
       now - lastQueuePositionBatchAtRef.current < QUEUE_POSITION_REFRESH_MS
     ) {
-      return;
+      return applyQueuePositionCache(users);
     }
 
     const dueDownloads = queuedDownloads
@@ -260,7 +352,7 @@ const Transfers = ({ runtimeProfile, direction, server }) => {
       .slice(0, MAX_QUEUE_POSITION_LOOKUPS_PER_FETCH);
 
     if (dueDownloads.length === 0) {
-      return;
+      return applyQueuePositionCache(users);
     }
 
     lastQueuePositionBatchAtRef.current = now;
@@ -275,12 +367,16 @@ const Transfers = ({ runtimeProfile, direction, server }) => {
           username: file.username,
         });
 
-        if (mountedRef.current) {
+        const placeInQueue = toNonNegativeNumber(queueResponse?.data, null);
+        if (
+          mountedRef.current &&
+          fetchId === latestFetchIdRef.current &&
+          placeInQueue !== null
+        ) {
           queuePositionCacheRef.current.set(key, {
-            placeInQueue: queueResponse.data,
+            placeInQueue,
             updatedAt: Date.now(),
           });
-          file.placeInQueue = queueResponse.data;
         }
       } catch (error) {
         console.debug(
@@ -294,6 +390,7 @@ const Transfers = ({ runtimeProfile, direction, server }) => {
     });
 
     await Promise.allSettled(queuePositionPromises);
+    return applyQueuePositionCache(users);
   };
 
   const fetch = async () => {
@@ -302,18 +399,23 @@ const Transfers = ({ runtimeProfile, direction, server }) => {
     latestFetchIdRef.current = fetchId;
 
     try {
-      const response =
+      const response = normalizeTransferGroups(
         runtimeProfile === 'native'
           ? groupFlatTransfers((await transfersLibrary.getChanges()).transfers)
-          : await transfersLibrary.getAll({ direction });
+          : await transfersLibrary.getAll({ direction }),
+        direction,
+      );
 
-      await refreshQueuePositions(response);
+      const responseWithQueuePositions = await refreshQueuePositions(
+        response,
+        fetchId,
+      );
 
       if (
         mountedRef.current &&
         fetchId === latestFetchIdRef.current
       ) {
-        setTransfers(filterHiddenTransfers(response));
+        setTransfers(filterHiddenTransfers(responseWithQueuePositions));
       }
     } catch (error) {
       console.error(error);
@@ -537,6 +639,14 @@ const Transfers = ({ runtimeProfile, direction, server }) => {
   }, [runtimeProfile, direction]);
 
   const handleAutoReplaceChange = async (enabled) => {
+    if (
+      !mountedRef.current ||
+      modeInFlightRef.current.autoReplace
+    ) {
+      return;
+    }
+    modeInFlightRef.current.autoReplace = true;
+    setAutoReplaceChanging(true);
     const requestId = ++modeRequestIdsRef.current.autoReplace;
     try {
       if (enabled) {
@@ -555,12 +665,25 @@ const Transfers = ({ runtimeProfile, direction, server }) => {
     } catch (error) {
       console.error('Failed to toggle auto-replace:', error);
       if (mountedRef.current && requestId === modeRequestIdsRef.current.autoReplace) {
-        toast.error('Failed to toggle auto-replace');
+        toast.error(`Failed to toggle auto-replace: ${getErrorMessage(error)}`);
+      }
+    } finally {
+      modeInFlightRef.current.autoReplace = false;
+      if (mountedRef.current && requestId === modeRequestIdsRef.current.autoReplace) {
+        setAutoReplaceChanging(false);
       }
     }
   };
 
   const handleAcceleratedChange = async (enabled) => {
+    if (
+      !mountedRef.current ||
+      modeInFlightRef.current.accelerated
+    ) {
+      return;
+    }
+    modeInFlightRef.current.accelerated = true;
+    setAcceleratedChanging(true);
     const requestId = ++modeRequestIdsRef.current.accelerated;
     try {
       const status = await transfersLibrary.setAcceleratedMode({ enabled });
@@ -574,7 +697,12 @@ const Transfers = ({ runtimeProfile, direction, server }) => {
     } catch (error) {
       console.error('Failed to toggle accelerated mode:', error);
       if (mountedRef.current && requestId === modeRequestIdsRef.current.accelerated) {
-        toast.error('Failed to toggle accelerated mode');
+        toast.error(`Failed to toggle accelerated mode: ${getErrorMessage(error)}`);
+      }
+    } finally {
+      modeInFlightRef.current.accelerated = false;
+      if (mountedRef.current && requestId === modeRequestIdsRef.current.accelerated) {
+        setAcceleratedChanging(false);
       }
     }
   };
@@ -587,8 +715,10 @@ const Transfers = ({ runtimeProfile, direction, server }) => {
     <div data-testid={testId}>
       <TransfersHeader
         acceleratedEnabled={acceleratedEnabled}
+        acceleratedChanging={acceleratedChanging}
         autoReplaceEnabled={autoReplaceEnabled}
         autoReplaceThreshold={autoReplaceThreshold}
+        autoReplaceChanging={autoReplaceChanging}
         cancelling={cancelling}
         direction={direction}
         onAutoReplaceChange={handleAutoReplaceChange}

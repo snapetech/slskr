@@ -84,6 +84,8 @@ const DiscographyCoveragePanel = ({ disabled }) => {
   const mountedRef = useMountedRef();
   const loadRequestIdRef = useRef(0);
   const promoteRequestIdRef = useRef(0);
+  const loadInFlightRef = useRef(false);
+  const promoteInFlightRef = useRef(false);
 
   const missingCount = useMemo(() => {
     if (!coverage) {
@@ -95,15 +97,19 @@ const DiscographyCoveragePanel = ({ disabled }) => {
       .filter((track) => track.status === 'Absent').length;
   }, [coverage]);
 
-  const loadCoverage = async ({ forceRefresh = false } = {}) => {
-    const requestId = ++loadRequestIdRef.current;
-    const normalizedArtistId = artistId.trim();
+  const loadCoverage = async ({ forceRefresh = false, artistIdOverride } = {}) => {
+    const rawArtistId = artistIdOverride ?? artistId;
+    const normalizedArtistId = typeof rawArtistId === 'string'
+      ? rawArtistId.trim()
+      : '';
     if (!normalizedArtistId) {
       toast.error('Artist MBID is required');
       return;
     }
 
-    if (!mountedRef.current) return;
+    if (!mountedRef.current || disabled || loadInFlightRef.current) return;
+    const requestId = ++loadRequestIdRef.current;
+    loadInFlightRef.current = true;
     setLoading(true);
     setError(null);
 
@@ -135,6 +141,7 @@ const DiscographyCoveragePanel = ({ disabled }) => {
       ) {
         setLoading(false);
       }
+      loadInFlightRef.current = false;
     }
   };
 
@@ -143,8 +150,9 @@ const DiscographyCoveragePanel = ({ disabled }) => {
       return;
     }
 
+    if (!mountedRef.current || disabled || promoteInFlightRef.current) return;
     const requestId = ++promoteRequestIdRef.current;
-    if (!mountedRef.current) return;
+    promoteInFlightRef.current = true;
     setPromoting(true);
 
     try {
@@ -162,7 +170,7 @@ const DiscographyCoveragePanel = ({ disabled }) => {
       toast.success(
         `Added ${response.data?.createdCount ?? 0} missing tracks to Wishlist`,
       );
-      await loadCoverage();
+      await loadCoverage({ artistIdOverride: coverage.artistId });
     } catch (promoteError) {
       console.error(promoteError);
       if (
@@ -178,6 +186,7 @@ const DiscographyCoveragePanel = ({ disabled }) => {
       ) {
         setPromoting(false);
       }
+      promoteInFlightRef.current = false;
     }
   };
 

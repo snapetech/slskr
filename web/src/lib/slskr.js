@@ -1,4 +1,5 @@
 import api from './api';
+import { toDisplayError } from './errors';
 import { encodePathSegment } from './pathEncoding';
 
 // Older daemon profiles may not expose every optional endpoint. Preserve the
@@ -64,7 +65,7 @@ export const triggerMeshSync = async (username) => {
   try {
     return (await api.post(`/mesh/sync/${encodePathSegment(username)}`)).data;
   } catch (error) {
-    return { error: error?.message || 'Sync failed', success: false };
+    return { error: toDisplayError(error, 'Sync failed'), success: false };
   }
 };
 
@@ -95,7 +96,7 @@ export const backfillFromSearchHistory = async (options = {}) => {
 
     return (await api.post(`/hashdb/backfill/from-history${query}`)).data;
   } catch (error) {
-    return { error: error?.message || 'Backfill failed', success: false };
+    return { error: toDisplayError(error, 'Backfill failed'), success: false };
   }
 };
 

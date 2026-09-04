@@ -1,5 +1,6 @@
 import Footer from './Shared/Footer';
 import { urlBase } from '../config';
+import { toDisplayError } from '../lib/errors';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Button,
@@ -44,7 +45,7 @@ const LoginForm = ({ error, loading, onLoginAttempt }) => {
   }, []);
 
   useEffect(() => {
-    if (state.username !== '' && state.password !== '') {
+    if (state.username.trim() !== '' && state.password !== '') {
       setReady(true);
     } else {
       setReady(false);
@@ -56,10 +57,10 @@ const LoginForm = ({ error, loading, onLoginAttempt }) => {
   }, [loading]);
 
   const handleChange = (field, value) => {
-    setState({
-      ...state,
+    setState((currentState) => ({
+      ...currentState,
       [field]: value,
-    });
+    }));
   };
 
   const { password, username } = state;
@@ -103,6 +104,7 @@ const LoginForm = ({ error, loading, onLoginAttempt }) => {
                 }
                 placeholder="Username"
                 ref={usernameInput}
+                value={username}
               />
               <Form.Input
                 data-testid="login-password"
@@ -115,6 +117,7 @@ const LoginForm = ({ error, loading, onLoginAttempt }) => {
                 }
                 placeholder="Password"
                 type="password"
+                value={password}
               />
             </Segment>
             <Button
@@ -137,7 +140,7 @@ const LoginForm = ({ error, loading, onLoginAttempt }) => {
                 negative
               >
                 <Icon name="x" />
-                {error.message}
+                {toDisplayError(error, 'Login failed')}
               </Message>
             )}
             {httpsUrl && (

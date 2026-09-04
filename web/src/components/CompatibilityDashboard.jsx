@@ -1,8 +1,10 @@
 import './CompatibilityDashboard.css';
+import { toDisplayError } from '../lib/errors';
 import * as reports from '../lib/reports';
 import * as searches from '../lib/searches';
 import { formatBytes, formatDate, formatSpeed, formatWait, getFileName, truncate } from '../lib/util';
 import LoaderSegment from './Shared/LoaderSegment';
+import { useMountedRef } from '../lib/useMountedRef';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-toastify';
@@ -16,6 +18,7 @@ import {
   Progress,
   Segment,
   Statistic,
+  Message,
   Tab,
   Table,
 } from 'semantic-ui-react';
@@ -42,16 +45,60 @@ const EMPTY_REPORT = {
   summary: {},
 };
 
+const isRecord = (value) =>
+  value && typeof value === 'object' && !Array.isArray(value);
+
+const asRows = (value) =>
+  (Array.isArray(value) ? value : []).filter(
+    (row) => row && typeof row === 'object' && !Array.isArray(row),
+  );
+
+const normalizeReport = ({
+  directories,
+  downloadLeaderboard,
+  downloadPareto,
+  downloadRecent,
+  histogram,
+  summary,
+  uploadLeaderboard,
+  uploadPareto,
+  uploadRecent,
+}) => ({
+  directories: asRows(directories),
+  exceptions: {
+    download: {
+      pareto: asRows(downloadPareto),
+      recent: asRows(downloadRecent),
+    },
+    upload: {
+      pareto: asRows(uploadPareto),
+      recent: asRows(uploadRecent),
+    },
+  },
+  histogram: isRecord(histogram) ? histogram : {},
+  leaderboard: {
+    download: asRows(downloadLeaderboard),
+    upload: asRows(uploadLeaderboard),
+  },
+  summary: isRecord(summary) ? summary : {},
+});
+
 const sumCounts = (directionData = {}) =>
-  Object.values(directionData).reduce((sum, state) => sum + (state?.count ?? 0), 0);
+  Object.values(isRecord(directionData) ? directionData : {}).reduce(
+    (sum, state) => sum + (Number(state?.count) || 0),
+    0,
+  );
 
 const sumBytes = (directionData = {}) =>
-  Object.values(directionData).reduce((sum, state) => sum + (state?.totalBytes ?? 0), 0);
+  Object.values(isRecord(directionData) ? directionData : {}).reduce(
+    (sum, state) => sum + (Number(state?.totalBytes) || 0),
+    0,
+  );
 
 const errorCount = (directionData = {}) =>
-  (directionData.Errored?.count ?? 0) +
-  (directionData.Cancelled?.count ?? 0) +
-  (directionData.TimedOut?.count ?? 0);
+  (Number(directionData?.Errored?.count) || 0) +
+  (Number(directionData?.Cancelled?.count) || 0) +
+  (Number(directionData?.TimedOut?.count) || 0);
 
 const formatBytesParts = (bytes) => {
   if (!bytes || bytes < 1) return { unit: 'B', value: '0' };
@@ -64,15 +111,18 @@ const formatBytesParts = (bytes) => {
 };
 
 const buildChartData = (histogram = {}) =>
-  Object.entries(histogram)
+  Object.entries(isRecord(histogram) ? histogram : {})
     .sort(([left], [right]) => new Date(left) - new Date(right))
     .map(([timestamp, directions]) => {
-      const uploadBytes = sumBytes(directions.Upload ?? {});
-      const downloadBytes = sumBytes(directions.Download ?? {});
-      const uploadCount = sumCounts(directions.Upload ?? {});
-      const downloadCount = sumCounts(directions.Download ?? {});
-      const uploadErrors = errorCount(directions.Upload ?? {});
-      const downloadErrors = errorCount(directions.Download ?? {});
+      const safeDirections = isRecord(directions) ? directions : {};
+      const upload = isRecord(safeDirections.Upload) ? safeDirections.Upload : {};
+      const download = isRecord(safeDirections.Download) ? safeDirections.Download : {};
+      const uploadBytes = sumBytes(upload);
+      const downloadBytes = sumBytes(download);
+      const uploadCount = sumCounts(upload);
+      const downloadCount = sumCounts(download);
+      const uploadErrors = errorCount(upload);
+      const downloadErrors = errorCount(download);
 
       return {
         downloadBytes,
@@ -80,7 +130,7 @@ const buildChartData = (histogram = {}) =>
         downloadErrorRate:
           downloadCount > 0 ? (downloadErrors / downloadCount) * 100 : 0,
         downloadErrors,
-        downloadSpeed: directions.Download?.Succeeded?.averageSpeed ?? 0,
+        downloadSpeed: Number(download.Succeeded?.averageSpeed) || 0,
         shareRatio: downloadBytes > 0 ? uploadBytes / downloadBytes : 0,
         timestamp: new Date(timestamp).getTime(),
         uploadBytes,
@@ -88,8 +138,8 @@ const buildChartData = (histogram = {}) =>
         uploadErrorRate:
           uploadCount > 0 ? (uploadErrors / uploadCount) * 100 : 0,
         uploadErrors,
-        uploadSpeed: directions.Upload?.Succeeded?.averageSpeed ?? 0,
-        uploadWait: directions.Upload?.Succeeded?.averageWait ?? 0,
+        uploadSpeed: Number(upload.Succeeded?.averageSpeed) || 0,
+        uploadWait: Number(upload.Succeeded?.averageWait) || 0,
       };
     });
 
@@ -112,16 +162,28 @@ const SearchBar = ({ server } = {}) => {
   const navigate = useNavigate();
   const [searchText, setSearchText] = useState('');
   const [creating, setCreating] = useState(false);
+  const mountedRef = useMountedRef();
+  const createInFlightRef = useRef(false);
   const connected = Boolean(server?.isConnected);
 
   const create = async ({ navigateToResults = false } = {}) => {
     const query = searchText.trim();
-    if (!query || !connected || creating) return;
+    if (
+      !query ||
+      !connected ||
+      creating ||
+      !mountedRef.current ||
+      createInFlightRef.current
+    ) {
+      return;
+    }
 
+    createInFlightRef.current = true;
     try {
       setCreating(true);
       const id = uuidv4();
       await searches.create({ id, searchText: query });
+      if (!mountedRef.current) return;
       setSearchText('');
       if (navigateToResults) {
         navigate(`/searches/${id}`);
@@ -130,9 +192,12 @@ const SearchBar = ({ server } = {}) => {
         toast.info(`Search for '${label}' started.`);
       }
     } catch (error) {
-      toast.error(error?.response?.data ?? error?.message ?? `${error}`);
+      if (mountedRef.current) {
+        toast.error(toDisplayError(error, 'Failed to start search'));
+      }
     } finally {
-      setCreating(false);
+      createInFlightRef.current = false;
+      if (mountedRef.current) setCreating(false);
     }
   };
 
@@ -367,7 +432,10 @@ const LeaderboardTable = ({ loading, onSort, rows = [], sortBy }) => {
 
 const Leaderboard = ({ downloads, end, start, uploads }) => {
   const [sortBy, setSortBy] = useState('Count');
-  const [rows, setRows] = useState({ download: downloads ?? [], upload: uploads ?? [] });
+  const [rows, setRows] = useState({
+    download: asRows(downloads),
+    upload: asRows(uploads),
+  });
   const [loading, setLoading] = useState({ download: false, upload: false });
   const sortRequest = useRef(0);
   const mountedRef = useRef(false);
@@ -382,7 +450,7 @@ const Leaderboard = ({ downloads, end, start, uploads }) => {
 
   useEffect(() => {
     sortRequest.current += 1;
-    setRows({ download: downloads ?? [], upload: uploads ?? [] });
+    setRows({ download: asRows(downloads), upload: asRows(uploads) });
     setSortBy('Count');
   }, [downloads, uploads]);
 
@@ -398,10 +466,12 @@ const Leaderboard = ({ downloads, end, start, uploads }) => {
         reports.getLeaderboard({ direction: 'Download', end: new Date(end), sortBy: nextSort, start: start ? new Date(start) : undefined }),
       ]);
       if (mountedRef.current && requestId === sortRequest.current) {
-        setRows({ download, upload });
+        setRows({ download: asRows(download), upload: asRows(upload) });
       }
     } catch (error) {
-      toast.error(error?.response?.data ?? error?.message ?? `${error}`);
+      if (mountedRef.current && requestId === sortRequest.current) {
+        toast.error(toDisplayError(error, 'Failed to sort leaderboard'));
+      }
     } finally {
       if (mountedRef.current && requestId === sortRequest.current) {
         setLoading({ download: false, upload: false });
@@ -582,10 +652,12 @@ const TransferErrors = ({ data, end, start }) => {
     };
     try {
       return kind === 'pareto'
-        ? await reports.getExceptionPareto(parameters)
-        : await reports.getExceptions({ ...parameters, limit: 10 });
+        ? asRows(await reports.getExceptionPareto(parameters))
+        : asRows(await reports.getExceptions({ ...parameters, limit: 10 }));
     } catch (error) {
-      toast.error(error?.response?.data ?? error?.message ?? `${error}`);
+      if (mountedRef.current) {
+        toast.error(toDisplayError(error, 'Failed to load transfer errors'));
+      }
       return [];
     }
   };
@@ -608,7 +680,7 @@ const TransferErrors = ({ data, end, start }) => {
       } else {
         const rows = await fetchRows(kind, direction);
         if (mountedRef.current && requestId === requestRef.current) {
-          setRows(rows.map((row) => ({ ...row, direction })));
+          setRows(asRows(rows).map((row) => ({ ...row, direction })));
         }
       }
     } finally {
@@ -731,6 +803,8 @@ const CompatibilityDashboard = ({ runtimeProfile, server } = {}) => {
   const [historyLabel, setHistoryLabel] = useState('30d');
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState(EMPTY_REPORT);
+  const [error, setError] = useState(null);
+  const mountedRef = useMountedRef();
   const range = HISTORY_RANGES.find((item) => item.label === historyLabel) ?? HISTORY_RANGES[2];
   const historyParameters = useMemo(() => {
     const end = new Date();
@@ -743,43 +817,92 @@ const CompatibilityDashboard = ({ runtimeProfile, server } = {}) => {
 
   useEffect(() => {
     let active = true;
-    setLoading(true);
+    const reportFailures = [];
+    const safeRequest = (request, fallback) =>
+      Promise.resolve()
+        .then(request)
+        .catch((loadError) => {
+          reportFailures.push(loadError);
+          return fallback;
+        });
+
+    if (mountedRef.current) {
+      setError(null);
+      setLoading(true);
+    }
     const start = new Date(historyParameters.start);
     const end = new Date(historyParameters.end);
     Promise.all([
-      reports.getSummary({ end, start }).catch(() => ({})),
-      reports.getHistogram({ buckets: historyParameters.buckets, end, start }).catch(() => ({})),
-      reports.getLeaderboard({ direction: 'Upload', end, start }).catch(() => []),
-      reports.getLeaderboard({ direction: 'Download', end, start }).catch(() => []),
-      reports.getTopDirectories({ end, start }).catch(() => []),
-      reports.getExceptionPareto({ direction: 'Upload', end, start }).catch(() => []),
-      reports.getExceptionPareto({ direction: 'Download', end, start }).catch(() => []),
-      reports.getExceptions({ direction: 'Upload', end, start }).catch(() => []),
-      reports.getExceptions({ direction: 'Download', end, start }).catch(() => []),
+      safeRequest(() => reports.getSummary({ end, start }), {}),
+      safeRequest(
+        () => reports.getHistogram({ buckets: historyParameters.buckets, end, start }),
+        {},
+      ),
+      safeRequest(
+        () => reports.getLeaderboard({ direction: 'Upload', end, start }),
+        [],
+      ),
+      safeRequest(
+        () => reports.getLeaderboard({ direction: 'Download', end, start }),
+        [],
+      ),
+      safeRequest(() => reports.getTopDirectories({ end, start }), []),
+      safeRequest(
+        () => reports.getExceptionPareto({ direction: 'Upload', end, start }),
+        [],
+      ),
+      safeRequest(
+        () => reports.getExceptionPareto({ direction: 'Download', end, start }),
+        [],
+      ),
+      safeRequest(
+        () => reports.getExceptions({ direction: 'Upload', end, start }),
+        [],
+      ),
+      safeRequest(
+        () => reports.getExceptions({ direction: 'Download', end, start }),
+        [],
+      ),
     ]).then(([summary, histogram, uploadLeaderboard, downloadLeaderboard, directories, uploadPareto, downloadPareto, uploadRecent, downloadRecent]) => {
-      if (!active) return;
+      if (!active || !mountedRef.current) return;
       setData({
-        directories,
-        exceptions: {
-          download: { pareto: downloadPareto, recent: downloadRecent },
-          upload: { pareto: uploadPareto, recent: uploadRecent },
-        },
-        histogram,
+        ...normalizeReport({
+          directories,
+          downloadLeaderboard,
+          downloadPareto,
+          downloadRecent,
+          histogram,
+          summary,
+          uploadLeaderboard,
+          uploadPareto,
+          uploadRecent,
+        }),
         historyEnd: historyParameters.end,
         historyStart: historyParameters.start,
-        leaderboard: { download: downloadLeaderboard, upload: uploadLeaderboard },
-        summary,
       });
+      setError(
+        reportFailures.length > 0
+          ? `Some transfer reports could not be loaded: ${toDisplayError(
+              reportFailures[0],
+              'report service unavailable',
+            )}`
+          : null,
+      );
+      setLoading(false);
+    }).catch((loadError) => {
+      if (!active || !mountedRef.current) return;
+      setError(toDisplayError(loadError, 'Unable to load transfer reports'));
       setLoading(false);
     });
     return () => {
       active = false;
     };
-  }, [historyParameters]);
+  }, [historyParameters, mountedRef]);
 
   return (
     <div className="view dashboard compatibility-dashboard">
       <SearchBar server={server} />
+      {error && <Message negative>{error}</Message>}
       {runtimeProfile === 'legacy' ? (
         <Segment>
           <Header as="h4">

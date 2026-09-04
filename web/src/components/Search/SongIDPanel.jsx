@@ -224,10 +224,14 @@ const SongIDPanel = ({ disabled }) => {
   const [graphOpen, setGraphOpen] = useState(false);
   const [graphData, setGraphData] = useState(null);
   const [graphRequest, setGraphRequest] = useState(null);
+  const [actionLoading, setActionLoading] = useState(false);
+  const [copyLoading, setCopyLoading] = useState(false);
   const mountedRef = useMountedRef();
   const analyzeRequestIdRef = useRef(0);
   const graphRequestIdRef = useRef(0);
   const currentRunIdRef = useRef(null);
+  const actionInFlightRef = useRef(false);
+  const copyInFlightRef = useRef(false);
 
   useEffect(() => {
     currentRunIdRef.current = run?.id || null;
@@ -312,45 +316,79 @@ const SongIDPanel = ({ disabled }) => {
     }
   };
 
-  const handleTrackSearch = async (candidate) => {
+  const runAction = async (operation, failureMessage) => {
+    if (!mountedRef.current || disabled || actionInFlightRef.current) {
+      return false;
+    }
+
+    actionInFlightRef.current = true;
+    setActionLoading(true);
     try {
+      await operation();
+      return true;
+    } catch (error) {
+      if (mountedRef.current) {
+        console.error(error);
+        toast.error(toDisplayError(error, failureMessage));
+      }
+      return false;
+    } finally {
+      actionInFlightRef.current = false;
+      if (mountedRef.current) {
+        setActionLoading(false);
+      }
+    }
+  };
+
+  const handleTrackSearch = async (candidate) => {
+    const searchText = typeof candidate?.searchText === 'string'
+      ? candidate.searchText.trim()
+      : '';
+    if (!searchText) {
+      toast.error('This candidate has no searchable query');
+      return false;
+    }
+
+    const artist = typeof candidate?.artist === 'string' ? candidate.artist : '';
+    const title = typeof candidate?.title === 'string' ? candidate.title : searchText;
+    return runAction(async () => {
       await searches.create({
         id: uuidv4(),
-        searchText: candidate.searchText,
+        searchText,
       });
-      toast.success(`Started search for ${candidate.artist} - ${candidate.title}`);
-    } catch (error) {
-      console.error(error);
-      toast.error(
-        error?.response?.data ?? error?.message ?? 'Failed to start song search',
-      );
-    }
+      if (mountedRef.current) {
+        toast.success(`Started search for ${artist} - ${title}`);
+      }
+    }, 'Failed to start song search');
   };
 
   const handleTrackSearchBatch = async (queries) => {
     const validQueries = Array.isArray(queries)
-      ? queries.map((query) => (query || '').trim()).filter(Boolean)
+      ? queries
+        .filter((query) => typeof query === 'string')
+        .map((query) => query.trim())
+        .filter(Boolean)
       : [];
     if (validQueries.length === 0) {
       toast.error('No candidate searches were available');
       return;
     }
 
-    try {
+    return runAction(async () => {
       const count = await searches.createBatch({ queries: validQueries });
-      toast.success(`Started ${count} candidate searches`);
-    } catch (error) {
-      console.error(error);
-      toast.error(
-        error?.response?.data ??
-          error?.message ??
-          'Failed to start candidate searches',
-      );
-    }
+      const startedCount = typeof count === 'number'
+        ? count
+        : typeof count?.count === 'number'
+          ? count.count
+          : validQueries.length;
+      if (mountedRef.current) {
+        toast.success(`Started ${startedCount} candidate searches`);
+      }
+    }, 'Failed to start candidate searches');
   };
 
   const handleMixSearch = async (mix) => {
-    if (!mix?.searchText) {
+    if (typeof mix?.searchText !== 'string') {
       toast.error('No mix queries were available');
       return;
     }
@@ -364,66 +402,71 @@ const SongIDPanel = ({ disabled }) => {
       return;
     }
 
-    try {
+    return runAction(async () => {
       const count = await searches.createBatch({ queries });
-      toast.success(`Started ${count} mix search(es) for ${mix.segmentCount} segments`);
-    } catch (error) {
-      console.error(error);
-      toast.error(
-        error?.response?.data ??
-          error?.message ??
-          'Failed to start mix searches',
-      );
-    }
+      const startedCount = typeof count === 'number'
+        ? count
+        : typeof count?.count === 'number'
+          ? count.count
+          : queries.length;
+      const segmentCount = typeof mix.segmentCount === 'number'
+        ? mix.segmentCount
+        : queries.length;
+      if (mountedRef.current) {
+        toast.success(`Started ${startedCount} mix search(es) for ${segmentCount} segments`);
+      }
+    }, 'Failed to start mix searches');
   };
 
   const handleAlbumPrepare = async (candidate) => {
-    try {
-      await musicBrainz.resolveTarget({ releaseId: candidate.releaseId });
-      toast.success(`Prepared album target for ${candidate.title}`);
-    } catch (error) {
-      console.error(error);
-      toast.error(
-        error?.response?.data ??
-          error?.message ??
-          'Failed to prepare album target',
-      );
+    if (!candidate?.releaseId) {
+      toast.error('This album has no MusicBrainz release ID');
+      return false;
     }
+
+    return runAction(async () => {
+      await musicBrainz.resolveTarget({ releaseId: candidate.releaseId });
+      if (mountedRef.current) {
+        toast.success(`Prepared album target for ${candidate.title || 'album'}`);
+      }
+    }, 'Failed to prepare album target');
   };
 
   const handleDiscography = async (candidate) => {
-    try {
+    if (!candidate?.artistId) {
+      toast.error('This artist has no MusicBrainz artist ID');
+      return false;
+    }
+
+    return runAction(async () => {
       const response = await jobs.createDiscographyJob({
         artistId: candidate.artistId,
         profile: candidate.recommendedProfile || 'CoreDiscography',
         targetDirectory: targetDirectory.trim(),
       });
-      toast.success(`Planned discography job ${response?.job_id}`);
-    } catch (error) {
-      console.error(error);
-      toast.error(
-        error?.response?.data ??
-          error?.message ??
-          'Failed to create discography job',
-      );
-    }
+      const jobId = response?.job_id || response?.jobId || 'queued';
+      if (mountedRef.current) {
+        toast.success(`Planned discography job ${jobId}`);
+      }
+    }, 'Failed to create discography job');
   };
 
   const handleMbReleaseJob = async (candidate) => {
-    try {
+    if (!candidate?.releaseId) {
+      toast.error('This album has no MusicBrainz release ID');
+      return false;
+    }
+
+    return runAction(async () => {
       const response = await jobs.createMbReleaseJob({
         mbReleaseId: candidate.releaseId,
         targetDir: targetDirectory.trim(),
       });
-      toast.success(`Planned album job ${response?.job_id}`);
-    } catch (error) {
-      console.error(error);
-      toast.error(
-        error?.response?.data ??
-          error?.message ??
-          'Failed to create album download job',
-      );
-    }
+      const jobId = response?.job_id || response?.jobId || 'queued';
+      if (mountedRef.current) {
+        toast.success(`Planned album job ${jobId}`);
+      }
+    }, 'Failed to create album download job');
   };
 
   const copyForensicMatrix = async () => {
@@ -432,27 +475,41 @@ const SongIDPanel = ({ disabled }) => {
       return;
     }
 
+    if (!navigator.clipboard?.writeText || copyInFlightRef.current) {
+      toast.error('Clipboard access is unavailable');
+      return;
+    }
+
+    copyInFlightRef.current = true;
+    setCopyLoading(true);
     try {
       const matrix = await songId.getForensicMatrix(run.id);
-      await navigator.clipboard.writeText(JSON.stringify(matrix, null, 2));
-      toast.success('SongID forensic matrix copied');
+      if (!mountedRef.current) return;
+      await navigator.clipboard.writeText(JSON.stringify(matrix, null, 2) || '{}');
+      if (mountedRef.current) {
+        toast.success('SongID forensic matrix copied');
+      }
     } catch (error) {
-      console.error(error);
-      toast.error(
-        error?.response?.data ??
-          error?.message ??
-          'Failed to copy SongID forensic matrix',
-      );
+      if (mountedRef.current) {
+        console.error(error);
+        toast.error(toDisplayError(error, 'Failed to copy SongID forensic matrix'));
+      }
+    } finally {
+      copyInFlightRef.current = false;
+      if (mountedRef.current) {
+        setCopyLoading(false);
+      }
     }
   };
 
   const openDiscoveryGraph = async (request) => {
-    if (!mountedRef.current || disabled) return;
+    if (!mountedRef.current || disabled || graphLoading) return;
     const requestId = ++graphRequestIdRef.current;
     const isCurrentRequest = () =>
       mountedRef.current && graphRequestIdRef.current === requestId;
     setGraphLoading(true);
     setGraphOpen(true);
+    setGraphData(null);
     setGraphRequest(request);
 
     try {
@@ -531,10 +588,17 @@ const SongIDPanel = ({ disabled }) => {
   };
 
   const handlePlanAction = async (plan) => {
+    if (!plan || typeof plan !== 'object') {
+      toast.error('SongID plan is unavailable');
+      return false;
+    }
+
     if (plan.kind === 'track') {
+      const title = typeof plan.title === 'string' ? plan.title : '';
+      const segments = title.split(' - ');
       await handleTrackSearch({
-        artist: plan.title.split(' - ')[0] || '',
-        title: plan.title.split(' - ').slice(1).join(' - ') || plan.title,
+        artist: segments[0] || '',
+        title: segments.slice(1).join(' - ') || title,
         searchText: plan.searchText,
       });
       return;
@@ -554,11 +618,17 @@ const SongIDPanel = ({ disabled }) => {
   };
 
   const handleOptionAction = async (option) => {
+    if (!option || typeof option !== 'object') {
+      toast.error('SongID option is unavailable');
+      return false;
+    }
+
     if (option.actionKind === 'track_search') {
-      const segments = option.title.split(' - ');
+      const title = typeof option.title === 'string' ? option.title : '';
+      const segments = title.split(' - ');
       await handleTrackSearch({
         artist: segments[0] || '',
-        title: segments.slice(1).join(' - ') || option.title,
+        title: segments.slice(1).join(' - ') || title,
         searchText: option.searchText,
       });
       return;
@@ -953,10 +1023,11 @@ const SongIDPanel = ({ disabled }) => {
                       key={`${action.type}-${action.label}-${index}`}
                       content={content}
                       position="top center"
-                      trigger={
-                        <Button
-                          onClick={onClick}
-                          primary={index === 0}
+                        trigger={
+                          <Button
+                            disabled={actionLoading}
+                            onClick={onClick}
+                            primary={index === 0}
                           size="small"
                           style={{ marginLeft: index === 0 ? 0 : '0.5em' }}
                         >
@@ -996,6 +1067,7 @@ const SongIDPanel = ({ disabled }) => {
                         position="top center"
                         trigger={
                           <Button
+                            disabled={actionLoading}
                             onClick={() => handleMixSearch(mix)}
                             size="small"
                           >
@@ -1345,6 +1417,7 @@ const SongIDPanel = ({ disabled }) => {
                             position="top center"
                             trigger={
                               <Button
+                                disabled={actionLoading}
                                 onClick={() => handleOptionAction(segment.options[0])}
                                 size="mini"
                               >
@@ -1358,6 +1431,7 @@ const SongIDPanel = ({ disabled }) => {
                             position="top center"
                             trigger={
                               <Button
+                                disabled={actionLoading}
                                 onClick={() =>
                                   handleTrackSearchBatch([segment.query])
                                 }
@@ -1390,6 +1464,7 @@ const SongIDPanel = ({ disabled }) => {
                         position="top center"
                         trigger={
                           <Button
+                            disabled={actionLoading}
                             onClick={() => handleOptionAction(option)}
                             size="small"
                           >
@@ -1572,7 +1647,9 @@ const SongIDPanel = ({ disabled }) => {
                   trigger={
                     <Button
                       aria-label="Copy SongID forensic matrix JSON"
+                      disabled={copyLoading}
                       icon="copy"
+                      loading={copyLoading}
                       onClick={copyForensicMatrix}
                       size="mini"
                     />
@@ -1695,6 +1772,7 @@ const SongIDPanel = ({ disabled }) => {
                         position="top center"
                         trigger={
                           <Button
+                            disabled={actionLoading}
                             onClick={() => handlePlanAction(plan)}
                             size="small"
                           >
@@ -1733,6 +1811,7 @@ const SongIDPanel = ({ disabled }) => {
                         position="top center"
                         trigger={
                           <Button
+                            disabled={actionLoading}
                             onClick={() => handleTrackSearch(candidate)}
                             size="small"
                           >
@@ -1803,7 +1882,10 @@ const SongIDPanel = ({ disabled }) => {
                           content="Resolve and cache this MusicBrainz release in slskr so album completion and downstream download workflows can use it."
                           position="top center"
                           trigger={
-                            <Button onClick={() => handleAlbumPrepare(candidate)}>
+                            <Button
+                              disabled={actionLoading}
+                              onClick={() => handleAlbumPrepare(candidate)}
+                            >
                               Prepare Album
                             </Button>
                           }
@@ -1812,7 +1894,10 @@ const SongIDPanel = ({ disabled }) => {
                           content="Create a single-release job from this SongID album candidate so slskr can plan album acquisition directly."
                           position="top center"
                           trigger={
-                            <Button onClick={() => handleMbReleaseJob(candidate)}>
+                            <Button
+                              disabled={actionLoading}
+                              onClick={() => handleMbReleaseJob(candidate)}
+                            >
                               Download Album
                             </Button>
                           }
@@ -1875,6 +1960,7 @@ const SongIDPanel = ({ disabled }) => {
                         position="top center"
                         trigger={
                           <Button
+                            disabled={actionLoading}
                             onClick={() => handleDiscography(candidate)}
                             size="small"
                           >

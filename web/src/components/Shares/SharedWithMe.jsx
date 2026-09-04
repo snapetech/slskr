@@ -19,6 +19,35 @@ import {
 const isAuthOrFeatureErrorStatus = (status) =>
   status === 401 || status === 403 || status === 404 || status === 400;
 
+const asRecords = (value) =>
+  (Array.isArray(value) ? value : []).filter(
+    (item) => item && typeof item === 'object' && !Array.isArray(item),
+  );
+
+const normalizeShare = (share, index) => ({
+  ...share,
+  collectionDescription:
+    typeof share.collectionDescription === 'string'
+      ? share.collectionDescription
+      : '',
+  collectionTitle:
+    typeof share.collectionTitle === 'string' ? share.collectionTitle : '',
+  collectionType:
+    typeof share.collectionType === 'string' ? share.collectionType : 'ShareList',
+  id: share.id ?? share.shareGrantId ?? `incoming-share-${index}`,
+  ownerEndpoint: String(share.ownerEndpoint ?? ''),
+  ownerUserId: String(share.ownerUserId ?? ''),
+  shareGrantId: String(share.shareGrantId ?? ''),
+  token: String(share.token ?? ''),
+});
+
+const normalizeManifestItem = (item, index) => ({
+  ...item,
+  contentId: String(item.contentId ?? `item-${index}`),
+  fileName: typeof item.fileName === 'string' ? item.fileName : '',
+  mediaKind: typeof item.mediaKind === 'string' ? item.mediaKind : 'Unknown',
+});
+
 export default class SharedWithMe extends Component {
   state = {
     backfilling: false,
@@ -41,6 +70,8 @@ export default class SharedWithMe extends Component {
     stream: 0,
   };
 
+  backfillInFlight = false;
+
   componentDidMount() {
     this.isMountedFlag = true;
     void this.loadData();
@@ -60,7 +91,7 @@ export default class SharedWithMe extends Component {
         this.setState({ error: null, loading: true });
       }
       const sharesRes = await collectionsAPI.getIncomingShares().catch((error) => {
-        if (isAuthOrFeatureErrorStatus(error.response?.status)) {
+        if (isAuthOrFeatureErrorStatus(error?.response?.status)) {
           return { data: [] };
         }
         throw error;
@@ -68,13 +99,13 @@ export default class SharedWithMe extends Component {
       if (this.isMountedFlag && requestId === this.requestIds.load) {
         this.setState({
           loading: false,
-          shares: Array.isArray(sharesRes.data) ? sharesRes.data : [],
+          shares: asRecords(sharesRes?.data).map(normalizeShare),
         });
       }
     } catch (error) {
       if (this.isMountedFlag && requestId === this.requestIds.load) {
         this.setState({
-          error: isAuthOrFeatureErrorStatus(error.response?.status)
+          error: isAuthOrFeatureErrorStatus(error?.response?.status)
             ? null
             : toDisplayError(error),
           loading: false,
@@ -108,7 +139,7 @@ export default class SharedWithMe extends Component {
         this.setState({
           manifest: {
             ...manifest,
-            items: Array.isArray(manifest?.items) ? manifest.items : [],
+            items: asRecords(manifest?.items).map(normalizeManifestItem),
           },
           manifestLoading: false,
         });
@@ -168,7 +199,10 @@ export default class SharedWithMe extends Component {
 
   handleBackfill = async () => {
     const { selectedShare } = this.state;
-    if (!selectedShare || !this.isMountedFlag) return;
+    if (!selectedShare || !this.isMountedFlag || this.backfillInFlight) {
+      return;
+    }
+    this.backfillInFlight = true;
     const requestId = ++this.requestIds.backfill;
     const selectedShareId = selectedShare.id || selectedShare.shareGrantId;
 
@@ -185,8 +219,15 @@ export default class SharedWithMe extends Component {
       ) {
         return;
       }
-      this.setState({ backfilling: false, backfillResult: result });
-      toast.success(result?.message || 'Backfill requested');
+      const message =
+        typeof result?.message === 'string' && result.message.trim()
+          ? result.message
+          : `Backfilled ${Number(result?.backfilled) || 0} items`;
+      this.setState({
+        backfilling: false,
+        backfillResult: { ...result, message },
+      });
+      toast.success(message);
     } catch (error) {
       if (
         !this.isMountedFlag ||
@@ -201,6 +242,8 @@ export default class SharedWithMe extends Component {
         error: errorMessage,
       });
       toast.error(errorMessage);
+    } finally {
+      this.backfillInFlight = false;
     }
   };
 

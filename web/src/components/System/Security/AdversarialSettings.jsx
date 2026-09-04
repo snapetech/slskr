@@ -36,6 +36,7 @@ const AdversarialSettings = () => {
   const [transportLoading, setTransportLoading] = useState(false);
   const [torStatus, setTorStatus] = useState(null);
   const [torLoading, setTorLoading] = useState(false);
+  const [refreshingAll, setRefreshingAll] = useState(false);
   const mountedRef = useMountedRef();
   const requestIdsRef = useRef({
     save: 0,
@@ -46,13 +47,14 @@ const AdversarialSettings = () => {
     tor: 0,
     transport: 0,
   });
+  const refreshAllInFlightRef = useRef(false);
 
   const fetchSettings = useCallback(async () => {
     if (!mountedRef.current) return null;
     const requestId = ++requestIdsRef.current.settings;
     try {
       setLoading(true);
-      const data = await securityApi.getAdversarialSettings().catch(() => null);
+      const data = await securityApi.getAdversarialSettings();
       if (
         !mountedRef.current ||
         requestIdsRef.current.settings !== requestId
@@ -71,7 +73,11 @@ const AdversarialSettings = () => {
         mountedRef.current &&
         requestIdsRef.current.settings === requestId
       ) {
-        setError(toDisplayError(fetchError, 'Failed to load adversarial settings'));
+        setError(
+          fetchError?.response?.status === 404
+            ? 'Adversarial features are not configured on this server'
+            : toDisplayError(fetchError, 'Failed to load adversarial settings'),
+        );
       }
     } finally {
       if (
@@ -210,6 +216,23 @@ const AdversarialSettings = () => {
       }
     } finally {
       if (isCurrentRequest()) setSaving(false);
+    }
+  };
+
+  const refreshAll = async () => {
+    if (!mountedRef.current || refreshingAll || refreshAllInFlightRef.current) return;
+    refreshAllInFlightRef.current = true;
+    setRefreshingAll(true);
+    try {
+      await Promise.allSettled([
+        fetchSettings(),
+        fetchStatus(),
+        fetchTransportStatus(),
+        fetchTorStatus(),
+      ]);
+    } finally {
+      refreshAllInFlightRef.current = false;
+      if (mountedRef.current) setRefreshingAll(false);
     }
   };
 
@@ -1412,13 +1435,10 @@ const AdversarialSettings = () => {
         </Header>
         <div>
           <Button
+            disabled={refreshingAll}
             icon="refresh"
-            onClick={() => {
-              void fetchSettings();
-              void fetchStatus();
-              void fetchTransportStatus();
-              void fetchTorStatus();
-            }}
+            loading={refreshingAll}
+            onClick={refreshAll}
             size="tiny"
             title="Refresh Settings & Status"
           />

@@ -1,4 +1,5 @@
 import * as libraryHealth from '../../../lib/libraryHealth';
+import { toDisplayError } from '../../../lib/errors';
 import {
   buildLibraryHealthActionPlan,
   buildLibraryHealthQuarantinePacket,
@@ -46,6 +47,9 @@ const LibraryHealth = () => {
   const scanStartedAtRef = useRef(null);
   const mountedRef = useRef(false);
   const summaryRequestIdRef = useRef(0);
+  const scanRequestIdRef = useRef(0);
+  const mutationRequestIdRef = useRef(0);
+  const replacementRequestIdRef = useRef(0);
   const reloadTimeoutRef = useRef(null);
 
   useEffect(() => {
@@ -54,6 +58,9 @@ const LibraryHealth = () => {
     return () => {
       mountedRef.current = false;
       summaryRequestIdRef.current += 1;
+      scanRequestIdRef.current += 1;
+      mutationRequestIdRef.current += 1;
+      replacementRequestIdRef.current += 1;
       if (reloadTimeoutRef.current !== null) {
         clearTimeout(reloadTimeoutRef.current);
         reloadTimeoutRef.current = null;
@@ -62,7 +69,7 @@ const LibraryHealth = () => {
   }, []);
 
   const loadSummary = async (path) => {
-    if (!path) return;
+    if (!path || !mountedRef.current) return;
     const requestId = ++summaryRequestIdRef.current;
 
     try {
@@ -76,17 +83,34 @@ const LibraryHealth = () => {
           libraryHealth.getIssues({ libraryPath: path, limit: 100 }),
         ]);
       if (!mountedRef.current || summaryRequestIdRef.current !== requestId) return;
-      setSummary(summaryResp.data);
-      setIssuesByType(byTypeResp.data.groups || []);
-      setIssuesByArtist(byArtistResp.data.groups || []);
-      setIssues(issuesResp.data.issues || []);
+      const summaryData = summaryResp?.data;
+      const byTypeData = byTypeResp?.data;
+      const byArtistData = byArtistResp?.data;
+      const issuesData = issuesResp?.data;
+      setSummary(
+        summaryData &&
+          typeof summaryData === 'object' &&
+          !Array.isArray(summaryData)
+          ? summaryData
+          : null,
+      );
+      setIssuesByType(Array.isArray(byTypeData?.groups) ? byTypeData.groups : []);
+      setIssuesByArtist(
+        Array.isArray(byArtistData?.groups) ? byArtistData.groups : [],
+      );
+      setIssues(
+        Array.isArray(issuesData?.issues)
+          ? issuesData.issues.filter(
+              (issue) =>
+                issue && typeof issue === 'object' && !Array.isArray(issue),
+            )
+          : [],
+      );
       setReportMessage('');
     } catch (error_) {
       if (!mountedRef.current || summaryRequestIdRef.current !== requestId) return;
       setError(
-        error_.response?.data?.message ||
-          error_.message ||
-          'Failed to load library health data',
+        toDisplayError(error_, 'Failed to load library health data'),
       );
     } finally {
       if (mountedRef.current && summaryRequestIdRef.current === requestId) {
@@ -124,8 +148,8 @@ const LibraryHealth = () => {
       try {
         const statusResp = await libraryHealth.getScanStatus(scanId);
         if (
-          statusResp.data.status === 'Completed' ||
-          statusResp.data.status === 'Failed'
+          statusResp?.data?.status === 'Completed' ||
+          statusResp?.data?.status === 'Failed'
         ) {
           if (!mountedRef.current) return;
           setScanId(null);
@@ -136,9 +160,10 @@ const LibraryHealth = () => {
       } catch (error_) {
         if (!mountedRef.current) return;
         setError(
-          error_.response?.data?.message ||
-            error_.message ||
+          toDisplayError(
+            error_,
             'Failed to check library health scan status',
+          ),
         );
         setScanId(null);
         scanStartedAtRef.current = null;
@@ -150,27 +175,40 @@ const LibraryHealth = () => {
   );
 
   const handleStartScan = async () => {
-    if (!libraryPath) {
+    if (!mountedRef.current || scanning) return;
+    const path = libraryPath.trim();
+    if (!path) {
       setError('Please enter a library path');
       return;
     }
 
+    const requestId = ++scanRequestIdRef.current;
     try {
       setScanning(true);
       setError(null);
-      const response = await libraryHealth.startScan(libraryPath);
-      const startedScanId = response.data.scanId;
+      const response = await libraryHealth.startScan(path);
+      const startedScanId = response?.data?.scanId;
+      if (!startedScanId) {
+        throw new Error('Scan start returned no scan ID');
+      }
+      if (
+        !mountedRef.current ||
+        requestId !== scanRequestIdRef.current
+      ) {
+        return;
+      }
       scanStartedAtRef.current = Date.now();
       setScanId(startedScanId);
     } catch (error_) {
-      setError(
-        error_.response?.data?.message ||
-          error_.message ||
-          'Failed to start scan',
-      );
-      setScanId(null);
-      scanStartedAtRef.current = null;
-      setScanning(false);
+      if (
+        mountedRef.current &&
+        requestId === scanRequestIdRef.current
+      ) {
+        setError(toDisplayError(error_, 'Failed to start scan'));
+        setScanId(null);
+        scanStartedAtRef.current = null;
+        setScanning(false);
+      }
     }
   };
 
@@ -234,6 +272,7 @@ const LibraryHealth = () => {
   };
 
   const handleFixSelected = async () => {
+    if (!mountedRef.current || fixing) return;
     if (selectedIssues.size === 0) {
       setError('Please select issues to fix');
       return;
@@ -247,44 +286,69 @@ const LibraryHealth = () => {
       return;
     }
 
+    const requestId = ++mutationRequestIdRef.current;
     try {
       setFixing(true);
       setError(null);
       await libraryHealth.createRemediationJob(issueIds);
-      if (!mountedRef.current) return;
+      if (
+        !mountedRef.current ||
+        requestId !== mutationRequestIdRef.current
+      ) {
+        return;
+      }
       setSelectedIssues(new Set());
       setReportMessage(`Queued remediation job for ${issueIds.length} auto-fixable issue${issueIds.length === 1 ? '' : 's'}.`);
       // Reload issues after a delay
       scheduleSummaryReload(libraryPath);
     } catch (error_) {
       if (!mountedRef.current) return;
-      setError(
-        error_.response?.data?.message ||
-          error_.message ||
-          'Failed to create fix job',
-      );
+      if (
+        mountedRef.current &&
+        requestId === mutationRequestIdRef.current
+      ) {
+        setError(toDisplayError(error_, 'Failed to create fix job'));
+      }
     } finally {
-      if (mountedRef.current) setFixing(false);
+      if (
+        mountedRef.current &&
+        requestId === mutationRequestIdRef.current
+      ) {
+        setFixing(false);
+      }
     }
   };
 
   const handleFixSingle = async (issueId) => {
+    if (!mountedRef.current || fixing) return;
+    const requestId = ++mutationRequestIdRef.current;
     try {
       setFixing(true);
       setError(null);
       await libraryHealth.createRemediationJob([issueId]);
-      if (!mountedRef.current) return;
+      if (
+        !mountedRef.current ||
+        requestId !== mutationRequestIdRef.current
+      ) {
+        return;
+      }
       setReportMessage('Queued remediation job for 1 auto-fixable issue.');
       scheduleSummaryReload(libraryPath);
     } catch (error_) {
       if (!mountedRef.current) return;
-      setError(
-        error_.response?.data?.message ||
-          error_.message ||
-          'Failed to create fix job',
-      );
+      if (
+        mountedRef.current &&
+        requestId === mutationRequestIdRef.current
+      ) {
+        setError(toDisplayError(error_, 'Failed to create fix job'));
+      }
     } finally {
-      if (mountedRef.current) setFixing(false);
+      if (
+        mountedRef.current &&
+        requestId === mutationRequestIdRef.current
+      ) {
+        setFixing(false);
+      }
     }
   };
 
@@ -365,6 +429,7 @@ const LibraryHealth = () => {
   };
 
   const handleRunReplacementSearches = async () => {
+    if (!mountedRef.current || searchingReplacements) return;
     const selectedIssueList = issues.filter((issue) =>
       selectedIssues.has(issue.issueId));
     const queries = getLibraryHealthReplacementSearchQueries(selectedIssueList, {
@@ -376,19 +441,33 @@ const LibraryHealth = () => {
       return;
     }
 
+    const requestId = ++replacementRequestIdRef.current;
     try {
       setSearchingReplacements(true);
       setError(null);
       const count = await searches.createBatch({ queries });
-      setReportMessage(`Started ${count} bounded replacement search${count === 1 ? '' : 'es'} for selected Library Health issues.`);
+      if (
+        !mountedRef.current ||
+        requestId !== replacementRequestIdRef.current
+      ) {
+        return;
+      }
+      const startedCount = Number.isFinite(count) ? count : queries.length;
+      setReportMessage(`Started ${startedCount} bounded replacement search${startedCount === 1 ? '' : 'es'} for selected Library Health issues.`);
     } catch (error_) {
-      setError(
-        error_.response?.data?.message ||
-          error_.message ||
-          'Failed to start replacement searches',
-      );
+      if (
+        mountedRef.current &&
+        requestId === replacementRequestIdRef.current
+      ) {
+        setError(toDisplayError(error_, 'Failed to start replacement searches'));
+      }
     } finally {
-      setSearchingReplacements(false);
+      if (
+        mountedRef.current &&
+        requestId === replacementRequestIdRef.current
+      ) {
+        setSearchingReplacements(false);
+      }
     }
   };
 

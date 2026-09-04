@@ -1,4 +1,5 @@
 import * as federationDiagnostics from '../../../lib/federationDiagnostics';
+import { toDisplayError } from '../../../lib/errors';
 import * as lidarr from '../../../lib/lidarr';
 import * as optionsApi from '../../../lib/options';
 import * as YAML from 'yaml';
@@ -18,7 +19,14 @@ import {
   formatServarrCompatibilityReport,
   summarizeServarrReadiness,
 } from '../../../lib/servarrReadiness';
-import React, { useEffect, useMemo, useState } from 'react';
+import { useMountedRef } from '../../../lib/useMountedRef';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   Button,
   Card,
@@ -123,6 +131,39 @@ const toNumber = (value, fallback) => {
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
+const useAsyncGuard = () => {
+  const mountedRef = useMountedRef();
+  const requestIdRef = useRef(0);
+  const inFlightRef = useRef(false);
+
+  useEffect(() => () => {
+    requestIdRef.current += 1;
+    inFlightRef.current = false;
+  }, []);
+
+  const begin = useCallback(() => {
+    if (!mountedRef.current || inFlightRef.current) return null;
+    inFlightRef.current = true;
+    return ++requestIdRef.current;
+  }, [mountedRef]);
+
+  const isCurrent = useCallback(
+    (requestId) =>
+      mountedRef.current && requestId === requestIdRef.current,
+    [mountedRef],
+  );
+
+  const finish = useCallback((requestId) => {
+    if (requestId === requestIdRef.current) inFlightRef.current = false;
+  }, []);
+
+  return useMemo(() => ({ begin, finish, isCurrent }), [
+    begin,
+    finish,
+    isCurrent,
+  ]);
+};
+
 const portForwards = (vpn = {}) =>
   getOption(vpn, 'portForwards', 'PortForwards') || [];
 
@@ -221,6 +262,7 @@ const NotificationIntegrationsPanel = ({ options }) => {
   const [savingAction, setSavingAction] = useState('');
   const [message, setMessage] = useState(null);
   const saving = Boolean(savingAction);
+  const asyncGuard = useAsyncGuard();
 
   useEffect(() => {
     setForm(buildNotificationForm(options));
@@ -327,32 +369,38 @@ const NotificationIntegrationsPanel = ({ options }) => {
   };
 
   const applyRuntime = async () => {
+    const requestId = asyncGuard.begin();
+    if (requestId === null) return;
     setSavingAction('runtime');
     setMessage(null);
     const overlay = buildOverlay();
 
     try {
       await optionsApi.applyOverlay(overlay);
+      if (!asyncGuard.isCurrent(requestId)) return;
       markSecretsConfigured(overlay);
       setMessage({
         positive: true,
         text: 'Notification integration settings applied for this running daemon.',
       });
     } catch (error) {
+      if (!asyncGuard.isCurrent(requestId)) return;
       setMessage({
         negative: true,
-        text:
-          error?.response?.data ||
-          error?.response?.statusText ||
-          error?.message ||
+        text: toDisplayError(
+          error,
           'Failed to apply notification integration settings.',
+        ),
       });
     } finally {
-      setSavingAction('');
+      if (asyncGuard.isCurrent(requestId)) setSavingAction('');
+      asyncGuard.finish(requestId);
     }
   };
 
   const saveYaml = async () => {
+    const requestId = asyncGuard.begin();
+    if (requestId === null) return;
     setSavingAction('yaml');
     setMessage(null);
     const overlay = buildOverlay();
@@ -433,22 +481,24 @@ const NotificationIntegrationsPanel = ({ options }) => {
       }
 
       await optionsApi.updateYaml({ yaml: document.toString() });
+      if (!asyncGuard.isCurrent(requestId)) return;
       markSecretsConfigured(overlay);
       setMessage({
         positive: true,
         text: 'Notification integration settings saved to YAML.',
       });
     } catch (error) {
+      if (!asyncGuard.isCurrent(requestId)) return;
       setMessage({
         negative: true,
-        text:
-          error?.response?.data ||
-          error?.response?.statusText ||
-          error?.message ||
+        text: toDisplayError(
+          error,
           'Failed to save notification integration settings.',
+        ),
       });
     } finally {
-      setSavingAction('');
+      if (asyncGuard.isCurrent(requestId)) setSavingAction('');
+      asyncGuard.finish(requestId);
     }
   };
 
@@ -984,6 +1034,7 @@ const MetadataSettingsPanel = ({ options }) => {
   const [form, setForm] = useState(() => buildMetadataSettingsForm(options));
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState(null);
+  const asyncGuard = useAsyncGuard();
 
   useEffect(() => {
     setForm(buildMetadataSettingsForm(options));
@@ -1085,6 +1136,8 @@ const MetadataSettingsPanel = ({ options }) => {
   };
 
   const saveYaml = async () => {
+    const requestId = asyncGuard.begin();
+    if (requestId === null) return;
     setSaving(true);
     setMessage(null);
     const patch = buildPatch();
@@ -1187,22 +1240,24 @@ const MetadataSettingsPanel = ({ options }) => {
       );
 
       await optionsApi.updateYaml({ yaml: document.toString() });
+      if (!asyncGuard.isCurrent(requestId)) return;
       markSecretsConfigured(patch);
       setMessage({
         positive: true,
         text: 'Metadata and Servarr integration settings saved to YAML.',
       });
     } catch (error) {
+      if (!asyncGuard.isCurrent(requestId)) return;
       setMessage({
         negative: true,
-        text:
-          error?.response?.data ||
-          error?.response?.statusText ||
-          error?.message ||
+        text: toDisplayError(
+          error,
           'Failed to save metadata integration settings.',
+        ),
       });
     } finally {
-      setSaving(false);
+      if (asyncGuard.isCurrent(requestId)) setSaving(false);
+      asyncGuard.finish(requestId);
     }
   };
 
@@ -1673,6 +1728,7 @@ const FtpIntegrationPanel = ({ options }) => {
   const [savingAction, setSavingAction] = useState('');
   const [message, setMessage] = useState(null);
   const saving = Boolean(savingAction);
+  const asyncGuard = useAsyncGuard();
 
   useEffect(() => {
     setForm(buildFtpForm(options));
@@ -1729,32 +1785,35 @@ const FtpIntegrationPanel = ({ options }) => {
   };
 
   const applyRuntime = async () => {
+    const requestId = asyncGuard.begin();
+    if (requestId === null) return;
     setSavingAction('runtime');
     setMessage(null);
     const overlay = buildOverlay();
 
     try {
       await optionsApi.applyOverlay(overlay);
+      if (!asyncGuard.isCurrent(requestId)) return;
       markSecretsConfigured(overlay);
       setMessage({
         positive: true,
         text: 'FTP integration settings applied for this running daemon.',
       });
     } catch (error) {
+      if (!asyncGuard.isCurrent(requestId)) return;
       setMessage({
         negative: true,
-        text:
-          error?.response?.data ||
-          error?.response?.statusText ||
-          error?.message ||
-          'Failed to apply FTP integration settings.',
+        text: toDisplayError(error, 'Failed to apply FTP integration settings.'),
       });
     } finally {
-      setSavingAction('');
+      if (asyncGuard.isCurrent(requestId)) setSavingAction('');
+      asyncGuard.finish(requestId);
     }
   };
 
   const saveYaml = async () => {
+    const requestId = asyncGuard.begin();
+    if (requestId === null) return;
     setSavingAction('yaml');
     setMessage(null);
     const overlay = buildOverlay();
@@ -1790,22 +1849,21 @@ const FtpIntegrationPanel = ({ options }) => {
       set(['integrations', 'ftp', 'retry_attempts'], ftpPatch.retryAttempts);
 
       await optionsApi.updateYaml({ yaml: document.toString() });
+      if (!asyncGuard.isCurrent(requestId)) return;
       markSecretsConfigured(overlay);
       setMessage({
         positive: true,
         text: 'FTP integration settings saved to YAML.',
       });
     } catch (error) {
+      if (!asyncGuard.isCurrent(requestId)) return;
       setMessage({
         negative: true,
-        text:
-          error?.response?.data ||
-          error?.response?.statusText ||
-          error?.message ||
-          'Failed to save FTP integration settings.',
+        text: toDisplayError(error, 'Failed to save FTP integration settings.'),
       });
     } finally {
-      setSavingAction('');
+      if (asyncGuard.isCurrent(requestId)) setSavingAction('');
+      asyncGuard.finish(requestId);
     }
   };
 
@@ -2047,6 +2105,7 @@ const SourceFeedIntegrationsPanel = ({ options }) => {
   const [savingAction, setSavingAction] = useState('');
   const [message, setMessage] = useState(null);
   const saving = Boolean(savingAction);
+  const asyncGuard = useAsyncGuard();
 
   useEffect(() => {
     setForm(buildSourceFeedForm(options));
@@ -2143,32 +2202,38 @@ const SourceFeedIntegrationsPanel = ({ options }) => {
   };
 
   const applyRuntime = async () => {
+    const requestId = asyncGuard.begin();
+    if (requestId === null) return;
     setSavingAction('runtime');
     setMessage(null);
     const overlay = buildOverlay();
 
     try {
       await optionsApi.applyOverlay(overlay);
+      if (!asyncGuard.isCurrent(requestId)) return;
       markSecretsConfigured(overlay);
       setMessage({
         positive: true,
         text: 'Source-feed integration settings applied for this running daemon.',
       });
     } catch (error) {
+      if (!asyncGuard.isCurrent(requestId)) return;
       setMessage({
         negative: true,
-        text:
-          error?.response?.data ||
-          error?.response?.statusText ||
-          error?.message ||
+        text: toDisplayError(
+          error,
           'Failed to apply source-feed integration settings.',
+        ),
       });
     } finally {
-      setSavingAction('');
+      if (asyncGuard.isCurrent(requestId)) setSavingAction('');
+      asyncGuard.finish(requestId);
     }
   };
 
   const saveYaml = async () => {
+    const requestId = asyncGuard.begin();
+    if (requestId === null) return;
     setSavingAction('yaml');
     setMessage(null);
     const overlay = buildOverlay();
@@ -2205,22 +2270,24 @@ const SourceFeedIntegrationsPanel = ({ options }) => {
       }
 
       await optionsApi.updateYaml({ yaml: document.toString() });
+      if (!asyncGuard.isCurrent(requestId)) return;
       markSecretsConfigured(overlay);
       setMessage({
         positive: true,
         text: 'Source-feed integration settings saved to YAML.',
       });
     } catch (error) {
+      if (!asyncGuard.isCurrent(requestId)) return;
       setMessage({
         negative: true,
-        text:
-          error?.response?.data ||
-          error?.response?.statusText ||
-          error?.message ||
+        text: toDisplayError(
+          error,
           'Failed to save source-feed integration settings.',
+        ),
       });
     } finally {
-      setSavingAction('');
+      if (asyncGuard.isCurrent(requestId)) setSavingAction('');
+      asyncGuard.finish(requestId);
     }
   };
 
@@ -2677,6 +2744,7 @@ const LidarrPanel = ({ options }) => {
   const [importRetryResult, setImportRetryResult] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState('');
+  const asyncGuard = useAsyncGuard();
   const enabled = getOption(lidarrOptions, 'enabled', 'Enabled');
 
   const maskedApiKey = useMemo(() => {
@@ -2685,40 +2753,42 @@ const LidarrPanel = ({ options }) => {
   }, [lidarrOptions]);
 
   const run = async (name, action) => {
+    const requestId = asyncGuard.begin();
+    if (requestId === null) return;
     setLoading(name);
     setError('');
 
     try {
-      await action();
+      await action(() => asyncGuard.isCurrent(requestId));
     } catch (error) {
-      setError(
-        error?.response?.data ||
-          error?.response?.statusText ||
-          error?.message ||
-          'Lidarr request failed',
-      );
+      if (asyncGuard.isCurrent(requestId)) {
+        setError(toDisplayError(error, 'Lidarr request failed'));
+      }
     } finally {
-      setLoading('');
+      if (asyncGuard.isCurrent(requestId)) setLoading('');
+      asyncGuard.finish(requestId);
     }
   };
 
-  const loadImportHistory = async () => {
+  const loadImportHistory = async (isCurrent = () => true) => {
     const data = await lidarr.getImportHistory({ limit: 50 });
-    setImportHistory(
-      Array.isArray(data)
-        ? data.filter(
-            (record) =>
-              record && typeof record === 'object' && !Array.isArray(record),
-          )
-        : [],
-    );
+    if (isCurrent()) {
+      setImportHistory(
+        Array.isArray(data)
+          ? data.filter(
+              (record) =>
+                record && typeof record === 'object' && !Array.isArray(record),
+            )
+          : [],
+      );
+    }
   };
 
   const retryImport = async (historyId) => {
-    await run('retry', async () => {
+    await run('retry', async (isCurrent) => {
       const result = await lidarr.retryImport(historyId);
-      setImportRetryResult(result);
-      await loadImportHistory();
+      if (isCurrent()) setImportRetryResult(result);
+      await loadImportHistory(isCurrent);
     });
   };
 
@@ -2804,7 +2874,10 @@ const LidarrPanel = ({ options }) => {
                 labelPosition="left"
                 loading={loading === 'status'}
                 onClick={() =>
-                  run('status', async () => setStatus(await lidarr.getStatus()))
+                  run('status', async (isCurrent) => {
+                    const result = await lidarr.getStatus();
+                    if (isCurrent()) setStatus(result);
+                  })
                 }
               >
                 <Icon name="heartbeat" />
@@ -2820,9 +2893,10 @@ const LidarrPanel = ({ options }) => {
                 labelPosition="left"
                 loading={loading === 'wanted'}
                 onClick={() =>
-                  run('wanted', async () =>
-                    setWanted(await lidarr.getWantedMissing({ pageSize: 25 })),
-                  )
+                  run('wanted', async (isCurrent) => {
+                    const result = await lidarr.getWantedMissing({ pageSize: 25 });
+                    if (isCurrent()) setWanted(Array.isArray(result) ? result : []);
+                  })
                 }
               >
                 <Icon name="list" />
@@ -2838,7 +2912,10 @@ const LidarrPanel = ({ options }) => {
                 labelPosition="left"
                 loading={loading === 'sync'}
                 onClick={() =>
-                  run('sync', async () => setSyncResult(await lidarr.syncWanted()))
+                  run('sync', async (isCurrent) => {
+                    const result = await lidarr.syncWanted();
+                    if (isCurrent()) setSyncResult(result);
+                  })
                 }
                 primary
               >
@@ -2980,14 +3057,13 @@ const LidarrPanel = ({ options }) => {
               disabled: !importDirectory.trim(),
               icon: 'download',
               loading: loading === 'import',
-              onClick: () =>
-                run('import', async () =>
-                  setImportResult(
-                    await lidarr.importCompletedDirectory({
+                onClick: () =>
+                  run('import', async (isCurrent) => {
+                    const result = await lidarr.importCompletedDirectory({
                       directory: importDirectory.trim(),
-                    }),
-                  ),
-                ),
+                    });
+                    if (isCurrent()) setImportResult(result);
+                  }),
             }}
             fluid
             onChange={(_, { value }) => setImportDirectory(value)}
@@ -3033,6 +3109,7 @@ const MediaServerPanel = () => {
   const [tokenConfigured, setTokenConfigured] = useState(false);
   const [userMappingConfigured, setUserMappingConfigured] = useState(false);
   const [copyStatus, setCopyStatus] = useState('');
+  const asyncGuard = useAsyncGuard();
   const diagnostic = buildMediaServerPathDiagnostic({
     localPath,
     remotePathFrom,
@@ -3058,32 +3135,54 @@ const MediaServerPanel = () => {
   });
 
   const copySyncReport = async () => {
+    const requestId = asyncGuard.begin();
+    if (requestId === null) return;
     const report = formatMediaServerSyncReport(syncPreview);
     if (!navigator.clipboard?.writeText) {
-      setCopyStatus('Clipboard unavailable; copy the report from the preview text.');
+      if (asyncGuard.isCurrent(requestId)) {
+        setCopyStatus('Clipboard unavailable; copy the report from the preview text.');
+      }
+      asyncGuard.finish(requestId);
       return;
     }
 
     try {
       await navigator.clipboard.writeText(report);
-      setCopyStatus('Media-server sync review copied.');
+      if (asyncGuard.isCurrent(requestId)) {
+        setCopyStatus('Media-server sync review copied.');
+      }
     } catch {
-      setCopyStatus('Unable to copy media-server sync review.');
+      if (asyncGuard.isCurrent(requestId)) {
+        setCopyStatus('Unable to copy media-server sync review.');
+      }
+    } finally {
+      asyncGuard.finish(requestId);
     }
   };
 
   const copyExecutionContract = async () => {
+    const requestId = asyncGuard.begin();
+    if (requestId === null) return;
     const report = formatMediaServerExecutionContractReport(executionContract);
     if (!navigator.clipboard?.writeText) {
-      setCopyStatus('Clipboard unavailable; copy the execution contract manually.');
+      if (asyncGuard.isCurrent(requestId)) {
+        setCopyStatus('Clipboard unavailable; copy the execution contract manually.');
+      }
+      asyncGuard.finish(requestId);
       return;
     }
 
     try {
       await navigator.clipboard.writeText(report);
-      setCopyStatus('Media-server execution contract copied.');
+      if (asyncGuard.isCurrent(requestId)) {
+        setCopyStatus('Media-server execution contract copied.');
+      }
     } catch {
-      setCopyStatus('Unable to copy media-server execution contract.');
+      if (asyncGuard.isCurrent(requestId)) {
+        setCopyStatus('Unable to copy media-server execution contract.');
+      }
+    } finally {
+      asyncGuard.finish(requestId);
     }
   };
 
@@ -3426,6 +3525,7 @@ const ServarrReadinessPanel = ({ options }) => {
   const lidarrOptions = getLidarrOptions(options);
   const [copyStatus, setCopyStatus] = useState('');
   const [running, setRunning] = useState(false);
+  const asyncGuard = useAsyncGuard();
   const checks = buildServarrReadiness({
     apiKey: getOption(lidarrOptions, 'apiKey', 'ApiKey'),
     autoImportCompleted: getOption(
@@ -3464,45 +3564,60 @@ const ServarrReadinessPanel = ({ options }) => {
   });
 
   const copyCompatibilityReport = async () => {
+    const requestId = asyncGuard.begin();
+    if (requestId === null) return;
     const report = formatServarrCompatibilityReport(compatibility);
     if (!navigator.clipboard?.writeText) {
-      setCopyStatus('Clipboard unavailable; copy the Servarr review manually.');
+      if (asyncGuard.isCurrent(requestId)) {
+        setCopyStatus('Clipboard unavailable; copy the Servarr review manually.');
+      }
+      asyncGuard.finish(requestId);
       return;
     }
 
     try {
       await navigator.clipboard.writeText(report);
-      setCopyStatus('Servarr compatibility review copied.');
+      if (asyncGuard.isCurrent(requestId)) {
+        setCopyStatus('Servarr compatibility review copied.');
+      }
     } catch {
-      setCopyStatus('Unable to copy Servarr compatibility review.');
+      if (asyncGuard.isCurrent(requestId)) {
+        setCopyStatus('Unable to copy Servarr compatibility review.');
+      }
+    } finally {
+      asyncGuard.finish(requestId);
     }
   };
 
   const runReadyActions = async () => {
+    const requestId = asyncGuard.begin();
+    if (requestId === null) return;
     setRunning(true);
     setCopyStatus('');
 
     try {
       if (!compatibility.supportsWantedPull) {
-        setCopyStatus('Wanted pull is not ready; no Servarr action was run.');
+        if (asyncGuard.isCurrent(requestId)) {
+          setCopyStatus('Wanted pull is not ready; no Servarr action was run.');
+        }
         return;
       }
 
       const result = await lidarr.syncWanted();
-      setCopyStatus(
-        `Wanted sync ran: ${result.createdCount ?? result.CreatedCount ?? 0} created, ${
-          result.duplicateCount ?? result.DuplicateCount ?? 0
-        } duplicates, ${result.skippedCount ?? result.SkippedCount ?? 0} skipped.`,
-      );
+      if (asyncGuard.isCurrent(requestId)) {
+        setCopyStatus(
+          `Wanted sync ran: ${result.createdCount ?? result.CreatedCount ?? 0} created, ${
+            result.duplicateCount ?? result.DuplicateCount ?? 0
+          } duplicates, ${result.skippedCount ?? result.SkippedCount ?? 0} skipped.`,
+        );
+      }
     } catch (error) {
-      setCopyStatus(
-        error?.response?.data ||
-          error?.response?.statusText ||
-          error?.message ||
-          'Servarr action failed.',
-      );
+      if (asyncGuard.isCurrent(requestId)) {
+        setCopyStatus(toDisplayError(error, 'Servarr action failed.'));
+      }
     } finally {
-      setRunning(false);
+      if (asyncGuard.isCurrent(requestId)) setRunning(false);
+      asyncGuard.finish(requestId);
     }
   };
 
@@ -3630,35 +3745,38 @@ const FederationDiagnosticsPanel = () => {
   const [diagnostics, setDiagnostics] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const asyncGuard = useAsyncGuard();
 
   useEffect(() => {
-    let mounted = true;
+    const requestId = asyncGuard.begin();
+    if (requestId === null) return undefined;
 
     const loadDiagnostics = async () => {
       try {
         setLoading(true);
         setError(null);
         const response = await federationDiagnostics.getDiagnostics();
-        if (mounted) {
-          setDiagnostics(response.data || {});
+        if (asyncGuard.isCurrent(requestId)) {
+          const data = response?.data;
+          setDiagnostics(
+            data && typeof data === 'object' && !Array.isArray(data)
+              ? data
+              : {},
+          );
         }
       } catch (error_) {
-        if (mounted) {
-          setError(error_);
+        if (asyncGuard.isCurrent(requestId)) {
+          setError(toDisplayError(error_, 'Federation diagnostics failed'));
         }
       } finally {
-        if (mounted) {
-          setLoading(false);
-        }
+        if (asyncGuard.isCurrent(requestId)) setLoading(false);
+        asyncGuard.finish(requestId);
       }
     };
 
-    loadDiagnostics();
-
-    return () => {
-      mounted = false;
-    };
-  }, []);
+    void loadDiagnostics();
+    return undefined;
+  }, [asyncGuard]);
 
   const federation = diagnostics?.federation || {};
   const publishing = diagnostics?.publishing || {};

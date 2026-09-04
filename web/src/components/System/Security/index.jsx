@@ -27,11 +27,11 @@ const Security = () => {
   const requestIdRef = useRef(0);
 
   const fetchData = useCallback(async () => {
-    if (!mountedRef.current) return;
+    if (!mountedRef.current || refreshing) return;
     const requestId = ++requestIdRef.current;
     try {
       setRefreshing(true);
-      const dashboardData = await securityApi.getDashboard().catch(() => null);
+      const dashboardData = await securityApi.getDashboard();
       if (
         mountedRef.current &&
         requestIdRef.current === requestId
@@ -59,7 +59,7 @@ const Security = () => {
         setRefreshing(false);
       }
     }
-  }, [mountedRef]);
+  }, [mountedRef, refreshing]);
 
   usePolling(fetchData, 30_000);
 
@@ -83,6 +83,7 @@ const Security = () => {
         <p>{error}</p>
         <p>Security features may not be enabled on this server.</p>
         <Button
+          disabled={refreshing}
           onClick={fetchData}
           size="small"
         >
@@ -151,6 +152,7 @@ const Security = () => {
           detected. Check the <strong>Mesh</strong> tab to verify connectivity.
         </p>
         <Button
+          disabled={refreshing}
           loading={refreshing}
           onClick={fetchData}
           primary
@@ -186,6 +188,7 @@ const Security = () => {
               </Header>
               <Button
                 icon="refresh"
+                disabled={refreshing}
                 loading={refreshing}
                 onClick={fetchData}
                 size="tiny"

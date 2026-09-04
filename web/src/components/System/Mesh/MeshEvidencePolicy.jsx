@@ -105,8 +105,15 @@ const MeshEvidencePolicy = ({ runtimeProfile } = {}) => {
     if (!review) return;
 
     if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(formatMeshEvidenceReviewReport(review));
-      toast.success('Mesh evidence review copied');
+      try {
+        await navigator.clipboard.writeText(
+          formatMeshEvidenceReviewReport(review),
+        );
+        toast.success('Mesh evidence review copied');
+      } catch (error) {
+        console.error('Unable to copy mesh evidence review:', error);
+        toast.error('Unable to copy mesh evidence review');
+      }
       return;
     }
 

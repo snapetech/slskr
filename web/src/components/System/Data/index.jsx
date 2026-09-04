@@ -5,8 +5,9 @@ import React, { useState } from 'react';
 import { toast } from 'react-toastify';
 import { Button, Divider, Header, Icon } from 'semantic-ui-react';
 
-const clear = async ({ direction, isMounted, setState }) => {
-  if (!isMounted()) return;
+const clear = async ({ direction, isMounted, isInFlight, setInFlight, setState }) => {
+  if (!isMounted() || isInFlight()) return;
+  setInFlight(true);
   setState(true);
   try {
     await clearCompleted({ direction });
@@ -19,6 +20,7 @@ const clear = async ({ direction, isMounted, setState }) => {
     }
   } finally {
     if (isMounted()) setState(false);
+    setInFlight(false);
   }
 };
 
@@ -26,6 +28,8 @@ const Data = () => {
   const [up, setUp] = useState(false);
   const [down, setDown] = useState(false);
   const mountedRef = useMountedRef();
+  const upInFlightRef = React.useRef(false);
+  const downInFlightRef = React.useRef(false);
 
   return (
     <div>
@@ -46,9 +50,15 @@ const Data = () => {
       <Button
         disabled={up}
         loading={up}
-        onClick={() =>
-          clear({ direction: 'upload', isMounted: () => mountedRef.current, setState: setUp })
-        }
+        onClick={() => clear({
+          direction: 'upload',
+          isInFlight: () => upInFlightRef.current,
+          isMounted: () => mountedRef.current,
+          setInFlight: (value) => {
+            upInFlightRef.current = value;
+          },
+          setState: setUp,
+        })}
         primary
       >
         <Icon name="trash alternate" />
@@ -57,9 +67,15 @@ const Data = () => {
       <Button
         disabled={down}
         loading={down}
-        onClick={() =>
-          clear({ direction: 'download', isMounted: () => mountedRef.current, setState: setDown })
-        }
+        onClick={() => clear({
+          direction: 'download',
+          isInFlight: () => downInFlightRef.current,
+          isMounted: () => mountedRef.current,
+          setInFlight: (value) => {
+            downInFlightRef.current = value;
+          },
+          setState: setDown,
+        })}
         primary
       >
         <Icon name="trash alternate" />

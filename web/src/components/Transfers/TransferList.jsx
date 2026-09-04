@@ -10,7 +10,7 @@ import {
   Table,
 } from 'semantic-ui-react';
 
-const getColor = (state) => {
+const getColor = (state = '') => {
   switch (state) {
     case 'InProgress':
       return { color: 'blue' };
@@ -29,13 +29,23 @@ const getColor = (state) => {
 };
 
 const isRetryableState = (state) => getColor(state).color === 'red';
-const isQueuedState = (state) => state.includes('Queued');
+const isQueuedState = (state = '') =>
+  typeof state === 'string' && state.includes('Queued');
+
+const safeNumber = (value) => {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : 0;
+};
 
 const formatBytesTransferred = ({ size, transferred }) => {
-  const [s, sExtension] = formatBytes(size, 1).split(' ');
-  const t = formatBytesAsUnit(transferred, sExtension, 1);
+  const [sizeText, sizeExtension] = formatBytes(safeNumber(size), 1).split(' ');
+  const transferredText = formatBytesAsUnit(
+    safeNumber(transferred),
+    sizeExtension,
+    1,
+  );
 
-  return `${t}/${s} ${sExtension}`;
+  return `${transferredText}/${sizeText} ${sizeExtension}`;
 };
 
 class TransferList extends Component {
@@ -50,7 +60,7 @@ class TransferList extends Component {
   handleClick = (file) => {
     const { direction, state } = file;
 
-    if (direction === 'Download') {
+    if (typeof direction === 'string' && direction.toLowerCase() === 'download') {
       if (isRetryableState(state)) {
         return this.props.onRetryRequested(file);
       }
@@ -68,7 +78,11 @@ class TransferList extends Component {
   };
 
   render() {
-    const { directoryName, files, onSelectionChange } = this.props;
+    const {
+      directoryName = '',
+      files = [],
+      onSelectionChange,
+    } = this.props;
     const { isFolded } = this.state;
 
     return (
@@ -92,7 +106,10 @@ class TransferList extends Component {
                   <Table.Row>
                     <Table.HeaderCell className="transferlist-selector">
                       <Checkbox
-                        checked={files.filter((f) => !f.selected).length === 0}
+                        checked={
+                          files.length > 0 &&
+                          files.filter((f) => !f.selected).length === 0
+                        }
                         fitted
                         onChange={(event, data) =>
                           files.map((file) =>
@@ -120,14 +137,14 @@ class TransferList extends Component {
                   </Table.Row>
                 </Table.Header>
                 <Table.Body>
-                  {files
+                  {[...files]
                     .sort((a, b) =>
                       getFileName(a.filename).localeCompare(
                         getFileName(b.filename),
                       ),
                     )
-                    .map((f) => (
-                      <Table.Row key={f.filename}>
+                    .map((f, index) => (
+                      <Table.Row key={f.id || f.filename || index}>
                         <Table.Cell className="transferlist-selector">
                           <Checkbox
                             checked={f.selected}
@@ -138,13 +155,20 @@ class TransferList extends Component {
                           />
                         </Table.Cell>
                         <Table.Cell className="transferlist-filename">
-                          {getFileName(f.filename)}
+                          {getFileName(
+                            typeof f.filename === 'string'
+                              ? f.filename
+                              : 'Unknown file',
+                          )}
                         </Table.Cell>
                         <Table.Cell className="transferlist-progress">
                           {f.state === 'InProgress' ? (
                             <Progress
                               color={getColor(f.state).color}
-                              percent={Math.round(f.percentComplete)}
+                              percent={Math.min(
+                                100,
+                                Math.max(0, safeNumber(f.percentComplete)),
+                              )}
                               progress
                               style={{ margin: 0 }}
                             />
@@ -161,14 +185,16 @@ class TransferList extends Component {
                               active={f.direction === 'Upload'}
                               onClick={() => this.handleClick(f)}
                             >
-                              {f.direction === 'Download' &&
-                                isQueuedState(f.state) && (
-                                  <Icon name="refresh" />
-                                )}
-                              {f.direction === 'Download' &&
-                                isRetryableState(f.state) && (
-                                  <Icon name="redo" />
-                                )}
+                              {typeof f.direction === 'string' &&
+                                f.direction.toLowerCase() === 'download' &&
+                               isQueuedState(f.state) && (
+                                 <Icon name="refresh" />
+                               )}
+                              {typeof f.direction === 'string' &&
+                                f.direction.toLowerCase() === 'download' &&
+                               isRetryableState(f.state) && (
+                                 <Icon name="redo" />
+                               )}
                               {f.state}
                               {f.placeInQueue ? ` (#${f.placeInQueue})` : ''}
                             </Button>

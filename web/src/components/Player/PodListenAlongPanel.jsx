@@ -8,7 +8,7 @@ import { toast } from 'react-toastify';
 import { Button, Checkbox, Icon, Label, List, Popup, Segment } from 'semantic-ui-react';
 
 const applyPartyState = (state, player) => {
-  if (!state) return;
+  if (!state || typeof state !== 'object' || Array.isArray(state)) return;
 
   if (state.action === 'play' || state.action === 'seek') {
     const elapsed =
@@ -43,11 +43,13 @@ const PodListenAlongPanel = ({ channelId, compact = false, podId, user }) => {
   const [globalRadio, setGlobalRadio] = useState(false);
   const [meshStreaming, setMeshStreaming] = useState(false);
   const [partyState, setPartyState] = useState(null);
+  const [publishing, setPublishing] = useState(false);
   const followingRef = useRef(false);
   const playerRef = useRef(player);
   const mountedRef = useRef(false);
   const directoryRequestIdRef = useRef(0);
   const operationRequestIdRef = useRef(0);
+  const publishInFlightRef = useRef(false);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -74,10 +76,14 @@ const PodListenAlongPanel = ({ channelId, compact = false, podId, user }) => {
 
     hub.on('partyState', (state) => {
       if (disposed || !mountedRef.current) return;
-      setPartyState(state);
+      const nextState =
+        state && typeof state === 'object' && !Array.isArray(state)
+          ? state
+          : null;
+      setPartyState(nextState);
       if (followingRef.current) {
-        playerRef.current.followParty(state);
-        applyPartyState(state, playerRef.current);
+        playerRef.current.followParty(nextState);
+        applyPartyState(nextState, playerRef.current);
       }
     });
     hub.onreconnecting(() => {
@@ -106,19 +112,28 @@ const PodListenAlongPanel = ({ channelId, compact = false, podId, user }) => {
     listeningParty
       .getPartyState(podId, channelId)
       .then((state) => {
-        if (!disposed && mountedRef.current) setPartyState(state);
+        if (!disposed && mountedRef.current) {
+          setPartyState(
+            state && typeof state === 'object' && !Array.isArray(state)
+              ? state
+              : null,
+          );
+        }
       })
       .catch(() => {});
 
     return () => {
       disposed = true;
       operationRequestIdRef.current += 1;
+      publishInFlightRef.current = false;
+      if (mountedRef.current) setPublishing(false);
       hub.invoke('LeaveParty', podId, channelId).catch(() => {});
       hub.stop().catch(() => {});
     };
   }, [channelId, podId]);
 
   const refreshDirectory = useCallback(async () => {
+    if (!mountedRef.current) return;
     const requestId = ++directoryRequestIdRef.current;
     try {
       const nextDirectory = await listeningParty.getPartyDirectory();
@@ -126,7 +141,14 @@ const PodListenAlongPanel = ({ channelId, compact = false, podId, user }) => {
         mountedRef.current &&
         requestId === directoryRequestIdRef.current
       ) {
-        setDirectory(nextDirectory || []);
+        setDirectory(
+          Array.isArray(nextDirectory)
+            ? nextDirectory.filter(
+                (party) =>
+                  party && typeof party === 'object' && !Array.isArray(party),
+              )
+            : [],
+        );
       }
     } catch {
       if (
@@ -142,9 +164,17 @@ const PodListenAlongPanel = ({ channelId, compact = false, podId, user }) => {
 
   const publish = async (action) => {
     const current = player.current;
-    if (action !== 'stop' && !current?.contentId) return;
+    if (
+      !mountedRef.current ||
+      publishInFlightRef.current ||
+      (action !== 'stop' && !current?.contentId)
+    ) {
+      return;
+    }
 
     const requestId = ++operationRequestIdRef.current;
+    publishInFlightRef.current = true;
+    setPublishing(true);
     try {
       const state = await listeningParty.publishPartyState(podId, channelId, {
         action,
@@ -164,7 +194,11 @@ const PodListenAlongPanel = ({ channelId, compact = false, podId, user }) => {
       ) {
         return;
       }
-      setPartyState(state);
+      setPartyState(
+        state && typeof state === 'object' && !Array.isArray(state)
+          ? state
+          : null,
+      );
       await refreshDirectory();
     } catch (error) {
       console.error('[Listen Along] Failed to publish party state:', error);
@@ -174,25 +208,39 @@ const PodListenAlongPanel = ({ channelId, compact = false, podId, user }) => {
       ) {
         toast.error(toDisplayError(error, 'Broadcast failed'));
       }
+    } finally {
+      publishInFlightRef.current = false;
+      if (
+        mountedRef.current &&
+        requestId === operationRequestIdRef.current
+      ) {
+        setPublishing(false);
+      }
     }
   };
 
   const joinListedParty = (party) => {
-    const streamUrl = listeningParty.buildRadioStreamUrl(party);
-    player.followParty(party);
-    player.playItem(
-      {
-        album: party.album,
-        artist: party.artist || party.hostPeerId,
-        contentId: party.contentId,
-        streamUrl,
-        title: party.title || party.contentId,
-      },
-      {
-        replaceQueue: true,
-        streamUrl,
-      },
-    );
+    if (!mountedRef.current || !party?.contentId) return;
+    try {
+      const streamUrl = listeningParty.buildRadioStreamUrl(party);
+      player.followParty(party);
+      player.playItem(
+        {
+          album: party.album,
+          artist: party.artist || party.hostPeerId,
+          contentId: party.contentId,
+          streamUrl,
+          title: party.title || party.contentId,
+        },
+        {
+          replaceQueue: true,
+          streamUrl,
+        },
+      );
+    } catch (error) {
+      console.error('[Listen Along] Failed to join listed party:', error);
+      toast.error(toDisplayError(error, 'Unable to join listed party'));
+    }
   };
 
   if (compact) {
@@ -248,7 +296,7 @@ const PodListenAlongPanel = ({ channelId, compact = false, podId, user }) => {
             trigger={
               <Button
                 aria-label="Broadcast current track to room"
-                disabled={!player.current}
+                disabled={publishing || !player.current}
                 icon
                 onClick={() => publish('play')}
                 size="mini"
@@ -294,6 +342,7 @@ const PodListenAlongPanel = ({ channelId, compact = false, podId, user }) => {
             trigger={
               <Button
                 aria-label="Stop room broadcast"
+                disabled={publishing}
                 icon
                 onClick={() => publish('stop')}
                 size="mini"
@@ -374,7 +423,7 @@ const PodListenAlongPanel = ({ channelId, compact = false, podId, user }) => {
           content="Publish your current local player track as the pod listen-along host."
           trigger={
             <Button
-              disabled={!player.current}
+              disabled={publishing || !player.current}
               icon
               onClick={() => publish('play')}
             >
@@ -386,6 +435,7 @@ const PodListenAlongPanel = ({ channelId, compact = false, podId, user }) => {
           content="Stop hosting listen-along metadata for this pod."
           trigger={
             <Button
+              disabled={publishing}
               icon
               onClick={() => publish('stop')}
             >

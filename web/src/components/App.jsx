@@ -92,9 +92,15 @@ const normalizeTheme = (theme) => {
 
 const getSemanticTheme = (theme) => (theme === 'light' ? 'light' : 'dark');
 
-const toDisplayError = (error, fallback) => {
-  const value = error?.response?.data || error?.message || fallback;
-  return typeof value === 'string' ? value : fallback;
+const toDisplayError = (error, fallback = 'Request failed') => {
+  const value = error?.response?.data ?? error?.message ?? error;
+  if (typeof value === 'string' || typeof value === 'number') return String(value);
+  if (value && typeof value === 'object') {
+    for (const key of ['message', 'error', 'detail', 'title']) {
+      if (typeof value[key] === 'string' && value[key].trim()) return value[key];
+    }
+  }
+  return fallback;
 };
 
 const normalizePortForwardProtocol = (proto) =>
@@ -688,6 +694,8 @@ class App extends Component {
     this.isMountedFlag = false;
     this.navigationActivityRunning = false;
     this.navigationActivityRequestId = 0;
+    this.connectionInFlight = false;
+    this.loginInFlight = false;
   }
 
   componentDidMount() {
@@ -765,16 +773,22 @@ class App extends Component {
     }
 
     const conversations = await chat.getAll({ unAcknowledgedOnly: true });
-    return (conversations || []).length > 0;
+    return Array.isArray(conversations) && conversations.length > 0;
   };
 
   getRoomsActivity = async () => {
-    const joinedRooms = (await rooms.getJoined()) || [];
+    const joinedRoomsResponse = await rooms.getJoined();
+    const joinedRooms = Array.isArray(joinedRoomsResponse)
+      ? joinedRoomsResponse.filter((roomName) => typeof roomName === 'string' && roomName)
+      : [];
     const roomMessages = await Promise.all(
-      joinedRooms.filter(Boolean).map(async (roomName) => ({
-        messages: (await rooms.getMessages({ roomName })) || [],
-        roomName,
-      })),
+      joinedRooms.map(async (roomName) => {
+        const messages = await rooms.getMessages({ roomName });
+        return {
+          messages: Array.isArray(messages) ? messages : [],
+          roomName,
+        };
+      }),
     );
     const latestByRoom = roomMessages.reduce((activity, room) => {
       const latest = room.messages
@@ -1133,6 +1147,7 @@ class App extends Component {
   };
 
   handleSoulseekConnect = async (server) => {
+    if (this.connectionInFlight || !this.isMountedFlag) return;
     const credentialsConfigured =
       server?.credentialsConfigured ||
       server?.runtimeCredentialsConfigured ||
@@ -1140,12 +1155,15 @@ class App extends Component {
       server?.credentialSource === 'runtime';
 
     if (credentialsConfigured) {
+      this.connectionInFlight = true;
       try {
         const response = await connect();
         this.updateServerState(response?.data);
       } catch (error) {
         console.error('Failed to connect to Soulseek:', error);
         this.setServerConnectError(error);
+      } finally {
+        this.connectionInFlight = false;
       }
       return;
     }
@@ -1154,6 +1172,7 @@ class App extends Component {
   };
 
   submitSoulseekCredentials = async () => {
+    if (this.connectionInFlight || !this.isMountedFlag) return;
     const { soulseekCredentials = {} } = this.state;
     const username = (soulseekCredentials.username || '').trim();
     const password = soulseekCredentials.password || '';
@@ -1168,6 +1187,7 @@ class App extends Component {
       return;
     }
 
+    this.connectionInFlight = true;
     this.setState((previousState) => ({
       soulseekCredentials: {
         ...previousState.soulseekCredentials,
@@ -1196,6 +1216,8 @@ class App extends Component {
           pending: false,
         },
       }));
+    } finally {
+      this.connectionInFlight = false;
     }
   };
 
@@ -1205,6 +1227,8 @@ class App extends Component {
   };
 
   handleLogin = (username, password) => {
+    if (this.loginInFlight || !this.isMountedFlag) return;
+    this.loginInFlight = true;
     this.setState(
       (previousState) => ({
         login: { ...previousState.login, error: undefined, pending: true },
@@ -1222,6 +1246,8 @@ class App extends Component {
           this.setState((previousState) => ({
             login: { ...previousState.login, error, pending: false },
           }));
+        } finally {
+          this.loginInFlight = false;
         }
       },
     );

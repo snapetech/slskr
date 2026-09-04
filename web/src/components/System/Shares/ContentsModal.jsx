@@ -1,46 +1,89 @@
 import { browse } from '../../../lib/shares';
+import { toDisplayError } from '../../../lib/errors';
 import { CodeEditor, LoaderSegment, Switch } from '../../Shared';
-import React, { useEffect, useState } from 'react';
-import { Button, Icon, Modal } from 'semantic-ui-react';
+import { useMountedRef } from '../../../lib/useMountedRef';
+import React, { useEffect, useRef, useState } from 'react';
+import { Button, Icon, Message, Modal } from 'semantic-ui-react';
 
 const ContentsModal = ({ onClose, share, theme }) => {
   const [loading, setLoading] = useState(true);
   const [contents, setContents] = useState();
+  const [error, setError] = useState();
+  const mountedRef = useMountedRef();
+  const requestIdRef = useRef(0);
 
   const { id, localPath, remotePath } = share || {};
 
   useEffect(() => {
-    const fetch = async () => {
+    const requestId = ++requestIdRef.current;
+    const fetchContents = async () => {
       setLoading(true);
+      setError(undefined);
 
-      const result = await browse({ id });
+      try {
+        const result = await browse({ id });
+        const directories = (Array.isArray(result) ? result : []).map(
+          (directory) => {
+            const directoryName = String(directory?.name ?? '');
+            const lines = [directoryName.replace(remotePath ?? '', localPath ?? '')];
+            const directoryFilesOrderedByFilename = Array.isArray(
+              directory?.files,
+            )
+              ? [...directory.files].sort((file1, file2) =>
+                  String(file1?.filename ?? '').localeCompare(
+                    String(file2?.filename ?? ''),
+                  ),
+                )
+              : [];
 
-      const directories = result.map((directory) => {
-        const lines = [directory.name.replace(remotePath, localPath)];
-        const directoryFilesOrderedByFilename = directory.files.sort(
-          (file1, file2) => file1.filename.localeCompare(file2.filename),
+            for (const file of directoryFilesOrderedByFilename) {
+              lines.push(
+                '\t' + String(file?.filename ?? '').replace(remotePath ?? '', ''),
+              );
+            }
+
+            lines.push('');
+
+            return lines.join('\n');
+          },
         );
 
-        for (const file of directoryFilesOrderedByFilename) {
-          lines.push('\t' + file.filename.replace(remotePath, ''));
+        if (
+          mountedRef.current &&
+          requestId === requestIdRef.current
+        ) {
+          setContents(directories.join('\n'));
         }
-
-        lines.push('');
-
-        return lines.join('\n');
-      });
-
-      setContents(directories.join('\n'));
-      setLoading(false);
+      } catch (browseError) {
+        if (
+          mountedRef.current &&
+          requestId === requestIdRef.current
+        ) {
+          setError(toDisplayError(browseError, 'Failed to load share contents'));
+          setContents();
+        }
+      } finally {
+        if (
+          mountedRef.current &&
+          requestId === requestIdRef.current
+        ) {
+          setLoading(false);
+        }
+      }
     };
 
     if (id) {
-      fetch();
+      void fetchContents();
     } else {
       setLoading(true);
       setContents();
+      setError(undefined);
     }
-  }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    return () => {
+      requestIdRef.current += 1;
+    };
+  }, [id, localPath, mountedRef, remotePath]);
 
   return (
     <Modal
@@ -56,7 +99,10 @@ const ContentsModal = ({ onClose, share, theme }) => {
         className="share-ls-content"
         scrolling
       >
-        <Switch loading={loading && <LoaderSegment className="modal-loader" />}>
+        <Switch
+          error={error && <Message negative>{error}</Message>}
+          loading={loading && <LoaderSegment className="modal-loader" />}
+        >
           <CodeEditor
             basicSetup={false}
             editable={false}

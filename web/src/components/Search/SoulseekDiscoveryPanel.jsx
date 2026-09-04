@@ -24,8 +24,12 @@ const getValue = (value, camel, pascal, fallback = undefined) =>
   value?.[camel] ?? value?.[pascal] ?? fallback;
 
 const normalizeRecommendation = (recommendation) => ({
-  item: getValue(recommendation, 'item', 'Item', ''),
-  score: getValue(recommendation, 'score', 'Score', null),
+  item: typeof getValue(recommendation, 'item', 'Item', '') === 'string'
+    ? getValue(recommendation, 'item', 'Item', '').trim()
+    : '',
+  score: typeof getValue(recommendation, 'score', 'Score', null) === 'number'
+    ? getValue(recommendation, 'score', 'Score', null)
+    : null,
 });
 
 const normalizeUser = (user) => {
@@ -35,7 +39,9 @@ const normalizeUser = (user) => {
 
   return {
     rating: getValue(user, 'rating', 'Rating', null),
-    username: getValue(user, 'username', 'Username', ''),
+    username: typeof getValue(user, 'username', 'Username', '') === 'string'
+      ? getValue(user, 'username', 'Username', '').trim()
+      : '',
   };
 };
 
@@ -60,6 +66,14 @@ const getUsernames = (payload) =>
     .map(normalizeUser)
     .filter((user) => user.username);
 
+const getStringList = (value) =>
+  Array.isArray(value)
+    ? value
+      .filter((item) => typeof item === 'string')
+      .map((item) => item.trim())
+      .filter(Boolean)
+    : [];
+
 const errorMessage = (error, fallback) =>
   toDisplayError(error, fallback);
 
@@ -78,6 +92,9 @@ const SoulseekDiscoveryPanel = ({ disabled, onSearch }) => {
   const mountedRef = useMountedRef();
   const requestIdRef = useRef(0);
   const actionRequestIdRef = useRef(0);
+  const requestInFlightRef = useRef(false);
+  const wishlistInFlightRef = useRef(false);
+  const [wishlistLoading, setWishlistLoading] = useState(false);
 
   const hasResults = useMemo(
     () =>
@@ -96,8 +113,9 @@ const SoulseekDiscoveryPanel = ({ disabled, onSearch }) => {
   };
 
   const run = async (label, action) => {
+    if (!mountedRef.current || disabled || requestInFlightRef.current) return;
     const requestId = ++requestIdRef.current;
-    if (!mountedRef.current || disabled) return;
+    requestInFlightRef.current = true;
     setError('');
     setLoading(true);
     try {
@@ -118,6 +136,7 @@ const SoulseekDiscoveryPanel = ({ disabled, onSearch }) => {
       ) {
         setLoading(false);
       }
+      requestInFlightRef.current = false;
     }
   };
 
@@ -236,21 +255,29 @@ const SoulseekDiscoveryPanel = ({ disabled, onSearch }) => {
   };
 
   const addToWishlist = async (searchText) => {
+    const normalizedSearchText = typeof searchText === 'string' ? searchText.trim() : '';
+    if (
+      !normalizedSearchText ||
+      !mountedRef.current ||
+      disabled ||
+      wishlistInFlightRef.current
+    ) return;
     const requestId = ++actionRequestIdRef.current;
-    if (!mountedRef.current || disabled) return;
+    wishlistInFlightRef.current = true;
+    setWishlistLoading(true);
     try {
       await wishlist.create({
         autoDownload: false,
         enabled: false,
         filter: 'source:soulseek-native-discovery; review-only',
         maxResults: 25,
-        searchText,
+        searchText: normalizedSearchText,
       });
       if (
         mountedRef.current &&
         requestId === actionRequestIdRef.current
       ) {
-        toast.success(`Added ${searchText} to Wishlist for review`);
+        toast.success(`Added ${normalizedSearchText} to Wishlist for review`);
       }
     } catch (wishlistError) {
       if (
@@ -259,6 +286,9 @@ const SoulseekDiscoveryPanel = ({ disabled, onSearch }) => {
       ) {
         toast.error(errorMessage(wishlistError, 'Unable to add to Wishlist.'));
       }
+    } finally {
+      wishlistInFlightRef.current = false;
+      if (mountedRef.current) setWishlistLoading(false);
     }
   };
 
@@ -281,6 +311,7 @@ const SoulseekDiscoveryPanel = ({ disabled, onSearch }) => {
           trigger={
             <Button
               aria-label={`Add ${recommendation.item} to Wishlist`}
+              disabled={loading || wishlistLoading}
               icon="bookmark outline"
               onClick={() => addToWishlist(recommendation.item)}
               size="mini"
@@ -308,6 +339,7 @@ const SoulseekDiscoveryPanel = ({ disabled, onSearch }) => {
           trigger={
             <Button
               aria-label={`Load ${user.username} interests`}
+              disabled={loading}
               icon="heart outline"
               onClick={() => loadUserInterests(user.username)}
               size="mini"
@@ -360,8 +392,8 @@ const SoulseekDiscoveryPanel = ({ disabled, onSearch }) => {
     );
   }
 
-  const liked = getValue(userInterests, 'liked', 'Liked', []) || [];
-  const hated = getValue(userInterests, 'hated', 'Hated', []) || [];
+  const liked = getStringList(getValue(userInterests, 'liked', 'Liked', []));
+  const hated = getStringList(getValue(userInterests, 'hated', 'Hated', []));
 
   return (
     <Segment loading={loading}>
@@ -393,6 +425,7 @@ const SoulseekDiscoveryPanel = ({ disabled, onSearch }) => {
         </Form.Group>
         <Button.Group size="small">
           <Button
+            disabled={loading}
             icon
             labelPosition="left"
             onClick={() => updateInterest(false, false)}
@@ -402,6 +435,7 @@ const SoulseekDiscoveryPanel = ({ disabled, onSearch }) => {
             Add Interest
           </Button>
           <Button
+            disabled={loading}
             icon
             labelPosition="left"
             onClick={() => updateInterest(true, false)}
@@ -411,6 +445,7 @@ const SoulseekDiscoveryPanel = ({ disabled, onSearch }) => {
             Add Hated
           </Button>
           <Button
+            disabled={loading}
             icon
             labelPosition="left"
             onClick={() => updateInterest(false, true)}
@@ -420,6 +455,7 @@ const SoulseekDiscoveryPanel = ({ disabled, onSearch }) => {
             Remove Interest
           </Button>
           <Button
+            disabled={loading}
             icon
             labelPosition="left"
             onClick={() => updateInterest(true, true)}
@@ -434,6 +470,7 @@ const SoulseekDiscoveryPanel = ({ disabled, onSearch }) => {
           size="small"
         >
           <Button
+            disabled={loading}
             icon
             labelPosition="left"
             onClick={() => loadRecommendations(false)}
@@ -443,6 +480,7 @@ const SoulseekDiscoveryPanel = ({ disabled, onSearch }) => {
             My Recs
           </Button>
           <Button
+            disabled={loading}
             icon
             labelPosition="left"
             onClick={() => loadRecommendations(true)}
@@ -452,6 +490,7 @@ const SoulseekDiscoveryPanel = ({ disabled, onSearch }) => {
             Global
           </Button>
           <Button
+            disabled={loading}
             icon
             labelPosition="left"
             onClick={loadSimilarUsers}
@@ -461,6 +500,7 @@ const SoulseekDiscoveryPanel = ({ disabled, onSearch }) => {
             Similar Users
           </Button>
           <Button
+            disabled={loading}
             icon
             labelPosition="left"
             onClick={loadItemRecommendations}
@@ -470,6 +510,7 @@ const SoulseekDiscoveryPanel = ({ disabled, onSearch }) => {
             Item Recs
           </Button>
           <Button
+            disabled={loading}
             icon
             labelPosition="left"
             onClick={loadItemSimilarUsers}
@@ -479,6 +520,7 @@ const SoulseekDiscoveryPanel = ({ disabled, onSearch }) => {
             Item Users
           </Button>
           <Button
+            disabled={loading}
             icon
             labelPosition="left"
             onClick={() => loadUserInterests()}

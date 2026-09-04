@@ -4,7 +4,7 @@ import {
 } from '../../../lib/setupHealthCheck';
 import { toDisplayError } from '../../../lib/errors';
 import { useMountedRef } from '../../../lib/useMountedRef';
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { toast } from 'react-toastify';
 import {
   Button,
@@ -41,6 +41,8 @@ const copyToClipboard = async (value) => {
 
 const SetupHealthCheckModal = ({ options = {}, state = {} }) => {
   const [activeGroup, setActiveGroup] = useState('All');
+  const [copying, setCopying] = useState(false);
+  const copyingRef = useRef(false);
   const [open, setOpen] = useState(false);
   const mountedRef = useMountedRef();
   const summary = useMemo(
@@ -65,7 +67,9 @@ const SetupHealthCheckModal = ({ options = {}, state = {} }) => {
   );
 
   const copyReport = async () => {
-    if (!mountedRef.current) return;
+    if (!mountedRef.current || copying || copyingRef.current) return;
+    copyingRef.current = true;
+    setCopying(true);
     try {
       const copied = await copyToClipboard(report);
 
@@ -80,6 +84,9 @@ const SetupHealthCheckModal = ({ options = {}, state = {} }) => {
       if (mountedRef.current) {
         toast.error(toDisplayError(error, 'Unable to copy setup health report'));
       }
+    } finally {
+      copyingRef.current = false;
+      if (mountedRef.current) setCopying(false);
     }
   };
 
@@ -220,6 +227,8 @@ const SetupHealthCheckModal = ({ options = {}, state = {} }) => {
             trigger={
               <Button
                 aria-label="Copy setup health report"
+                disabled={copying}
+                loading={copying}
                 onClick={copyReport}
                 primary
               >

@@ -1,4 +1,5 @@
 import api from './api';
+import { toDisplayError } from './errors';
 
 // Older daemon profiles may not expose every optional endpoint. Preserve the
 // compatibility fallback for that case, but surface real outages and auth
@@ -56,7 +57,7 @@ export const triggerMeshSync = async (username) => {
   try {
     return (await api.post(`/mesh/sync/${encodeURIComponent(username)}`)).data;
   } catch (error) {
-    return { error: error?.message || 'Sync failed', success: false };
+    return { error: toDisplayError(error, 'Sync failed'), success: false };
   }
 };
 
@@ -87,7 +88,7 @@ export const backfillFromSearchHistory = async (options = {}) => {
 
     return (await api.post(`/hashdb/backfill/from-history${query}`)).data;
   } catch (error) {
-    return { error: error?.message || 'Backfill failed', success: false };
+    return { error: toDisplayError(error, 'Backfill failed'), success: false };
   }
 };
 

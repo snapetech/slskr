@@ -1,5 +1,6 @@
 import './Users.css';
 import { activeUserInfoKey } from '../../config';
+import { toDisplayError } from '../../lib/errors';
 import {
   getLocalStorageItem,
   removeLocalStorageItem,
@@ -12,11 +13,38 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { Icon, Input, Item, Loader, Segment } from 'semantic-ui-react';
 
+const toText = (value, fallback = '') => {
+  if (typeof value === 'string' || typeof value === 'number') return String(value);
+  return fallback;
+};
+
+const asRecord = (value) =>
+  value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+
+const normalizeUser = (responses, username) => {
+  const merged = responses.reduce(
+    (result, response) => ({ ...result, ...asRecord(response?.data) }),
+    {},
+  );
+  return {
+    ...merged,
+    address: toText(merged.address, 'Unknown'),
+    description: toText(merged.description),
+    hasPicture: merged.hasPicture === true && typeof merged.picture === 'string',
+    picture: toText(merged.picture),
+    port: toText(merged.port, 'Unknown'),
+    presence: toText(merged.presence, 'Unknown'),
+    queueLength: toText(merged.queueLength, 'Unknown'),
+    uploadSlots: toText(merged.uploadSlots, 'Unknown'),
+    username: toText(merged.username, username),
+  };
+};
+
 const Users = () => {
   const location = useLocation();
   const inputRef = useRef();
   const [user, setUser] = useState();
-  const [usernameInput, setUsernameInput] = useState();
+  const [usernameInput, setUsernameInput] = useState('');
   const [selectedUsername, setSelectedUsername] = useState(undefined);
   // eslint-disable-next-line react/hook-use-state
   const [{ error, fetching }, setStatus] = useState({
@@ -25,16 +53,19 @@ const Users = () => {
   });
 
   const setInputText = (text) => {
-    inputRef.current.inputRef.current.value = text;
+    if (inputRef.current?.inputRef?.current) {
+      inputRef.current.inputRef.current.value = text;
+    }
   };
 
   const setInputFocus = () => {
-    inputRef.current.focus();
+    inputRef.current?.focus?.();
   };
 
   const clear = () => {
     removeLocalStorageItem(activeUserInfoKey);
     setSelectedUsername(undefined);
+    setUsernameInput('');
     setUser(undefined);
     setInputText('');
     setInputFocus();
@@ -49,8 +80,12 @@ const Users = () => {
       location.state?.user || getLocalStorageItem(activeUserInfoKey);
 
     if (storedUsername !== undefined) {
-      setSelectedUsername(storedUsername);
-      setInputText(storedUsername);
+      const normalizedUsername = toText(storedUsername).trim();
+      if (normalizedUsername) {
+        setSelectedUsername(normalizedUsername);
+        setUsernameInput(normalizedUsername);
+        setInputText(normalizedUsername);
+      }
     }
 
     return () => document.removeEventListener('keyup', keyUp, false);
@@ -83,11 +118,14 @@ const Users = () => {
         }
 
         setLocalStorageItem(activeUserInfoKey, selectedUsername);
-        setUser({ ...info.data, ...status.data, ...endpoint.data });
+        setUser(normalizeUser([info, status, endpoint], selectedUsername));
         setStatus({ error: undefined, fetching: false });
       } catch (fetchError) {
         if (active) {
-          setStatus({ error: fetchError, fetching: false });
+          setStatus({
+            error: toDisplayError(fetchError, 'Failed to retrieve user information'),
+            fetching: false,
+          });
         }
       }
     };
@@ -98,6 +136,12 @@ const Users = () => {
       active = false;
     };
   }, [selectedUsername]);
+
+  const submitUsername = () => {
+    const normalizedUsername =
+      typeof usernameInput === 'string' ? usernameInput.trim() : '';
+    if (normalizedUsername) setSelectedUsername(normalizedUsername);
+  };
 
   return (
     <div className="users-container">
@@ -118,7 +162,7 @@ const Users = () => {
               ? {
                   'aria-label': 'Search for user',
                   icon: 'search',
-                  onClick: () => setSelectedUsername(usernameInput),
+                  onClick: submitUsername,
                   title: 'Search for user',
                 }
               : {
@@ -142,7 +186,7 @@ const Users = () => {
           loading={fetching}
           onChange={(event) => setUsernameInput(event.target.value)}
           onKeyUp={(event) =>
-            event.key === 'Enter' ? setSelectedUsername(usernameInput) : ''
+            event.key === 'Enter' ? submitUsername() : ''
           }
           placeholder="Username"
           ref={inputRef}
@@ -159,7 +203,9 @@ const Users = () => {
       ) : (
         <div>
           {error ? (
-            <span>Failed to retrieve information for {selectedUsername}</span>
+            <span>
+              Failed to retrieve information for {selectedUsername}: {error}
+            </span>
           ) : user == null ? (
             <PlaceholderSegment
               caption="No user info to display"

@@ -38,6 +38,25 @@ const GOLD_STAR_CLUB_POD_ID = 'pod:901d57a2c1bb4e5d90d57a2c1bb4e5d0';
 
 let panelCounter = 0;
 
+const asRecords = (value) =>
+  (Array.isArray(value) ? value : []).filter(
+    (record) => record && typeof record === 'object' && !Array.isArray(record),
+  );
+
+const normalizePanel = (panel) => {
+  if (!panel || typeof panel !== 'object' || Array.isArray(panel)) return null;
+  const type = ['chat', 'room', 'pod'].includes(panel.type) ? panel.type : null;
+  const target = `${panel.target ?? ''}`.trim();
+  if (!type || !target) return null;
+  return {
+    ...panel,
+    collapsed: Boolean(panel.collapsed),
+    id: `${panel.id || `${type}-${target}`}`,
+    target,
+    type,
+  };
+};
+
 const loadPanels = () => {
   try {
     const saved = getLocalStorageItem(STORAGE_KEY);
@@ -46,8 +65,15 @@ const loadPanels = () => {
     }
 
     const parsed = JSON.parse(saved);
-    panelCounter = parsed.panelCounter || 0;
-    return Array.isArray(parsed.panels) ? parsed.panels : [];
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return [];
+    }
+    panelCounter = Number.isInteger(parsed.panelCounter) && parsed.panelCounter >= 0
+      ? parsed.panelCounter
+      : 0;
+    return Array.isArray(parsed.panels)
+      ? parsed.panels.map(normalizePanel).filter(Boolean)
+      : [];
   } catch {
     return [];
   }
@@ -109,6 +135,9 @@ const PodChannelSession = ({ channel, state }) => {
   const mountedRef = useRef(false);
   const refreshRequestIdRef = useRef(0);
   const sendRequestIdRef = useRef(0);
+  const sendInFlightRef = useRef(false);
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState('');
 
   useEffect(() => {
     mountedRef.current = true;
@@ -134,8 +163,8 @@ const PodChannelSession = ({ channel, state }) => {
     ) {
       return;
     }
-    setMessages(channelMessages || []);
-    setMembers(podMembers || []);
+    setMessages(asRecords(channelMessages));
+    setMembers(asRecords(podMembers));
   }, [channel?.channelId, channel?.podId]);
 
   usePolling(
@@ -152,23 +181,49 @@ const PodChannelSession = ({ channel, state }) => {
 
   const send = async () => {
     const trimmed = body.trim();
-    if (!trimmed || !channel?.podId || !channel?.channelId) return;
-
-    const requestId = ++sendRequestIdRef.current;
-    await pods.sendMessage(
-      channel.podId,
-      channel.channelId,
-      trimmed,
-      state?.user?.username || 'local-peer',
-    );
     if (
-      !mountedRef.current ||
-      requestId !== sendRequestIdRef.current
-    ) {
-      return;
+      !trimmed ||
+      !channel?.podId ||
+      !channel?.channelId ||
+      sendInFlightRef.current ||
+      !mountedRef.current
+    ) return;
+
+    sendInFlightRef.current = true;
+    const requestId = ++sendRequestIdRef.current;
+    setSending(true);
+    setError('');
+    try {
+      await pods.sendMessage(
+        channel.podId,
+        channel.channelId,
+        trimmed,
+        state?.user?.username || 'local-peer',
+      );
+      if (
+        !mountedRef.current ||
+        requestId !== sendRequestIdRef.current
+      ) {
+        return;
+      }
+      setBody('');
+      await refresh();
+    } catch (sendError) {
+      if (
+        mountedRef.current &&
+        requestId === sendRequestIdRef.current
+      ) {
+        setError(toDisplayError(sendError, 'Failed to send pod message'));
+      }
+    } finally {
+      sendInFlightRef.current = false;
+      if (
+        mountedRef.current &&
+        requestId === sendRequestIdRef.current
+      ) {
+        setSending(false);
+      }
     }
-    setBody('');
-    await refresh();
   };
 
   return (
@@ -182,6 +237,7 @@ const PodChannelSession = ({ channel, state }) => {
         />
       )}
       <div className="pod-message-session-main">
+        {error ? <Message negative>{error}</Message> : null}
         <Segment.Group>
           <Segment className="pod-message-session-history">
             {messages.length === 0 ? (
@@ -194,7 +250,7 @@ const PodChannelSession = ({ channel, state }) => {
                 {messages.map((message, index) => (
                   <List.Content
                     className={`room-message ${message.senderPeerId === state?.user?.username ? 'room-message-self' : ''}`}
-                    key={`${message.timestampUnixMs}-${index}`}
+                    key={`${message.timestampUnixMs || index}-${index}`}
                   >
                     <span className="room-message-time">
                       {message.timestampUnixMs
@@ -202,10 +258,10 @@ const PodChannelSession = ({ channel, state }) => {
                         : ''}
                     </span>
                     <span className="room-message-name">
-                      {message.senderPeerId}:{' '}
+                      {String(message.senderPeerId ?? message.username ?? 'Unknown peer')}:{' '}
                     </span>
                     <span className="room-message-message">
-                      {message.body}
+                      {String(message.body ?? '')}
                     </span>
                   </List.Content>
                 ))}
@@ -234,8 +290,9 @@ const PodChannelSession = ({ channel, state }) => {
                 trigger={
                   <Button
                     aria-label={`Send message to ${channelLabel(channel)}`}
-                    disabled={!body.trim()}
+                    disabled={!body.trim() || sending}
                     icon="send"
+                    loading={sending}
                     onClick={() =>
                       send().catch((error) => {
                         console.error('Failed to send pod message:', error);
@@ -259,7 +316,9 @@ const PodChannelSession = ({ channel, state }) => {
             relaxed
           >
             {members.map((member) => {
-              const username = member.peerId || member.username || member.PeerId;
+              const username = String(
+                member.peerId || member.username || member.PeerId || 'Unknown peer',
+              );
 
               return (
                 <List.Item key={username}>
@@ -268,7 +327,7 @@ const PodChannelSession = ({ channel, state }) => {
                       <UserCard username={username}>{username}</UserCard>
                     </List.Header>
                     <List.Description>
-                      {member.role || member.Role || 'Member'}
+                      {String(member.role || member.Role || 'Member')}
                     </List.Description>
                   </List.Content>
                 </List.Item>
@@ -297,8 +356,12 @@ const Messaging = ({ runtimeProfile, initialKind = 'mixed', state }) => {
   const mountedRef = useRef(false);
   const hydrateRequestIdRef = useRef(0);
   const availableRoomsRequestIdRef = useRef(0);
-  const workspaceActionRequestIdRef = useRef(0);
+  const workspaceActionRequestIdRef = useRef(new Map());
   const batchRequestIdRef = useRef(0);
+  const workspaceActionInFlightRef = useRef(new Set());
+  const batchInFlightRef = useRef(false);
+  const roomsRequestInFlightRef = useRef(false);
+  const [workspaceActionKeys, setWorkspaceActionKeys] = useState([]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -306,7 +369,8 @@ const Messaging = ({ runtimeProfile, initialKind = 'mixed', state }) => {
       mountedRef.current = false;
       hydrateRequestIdRef.current += 1;
       availableRoomsRequestIdRef.current += 1;
-      workspaceActionRequestIdRef.current += 1;
+      workspaceActionRequestIdRef.current.clear();
+      workspaceActionInFlightRef.current.clear();
       batchRequestIdRef.current += 1;
     };
   }, []);
@@ -368,11 +432,11 @@ const Messaging = ({ runtimeProfile, initialKind = 'mixed', state }) => {
     const joinedRoomList = Array.isArray(serverJoinedRooms)
       ? serverJoinedRooms
       : [];
-    const podList = Array.isArray(serverPods) ? serverPods : [];
+    const podList = asRecords(serverPods).filter((pod) => pod.podId);
     const podDetails =
       runtimeProfile === 'native'
-        ? Array.isArray(serverDiscoveredPods) && serverDiscoveredPods.length > 0
-          ? serverDiscoveredPods
+        ? asRecords(serverDiscoveredPods).length > 0
+          ? asRecords(serverDiscoveredPods)
           : podList
         : await Promise.all(
             podList.map(async (pod) => {
@@ -393,7 +457,12 @@ const Messaging = ({ runtimeProfile, initialKind = 'mixed', state }) => {
 
     setConversations(
       conversationsList
-        .filter((conversation) => conversation.username)
+        .filter((conversation) => typeof conversation?.username === 'string' && conversation.username.trim())
+        .map((conversation) => ({
+          ...conversation,
+          hasUnAcknowledgedMessages: Boolean(conversation.hasUnAcknowledgedMessages),
+          username: conversation.username.trim(),
+        }))
         .sort((a, b) => {
           if (a.hasUnAcknowledgedMessages !== b.hasUnAcknowledgedMessages) {
             return a.hasUnAcknowledgedMessages ? -1 : 1;
@@ -402,19 +471,30 @@ const Messaging = ({ runtimeProfile, initialKind = 'mixed', state }) => {
           return a.username.localeCompare(b.username);
         }),
     );
-    setJoinedRooms(joinedRoomList.filter(Boolean).sort());
+    setJoinedRooms(
+      joinedRoomList
+        .filter((roomName) => typeof roomName === 'string' && roomName.trim())
+        .map((roomName) => roomName.trim())
+        .sort(),
+    );
     setPodChannels(
       podDetails
-        .filter(Boolean)
+        .filter((pod) => pod?.podId)
         .flatMap((pod) =>
-          (Array.isArray(pod.channels) ? pod.channels : []).map((channel) => ({
-            channelId: channel.channelId,
-            channelKind: channel.kind,
-            channelName: channel.name,
-            podId: pod.podId,
-            podName: pod.name || pod.podId,
-            target: encodePodTarget(pod.podId, channel.channelId),
-          })),
+          asRecords(pod.channels)
+            .filter((channel) => channel.channelId || channel.id)
+            .map((channel) => {
+              const channelId = `${channel.channelId || channel.id}`;
+              const podId = `${pod.podId}`;
+              return {
+                channelId,
+                channelKind: `${channel.kind || channel.channelKind || ''}`,
+                channelName: `${channel.name || channel.channelName || channelId}`,
+                podId,
+                podName: `${pod.name || podId}`,
+                target: encodePodTarget(podId, channelId),
+              };
+            }),
         )
         .sort((a, b) => channelLabel(a).localeCompare(channelLabel(b))),
     );
@@ -429,6 +509,27 @@ const Messaging = ({ runtimeProfile, initialKind = 'mixed', state }) => {
       return false;
     }
   }, [hydrate]);
+
+  const beginWorkspaceAction = useCallback((key) => {
+    if (!mountedRef.current || !key || workspaceActionInFlightRef.current.has(key)) {
+      return false;
+    }
+    workspaceActionInFlightRef.current.add(key);
+    setWorkspaceActionKeys(Array.from(workspaceActionInFlightRef.current));
+    return true;
+  }, []);
+
+  const finishWorkspaceAction = useCallback((key) => {
+    workspaceActionInFlightRef.current.delete(key);
+    if (mountedRef.current) {
+      setWorkspaceActionKeys(Array.from(workspaceActionInFlightRef.current));
+    }
+  }, []);
+
+  const isWorkspaceActionPending = useCallback(
+    (key) => workspaceActionKeys.includes(key),
+    [workspaceActionKeys],
+  );
 
   const savedChatNames = useMemo(
     () =>
@@ -546,8 +647,9 @@ const Messaging = ({ runtimeProfile, initialKind = 'mixed', state }) => {
 
   const fetchAvailableRooms = async () => {
     const requestId = ++availableRoomsRequestIdRef.current;
-    if (!mountedRef.current) return;
+    if (!mountedRef.current || roomsRequestInFlightRef.current) return;
 
+    roomsRequestInFlightRef.current = true;
     setRoomSearchLoading(true);
     try {
       const available = await rooms.getAvailable();
@@ -555,7 +657,17 @@ const Messaging = ({ runtimeProfile, initialKind = 'mixed', state }) => {
         mountedRef.current &&
         requestId === availableRoomsRequestIdRef.current
       ) {
-        setAvailableRooms(available || []);
+        setAvailableRooms(
+          asRecords(available)
+            .filter((room) => typeof room.name === 'string' && room.name.trim())
+            .map((room) => ({
+              ...room,
+              name: room.name.trim(),
+              userCount: Number.isFinite(Number(room.userCount))
+                ? Number(room.userCount)
+                : 0,
+            })),
+        );
       }
     } catch {
       if (
@@ -571,26 +683,34 @@ const Messaging = ({ runtimeProfile, initialKind = 'mixed', state }) => {
       ) {
         setRoomSearchLoading(false);
       }
+      roomsRequestInFlightRef.current = false;
     }
   };
 
   const joinRoom = async (roomName) => {
-    if (!roomName) {
+    const actionKey = `room:join:${roomName}`;
+    if (!roomName || !beginWorkspaceAction(actionKey)) {
       return;
     }
 
-    const requestId = ++workspaceActionRequestIdRef.current;
+    const requestId = (workspaceActionRequestIdRef.current.get(actionKey) || 0) + 1;
+    workspaceActionRequestIdRef.current.set(actionKey, requestId);
     try {
       await rooms.join({ roomName });
       if (!(await refreshWorkspace())) return;
       if (
         mountedRef.current &&
-        requestId === workspaceActionRequestIdRef.current
+        requestId === workspaceActionRequestIdRef.current.get(actionKey)
       ) {
         openPanel('room', roomName);
       }
     } catch (error) {
       console.error('Failed to join room:', error);
+      if (mountedRef.current) {
+        toast.error(`Failed to join room: ${toDisplayError(error)}`);
+      }
+    } finally {
+      finishWorkspaceAction(actionKey);
     }
   };
 
@@ -602,14 +722,17 @@ const Messaging = ({ runtimeProfile, initialKind = 'mixed', state }) => {
     ) {
       return;
     }
+    const actionKey = `room:leave:${roomName}`;
+    if (!beginWorkspaceAction(actionKey)) return;
 
-    const requestId = ++workspaceActionRequestIdRef.current;
+    const requestId = (workspaceActionRequestIdRef.current.get(actionKey) || 0) + 1;
+    workspaceActionRequestIdRef.current.set(actionKey, requestId);
     try {
       await rooms.leave({ roomName });
       if (!(await refreshWorkspace())) return;
       if (
         mountedRef.current &&
-        requestId === workspaceActionRequestIdRef.current
+        requestId === workspaceActionRequestIdRef.current.get(actionKey)
       ) {
         setPanels((previous) =>
           previous.filter(
@@ -619,6 +742,11 @@ const Messaging = ({ runtimeProfile, initialKind = 'mixed', state }) => {
       }
     } catch (error) {
       console.error('Failed to leave room:', error);
+      if (mountedRef.current) {
+        toast.error(`Failed to leave room: ${toDisplayError(error)}`);
+      }
+    } finally {
+      finishWorkspaceAction(actionKey);
     }
   };
 
@@ -630,14 +758,17 @@ const Messaging = ({ runtimeProfile, initialKind = 'mixed', state }) => {
     ) {
       return;
     }
+    const actionKey = `chat:delete:${username}`;
+    if (!beginWorkspaceAction(actionKey)) return;
 
-    const requestId = ++workspaceActionRequestIdRef.current;
+    const requestId = (workspaceActionRequestIdRef.current.get(actionKey) || 0) + 1;
+    workspaceActionRequestIdRef.current.set(actionKey, requestId);
     try {
       await chat.remove({ username });
       if (!(await refreshWorkspace())) return;
       if (
         mountedRef.current &&
-        requestId === workspaceActionRequestIdRef.current
+        requestId === workspaceActionRequestIdRef.current.get(actionKey)
       ) {
         setPanels((previous) =>
           previous.filter(
@@ -647,6 +778,11 @@ const Messaging = ({ runtimeProfile, initialKind = 'mixed', state }) => {
       }
     } catch (error) {
       console.error('Failed to delete conversation:', error);
+      if (mountedRef.current) {
+        toast.error(`Failed to delete conversation: ${toDisplayError(error)}`);
+      }
+    } finally {
+      finishWorkspaceAction(actionKey);
     }
   };
 
@@ -665,14 +801,17 @@ const Messaging = ({ runtimeProfile, initialKind = 'mixed', state }) => {
     if (!window.confirm(prompt)) {
       return;
     }
+    const actionKey = `pod:leave:${channel.podId}`;
+    if (!beginWorkspaceAction(actionKey)) return;
 
-    const requestId = ++workspaceActionRequestIdRef.current;
+    const requestId = (workspaceActionRequestIdRef.current.get(actionKey) || 0) + 1;
+    workspaceActionRequestIdRef.current.set(actionKey, requestId);
     try {
       await pods.leave(channel.podId, peerId);
       if (!(await refreshWorkspace())) return;
       if (
         mountedRef.current &&
-        requestId === workspaceActionRequestIdRef.current
+        requestId === workspaceActionRequestIdRef.current.get(actionKey)
       ) {
         setPanels((previous) =>
           previous.filter((panel) => {
@@ -684,6 +823,11 @@ const Messaging = ({ runtimeProfile, initialKind = 'mixed', state }) => {
       }
     } catch (error) {
       console.error('Failed to leave pod:', error);
+      if (mountedRef.current) {
+        toast.error(`Failed to leave pod: ${toDisplayError(error)}`);
+      }
+    } finally {
+      finishWorkspaceAction(actionKey);
     }
   };
 
@@ -704,6 +848,8 @@ const Messaging = ({ runtimeProfile, initialKind = 'mixed', state }) => {
       return;
     }
 
+    if (!mountedRef.current || batchInFlightRef.current) return;
+    batchInFlightRef.current = true;
     const requestId = ++batchRequestIdRef.current;
     setBatchSending(true);
     try {
@@ -733,6 +879,7 @@ const Messaging = ({ runtimeProfile, initialKind = 'mixed', state }) => {
       ) {
         setBatchSending(false);
       }
+      batchInFlightRef.current = false;
     }
   };
 
@@ -858,6 +1005,7 @@ const Messaging = ({ runtimeProfile, initialKind = 'mixed', state }) => {
                     trigger={
                       <Button
                         aria-label={`Delete message thread with ${conversation.username}`}
+                        disabled={isWorkspaceActionPending(`chat:delete:${conversation.username}`)}
                         icon="trash alternate"
                         negative
                         onClick={() => deleteConversation(conversation.username)}
@@ -922,6 +1070,7 @@ const Messaging = ({ runtimeProfile, initialKind = 'mixed', state }) => {
                     trigger={
                       <Button
                         aria-label={`Leave room ${roomName}`}
+                        disabled={isWorkspaceActionPending(`room:leave:${roomName}`)}
                         icon="sign-out"
                         negative
                         onClick={() => leaveRoom(roomName)}
@@ -970,6 +1119,7 @@ const Messaging = ({ runtimeProfile, initialKind = 'mixed', state }) => {
                     trigger={
                       <Button
                         aria-label={`Leave pod ${channel.podName}`}
+                        disabled={isWorkspaceActionPending(`pod:leave:${channel.podId}`)}
                         icon="sign-out"
                         negative
                         onClick={() => leavePod(channel)}
@@ -1134,6 +1284,7 @@ const Messaging = ({ runtimeProfile, initialKind = 'mixed', state }) => {
                               trigger={
                                 <Button
                                   aria-label={`Delete message thread with ${panel.target}`}
+                                  disabled={isWorkspaceActionPending(`chat:delete:${panel.target}`)}
                                   icon="trash alternate"
                                   negative
                                   onClick={() => deleteConversation(panel.target)}
@@ -1150,6 +1301,7 @@ const Messaging = ({ runtimeProfile, initialKind = 'mixed', state }) => {
                             trigger={
                               <Button
                                 aria-label={`Leave room ${panel.target}`}
+                                disabled={isWorkspaceActionPending(`room:leave:${panel.target}`)}
                                 icon="sign-out"
                                 negative
                                 onClick={() => leaveRoom(panel.target)}
@@ -1165,6 +1317,7 @@ const Messaging = ({ runtimeProfile, initialKind = 'mixed', state }) => {
                             trigger={
                               <Button
                                 aria-label={`Leave pod ${panelPodChannel.podName}`}
+                                disabled={isWorkspaceActionPending(`pod:leave:${panelPodChannel.podId}`)}
                                 icon="sign-out"
                                 negative
                                 onClick={() => leavePod(panelPodChannel)}

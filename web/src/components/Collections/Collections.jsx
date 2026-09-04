@@ -1,4 +1,5 @@
 import * as collectionsAPI from '../../lib/collections';
+import { toDisplayError } from '../../lib/errors';
 import PlayCollectionItemButton from '../Player/PlayCollectionItemButton';
 import ErrorSegment from '../Shared/ErrorSegment';
 import LoaderSegment from '../Shared/LoaderSegment';
@@ -23,8 +24,12 @@ export default class Collections extends Component {
 
     this.state = {
       addItemModalOpen: false,
+      addingItem: false,
       collections: [],
+      creatingCollection: false,
+      creatingShare: false,
       createModalOpen: false,
+      deletingCollectionId: null,
       error: null,
       itemSearchLoading: false,
       itemSearchQuery: '',
@@ -35,6 +40,7 @@ export default class Collections extends Component {
       newCollectionType: 'Playlist',
       selectedCollection: null,
       selectedCollectionItems: [],
+      removingItemId: null,
       shareAllowDownload: true,
       shareAllowStream: true,
       shareAudienceId: null,
@@ -45,8 +51,13 @@ export default class Collections extends Component {
     };
     this.isMountedFlag = false;
     this.requestIds = {
+      addItem: 0,
       collectionItems: 0,
       collections: 0,
+      createCollection: 0,
+      createShare: 0,
+      deleteCollection: 0,
+      removeItem: 0,
       search: 0,
       shareGroups: 0,
       shares: 0,
@@ -75,9 +86,9 @@ export default class Collections extends Component {
       }
       const response = await collectionsAPI.getCollections().catch((error) => {
         if (
-          error.response?.status === 401 ||
-          error.response?.status === 403 ||
-          error.response?.status === 404
+          error?.response?.status === 401 ||
+          error?.response?.status === 403 ||
+          error?.response?.status === 404
         ) {
           return { data: [] };
         }
@@ -91,23 +102,12 @@ export default class Collections extends Component {
         });
       }
     } catch (error) {
-      let errorMessage = error.message;
-      if (error.response?.data) {
-        if (typeof error.response.data === 'string') {
-          errorMessage = error.response.data;
-        } else if (error.response.data.message) {
-          errorMessage = error.response.data.message;
-        } else if (error.response.data.error) {
-          errorMessage = error.response.data.error;
-        } else {
-          errorMessage = JSON.stringify(error.response.data);
-        }
-      }
+      const errorMessage = toDisplayError(error, 'Failed to load collections');
 
       const isAuthOrFeatureError =
-        error.response?.status === 401 ||
-        error.response?.status === 403 ||
-        error.response?.status === 404;
+        error?.response?.status === 401 ||
+        error?.response?.status === 403 ||
+        error?.response?.status === 404;
       if (this.isMountedFlag && requestId === this.requestIds.collections) {
         this.setState({
           error: isAuthOrFeatureError ? null : errorMessage,
@@ -125,9 +125,9 @@ export default class Collections extends Component {
       }
       const response = await collectionsAPI.getShareGroups().catch((error) => {
         if (
-          error.response?.status === 401 ||
-          error.response?.status === 403 ||
-          error.response?.status === 404
+          error?.response?.status === 401 ||
+          error?.response?.status === 403 ||
+          error?.response?.status === 404
         ) {
           return { data: [] };
         }
@@ -164,9 +164,9 @@ export default class Collections extends Component {
         .getSharesByCollection(collectionId)
         .catch((error) => {
           if (
-            error.response?.status === 401 ||
-            error.response?.status === 403 ||
-            error.response?.status === 404
+            error?.response?.status === 401 ||
+            error?.response?.status === 403 ||
+            error?.response?.status === 404
           ) {
             return { data: [] };
           }
@@ -205,13 +205,22 @@ export default class Collections extends Component {
   };
 
   handleCreateCollection = async () => {
+    if (!this.isMountedFlag || this.state.creatingCollection) return;
+    const requestId = ++this.requestIds.createCollection;
+    this.setState({ creatingCollection: true, error: null });
+
     try {
       await collectionsAPI.createCollection({
         description: this.state.newCollectionDescription || undefined,
         title: this.state.newCollectionTitle,
         type: this.state.newCollectionType,
       });
-      if (!this.isMountedFlag) return;
+      if (
+        !this.isMountedFlag ||
+        requestId !== this.requestIds.createCollection
+      ) {
+        return;
+      }
       this.setState({
         createModalOpen: false,
         error: null,
@@ -221,41 +230,70 @@ export default class Collections extends Component {
       });
       await this.loadData();
     } catch (error) {
-      let errorMessage = error.message || 'Failed to create collection';
-      if (error.response?.data) {
-        if (typeof error.response.data === 'string') {
-          errorMessage = error.response.data;
-        } else if (error.response.data.detail) {
-          errorMessage = error.response.data.detail;
-        } else if (error.response.data.message) {
-          errorMessage = error.response.data.message;
-        } else if (error.response.data.error) {
-          errorMessage = error.response.data.error;
-        } else if (error.response.data.title) {
-          errorMessage = error.response.data.title;
-        }
+      if (
+        this.isMountedFlag &&
+        requestId === this.requestIds.createCollection
+      ) {
+        this.setState({
+          error: toDisplayError(error, 'Failed to create collection'),
+        });
       }
-
-      if (this.isMountedFlag) this.setState({ error: errorMessage });
+    } finally {
+      if (
+        this.isMountedFlag &&
+        requestId === this.requestIds.createCollection
+      ) {
+        this.setState({ creatingCollection: false });
+      }
     }
   };
 
   handleDeleteCollection = async (id) => {
+    if (
+      !this.isMountedFlag ||
+      this.state.deletingCollectionId !== null
+    ) {
+      return;
+    }
     // eslint-disable-next-line no-alert
     if (!window.confirm('Delete this collection?')) return;
+    const requestId = ++this.requestIds.deleteCollection;
+    this.setState({ deletingCollectionId: id, error: null });
+
     try {
       await collectionsAPI.deleteCollection(id);
-      if (!this.isMountedFlag) return;
+      if (
+        !this.isMountedFlag ||
+        requestId !== this.requestIds.deleteCollection
+      ) {
+        return;
+      }
       await this.loadData();
-      if (this.state.selectedCollection?.id === id) {
+      if (
+        this.isMountedFlag &&
+        requestId === this.requestIds.deleteCollection &&
+        this.state.selectedCollection?.id === id
+      ) {
         this.setState({
           selectedCollection: null,
           selectedCollectionItems: [],
         });
       }
     } catch (error) {
-      if (this.isMountedFlag) {
-        this.setState({ error: error.response?.data || error.message });
+      if (
+        this.isMountedFlag &&
+        requestId === this.requestIds.deleteCollection
+      ) {
+        this.setState({
+          error: toDisplayError(error, 'Failed to delete collection'),
+        });
+      }
+    } finally {
+      if (
+        this.isMountedFlag &&
+        requestId === this.requestIds.deleteCollection
+      ) {
+        this.setState({ deletingCollectionId: null });
       }
     }
   };
@@ -295,7 +333,9 @@ export default class Collections extends Component {
     }
     try {
       const response = await collectionsAPI.searchLibraryItems(query, null, 20);
-      const items = response.data?.items || [];
+      const items = Array.isArray(response.data?.items)
+        ? response.data.items
+        : [];
       if (this.isMountedFlag && requestId === this.requestIds.search) {
         this.setState({
           itemSearchLoading: false,
@@ -312,18 +352,22 @@ export default class Collections extends Component {
 
   handleAddItem = async () => {
     const selectedCollection = this.state.selectedCollection;
-    if (!selectedCollection) return;
+    if (!selectedCollection || this.state.addingItem) return;
+
+    const requestId = ++this.requestIds.addItem;
+    const itemSearchQuery = this.state.itemSearchQuery.trim();
 
     // Use selected search result if available, otherwise use query as fallback
     const selectedResult = this.state.itemSearchResults.find(
-      (item) => item.contentId === this.state.itemSearchQuery,
+      (item) => item.contentId === itemSearchQuery,
     );
     const contentId = selectedResult
       ? selectedResult.contentId
-      : this.state.itemSearchQuery;
+      : itemSearchQuery;
     const mediaKind = selectedResult ? selectedResult.mediaKind : 'File'; // Default fallback
 
     if (!contentId) return;
+    this.setState({ addingItem: true, error: null });
 
     try {
       await collectionsAPI.addCollectionItem(selectedCollection.id, {
@@ -335,6 +379,7 @@ export default class Collections extends Component {
       });
       if (
         !this.isMountedFlag ||
+        requestId !== this.requestIds.addItem ||
         this.state.selectedCollection?.id !== selectedCollection.id
       ) {
         return;
@@ -347,18 +392,61 @@ export default class Collections extends Component {
       });
       await this.loadCollectionItems(selectedCollection.id);
     } catch (error) {
-      let errorMessage = error.message || 'Failed to add item';
-      if (error.response?.data) {
-        if (typeof error.response.data === 'string') {
-          errorMessage = error.response.data;
-        } else if (error.response.data.detail) {
-          errorMessage = error.response.data.detail;
-        } else if (error.response.data.message) {
-          errorMessage = error.response.data.message;
-        }
+      if (
+        this.isMountedFlag &&
+        requestId === this.requestIds.addItem
+      ) {
+        this.setState({ error: toDisplayError(error, 'Failed to add item') });
       }
+    } finally {
+      if (
+        this.isMountedFlag &&
+        requestId === this.requestIds.addItem
+      ) {
+        this.setState({ addingItem: false });
+      }
+    }
+  };
 
-      if (this.isMountedFlag) this.setState({ error: errorMessage });
+  handleRemoveItem = async (itemId) => {
+    const selectedCollection = this.state.selectedCollection;
+    if (
+      !selectedCollection ||
+      !this.isMountedFlag ||
+      this.state.removingItemId !== null
+    ) {
+      return;
+    }
+
+    const requestId = ++this.requestIds.removeItem;
+    this.setState({ error: null, removingItemId: itemId });
+
+    try {
+      await collectionsAPI.removeCollectionItem(itemId);
+      if (
+        !this.isMountedFlag ||
+        requestId !== this.requestIds.removeItem ||
+        this.state.selectedCollection?.id !== selectedCollection.id
+      ) {
+        return;
+      }
+      await this.loadCollectionItems(selectedCollection.id);
+    } catch (error) {
+      if (
+        this.isMountedFlag &&
+        requestId === this.requestIds.removeItem
+      ) {
+        this.setState({
+          error: toDisplayError(error, 'Failed to remove collection item'),
+        });
+      }
+    } finally {
+      if (
+        this.isMountedFlag &&
+        requestId === this.requestIds.removeItem
+      ) {
+        this.setState({ removingItemId: null });
+      }
     }
   };
 
@@ -380,7 +468,13 @@ export default class Collections extends Component {
       shareAudienceId,
       shareGroups,
     } = this.state;
-    if (!selectedCollection || !shareAudienceId) return;
+    if (
+      !selectedCollection ||
+      !shareAudienceId ||
+      this.state.creatingShare
+    ) {
+      return;
+    }
 
     // The backend has no "share with a group" primitive: /api/share-grants
     // only ever grants one Soulseek username access to one collection. A
@@ -389,7 +483,17 @@ export default class Collections extends Component {
     const audienceGroup = shareGroups.find(
       (group) => String(group.id) === String(shareAudienceId),
     );
-    const usernames = (audienceGroup?.members ?? []).map((member) => member.username);
+    const usernames = [
+      ...new Set(
+        (audienceGroup?.members ?? [])
+          .map((member) =>
+            typeof member?.username === 'string'
+              ? member.username.trim()
+              : '',
+          )
+          .filter(Boolean),
+      ),
+    ];
     if (usernames.length === 0) {
       this.setState({ error: 'Selected group has no members to share with.' });
       return;
@@ -403,6 +507,9 @@ export default class Collections extends Component {
       shareAllowStream && 'stream',
     ].filter(Boolean).join(',');
 
+    const requestId = ++this.requestIds.createShare;
+    this.setState({ creatingShare: true, error: null });
+
     try {
       const created = await Promise.all(
         usernames.map((username) =>
@@ -412,6 +519,12 @@ export default class Collections extends Component {
           })),
       );
       if (permissions) {
+        const shareIds = created
+          .map((response) => response?.data?.id)
+          .filter(Boolean);
+        if (shareIds.length !== created.length) {
+          throw new Error('Share creation returned an invalid grant');
+        }
         await Promise.all(
           created.map((response) =>
             collectionsAPI.updateShare(response.data.id, { permissions })),
@@ -419,6 +532,7 @@ export default class Collections extends Component {
       }
       if (
         !this.isMountedFlag ||
+        requestId !== this.requestIds.createShare ||
         this.state.selectedCollection?.id !== selectedCollection.id
       ) {
         return;
@@ -426,8 +540,20 @@ export default class Collections extends Component {
       this.setState({ error: null, shareModalOpen: false });
       await this.loadShares(selectedCollection.id);
     } catch (error) {
-      if (this.isMountedFlag) {
-        this.setState({ error: error.response?.data || error.message });
+      if (
+        this.isMountedFlag &&
+        requestId === this.requestIds.createShare
+      ) {
+        this.setState({
+          error: toDisplayError(error, 'Failed to share collection'),
+        });
+      }
+    } finally {
+      if (
+        this.isMountedFlag &&
+        requestId === this.requestIds.createShare
+      ) {
+        this.setState({ creatingShare: false });
       }
     }
   };
@@ -435,8 +561,12 @@ export default class Collections extends Component {
   render() {
     const {
       addItemModalOpen,
+      addingItem,
       collections,
+      creatingCollection,
+      creatingShare,
       createModalOpen,
+      deletingCollectionId,
       error,
       itemSearchLoading,
       itemSearchQuery,
@@ -447,6 +577,7 @@ export default class Collections extends Component {
       newCollectionType,
       selectedCollection,
       selectedCollectionItems,
+      removingItemId,
       shareAllowDownload,
       shareAllowStream,
       shareAudienceId,
@@ -533,6 +664,8 @@ export default class Collections extends Component {
                           event.stopPropagation();
                           this.handleDeleteCollection(collection.id);
                         }}
+                        loading={deletingCollectionId === collection.id}
+                        disabled={deletingCollectionId !== null}
                         size="small"
                       >
                         Delete
@@ -602,18 +735,9 @@ export default class Collections extends Component {
                                 <Button
                                   data-testid={`collection-item-remove-${index}`}
                                   negative
-                                  onClick={async () => {
-                                    try {
-                                      await collectionsAPI.removeCollectionItem(
-                                        item.id,
-                                      );
-                                      await this.loadCollectionItems(
-                                        selectedCollection.id,
-                                      );
-                                    } catch (error) {
-                                      this.setState({ error: error.message });
-                                    }
-                                  }}
+                                  disabled={removingItemId !== null}
+                                  loading={removingItemId === item.id}
+                                  onClick={() => this.handleRemoveItem(item.id)}
                                   size="small"
                                 >
                                   Remove
@@ -732,7 +856,8 @@ export default class Collections extends Component {
               </Button>
               <Button
                 data-testid="collections-create-submit"
-                disabled={!newCollectionTitle.trim()}
+                disabled={!newCollectionTitle.trim() || creatingCollection}
+                loading={creatingCollection}
                 onClick={this.handleCreateCollection}
                 primary
               >
@@ -803,12 +928,16 @@ export default class Collections extends Component {
               )}
             </Modal.Content>
             <Modal.Actions>
-              <Button onClick={() => this.setState({ shareModalOpen: false })}>
+              <Button
+                disabled={creatingShare}
+                onClick={() => this.setState({ shareModalOpen: false })}
+              >
                 Cancel
               </Button>
               <Button
                 data-testid="share-create-submit"
-                disabled={!shareAudienceId}
+                disabled={!shareAudienceId || creatingShare}
+                loading={creatingShare}
                 onClick={this.handleCreateShare}
                 primary
               >
@@ -896,7 +1025,8 @@ export default class Collections extends Component {
               </Button>
               <Button
                 data-testid="collection-add-item-submit"
-                disabled={!itemSearchQuery.trim()}
+                disabled={!itemSearchQuery.trim() || addingItem}
+                loading={addingItem}
                 onClick={this.handleAddItem}
                 primary
               >

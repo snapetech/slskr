@@ -1,4 +1,5 @@
 import { getAcquisitionProfile } from './acquisitionProfiles';
+import { toDisplayError } from './errors';
 import { getLocalStorageItem, setLocalStorageItem } from './storage';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -29,38 +30,42 @@ const now = () => new Date().toISOString();
 const normalizeState = (state) =>
   acquisitionPlanStates.includes(state) ? state : 'Planned';
 
-const normalizeText = (value) => `${value || ''}`.trim();
+const normalizeText = (value) =>
+  typeof value === 'string' || typeof value === 'number' ? String(value).trim() : '';
 
 const isPlainObject = (value) =>
   value && typeof value === 'object' && !Array.isArray(value);
 
-const normalizePlan = (plan) => {
+const normalizePlan = (plan = {}) => {
+  const sourcePlan = isPlainObject(plan) ? plan : {};
   const timestamp = now();
-  const profile = getAcquisitionProfile(plan.acquisitionProfile);
+  const profile = getAcquisitionProfile(sourcePlan.acquisitionProfile);
 
   return {
     acquisitionProfile: profile.id,
-    createdAt: plan.createdAt || timestamp,
-    evidenceKey: normalizeText(plan.evidenceKey),
-    execution: plan.execution || null,
-    id: plan.id || uuidv4(),
-    manualOnly: plan.manualOnly !== false,
+    createdAt: normalizeText(sourcePlan.createdAt) || timestamp,
+    evidenceKey: normalizeText(sourcePlan.evidenceKey),
+    execution: isPlainObject(sourcePlan.execution) ? sourcePlan.execution : null,
+    id: normalizeText(sourcePlan.id) || uuidv4(),
+    manualOnly: sourcePlan.manualOnly !== false,
     networkImpact:
-      plan.networkImpact ||
+      normalizeText(sourcePlan.networkImpact) ||
       'Dry-run plan only; no peer search, browse, download, DHT lookup, or remote request has started.',
     providerPriority:
-      plan.providerPriority ||
+      (Array.isArray(sourcePlan.providerPriority)
+        ? sourcePlan.providerPriority.filter((provider) => typeof provider === 'string')
+        : null) ||
       profileProviderPriority[profile.id] ||
       profileProviderPriority['lossless-exact'],
-    reason: plan.reason || 'Approved discovery candidate.',
-    queuedSearchId: plan.queuedSearchId || '',
-    searchText: normalizeText(plan.searchText || plan.title),
-    source: plan.source || 'Discovery Inbox',
-    sourceId: plan.sourceId || '',
-    state: normalizeState(plan.state),
-    title: normalizeText(plan.title || plan.searchText || 'Untitled acquisition plan'),
-    updatedAt: plan.updatedAt || timestamp,
-    wishlistRequestId: plan.wishlistRequestId || '',
+    reason: normalizeText(sourcePlan.reason) || 'Approved discovery candidate.',
+    queuedSearchId: normalizeText(sourcePlan.queuedSearchId),
+    searchText: normalizeText(sourcePlan.searchText || sourcePlan.title),
+    source: normalizeText(sourcePlan.source) || 'Discovery Inbox',
+    sourceId: normalizeText(sourcePlan.sourceId),
+    state: normalizeState(sourcePlan.state),
+    title: normalizeText(sourcePlan.title || sourcePlan.searchText) || 'Untitled acquisition plan',
+    updatedAt: normalizeText(sourcePlan.updatedAt) || timestamp,
+    wishlistRequestId: normalizeText(sourcePlan.wishlistRequestId),
   };
 };
 
@@ -76,15 +81,15 @@ export const getAcquisitionPlans = (getItem = getLocalStorageItem) => {
 };
 
 export const saveAcquisitionPlans = (
-  plans,
+  plans = [],
   setItem = setLocalStorageItem,
 ) => {
-  const normalized = plans.map(normalizePlan);
+  const normalized = (Array.isArray(plans) ? plans : []).map(normalizePlan);
   setItem(acquisitionPlanStorageKey, JSON.stringify(normalized));
   return normalized;
 };
 
-export const buildDiscoveryInboxAcquisitionPlan = (candidate) =>
+export const buildDiscoveryInboxAcquisitionPlan = (candidate = {}) =>
   normalizePlan({
     acquisitionProfile: candidate.acquisitionProfile,
     evidenceKey: candidate.evidenceKey,
@@ -105,7 +110,8 @@ export const createAcquisitionPlansFromDiscoveryInbox = (
     setItem = setLocalStorageItem,
   } = {},
 ) => {
-  const approvedCandidates = candidates.filter((candidate) => candidate.state === 'Approved');
+  const approvedCandidates = (Array.isArray(candidates) ? candidates : [])
+    .filter((candidate) => isPlainObject(candidate) && candidate.state === 'Approved');
   const plans = getAcquisitionPlans(getItem);
   const existingKeys = new Set(
     plans.map((plan) => `${plan.evidenceKey}:${plan.sourceId}`),
@@ -160,12 +166,12 @@ export const executeAcquisitionPlanSearches = async (
     throw new Error('createSearch is required to execute acquisition plans.');
   }
 
-  const selectedIds = new Set(planIds);
+  const selectedIds = new Set(Array.isArray(planIds) ? planIds : []);
   const plans = getAcquisitionPlans(getItem);
   const eligible = plans
     .filter((plan) => selectedIds.size === 0 || selectedIds.has(plan.id))
     .filter(canExecutePlan)
-    .slice(0, maxPlans);
+    .slice(0, Math.max(0, Number.isFinite(maxPlans) ? Math.floor(maxPlans) : 0));
   const eligibleIds = new Set(eligible.map((plan) => plan.id));
   const results = [];
 
@@ -216,7 +222,7 @@ export const executeAcquisitionPlanSearches = async (
       );
     } catch (error) {
       results.push({
-        error: error.message || 'Search request failed.',
+        error: toDisplayError(error, 'Search request failed.'),
         planId: plan.id,
         status: 'Failed',
       });
@@ -226,7 +232,7 @@ export const executeAcquisitionPlanSearches = async (
               ...candidate,
               execution: {
                 requestedAt: candidate.execution?.requestedAt || now(),
-                summary: error.message || 'Search request failed.',
+                summary: toDisplayError(error, 'Search request failed.'),
               },
               state: 'Failed',
               updatedAt: now(),
@@ -263,12 +269,12 @@ export const executeAcquisitionPlanWishlistRequests = async (
     throw new Error('createWishlist is required to create acquisition Wishlist requests.');
   }
 
-  const selectedIds = new Set(planIds);
+  const selectedIds = new Set(Array.isArray(planIds) ? planIds : []);
   const plans = getAcquisitionPlans(getItem);
   const eligible = plans
     .filter((plan) => selectedIds.size === 0 || selectedIds.has(plan.id))
     .filter(canCreateWishlistRequest)
-    .slice(0, maxPlans);
+    .slice(0, Math.max(0, Number.isFinite(maxPlans) ? Math.floor(maxPlans) : 0));
   const eligibleIds = new Set(eligible.map((plan) => plan.id));
   const results = [];
   let nextPlans = plans;
@@ -301,7 +307,7 @@ export const executeAcquisitionPlanWishlistRequests = async (
       );
     } catch (error) {
       results.push({
-        error: error.message || 'Wishlist request failed.',
+        error: toDisplayError(error, 'Wishlist request failed.'),
         planId: plan.id,
         status: 'Failed',
       });
@@ -311,7 +317,7 @@ export const executeAcquisitionPlanWishlistRequests = async (
               ...candidate,
               execution: {
                 requestedAt: now(),
-                summary: error.message || 'Wishlist request failed.',
+                summary: toDisplayError(error, 'Wishlist request failed.'),
               },
               updatedAt: now(),
             }

@@ -29,6 +29,7 @@ import {
 } from '../../../lib/storage';
 import { getAllNotes } from '../../../lib/userNotes';
 import { getDirectoryName, sleep } from '../../../lib/util';
+import { toDisplayError } from '../../../lib/errors';
 import * as wishlistAPI from '../../../lib/wishlist';
 import ErrorSegment from '../../Shared/ErrorSegment';
 import LoaderSegment from '../../Shared/LoaderSegment';
@@ -37,7 +38,8 @@ import DiscoveryGraphModal from '../DiscoveryGraphModal';
 import Response from '../Response';
 import SearchDetailHeader from './SearchDetailHeader';
 import SearchFilterModal from './SearchFilterModal';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useMountedRef } from '../../../lib/useMountedRef';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'react-toastify';
 import {
   Button,
@@ -138,8 +140,16 @@ const SearchDetail = ({
   const [graphLoading, setGraphLoading] = useState(false);
   const [graphOpen, setGraphOpen] = useState(false);
   const [graphRequest, setGraphRequest] = useState(null);
+  const mountedRef = useMountedRef();
+  const requestIdsRef = useRef({
+    graph: 0,
+    ignore: 0,
+    notes: 0,
+    stats: 0,
+  });
 
   const fetchUserNotes = useCallback(async () => {
+    const requestId = ++requestIdsRef.current.notes;
     try {
       const response = await getAllNotes();
       const notes = Array.isArray(response.data) ? response.data : [];
@@ -147,18 +157,30 @@ const SearchDetail = ({
         accumulator[note.username] = note;
         return accumulator;
       }, {});
+      if (
+        !mountedRef.current ||
+        requestId !== requestIdsRef.current.notes
+      ) {
+        return;
+      }
       setUserNotes(notesMap);
     } catch (error_) {
-      console.error('Failed to fetch user notes', error_);
+      if (
+        mountedRef.current &&
+        requestId === requestIdsRef.current.notes
+      ) {
+        console.error('Failed to fetch user notes', error_);
+      }
     }
-  }, []);
+  }, [mountedRef]);
 
   useEffect(() => {
-    fetchUserNotes();
+    void fetchUserNotes();
   }, [fetchUserNotes]);
 
   useEffect(() => {
     let cancelled = false;
+    const requestId = ++requestIdsRef.current.ignore;
 
     const loadIgnoredResults = async () => {
       if (!search.wishlistItemId) {
@@ -168,22 +190,33 @@ const SearchDetail = ({
 
       try {
         const rules = await wishlistAPI.getIgnoredResults(search.wishlistItemId);
-        if (!cancelled) {
+        if (
+          !cancelled &&
+          mountedRef.current &&
+          requestId === requestIdsRef.current.ignore
+        ) {
           setIgnoredResults(asArray(rules));
         }
       } catch (error_) {
-        if (!cancelled) {
+        if (
+          !cancelled &&
+          mountedRef.current &&
+          requestId === requestIdsRef.current.ignore
+        ) {
           console.error(error_);
-          toast.error('Failed to load ignored wishlist results');
+          toast.error(
+            toDisplayError(error_, 'Failed to load ignored wishlist results'),
+          );
         }
       }
     };
 
-    loadIgnoredResults();
+    void loadIgnoredResults();
     return () => {
       cancelled = true;
+      requestIdsRef.current.ignore += 1;
     };
-  }, [search.wishlistItemId]);
+  }, [mountedRef, search.wishlistItemId]);
 
   const isIgnoredWishlistFile = useCallback(
     (username, filename) => {
@@ -201,26 +234,45 @@ const SearchDetail = ({
 
   const handleIgnoreWishlistDirectory = async () => {
     const request = ignoreRequest;
+    const wishlistItemId = search.wishlistItemId;
+    const requestId = ++requestIdsRef.current.ignore;
     setIgnoreRequest(null);
 
-    if (!request || !search.wishlistItemId) {
+    if (!request || !wishlistItemId) {
       return;
     }
 
     try {
-      const rule = await wishlistAPI.ignoreResult(search.wishlistItemId, request);
-      if (rule) {
+      const rule = await wishlistAPI.ignoreResult(wishlistItemId, request);
+      if (
+        rule &&
+        mountedRef.current &&
+        requestId === requestIdsRef.current.ignore &&
+        search.wishlistItemId === wishlistItemId
+      ) {
         setIgnoredResults((current) => [
           rule,
           ...current.filter((candidate) => candidate.id !== rule.id),
         ]);
       }
-      toast.info(
-        `Ignored ${request.directory} from ${request.username} for this wishlist item`,
-      );
+      if (
+        mountedRef.current &&
+        requestId === requestIdsRef.current.ignore &&
+        search.wishlistItemId === wishlistItemId
+      ) {
+        toast.info(
+          `Ignored ${request.directory} from ${request.username} for this wishlist item`,
+        );
+      }
     } catch (error_) {
-      console.error(error_);
-      toast.error(error_?.response?.data ?? error_?.message ?? String(error_));
+      if (
+        mountedRef.current &&
+        requestId === requestIdsRef.current.ignore &&
+        search.wishlistItemId === wishlistItemId
+      ) {
+        console.error(error_);
+        toast.error(toDisplayError(error_, 'Failed to ignore wishlist folder'));
+      }
     }
   };
 
@@ -242,17 +294,30 @@ const SearchDetail = ({
 
   // Fetch user download stats for smart ranking
   useEffect(() => {
+    let cancelled = false;
+    const requestId = ++requestIdsRef.current.stats;
+
     const fetchStats = async () => {
       try {
         const stats = await getUserDownloadStats();
-        setUserStats(stats);
+        if (
+          !cancelled &&
+          mountedRef.current &&
+          requestId === requestIdsRef.current.stats
+        ) {
+          setUserStats(stats && typeof stats === 'object' ? stats : {});
+        }
       } catch {
         // Stats are optional, don't fail if unavailable
       }
     };
 
-    fetchStats();
-  }, []);
+    void fetchStats();
+    return () => {
+      cancelled = true;
+      requestIdsRef.current.stats += 1;
+    };
+  }, [mountedRef]);
 
   // Handle blocking/unblocking users
   const handleBlockUser = useCallback((username) => {
@@ -294,7 +359,12 @@ const SearchDetail = ({
             await sleep(isComplete && attempt === 1 ? 500 : 250);
           }
 
-          const responses = asArray(await getResponses({ id }));
+          const responses = asArray(await getResponses({ id })).filter(
+            (response) =>
+              response &&
+              typeof response === 'object' &&
+              !Array.isArray(response),
+          );
           if (responses.length > 0 || attempt === attempts - 1) {
             if (!cancelled) {
               setResults(responses);
@@ -305,7 +375,7 @@ const SearchDetail = ({
         }
       } catch (getError) {
         if (!cancelled) {
-          setError(getError);
+          setError(toDisplayError(getError, 'Failed to load search results'));
           setLoading(false);
         }
       }
@@ -456,25 +526,45 @@ const SearchDetail = ({
   };
 
   const openDiscoveryGraph = async (request) => {
+    if (!mountedRef.current) return;
+    const requestId = ++requestIdsRef.current.graph;
     setGraphLoading(true);
     setGraphOpen(true);
     setGraphRequest(request);
+    setGraphData(null);
 
     try {
       const graph = await buildDiscoveryGraph(request);
-      setGraphData(graph);
+      if (
+        mountedRef.current &&
+        requestId === requestIdsRef.current.graph
+      ) {
+        setGraphData(graph);
+      }
     } catch (error_) {
-      console.error(error_);
-      toast.error(
-        error_?.response?.data ??
-          error_?.message ??
-          'Failed to build discovery graph',
-      );
-      setGraphOpen(false);
+      if (
+        mountedRef.current &&
+        requestId === requestIdsRef.current.graph
+      ) {
+        console.error(error_);
+        toast.error(toDisplayError(error_, 'Failed to build discovery graph'));
+        setGraphOpen(false);
+      }
     } finally {
-      setGraphLoading(false);
+      if (
+        mountedRef.current &&
+        requestId === requestIdsRef.current.graph
+      ) {
+        setGraphLoading(false);
+      }
     }
   };
+
+  const closeDiscoveryGraph = useCallback(() => {
+    requestIdsRef.current.graph += 1;
+    setGraphOpen(false);
+    setGraphLoading(false);
+  }, []);
 
   const openSearchGraph = async () => {
     await openDiscoveryGraph({
@@ -485,7 +575,7 @@ const SearchDetail = ({
   };
 
   const handleGraphRecenter = async (nodeId) => {
-    if (!nodeId) {
+    if (typeof nodeId !== 'string' || nodeId.length === 0) {
       return;
     }
 
@@ -522,7 +612,8 @@ const SearchDetail = ({
   };
 
   const handleQueueNearby = async (graph) => {
-    const queries = (graph?.nodes || [])
+    if (!mountedRef.current) return;
+    const queries = asArray(graph?.nodes)
       .filter((node) => node.nodeType === 'track')
       .map((node) => node.label || '')
       .filter(Boolean)
@@ -535,14 +626,16 @@ const SearchDetail = ({
 
     try {
       const count = await createBatch({ queries });
-      toast.success(`Started ${count} nearby graph searches`);
+      if (mountedRef.current) {
+        toast.success(`Started ${count} nearby graph searches`);
+      }
     } catch (error_) {
-      console.error(error_);
-      toast.error(
-        error_?.response?.data ??
-          error_?.message ??
-          'Failed to queue nearby graph searches',
-      );
+      if (mountedRef.current) {
+        console.error(error_);
+        toast.error(
+          toDisplayError(error_, 'Failed to queue nearby graph searches'),
+        );
+      }
     }
   };
 
@@ -623,7 +716,7 @@ const SearchDetail = ({
   const loaded = !removing && !creating && !loading && results !== null;
 
   if (error) {
-    return <ErrorSegment caption={error?.message ?? error} />;
+    return <ErrorSegment caption={toDisplayError(error, 'Failed to load search results')} />;
   }
 
   return (
@@ -661,7 +754,7 @@ const SearchDetail = ({
         <DiscoveryGraphModal
           graph={graphData}
           loading={graphLoading}
-          onClose={() => setGraphOpen(false)}
+          onClose={closeDiscoveryGraph}
           onCompare={handleGraphCompare}
           onQueueNearby={handleQueueNearby}
           onRecenter={handleGraphRecenter}

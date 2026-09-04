@@ -19,8 +19,35 @@ import {
 
 const Button = TooltipButton;
 
+const asRecords = (value) =>
+  (Array.isArray(value) ? value : []).filter(
+    (record) => record && typeof record === 'object' && !Array.isArray(record),
+  );
+
+const normalizeShareGroup = (group) => {
+  const id = group.id ?? group.Id;
+  if (id === undefined || id === null || id === '') return null;
+  return {
+    ...group,
+    id,
+    name: String(group.name ?? group.Name ?? 'Unnamed group'),
+  };
+};
+
+const normalizeContact = (contact) => {
+  const username = String(contact.username ?? contact.nickname ?? '').trim();
+  if (!username) return null;
+  return {
+    ...contact,
+    id: contact.id ?? username,
+    username,
+  };
+};
+
 export default class ShareGroups extends Component {
   isMountedFlag = false;
+  operationInFlight = false;
+  membersInFlight = false;
 
   requestIds = {
     data: 0,
@@ -39,7 +66,8 @@ export default class ShareGroups extends Component {
     selectedGroup: null,
     selectedUserId: null,
     shareGroups: [],
-    usePeerId: true,
+    operationPending: false,
+    viewingMembersGroupId: null,
   };
 
   componentDidMount() {
@@ -54,6 +82,18 @@ export default class ShareGroups extends Component {
     });
   }
 
+  beginOperation = () => {
+    if (!this.isMountedFlag || this.operationInFlight) return false;
+    this.operationInFlight = true;
+    this.setState({ operationPending: true });
+    return true;
+  };
+
+  finishOperation = () => {
+    this.operationInFlight = false;
+    if (this.isMountedFlag) this.setState({ operationPending: false });
+  };
+
   loadData = async () => {
     const requestId = ++this.requestIds.data;
     try {
@@ -65,47 +105,44 @@ export default class ShareGroups extends Component {
           // If 401/403/404, feature not enabled or not authenticated - return empty list
           // 400 errors might have useful messages, so let them through
           if (
-            error.response?.status === 401 ||
-            error.response?.status === 403 ||
-            error.response?.status === 404
+            error?.response?.status === 401 ||
+            error?.response?.status === 403 ||
+            error?.response?.status === 404
           ) {
             return { data: [] };
           }
 
           throw error;
         }),
-        identityAPI.getContacts().catch(() => ({ data: [] })), // Gracefully handle if Identity not enabled
+        identityAPI.getContacts().catch((error) => {
+          if ([401, 403, 404].includes(error?.response?.status)) {
+            return { data: [] };
+          }
+          throw error;
+        }),
       ]);
       if (this.isMountedFlag && requestId === this.requestIds.data) {
         this.setState({
-          contacts: Array.isArray(contactsRes.data) ? contactsRes.data : [],
+          contacts: asRecords(contactsRes.data)
+            .map(normalizeContact)
+            .filter(Boolean),
           loading: false,
-          shareGroups: Array.isArray(groupsRes.data) ? groupsRes.data : [],
+          shareGroups: asRecords(groupsRes.data)
+            .map(normalizeShareGroup)
+            .filter(Boolean),
         });
       }
     } catch (error) {
-      // Extract error message from response
-      let errorMessage = error.message;
-      if (error.response?.data) {
-        if (typeof error.response.data === 'string') {
-          errorMessage = error.response.data;
-        } else if (error.response.data.message) {
-          errorMessage = error.response.data.message;
-        } else if (error.response.data.error) {
-          errorMessage = error.response.data.error;
-        } else {
-          errorMessage = JSON.stringify(error.response.data);
-        }
-      }
-
       // Only suppress errors for 401/403/404 (auth/feature disabled)
       const isAuthOrFeatureError =
-        error.response?.status === 401 ||
-        error.response?.status === 403 ||
-        error.response?.status === 404;
+        error?.response?.status === 401 ||
+        error?.response?.status === 403 ||
+        error?.response?.status === 404;
       if (this.isMountedFlag && requestId === this.requestIds.data) {
         this.setState({
-          error: isAuthOrFeatureError ? null : errorMessage,
+          error: isAuthOrFeatureError
+            ? null
+            : toDisplayError(error, 'Failed to load share groups'),
           loading: false,
         });
       }
@@ -113,7 +150,10 @@ export default class ShareGroups extends Component {
   };
 
   handleViewMembers = async (groupId) => {
+    if (!this.isMountedFlag || this.membersInFlight) return;
+    this.membersInFlight = true;
     const requestId = ++this.requestIds.members;
+    this.setState({ viewingMembersGroupId: groupId });
     try {
       const membersRes = await collectionsAPI.getShareGroupMembers(
         groupId,
@@ -128,7 +168,8 @@ export default class ShareGroups extends Component {
       const members = Array.isArray(membersRes.data) ? membersRes.data : [];
       window.alert(
         `Members:\n${members
-          .map((member) => member.contactNickname || member.userId)
+          .filter((member) => member && typeof member === 'object')
+          .map((member) => member.contactNickname || member.username || member.userId || 'Unknown member')
           .join('\n')}`,
       );
     } catch (error) {
@@ -139,10 +180,14 @@ export default class ShareGroups extends Component {
         console.error('[ShareGroups] Failed to load group members:', error);
         this.setState({ error: toDisplayError(error, 'Failed to load group members') });
       }
+    } finally {
+      this.membersInFlight = false;
+      if (this.isMountedFlag) this.setState({ viewingMembersGroupId: null });
     }
   };
 
   handleCreateGroup = async () => {
+    if (!this.beginOperation()) return;
     const requestId = ++this.requestIds.operation;
     try {
       await collectionsAPI.createShareGroup({ name: this.state.newGroupName });
@@ -162,69 +207,16 @@ export default class ShareGroups extends Component {
         return;
       }
       console.error('[ShareGroups] Create group error:', error);
-      // Extract error message from response (supports ProblemDetails, object with message/error, or string)
-      let errorMessage = error.message || 'Failed to create share group';
-      if (error.response) {
-        const status = error.response.status;
-        const url = error.response.config?.url || 'unknown';
-        const contentLength = error.response.headers['content-length'];
-
-        console.error('[ShareGroups] Response status:', status);
-        console.error('[ShareGroups] Response URL:', url);
-        console.error('[ShareGroups] Response data:', error.response.data);
-
-        // Check for empty body
-        if (contentLength === '0' || contentLength === 0) {
-          console.error(
-            `[ShareGroups] HTTP ${status} with empty body from ${url}`,
-          );
-        }
-
-        if (error.response.data) {
-          if (typeof error.response.data === 'string') {
-            errorMessage = error.response.data;
-          } else if (error.response.data.detail) {
-            errorMessage = error.response.data.detail; // ProblemDetails format
-          } else if (error.response.data.message) {
-            errorMessage = error.response.data.message;
-          } else if (error.response.data.error) {
-            errorMessage = error.response.data.error;
-          } else if (error.response.data.title) {
-            errorMessage = error.response.data.title; // ProblemDetails title as fallback
-          } else {
-            errorMessage = JSON.stringify(error.response.data);
-          }
-        } else if (status === 400) {
-          // 400 with empty body likely means CSRF validation failed or user identity missing
-          errorMessage =
-            'Request failed. This may be due to: missing CSRF token (try refreshing the page), user identity not available (configure Soulseek username or enable Identity & Friends), or invalid input.';
-        } else if (status === 401) {
-          errorMessage = 'Authentication required. Please refresh the page.';
-        } else if (status === 403) {
-          errorMessage = 'Not authorized.';
-        } else if (status === 404) {
-          // 404 could be route mismatch (double prefix bug) or feature disabled
-          if (url.includes('/api/v0/api/v0')) {
-            errorMessage = `Endpoint not found: ${url} (possible route mismatch - check browser console)`;
-          } else {
-            errorMessage =
-              'Collections sharing feature is not enabled, or endpoint not found.';
-          }
-        } else if (status >= 500) {
-          errorMessage = 'Server error. Please check server logs.';
-        }
-      }
-
       this.setState({
-        error:
-          errorMessage ||
-          'Failed to create share group. Please configure Soulseek username or enable Identity & Friends.',
+        error: toDisplayError(error, 'Failed to create share group'),
       });
+    } finally {
+      this.finishOperation();
     }
   };
 
   handleAddMember = async () => {
-    if (!this.state.selectedGroup) return;
+    if (!this.state.selectedGroup || !this.beginOperation()) return;
 
     const requestId = ++this.requestIds.operation;
     try {
@@ -261,34 +253,17 @@ export default class ShareGroups extends Component {
       ) {
         return;
       }
-      // Extract error message from response (supports ProblemDetails, object with message/error, or string)
-      let errorMessage = error.message;
-      if (error.response?.data) {
-        if (typeof error.response.data === 'string') {
-          errorMessage = error.response.data;
-        } else if (error.response.data.detail) {
-          errorMessage = error.response.data.detail; // ProblemDetails format
-        } else if (error.response.data.message) {
-          errorMessage = error.response.data.message;
-        } else if (error.response.data.error) {
-          errorMessage = error.response.data.error;
-        } else if (error.response.data.title) {
-          errorMessage = error.response.data.title; // ProblemDetails title as fallback
-        } else {
-          errorMessage = JSON.stringify(error.response.data);
-        }
-      }
-
       this.setState({
-        error:
-          errorMessage ||
-          'Failed to add member. Please configure Soulseek username or enable Identity & Friends.',
+        error: toDisplayError(error, 'Failed to add member'),
       });
+    } finally {
+      this.finishOperation();
     }
   };
 
   handleDeleteGroup = async (id) => {
     if (!window.confirm('Delete this share group?')) return;
+    if (!this.beginOperation()) return;
     const requestId = ++this.requestIds.operation;
     try {
       await collectionsAPI.deleteShareGroup(id);
@@ -306,11 +281,14 @@ export default class ShareGroups extends Component {
       ) {
         this.setState({ error: toDisplayError(error, 'Failed to delete share group') });
       }
+    } finally {
+      this.finishOperation();
     }
   };
 
   handleRemoveMember = async (groupId, userId) => {
     if (!window.confirm('Remove this member?')) return;
+    if (!this.beginOperation()) return;
     const requestId = ++this.requestIds.operation;
     try {
       await collectionsAPI.removeShareGroupMember(groupId, userId);
@@ -328,6 +306,8 @@ export default class ShareGroups extends Component {
       ) {
         this.setState({ error: toDisplayError(error, 'Failed to remove group member') });
       }
+    } finally {
+      this.finishOperation();
     }
   };
 
@@ -343,14 +323,15 @@ export default class ShareGroups extends Component {
       selectedGroup,
       selectedUserId,
       shareGroups,
-      usePeerId,
+      operationPending,
+      viewingMembersGroupId,
     } = this.state;
 
     const contactOptions = contacts.map((c) => ({
       contact: c,
       key: c.id,
-      text: `${c.nickname || 'Unnamed'} (${c.peerId?.slice(0, 16)}...)`,
-      value: c.peerId,
+      text: c.username,
+      value: c.username,
     }));
 
     if (loading) return <LoaderSegment />;
@@ -415,6 +396,8 @@ export default class ShareGroups extends Component {
                   <Table.Cell>
                     <Button
                       onClick={() => this.handleViewMembers(group.id)}
+                      disabled={operationPending || this.membersInFlight}
+                      loading={viewingMembersGroupId === group.id}
                       size="small"
                       tooltip="Show the contacts or users currently assigned to this group."
                     >
@@ -442,6 +425,7 @@ export default class ShareGroups extends Component {
                     <Button
                       negative
                       onClick={() => this.handleDeleteGroup(group.id)}
+                      disabled={operationPending}
                       size="small"
                       tooltip="Delete this share group and remove its collection access."
                     >
@@ -486,7 +470,8 @@ export default class ShareGroups extends Component {
             </Button>
             <Button
               data-testid="groups-create-submit"
-              disabled={!newGroupName.trim()}
+              disabled={!newGroupName.trim() || operationPending}
+              loading={operationPending}
               onClick={this.handleCreateGroup}
               primary
               tooltip="Create this share group."
@@ -520,7 +505,6 @@ export default class ShareGroups extends Component {
                     onChange={(e, { value }) =>
                       this.setState({
                         selectedContactId: value,
-                        usePeerId: true,
                       })
                     }
                     options={contactOptions}
@@ -536,7 +520,6 @@ export default class ShareGroups extends Component {
                     onChange={(e) =>
                       this.setState({
                         selectedUserId: e.target.value,
-                        usePeerId: false,
                       })
                     }
                     placeholder="Soulseek username"
@@ -579,7 +562,8 @@ export default class ShareGroups extends Component {
             </Button>
             <Button
               data-testid="group-member-add-submit"
-              disabled={!selectedContactId && !selectedUserId}
+              disabled={(!selectedContactId && !selectedUserId) || operationPending}
+              loading={operationPending}
               onClick={this.handleAddMember}
               primary
               tooltip="Add the selected contact or username to this share group."

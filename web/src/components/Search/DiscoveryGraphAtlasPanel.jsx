@@ -27,6 +27,22 @@ const scopeOptions = [
   { key: 'artist', text: 'Artist', value: 'artist' },
 ];
 
+const normalizeGraph = (payload) => {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return null;
+  }
+
+  return {
+    ...payload,
+    edges: Array.isArray(payload.edges)
+      ? payload.edges.filter((edge) => edge && typeof edge === 'object' && !Array.isArray(edge))
+      : [],
+    nodes: Array.isArray(payload.nodes)
+      ? payload.nodes.filter((node) => node && typeof node === 'object' && !Array.isArray(node))
+      : [],
+  };
+};
+
 const DiscoveryGraphAtlasPanel = ({ disabled, persistRoute = false }) => {
   const location = useLocation();
   const navigate = useNavigate();
@@ -46,13 +62,28 @@ const DiscoveryGraphAtlasPanel = ({ disabled, persistRoute = false }) => {
   const [savedBranches, setSavedBranches] = useState([]);
   const mountedRef = useMountedRef();
   const requestIdRef = useRef(0);
+  const queueInFlightRef = useRef(false);
+  const copyInFlightRef = useRef(false);
+  const [queueLoading, setQueueLoading] = useState(false);
+  const [copyLoading, setCopyLoading] = useState(false);
 
   const loadSavedBranches = () => {
     try {
       const raw = getLocalStorageItem('slskr.discoveryGraph.savedBranches');
       const parsed = raw ? JSON.parse(raw) : [];
       if (mountedRef.current) {
-        setSavedBranches(Array.isArray(parsed) ? parsed : []);
+        setSavedBranches(
+          Array.isArray(parsed)
+            ? parsed.filter(
+              (branch) =>
+                branch &&
+                typeof branch === 'object' &&
+                !Array.isArray(branch) &&
+                branch.request &&
+                typeof branch.request === 'object',
+            )
+            : [],
+        );
       }
     } catch (error) {
       console.warn('Failed to load saved Discovery Graph branches', error);
@@ -104,8 +135,8 @@ const DiscoveryGraphAtlasPanel = ({ disabled, persistRoute = false }) => {
   });
 
   const openGraph = async (request) => {
+    if (!mountedRef.current || disabled || loading) return;
     const requestId = ++requestIdRef.current;
-    if (!mountedRef.current || disabled) return;
     setLoading(true);
 
     try {
@@ -116,7 +147,11 @@ const DiscoveryGraphAtlasPanel = ({ disabled, persistRoute = false }) => {
       ) {
         return;
       }
-      setGraph(nextGraph);
+      const normalizedGraph = normalizeGraph(nextGraph);
+      if (!normalizedGraph) {
+        throw new Error('Discovery Graph returned an invalid response');
+      }
+      setGraph(normalizedGraph);
       setActiveEdgeTypes([]);
       if (persistRoute) {
         const query = discoveryGraph.toQueryString(request);
@@ -180,6 +215,9 @@ const DiscoveryGraphAtlasPanel = ({ disabled, persistRoute = false }) => {
   };
 
   const handleQueueNearby = async () => {
+    if (!mountedRef.current || disabled || !graph || queueInFlightRef.current) {
+      return;
+    }
     const queries = discoveryGraph.buildDiscoveryGraphBranchPlan({
       edgeTypes: activeEdgeTypes,
       graph,
@@ -193,20 +231,37 @@ const DiscoveryGraphAtlasPanel = ({ disabled, persistRoute = false }) => {
       return;
     }
 
+    queueInFlightRef.current = true;
+    setQueueLoading(true);
     try {
       const count = await searches.createBatch({ queries });
       if (mountedRef.current) {
-        toast.success(`Started ${count} nearby atlas searches`);
+        const startedCount = typeof count === 'number'
+          ? count
+          : typeof count?.count === 'number'
+            ? count.count
+            : queries.length;
+        toast.success(`Started ${startedCount} nearby atlas searches`);
       }
     } catch (error) {
       console.error(error);
       if (mountedRef.current) {
         toast.error(toDisplayError(error, 'Failed to queue nearby atlas searches'));
       }
+    } finally {
+      queueInFlightRef.current = false;
+      if (mountedRef.current) setQueueLoading(false);
     }
   };
 
   const copyBranchReport = async () => {
+    if (!mountedRef.current || !graph || copyInFlightRef.current) {
+      return;
+    }
+    if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) {
+      toast.error('Clipboard access is unavailable');
+      return;
+    }
     const plan = discoveryGraph.buildDiscoveryGraphBranchPlan({
       edgeTypes: activeEdgeTypes,
       graph,
@@ -216,6 +271,8 @@ const DiscoveryGraphAtlasPanel = ({ disabled, persistRoute = false }) => {
     });
     const report = discoveryGraph.formatDiscoveryGraphBranchReport(plan);
 
+    copyInFlightRef.current = true;
+    setCopyLoading(true);
     try {
       await navigator.clipboard.writeText(report);
       if (mountedRef.current) {
@@ -224,18 +281,22 @@ const DiscoveryGraphAtlasPanel = ({ disabled, persistRoute = false }) => {
     } catch (error) {
       console.error(error);
       if (mountedRef.current) {
-        toast.error('Unable to copy Discovery Graph branch report');
+        toast.error(toDisplayError(error, 'Unable to copy Discovery Graph branch report'));
       }
+    } finally {
+      copyInFlightRef.current = false;
+      if (mountedRef.current) setCopyLoading(false);
     }
   };
 
   const nodes = Array.isArray(graph?.nodes) ? graph.nodes : [];
   const nodeMap = nodes.reduce((accumulator, node) => {
-    accumulator[node.nodeId] = node;
+    if (node.nodeId) accumulator[node.nodeId] = node;
     return accumulator;
   }, {});
+  const edges = Array.isArray(graph?.edges) ? graph.edges : [];
   const availableEdgeTypes = Array.from(
-    new Set((graph?.edges || []).map((edge) => edge.edgeType)),
+    new Set(edges.map((edge) => edge.edgeType).filter(Boolean)),
   ).sort();
   const visibleGraph = discoveryGraph.getVisibleDiscoveryGraph({
     edgeTypes: activeEdgeTypes,
@@ -353,7 +414,8 @@ const DiscoveryGraphAtlasPanel = ({ disabled, persistRoute = false }) => {
           position="top center"
           trigger={
             <Button
-              disabled={!graph}
+              disabled={!graph || queueLoading}
+              loading={queueLoading}
               onClick={handleQueueNearby}
               style={{ marginLeft: '0.5em' }}
             >
@@ -367,8 +429,9 @@ const DiscoveryGraphAtlasPanel = ({ disabled, persistRoute = false }) => {
           trigger={
             <Button
               aria-label="Copy Discovery Graph branch report"
-              disabled={!graph}
+              disabled={!graph || copyLoading}
               icon="copy"
+              loading={copyLoading}
               onClick={copyBranchReport}
               style={{ marginLeft: '0.5em' }}
             />
@@ -430,6 +493,7 @@ const DiscoveryGraphAtlasPanel = ({ disabled, persistRoute = false }) => {
                   position="top center"
                   trigger={
                     <Button
+                      disabled={loading}
                       onClick={() => branch.request && openGraph(branch.request)}
                       size="mini"
                     >
@@ -502,6 +566,7 @@ const DiscoveryGraphAtlasPanel = ({ disabled, persistRoute = false }) => {
                         position="top center"
                         trigger={
                           <Button
+                            disabled={loading}
                             onClick={() => handleRecenter(route.target.nodeId)}
                             size="mini"
                             style={{ marginLeft: '0.5em' }}
@@ -539,6 +604,7 @@ const DiscoveryGraphAtlasPanel = ({ disabled, persistRoute = false }) => {
                     position="top center"
                     trigger={
                       <Button
+                        disabled={loading}
                         onClick={() => handleRecenter(edge.targetNodeId)}
                         size="mini"
                       >

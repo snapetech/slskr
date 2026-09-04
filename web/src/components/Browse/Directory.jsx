@@ -1,4 +1,5 @@
 import * as transfers from '../../lib/transfers';
+import { toDisplayError } from '../../lib/errors';
 import { formatBytes } from '../../lib/util';
 import FileList from '../Shared/FileList';
 import React, { Component } from 'react';
@@ -9,11 +10,13 @@ const initialState = {
   downloadRequest: undefined,
 };
 
-const getDownloadErrorMessage = (error) => {
-  if (typeof error?.data === 'string') return error.data;
-  if (typeof error?.data?.message === 'string') return error.data.message;
-  return error?.message || 'Download failed';
-};
+const getDownloadErrorMessage = (error) =>
+  toDisplayError(error, 'Download failed');
+
+const asFiles = (files) =>
+  (Array.isArray(files) ? files : []).filter(
+    (file) => file && typeof file === 'object' && !Array.isArray(file),
+  );
 
 class Directory extends Component {
   constructor(props) {
@@ -21,10 +24,14 @@ class Directory extends Component {
 
     this.state = {
       ...initialState,
-      files: this.props.files.map((f) => ({ selected: false, ...f })),
+      files: asFiles(this.props.files).map((f) => ({ selected: false, ...f })),
     };
     this.isMountedFlag = false;
     this.downloadRequestId = 0;
+    this.downloadInFlight = false;
+    this.fileSignature = JSON.stringify(
+      asFiles(this.props.files).map((file) => [file.filename, file.size]),
+    );
   }
 
   componentDidMount() {
@@ -37,36 +44,55 @@ class Directory extends Component {
   }
 
   componentDidUpdate(previousProps) {
-    if (this.props.name !== previousProps.name) {
+    const nextFileSignature = JSON.stringify(
+      asFiles(this.props.files).map((file) => [file.filename, file.size]),
+    );
+    if (
+      this.props.name !== previousProps.name ||
+      nextFileSignature !== this.fileSignature
+    ) {
+      this.fileSignature = nextFileSignature;
       this.setState({
-        files: this.props.files.map((f) => ({ selected: false, ...f })),
+        downloadError: '',
+        downloadRequest: undefined,
+        files: asFiles(this.props.files).map((f) => ({ selected: false, ...f })),
       });
     }
   }
 
   handleFileSelectionChange = (file, state) => {
-    file.selected = state;
     this.setState((previousState) => ({
       downloadError: '',
       downloadRequest: undefined,
-      tree: previousState.tree,
+      files: previousState.files.map((candidate) =>
+        candidate === file || candidate.filename === file.filename
+          ? { ...candidate, selected: state }
+          : candidate,
+      ),
     }));
   };
 
   download = (username, files) => {
+    if (!this.isMountedFlag || this.downloadInFlight) return;
     const requestId = ++this.downloadRequestId;
+    this.downloadInFlight = true;
     this.setState({ downloadRequest: 'inProgress' }, async () => {
       if (
         !this.isMountedFlag ||
         requestId !== this.downloadRequestId
       ) {
+        this.downloadInFlight = false;
         return;
       }
       try {
-        const requests = (files || []).map(({ filename, size }) => ({
+        const requests = asFiles(files).map(({ filename, size }) => ({
           filename,
-          size,
+          size: Number.isFinite(Number(size)) ? Number(size) : 0,
         }));
+        if (requests.length === 0) {
+          this.downloadInFlight = false;
+          return;
+        }
         await transfers.download({ files: requests, username });
 
         if (
@@ -81,13 +107,16 @@ class Directory extends Component {
           requestId === this.downloadRequestId
         ) {
           this.setState({
-            downloadError: error.response || {
-              data: error.message || 'Download failed',
-              status: 0,
-              statusText: 'Network error',
-            },
+            downloadError: error.response || error,
             downloadRequest: 'error',
           });
+        }
+      } finally {
+        if (
+          this.isMountedFlag &&
+          requestId === this.downloadRequestId
+        ) {
+          this.downloadInFlight = false;
         }
       }
     });
@@ -99,9 +128,13 @@ class Directory extends Component {
 
     const selectedFiles = files.filter((f) => f.selected);
 
-    const selectedSize = formatBytes(
-      selectedFiles.reduce((total, f) => total + f.size, 0),
-    );
+   const selectedSize = formatBytes(
+      selectedFiles.reduce(
+        (total, f) =>
+          total + (Number.isFinite(Number(f.size)) ? Number(f.size) : 0),
+        0,
+      ),
+   );
 
     return (
       <Card

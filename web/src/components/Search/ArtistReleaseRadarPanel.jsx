@@ -39,10 +39,15 @@ const getWorkArtist = (notification = {}) =>
   '';
 
 const parseList = (value = '') =>
-  value
+  String(value ?? '')
     .split(',')
     .map((item) => item.trim())
     .filter(Boolean);
+
+const asRecords = (value) =>
+  (Array.isArray(value) ? value : []).filter(
+    (item) => item && typeof item === 'object' && !Array.isArray(item),
+  );
 
 const ArtistReleaseRadarPanel = ({ disabled }) => {
   const [artistId, setArtistId] = useState('');
@@ -56,9 +61,11 @@ const ArtistReleaseRadarPanel = ({ disabled }) => {
   const [status, setStatus] = useState('');
   const [subscriptions, setSubscriptions] = useState([]);
   const [unreadOnly, setUnreadOnly] = useState(false);
+  const [working, setWorking] = useState(false);
   const mountedRef = useMountedRef();
   const loadRequestIdRef = useRef(0);
   const operationRequestIdRef = useRef(0);
+  const operationInFlightRef = useRef(false);
 
   const loadRadar = async () => {
     const requestId = ++loadRequestIdRef.current;
@@ -78,14 +85,10 @@ const ArtistReleaseRadarPanel = ({ disabled }) => {
         return;
       }
       setSubscriptions(
-        Array.isArray(subscriptionsResponse.data)
-          ? subscriptionsResponse.data
-          : [],
+        asRecords(subscriptionsResponse.data),
       );
       setNotifications(
-        Array.isArray(notificationsResponse.data)
-          ? notificationsResponse.data
-          : [],
+        asRecords(notificationsResponse.data),
       );
     } catch (loadError) {
       if (
@@ -102,13 +105,21 @@ const ArtistReleaseRadarPanel = ({ disabled }) => {
   }, [disabled, unreadOnly]);
 
   const subscribe = async () => {
+    if (
+      !mountedRef.current ||
+      disabled ||
+      operationInFlightRef.current
+    ) {
+      return;
+    }
     if (!artistId.trim()) {
       toast.error('Artist MBID is required');
       return;
     }
 
     const requestId = ++operationRequestIdRef.current;
-    if (!mountedRef.current || disabled) return;
+    operationInFlightRef.current = true;
+    setWorking(true);
     setError(null);
     try {
       await subscribeArtistReleaseRadar({
@@ -140,12 +151,26 @@ const ArtistReleaseRadarPanel = ({ disabled }) => {
           ),
         );
       }
+    } finally {
+      operationInFlightRef.current = false;
+      if (mountedRef.current && requestId === operationRequestIdRef.current) {
+        setWorking(false);
+      }
     }
   };
 
   const routeNotification = async (notification) => {
+    if (
+      !notification?.id ||
+      !mountedRef.current ||
+      disabled ||
+      operationInFlightRef.current
+    ) {
+      return;
+    }
     const requestId = ++operationRequestIdRef.current;
-    if (!mountedRef.current || disabled) return;
+    operationInFlightRef.current = true;
+    setWorking(true);
     setError(null);
     try {
       const response = await routeArtistReleaseRadarNotification({
@@ -169,6 +194,11 @@ const ArtistReleaseRadarPanel = ({ disabled }) => {
         setError(
           toDisplayError(routeError, 'Unable to route release radar notification.'),
         );
+      }
+    } finally {
+      operationInFlightRef.current = false;
+      if (mountedRef.current && requestId === operationRequestIdRef.current) {
+        setWorking(false);
       }
     }
   };
@@ -243,7 +273,8 @@ const ArtistReleaseRadarPanel = ({ disabled }) => {
           position="top center"
           trigger={
             <Button
-              disabled={!artistId.trim()}
+              disabled={working || !artistId.trim()}
+              loading={working}
               onClick={subscribe}
               primary
               type="button"
@@ -258,6 +289,8 @@ const ArtistReleaseRadarPanel = ({ disabled }) => {
           position="top center"
           trigger={
             <Button
+              disabled={working}
+              loading={working}
               onClick={loadRadar}
               type="button"
             >
@@ -320,6 +353,8 @@ const ArtistReleaseRadarPanel = ({ disabled }) => {
                   trigger={
                     <Button
                       aria-label={`Route ${title} radar hit`}
+                      disabled={working}
+                      loading={working}
                       onClick={() => routeNotification(notification)}
                       size="mini"
                       type="button"

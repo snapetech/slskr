@@ -43,11 +43,15 @@ export const PlayerProvider = ({ children }) => {
 
   useEffect(() => {
     if (!current?.artist || !current?.title) return;
-    nowPlaying.setNowPlaying({
-      album: current.album,
-      artist: current.artist,
-      title: current.title,
-    });
+    void nowPlaying
+      .setNowPlaying({
+        album: current.album,
+        artist: current.artist,
+        title: current.title,
+      })
+      .catch((error) => {
+        console.debug('[Player] Unable to update now-playing state:', error);
+      });
   }, [current]);
 
   const playItem = useCallback(
@@ -113,7 +117,11 @@ export const PlayerProvider = ({ children }) => {
     setCurrent(null);
     setHistory([]);
     setQueue([]);
-    await nowPlaying.clearNowPlaying();
+    try {
+      await nowPlaying.clearNowPlaying();
+    } catch (error) {
+      console.debug('[Player] Unable to clear now-playing state:', error);
+    }
   }, [audioElement]);
 
   const clearQueue = useCallback(() => {
@@ -121,9 +129,10 @@ export const PlayerProvider = ({ children }) => {
   }, [current]);
 
   const queueItems = useCallback((items = []) => {
+    const nextItems = Array.isArray(items) ? items : [];
     setQueue((existing) => {
       const queuedIds = new Set(existing.map((item) => item.contentId));
-      const additions = items.filter((item) => {
+      const additions = nextItems.filter((item) => {
         if (!item?.contentId || queuedIds.has(item.contentId)) return false;
         queuedIds.add(item.contentId);
         return true;
@@ -158,16 +167,14 @@ export const PlayerProvider = ({ children }) => {
   );
 
   const next = useCallback(() => {
-    setQueue((existing) => {
-      if (existing.length < 2) return existing;
-      const [, nextItem, ...remaining] = existing;
-      setHistory((previousHistory) =>
-        current ? [current, ...previousHistory].slice(0, 25) : previousHistory,
-      );
-      setCurrent(nextItem);
-      return [nextItem, ...remaining];
-    });
-  }, [current]);
+    if (queue.length < 2) return;
+    const [, nextItem, ...remaining] = queue;
+    setHistory((previousHistory) =>
+      current ? [current, ...previousHistory].slice(0, 25) : previousHistory,
+    );
+    setCurrent(nextItem);
+    setQueue([nextItem, ...remaining]);
+  }, [current, queue]);
 
   const previous = useCallback(() => {
     if (history.length === 0) {

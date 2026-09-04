@@ -9,6 +9,18 @@ const labelColor = (status) =>
     status
   ] || 'grey';
 
+const asText = (value, fallback = '') =>
+  typeof value === 'string' || typeof value === 'number' ? String(value) : fallback;
+
+const normalizeActivity = (item, index) => ({
+  detail: asText(item.detail, 'In progress'),
+  filename: asText(item.filename, 'Unknown file'),
+  id: asText(item.id, `metadata-item-${index}`),
+  stage: asText(item.stage, 'Unknown stage'),
+  startedAt: asText(item.startedAt),
+  status: asText(item.status, 'unknown').toLowerCase(),
+});
+
 const MetadataProcessingPanel = () => {
   const [status, setStatus] = useState({ active: [], history: [] });
   const mountedRef = useMountedRef();
@@ -24,7 +36,7 @@ const MetadataProcessingPanel = () => {
 
   const rows = [...status.active, ...status.history].filter(
     (item) => item && typeof item === 'object',
-  );
+  ).map(normalizeActivity);
   return (
     <Card fluid>
       <Card.Content>
