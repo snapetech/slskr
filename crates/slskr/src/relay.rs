@@ -31,6 +31,7 @@ use crate::config::{ControllerProfile, RelaySettings};
 const CHALLENGE_TTL_SECONDS: u64 = 10;
 const REQUEST_TTL_SECONDS: u64 = 5 * 60;
 const DOWNLOAD_TTL_SECONDS: u64 = 10 * 60;
+const MAX_RELAY_PENDING_REQUESTS: usize = 4_096;
 pub(crate) const MAX_RELAY_SHARE_ENTRIES: usize = 131_072;
 const MAX_RELAY_SHARE_MANIFEST_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_RELAY_SHARE_UPLOAD_RECORDS: usize = 4_096;
@@ -824,6 +825,10 @@ impl RuntimeState {
         agent_name: &str,
         now: u64,
     ) -> Option<String> {
+        self.prune(now);
+        if self.pending_share_uploads.len() >= MAX_RELAY_PENDING_REQUESTS {
+            return None;
+        }
         let connection_id = self
             .registered_agents
             .get(agent_name)?
@@ -858,6 +863,10 @@ impl RuntimeState {
         else {
             return false;
         };
+        self.prune(now);
+        if self.pending_file_uploads.len() >= MAX_RELAY_PENDING_REQUESTS {
+            return false;
+        }
         self.pending_file_uploads.insert(
             token.to_string(),
             PendingRequest {
@@ -876,6 +885,14 @@ impl RuntimeState {
         now: u64,
     ) -> Vec<(String, String)> {
         self.prune(now);
+        if self
+            .pending_downloads
+            .len()
+            .saturating_add(self.registered_agents.len())
+            > MAX_RELAY_PENDING_REQUESTS
+        {
+            return Vec::new();
+        }
         self.registered_agents
             .iter()
             .map(|(agent_name, registration)| {
@@ -962,6 +979,9 @@ impl RuntimeState {
             .registered_agents
             .get(agent_name)
             .map(|registration| registration.connection_id.clone())?;
+        if self.pending_file_info.len() >= MAX_RELAY_PENDING_REQUESTS {
+            return None;
+        }
         let token = Uuid::new_v4();
         self.pending_file_info.insert(
             token.to_string(),
@@ -1047,6 +1067,9 @@ impl RuntimeState {
             .registered_agents
             .get(agent_name)
             .map(|registration| registration.connection_id.clone())?;
+        if self.pending_file_uploads.len() >= MAX_RELAY_PENDING_REQUESTS {
+            return None;
+        }
         let token = Uuid::new_v4();
         self.pending_file_uploads.insert(
             token.to_string(),
@@ -1850,6 +1873,46 @@ mod tests {
             )
             .expect_err("relay share count mismatch must be rejected");
         assert!(error.contains("does not match"), "{error}");
+    }
+
+    #[test]
+    fn relay_pending_request_maps_have_hard_capacity() {
+        let now = 100;
+        let mut state = RuntimeState::new();
+        state.registered_agents.insert(
+            "edge-limit".to_owned(),
+            AgentRegistration {
+                connection_id: "connection-limit".to_owned(),
+                remote_ip: "127.0.0.1".parse().expect("test relay address"),
+            },
+        );
+        let pending = PendingRequest {
+            connection_id: "connection-limit".to_owned(),
+            filename: Some("file.flac".to_owned()),
+            start_offset: 0,
+            expires_at: now + 1,
+        };
+        state.pending_downloads = (0..MAX_RELAY_PENDING_REQUESTS)
+            .map(|index| (format!("download-{index}"), pending.clone()))
+            .collect();
+        state.pending_file_info = (0..MAX_RELAY_PENDING_REQUESTS)
+            .map(|index| (format!("info-{index}"), pending.clone()))
+            .collect();
+        state.pending_file_uploads = (0..MAX_RELAY_PENDING_REQUESTS)
+            .map(|index| (format!("upload-{index}"), pending.clone()))
+            .collect();
+        state.pending_share_uploads = (0..MAX_RELAY_PENDING_REQUESTS)
+            .map(|index| (format!("share-{index}"), pending.clone()))
+            .collect();
+
+        assert!(state.issue_download_tokens("file.flac", now).is_empty());
+        assert!(state.issue_share_upload_token("edge-limit", now).is_none());
+        assert!(state
+            .begin_file_info("edge-limit", "file.flac", now)
+            .is_none());
+        assert!(state
+            .begin_file_stream("edge-limit", "file.flac", 0, now)
+            .is_none());
     }
 
     #[test]
