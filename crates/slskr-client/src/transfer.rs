@@ -493,7 +493,10 @@ impl UploadTransfer {
                 });
             }
 
-            connection.write_chunk(&bytes[start..]).await?;
+            let max_chunk_len = connection.max_write_chunk_len();
+            for chunk in bytes[start..].chunks(max_chunk_len) {
+                connection.write_chunk(chunk).await?;
+            }
             Ok::<u64, ClientError>(offset)
         })
         .await;

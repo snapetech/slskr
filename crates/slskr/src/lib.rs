@@ -83395,7 +83395,12 @@ async fn upload_file_with_progress(
     let mut sent = offset;
     update_transfer_progress(state, transfer.id, sent).await;
     let pacing_started = Instant::now();
-    let mut buffer = vec![0_u8; state.config.soulseek_connection.buffer_transfer];
+    let buffer_len = state
+        .config
+        .soulseek_connection
+        .buffer_transfer
+        .min(connection.max_write_chunk_len());
+    let mut buffer = vec![0_u8; buffer_len];
     loop {
         if transfer_is_cancelled(state, transfer.id).await {
             return Err("transfer cancelled".to_owned());

@@ -1,4 +1,7 @@
-use slskr_client::{file_transfer::FileTransferConnection, ClientError};
+use slskr_client::{
+    file_transfer::{FileTransferConnection, DEFAULT_MAX_TRANSFER_CHUNK_LEN},
+    ClientError,
+};
 use tokio::io::duplex;
 
 #[tokio::test]
@@ -29,6 +32,23 @@ async fn chunks_round_trip() {
 
     a.write_chunk(&[1, 2, 3, 4]).await.unwrap();
     assert_eq!(b.read_chunk(4).await.unwrap(), vec![1, 2, 3, 4]);
+}
+
+#[tokio::test]
+async fn oversized_plain_chunk_is_rejected_before_io() {
+    let (a, _b) = duplex(8);
+    let mut a = FileTransferConnection::new(a);
+    let chunk = vec![0_u8; DEFAULT_MAX_TRANSFER_CHUNK_LEN + 1];
+
+    let error = a.write_chunk(&chunk).await.unwrap_err();
+
+    assert!(matches!(
+        error,
+        ClientError::FrameTooLarge {
+            length,
+            max: DEFAULT_MAX_TRANSFER_CHUNK_LEN
+        } if length == DEFAULT_MAX_TRANSFER_CHUNK_LEN + 1
+    ));
 }
 
 #[tokio::test]

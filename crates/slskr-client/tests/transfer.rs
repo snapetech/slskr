@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use slskr_client::{
-    file_transfer::FileTransferConnection,
+    file_transfer::{FileTransferConnection, DEFAULT_MAX_TRANSFER_CHUNK_LEN},
     transfer::{
         DownloadState, DownloadTransfer, UploadState, UploadTransfer, MAX_TRANSFER_REASON_BYTES,
     },
@@ -692,6 +692,71 @@ async fn send_file_uses_requested_offset_and_marks_completed() {
     assert_eq!(offset, 2);
     assert_eq!(transfer.state, UploadState::Completed);
     assert_eq!(downloader_task.await.unwrap(), vec![3, 4, 5]);
+}
+
+#[tokio::test]
+async fn send_file_splits_large_plain_uploads_into_bounded_chunks() {
+    let (uploader, downloader) = duplex(64 * 1024);
+    let mut uploader = FileTransferConnection::new(uploader);
+    let mut downloader = FileTransferConnection::new(downloader);
+    let bytes = vec![0x5a_u8; DEFAULT_MAX_TRANSFER_CHUNK_LEN + 1];
+    let mut transfer = UploadTransfer::new(
+        "peer",
+        "Music/file.flac",
+        7,
+        u64::try_from(bytes.len()).unwrap(),
+    );
+    transfer.transfer_request_message().unwrap();
+    transfer
+        .handle_peer_message(PeerMessage::TransferResponse(TransferResponse::Allowed {
+            token: 7,
+            size: None,
+        }))
+        .unwrap();
+
+    let expected_len = bytes.len();
+    let downloader_task = tokio::spawn(async move {
+        assert_eq!(downloader.receive_token().await.unwrap(), 7);
+        downloader.send_offset(0).await.unwrap();
+        let mut received = Vec::with_capacity(expected_len);
+        while received.len() < expected_len {
+            let length = (expected_len - received.len()).min(DEFAULT_MAX_TRANSFER_CHUNK_LEN);
+            received.extend(downloader.read_chunk(length).await.unwrap());
+        }
+        received
+    });
+
+    let offset = transfer.send_file_to(&mut uploader, &bytes).await.unwrap();
+
+    assert_eq!(offset, 0);
+    assert_eq!(transfer.state, UploadState::Completed);
+    assert_eq!(downloader_task.await.unwrap(), bytes);
+}
+
+#[tokio::test]
+async fn obfuscated_upload_completes_when_resume_offset_is_end_of_file() {
+    let (uploader, downloader) = duplex(256);
+    let mut uploader = FileTransferConnection::new_obfuscated(uploader);
+    let mut downloader = FileTransferConnection::new_obfuscated(downloader);
+    let mut transfer = UploadTransfer::new("peer", "Music/file.flac", 7, 0);
+    transfer.transfer_request_message().unwrap();
+    transfer
+        .handle_peer_message(PeerMessage::TransferResponse(TransferResponse::Allowed {
+            token: 7,
+            size: Some(0),
+        }))
+        .unwrap();
+
+    let downloader_task = tokio::spawn(async move {
+        assert_eq!(downloader.receive_token().await.unwrap(), 7);
+        downloader.send_offset(0).await.unwrap();
+    });
+
+    let offset = transfer.send_file_to(&mut uploader, &[]).await.unwrap();
+
+    assert_eq!(offset, 0);
+    assert_eq!(transfer.state, UploadState::Completed);
+    downloader_task.await.unwrap();
 }
 
 #[tokio::test]

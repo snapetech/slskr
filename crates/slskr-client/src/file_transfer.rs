@@ -40,6 +40,15 @@ impl<S> FileTransferConnection<S> {
         self.obfuscated
     }
 
+    #[must_use]
+    pub const fn max_write_chunk_len(&self) -> usize {
+        if self.obfuscated {
+            MAX_OBFUSCATED_TRANSFER_FRAME_LEN - OBFUSCATED_TRANSFER_FRAME_PREFIX_LEN
+        } else {
+            DEFAULT_MAX_TRANSFER_CHUNK_LEN
+        }
+    }
+
     pub fn into_inner(self) -> S {
         self.stream
     }
@@ -100,6 +109,13 @@ where
     }
 
     pub async fn write_chunk(&mut self, chunk: &[u8]) -> Result<(), ClientError> {
+        let max_len = self.max_write_chunk_len();
+        if chunk.len() > max_len {
+            return Err(ClientError::FrameTooLarge {
+                length: chunk.len(),
+                max: max_len,
+            });
+        }
         if self.obfuscated {
             self.write_obfuscated_payload(chunk).await
         } else {
