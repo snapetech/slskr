@@ -62,6 +62,7 @@ const DESTINATION_WRITE_TIMEOUT: Duration = Duration::from_secs(30);
 const OVERLAY_MESSAGE_READ_TIMEOUT: Duration = Duration::from_secs(30);
 const OVERLAY_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(2 * 60);
 const OVERLAY_IDLE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+const QUIC_DATA_READ_TIMEOUT: Duration = Duration::from_secs(30);
 const INBOUND_BUFFER_CHUNKS: usize = 64;
 const TUNNEL_CHUNK_BYTES: usize = 8 * 1024;
 const MAX_POD_MESSAGE_BODY_BYTES: usize = 4 * 1024;
@@ -881,17 +882,22 @@ impl Gateway {
         let stream_permits = Arc::new(Semaphore::new(self.quic_data_max_concurrent_streams));
         let mut stream_tasks = JoinSet::new();
         loop {
-            let stream = match connection.accept_inbound_stream().await {
-                Ok(stream) => stream,
-                Err(QuicDataError::Connection(error)) => {
-                    tracing::debug!(%error, ?remote, "overlay QUIC data connection closed");
-                    break;
-                }
-                Err(error) => {
-                    tracing::debug!(%error, ?remote, "overlay QUIC data stream rejected");
-                    continue;
-                }
-            };
+            let stream =
+                match timeout(QUIC_DATA_READ_TIMEOUT, connection.accept_inbound_stream()).await {
+                    Err(_) => {
+                        tracing::debug!(?remote, "overlay QUIC data connection read timed out");
+                        break;
+                    }
+                    Ok(Ok(stream)) => stream,
+                    Ok(Err(QuicDataError::Connection(error))) => {
+                        tracing::debug!(%error, ?remote, "overlay QUIC data connection closed");
+                        break;
+                    }
+                    Ok(Err(error)) => {
+                        tracing::debug!(%error, ?remote, "overlay QUIC data stream rejected");
+                        continue;
+                    }
+                };
             let Ok(permit) = Arc::clone(&stream_permits).acquire_owned().await else {
                 break;
             };
@@ -903,16 +909,20 @@ impl Gateway {
                         gateway.handle_quic_data_stream(stream, remote).await;
                     }
                     QuicDataInboundStream::Unidirectional(mut receive) => {
-                        match receive.read_to_end().await {
-                            Ok(payload) => tracing::debug!(
+                        match timeout(QUIC_DATA_READ_TIMEOUT, receive.read_to_end()).await {
+                            Ok(Ok(payload)) => tracing::debug!(
                                 size = payload.len(),
                                 ?remote,
                                 "received overlay QUIC unidirectional data payload"
                             ),
-                            Err(error) => tracing::debug!(
+                            Ok(Err(error)) => tracing::debug!(
                                 %error,
                                 ?remote,
                                 "overlay QUIC unidirectional data payload rejected"
+                            ),
+                            Err(_) => tracing::debug!(
+                                ?remote,
+                                "overlay QUIC unidirectional data payload read timed out"
                             ),
                         }
                     }
@@ -928,7 +938,8 @@ impl Gateway {
         remote: SocketAddr,
     ) {
         let (mut send, mut receive) = stream.split();
-        let (line, line_bytes) = match read_quic_data_command_line(&mut receive).await {
+        let (line, line_bytes) = match read_quic_data_command_line_with_timeout(&mut receive).await
+        {
             Ok(value) => value,
             Err(error) => {
                 tracing::debug!(%error, ?remote, "overlay QUIC data command rejected");
@@ -950,9 +961,12 @@ impl Gateway {
                 let _ = write_quic_data_error(&mut send, "authentication failed").await;
                 return;
             }
-            let Ok((relay_line, _)) = read_quic_data_command_line(&mut receive).await else {
-                let _ = write_quic_data_error(&mut send, "bad command").await;
-                return;
+            let relay_line = match read_quic_data_command_line_with_timeout(&mut receive).await {
+                Ok((line, _)) => line,
+                Err(_) => {
+                    let _ = write_quic_data_error(&mut send, "bad command").await;
+                    return;
+                }
             };
             let parts = relay_line.split(' ').collect::<Vec<_>>();
             let Some((_, host, port)) =
@@ -993,7 +1007,10 @@ impl Gateway {
                         return;
                     }
                 };
-            if send.write_all(b"OK\n").await.is_err() {
+            if timeout(DESTINATION_WRITE_TIMEOUT, send.write_all(b"OK\n"))
+                .await
+                .is_err()
+            {
                 drop(permit);
                 return;
             }
@@ -1010,10 +1027,19 @@ impl Gateway {
             return;
         }
 
-        let remaining = match receive.read_to_end_after(line_bytes.len()).await {
-            Ok(remaining) => remaining,
-            Err(error) => {
+        let remaining = match timeout(
+            QUIC_DATA_READ_TIMEOUT,
+            receive.read_to_end_after(line_bytes.len()),
+        )
+        .await
+        {
+            Ok(Ok(remaining)) => remaining,
+            Ok(Err(error)) => {
                 tracing::debug!(%error, ?remote, "overlay QUIC data payload rejected");
+                return;
+            }
+            Err(_) => {
+                tracing::debug!(?remote, "overlay QUIC data payload read timed out");
                 return;
             }
         };
@@ -1031,17 +1057,22 @@ impl Gateway {
     ) {
         let remote = connection.remote_address();
         loop {
-            let envelope = match connection.accept_envelope().await {
-                Ok(envelope) => envelope,
-                Err(QuicControlError::Connection(error)) => {
-                    tracing::debug!(%error, ?remote, "overlay QUIC control connection closed");
-                    return;
-                }
-                Err(error) => {
-                    tracing::debug!(%error, ?remote, "overlay QUIC control stream rejected");
-                    continue;
-                }
-            };
+            let envelope =
+                match timeout(OVERLAY_MESSAGE_READ_TIMEOUT, connection.accept_envelope()).await {
+                    Ok(Ok(envelope)) => envelope,
+                    Ok(Err(QuicControlError::Connection(error))) => {
+                        tracing::debug!(%error, ?remote, "overlay QUIC control connection closed");
+                        return;
+                    }
+                    Ok(Err(error)) => {
+                        tracing::debug!(%error, ?remote, "overlay QUIC control stream rejected");
+                        continue;
+                    }
+                    Err(_) => {
+                        tracing::debug!(?remote, "overlay QUIC control stream read timed out");
+                        continue;
+                    }
+                };
             let now = match i64::try_from(super::unix_timestamp_millis()) {
                 Ok(now) => now,
                 Err(_) => continue,
@@ -1306,12 +1337,24 @@ async fn read_quic_data_command_line(
     Ok((line, bytes))
 }
 
+async fn read_quic_data_command_line_with_timeout(
+    receive: &mut QuicDataReceiveStream,
+) -> Result<(String, Vec<u8>), QuicDataError> {
+    timeout(QUIC_DATA_READ_TIMEOUT, read_quic_data_command_line(receive))
+        .await
+        .map_err(|_| QuicDataError::Timeout("data command read"))?
+}
+
 async fn write_quic_data_error(
     send: &mut QuicDataSendStream,
     reason: &str,
 ) -> Result<(), QuicDataError> {
-    send.write_all(format!("ERR {reason}\n").as_bytes()).await?;
-    send.finish()
+    timeout(DESTINATION_WRITE_TIMEOUT, async {
+        send.write_all(format!("ERR {reason}\n").as_bytes()).await?;
+        send.finish()
+    })
+    .await
+    .map_err(|_| QuicDataError::Timeout("data error write"))?
 }
 
 fn relay_authentication_valid(line: &str, configured_token: &str) -> bool {
