@@ -156,15 +156,22 @@ async fn send_message<S>(session: &mut ServerSession<S>, username: &str, message
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
-    let Ok(body) = message.encode_private_message() else {
-        return;
+    let body = match message.encode_private_message() {
+        Ok(body) => body,
+        Err(error) => {
+            tracing::warn!(%username, %error, "mesh-sync response could not be encoded");
+            return;
+        }
     };
-    let _ = session
+    if let Err(error) = session
         .send_server_message(ServerMessage::MessageUserRequest {
             username: username.to_owned(),
             message: body,
         })
-        .await;
+        .await
+    {
+        tracing::warn!(%username, %error, "mesh-sync response could not be sent");
+    }
 }
 
 async fn build_hello(state: &super::AppState) -> MeshHelloMessage {

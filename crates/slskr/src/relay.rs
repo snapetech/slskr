@@ -847,6 +847,10 @@ impl RuntimeState {
             .collect()
     }
 
+    pub(crate) fn cancel_download(&mut self, token: &str) {
+        self.pending_downloads.remove(token);
+    }
+
     pub(crate) fn validate_download(
         &mut self,
         settings: &RelaySettings,

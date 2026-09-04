@@ -177,33 +177,18 @@ async fn run_connection(state: &Arc<AppState>, settings: &RelaySettings) -> Resu
                         .and_then(Value::as_str)
                         .unwrap_or_default();
                     if target_name == "RequestFileUpload" {
-                        let filename = message
-                            .get("arguments")
-                            .and_then(Value::as_array)
-                            .and_then(|arguments| arguments.first())
-                            .and_then(Value::as_str)
-                            .filter(|filename| {
-                                !filename.trim().is_empty()
-                                    && filename.len() <= MAX_RELAY_FILENAME_BYTES
-                            })
-                            .unwrap_or_default()
-                            .to_owned();
-                        let start_offset = message
-                            .get("arguments")
-                            .and_then(Value::as_array)
-                            .and_then(|arguments| arguments.get(1))
-                            .and_then(Value::as_u64)
-                            .unwrap_or(0);
-                        let token = message
-                            .get("arguments")
-                            .and_then(Value::as_array)
-                            .and_then(|arguments| arguments.get(2))
-                            .and_then(Value::as_str)
-                            .filter(|token| {
-                                !token.trim().is_empty() && token.len() <= MAX_RELAY_TOKEN_BYTES
-                            })
-                            .unwrap_or_default()
-                            .to_owned();
+                        let (filename, start_offset, token) =
+                            match relay_upload_request(&message) {
+                                Ok(request) => request,
+                                Err(error) => {
+                                    if let Some(token) = relay_upload_failure_token(&message) {
+                                        pending_failures.push_back((token, error));
+                                    } else {
+                                        tracing::warn!(%error, "relay upload request was invalid");
+                                    }
+                                    continue;
+                                }
+                            };
                         let Ok(upload_permit) = Arc::clone(&upload_slots).try_acquire_owned()
                         else {
                             pending_failures.push_back((
@@ -599,6 +584,42 @@ fn parse_signalr_text(text: &str) -> Result<Vec<Value>, String> {
     Ok(values)
 }
 
+fn relay_upload_request(message: &Value) -> Result<(String, u64, String), String> {
+    let arguments = message
+        .get("arguments")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "relay upload request arguments are missing".to_owned())?;
+    let filename = arguments
+        .first()
+        .and_then(Value::as_str)
+        .filter(|filename| {
+            !filename.trim().is_empty() && filename.len() <= MAX_RELAY_FILENAME_BYTES
+        })
+        .map(str::to_owned)
+        .ok_or_else(|| "relay upload request filename is invalid".to_owned())?;
+    let start_offset = arguments
+        .get(1)
+        .and_then(Value::as_u64)
+        .ok_or_else(|| "relay upload request offset is invalid".to_owned())?;
+    let token = arguments
+        .get(2)
+        .and_then(Value::as_str)
+        .filter(|token| !token.trim().is_empty() && token.len() <= MAX_RELAY_TOKEN_BYTES)
+        .map(str::to_owned)
+        .ok_or_else(|| "relay upload request token is invalid".to_owned())?;
+    Ok((filename, start_offset, token))
+}
+
+fn relay_upload_failure_token(message: &Value) -> Option<String> {
+    message
+        .get("arguments")
+        .and_then(Value::as_array)
+        .and_then(|arguments| arguments.get(2))
+        .and_then(Value::as_str)
+        .filter(|token| !token.trim().is_empty() && token.len() <= MAX_RELAY_TOKEN_BYTES)
+        .map(str::to_owned)
+}
+
 async fn upload_shares(
     state: &Arc<AppState>,
     settings: &RelaySettings,
@@ -967,6 +988,24 @@ mod tests {
         assert!(parse_signalr_text(&too_many)
             .expect_err("oversized message batch")
             .contains("too many messages"));
+    }
+
+    #[test]
+    fn relay_upload_request_rejects_invalid_protocol_arguments() {
+        let invalid = serde_json::json!({
+            "arguments": ["track.flac", "not-an-offset", "upload-token"]
+        });
+        assert!(relay_upload_request(&invalid)
+            .expect_err("invalid upload offset")
+            .contains("offset"));
+
+        let valid = serde_json::json!({
+            "arguments": ["track.flac", 42, "upload-token"]
+        });
+        assert_eq!(
+            relay_upload_request(&valid).expect("valid upload request"),
+            ("track.flac".to_owned(), 42, "upload-token".to_owned())
+        );
     }
 
     #[test]

@@ -47456,15 +47456,22 @@ async fn issue_relay_download_tokens(state: &AppState, transfer: &TransferEntry)
         .protocol
         .issue_download_tokens(&filename, unix_timestamp());
     for (agent_name, token) in issued {
-        let _ = relay::send_hub_invocation(
+        let sent = relay::send_hub_invocation(
             &relay.protocol,
             &agent_name,
             "NotifyFileDownloadCompleted",
             vec![
                 serde_json::Value::String(filename.clone()),
-                serde_json::Value::String(token),
+                serde_json::Value::String(token.clone()),
             ],
         );
+        if !sent {
+            relay.protocol.cancel_download(&token);
+            ::tracing::warn!(
+                agent = %agent_name,
+                "relay download completion notification could not be queued"
+            );
+        }
     }
 }
 

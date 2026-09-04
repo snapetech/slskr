@@ -20,6 +20,7 @@ use crate::{relay, AppState};
 
 const SIGNALR_RECORD_SEPARATOR: char = '\x1e';
 const MAX_SIGNALR_MESSAGE_BYTES: usize = 256 * 1024;
+const MAX_SIGNALR_MESSAGES_PER_FRAME: usize = 256;
 const MAX_WEBSOCKET_FRAME_BYTES: u64 = 4 * 1024 * 1024;
 pub(crate) const WEBSOCKET_READ_TIMEOUT: Duration = Duration::from_secs(120);
 pub(crate) const SIGNALR_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(15);
@@ -354,11 +355,16 @@ pub(crate) fn signalr_messages(text: &str) -> Result<Vec<String>, String> {
     if text.len() > MAX_SIGNALR_MESSAGE_BYTES {
         return Err("relay SignalR message is too large".to_owned());
     }
-    let messages = text
+    let mut messages = Vec::new();
+    for message in text
         .split(SIGNALR_RECORD_SEPARATOR)
         .filter(|message| !message.is_empty())
-        .map(str::to_owned)
-        .collect::<Vec<_>>();
+    {
+        if messages.len() >= MAX_SIGNALR_MESSAGES_PER_FRAME {
+            return Err("relay SignalR frame contains too many messages".to_owned());
+        }
+        messages.push(message.to_owned());
+    }
     if messages.is_empty() {
         return Err("relay SignalR message is empty".to_owned());
     }
@@ -531,5 +537,14 @@ mod tests {
         .expect("read deadline")
         .expect_err("blocked websocket reader must time out");
         assert!(error.contains("read deadline exceeded"), "{error}");
+    }
+
+    #[test]
+    fn signalr_parser_rejects_message_bursts() {
+        let burst = std::iter::repeat_n("{}", MAX_SIGNALR_MESSAGES_PER_FRAME + 1)
+            .collect::<Vec<_>>()
+            .join(&SIGNALR_RECORD_SEPARATOR.to_string());
+        let error = signalr_messages(&burst).expect_err("message burst");
+        assert!(error.contains("too many messages"), "{error}");
     }
 }

@@ -6,6 +6,7 @@ use suppaftp::tokio::{
     AsyncFtpStream, AsyncRustlsConnector, AsyncRustlsFtpStream, ImplAsyncFtpStream, TokioTlsStream,
 };
 use suppaftp::types::FileType;
+use suppaftp::{FtpError, Status};
 use tokio_rustls::rustls;
 
 use crate::config::{ControllerProfile, FtpIntegrationSettings};
@@ -133,12 +134,15 @@ fn remote_upload_path(
     Ok(format!("{base}/{suffix}").replace('\\', "/"))
 }
 
-async fn create_remote_directories<T>(ftp: &mut ImplAsyncFtpStream<T>, remote_filename: &str)
+async fn create_remote_directories<T>(
+    ftp: &mut ImplAsyncFtpStream<T>,
+    remote_filename: &str,
+) -> Result<(), String>
 where
     T: TokioTlsStream + Send,
 {
     let Some((directory, _)) = remote_filename.rsplit_once('/') else {
-        return;
+        return Ok(());
     };
     let absolute = directory.starts_with('/');
     let mut current = if absolute {
@@ -151,8 +155,20 @@ where
             current.push('/');
         }
         current.push_str(segment);
-        let _ = ftp.mkdir(&current).await;
+        if let Err(create_error) = ftp.mkdir(&current).await {
+            ftp.cwd(&current).await.map_err(|access_error| {
+                format!(
+                    "FTP remote directory {current} is unavailable (create failed: {create_error}; access failed: {access_error})"
+                )
+            })?;
+            ftp.cdup().await.map_err(|restore_error| {
+                format!(
+                    "FTP working directory could not be restored after checking {current}: {restore_error}"
+                )
+            })?;
+        }
     }
+    Ok(())
 }
 
 async fn upload_on_stream<T>(
@@ -170,15 +186,23 @@ where
         .await
         .map_err(|error| format!("FTP binary transfer setup failed: {error}"))?;
     let remote_filename = remote_upload_path(options, local_path)?;
-    create_remote_directories(&mut ftp, &remote_filename).await;
-    if !options.overwrite_existing
-        && ftp
-            .nlst(Some(&remote_filename))
-            .await
-            .is_ok_and(|entries| !entries.is_empty())
-    {
-        let _ = ftp.quit().await;
-        return Ok(());
+    create_remote_directories(&mut ftp, &remote_filename).await?;
+    if !options.overwrite_existing {
+        let existing = match ftp.nlst(Some(&remote_filename)).await {
+            Ok(entries) => !entries.is_empty(),
+            Err(FtpError::UnexpectedResponse(response))
+                if response.status == Status::FileUnavailable =>
+            {
+                false
+            }
+            Err(error) => return Err(format!("FTP remote file check failed: {error}")),
+        };
+        if existing {
+            if let Err(error) = ftp.quit().await {
+                tracing::debug!(%error, "FTP quit after existing-file check failed");
+            }
+            return Ok(());
+        }
     }
     let mut file = tokio::fs::File::open(local_path)
         .await
@@ -186,7 +210,9 @@ where
     ftp.put_file(&remote_filename, &mut file)
         .await
         .map_err(|error| format!("FTP upload failed: {error}"))?;
-    let _ = ftp.quit().await;
+    if let Err(error) = ftp.quit().await {
+        tracing::debug!(%error, "FTP quit after upload failed");
+    }
     Ok(())
 }
 
