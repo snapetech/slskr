@@ -543,6 +543,14 @@ impl MeshSyncMessage {
         let message_type = MeshMessageType::try_from(
             i32::try_from(raw_type).map_err(|_| MeshSyncError::InvalidTypeValue)?,
         )?;
+        if message_type == MeshMessageType::PushDelta
+            && value
+                .get("entries")
+                .and_then(Value::as_array)
+                .is_some_and(|entries| entries.len() > MAX_MESH_SYNC_ENTRIES)
+        {
+            return Err(MeshSyncError::InvalidField("entries"));
+        }
         let decoded = match message_type {
             MeshMessageType::Hello => Self::Hello(serde_json::from_value(value)?),
             MeshMessageType::ReqDelta => Self::ReqDelta(serde_json::from_value(value)?),
@@ -918,7 +926,7 @@ mod tests {
     use super::{
         mesh_hash_entry_signing_bytes, sign_mesh_hash_entry, verify_mesh_hash_entry_signature,
         MeshHashEntry, MeshHelloMessage, MeshMessageType, MeshReqChunkMessage, MeshReqDeltaMessage,
-        MeshReqKeyMessage, MeshSyncBase, MeshSyncError, MeshSyncMessage,
+        MeshReqKeyMessage, MeshSyncBase, MeshSyncError, MeshSyncMessage, MAX_MESH_SYNC_ENTRIES,
         MAX_MESH_SYNC_PAYLOAD_BYTES, MESH_SYNC_MAX_SIGNATURE_AGE_MS,
     };
 
@@ -1044,6 +1052,20 @@ mod tests {
         assert!(matches!(
             MeshSyncMessage::decode_json(&vec![b' '; MAX_MESH_SYNC_PAYLOAD_BYTES + 1]),
             Err(MeshSyncError::PayloadTooLarge { .. })
+        ));
+    }
+
+    #[test]
+    fn mesh_sync_rejects_oversized_delta_arrays_before_typed_deserialization() {
+        let entries = (0..=MAX_MESH_SYNC_ENTRIES)
+            .map(|_| serde_json::Value::Null)
+            .collect::<Vec<_>>();
+        let payload = serde_json::json!({"type": 3, "entries": entries});
+        let encoded = serde_json::to_vec(&payload).expect("encode oversized delta");
+
+        assert!(matches!(
+            MeshSyncMessage::decode_json(&encoded),
+            Err(MeshSyncError::InvalidField("entries"))
         ));
     }
 
