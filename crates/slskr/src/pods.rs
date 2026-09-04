@@ -157,7 +157,8 @@ pub fn gold_star_club_revocation_path(state_dir: &Path) -> PathBuf {
 }
 
 pub fn gold_star_club_is_revoked(state_dir: &Path) -> bool {
-    gold_star_club_revocation_path(state_dir).is_file()
+    fs::symlink_metadata(gold_star_club_revocation_path(state_dir))
+        .is_ok_and(|metadata| metadata.is_file() && !metadata.file_type().is_symlink())
 }
 
 #[allow(dead_code)]
@@ -181,9 +182,8 @@ pub fn gold_star_club_available_with_setting(state_dir: &Path, enabled: bool) ->
 
 pub fn record_gold_star_club_revocation(state_dir: &Path, peer_id: &str) -> Result<(), String> {
     let peer_id = peer_id.trim();
-    if peer_id.is_empty() {
-        return Err("Gold Star Club revocation requires a peer ID".to_owned());
-    }
+    validate_peer_id(peer_id)
+        .map_err(|_| "Gold Star Club revocation requires a valid peer ID".to_owned())?;
     let path = gold_star_club_revocation_path(state_dir);
     let body = format!("revoked_by={peer_id}\nrevoked_at={}\n", current_timestamp());
     super::write_file_atomic(&path, body.as_bytes())
@@ -500,13 +500,9 @@ impl PodStore {
         pod_id: &str,
         mut member: PodMember,
     ) -> Result<Option<PodMember>, String> {
-        validate_peer_id(&member.peer_id)?;
-        validate_text("Role", &member.role, MAX_NAME_BYTES, false)?;
         member.peer_id = member.peer_id.trim().to_owned();
         member.role = member.role.trim().to_ascii_lowercase();
-        if !matches!(member.role.as_str(), "owner" | "mod" | "member" | "guest") {
-            return Err("Role must be owner, mod, member, or guest".to_owned());
-        }
+        validate_member(&member)?;
         let Some(stored) = self.pods.get(pod_id) else {
             return Ok(None);
         };
@@ -776,6 +772,7 @@ impl PodStore {
     }
 
     pub fn join(&mut self, pod_id: &str, peer_id: String) -> Result<Option<bool>, String> {
+        let peer_id = peer_id.trim().to_owned();
         validate_peer_id(&peer_id)?;
         if is_gold_star_club(pod_id) && !self.gold_star_club_available() {
             return Err("Gold Star Club is disabled or locally revoked".to_owned());
@@ -1136,7 +1133,36 @@ fn normalize_optional(
 }
 
 fn validate_peer_id(peer_id: &str) -> Result<(), String> {
-    validate_text("PeerId", peer_id, MAX_PEER_ID_BYTES, false)
+    validate_text("PeerId", peer_id, MAX_PEER_ID_BYTES, false)?;
+    if peer_id.chars().any(char::is_control) {
+        return Err("PeerId must not contain control characters".to_owned());
+    }
+    Ok(())
+}
+
+fn validate_member(member: &PodMember) -> Result<(), String> {
+    validate_peer_id(&member.peer_id)?;
+    validate_text("Role", &member.role, MAX_NAME_BYTES, false)?;
+    if !matches!(member.role.as_str(), "owner" | "mod" | "member" | "guest") {
+        return Err("Role must be owner, mod, member, or guest".to_owned());
+    }
+    for (name, value, maximum) in [
+        (
+            "PublicKey",
+            member.public_key.as_deref(),
+            MAX_PUBLIC_KEY_BYTES,
+        ),
+        ("JoinedAt", member.joined_at.as_deref(), 128),
+        ("LastSeen", member.last_seen.as_deref(), 128),
+    ] {
+        if let Some(value) = value {
+            validate_text(name, value, maximum, true)?;
+            if value.chars().any(char::is_control) {
+                return Err(format!("{name} must not contain control characters"));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn peer_ids_equal(left: &str, right: &str) -> bool {
@@ -1443,22 +1469,7 @@ fn load_state(path: &Path) -> Result<BTreeMap<String, StoredPod>, String> {
         }
         let mut peers = HashSet::new();
         stored.members.retain(|member| {
-            !member.peer_id.trim().is_empty()
-                && member.peer_id.len() <= MAX_PEER_ID_BYTES
-                && matches!(member.role.as_str(), "owner" | "mod" | "member" | "guest")
-                && member
-                    .public_key
-                    .as_ref()
-                    .is_none_or(|key| key.len() <= MAX_PUBLIC_KEY_BYTES)
-                && member
-                    .joined_at
-                    .as_ref()
-                    .is_none_or(|timestamp| timestamp.len() <= 128)
-                && member
-                    .last_seen
-                    .as_ref()
-                    .is_none_or(|timestamp| timestamp.len() <= 128)
-                && peers.insert(member.peer_id.to_ascii_lowercase())
+            validate_member(member).is_ok() && peers.insert(member.peer_id.to_ascii_lowercase())
         });
         stored.members.truncate(MAX_MEMBERS);
         if !is_gold_star_club(&stored.pod.pod_id)
@@ -1477,6 +1488,11 @@ fn write_state(path: &Path, pods: &BTreeMap<String, StoredPod>) -> Result<(), St
         pods: pods.values().cloned().collect(),
     })
     .map_err(|error| format!("pod state encode failed: {error}"))?;
+    if body.len() as u64 > MAX_STATE_BYTES {
+        return Err(format!(
+            "pod state exceeds the {MAX_STATE_BYTES} byte limit"
+        ));
+    }
     super::write_file_atomic(path, body).map_err(|error| format!("pod state write failed: {error}"))
 }
 
@@ -1580,6 +1596,29 @@ mod tests {
         let body =
             std::fs::read_to_string(super::gold_star_club_revocation_path(&state_dir)).unwrap();
         assert!(body.contains("revoked_by=local-user\n"));
+        std::fs::remove_dir_all(state_dir).unwrap();
+    }
+
+    #[test]
+    fn revocation_rejects_control_id_and_symlink_marker() {
+        let state_dir = std::env::temp_dir().join(format!(
+            "slskr-gold-star-revocation-hardening-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&state_dir).unwrap();
+        assert!(record_gold_star_club_revocation(&state_dir, "peer\ninjected").is_err());
+        assert!(!super::gold_star_club_is_revoked(&state_dir));
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            let target = state_dir.join("target");
+            let marker = super::gold_star_club_revocation_path(&state_dir);
+            std::fs::write(&target, b"external marker").unwrap();
+            symlink(&target, &marker).unwrap();
+            assert!(!super::gold_star_club_is_revoked(&state_dir));
+        }
+
         std::fs::remove_dir_all(state_dir).unwrap();
     }
 
@@ -1920,6 +1959,33 @@ mod tests {
             store.join("pod:test", "mEmBeR".to_owned()).unwrap_err(),
             "Peer is banned from this pod"
         );
+        std::fs::remove_dir_all(state_dir).unwrap();
+    }
+
+    #[test]
+    fn member_join_trims_identity_and_bounds_optional_metadata() {
+        let state_dir = std::env::temp_dir().join(format!(
+            "slskr-pod-member-hardening-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&state_dir).unwrap();
+        let mut store = PodStore::empty(&state_dir);
+        store.create(fixture(), "owner".to_owned()).unwrap();
+        assert!(store
+            .join("pod:test", " member ".to_owned())
+            .unwrap()
+            .unwrap());
+        assert!(store.is_member("pod:test", "member"));
+
+        let oversized = PodMember {
+            peer_id: "large".to_owned(),
+            role: "member".to_owned(),
+            is_banned: false,
+            public_key: Some("x".repeat(super::MAX_PUBLIC_KEY_BYTES + 1)),
+            joined_at: None,
+            last_seen: None,
+        };
+        assert!(store.upsert_member("pod:test", oversized).is_err());
         std::fs::remove_dir_all(state_dir).unwrap();
     }
 }
