@@ -35,12 +35,12 @@ func TestBatchBuilderOwnsNestedRequestBodies(t *testing.T) {
 
 func TestBatchBuilderSupportsAnyJSONBody(t *testing.T) {
 	client := NewClient("http://example.test", "token")
-	values := []interface{}{"lossless", map[string]interface{}{"bitrate": 320}}
+	values := []string{"lossless", "320kbps"}
 	builder := client.NewBatchBuilder().Post("/api/searches", values, nil).Put("/api/config", "compact", nil)
 
 	values[0] = "mutated input"
 	operations := builder.GetOperations()
-	storedValues, ok := operations[0].Body.([]interface{})
+	storedValues, ok := operations[0].Body.([]string)
 	if !ok {
 		t.Fatalf("expected array body, got %T", operations[0].Body)
 	}

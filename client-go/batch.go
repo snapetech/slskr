@@ -3,6 +3,7 @@ package slskr
 import (
 	"context"
 	"fmt"
+	"reflect"
 )
 
 // BatchOperation represents a single operation in a batch
@@ -143,27 +144,60 @@ func (b *BatchBuilder) GetOperations() []BatchOperation {
 	return ops
 }
 
-func cloneJSONMap(value map[string]interface{}) map[string]interface{} {
-	if value == nil {
+func cloneJSONValue(value interface{}) interface{} {
+	cloned := cloneJSONReflectValue(reflect.ValueOf(value))
+	if !cloned.IsValid() {
 		return nil
 	}
-	cloned := make(map[string]interface{}, len(value))
-	for key, item := range value {
-		cloned[key] = cloneJSONValue(item)
-	}
-	return cloned
+	return cloned.Interface()
 }
 
-func cloneJSONValue(value interface{}) interface{} {
-	switch typed := value.(type) {
-	case map[string]interface{}:
-		return cloneJSONMap(typed)
-	case []interface{}:
-		cloned := make([]interface{}, len(typed))
-		for index, item := range typed {
-			cloned[index] = cloneJSONValue(item)
+func cloneJSONReflectValue(value reflect.Value) reflect.Value {
+	if !value.IsValid() {
+		return value
+	}
+
+	switch value.Kind() {
+	case reflect.Interface:
+		if value.IsNil() {
+			return reflect.Zero(value.Type())
 		}
-		return cloned
+		cloned := cloneJSONReflectValue(value.Elem())
+		result := reflect.New(value.Type()).Elem()
+		result.Set(cloned)
+		return result
+	case reflect.Map:
+		if value.IsNil() {
+			return reflect.Zero(value.Type())
+		}
+		result := reflect.MakeMapWithSize(value.Type(), value.Len())
+		iter := value.MapRange()
+		for iter.Next() {
+			result.SetMapIndex(iter.Key(), cloneJSONReflectValue(iter.Value()))
+		}
+		return result
+	case reflect.Slice:
+		if value.IsNil() {
+			return reflect.Zero(value.Type())
+		}
+		result := reflect.MakeSlice(value.Type(), value.Len(), value.Len())
+		for index := 0; index < value.Len(); index++ {
+			result.Index(index).Set(cloneJSONReflectValue(value.Index(index)))
+		}
+		return result
+	case reflect.Array:
+		result := reflect.New(value.Type()).Elem()
+		for index := 0; index < value.Len(); index++ {
+			result.Index(index).Set(cloneJSONReflectValue(value.Index(index)))
+		}
+		return result
+	case reflect.Pointer:
+		if value.IsNil() {
+			return reflect.Zero(value.Type())
+		}
+		result := reflect.New(value.Type().Elem())
+		result.Elem().Set(cloneJSONReflectValue(value.Elem()))
+		return result
 	default:
 		return value
 	}
