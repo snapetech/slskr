@@ -261,6 +261,7 @@ impl RoomState {
                     || username.is_empty()
                     || room.chars().any(char::is_control)
                     || username.chars().any(char::is_control)
+                    || message.chars().any(char::is_control)
                 {
                     return false;
                 }
@@ -351,6 +352,7 @@ impl PrivateMessageInbox {
                     || message.message.len() > MAX_STORED_SOCIAL_FIELD_BYTES
                     || username.is_empty()
                     || message.username.chars().any(char::is_control)
+                    || message.message.chars().any(char::is_control)
                 {
                     return Some(ServerMessage::MessageAcked { id: message.id });
                 }
@@ -437,5 +439,32 @@ mod tests {
             Some(ServerMessage::MessageAcked { id: 1 })
         );
         assert_eq!(inbox.messages()[0].username, "alice");
+    }
+
+    #[test]
+    fn social_message_bodies_reject_control_characters() {
+        let mut rooms = RoomState::new();
+        assert!(
+            !rooms.apply_server_message(&ServerMessage::GlobalRoomMessage {
+                room: "lobby".to_owned(),
+                username: "alice".to_owned(),
+                message: "hello\nforged".to_owned(),
+            })
+        );
+        assert!(rooms.messages().is_empty());
+
+        let mut inbox = super::PrivateMessageInbox::new();
+        assert_eq!(
+            inbox.apply_server_message(&ServerMessage::MessageUserResponse(PrivateMessage {
+                id: 2,
+                timestamp: 3,
+                username: "alice".to_owned(),
+                message: "hello\rforged".to_owned(),
+                is_new: true,
+                was_replayed: false,
+            })),
+            Some(ServerMessage::MessageAcked { id: 2 })
+        );
+        assert!(inbox.messages().is_empty());
     }
 }
