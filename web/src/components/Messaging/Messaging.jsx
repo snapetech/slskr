@@ -152,9 +152,9 @@ const PodChannelSession = ({ channel, state }) => {
     const requestId = ++refreshRequestIdRef.current;
     if (!channel?.podId || !channel?.channelId) return;
 
-    const [channelMessages, podMembers] = await Promise.all([
+    const [messagesResult, membersResult] = await Promise.allSettled([
       pods.getMessages(channel.podId, channel.channelId),
-      pods.getMembers(channel.podId).catch(() => []),
+      pods.getMembers(channel.podId),
     ]);
 
     if (
@@ -163,14 +163,31 @@ const PodChannelSession = ({ channel, state }) => {
     ) {
       return;
     }
-    setMessages(asRecords(channelMessages));
-    setMembers(asRecords(podMembers));
+
+    if (messagesResult.status === 'rejected') {
+      throw messagesResult.reason;
+    }
+
+    setMessages(asRecords(messagesResult.value));
+    if (membersResult.status === 'fulfilled') {
+      setMembers(asRecords(membersResult.value));
+      setError('');
+    } else {
+      setError(
+        toDisplayError(membersResult.reason, 'Failed to load pod members'),
+      );
+    }
   }, [channel?.channelId, channel?.podId]);
 
   usePolling(
     () =>
       refresh().catch((error) => {
         console.error('Failed to load pod channel messages:', error);
+        if (mountedRef.current) {
+          setError(
+            toDisplayError(error, 'Failed to load pod channel messages'),
+          );
+        }
       }),
     2_000,
     {
@@ -348,6 +365,7 @@ const Messaging = ({ runtimeProfile, initialKind = 'mixed', state }) => {
   const [joinedRooms, setJoinedRooms] = useState([]);
   const [podChannels, setPodChannels] = useState([]);
   const [availableRooms, setAvailableRooms] = useState([]);
+  const [workspaceError, setWorkspaceError] = useState('');
   const [batchMessage, setBatchMessage] = useState('');
   const [batchModalOpen, setBatchModalOpen] = useState(false);
   const [batchSending, setBatchSending] = useState(false);
@@ -414,39 +432,70 @@ const Messaging = ({ runtimeProfile, initialKind = 'mixed', state }) => {
     if (!mountedRef.current) return false;
 
     const [
-      serverConversations,
-      serverJoinedRooms,
-      serverPods,
-      serverDiscoveredPods,
-    ] = await Promise.all([
+      serverConversationsResult,
+      serverJoinedRoomsResult,
+      serverPodsResult,
+      serverDiscoveredPodsResult,
+    ] = await Promise.allSettled([
       chat.getAll(),
       rooms.getJoined(),
-      pods.list().catch(() => []),
+      pods.list(),
       runtimeProfile === 'native'
-        ? pods.discoverAll(50).catch(() => [])
+        ? pods.discoverAll(50)
         : Promise.resolve([]),
     ]);
+    const failures = [];
+    const resultValue = (result, label) => {
+      if (result.status === 'fulfilled') return result.value;
+      failures.push(`${label}: ${toDisplayError(result.reason)}`);
+      return null;
+    };
+    const serverConversations = resultValue(
+      serverConversationsResult,
+      'Saved conversations',
+    );
+    const serverJoinedRooms = resultValue(
+      serverJoinedRoomsResult,
+      'Joined rooms',
+    );
+    const serverPods = resultValue(serverPodsResult, 'Pods');
+    const serverDiscoveredPods = resultValue(
+      serverDiscoveredPodsResult,
+      'Pod discovery',
+    );
     const conversationsList = Array.isArray(serverConversations)
       ? serverConversations
-      : [];
+      : null;
     const joinedRoomList = Array.isArray(serverJoinedRooms)
       ? serverJoinedRooms
-      : [];
-    const podList = asRecords(serverPods).filter((pod) => pod.podId);
-    const podDetails =
-      runtimeProfile === 'native'
-        ? asRecords(serverDiscoveredPods).length > 0
-          ? asRecords(serverDiscoveredPods)
-          : podList
-        : await Promise.all(
-            podList.map(async (pod) => {
-              try {
-                return await pods.get(pod.podId);
-              } catch {
-                return pod;
-              }
-            }),
+      : null;
+    const podList = Array.isArray(serverPods)
+      ? asRecords(serverPods).filter((pod) => pod.podId)
+      : null;
+    let podDetails = null;
+    if (runtimeProfile === 'native') {
+      if (Array.isArray(serverDiscoveredPods)) {
+        const discovered = asRecords(serverDiscoveredPods);
+        if (discovered.length > 0) {
+          podDetails = discovered;
+        } else if (podList) {
+          podDetails = podList;
+        }
+      } else if (podList) {
+        podDetails = podList;
+      }
+    } else if (podList) {
+      const detailResults = await Promise.allSettled(
+        podList.map((pod) => pods.get(pod.podId)),
+      );
+      podDetails = detailResults.map((result, index) => {
+        if (result.status === 'fulfilled') return result.value;
+        failures.push(
+          `Pod ${podList[index].podId}: ${toDisplayError(result.reason)}`,
         );
+        return podList[index];
+      });
+    }
 
     if (
       !mountedRef.current ||
@@ -455,49 +504,62 @@ const Messaging = ({ runtimeProfile, initialKind = 'mixed', state }) => {
       return false;
     }
 
-    setConversations(
-      conversationsList
-        .filter((conversation) => typeof conversation?.username === 'string' && conversation.username.trim())
-        .map((conversation) => ({
-          ...conversation,
-          hasUnAcknowledgedMessages: Boolean(conversation.hasUnAcknowledgedMessages),
-          username: conversation.username.trim(),
-        }))
-        .sort((a, b) => {
-          if (a.hasUnAcknowledgedMessages !== b.hasUnAcknowledgedMessages) {
-            return a.hasUnAcknowledgedMessages ? -1 : 1;
-          }
+    if (conversationsList) {
+      setConversations(
+        conversationsList
+          .filter((conversation) => typeof conversation?.username === 'string' && conversation.username.trim())
+          .map((conversation) => ({
+            ...conversation,
+            hasUnAcknowledgedMessages: Boolean(conversation.hasUnAcknowledgedMessages),
+            username: conversation.username.trim(),
+          }))
+          .sort((a, b) => {
+            if (a.hasUnAcknowledgedMessages !== b.hasUnAcknowledgedMessages) {
+              return a.hasUnAcknowledgedMessages ? -1 : 1;
+            }
 
-          return a.username.localeCompare(b.username);
-        }),
-    );
-    setJoinedRooms(
-      joinedRoomList
-        .filter((roomName) => typeof roomName === 'string' && roomName.trim())
-        .map((roomName) => roomName.trim())
-        .sort(),
-    );
-    setPodChannels(
-      podDetails
-        .filter((pod) => pod?.podId)
-        .flatMap((pod) =>
-          asRecords(pod.channels)
-            .filter((channel) => channel.channelId || channel.id)
-            .map((channel) => {
-              const channelId = `${channel.channelId || channel.id}`;
-              const podId = `${pod.podId}`;
-              return {
-                channelId,
-                channelKind: `${channel.kind || channel.channelKind || ''}`,
-                channelName: `${channel.name || channel.channelName || channelId}`,
-                podId,
-                podName: `${pod.name || podId}`,
-                target: encodePodTarget(podId, channelId),
-              };
-            }),
-        )
-        .sort((a, b) => channelLabel(a).localeCompare(channelLabel(b))),
-    );
+            return a.username.localeCompare(b.username);
+          }),
+      );
+    }
+    if (joinedRoomList) {
+      setJoinedRooms(
+        joinedRoomList
+          .filter((roomName) => typeof roomName === 'string' && roomName.trim())
+          .map((roomName) => roomName.trim())
+          .sort(),
+      );
+    }
+    if (podDetails) {
+      setPodChannels(
+        podDetails
+          .filter((pod) => pod?.podId)
+          .flatMap((pod) =>
+            asRecords(pod.channels)
+              .filter((channel) => channel.channelId || channel.id)
+              .map((channel) => {
+                const channelId = `${channel.channelId || channel.id}`;
+                const podId = `${pod.podId}`;
+                return {
+                  channelId,
+                  channelKind: `${channel.kind || channel.channelKind || ''}`,
+                  channelName: `${channel.name || channel.channelName || channelId}`,
+                  podId,
+                  podName: `${pod.name || podId}`,
+                  target: encodePodTarget(podId, channelId),
+                };
+              }),
+          )
+          .sort((a, b) => channelLabel(a).localeCompare(channelLabel(b))),
+      );
+    }
+    if (mountedRef.current && requestId === hydrateRequestIdRef.current) {
+      setWorkspaceError(
+        failures.length > 0
+          ? `Some messaging data could not be loaded: ${failures.join('; ')}`
+          : '',
+      );
+    }
     return true;
   }, [runtimeProfile]);
 
@@ -506,6 +568,11 @@ const Messaging = ({ runtimeProfile, initialKind = 'mixed', state }) => {
       return await hydrate();
     } catch (error) {
       console.error('Failed to hydrate messaging workspace:', error);
+      if (mountedRef.current) {
+        setWorkspaceError(
+          toDisplayError(error, 'Failed to hydrate messaging workspace'),
+        );
+      }
       return false;
     }
   }, [hydrate]);
@@ -919,6 +986,7 @@ const Messaging = ({ runtimeProfile, initialKind = 'mixed', state }) => {
               }
             />
           </div>
+          {workspaceError ? <Message warning>{workspaceError}</Message> : null}
 
           <div className="messaging-sidebar-section">
             <div className="messaging-sidebar-section-title">Direct Message</div>

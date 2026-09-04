@@ -98,6 +98,23 @@ describe('Messaging', () => {
     expect(pods.discoverAll).toHaveBeenCalledWith(50);
   });
 
+  it('keeps existing workspace data visible and reports pod load failures', async () => {
+    chat.getAll.mockResolvedValue([{ username: 'friend' }]);
+    rooms.getJoined.mockResolvedValue([]);
+    pods.list.mockRejectedValue(new Error('pod service unavailable'));
+
+    render(
+      <MemoryRouter>
+        <Messaging />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('friend')).toBeInTheDocument();
+    expect(
+      await screen.findByText(/Pods: pod service unavailable/),
+    ).toBeInTheDocument();
+  });
+
   it('refreshes conversations when a message websocket event arrives', async () => {
     chat.getAll
       .mockResolvedValueOnce([])
@@ -383,6 +400,44 @@ describe('Messaging', () => {
     expect(await screen.findByText('Members (1)')).toBeInTheDocument();
     expect(screen.getByText('pod room message')).toBeInTheDocument();
     expect(screen.getByLabelText('Message Gold Star Club / General')).toBeInTheDocument();
+  });
+
+  it('keeps pod messages usable and reports member refresh failures', async () => {
+    chat.getAll.mockResolvedValue([]);
+    rooms.getJoined.mockResolvedValue([]);
+    pods.list.mockResolvedValue([
+      {
+        channels: [{ channelId: 'general', kind: 'Room', name: 'General' }],
+        name: 'Gold Star Club',
+        podId: 'pod-1',
+      },
+    ]);
+    pods.get.mockResolvedValue({
+      channels: [{ channelId: 'general', kind: 'Room', name: 'General' }],
+      name: 'Gold Star Club',
+      podId: 'pod-1',
+    });
+    pods.getMembers.mockRejectedValue(new Error('member service unavailable'));
+    pods.getMessages.mockResolvedValue([
+      {
+        body: 'still available',
+        senderPeerId: 'member-one',
+        timestampUnixMs: Date.now(),
+      },
+    ]);
+
+    render(
+      <MemoryRouter>
+        <Messaging state={{ user: { username: 'me' } }} />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(await screen.findByText('Gold Star Club / General'));
+
+    expect(await screen.findByText('still available')).toBeInTheDocument();
+    expect(
+      await screen.findByText('member service unavailable'),
+    ).toBeInTheDocument();
   });
 
   it('exposes confirmed destructive actions for chats, rooms, and pods', async () => {
