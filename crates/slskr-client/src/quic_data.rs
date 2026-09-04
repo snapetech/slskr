@@ -101,15 +101,14 @@ impl QuicDataServer {
     /// Accept the next data connection. `None` means the endpoint was closed.
     pub async fn accept(&self) -> Option<Result<QuicDataConnection, QuicDataError>> {
         let incoming = self.endpoint.accept().await?;
-        Some(
-            incoming
-                .await
-                .map(|connection| QuicDataConnection {
-                    connection,
-                    max_payload_bytes: self.max_payload_bytes,
-                })
-                .map_err(|error| QuicDataError::Connection(error.to_string())),
-        )
+        Some(match timeout(QUIC_CONNECT_TIMEOUT, incoming).await {
+            Ok(Ok(connection)) => Ok(QuicDataConnection {
+                connection,
+                max_payload_bytes: self.max_payload_bytes,
+            }),
+            Ok(Err(error)) => Err(QuicDataError::Connection(error.to_string())),
+            Err(_) => Err(QuicDataError::Timeout("QUIC data handshake")),
+        })
     }
 
     pub fn close(&self) {

@@ -305,12 +305,11 @@ impl QuicControlServer {
     /// Accept the next QUIC connection. `None` means the endpoint was closed.
     pub async fn accept(&self) -> Option<Result<QuicControlConnection, QuicControlError>> {
         let incoming = self.endpoint.accept().await?;
-        Some(
-            incoming
-                .await
-                .map(|connection| QuicControlConnection { connection })
-                .map_err(|error| QuicControlError::Connection(error.to_string())),
-        )
+        Some(match timeout(QUIC_CONNECT_TIMEOUT, incoming).await {
+            Ok(Ok(connection)) => Ok(QuicControlConnection { connection }),
+            Ok(Err(error)) => Err(QuicControlError::Connection(error.to_string())),
+            Err(_) => Err(QuicControlError::Timeout("QUIC control handshake")),
+        })
     }
 
     pub fn close(&self) {
