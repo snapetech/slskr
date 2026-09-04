@@ -9,6 +9,7 @@
 use std::{
     collections::{BTreeMap, HashMap, VecDeque},
     fs,
+    io::Read,
     net::{IpAddr, SocketAddr},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
@@ -22,6 +23,11 @@ pub const MAX_REMOTE_PAYLOAD_SIZE: usize = 1024 * 1024;
 pub const MAX_PARSE_DEPTH: usize = 32;
 const MAX_RATE_LIMIT_BUCKETS: usize = 4096;
 const PREVIOUS_PIN_GRACE: u64 = 30 * 24 * 60 * 60;
+const MAX_CERTIFICATE_PIN_PEERS: usize = 1_024;
+const MAX_CERTIFICATE_PINS_PER_PEER: usize = 8;
+const MAX_CERTIFICATE_PEER_ID_BYTES: usize = 512;
+const MAX_CERTIFICATE_PIN_BYTES: usize = 128;
+const MAX_CERTIFICATE_PIN_STATE_BYTES: usize = 2 * 1024 * 1024;
 
 fn unix_seconds() -> u64 {
     SystemTime::now()
@@ -1094,10 +1100,14 @@ impl CertificatePinManager {
         pin: &str,
         pin_type: CertificatePinType,
     ) -> Result<(), String> {
-        if peer_id.trim().is_empty() || pin.trim().is_empty() {
-            return Err("peer ID and pin cannot be empty".to_owned());
-        }
+        let peer_id = peer_id.trim();
+        let pin = pin.trim();
+        validate_certificate_peer_id(peer_id)?;
+        validate_certificate_pin_text(pin)?;
         let mut peers = self.peers.lock().expect("mesh certificate pin lock");
+        if !peers.contains_key(peer_id) && peers.len() >= MAX_CERTIFICATE_PIN_PEERS {
+            return Err("certificate pin peer capacity is full".to_owned());
+        }
         let info = peers
             .entry(peer_id.to_owned())
             .or_insert_with(|| PeerCertificateInfo {
@@ -1108,6 +1118,7 @@ impl CertificatePinManager {
             CertificatePinType::Current => {
                 if !info.current_pins.iter().any(|candidate| candidate == pin) {
                     info.previous_pins.append(&mut info.current_pins);
+                    trim_certificate_pins(&mut info.previous_pins);
                     info.current_pins.push(pin.to_owned());
                     info.last_rotation = unix_seconds();
                 }
@@ -1115,6 +1126,7 @@ impl CertificatePinManager {
             CertificatePinType::Previous => {
                 if !info.previous_pins.iter().any(|candidate| candidate == pin) {
                     info.previous_pins.push(pin.to_owned());
+                    trim_certificate_pins(&mut info.previous_pins);
                 }
             }
         }
@@ -1185,32 +1197,117 @@ impl CertificatePinManager {
         if metadata.file_type().is_symlink() || !metadata.is_file() {
             return Err("mesh certificate pins must be a regular file".to_owned());
         }
-        let bytes = fs::read(&self.storage_path)
+        let mut options = fs::OpenOptions::new();
+        options.read(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+        }
+        let file = options
+            .open(&self.storage_path)
+            .map_err(|error| format!("mesh certificate pins open failed: {error}"))?;
+        let metadata = file
+            .metadata()
+            .map_err(|error| format!("mesh certificate pins metadata failed: {error}"))?;
+        if !metadata.is_file() {
+            return Err("mesh certificate pins must be a regular file".to_owned());
+        }
+        if metadata.len() > MAX_CERTIFICATE_PIN_STATE_BYTES as u64 {
+            return Err("mesh certificate pin state exceeds the 2 MiB limit".to_owned());
+        }
+        let mut bytes = Vec::new();
+        file.take((MAX_CERTIFICATE_PIN_STATE_BYTES + 1) as u64)
+            .read_to_end(&mut bytes)
             .map_err(|error| format!("mesh certificate pins read failed: {error}"))?;
+        if bytes.len() > MAX_CERTIFICATE_PIN_STATE_BYTES {
+            return Err("mesh certificate pin state exceeds the 2 MiB limit".to_owned());
+        }
         let persisted = serde_json::from_slice::<PersistedPinData>(&bytes)
             .map_err(|error| format!("mesh certificate pins are invalid: {error}"))?;
+        if persisted.peer_certificates.len() > MAX_CERTIFICATE_PIN_PEERS {
+            return Err("mesh certificate pin peer capacity is full".to_owned());
+        }
+        let mut loaded = HashMap::with_capacity(persisted.peer_certificates.len());
+        for info in persisted.peer_certificates {
+            let info = validate_peer_certificate_info(info)?;
+            if loaded.insert(info.peer_id.clone(), info).is_some() {
+                return Err("mesh certificate pin peer is duplicated".to_owned());
+            }
+        }
         let mut peers = self.peers.lock().expect("mesh certificate pin lock");
-        peers.extend(
-            persisted
-                .peer_certificates
-                .into_iter()
-                .map(|info| (info.peer_id.clone(), info)),
-        );
+        peers.extend(loaded);
         Ok(())
     }
 
     fn persist_pins(&self) -> Result<(), String> {
         let peers = self.peers.lock().expect("mesh certificate pin lock");
+        if peers.len() > MAX_CERTIFICATE_PIN_PEERS
+            || peers
+                .values()
+                .any(|info| validate_peer_certificate_info(info.clone()).is_err())
+        {
+            return Err("mesh certificate pin state exceeds its record limits".to_owned());
+        }
         let body = serde_json::to_vec_pretty(&PersistedPinData {
             peer_certificates: peers.values().cloned().collect(),
             last_updated: unix_seconds(),
         })
         .map_err(|error| format!("mesh certificate pins serialization failed: {error}"))?;
         drop(peers);
+        if body.len() > MAX_CERTIFICATE_PIN_STATE_BYTES {
+            return Err("mesh certificate pin state exceeds the 2 MiB limit".to_owned());
+        }
 
         crate::write_file_atomic(&self.storage_path, body)
             .map_err(|error| format!("mesh certificate pins write failed: {error}"))
     }
+}
+
+fn validate_certificate_peer_id(peer_id: &str) -> Result<(), String> {
+    if peer_id.is_empty()
+        || peer_id.len() > MAX_CERTIFICATE_PEER_ID_BYTES
+        || peer_id.chars().any(char::is_control)
+    {
+        return Err("certificate pin peer ID is invalid or too long".to_owned());
+    }
+    Ok(())
+}
+
+fn validate_certificate_pin_text(pin: &str) -> Result<(), String> {
+    if pin.is_empty() || pin.len() > MAX_CERTIFICATE_PIN_BYTES {
+        return Err("certificate pin is invalid or too long".to_owned());
+    }
+    let decoded = STANDARD
+        .decode(pin.as_bytes())
+        .map_err(|_| "certificate pin is not valid base64".to_owned())?;
+    if decoded.len() != 32 {
+        return Err("certificate pin must encode a SHA-256 digest".to_owned());
+    }
+    Ok(())
+}
+
+fn trim_certificate_pins(pins: &mut Vec<String>) {
+    if pins.len() > MAX_CERTIFICATE_PINS_PER_PEER {
+        let excess = pins.len() - MAX_CERTIFICATE_PINS_PER_PEER;
+        pins.drain(0..excess);
+    }
+}
+
+fn validate_peer_certificate_info(
+    mut info: PeerCertificateInfo,
+) -> Result<PeerCertificateInfo, String> {
+    info.peer_id = info.peer_id.trim().to_owned();
+    validate_certificate_peer_id(&info.peer_id)?;
+    if info.current_pins.len() > MAX_CERTIFICATE_PINS_PER_PEER
+        || info.previous_pins.len() > MAX_CERTIFICATE_PINS_PER_PEER
+    {
+        return Err("certificate pin list capacity is full".to_owned());
+    }
+    for pin in info.current_pins.iter().chain(&info.previous_pins) {
+        validate_certificate_pin_text(pin)?;
+    }
+    Ok(info)
 }
 
 /// Endpoint-scoped certificate pin validation.
