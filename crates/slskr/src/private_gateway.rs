@@ -2652,48 +2652,8 @@ fn valid_destination_ip(ip: IpAddr) -> bool {
 
 fn valid_public_relay_ip(ip: IpAddr) -> bool {
     match ip {
-        IpAddr::V4(address) => {
-            let [first, second, third, ..] = address.octets();
-            first != 0
-                && first != 10
-                && first != 127
-                && !(first == 100 && (64..=127).contains(&second))
-                && !(first == 169 && second == 254)
-                && !(first == 172 && (16..=31).contains(&second))
-                && !(first == 192
-                    && ((second == 0 && (third == 0 || third == 2))
-                        || (second == 31 && third == 196)
-                        || (second == 52 && third == 193)
-                        || (second == 88 && third == 99)))
-                && !(first == 192 && second == 168)
-                && !(first == 198 && (second == 18 || second == 19))
-                && !(first == 198 && second == 51 && third == 100)
-                && !(first == 203 && second == 0 && third == 113)
-                && first < 224
-        }
-        IpAddr::V6(address) => {
-            let bytes = address.octets();
-            if let Some(mapped) = address.to_ipv4() {
-                return valid_public_relay_ip(IpAddr::V4(mapped));
-            }
-            let segments = address.segments();
-            let special_use = segments[0] == 0x2001
-                && (segments[1] == 0x0002
-                    || matches!(segments[1] & 0xfff0, 0x0010 | 0x0020)
-                    || segments[1] == 0x0db8)
-                || (segments[0] == 0x3fff && (segments[1] & 0xf000) == 0)
-                || (segments[0] == 0x0100
-                    && segments[1] == 0
-                    && segments[2] == 0
-                    && segments[3] == 0);
-            !address.is_unspecified()
-                && !address.is_loopback()
-                && !address.is_unicast_link_local()
-                && !address.is_unique_local()
-                && !address.is_multicast()
-                && !special_use
-                && (bytes[0] & 0xfe) != 0xfc
-        }
+        IpAddr::V4(address) => !crate::utils::is_blocked_outbound_ipv4(address),
+        IpAddr::V6(address) => !crate::utils::is_blocked_outbound_ipv6(address),
     }
 }
 
@@ -2919,6 +2879,8 @@ mod tests {
             "2001:2::1",
             "2001:20::1",
             "100::1",
+            "64:ff9b::a00:1",
+            "3fff::1",
         ] {
             assert!(
                 !valid_public_relay_ip(address.parse().unwrap()),

@@ -20,7 +20,7 @@ use tokio::{
     time::timeout,
 };
 
-use crate::utils::{is_blocked_outbound_ipv4, is_non_global_special_use_ipv6, nat64_embedded_ipv4};
+use crate::utils::{is_blocked_outbound_ipv4, is_blocked_outbound_ipv6};
 
 pub const DEFAULT_CHUNK_SIZE: u64 = 512 * 1024;
 const MIN_CHUNK_SIZE: u64 = 64 * 1024;
@@ -843,23 +843,7 @@ fn blocked_source_ipv4(ip: Ipv4Addr) -> bool {
 }
 
 fn blocked_source_ipv6(ip: Ipv6Addr) -> bool {
-    if let Some(ipv4) = ip.to_ipv4_mapped().or_else(|| ip.to_ipv4()) {
-        return blocked_source_ipv4(ipv4);
-    }
-    if let Some(ipv4) = nat64_embedded_ipv4(ip) {
-        return blocked_source_ipv4(ipv4);
-    }
-    let segments = ip.segments();
-    ip.is_loopback()
-        || ip.is_unspecified()
-        || ip.is_multicast()
-        || segments[0] == 0x2002
-        || (segments[0] == 0x2001 && segments[1] == 0)
-        || (segments[0] & 0xfe00) == 0xfc00
-        || (segments[0] & 0xffc0) == 0xfe80
-        || (segments[0] & 0xffc0) == 0xfec0
-        || (segments[0] == 0x2001 && segments[1] == 0x0db8)
-        || is_non_global_special_use_ipv6(ip)
+    is_blocked_outbound_ipv6(ip)
 }
 
 fn millis(duration: Duration) -> u64 {

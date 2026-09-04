@@ -1003,7 +1003,10 @@ pub(crate) async fn download_completed_file(
         ));
     }
     let expected_length = response.content_length();
-    let mut output = fs::File::create(&temporary)
+    let mut output = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temporary)
         .await
         .map_err(|error| format!("relay download destination create failed: {error}"))?;
     let mut bytes_written = 0_u64;

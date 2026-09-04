@@ -2850,7 +2850,14 @@ fn integration_ssrf_filter_blocks_special_use_ip_ranges() {
         );
     }
 
-    for address in ["100.64.0.1", "192.0.0.8", "192.88.99.1", "198.18.0.1"] {
+    for address in [
+        "100.64.0.1",
+        "192.0.0.8",
+        "192.31.196.1",
+        "192.52.193.1",
+        "192.88.99.1",
+        "198.18.0.1",
+    ] {
         let ip = address.parse::<std::net::IpAddr>().expect("fixture IP");
         assert!(super::is_blocked_integration_ip(ip), "accepted {address}");
     }
@@ -2866,6 +2873,7 @@ fn integration_ssrf_filter_blocks_special_use_ip_ranges() {
         "2001:2::1",
         "2001:10::1",
         "2001:20::1",
+        "3fff::1",
     ] {
         let ip = address.parse::<std::net::IpAddr>().expect("fixture IP");
         assert!(super::is_blocked_integration_ip(ip), "accepted {address}");

@@ -48772,26 +48772,7 @@ fn validate_lidarr_base_url(base_url: &str) -> Result<ResolvedIntegrationTarget,
 fn is_blocked_integration_ip(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(ip) => is_blocked_outbound_ipv4(ip),
-        IpAddr::V6(ip) => {
-            if let Some(v4) = ip.to_ipv4_mapped().or_else(|| ip.to_ipv4()) {
-                return is_blocked_integration_ip(IpAddr::V4(v4));
-            }
-            if let Some(v4) = nat64_embedded_ipv4(ip) {
-                return is_blocked_outbound_ipv4(v4);
-            }
-            let segments = ip.segments();
-            if segments[0] == 0x2002 || (segments[0] == 0x2001 && segments[1] == 0) {
-                return true;
-            }
-            ip.is_loopback()
-                || ip.is_unspecified()
-                || ip.is_multicast()
-                || (segments[0] == 0x2001 && segments[1] == 0x0db8)
-                || (segments[0] & 0xfe00) == 0xfc00
-                || (segments[0] & 0xffc0) == 0xfe80
-                || (segments[0] & 0xffc0) == 0xfec0
-                || is_non_global_special_use_ipv6(ip)
-        }
+        IpAddr::V6(ip) => is_blocked_outbound_ipv6(ip),
     }
 }
 
