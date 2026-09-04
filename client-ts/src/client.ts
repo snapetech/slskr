@@ -598,7 +598,7 @@ export class SlskrClient {
 
   private async getAuth<T>(path: string, query?: Record<string, any>): Promise<T> {
     const url = this.buildUrl(path, query);
-    return this.request<T>('GET', url, {}, true);
+    return this.request<T>('GET', url, undefined, true);
   }
 
   private async post<T>(path: string, body?: any): Promise<T> {

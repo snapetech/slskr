@@ -491,7 +491,7 @@ class SlskrClient {
     }
     async getAuth(path, query) {
         const url = this.buildUrl(path, query);
-        return this.request('GET', url, {}, true);
+        return this.request('GET', url, undefined, true);
     }
     async post(path, body) {
         return this.request('POST', this.baseUrl + path, body, false);

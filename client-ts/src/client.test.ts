@@ -95,6 +95,23 @@ describe('SlskrClient request lifecycle', () => {
     expect(global.fetch).toHaveBeenCalledTimes(1);
   });
 
+  it('does not send bodies with authenticated GET requests', async () => {
+    const requests: RequestInit[] = [];
+    global.fetch = jest.fn().mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push(init ?? {});
+      return new Response('{"username":"alice"}', { status: 200 });
+    });
+    const client = new SlskrClient({
+      baseUrl: 'http://localhost:8080',
+      token: 'test-token',
+      retries: 0,
+    });
+
+    await expect(client.getConfig()).resolves.toMatchObject({ username: 'alice' });
+    expect(requests[0].method).toBe('GET');
+    expect(requests[0].body).toBeUndefined();
+  });
+
   it('serializes falsy JSON request bodies instead of dropping them', async () => {
     const requests: RequestInit[] = [];
     global.fetch = jest.fn().mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
