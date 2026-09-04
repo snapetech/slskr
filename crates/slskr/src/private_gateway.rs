@@ -723,13 +723,10 @@ impl Gateway {
                 session
                     .last_activity
                     .store(super::unix_timestamp(), Ordering::Relaxed);
-                if session
-                    .sender
-                    .send(buffer[..received.0].to_vec())
-                    .await
-                    .is_err()
-                {
-                    quic_sessions.remove(&received.1);
+                if let Err(error) = session.sender.try_send(buffer[..received.0].to_vec()) {
+                    if matches!(error, mpsc::error::TrySendError::Closed(_)) {
+                        quic_sessions.remove(&received.1);
+                    }
                 }
                 continue;
             }
