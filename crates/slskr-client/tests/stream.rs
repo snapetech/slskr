@@ -35,6 +35,31 @@ async fn server_connection_sends_typed_messages() {
 }
 
 #[tokio::test]
+async fn server_connection_sends_batches_without_combining_frames() {
+    let (client, server) = duplex(256);
+    let mut client = ServerConnection::new(client);
+    let mut server = ServerConnection::new(server);
+    let messages = [ServerMessage::ServerPing, ServerMessage::ServerPing];
+
+    client.send_batch(&messages).await.unwrap();
+
+    assert_eq!(
+        server
+            .receive_with_direction(Direction::ClientToServer)
+            .await
+            .unwrap(),
+        ServerMessage::ServerPing
+    );
+    assert_eq!(
+        server
+            .receive_with_direction(Direction::ClientToServer)
+            .await
+            .unwrap(),
+        ServerMessage::ServerPing
+    );
+}
+
+#[tokio::test]
 async fn server_connection_preserves_partial_frame_after_receive_timeout() {
     let (client, mut server) = duplex(256);
     let mut client = ServerConnection::new(client);

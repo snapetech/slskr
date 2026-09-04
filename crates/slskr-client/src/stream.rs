@@ -75,11 +75,10 @@ where
     }
 
     pub async fn send_batch(&mut self, messages: &[ServerMessage]) -> Result<(), ClientError> {
-        let mut encoded = Vec::new();
         for message in messages {
-            encoded.extend_from_slice(&message.encode()?.encode()?);
+            let encoded = message.encode()?.encode()?;
+            self.stream.write_all(&encoded).await?;
         }
-        self.stream.write_all(&encoded).await?;
         self.stream.flush().await?;
         Ok(())
     }
