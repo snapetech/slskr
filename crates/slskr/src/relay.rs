@@ -31,6 +31,10 @@ use crate::config::{ControllerProfile, RelaySettings};
 const CHALLENGE_TTL_SECONDS: u64 = 10;
 const REQUEST_TTL_SECONDS: u64 = 5 * 60;
 const DOWNLOAD_TTL_SECONDS: u64 = 10 * 60;
+pub(crate) const MAX_RELAY_SHARE_ENTRIES: usize = 131_072;
+const MAX_RELAY_SHARE_MANIFEST_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_RELAY_SHARE_UPLOAD_RECORDS: usize = 4_096;
+const MAX_RELAY_SHARE_FILENAME_BYTES: usize = 16 * 1024;
 pub(crate) const HUB_OUTBOUND_QUEUE_CAPACITY: usize = 64;
 const PBKDF2_ITERATIONS: NonZeroU32 = match NonZeroU32::new(1_000) {
     Some(value) => value,
@@ -391,24 +395,34 @@ pub(crate) async fn read_share_database(
                 }
             ));
         }
-        let rows = query("SELECT maskedFilename, size FROM files ORDER BY maskedFilename")
+        let row_limit = i64::try_from(MAX_RELAY_SHARE_ENTRIES + 1)
+            .expect("relay share entry limit fits in SQLite integer");
+        let rows = query("SELECT maskedFilename, size FROM files ORDER BY maskedFilename LIMIT ?")
+            .bind(row_limit)
             .fetch_all(&pool)
             .await
             .map_err(|error| format!("relay share database files read failed: {error}"))?;
-        rows.iter()
-            .map(|row| {
-                Ok(RemoteShare {
-                    filename: row
-                        .try_get::<String, _>("maskedFilename")
-                        .map_err(|error| format!("relay share filename is invalid: {error}"))?,
-                    size: row
-                        .try_get::<i64, _>("size")
-                        .map_err(|error| format!("relay share size is invalid: {error}"))?
-                        .try_into()
-                        .map_err(|_| "relay share size is negative".to_owned())?,
-                })
-            })
-            .collect()
+        if rows.len() > MAX_RELAY_SHARE_ENTRIES {
+            return Err(format!(
+                "relay share database contains more than {MAX_RELAY_SHARE_ENTRIES} files"
+            ));
+        }
+        let mut shares = Vec::with_capacity(rows.len());
+        for row in rows {
+            let share = RemoteShare {
+                filename: row
+                    .try_get::<String, _>("maskedFilename")
+                    .map_err(|error| format!("relay share filename is invalid: {error}"))?,
+                size: row
+                    .try_get::<i64, _>("size")
+                    .map_err(|error| format!("relay share size is invalid: {error}"))?
+                    .try_into()
+                    .map_err(|_| "relay share size is negative".to_owned())?,
+            };
+            validate_share_entries(std::slice::from_ref(&share))?;
+            shares.push(share);
+        }
+        Ok(shares)
     }
     .await;
     pool.close().await;
@@ -584,15 +598,9 @@ impl RuntimeState {
         target: ControllerProfile,
     ) -> Result<(), String> {
         let manifest_path = incoming_directory.join("manifest.json");
-        let bytes = match fs::read(&manifest_path) {
-            Ok(bytes) => bytes,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-            Err(error) => {
-                return Err(format!("relay share manifest read failed: {error}"));
-            }
+        let Some(records) = read_share_manifest(&manifest_path)? else {
+            return Ok(());
         };
-        let records = serde_json::from_slice::<Vec<PersistedShareUpload>>(&bytes)
-            .map_err(|error| format!("relay share manifest is invalid: {error}"))?;
         for record in records {
             let expected_filename = format!("share-{}.db", record.token.replace('-', ""));
             if record.agent_name.trim().is_empty()
@@ -1085,6 +1093,7 @@ impl RuntimeState {
         database_path: PathBuf,
         completed_at: u64,
     ) -> Result<(), String> {
+        validate_share_entries(&shares)?;
         let completed = CompletedShareUpload {
             agent_name: agent_name.clone(),
             share_count,
@@ -1214,12 +1223,7 @@ fn persist_share_manifest(
         .lock()
         .map_err(|_| "relay share manifest lock is poisoned".to_owned())?;
     let manifest_path = incoming_directory.join("manifest.json");
-    let mut records = match fs::read(&manifest_path) {
-        Ok(bytes) => serde_json::from_slice::<Vec<PersistedShareUpload>>(&bytes)
-            .map_err(|error| format!("relay share manifest parse failed: {error}"))?,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
-        Err(error) => return Err(format!("relay share manifest read failed: {error}")),
-    };
+    let mut records = read_share_manifest(&manifest_path)?.unwrap_or_default();
     records.retain(|existing| existing.token != record.token);
     records.push(record.clone());
     let bytes = serde_json::to_vec_pretty(&records)
@@ -1253,6 +1257,98 @@ fn persist_share_manifest(
     }
     write_result?;
     Ok(())
+}
+
+fn read_share_manifest(path: &Path) -> Result<Option<Vec<PersistedShareUpload>>, String> {
+    let Some(bytes) = read_bounded_file(path, MAX_RELAY_SHARE_MANIFEST_BYTES)
+        .map_err(|error| format!("relay share manifest read failed: {error}"))?
+    else {
+        return Ok(None);
+    };
+    let records = serde_json::from_slice::<Vec<PersistedShareUpload>>(&bytes)
+        .map_err(|error| format!("relay share manifest parse failed: {error}"))?;
+    if records.len() > MAX_RELAY_SHARE_UPLOAD_RECORDS {
+        return Err(format!(
+            "relay share manifest contains more than {MAX_RELAY_SHARE_UPLOAD_RECORDS} uploads"
+        ));
+    }
+    for record in &records {
+        validate_share_entries(&record.shares)?;
+    }
+    Ok(Some(records))
+}
+
+fn validate_share_entries(shares: &[RemoteShare]) -> Result<(), String> {
+    if shares.len() > MAX_RELAY_SHARE_ENTRIES {
+        return Err(format!(
+            "relay share list contains more than {MAX_RELAY_SHARE_ENTRIES} files"
+        ));
+    }
+    if shares.iter().any(|share| {
+        share.filename.trim().is_empty()
+            || share.filename.len() > MAX_RELAY_SHARE_FILENAME_BYTES
+            || share.filename.chars().any(char::is_control)
+    }) {
+        return Err(format!(
+            "relay share filename exceeds {MAX_RELAY_SHARE_FILENAME_BYTES} bytes or contains invalid characters"
+        ));
+    }
+    Ok(())
+}
+
+fn read_bounded_file(path: &Path, max_bytes: u64) -> std::io::Result<Option<Vec<u8>>> {
+    use std::io::Read;
+
+    #[cfg(not(unix))]
+    {
+        let metadata = match fs::symlink_metadata(path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        if metadata.file_type().is_symlink() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "path must not be a symlink",
+            ));
+        }
+    }
+
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    let file = match options.open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    let metadata = file.metadata()?;
+    if !metadata.is_file() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "path must be a regular file",
+        ));
+    }
+    if metadata.len() > max_bytes {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("file exceeds {max_bytes} bytes"),
+        ));
+    }
+    let mut bytes = Vec::new();
+    file.take(max_bytes.saturating_add(1))
+        .read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > max_bytes {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("file exceeds {max_bytes} bytes"),
+        ));
+    }
+    Ok(Some(bytes))
 }
 
 #[cfg(unix)]
@@ -1540,6 +1636,57 @@ mod tests {
         assert!(state.agent_shares.is_empty());
         assert!(state.completed_share_uploads.is_empty());
         std::fs::remove_dir_all(root).expect("remove relay manifest fixture");
+    }
+
+    #[test]
+    fn relay_share_manifest_rejects_excessive_upload_records() {
+        let root = std::env::temp_dir().join(format!(
+            "slskr-relay-manifest-record-limit-{}",
+            Uuid::new_v4().simple()
+        ));
+        let incoming = root.join("relay").join("incoming");
+        std::fs::create_dir_all(&incoming).expect("create relay incoming directory");
+        let record = PersistedShareUpload {
+            token: Uuid::new_v4().to_string(),
+            agent_name: "edge-limit".to_owned(),
+            shares: Vec::new(),
+            database_path: incoming.join("share-limit.db"),
+            completed_at: 1,
+        };
+        let records = vec![record.clone(); MAX_RELAY_SHARE_UPLOAD_RECORDS + 1];
+        std::fs::write(
+            incoming.join("manifest.json"),
+            serde_json::to_vec(&records).expect("serialize oversized manifest"),
+        )
+        .expect("write oversized manifest");
+
+        let error = persist_share_manifest(&record.database_path, &record)
+            .expect_err("oversized manifest must be rejected");
+        assert!(error.contains("contains more than"), "{error}");
+        std::fs::remove_dir_all(root).expect("remove oversized manifest fixture");
+    }
+
+    #[test]
+    fn relay_share_record_rejects_excessive_file_count() {
+        let shares = vec![
+            RemoteShare {
+                filename: "file.flac".to_owned(),
+                size: 1,
+            };
+            MAX_RELAY_SHARE_ENTRIES + 1
+        ];
+        let mut state = RuntimeState::new();
+        let error = state
+            .record_share_upload(
+                Uuid::new_v4(),
+                "edge-limit".to_owned(),
+                shares.len(),
+                shares,
+                std::env::temp_dir().join("not-published.db"),
+                1,
+            )
+            .expect_err("oversized relay share record must be rejected");
+        assert!(error.contains("contains more than"), "{error}");
     }
 
     #[test]
