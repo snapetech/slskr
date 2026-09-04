@@ -212,11 +212,22 @@ impl PodChannelStore {
         sig_version: u8,
         normalize_timestamp: bool,
     ) -> Result<PodChannelMessage, String> {
+        if timestamp_unix_ms > MAX_SUPPORTED_UNIX_MILLIS {
+            return Err(format!(
+                "Timestamp must be at most {MAX_SUPPORTED_UNIX_MILLIS} milliseconds"
+            ));
+        }
         validate_field("PodId", &pod_id, MAX_POD_ID_BYTES)?;
         validate_field("ChannelId", &channel_id, MAX_CHANNEL_ID_BYTES)?;
         validate_field("SenderPeerId", &sender_peer_id, MAX_PEER_ID_BYTES)?;
         validate_field("Message body", &body, MAX_BODY_BYTES)?;
         validate_field("MessageId", &message_id, MAX_MESSAGE_ID_BYTES)?;
+        if uuid::Uuid::parse_str(&message_id).is_err() {
+            return Err("MessageId must be a UUID".to_owned());
+        }
+        if sig_version != 1 {
+            return Err("Signature version must be 1".to_owned());
+        }
         if signature.len() > MAX_SIGNATURE_BYTES {
             return Err(format!(
                 "Signature must be at most {MAX_SIGNATURE_BYTES} bytes"
@@ -338,7 +349,34 @@ impl PodChannelStore {
             return Ok(());
         }
         let mut messages = self.messages.clone();
-        messages.extend(restored);
+        let mut message_ids = messages
+            .iter()
+            .map(|message| message.message_id.clone())
+            .collect::<HashSet<_>>();
+        for message in restored {
+            validate_message(&message)?;
+            if !message_ids.insert(message.message_id.clone()) {
+                return Err("Pod channel message already exists".to_owned());
+            }
+            messages.push(message);
+        }
+        if messages.len() > MAX_MESSAGES {
+            return Err(format!(
+                "Pod channel message capacity is limited to {MAX_MESSAGES} messages"
+            ));
+        }
+        let mut channel_counts = BTreeMap::<(String, String), usize>::new();
+        for message in &messages {
+            let count = channel_counts
+                .entry((message.pod_id.clone(), message.channel_id.clone()))
+                .or_default();
+            *count += 1;
+            if *count > MAX_MESSAGES_PER_CHANNEL {
+                return Err(format!(
+                    "Pod channel capacity is limited to {MAX_MESSAGES_PER_CHANNEL} messages per channel"
+                ));
+            }
+        }
         messages.sort_by_key(|message| (message.timestamp_unix_ms, message.message_id.clone()));
         write_state(&self.state_path, &messages)?;
         self.messages = messages;
@@ -352,6 +390,31 @@ fn validate_field(name: &str, value: &str, maximum: usize) -> Result<(), String>
     }
     if value.len() > maximum {
         return Err(format!("{name} must be at most {maximum} bytes"));
+    }
+    Ok(())
+}
+
+fn validate_message(message: &PodChannelMessage) -> Result<(), String> {
+    validate_field("PodId", &message.pod_id, MAX_POD_ID_BYTES)?;
+    validate_field("ChannelId", &message.channel_id, MAX_CHANNEL_ID_BYTES)?;
+    validate_field("SenderPeerId", &message.sender_peer_id, MAX_PEER_ID_BYTES)?;
+    validate_field("Message body", &message.body, MAX_BODY_BYTES)?;
+    validate_field("MessageId", &message.message_id, MAX_MESSAGE_ID_BYTES)?;
+    if uuid::Uuid::parse_str(&message.message_id).is_err() {
+        return Err("MessageId must be a UUID".to_owned());
+    }
+    if message.signature.len() > MAX_SIGNATURE_BYTES {
+        return Err(format!(
+            "Signature must be at most {MAX_SIGNATURE_BYTES} bytes"
+        ));
+    }
+    if message.sig_version != 1 {
+        return Err("Signature version must be 1".to_owned());
+    }
+    if message.timestamp_unix_ms > MAX_SUPPORTED_UNIX_MILLIS {
+        return Err(format!(
+            "Timestamp must be at most {MAX_SUPPORTED_UNIX_MILLIS} milliseconds"
+        ));
     }
     Ok(())
 }
@@ -449,13 +512,18 @@ fn write_state(path: &Path, messages: &[PodChannelMessage]) -> Result<(), String
         messages: messages.to_vec(),
     })
     .map_err(|error| format!("pod channel state encode failed: {error}"))?;
+    if body.len() as u64 > MAX_STATE_BYTES {
+        return Err(format!(
+            "pod channel state exceeds the {MAX_STATE_BYTES} byte limit"
+        ));
+    }
     super::write_file_atomic(path, body)
         .map_err(|error| format!("pod channel state write failed: {error}"))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::PodChannelStore;
+    use super::{PodChannelMessage, PodChannelStore};
 
     #[test]
     fn messages_are_bounded_incremental_and_durable() {
@@ -587,5 +655,48 @@ mod tests {
         assert!(loaded.list("pod-1", "private", None).is_empty());
         assert_eq!(loaded.list("pod-1", "general", None).len(), 1);
         std::fs::remove_dir_all(state_dir).unwrap();
+    }
+
+    #[test]
+    fn live_append_rejects_future_timestamp_that_would_poison_channel_cursor() {
+        let state_dir = std::env::temp_dir().join(format!(
+            "slskr-pod-channel-timestamp-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&state_dir).unwrap();
+        let mut store = PodChannelStore::empty(&state_dir);
+        let error = store
+            .append_with_id(
+                uuid::Uuid::new_v4().to_string(),
+                "pod-1".to_owned(),
+                "chat".to_owned(),
+                "peer-1".to_owned(),
+                "future".to_owned(),
+                String::new(),
+                u64::MAX,
+                1,
+            )
+            .unwrap_err();
+        assert!(error.contains("Timestamp"), "{error}");
+        assert!(store.list("pod-1", "chat", None).is_empty());
+        std::fs::remove_dir_all(state_dir).unwrap();
+    }
+
+    #[test]
+    fn state_writer_rejects_output_larger_than_loader_limit() {
+        let messages = (0..300)
+            .map(|index| PodChannelMessage {
+                message_id: uuid::Uuid::new_v4().to_string(),
+                pod_id: format!("pod-{index}"),
+                channel_id: "chat".to_owned(),
+                sender_peer_id: "peer-1".to_owned(),
+                body: "x".repeat(super::MAX_BODY_BYTES),
+                timestamp_unix_ms: index,
+                signature: String::new(),
+                sig_version: 1,
+            })
+            .collect::<Vec<_>>();
+        let error = super::write_state(std::path::Path::new("unused"), &messages).unwrap_err();
+        assert!(error.contains("state exceeds"), "{error}");
     }
 }

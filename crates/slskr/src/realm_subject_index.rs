@@ -1,6 +1,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
     fs,
+    io::Read,
     path::{Path, PathBuf},
 };
 
@@ -84,10 +85,49 @@ impl Store {
         let state_path = state_dir.join("realm-subject-indexes.json");
         let mut store = Self::with_identity(realm_id, governance_roots);
         store.state_path = Some(state_path.clone());
-        if !state_path.exists() {
-            return Ok(store);
+
+        #[cfg(not(unix))]
+        {
+            let metadata = match fs::symlink_metadata(&state_path) {
+                Ok(metadata) => metadata,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(store),
+                Err(error) => {
+                    return Err(format!(
+                        "realm subject-index state metadata failed: {error}"
+                    ));
+                }
+            };
+            if metadata.file_type().is_symlink() || !metadata.is_file() {
+                return Err("realm subject-index state path must be a regular file".to_owned());
+            }
         }
-        let bytes = fs::read(&state_path)
+
+        let mut options = fs::OpenOptions::new();
+        options.read(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+        }
+        let file = match options.open(&state_path) {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(store),
+            Err(error) => {
+                return Err(format!("realm subject-index state open failed: {error}"));
+            }
+        };
+        let metadata = file
+            .metadata()
+            .map_err(|error| format!("realm subject-index state metadata failed: {error}"))?;
+        if !metadata.is_file() {
+            return Err("realm subject-index state path must be a regular file".to_owned());
+        }
+        if metadata.len() > MAX_STATE_BYTES as u64 {
+            return Err("realm subject-index state exceeds the 8 MiB limit".to_owned());
+        }
+        let mut bytes = Vec::new();
+        file.take((MAX_STATE_BYTES + 1) as u64)
+            .read_to_end(&mut bytes)
             .map_err(|error| format!("realm subject-index state read failed: {error}"))?;
         if bytes.len() > MAX_STATE_BYTES {
             return Err("realm subject-index state exceeds the 8 MiB limit".to_owned());
@@ -99,6 +139,21 @@ impl Store {
             || persisted.authority_decisions.len() > MAX_INDEXES
         {
             return Err("realm subject-index state is unsupported or over capacity".to_owned());
+        }
+        for (key, index) in &persisted.indexes {
+            let validated_key = validate_index(
+                index,
+                &store.local_realm_id,
+                &store.trusted_governance_roots,
+            )?;
+            if validated_key != *key {
+                return Err(
+                    "realm subject-index state key does not match index contents".to_owned(),
+                );
+            }
+        }
+        for (key, decision) in &persisted.authority_decisions {
+            validate_authority_decision(key, decision, &persisted.indexes, &store.local_realm_id)?;
         }
         Ok(Self {
             state_path: Some(state_path),
@@ -434,6 +489,53 @@ fn validate_index(
     } else {
         Err(errors.join(" "))
     }
+}
+
+fn validate_authority_decision(
+    key: &str,
+    decision: &Value,
+    indexes: &BTreeMap<String, Value>,
+    local_realm_id: &str,
+) -> Result<(), String> {
+    let Some(object) = decision.as_object() else {
+        return Err("realm subject-index authority decision must be an object".to_owned());
+    };
+    let realm_id = object
+        .get("realmId")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "Authority decision realm id is required.".to_owned())?;
+    if normalize(realm_id) != normalize(local_realm_id) {
+        return Err("Authority decision realm does not match the local realm.".to_owned());
+    }
+    let index_id = object
+        .get("indexId")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "Authority decision index id is required.".to_owned())?;
+    if index_key(realm_id, index_id) != key || !indexes.contains_key(key) {
+        return Err("Authority decision does not reference a persisted index.".to_owned());
+    }
+    if object.get("enabled").and_then(Value::as_bool).is_none() {
+        return Err("Authority decision enabled value is required.".to_owned());
+    }
+    let decided_by = object
+        .get("decidedBy")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if !is_safe_opaque_reference(decided_by) {
+        return Err("Authority decision decided-by identifier is invalid.".to_owned());
+    }
+    if object
+        .get("note")
+        .and_then(Value::as_str)
+        .is_some_and(|note| note.chars().count() > MAX_AUTHORITY_NOTE_CHARS)
+    {
+        return Err("Authority decision note must be 512 characters or fewer.".to_owned());
+    }
+    Ok(())
 }
 
 fn validate_entry(entry: &Value, errors: &mut Vec<String>) {
@@ -1133,5 +1235,52 @@ mod tests {
         second["entries"][0]["evidenceLinks"] =
             serde_json::json!(["HTTPS://EXAMPLE.TEST/EVIDENCE"]);
         assert_eq!(compute_payload_hash(&first), compute_payload_hash(&second));
+    }
+
+    #[test]
+    fn load_rejects_unvalidated_persisted_index() {
+        let state_dir = std::env::temp_dir().join(format!(
+            "slskr-realm-index-invalid-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        fs::create_dir_all(&state_dir).unwrap();
+        fs::write(
+            state_dir.join("realm-subject-indexes.json"),
+            serde_json::json!({
+                "version": 1,
+                "indexes": {"realm-a:unsafe": {"id": "unsafe"}},
+                "authority_decisions": {}
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let error = Store::load_with_identity(&state_dir, "realm-a", ["governance-a"]).unwrap_err();
+        assert!(
+            error.contains("required") || error.contains("state"),
+            "{error}"
+        );
+        fs::remove_dir_all(state_dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn load_rejects_symlinked_state_file() {
+        use std::os::unix::fs::symlink;
+
+        let root = std::env::temp_dir().join(format!(
+            "slskr-realm-index-symlink-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        let state_dir = root.join("state");
+        fs::create_dir_all(&state_dir).unwrap();
+        let target = root.join("target.json");
+        fs::write(&target, b"{}").unwrap();
+        symlink(&target, state_dir.join("realm-subject-indexes.json")).unwrap();
+        let error = Store::load_with_identity(&state_dir, "realm-a", ["governance-a"]).unwrap_err();
+        assert!(
+            error.contains("open") || error.contains("regular file"),
+            "{error}"
+        );
+        fs::remove_dir_all(root).unwrap();
     }
 }
