@@ -6371,7 +6371,32 @@ fn hash_db_entry_from_persistence(
     })
 }
 
+static HASH_DB_PERSISTENCE_LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> =
+    std::sync::OnceLock::new();
+
+fn hash_db_persistence_lock() -> &'static tokio::sync::Mutex<()> {
+    HASH_DB_PERSISTENCE_LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
+
 async fn persist_hash_db_snapshot(
+    state: &AppState,
+    entries: &[content_discovery::HashDbEntry],
+    latest_seq: u64,
+) -> Result<(), String> {
+    let _guard = hash_db_persistence_lock().lock().await;
+    persist_hash_db_snapshot_unlocked(state, entries, latest_seq).await
+}
+
+async fn persist_current_hash_db_snapshot(state: &AppState) -> Result<(), String> {
+    let _guard = hash_db_persistence_lock().lock().await;
+    let (entries, latest_seq) = {
+        let discovery = state.content_discovery.read().await;
+        (discovery.hash_entries().to_vec(), discovery.latest_seq())
+    };
+    persist_hash_db_snapshot_unlocked(state, &entries, latest_seq).await
+}
+
+async fn persist_hash_db_snapshot_unlocked(
     state: &AppState,
     entries: &[content_discovery::HashDbEntry],
     latest_seq: u64,
@@ -6386,6 +6411,30 @@ async fn persist_hash_db_snapshot(
     db.replace_hash_db_snapshot(&records, i64::try_from(latest_seq).unwrap_or(i64::MAX))
         .await
         .map_err(|error| format!("hash database storage unavailable: {error}"))
+}
+
+async fn rollback_hash_db_entries_if_unchanged(
+    state: &AppState,
+    previous_entries: Vec<content_discovery::HashDbEntry>,
+    previous_latest_seq: u64,
+    mutated_entries: &[content_discovery::HashDbEntry],
+    mutated_latest_seq: u64,
+) {
+    let mut discovery = state.content_discovery.write().await;
+    if discovery.latest_seq() != mutated_latest_seq
+        || discovery.hash_entries() != mutated_entries
+    {
+        return;
+    }
+    if let Err(error) = discovery.restore_hash_entries(previous_entries, previous_latest_seq) {
+        record_daemon_log(
+            state,
+            logging::LogLevel::Error,
+            "hashdb",
+            format!("failed to roll back an unpersisted HashDb merge: {error}"),
+        )
+        .await;
+    }
 }
 
 async fn read_hash_db_state_json(
@@ -53723,14 +53772,34 @@ async fn extended_controller_mutation_response(
             .await
             .sync_is_quarantined(&from_user, unix_timestamp());
         let mut discovery = state.content_discovery.write().await;
-        let result = if quarantined {
+        let previous_entries = discovery.hash_entries().to_vec();
+        let previous_latest_seq = discovery.latest_seq();
+        let mut result = if quarantined {
             Ok((0, 0, discovery.latest_seq()))
         } else {
             discovery
                 .merge_hash_entries_skipping_invalid(entries)
                 .map(|(merged, skipped)| (merged, skipped, discovery.latest_seq()))
         };
+        let mutated_entries = discovery.hash_entries().to_vec();
+        let mutated_latest_seq = discovery.latest_seq();
         drop(discovery);
+        if result
+            .as_ref()
+            .is_ok_and(|(merged, _, _)| *merged > 0)
+        {
+            if let Err(error) = persist_current_hash_db_snapshot(state).await {
+                rollback_hash_db_entries_if_unchanged(
+                    state,
+                    previous_entries,
+                    previous_latest_seq,
+                    &mutated_entries,
+                    mutated_latest_seq,
+                )
+                .await;
+                result = Err(error);
+            }
+        }
         // Matches the oracle's real MeshSyncStats: this is the one real
         // merge call site backing /api/mesh/stats's totalSyncs/
         // successfulSyncs/failedSyncs/totalEntriesReceived/
@@ -55475,17 +55544,38 @@ async fn misc_controller_mutation_response(
             size: size.unwrap_or_default() as u64,
             ..Default::default()
         };
-        return Some(
-            match state
-                .content_discovery
-                .write()
-                .await
-                .merge_hash_entries(vec![entry])
-            {
-                Ok(_) => routing::ok_response(serde_json::json!({"published": true}).to_string()),
-                Err(error) => content_discovery_error_response(state, error).await,
+        let (merge_result, previous_entries, previous_latest_seq, mutated_entries, mutated_latest_seq) = {
+            let mut discovery = state.content_discovery.write().await;
+            let previous_entries = discovery.hash_entries().to_vec();
+            let previous_latest_seq = discovery.latest_seq();
+            let merge_result = discovery.merge_hash_entries(vec![entry]);
+            let mutated_entries = discovery.hash_entries().to_vec();
+            let mutated_latest_seq = discovery.latest_seq();
+            (
+                merge_result,
+                previous_entries,
+                previous_latest_seq,
+                mutated_entries,
+                mutated_latest_seq,
+            )
+        };
+        return Some(match merge_result {
+            Ok(_) => match persist_current_hash_db_snapshot(state).await {
+                Ok(()) => routing::ok_response(serde_json::json!({"published": true}).to_string()),
+                Err(error) => {
+                    rollback_hash_db_entries_if_unchanged(
+                        state,
+                        previous_entries,
+                        previous_latest_seq,
+                        &mutated_entries,
+                        mutated_latest_seq,
+                    )
+                    .await;
+                    content_discovery_error_response(state, error).await
+                }
             },
-        );
+            Err(error) => content_discovery_error_response(state, error).await,
+        });
     }
     if method == "POST" && path == "/api/mesh/message" {
         if is_versioned_v0 {
@@ -72897,11 +72987,25 @@ fn spawn_session_manager(state: Arc<AppState>, mut receiver: mpsc::Receiver<Sess
 
         // Load persisted wishlist scheduler state
         if let Some(db) = state.db.as_ref() {
-            if let Ok(Some((next_index, server_interval))) =
-                db.load_wishlist_scheduler_state().await
+            match db
+                .load_wishlist_scheduler_state()
+                .await
+                .map_err(|error| error.to_string())
             {
-                wishlist_scheduler.set_next_index(next_index);
-                wishlist_scheduler.set_server_interval(server_interval);
+                Ok(Some((next_index, server_interval))) => {
+                    wishlist_scheduler.set_next_index(next_index);
+                    wishlist_scheduler.set_server_interval(server_interval);
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    record_daemon_log(
+                        &state,
+                        logging::LogLevel::Warn,
+                        "wishlist",
+                        format!("failed to load persisted wishlist scheduler state: {error}"),
+                    )
+                    .await;
+                }
             }
         }
 
@@ -72976,12 +73080,24 @@ fn spawn_session_manager(state: Arc<AppState>, mut receiver: mpsc::Receiver<Sess
                                     Instant::now() + wishlist_scheduler.interval();
                                 // Persist updated scheduler state
                                 if let Some(db) = state.db.as_ref() {
-                                    let _ = db
+                                    if let Err(error) = db
                                         .save_wishlist_scheduler_state(
                                             wishlist_scheduler.next_index(),
                                             wishlist_scheduler.server_interval_seconds(),
                                         )
+                                        .await
+                                        .map_err(|error| error.to_string())
+                                    {
+                                        record_daemon_log(
+                                            &state,
+                                            logging::LogLevel::Warn,
+                                            "wishlist",
+                                            format!(
+                                                "failed to persist server wishlist scheduler state: {error}"
+                                            ),
+                                        )
                                         .await;
+                                    }
                                 }
                             }
                             let relogged = matches!(message, ServerMessage::Relogged);
@@ -79916,12 +80032,22 @@ async fn send_due_wishlist_search(
 
     // Persist updated scheduler state after term replacement
     if let Some(db) = state.db.as_ref() {
-        let _ = db
+        if let Err(error) = db
             .save_wishlist_scheduler_state(
                 scheduler.next_index(),
                 scheduler.server_interval_seconds(),
             )
+            .await
+            .map_err(|error| error.to_string())
+        {
+            record_daemon_log(
+                state,
+                logging::LogLevel::Warn,
+                "wishlist",
+                format!("failed to persist wishlist scheduler term state: {error}"),
+            )
             .await;
+        }
     }
 
     let (previous_searches, expired_searches) = {
@@ -81738,18 +81864,49 @@ async fn backfill_file(
         Ok(header) => match parse_flac_backfill_hash(&header) {
             Ok(hash) => {
                 let flac_key = content_discovery::generate_flac_key(path, size);
-                let stored = state
-                    .content_discovery
-                    .write()
-                    .await
-                    .merge_hash_entries(vec![content_discovery::HashDbEntry {
-                        flac_key,
-                        byte_hash: hash.clone(),
-                        size,
-                        ..content_discovery::HashDbEntry::default()
-                    }]);
+                let (
+                    stored,
+                    previous_entries,
+                    previous_latest_seq,
+                    mutated_entries,
+                    mutated_latest_seq,
+                ) = {
+                    let mut discovery = state.content_discovery.write().await;
+                    let previous_entries = discovery.hash_entries().to_vec();
+                    let previous_latest_seq = discovery.latest_seq();
+                    let stored = discovery.merge_hash_entries(vec![
+                        content_discovery::HashDbEntry {
+                            flac_key,
+                            byte_hash: hash.clone(),
+                            size,
+                            ..content_discovery::HashDbEntry::default()
+                        },
+                    ]);
+                    let mutated_entries = discovery.hash_entries().to_vec();
+                    let mutated_latest_seq = discovery.latest_seq();
+                    (
+                        stored,
+                        previous_entries,
+                        previous_latest_seq,
+                        mutated_entries,
+                        mutated_latest_seq,
+                    )
+                };
                 match stored {
-                    Ok(_) => (true, hash, String::new(), header.len()),
+                    Ok(_) => match persist_current_hash_db_snapshot(state).await {
+                        Ok(()) => (true, hash, String::new(), header.len()),
+                        Err(error) => {
+                            rollback_hash_db_entries_if_unchanged(
+                                state,
+                                previous_entries,
+                                previous_latest_seq,
+                                &mutated_entries,
+                                mutated_latest_seq,
+                            )
+                            .await;
+                            (false, String::new(), error, header.len())
+                        }
+                    },
                     Err(error) => (false, String::new(), error, header.len()),
                 }
             }
@@ -82204,26 +82361,57 @@ async fn enrich_completed_audio_metadata(
         return transfer;
     };
     let flac_key = content_discovery::generate_flac_key(&filename, file_size);
-    let merge_result = state
-        .content_discovery
-        .write()
-        .await
-        .merge_hash_entries(vec![content_discovery::HashDbEntry {
-            flac_key,
-            byte_hash,
-            size: file_size,
-            ..content_discovery::HashDbEntry::default()
-        }]);
-    let discovery = state.content_discovery.read().await;
-    match merge_result {
-        Ok(_) => {
-            discovery.finish_metadata_stage(hash_stage, "complete", Some("Hash stored".to_owned()))
-        }
-        Err(error) => {
-            discovery.finish_metadata_stage(hash_stage, "failed", Some(error));
-            return transfer;
-        }
+    let (
+        merge_result,
+        previous_entries,
+        previous_latest_seq,
+        mutated_entries,
+        mutated_latest_seq,
+    ) = {
+        let mut discovery = state.content_discovery.write().await;
+        let previous_entries = discovery.hash_entries().to_vec();
+        let previous_latest_seq = discovery.latest_seq();
+        let merge_result = discovery.merge_hash_entries(vec![
+            content_discovery::HashDbEntry {
+                flac_key,
+                byte_hash,
+                size: file_size,
+                ..content_discovery::HashDbEntry::default()
+            },
+        ]);
+        let mutated_entries = discovery.hash_entries().to_vec();
+        let mutated_latest_seq = discovery.latest_seq();
+        (
+            merge_result,
+            previous_entries,
+            previous_latest_seq,
+            mutated_entries,
+            mutated_latest_seq,
+        )
     };
+    let merge_error = match merge_result {
+        Ok(_) => match persist_current_hash_db_snapshot(state).await {
+            Ok(()) => None,
+            Err(error) => {
+                rollback_hash_db_entries_if_unchanged(
+                    state,
+                    previous_entries,
+                    previous_latest_seq,
+                    &mutated_entries,
+                    mutated_latest_seq,
+                )
+                .await;
+                Some(error)
+            }
+        },
+        Err(error) => Some(error),
+    };
+    let discovery = state.content_discovery.read().await;
+    if let Some(error) = merge_error {
+        discovery.finish_metadata_stage(hash_stage, "failed", Some(error));
+        return transfer;
+    }
+    discovery.finish_metadata_stage(hash_stage, "complete", Some("Hash stored".to_owned()));
     let chromaprint_stage = discovery.begin_metadata_stage(&display_filename, "chromaprint");
     discovery.finish_metadata_stage(
         chromaprint_stage,

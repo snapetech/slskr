@@ -5,7 +5,7 @@ Official Go client library for the slskr HTTP API.
 ## Features
 
 - ✅ Context-aware HTTP client
-- ✅ Complete API coverage
+- ✅ Core API coverage
 - ✅ Type-safe responses
 - ✅ Error handling
 - ✅ No external dependencies (except gorilla/websocket)
@@ -71,6 +71,13 @@ func main() {
 - `GetConfig(ctx)` - Configuration
 - `GetStats(ctx)` - Statistics
 
+### Sessions, Users & Rooms
+- `GetSessions(ctx)` / `CreateSession(ctx, kind, parameters)` - Read or connect the server session
+- `PingSession(ctx, id)` / `DisconnectSession(ctx, id)` - Maintain or close the session
+- `GetSessionPrivileges(ctx, id)` - Read current privileges
+- `ListUsers(ctx, limit, offset)` / `GetUser(ctx, username)` - Read watched users
+- `ListRooms(ctx)` / `GetRoom(ctx, name)` / `JoinRoom(ctx, name)` / `LeaveRoom(ctx, name)` - Manage rooms
+
 ### Search
 - `ListSearches(ctx, limit, offset)` - List searches
 - `CreateSearch(ctx, query)` - Create search
@@ -78,13 +85,23 @@ func main() {
 
 ### Messages
 - `ListMessages(ctx, limit, offset)` - List messages
+- `GetUserMessages(ctx, username, limit)` - User messages
 - `SendMessage(ctx, recipient, content)` - Send message
+- `AcknowledgeMessage(ctx, messageID)` - Mark a message as read
 
 ### Transfers
 - `ListTransfers(ctx, direction, status, limit, offset)` - List transfers
 - `CreateTransfer(ctx, direction, peerUsername, filename)` - Queue a transfer
 - `GetTransfer(ctx, transferID)` - Get transfer details
 - `CancelTransfer(ctx, transferID)` - Cancel a transfer
+
+### Browse, Events & Administration
+- `BrowseUser(ctx, username, folder, limit, offset)` / `RequestBrowse(ctx, username)` - Browse a user's shares
+- `GetBrowseRequests(ctx, status, limit, offset)` / `RespondToBrowseRequest(ctx, username, action, folder)` - Manage browse requests
+- `GetEvents(ctx, eventType, limit, offset)` - Read recorded events
+- `ListShares(ctx, limit, offset)` / `RefreshShares(ctx)` - Read or rescan shares
+- `GetFilters(ctx)` / `UpdateFilters(ctx, filters)` - Read or update filters
+- `GetCacheStats(ctx)` / `InvalidateCache(ctx, keys)` - Inspect or clear the MediaCore cache
 
 ## Error Handling
 

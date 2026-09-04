@@ -78,6 +78,75 @@ func (c *Client) GetCapabilities(ctx context.Context) (map[string]interface{}, e
 	return c.get(ctx, "/api/capabilities", false)
 }
 
+// GetSessions gets the current server session snapshot as a list.
+func (c *Client) GetSessions(ctx context.Context) ([]map[string]interface{}, error) {
+	result, err := c.get(ctx, "/api/session", true)
+	if err != nil {
+		return nil, err
+	}
+	return []map[string]interface{}{result}, nil
+}
+
+// CreateSession connects the server session and returns its refreshed snapshot.
+func (c *Client) CreateSession(ctx context.Context, kind string, parameters map[string]interface{}) (map[string]interface{}, error) {
+	if kind != "server" {
+		return nil, fmt.Errorf("unsupported session type: %s", kind)
+	}
+	var err error
+	if _, hasUsername := parameters["username"]; hasUsername {
+		_, err = c.put(ctx, "/api/server", parameters, true)
+	} else if _, hasPassword := parameters["password"]; hasPassword {
+		_, err = c.put(ctx, "/api/server", parameters, true)
+	} else {
+		_, err = c.post(ctx, "/api/session/connect", map[string]interface{}{}, true)
+	}
+	if err != nil {
+		return nil, err
+	}
+	sessions, err := c.GetSessions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if len(sessions) == 0 {
+		return map[string]interface{}{}, nil
+	}
+	return sessions[0], nil
+}
+
+// PingSession keeps the server session alive.
+func (c *Client) PingSession(ctx context.Context, sessionID string) (map[string]interface{}, error) {
+	_ = sessionID
+	return c.post(ctx, "/api/session/ping", map[string]interface{}{}, true)
+}
+
+// DisconnectSession disconnects the server session.
+func (c *Client) DisconnectSession(ctx context.Context, sessionID string) error {
+	_ = sessionID
+	_, err := c.post(ctx, "/api/session/disconnect", map[string]interface{}{}, true)
+	return err
+}
+
+// GetSessionPrivileges requests and returns the current session privileges.
+func (c *Client) GetSessionPrivileges(ctx context.Context, sessionID string) (map[string]interface{}, error) {
+	_ = sessionID
+	if _, err := c.post(ctx, "/api/session/privileges/check", map[string]interface{}{}, true); err != nil {
+		return nil, err
+	}
+	snapshot, err := c.get(ctx, "/api/session", true)
+	if err != nil {
+		return nil, err
+	}
+	privileges := []interface{}{}
+	if seconds, ok := snapshot["privileges_seconds"].(float64); ok && seconds > 0 {
+		privileges = append(privileges, "privileged")
+	}
+	userID, _ := snapshot["username"].(string)
+	return map[string]interface{}{
+		"user_id":    userID,
+		"privileges": privileges,
+	}, nil
+}
+
 // ListSearches lists searches
 func (c *Client) ListSearches(ctx context.Context, limit, offset int) ([]map[string]interface{}, error) {
 	params := url.Values{}
@@ -250,7 +319,7 @@ func (c *Client) AcknowledgeMessage(ctx context.Context, messageID string) error
 
 // GetUser gets user info
 func (c *Client) GetUser(ctx context.Context, username string) (map[string]interface{}, error) {
-	return c.get(ctx, fmt.Sprintf("/api/users/%s", pathSegment(username)), false)
+	return c.get(ctx, fmt.Sprintf("/api/users/%s/info", pathSegment(username)), true)
 }
 
 // ListUsers lists users
@@ -371,6 +440,103 @@ func (c *Client) UpdateFilters(ctx context.Context, filters map[string]interface
 }
 
 // ============================================================================
+// Browse, events, and cache
+// ============================================================================
+
+// BrowseUser gets a user's shared files, optionally filtered to a folder.
+func (c *Client) BrowseUser(ctx context.Context, username, folder string, limit, offset int) (map[string]interface{}, error) {
+	params := url.Values{}
+	params.Set("limit", fmt.Sprintf("%d", limit))
+	params.Set("offset", fmt.Sprintf("%d", offset))
+	if folder != "" {
+		params.Set("folder", folder)
+	}
+	return c.getWithParams(ctx, fmt.Sprintf("/api/users/%s/browse", pathSegment(username)), params, true)
+}
+
+// RequestBrowse requests a fresh browse listing from a user.
+func (c *Client) RequestBrowse(ctx context.Context, username string) (map[string]interface{}, error) {
+	return c.post(ctx, fmt.Sprintf("/api/users/%s/browse/request", pathSegment(username)), map[string]interface{}{}, true)
+}
+
+// GetBrowseRequests lists pending and completed browse requests.
+func (c *Client) GetBrowseRequests(ctx context.Context, status string, limit, offset int) ([]map[string]interface{}, error) {
+	params := url.Values{}
+	params.Set("limit", fmt.Sprintf("%d", limit))
+	params.Set("offset", fmt.Sprintf("%d", offset))
+	if status != "" {
+		params.Set("status", status)
+	}
+	result, err := c.getWithParams(ctx, "/api/browse/requests", params, true)
+	if err != nil {
+		return nil, err
+	}
+	requests, err := responseArray(result, "requests", "entries")
+	if err != nil {
+		return nil, err
+	}
+	var out []map[string]interface{}
+	for _, request := range requests {
+		if object, ok := request.(map[string]interface{}); ok {
+			out = append(out, object)
+		}
+	}
+	return out, nil
+}
+
+// RespondToBrowseRequest accepts or rejects a browse request.
+func (c *Client) RespondToBrowseRequest(ctx context.Context, username, action, folder string) (map[string]interface{}, error) {
+	if action != "accept" && action != "reject" {
+		return nil, fmt.Errorf("action must be %q or %q", "accept", "reject")
+	}
+	path := fmt.Sprintf("/api/users/%s/browse/folder", pathSegment(username))
+	body := map[string]interface{}{"folder": folder}
+	if action == "reject" {
+		path = fmt.Sprintf("/api/users/%s/browse/cancel", pathSegment(username))
+		body = map[string]interface{}{"reason": "rejected by client"}
+	}
+	return c.post(ctx, path, body, true)
+}
+
+// GetEvents lists recorded events.
+func (c *Client) GetEvents(ctx context.Context, eventType string, limit, offset int) ([]map[string]interface{}, error) {
+	params := url.Values{}
+	params.Set("limit", fmt.Sprintf("%d", limit))
+	params.Set("offset", fmt.Sprintf("%d", offset))
+	if eventType != "" {
+		params.Set("kind", eventType)
+	}
+	result, err := c.getWithParams(ctx, "/api/events", params, true)
+	if err != nil {
+		return nil, err
+	}
+	events, err := responseArray(result, "events", "entries")
+	if err != nil {
+		return nil, err
+	}
+	var out []map[string]interface{}
+	for _, event := range events {
+		if object, ok := event.(map[string]interface{}); ok {
+			out = append(out, object)
+		}
+	}
+	return out, nil
+}
+
+// GetCacheStats gets MediaCore retrieval cache statistics.
+func (c *Client) GetCacheStats(ctx context.Context) (map[string]interface{}, error) {
+	return c.get(ctx, "/api/mediacore/retrieve/stats", true)
+}
+
+// InvalidateCache clears selected MediaCore cache keys, or the complete cache.
+func (c *Client) InvalidateCache(ctx context.Context, keys []string) (map[string]interface{}, error) {
+	if keys == nil {
+		keys = []string{}
+	}
+	return c.post(ctx, "/api/mediacore/retrieve/cache/clear", map[string]interface{}{"keys": keys}, true)
+}
+
+// ============================================================================
 // Internal Methods
 // ============================================================================
 
@@ -484,7 +650,10 @@ func (c *Client) doJSON(req *http.Request, auth bool) (interface{}, error) {
 		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", c.Token))
 	}
 
-	httpClient := *c.HTTPClient
+	httpClient := http.Client{}
+	if c.HTTPClient != nil {
+		httpClient = *c.HTTPClient
+	}
 	configuredRedirect := httpClient.CheckRedirect
 	baseURL, _ := url.Parse(c.BaseURL)
 	httpClient.CheckRedirect = func(redirected *http.Request, via []*http.Request) error {

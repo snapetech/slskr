@@ -299,3 +299,121 @@ func TestClientUsesDaemonWireContracts(t *testing.T) {
 		t.Fatalf("update filters failed: %v", err)
 	}
 }
+
+func TestClientCoversSessionBrowseEventAndCacheRoutes(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		write := func(body string) { _, _ = writer.Write([]byte(body)) }
+		switch {
+		case request.Method == http.MethodGet && request.URL.Path == "/api/session":
+			write(`{"state":"connected","username":"alice","privileges_seconds":60}`)
+		case request.Method == http.MethodPost && request.URL.Path == "/api/session/connect":
+			write(`{"accepted":true}`)
+		case request.Method == http.MethodPost && request.URL.Path == "/api/session/ping":
+			write(`{"accepted":true}`)
+		case request.Method == http.MethodPost && request.URL.Path == "/api/session/disconnect":
+			write(`{"accepted":true}`)
+		case request.Method == http.MethodPost && request.URL.Path == "/api/session/privileges/check":
+			write(`{"accepted":true}`)
+		case request.Method == http.MethodPost && request.URL.Path == "/api/messages/7/ack":
+			writer.WriteHeader(http.StatusNoContent)
+		case request.Method == http.MethodGet && request.URL.EscapedPath() == "/api/users/alice/info":
+			write(`{"username":"alice"}`)
+		case request.Method == http.MethodGet && request.URL.EscapedPath() == "/api/users/alice/browse":
+			if request.URL.Query().Get("folder") != "Albums" {
+				t.Errorf("browse folder was not encoded: %q", request.URL.RawQuery)
+			}
+			write(`{"entries":[{"filename":"track.flac"}]}`)
+		case request.Method == http.MethodPost && request.URL.EscapedPath() == "/api/users/alice/browse/request":
+			write(`{"username":"alice","status":"pending"}`)
+		case request.Method == http.MethodGet && request.URL.Path == "/api/browse/requests":
+			if request.URL.Query().Get("status") != "pending" {
+				t.Errorf("browse status was not encoded: %q", request.URL.RawQuery)
+			}
+			write(`{"requests":[{"username":"alice","status":"pending"}]}`)
+		case request.Method == http.MethodPost && request.URL.EscapedPath() == "/api/users/alice/browse/folder":
+			write(`{"entries":[]}`)
+		case request.Method == http.MethodPost && request.URL.EscapedPath() == "/api/users/alice/browse/cancel":
+			write(`{"cancelled":true}`)
+		case request.Method == http.MethodGet && request.URL.Path == "/api/events":
+			if request.URL.Query().Get("kind") != "transfer.completed" {
+				t.Errorf("event kind was not encoded: %q", request.URL.RawQuery)
+			}
+			write(`{"events":[{"type":"transfer.completed"}]}`)
+		case request.Method == http.MethodGet && request.URL.Path == "/api/mediacore/retrieve/stats":
+			write(`{"entries":4}`)
+		case request.Method == http.MethodPost && request.URL.Path == "/api/mediacore/retrieve/cache/clear":
+			write(`{"cleared":2}`)
+		case request.Method == http.MethodGet && request.URL.Path == "/api/health":
+			write(`{"status":"ok"}`)
+		default:
+			t.Errorf("unexpected %s %s", request.Method, request.URL.RequestURI())
+			writer.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "token")
+	ctx := context.Background()
+
+	sessions, err := client.GetSessions(ctx)
+	if err != nil || len(sessions) != 1 || sessions[0]["username"] != "alice" {
+		t.Fatalf("unexpected sessions response: %#v, %v", sessions, err)
+	}
+	if _, err := client.CreateSession(ctx, "server", nil); err != nil {
+		t.Fatalf("create session failed: %v", err)
+	}
+	if _, err := client.PingSession(ctx, "server"); err != nil {
+		t.Fatalf("ping session failed: %v", err)
+	}
+	if err := client.DisconnectSession(ctx, "server"); err != nil {
+		t.Fatalf("disconnect session failed: %v", err)
+	}
+	privileges, err := client.GetSessionPrivileges(ctx, "server")
+	if err != nil || privileges["user_id"] != "alice" {
+		t.Fatalf("unexpected privileges response: %#v, %v", privileges, err)
+	}
+	if err := client.AcknowledgeMessage(ctx, "7"); err != nil {
+		t.Fatalf("acknowledge message failed: %v", err)
+	}
+	if _, err := client.GetUser(ctx, "alice"); err != nil {
+		t.Fatalf("get user failed: %v", err)
+	}
+	if _, err := client.BrowseUser(ctx, "alice", "Albums", 10, 0); err != nil {
+		t.Fatalf("browse user failed: %v", err)
+	}
+	if _, err := client.RequestBrowse(ctx, "alice"); err != nil {
+		t.Fatalf("request browse failed: %v", err)
+	}
+	if requests, err := client.GetBrowseRequests(ctx, "pending", 10, 0); err != nil || len(requests) != 1 {
+		t.Fatalf("unexpected browse requests response: %#v, %v", requests, err)
+	}
+	if _, err := client.RespondToBrowseRequest(ctx, "alice", "accept", "Albums"); err != nil {
+		t.Fatalf("accept browse request failed: %v", err)
+	}
+	if _, err := client.RespondToBrowseRequest(ctx, "alice", "reject", ""); err != nil {
+		t.Fatalf("reject browse request failed: %v", err)
+	}
+	if events, err := client.GetEvents(ctx, "transfer.completed", 10, 0); err != nil || len(events) != 1 {
+		t.Fatalf("unexpected events response: %#v, %v", events, err)
+	}
+	if _, err := client.GetCacheStats(ctx); err != nil {
+		t.Fatalf("get cache stats failed: %v", err)
+	}
+	if _, err := client.InvalidateCache(ctx, []string{"artist:alice"}); err != nil {
+		t.Fatalf("invalidate cache failed: %v", err)
+	}
+}
+
+func TestClientHandlesNilHTTPClient(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		_, _ = writer.Write([]byte(`{"status":"ok"}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "token")
+	client.HTTPClient = nil
+	if _, err := client.Health(context.Background()); err != nil {
+		t.Fatalf("nil HTTP client should use the default transport: %v", err)
+	}
+}

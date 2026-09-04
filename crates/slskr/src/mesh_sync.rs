@@ -254,16 +254,25 @@ async fn merge_delta(
     }
 
     let incoming_count = incoming.len();
-    let merge_result = if incoming.is_empty() {
-        Ok((0, 0))
-    } else {
-        state
-            .content_discovery
-            .write()
-            .await
-            .merge_hash_entries_skipping_invalid(incoming)
-    };
-    let (merged, skipped_by_store) = match merge_result {
+    let (merge_result, previous_entries, previous_latest_seq, mutated_entries, mutated_latest_seq) =
+        if incoming.is_empty() {
+            (Ok((0, 0)), Vec::new(), 0, Vec::new(), 0)
+        } else {
+            let mut discovery = state.content_discovery.write().await;
+            let previous_entries = discovery.hash_entries().to_vec();
+            let previous_latest_seq = discovery.latest_seq();
+            let merge_result = discovery.merge_hash_entries_skipping_invalid(incoming);
+            let mutated_entries = discovery.hash_entries().to_vec();
+            let mutated_latest_seq = discovery.latest_seq();
+            (
+                merge_result,
+                previous_entries,
+                previous_latest_seq,
+                mutated_entries,
+                mutated_latest_seq,
+            )
+        };
+    let (mut merged, skipped_by_store) = match merge_result {
         Ok(result) => result,
         Err(error) => {
             tracing::warn!(%username, %error, incoming_count, "mesh-sync delta merge failed");
@@ -271,6 +280,21 @@ async fn merge_delta(
         }
     };
     skipped = skipped.saturating_add(skipped_by_store as u64);
+    if merged > 0 {
+        if let Err(error) = super::persist_current_hash_db_snapshot(state).await {
+            super::rollback_hash_db_entries_if_unchanged(
+                state,
+                previous_entries,
+                previous_latest_seq,
+                &mutated_entries,
+                mutated_latest_seq,
+            )
+            .await;
+            tracing::warn!(%username, %error, merged, "mesh-sync delta could not be persisted");
+            skipped = skipped.saturating_add(merged as u64);
+            merged = 0;
+        }
+    }
     let latest = state.content_discovery.read().await.latest_seq();
     {
         let mut mesh = state.mesh.write().await;
