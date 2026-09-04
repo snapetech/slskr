@@ -5,6 +5,7 @@
 import { Event, EventType, WebSocketMessage } from './types';
 
 export const websocketAuthProtocolPrefix = 'slskr.api-token.';
+export const WEBSOCKET_CONNECT_TIMEOUT_MS = 15_000;
 
 export function websocketAuthProtocols(token: string): string[] {
   const normalized = token.trim();
@@ -23,6 +24,8 @@ export class WebSocketClient {
   private maxReconnectAttempts = 5;
   private reconnectDelay = 1000;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private connectionTimer: ReturnType<typeof setTimeout> | null = null;
+  private pendingConnectReject: ((error: Error) => void) | null = null;
   private intentionallyDisconnected = false;
   private pingInterval: number | null = null;
   private subscribedTopics: Set<EventType> = new Set();
@@ -58,23 +61,43 @@ export class WebSocketClient {
     this.intentionallyDisconnected = false;
     this.clearReconnectTimer();
     return new Promise((resolve, reject) => {
+      let settled = false;
+      const clearConnectionTimer = () => this.clearConnectionTimer();
+      const settle = (callback: () => void) => {
+        if (settled) return false;
+        settled = true;
+        clearConnectionTimer();
+        this.pendingConnectReject = null;
+        callback();
+        return true;
+      };
+
       try {
-        let settled = false;
         const socket = new WebSocket(this.url, websocketAuthProtocols(this.token));
         this.ws = socket;
+        this.pendingConnectReject = (error) => settle(() => reject(error));
+        this.connectionTimer = setTimeout(() => {
+          if (this.ws !== socket || settled) return;
+          const error = new Error(
+            `WebSocket connection timed out after ${WEBSOCKET_CONNECT_TIMEOUT_MS}ms`
+          );
+          this.notifyErrorListeners(error);
+          settle(() => reject(error));
+          socket.close();
+        }, WEBSOCKET_CONNECT_TIMEOUT_MS);
 
         socket.onopen = () => {
           if (this.ws !== socket) return;
+          if (settled) return;
+          clearConnectionTimer();
           try {
             this.sendSubscription('subscribe', Array.from(this.subscribedTopics));
             this.reconnectAttempts = 0;
             this.notifyConnectionListeners(true);
             this.setupPingInterval();
-            settled = true;
-            resolve();
+            settle(resolve);
           } catch (error) {
-            settled = true;
-            reject(error);
+            settle(() => reject(error instanceof Error ? error : new Error(String(error))));
             socket.close();
           }
         };
@@ -88,9 +111,8 @@ export class WebSocketClient {
           if (this.ws !== socket) return;
           const error = new Error('WebSocket error');
           this.notifyErrorListeners(error);
-          if (!settled) {
-            settled = true;
-            reject(new Error('WebSocket connection error'));
+          if (!settled && socket.readyState !== WebSocket.OPEN) {
+            settle(() => reject(new Error('WebSocket connection error')));
             socket.close();
           }
         };
@@ -98,18 +120,18 @@ export class WebSocketClient {
         socket.onclose = () => {
           if (this.ws !== socket) return;
           this.ws = null;
+          clearConnectionTimer();
           this.notifyConnectionListeners(false);
           this.clearPingInterval();
           if (!settled) {
-            settled = true;
-            reject(new Error('WebSocket closed before opening'));
+            settle(() => reject(new Error('WebSocket closed before opening')));
           }
           if (!this.intentionallyDisconnected) {
             this.attemptReconnect();
           }
         };
       } catch (error) {
-        reject(error);
+        settle(() => reject(error instanceof Error ? error : new Error(String(error))));
       }
     });
   }
@@ -120,6 +142,8 @@ export class WebSocketClient {
   disconnect(): void {
     this.intentionallyDisconnected = true;
     this.clearReconnectTimer();
+    this.clearConnectionTimer();
+    this.pendingConnectReject?.(new Error('WebSocket closed before opening'));
     this.clearPingInterval();
     if (this.ws) {
       this.ws.close();
@@ -282,6 +306,13 @@ export class WebSocketClient {
     if (this.pingInterval !== null) {
       clearInterval(this.pingInterval);
       this.pingInterval = null;
+    }
+  }
+
+  private clearConnectionTimer(): void {
+    if (this.connectionTimer !== null) {
+      clearTimeout(this.connectionTimer);
+      this.connectionTimer = null;
     }
   }
 

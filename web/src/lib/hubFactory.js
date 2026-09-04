@@ -9,6 +9,7 @@ import {
 const RECONNECT_DELAYS_MS = [
   0, 100, 250, 500, 1_000, 2_000, 3_000, 5_000, 5_000, 5_000, 5_000, 5_000,
 ];
+export const WEBSOCKET_CONNECT_TIMEOUT_MS = 15_000;
 
 const SIGNALR_HUB_TOPICS = new Set([
   'application',
@@ -107,6 +108,8 @@ class WebSocketHubConnection {
     this.reconnectAttempt = 0;
     this.closedByClient = false;
     this.socket = undefined;
+    this.connectionTimer = undefined;
+    this.pendingConnection = undefined;
   }
 
   on(eventName, handler) {
@@ -139,6 +142,13 @@ class WebSocketHubConnection {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = undefined;
     }
+    if (this.connectionTimer !== undefined) {
+      clearTimeout(this.connectionTimer);
+      this.connectionTimer = undefined;
+    }
+    if (this.pendingConnection) {
+      this.pendingConnection.reject(new Error('WebSocket closed before opening'));
+    }
     if (this.socket) {
       this.socket.close();
       this.socket = undefined;
@@ -147,34 +157,108 @@ class WebSocketHubConnection {
   }
 
   connect() {
+    if (this.socket) {
+      return Promise.reject(
+        new Error(
+          this.socket.readyState === WebSocket.OPEN
+            ? 'WebSocket is already connected'
+            : 'WebSocket connection already in progress',
+        ),
+      );
+    }
+
     return new Promise((resolve, reject) => {
-      const socket = new WebSocket(eventFeedUrl(), eventFeedProtocols());
-      this.socket = socket;
+      let settled = false;
+      let pendingConnection;
+      const clearConnectionTimer = () => {
+        if (this.connectionTimer !== undefined) {
+          clearTimeout(this.connectionTimer);
+          this.connectionTimer = undefined;
+        }
+      };
+      const settle = (callback) => {
+        if (settled) {
+          return false;
+        }
+        settled = true;
+        clearConnectionTimer();
+        if (this.pendingConnection === pendingConnection) {
+          this.pendingConnection = undefined;
+        }
+        callback();
+        return true;
+      };
+
+      let socket;
+      try {
+        socket = new WebSocket(eventFeedUrl(), eventFeedProtocols());
+        this.socket = socket;
+      } catch (error) {
+        settle(() => reject(error));
+        return;
+      }
+
+      pendingConnection = {
+        reject: (error) => settle(() => reject(error)),
+        socket,
+      };
+      this.pendingConnection = pendingConnection;
+      this.connectionTimer = setTimeout(() => {
+        if (this.socket !== socket || settled) {
+          return;
+        }
+        const error = new Error(
+          `WebSocket connection timed out after ${WEBSOCKET_CONNECT_TIMEOUT_MS}ms`,
+        );
+        settle(() => reject(error));
+        socket.close();
+      }, WEBSOCKET_CONNECT_TIMEOUT_MS);
 
       socket.onopen = () => {
+        if (this.socket !== socket || settled) {
+          return;
+        }
+        clearConnectionTimer();
         const wasReconnect = this.reconnectAttempt > 0;
         this.reconnectAttempt = 0;
         if (wasReconnect) {
           this.emitLifecycle(this.reconnectedHandlers);
         }
-        resolve();
+        settle(resolve);
       };
 
-      socket.onmessage = (message) => this.handleMessage(message.data);
+      socket.onmessage = (message) => {
+        if (this.socket !== socket) {
+          return;
+        }
+        this.handleMessage(message.data);
+      };
 
       socket.onerror = () => {
+        if (this.socket !== socket) {
+          return;
+        }
         const error = new Error('WebSocket connection error');
-        if (socket.readyState !== WebSocket.OPEN) {
-          reject(error);
+        if (!settled && socket.readyState !== WebSocket.OPEN) {
+          settle(() => reject(error));
+          socket.close();
         }
       };
 
       socket.onclose = () => {
-        if (this.socket === socket) {
-          this.socket = undefined;
-        }
-        if (this.closedByClient) {
+        if (this.socket !== socket) {
           return;
+        }
+        this.socket = undefined;
+        clearConnectionTimer();
+        if (this.closedByClient) {
+          if (!settled) {
+            settle(() => reject(new Error('WebSocket closed before opening')));
+          }
+          return;
+        }
+        if (!settled) {
+          settle(() => reject(new Error('WebSocket closed before opening')));
         }
         const error = new Error('WebSocket disconnected');
         this.emitLifecycle(this.reconnectingHandlers, error);

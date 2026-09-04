@@ -3,9 +3,10 @@
  * WebSocket client for real-time event streaming
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.WebSocketClient = exports.websocketAuthProtocolPrefix = void 0;
+exports.WebSocketClient = exports.WEBSOCKET_CONNECT_TIMEOUT_MS = exports.websocketAuthProtocolPrefix = void 0;
 exports.websocketAuthProtocols = websocketAuthProtocols;
 exports.websocketAuthProtocolPrefix = 'slskr.api-token.';
+exports.WEBSOCKET_CONNECT_TIMEOUT_MS = 15000;
 function websocketAuthProtocols(token) {
     const normalized = token.trim();
     return normalized ? [`${exports.websocketAuthProtocolPrefix}${encodeURIComponent(normalized)}`] : [];
@@ -17,6 +18,8 @@ class WebSocketClient {
         this.maxReconnectAttempts = 5;
         this.reconnectDelay = 1000;
         this.reconnectTimer = null;
+        this.connectionTimer = null;
+        this.pendingConnectReject = null;
         this.intentionallyDisconnected = false;
         this.pingInterval = null;
         this.subscribedTopics = new Set();
@@ -46,24 +49,44 @@ class WebSocketClient {
         this.intentionallyDisconnected = false;
         this.clearReconnectTimer();
         return new Promise((resolve, reject) => {
+            let settled = false;
+            const clearConnectionTimer = () => this.clearConnectionTimer();
+            const settle = (callback) => {
+                if (settled)
+                    return false;
+                settled = true;
+                clearConnectionTimer();
+                this.pendingConnectReject = null;
+                callback();
+                return true;
+            };
             try {
-                let settled = false;
                 const socket = new WebSocket(this.url, websocketAuthProtocols(this.token));
                 this.ws = socket;
+                this.pendingConnectReject = (error) => settle(() => reject(error));
+                this.connectionTimer = setTimeout(() => {
+                    if (this.ws !== socket || settled)
+                        return;
+                    const error = new Error(`WebSocket connection timed out after ${exports.WEBSOCKET_CONNECT_TIMEOUT_MS}ms`);
+                    this.notifyErrorListeners(error);
+                    settle(() => reject(error));
+                    socket.close();
+                }, exports.WEBSOCKET_CONNECT_TIMEOUT_MS);
                 socket.onopen = () => {
                     if (this.ws !== socket)
                         return;
+                    if (settled)
+                        return;
+                    clearConnectionTimer();
                     try {
                         this.sendSubscription('subscribe', Array.from(this.subscribedTopics));
                         this.reconnectAttempts = 0;
                         this.notifyConnectionListeners(true);
                         this.setupPingInterval();
-                        settled = true;
-                        resolve();
+                        settle(resolve);
                     }
                     catch (error) {
-                        settled = true;
-                        reject(error);
+                        settle(() => reject(error instanceof Error ? error : new Error(String(error))));
                         socket.close();
                     }
                 };
@@ -77,9 +100,8 @@ class WebSocketClient {
                         return;
                     const error = new Error('WebSocket error');
                     this.notifyErrorListeners(error);
-                    if (!settled) {
-                        settled = true;
-                        reject(new Error('WebSocket connection error'));
+                    if (!settled && socket.readyState !== WebSocket.OPEN) {
+                        settle(() => reject(new Error('WebSocket connection error')));
                         socket.close();
                     }
                 };
@@ -87,11 +109,11 @@ class WebSocketClient {
                     if (this.ws !== socket)
                         return;
                     this.ws = null;
+                    clearConnectionTimer();
                     this.notifyConnectionListeners(false);
                     this.clearPingInterval();
                     if (!settled) {
-                        settled = true;
-                        reject(new Error('WebSocket closed before opening'));
+                        settle(() => reject(new Error('WebSocket closed before opening')));
                     }
                     if (!this.intentionallyDisconnected) {
                         this.attemptReconnect();
@@ -99,7 +121,7 @@ class WebSocketClient {
                 };
             }
             catch (error) {
-                reject(error);
+                settle(() => reject(error instanceof Error ? error : new Error(String(error))));
             }
         });
     }
@@ -109,6 +131,8 @@ class WebSocketClient {
     disconnect() {
         this.intentionallyDisconnected = true;
         this.clearReconnectTimer();
+        this.clearConnectionTimer();
+        this.pendingConnectReject?.(new Error('WebSocket closed before opening'));
         this.clearPingInterval();
         if (this.ws) {
             this.ws.close();
@@ -256,6 +280,12 @@ class WebSocketClient {
         if (this.pingInterval !== null) {
             clearInterval(this.pingInterval);
             this.pingInterval = null;
+        }
+    }
+    clearConnectionTimer() {
+        if (this.connectionTimer !== null) {
+            clearTimeout(this.connectionTimer);
+            this.connectionTimer = null;
         }
     }
     attemptReconnect() {

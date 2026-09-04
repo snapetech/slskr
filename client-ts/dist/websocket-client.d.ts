@@ -3,6 +3,7 @@
  */
 import { Event, EventType } from './types';
 export declare const websocketAuthProtocolPrefix = "slskr.api-token.";
+export declare const WEBSOCKET_CONNECT_TIMEOUT_MS = 15000;
 export declare function websocketAuthProtocols(token: string): string[];
 export type EventListener = (event: Event) => void;
 export type ConnectionListener = (connected: boolean) => void;
@@ -15,6 +16,8 @@ export declare class WebSocketClient {
     private maxReconnectAttempts;
     private reconnectDelay;
     private reconnectTimer;
+    private connectionTimer;
+    private pendingConnectReject;
     private intentionallyDisconnected;
     private pingInterval;
     private subscribedTopics;
@@ -68,6 +71,7 @@ export declare class WebSocketClient {
     private notifyErrorListeners;
     private setupPingInterval;
     private clearPingInterval;
+    private clearConnectionTimer;
     private attemptReconnect;
     private clearReconnectTimer;
 }
