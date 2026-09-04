@@ -37,6 +37,7 @@ const MAX_NONCE_BYTES: usize = 64;
 const MAX_SERVICE_FIELD_BYTES: usize = 128;
 const MAX_SERVICE_ERROR_BYTES: usize = 1_024;
 const MAX_DISCONNECT_REASON_BYTES: usize = 256;
+const MAX_SEARCH_TEXT_BYTES: usize = 1_024;
 const MAX_POD_ID_BYTES: usize = 512;
 const MAX_DESTINATION_HOST_BYTES: usize = 255;
 const MAX_UNMATCHED_SERVICE_FRAMES: usize = 32;
@@ -506,11 +507,9 @@ impl Disconnect {
         if self.message_type != "disconnect" {
             return Err(OverlayError::InvalidMessageType);
         }
-        if self
-            .reason
-            .as_ref()
-            .is_some_and(|reason| reason.len() > MAX_DISCONNECT_REASON_BYTES)
-        {
+        if self.reason.as_ref().is_some_and(|reason| {
+            reason.len() > MAX_DISCONNECT_REASON_BYTES || reason.chars().any(char::is_control)
+        }) {
             return Err(OverlayError::InvalidDisconnectReason);
         }
         Ok(())
@@ -575,11 +574,22 @@ impl MeshSearchRequestMessage {
         if Uuid::parse_str(&self.request_id).is_err() {
             return Err(OverlayError::InvalidMeshSearchRequest("request_id"));
         }
-        if self.search_text.trim().is_empty() || self.search_text.encode_utf16().count() > 256 {
+        if self.search_text.trim().is_empty()
+            || self.search_text.len() > MAX_SEARCH_TEXT_BYTES
+            || self.search_text.chars().any(char::is_control)
+            || self.search_text.encode_utf16().count() > 256
+        {
             return Err(OverlayError::InvalidMeshSearchRequest("search_text"));
         }
         if !(1..=200).contains(&self.max_results) {
             return Err(OverlayError::InvalidMeshSearchRequest("max_results"));
+        }
+        if self
+            .scope
+            .as_deref()
+            .is_some_and(|scope| !valid_text_field(scope, MAX_SERVICE_FIELD_BYTES))
+        {
+            return Err(OverlayError::InvalidMeshSearchRequest("scope"));
         }
         Ok(())
     }
@@ -629,11 +639,32 @@ impl MeshSearchResponseMessage {
         if self.files.len() > 500 {
             return Err(OverlayError::InvalidMeshSearchResponse("files"));
         }
-        if self
-            .files
-            .iter()
-            .any(|file| file.filename.is_empty() || !(0..=10_000_000_000).contains(&file.size))
-        {
+        if self.files.iter().any(|file| {
+            !valid_text_field(&file.filename, MAX_SERVICE_FIELD_BYTES)
+                || !(0..=10_000_000_000).contains(&file.size)
+                || file
+                    .extension
+                    .as_deref()
+                    .is_some_and(|value| !valid_text_field(value, MAX_SERVICE_FIELD_BYTES))
+                || file
+                    .codec
+                    .as_deref()
+                    .is_some_and(|value| !valid_text_field(value, MAX_SERVICE_FIELD_BYTES))
+                || file
+                    .content_id
+                    .as_deref()
+                    .is_some_and(|value| !valid_text_field(value, MAX_SERVICE_FIELD_BYTES))
+                || file
+                    .hash
+                    .as_deref()
+                    .is_some_and(|value| !valid_text_field(value, MAX_SERVICE_FIELD_BYTES))
+                || file.media_kinds.as_ref().is_some_and(|values| {
+                    values.len() > MAX_HANDSHAKE_FEATURES
+                        || values
+                            .iter()
+                            .any(|value| !valid_text_field(value, MAX_FEATURE_BYTES))
+                })
+        }) {
             return Err(OverlayError::InvalidMeshSearchResponse("file"));
         }
         Ok(())
@@ -680,7 +711,11 @@ impl MeshServiceCall {
         }
         validate_service_field("correlation_id", &self.correlation_id)?;
         validate_service_field("service_name", &self.service_name)?;
-        validate_service_field("method", &self.method)
+        validate_service_field("method", &self.method)?;
+        if self.payload.len() > MAX_OVERLAY_MESSAGE_BYTES {
+            return Err(OverlayError::FrameTooLarge(self.payload.len()));
+        }
+        Ok(())
     }
 }
 
@@ -704,6 +739,9 @@ impl MeshServiceReply {
             return Err(OverlayError::InvalidMessageType);
         }
         validate_service_field("correlation_id", &self.correlation_id)?;
+        if self.payload.len() > MAX_OVERLAY_MESSAGE_BYTES {
+            return Err(OverlayError::FrameTooLarge(self.payload.len()));
+        }
         if self.error_message.as_ref().is_some_and(|message| {
             message.len() > MAX_SERVICE_ERROR_BYTES || message.chars().any(char::is_control)
         }) {
@@ -1177,6 +1215,10 @@ fn validate_service_field(field: &'static str, value: &str) -> Result<(), Overla
     } else {
         Ok(())
     }
+}
+
+fn valid_text_field(value: &str, max_bytes: usize) -> bool {
+    !value.trim().is_empty() && value.len() <= max_bytes && !value.chars().any(char::is_control)
 }
 
 fn unix_seconds() -> Result<i64, OverlayError> {
@@ -1686,6 +1728,86 @@ mod tests {
                 Err(OverlayError::InvalidServiceField("error_message"))
             ));
         }
+    }
+
+    #[test]
+    fn overlay_dtos_bound_payloads_and_reject_control_text() {
+        assert!(matches!(
+            MeshServiceCall::new(
+                "correlation",
+                "private-gateway",
+                "OpenTunnel",
+                vec![0; MAX_OVERLAY_MESSAGE_BYTES + 1],
+            ),
+            Err(OverlayError::FrameTooLarge(length))
+                if length == MAX_OVERLAY_MESSAGE_BYTES + 1
+        ));
+
+        let reply = MeshServiceReply {
+            magic: OVERLAY_MAGIC.to_owned(),
+            message_type: "mesh_service_reply".to_owned(),
+            version: OVERLAY_VERSION,
+            correlation_id: "correlation".to_owned(),
+            status_code: 0,
+            payload: vec![0; MAX_OVERLAY_MESSAGE_BYTES + 1],
+            error_message: None,
+        };
+        assert!(matches!(
+            reply.validate(),
+            Err(OverlayError::FrameTooLarge(length))
+                if length == MAX_OVERLAY_MESSAGE_BYTES + 1
+        ));
+
+        let mut request = MeshSearchRequestMessage::new(
+            "00000000-0000-0000-0000-000000000001",
+            "search",
+            10,
+            Some("scope".to_owned()),
+        )
+        .unwrap();
+        request.search_text.push('\n');
+        assert!(matches!(
+            request.validate(),
+            Err(OverlayError::InvalidMeshSearchRequest("search_text"))
+        ));
+        request.search_text = "search".to_owned();
+        request.scope = Some("scope\rforged".to_owned());
+        assert!(matches!(
+            request.validate(),
+            Err(OverlayError::InvalidMeshSearchRequest("scope"))
+        ));
+
+        let response = MeshSearchResponseMessage::new(
+            "00000000-0000-0000-0000-000000000001",
+            vec![MeshSearchFileDto {
+                filename: "file\nforged".to_owned(),
+                size: 1,
+                extension: None,
+                bitrate: None,
+                duration: None,
+                codec: None,
+                media_kinds: None,
+                content_id: None,
+                hash: None,
+            }],
+            false,
+            None,
+        );
+        assert!(matches!(
+            response,
+            Err(OverlayError::InvalidMeshSearchResponse("file"))
+        ));
+
+        let disconnect = Disconnect {
+            magic: OVERLAY_MAGIC.to_owned(),
+            message_type: "disconnect".to_owned(),
+            version: OVERLAY_VERSION,
+            reason: Some("bye\rforged".to_owned()),
+        };
+        assert!(matches!(
+            disconnect.validate(),
+            Err(OverlayError::InvalidDisconnectReason)
+        ));
     }
 
     #[tokio::test]
