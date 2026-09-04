@@ -66,7 +66,7 @@ const SearchDetailHeader = ({
   const isSmallScreen = useMediaQuery({ query: '(max-width: 899px)' });
   const isTinyScreen = useMediaQuery({ query: '(max-width: 684px)' });
 
-  const { searchText: rawSearchText, state } = search;
+  const { searchText: rawSearchText, state, status } = search;
   const isComplete = isSearchComplete(search);
   const searchText = rawSearchText ?? search.query ?? '';
   const working = loading || creating || removing || stopping;
@@ -89,7 +89,10 @@ const SearchDetailHeader = ({
         raised
       >
         <Header>
-          <SearchStatusIcon state={state} />
+          <SearchStatusIcon
+            state={state}
+            status={status}
+          />
           {searchText}
         </Header>
         {!isTinyScreen && (

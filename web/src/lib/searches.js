@@ -162,7 +162,9 @@ const createWithRetry = async (
 
 export const createBatch = async ({ queries = [], providers = null } = {}) => {
   const normalizedQueries = Array.isArray(queries)
-    ? queries.map((query) => (query || '').trim()).filter(Boolean)
+    ? queries
+        .map((query) => (typeof query === 'string' ? query.trim() : ''))
+        .filter(Boolean)
     : [];
 
   await normalizedQueries.reduce(
@@ -198,7 +200,31 @@ export const getResponses = async ({ id }) => {
     return [];
   }
 
-  return response;
+  return response
+    .filter(
+      (entry) => entry && typeof entry === 'object' && !Array.isArray(entry),
+    )
+    .map((entry) => ({
+      ...entry,
+      files: Array.isArray(entry.files)
+        ? entry.files.filter(
+            (file) =>
+              file &&
+              typeof file === 'object' &&
+              !Array.isArray(file) &&
+              typeof file.filename === 'string',
+          )
+        : [],
+      lockedFiles: Array.isArray(entry.lockedFiles)
+        ? entry.lockedFiles.filter(
+            (file) =>
+              file &&
+              typeof file === 'object' &&
+              !Array.isArray(file) &&
+              typeof file.filename === 'string',
+          )
+        : [],
+    }));
 };
 
 const getNthMatch = (string, regex, n) => {

@@ -30,6 +30,7 @@ pub(crate) const MAX_GATEWAY_ENDPOINTS: usize = 4;
 const TUNNEL_CHUNK_BYTES: usize = 8 * 1024;
 const MAX_TUNNEL_ID_BYTES: usize = 128;
 const SERVICE_CALL_TIMEOUT: Duration = Duration::from_secs(30);
+const TUNNEL_CLOSE_TIMEOUT: Duration = Duration::from_secs(2);
 const EMPTY_POLL_DELAY: Duration = Duration::from_millis(10);
 
 #[derive(Clone, Debug)]
@@ -116,8 +117,11 @@ impl Manager {
             return false;
         };
         let _ = rule.cancel_tx.send(true);
-        if let Some(task) = rule.listener_task.lock().await.take() {
-            let _ = timeout(Duration::from_secs(5), task).await;
+        if let Some(mut task) = rule.listener_task.lock().await.take() {
+            if timeout(Duration::from_secs(5), &mut task).await.is_err() {
+                task.abort();
+                let _ = task.await;
+            }
         }
         true
     }
@@ -317,7 +321,7 @@ impl Rule {
         };
         send.abort();
         receive.abort();
-        let _ = close_tunnel(&client, &tunnel_id).await;
+        let _ = timeout(TUNNEL_CLOSE_TIMEOUT, close_tunnel(&client, &tunnel_id)).await;
         result?;
         Ok(())
     }

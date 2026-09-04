@@ -182,26 +182,18 @@ describe('jobs', () => {
       expect(result).toEqual([]);
     });
 
-    it('handles API errors gracefully', async () => {
-      api.get.mockRejectedValue(new Error('Network error'));
+    it('uses an empty list only when the optional endpoint is absent', async () => {
+      const error = new Error('Not found');
+      error.response = { status: 404 };
+      api.get.mockRejectedValue(error);
 
-      const result = await jobs.getActiveSwarmJobs();
-
-      expect(result).toEqual([]);
+      await expect(jobs.getActiveSwarmJobs()).resolves.toEqual([]);
     });
 
-    it('logs errors to console', async () => {
-      const consoleSpy = jest.spyOn(console, 'debug').mockImplementation();
+    it('propagates network errors instead of fabricating an empty list', async () => {
       api.get.mockRejectedValue(new Error('Network error'));
 
-      await jobs.getActiveSwarmJobs();
-
-      expect(consoleSpy).toHaveBeenCalledWith(
-        'Failed to fetch swarm jobs:',
-        expect.any(Error),
-      );
-
-      consoleSpy.mockRestore();
+      await expect(jobs.getActiveSwarmJobs()).rejects.toThrow('Network error');
     });
   });
 

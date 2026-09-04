@@ -46024,7 +46024,8 @@ async fn fetch_lidarr_system_status(
     let url = format!("{}/api/v1/system/status", base_url.trim_end_matches('/'));
     let mut client_builder = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(lidarr.timeout_seconds))
-        .redirect(reqwest::redirect::Policy::none());
+        .redirect(reqwest::redirect::Policy::none())
+        .no_proxy();
     for addr in &resolved.addrs {
         client_builder = client_builder.resolve(&resolved.host, *addr);
     }
@@ -46065,7 +46066,8 @@ async fn fetch_lidarr_wanted_missing(
     );
     let mut client_builder = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(lidarr.timeout_seconds))
-        .redirect(reqwest::redirect::Policy::none());
+        .redirect(reqwest::redirect::Policy::none())
+        .no_proxy();
     for addr in &resolved.addrs {
         client_builder = client_builder.resolve(&resolved.host, *addr);
     }
@@ -46824,7 +46826,8 @@ async fn fetch_lidarr_json_get(
     let url = format!("{}{}", base_url.trim_end_matches('/'), path);
     let mut builder = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(lidarr.timeout_seconds))
-        .redirect(reqwest::redirect::Policy::none());
+        .redirect(reqwest::redirect::Policy::none())
+        .no_proxy();
     for addr in &resolved.addrs {
         builder = builder.resolve(&resolved.host, *addr);
     }
@@ -46957,7 +46960,8 @@ async fn fetch_lidarr_manual_import_candidates(
     );
     let mut builder = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(lidarr.timeout_seconds))
-        .redirect(reqwest::redirect::Policy::none());
+        .redirect(reqwest::redirect::Policy::none())
+        .no_proxy();
     for addr in &resolved.addrs {
         builder = builder.resolve(&resolved.host, *addr);
     }
@@ -47589,7 +47593,8 @@ async fn start_lidarr_manual_import(
         .ok_or("Lidarr API key is not configured")?;
     let mut builder = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(lidarr.timeout_seconds))
-        .redirect(reqwest::redirect::Policy::none());
+        .redirect(reqwest::redirect::Policy::none())
+        .no_proxy();
     for addr in &resolved.addrs {
         builder = builder.resolve(&resolved.host, *addr);
     }

@@ -120,7 +120,10 @@ const SearchListRow = ({ onRemove, onStop, search }) => {
         style={{ cursor: working ? 'wait' : undefined }}
       >
         <Table.Cell>
-          <SearchStatusIcon state={search.state} />
+          <SearchStatusIcon
+            state={search.state}
+            status={search.status}
+          />
         </Table.Cell>
         <Table.Cell>
           <Link to={`/searches/${encodeURIComponent(search.id)}`}>

@@ -4,6 +4,7 @@ import * as search from './searches';
 vi.mock('./api', () => ({
   __esModule: true,
   default: {
+    get: vi.fn(),
     post: vi.fn(),
   },
 }));
@@ -48,6 +49,47 @@ describe('createBatch', () => {
         status: 400,
       },
     });
+  });
+
+  it('ignores non-string batch entries instead of calling trim on them', async () => {
+    api.post.mockResolvedValue({ data: { id: 'first' } });
+
+    await expect(
+      search.createBatch({ queries: [' one ', null, 42, { query: 'bad' }] }),
+    ).resolves.toBe(1);
+    expect(api.post).toHaveBeenCalledWith(
+      '/searches',
+      expect.objectContaining({ searchText: 'one' }),
+    );
+  });
+});
+
+describe('getResponses', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('drops malformed response entries before they reach result panels', async () => {
+    api.get.mockResolvedValue({
+      data: [
+        null,
+        {
+          files: [{ filename: 'valid.mp3' }, null, { filename: 42 }],
+          lockedFiles: ['invalid', { filename: 'locked.flac' }],
+          username: 'peer-one',
+        },
+        ['unexpected-array-entry'],
+        42,
+      ],
+    });
+
+    await expect(search.getResponses({ id: 'search-1' })).resolves.toEqual([
+      {
+        files: [{ filename: 'valid.mp3' }],
+        lockedFiles: [{ filename: 'locked.flac' }],
+        username: 'peer-one',
+      },
+    ]);
   });
 });
 

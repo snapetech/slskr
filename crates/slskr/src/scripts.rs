@@ -1,8 +1,21 @@
-use std::{path::Path, process::Stdio, time::Duration};
+use std::{
+    path::Path,
+    process::Stdio,
+    sync::{Arc, OnceLock},
+    time::Duration,
+};
 
-use tokio::{process::Command, time};
+use tokio::{process::Command, sync::Semaphore, time};
 
 use crate::config::{ControllerProfile, ScriptIntegrationSettings};
+
+const MAX_CONCURRENT_SCRIPT_RUNS: usize = 32;
+
+static SCRIPT_RUN_PERMITS: OnceLock<Arc<Semaphore>> = OnceLock::new();
+
+fn script_run_permits() -> &'static Arc<Semaphore> {
+    SCRIPT_RUN_PERMITS.get_or_init(|| Arc::new(Semaphore::new(MAX_CONCURRENT_SCRIPT_RUNS)))
+}
 
 fn command_for(
     script: &ScriptIntegrationSettings,
@@ -118,10 +131,20 @@ pub(crate) fn dispatch(
         }) {
             continue;
         }
+        let permit = match Arc::clone(script_run_permits()).try_acquire_owned() {
+            Ok(permit) => permit,
+            Err(_) => {
+                eprintln!(
+                    "[Warning] script: Dropping event type {event_name} for script '{name}'; the concurrent script-run limit ({MAX_CONCURRENT_SCRIPT_RUNS}) is full"
+                );
+                continue;
+            }
+        };
         let payload = payload.clone();
         let directory = script_directory.clone();
         let event_name = event_name.to_owned();
         tokio::spawn(async move {
+            let _permit = permit;
             match run(&script, &directory, target, &payload).await {
                 Ok(output) => eprintln!(
                     "[Debug] script: Script '{name}' ran successfully; output: {output:?}"

@@ -2,10 +2,14 @@ import { getSearchStateKind } from '../../lib/searchState';
 import React from 'react';
 import { Icon, Popup } from 'semantic-ui-react';
 
-const getIcon = ({ state, ...props }) => {
-  switch (getSearchStateKind({ state })) {
+const getIcon = ({ state, status, ...props }) => {
+  switch (getSearchStateKind({ state, status })) {
     case 'active':
-      if (['none', 'queued', 'requested'].includes(String(state ?? '').trim().toLowerCase())) {
+      if (
+        ['none', 'queued', 'requested'].includes(
+          String(state ?? status ?? '').trim().toLowerCase(),
+        )
+      ) {
         return (
           <Icon
             name="time"
@@ -56,10 +60,10 @@ const getIcon = ({ state, ...props }) => {
   }
 };
 
-const SearchStatusIcon = ({ state, ...props }) => (
+const SearchStatusIcon = ({ state, status, ...props }) => (
   <Popup
-    content={state ?? 'Unknown'}
-    trigger={getIcon({ state, ...props })}
+    content={status ?? state ?? 'Unknown'}
+    trigger={getIcon({ state, status, ...props })}
   />
 );
 
