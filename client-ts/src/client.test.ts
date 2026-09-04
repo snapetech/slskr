@@ -66,6 +66,25 @@ describe('SlskrClient request lifecycle', () => {
     expect(global.fetch).toHaveBeenCalledTimes(1);
   });
 
+  it('serializes falsy JSON request bodies instead of dropping them', async () => {
+    const requests: RequestInit[] = [];
+    global.fetch = jest.fn().mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push(init ?? {});
+      return new Response('{}', { status: 200 });
+    });
+    const client = new SlskrClient({
+      baseUrl: 'http://localhost:8080',
+      token: 'test-token',
+      retries: 0,
+    });
+
+    for (const body of [false, 0, '', null]) {
+      await (client as any).postAuth('/api/test', body);
+    }
+
+    expect(requests.map((request) => request.body)).toEqual(['false', '0', '""', 'null']);
+  });
+
   it('rejects oversized declared responses without retrying', async () => {
     global.fetch = jest.fn().mockResolvedValue(new Response(null, {
       status: 200,

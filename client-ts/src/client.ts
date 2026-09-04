@@ -653,7 +653,7 @@ export class SlskrClient {
         response = await fetch(url, {
           method,
           headers,
-          body: body ? JSON.stringify(body) : undefined,
+          body: body === undefined ? undefined : JSON.stringify(body),
           signal: controller.signal,
         });
       } finally {
