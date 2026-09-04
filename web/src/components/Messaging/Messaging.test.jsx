@@ -37,6 +37,7 @@ vi.mock('../../lib/pods', () => ({
   get: vi.fn(),
   getMembers: vi.fn(),
   getMessages: vi.fn(),
+  discoverAll: vi.fn(),
   leave: vi.fn(),
   list: vi.fn(),
   sendMessage: vi.fn(),
@@ -78,7 +79,23 @@ describe('Messaging', () => {
     vi.clearAllMocks();
     pods.getMembers.mockResolvedValue([]);
     pods.getMessages.mockResolvedValue([]);
+    pods.discoverAll.mockResolvedValue([]);
     vi.spyOn(window, 'confirm').mockReturnValue(true);
+  });
+
+  it('uses the live messaging workspace in the native runtime profile', async () => {
+    chat.getAll.mockResolvedValue([]);
+    rooms.getJoined.mockResolvedValue([]);
+    pods.list.mockResolvedValue([]);
+
+    render(
+      <MemoryRouter>
+        <Messaging runtimeProfile="native" />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('Workspace')).toBeInTheDocument();
+    expect(pods.discoverAll).toHaveBeenCalledWith(50);
   });
 
   it('refreshes conversations when a message websocket event arrives', async () => {

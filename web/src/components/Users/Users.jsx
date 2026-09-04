@@ -8,7 +8,7 @@ import {
 import * as users from '../../lib/users';
 import PlaceholderSegment from '../Shared/PlaceholderSegment';
 import User from './User';
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { Icon, Input, Item, Loader, Segment } from 'semantic-ui-react';
 
@@ -42,10 +42,6 @@ const Users = () => {
 
   const keyUp = (event) => (event.key === 'Escape' ? clear() : '');
 
-  useLayoutEffect(() => {
-    document.removeEventListener('keyup', keyUp, false);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
   useEffect(() => {
     document.addEventListener('keyup', keyUp, false);
 
@@ -56,15 +52,24 @@ const Users = () => {
       setSelectedUsername(storedUsername);
       setInputText(storedUsername);
     }
+
+    return () => document.removeEventListener('keyup', keyUp, false);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
+    let active = true;
+
     const fetchUser = async () => {
       if (!selectedUsername) {
+        if (active) {
+          setStatus({ error: undefined, fetching: false });
+        }
         return;
       }
 
-      setStatus({ error: undefined, fetching: true });
+      if (active) {
+        setStatus({ error: undefined, fetching: true });
+      }
 
       try {
         const [info, status, endpoint] = await Promise.all([
@@ -73,15 +78,25 @@ const Users = () => {
           users.getEndpoint({ username: selectedUsername }),
         ]);
 
+        if (!active) {
+          return;
+        }
+
         setLocalStorageItem(activeUserInfoKey, selectedUsername);
         setUser({ ...info.data, ...status.data, ...endpoint.data });
         setStatus({ error: undefined, fetching: false });
       } catch (fetchError) {
-        setStatus({ error: fetchError, fetching: false });
+        if (active) {
+          setStatus({ error: fetchError, fetching: false });
+        }
       }
     };
 
-    fetchUser();
+    void fetchUser();
+
+    return () => {
+      active = false;
+    };
   }, [selectedUsername]);
 
   return (

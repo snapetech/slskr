@@ -102,10 +102,16 @@ class BrowseSession extends Component {
     super(props);
 
     this.state = initialState;
+    this.isMountedFlag = false;
+    this.mountTimeoutId = null;
+    this.browseRequestId = 0;
+    this.userNoteRequestId = 0;
     this.pollController = null;
   }
 
   componentDidMount() {
+    this.isMountedFlag = true;
+
     // Check for username from props (tab only - navigation handled by parent)
     const userToBrowse = this.props.username;
 
@@ -115,7 +121,13 @@ class BrowseSession extends Component {
       const hasCachedData = this.loadState();
 
       // Small delay to ensure ref is ready
-      setTimeout(() => {
+      this.mountTimeoutId = setTimeout(() => {
+        this.mountTimeoutId = null;
+
+        if (!this.isMountedFlag) {
+          return;
+        }
+
         if (this.inputtext?.inputRef?.current) {
           this.inputtext.inputRef.current.value = userToBrowse;
         }
@@ -133,16 +145,29 @@ class BrowseSession extends Component {
   }
 
   componentWillUnmount() {
+    this.isMountedFlag = false;
+    this.browseRequestId += 1;
+    this.userNoteRequestId += 1;
+    if (this.mountTimeoutId) {
+      clearTimeout(this.mountTimeoutId);
+      this.mountTimeoutId = null;
+    }
     this.stopPolling();
     document.removeEventListener('keyup', this.keyUp, false);
   }
 
   fetchUserNote = async (username) => {
+    const requestId = ++this.userNoteRequestId;
+
     try {
       const response = await userNotes.getNote({ username });
-      this.setState({ userNote: response.data });
+      if (this.isMountedFlag && requestId === this.userNoteRequestId) {
+        this.setState({ userNote: response.data });
+      }
     } catch {
-      this.setState({ userNote: null });
+      if (this.isMountedFlag && requestId === this.userNoteRequestId) {
+        this.setState({ userNote: null });
+      }
     }
   };
 
@@ -170,6 +195,8 @@ class BrowseSession extends Component {
       return;
     }
 
+    const requestId = ++this.browseRequestId;
+
     // Notify parent to update tab label
     if (this.props.onUsernameChange) {
       this.props.onUsernameChange(username);
@@ -178,6 +205,10 @@ class BrowseSession extends Component {
     this.setState(
       { browseError: undefined, browseState: 'pending', username },
       () => {
+        if (!this.isMountedFlag || requestId !== this.browseRequestId) {
+          return;
+        }
+
         this.fetchUserNote(username);
         // Start polling only while browse is in progress
         this.startPolling();
@@ -185,6 +216,10 @@ class BrowseSession extends Component {
         users
           .browse({ username })
           .then((response) => {
+            if (!this.isMountedFlag || requestId !== this.browseRequestId) {
+              return;
+            }
+
             let { directories } = response;
             const { lockedDirectories } = response;
 
@@ -224,6 +259,10 @@ class BrowseSession extends Component {
             });
           })
           .then(() => {
+            if (!this.isMountedFlag || requestId !== this.browseRequestId) {
+              return;
+            }
+
             // Stop polling when browse completes
             this.stopPolling();
             this.setState(
@@ -234,6 +273,10 @@ class BrowseSession extends Component {
             );
           })
           .catch((error) => {
+            if (!this.isMountedFlag || requestId !== this.browseRequestId) {
+              return;
+            }
+
             // Stop polling on error too
             this.stopPolling();
             this.setState({
@@ -246,6 +289,8 @@ class BrowseSession extends Component {
   };
 
   clear = () => {
+    this.browseRequestId += 1;
+    this.userNoteRequestId += 1;
     this.stopPolling();
     this.setState(initialState, () => {
       this.saveState();
@@ -315,9 +360,11 @@ class BrowseSession extends Component {
     if (browseState === 'pending' && username) {
       try {
         const response = await users.getBrowseStatus({ username });
-        this.setState({
-          browseStatus: response.data,
-        });
+        if (this.isMountedFlag && username === this.state.username) {
+          this.setState({
+            browseStatus: response.data,
+          });
+        }
       } catch {
         // Ignore 404s during status polling
       }

@@ -254,72 +254,6 @@ const PodChannelSession = ({ channel, state }) => {
   );
 };
 
-const CompatibilityMessagingChrome = ({ onRefresh }) => (
-  <div className="messaging-v2-compatibility">
-    <div className="messaging-v2-compatibility-rail">
-      <button aria-label="All networks" onClick={() => {}} type="button">
-        All networks
-      </button>
-      <button aria-label="Soulseek only" onClick={() => {}} type="button">
-        Soulseek only
-      </button>
-      <button aria-label="Mesh only" onClick={() => {}} type="button">
-        Mesh only
-      </button>
-      <button aria-label="Refresh" onClick={onRefresh} type="button">
-        Refresh
-      </button>
-    </div>
-    <div className="messaging-v2-compatibility-tree">
-      <button type="button">▾ SOULSEEK · DMS 0</button>
-      <button aria-label="Start a direct message" type="button">
-        Start a direct message
-      </button>
-      <button type="button">▾ SOULSEEK · ROOMS 0</button>
-      <button aria-label="Join or create a room" type="button">
-        Join or create a room
-      </button>
-      <button type="button">▾ MESH · POD CHANNELS 1</button>
-      <button aria-label="Create a pod room" type="button">
-        Create a pod room
-      </button>
-    </div>
-    <div className="messaging-v2-compatibility-stage">
-      <button aria-label="Gold Star Club / General" type="button">
-        &amp;Gold Star Club ⭐ / General
-      </button>
-      <button aria-label="Private-message auto response" type="button">
-        H
-      </button>
-      <button aria-label="Make Messages UI smaller" type="button">
-        −
-      </button>
-      <button aria-label="Messages UI size S" type="button">
-        S
-      </button>
-      <button aria-label="Messages UI size M" type="button">
-        M
-      </button>
-      <button aria-label="Messages UI size L" type="button">
-        L
-      </button>
-      <button aria-label="Messages UI size XL" type="button">
-        XL
-      </button>
-      <button aria-label="Make Messages UI larger" type="button">
-        +
-      </button>
-      <textarea
-        aria-label="Message composer"
-        placeholder="Open a tab to start typing"
-      />
-      <button aria-label="Send" type="button">
-        Send
-      </button>
-    </div>
-  </div>
-);
-
 const Messaging = ({ runtimeProfile, initialKind = 'mixed', state }) => {
   const navigate = useNavigate();
   const [panels, setPanels] = useState(() => loadPanels());
@@ -696,10 +630,6 @@ const Messaging = ({ runtimeProfile, initialKind = 'mixed', state }) => {
 
   const openPanels = panels.filter((panel) => !panel.collapsed);
   const collapsedPanels = panels.filter((panel) => panel.collapsed);
-
-  if (runtimeProfile === 'native') {
-    return <CompatibilityMessagingChrome onRefresh={() => hydrate()} />;
-  }
 
   return (
     <div className="messaging-workspace">

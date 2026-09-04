@@ -2,7 +2,7 @@ import BrowseSession from './BrowseSession';
 import { getLocalStorageItem, setLocalStorageItem } from '../../lib/storage';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { Button, Icon, Menu, Tab } from 'semantic-ui-react';
+import { Icon, Menu, Tab } from 'semantic-ui-react';
 
 let tabCounter = 0;
 
@@ -32,7 +32,7 @@ const saveTabsToStorage = (tabsToSave) => {
   );
 };
 
-const Browse = ({ runtimeProfile } = {}) => {
+const Browse = () => {
   const location = useLocation();
   const [tabs, setTabs] = useState(() => loadTabsFromStorage());
   const [activeIndex, setActiveIndex] = useState(0);
@@ -98,15 +98,19 @@ const Browse = ({ runtimeProfile } = {}) => {
 
   // Handle navigation with user in state (quick browse from search)
   useEffect(() => {
-    const user = location.state?.user;
+    const user =
+      location.state?.user || new URLSearchParams(location.search).get('user');
 
-    if (user) {
-      const existingIndex = tabs.findIndex((t) => t.username === user);
+    if (user?.trim()) {
+      const requestedUser = user.trim();
+      const existingIndex = tabs.findIndex(
+        (t) => t.username === requestedUser,
+      );
 
       if (existingIndex === -1) {
         // Create new tab for this user - use callback to get correct index
         setTabs((previous) => {
-          const newTabs = [...previous, createTab(user)];
+          const newTabs = [...previous, createTab(requestedUser)];
           setActiveIndex(newTabs.length - 1);
           return newTabs;
         });
@@ -118,43 +122,7 @@ const Browse = ({ runtimeProfile } = {}) => {
       window.history.replaceState({}, document.title);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [location.state]);
-
-  if (runtimeProfile) {
-    const requestedUser =
-      location.state?.user ||
-      new URLSearchParams(location.search).get('user') ||
-      '';
-
-    return (
-      <div className="search-container compatibility-browse">
-        <div className="browse-segment compatibility-browse-segment">
-          <input
-            aria-label="Username"
-            defaultValue={requestedUser.trim()}
-            placeholder="Username"
-            type="search"
-          />
-          <button
-            aria-label="Browse user files"
-            onClick={() => {}}
-            type="button"
-          >
-            Browse user files
-          </button>
-        </div>
-        {runtimeProfile === 'native' && (
-          <Button
-            compact
-            size="tiny"
-            type="button"
-          >
-            Collapse All
-          </Button>
-        )}
-      </div>
-    );
-  }
+  }, [location.search, location.state]);
 
   const handleAddTab = () => {
     setTabs((previous) => {
