@@ -73,7 +73,7 @@ impl EventRecord {
         format!(
             "{{\"id\":{},\"kind\":\"{}\",\"topic\":\"{}\",\"resource\":\"{}\",\"detail\":{},\"created_at\":{}}}",
             self.id,
-            self.kind,
+            crate::json_escape(&self.kind),
             self.topic(),
             crate::json_escape(&self.resource),
             crate::json_option(self.detail.as_deref()),
@@ -310,5 +310,22 @@ impl EventStore {
             .map(EventRecord::controller_json)
             .collect::<Vec<_>>();
         serde_json::Value::Array(entries).to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::EventStore;
+
+    #[test]
+    fn json_escapes_untrusted_event_kinds() {
+        let kind = r#"custom\",\"injected\":true,\"ignored\":\""#;
+        let mut store = EventStore::new(1);
+        store.record(kind, "resource", None);
+
+        let parsed: serde_json::Value =
+            serde_json::from_str(&store.json(None)).expect("event records must be valid JSON");
+        assert_eq!(parsed["entries"][0]["kind"], kind);
+        assert!(parsed["entries"][0].get("injected").is_none());
     }
 }
