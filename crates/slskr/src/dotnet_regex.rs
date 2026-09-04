@@ -320,46 +320,49 @@ fn rewrite_dotnet_numbered_captures(expression: &str) -> Result<String, String> 
         .chain(explicit_slots.iter())
         .copied()
         .max()
-        .unwrap_or(0)
-        + 1;
+        .unwrap_or(0);
     let mut named_slots = Vec::with_capacity(named.len());
     for name in &named {
-        let slot = name
-            .parse::<usize>()
-            .ok()
-            .filter(|slot| *slot > 0)
-            .unwrap_or_else(|| {
-                while explicit_slots.contains(&next_named_slot) {
-                    next_named_slot += 1;
-                }
-                let slot = next_named_slot;
-                next_named_slot += 1;
-                slot
-            });
+        let slot = if let Some(slot) = name.parse::<usize>().ok().filter(|slot| *slot > 0) {
+            slot
+        } else {
+            next_named_slot = next_named_slot
+                .checked_add(1)
+                .ok_or_else(|| "regular-expression capture slot is too large".to_owned())?;
+            while explicit_slots.contains(&next_named_slot) {
+                next_named_slot = next_named_slot
+                    .checked_add(1)
+                    .ok_or_else(|| "regular-expression capture slot is too large".to_owned())?;
+            }
+            let slot = next_named_slot;
+            slot
+        };
         named_slots.push((slot, name.clone()));
     }
-    let maximum_slot = unnamed_slots
-        .iter()
-        .copied()
-        .chain(named_slots.iter().map(|(slot, _)| *slot))
-        .max()
-        .unwrap_or(0);
-    let mut targets = vec![String::new(); maximum_slot + 1];
+    let mut targets = std::collections::BTreeMap::new();
     for slot in &unnamed_slots {
-        targets[*slot] = format!("slskrDotNetCapture{slot}");
+        targets.insert(*slot, format!("slskrDotNetCapture{slot}"));
     }
     for (slot, name) in named_slots {
-        targets[slot] = if name.parse::<usize>().is_ok() {
-            format!("slskrDotNetCapture{slot}")
-        } else {
-            name
-        };
+        targets.insert(
+            slot,
+            if name.parse::<usize>().is_ok() {
+                format!("slskrDotNetCapture{slot}")
+            } else {
+                name
+            },
+        );
     }
 
     let mut replacements = unnamed
         .into_iter()
         .zip(unnamed_slots)
-        .map(|(position, slot)| (position, (1, format!("(?<{}>", targets[slot]))))
+        .map(|(position, slot)| {
+            let target = targets
+                .get(&slot)
+                .expect("every unnamed capture has a rewrite target");
+            (position, (1, format!("(?<{}>", target)))
+        })
         .collect::<std::collections::BTreeMap<_, _>>();
     for (position, slot) in numeric_named {
         let remaining = &expression[position..];
@@ -369,7 +372,10 @@ fn rewrite_dotnet_numbered_captures(expression: &str) -> Result<String, String> 
             '\''
         };
         let consumed = remaining.find(delimiter).map_or(1, |end| end + 1);
-        replacements.insert(position, (consumed, format!("(?<{}>", targets[slot])));
+        let target = targets
+            .get(&slot)
+            .expect("every numeric capture has a rewrite target");
+        replacements.insert(position, (consumed, format!("(?<{}>", target)));
     }
     let mut rewritten = String::with_capacity(expression.len() + replacements.len() * 24);
     index = 0;
@@ -388,7 +394,7 @@ fn rewrite_dotnet_numbered_captures(expression: &str) -> Result<String, String> 
             }
             if target_end > target_start && bytes.get(target_end) == Some(&b')') {
                 if let Ok(slot) = expression[target_start..target_end].parse::<usize>() {
-                    if let Some(target) = targets.get(slot).filter(|target| !target.is_empty()) {
+                    if let Some(target) = targets.get(&slot).filter(|target| !target.is_empty()) {
                         rewritten.push_str("(?(<");
                         rewritten.push_str(target);
                         rewritten.push_str(">)");
@@ -405,7 +411,7 @@ fn rewrite_dotnet_numbered_captures(expression: &str) -> Result<String, String> 
                     end += 1;
                 }
                 if let Ok(slot) = expression[index + 1..end].parse::<usize>() {
-                    if let Some(target) = targets.get(slot).filter(|target| !target.is_empty()) {
+                    if let Some(target) = targets.get(&slot).filter(|target| !target.is_empty()) {
                         rewritten.push_str("\\k<");
                         rewritten.push_str(target);
                         rewritten.push('>');
@@ -949,7 +955,7 @@ fn parse_inline_options(expression: &str, start: usize) -> Option<InlineOptions>
 
 #[cfg(test)]
 mod tests {
-    use super::DotNetRegex;
+    use super::{rewrite_dotnet_numbered_captures, DotNetRegex};
 
     #[test]
     fn translates_dotnet_control_escape_and_end_anchor() {
@@ -1030,6 +1036,14 @@ mod tests {
         assert!(!conditional
             .is_match("bd")
             .expect("encounter-order conditional mismatch"));
+    }
+
+    #[test]
+    fn sparse_capture_targets_do_not_allocate_for_large_numeric_labels() {
+        let expression = format!(r"^(?<{}>value)$", usize::MAX);
+        let rewritten = rewrite_dotnet_numbered_captures(&expression)
+            .expect("large numeric capture labels remain representable");
+        assert!(rewritten.contains(&format!("slskrDotNetCapture{}", usize::MAX)));
     }
 
     #[test]
