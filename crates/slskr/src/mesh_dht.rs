@@ -7,7 +7,10 @@ use sha1::{Digest as Sha1Digest, Sha1};
 use sha2::Sha256;
 use slskr_client::{
     capabilities::peer_id_for_public_key,
-    overlay::{connect_tls_overlay, MeshHello, MeshServiceCall, FEATURE_MESH_SERVICE},
+    overlay::{
+        connect_tls_overlay, MeshHello, MeshServiceCall, FEATURE_MESH_SERVICE,
+        MAX_OVERLAY_MESSAGE_BYTES,
+    },
 };
 
 use crate::config::TrustedMeshPeer;
@@ -59,6 +62,9 @@ impl DhtServiceState {
         payload: &[u8],
         remote_username: &str,
     ) -> Result<Vec<u8>, (i32, String)> {
+        if payload.len() > MAX_OVERLAY_MESSAGE_BYTES {
+            return Err((4, "DHT request payload is too large".to_owned()));
+        }
         match method {
             "FindNode" => self.handle_find_node(payload, remote_username),
             "FindValue" => self.handle_find_value(payload, remote_username),
@@ -1085,6 +1091,20 @@ mod tests {
             .expect_err("a requester id not bound to the signing key must fail");
         assert_eq!(error.0, 7);
         assert_eq!(error.1, "Signature verification failed");
+    }
+
+    #[tokio::test]
+    async fn dht_service_rejects_oversized_direct_payloads() {
+        let state = DhtServiceState::default();
+        let error = state
+            .handle_call(
+                "Ping",
+                &vec![b'x'; MAX_OVERLAY_MESSAGE_BYTES + 1],
+                "overlay-peer",
+            )
+            .await
+            .expect_err("direct DHT calls must keep the overlay payload bound");
+        assert_eq!(error, (4, "DHT request payload is too large".to_owned()));
     }
 
     #[test]
