@@ -247,15 +247,12 @@ impl State {
         intent.status = "InProgress".to_owned();
         intent.updated_at = timestamp_now();
         let track_exists = catalogue.iter().any(|item| {
-                track_id(item) == intent.track_id
-                && item
-                    .local_path
-                    .as_deref()
-                    .is_none_or(|path| {
-                        Path::new(path).metadata().is_ok_and(|metadata| {
-                            metadata.is_file() && (item.size == 0 || metadata.len() == item.size)
-                        })
+            track_id(item) == intent.track_id
+                && item.local_path.as_deref().is_some_and(|path| {
+                    Path::new(path).metadata().is_ok_and(|metadata| {
+                        metadata.is_file() && (item.size == 0 || metadata.len() == item.size)
                     })
+                })
         });
         let now = timestamp_now();
         intent.status = if track_exists { "Completed" } else { "Failed" }.to_owned();
@@ -565,7 +562,14 @@ mod tests {
 
     #[test]
     fn processing_claims_pending_intent_once() {
-        let catalogue = catalogue();
+        let path = std::env::temp_dir().join(format!(
+            "slskr-virtual-soulfind-{}.flac",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::write(&path, b"track").expect("write executable catalogue fixture");
+        let mut catalogue = catalogue();
+        catalogue[0].local_path = Some(path.display().to_string());
+        catalogue[0].size = 5;
         let track_id = track_id(&catalogue[0]);
         let mut state = State::default();
         let intent = state
@@ -576,6 +580,25 @@ mod tests {
         assert!(!state.process_track(id, &catalogue));
         assert_eq!(state.track(id).unwrap()["status"], "Completed");
         assert_eq!(state.stats()["totalProcessed"], 1);
+        std::fs::remove_file(path).expect("remove executable catalogue fixture");
+    }
+
+    #[test]
+    fn metadata_only_catalogue_entries_cannot_complete_processing() {
+        let catalogue = catalogue();
+        let track_id = track_id(&catalogue[0]);
+        let mut state = State::default();
+        let intent = state
+            .enqueue_track(&json!("Music"), &track_id, &json!("Normal"), None)
+            .expect("enqueue metadata-only track");
+        let id = intent["desiredTrackId"]
+            .as_str()
+            .expect("metadata-only intent ID");
+
+        assert!(state.process_track(id, &catalogue));
+        let processed = state.track(id).expect("processed metadata-only track");
+        assert_eq!(processed["status"], "Failed");
+        assert!(processed.get("plannedSources").is_none());
     }
 
     #[test]
