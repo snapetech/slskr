@@ -40,7 +40,7 @@
     "@testing-library/user-event": "^14.6.5",
     "@types/node": "^26.1.2",
     "@vitest/eslint-plugin": "^1.6.27",
-    "@vitejs/plugin-react": "^6.1.0",
+    "@vitejs/plugin-react": "^6.1.1",
     "@vitest/coverage-v8": "^4.1.11",
     "esbuild": "^0.28.2",
     "eslint": "^10.8.0",
@@ -52,7 +52,7 @@
     "globals": "^17.9.0",
     "jsdom": "^30.0.1",
     "less": "^4.8.1",
-    "typescript": "6.0.3",
+    "typescript": "7.0.2",
     "vite": "^8.2.2",
     "vitest": "^4.1.11"
   },
