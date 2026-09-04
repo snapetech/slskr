@@ -54,6 +54,23 @@ describe('SlskrClient request lifecycle', () => {
     expect((client as any).debug).toBe(false);
   });
 
+  it('disables the request deadline when timeout is zero', async () => {
+    global.fetch = jest.fn().mockImplementation(
+      () => new Promise((resolve) => {
+        setTimeout(() => resolve(new Response('{"status":"ok"}', { status: 200 })), 10);
+      })
+    );
+    const client = new SlskrClient({
+      baseUrl: 'http://localhost:8080',
+      token: 'test-token',
+      timeout: 0,
+      retries: 0,
+    });
+
+    await expect(client.health()).resolves.toMatchObject({ status: 'ok' });
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+
   it('accepts successful no-content mutations without retrying JSON parsing', async () => {
     global.fetch = jest.fn().mockResolvedValue(new Response(null, { status: 204 }));
     const client = new SlskrClient({

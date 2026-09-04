@@ -523,7 +523,9 @@ class SlskrClient {
                 headers['Authorization'] = `Bearer ${this.token}`;
             }
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), this.timeout);
+            const timeoutId = this.timeout > 0
+                ? setTimeout(() => controller.abort(), this.timeout)
+                : undefined;
             let response;
             try {
                 response = await fetch(url, {
@@ -534,7 +536,9 @@ class SlskrClient {
                 });
             }
             finally {
-                clearTimeout(timeoutId);
+                if (timeoutId !== undefined) {
+                    clearTimeout(timeoutId);
+                }
             }
             if (!response.ok) {
                 const parsedError = await this.readJson(response, MAX_HTTP_ERROR_BYTES).catch(() => ({}));

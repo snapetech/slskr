@@ -646,7 +646,9 @@ export class SlskrClient {
       }
 
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), this.timeout);
+      const timeoutId = this.timeout > 0
+        ? setTimeout(() => controller.abort(), this.timeout)
+        : undefined;
 
       let response: Response;
       try {
@@ -657,7 +659,9 @@ export class SlskrClient {
           signal: controller.signal,
         });
       } finally {
-        clearTimeout(timeoutId);
+        if (timeoutId !== undefined) {
+          clearTimeout(timeoutId);
+        }
       }
 
       if (!response.ok) {
