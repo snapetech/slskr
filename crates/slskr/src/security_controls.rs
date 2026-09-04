@@ -985,7 +985,8 @@ impl WorkBudgetControl {
             near_quota_peers: windows
                 .values()
                 .filter(|window| {
-                    window.consumed >= self.config.max_units_per_peer_per_minute * 4 / 5
+                    window.consumed
+                        >= self.config.max_units_per_peer_per_minute.saturating_mul(4) / 5
                 })
                 .count(),
         }
@@ -1307,7 +1308,7 @@ impl ReconnaissanceControl {
         }
         let profile = profiles.entry(ip).or_default();
         profile.attempts = profile.attempts.saturating_add(1);
-        profile.failures += usize::from(!succeeded);
+        profile.failures = profile.failures.saturating_add(usize::from(!succeeded));
         profile.ports.insert(port);
         if let Some(protocol) = protocol.filter(|value| !value.trim().is_empty()) {
             profile.versions.insert(protocol.to_owned());
@@ -1318,7 +1319,7 @@ impl ReconnaissanceControl {
         profile.scanner = profile.ports.len() > 3
             || profile.versions.len() > 2
             || profile.user_agents.len() > 3
-            || (profile.attempts > 5 && profile.failures * 2 > profile.attempts);
+            || (profile.attempts > 5 && profile.failures.saturating_mul(2) > profile.attempts);
         let scanner = profile.scanner;
         drop(profiles);
         if scanner {
@@ -1792,6 +1793,7 @@ struct PrivacyState {
 
 impl PrivacyLayerControl {
     pub const MAX_MESSAGE_SIZE: usize = 1_048_576;
+    pub const MAX_PADDED_MESSAGE_SIZE: usize = Self::MAX_MESSAGE_SIZE + 4;
 
     pub fn new(enabled: bool) -> Self {
         Self {
@@ -1813,13 +1815,18 @@ impl PrivacyLayerControl {
     }
 
     pub fn transform_outbound(&self, message: &[u8], bucket: usize) -> Option<Vec<u8>> {
-        if !self.enabled || message.len() > Self::MAX_MESSAGE_SIZE || bucket < message.len() {
+        let transformed_len = bucket.checked_add(4)?;
+        if !self.enabled
+            || message.len() > Self::MAX_MESSAGE_SIZE
+            || bucket < message.len()
+            || transformed_len > Self::MAX_PADDED_MESSAGE_SIZE
+        {
             return None;
         }
-        let mut transformed = Vec::with_capacity(bucket + 4);
+        let mut transformed = Vec::with_capacity(transformed_len);
         transformed.extend_from_slice(b"SLP1");
         transformed.extend_from_slice(message);
-        transformed.resize(bucket + 4, 0);
+        transformed.resize(transformed_len, 0);
         let mut state = self.state.lock().expect("privacy layer lock");
         state.outbound_messages = state.outbound_messages.saturating_add(1);
         state.padding_bytes = state
@@ -1829,7 +1836,11 @@ impl PrivacyLayerControl {
     }
 
     pub fn transform_inbound(&self, message: &[u8]) -> Option<Vec<u8>> {
-        if !self.enabled || message.len() < 4 || &message[..4] != b"SLP1" {
+        if !self.enabled
+            || message.len() < 4
+            || message.len() > Self::MAX_PADDED_MESSAGE_SIZE
+            || &message[..4] != b"SLP1"
+        {
             return None;
         }
         let mut state = self.state.lock().expect("privacy layer lock");
@@ -2155,5 +2166,36 @@ impl ShadowRateLimiter {
             .lock()
             .expect("shadow rate limiter lock")
             .clear();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{PrivacyLayerControl, WorkBudgetConfig, WorkBudgetControl};
+
+    #[test]
+    fn work_budget_near_quota_check_handles_maximum_configuration() {
+        let budget = WorkBudgetControl::new(WorkBudgetConfig {
+            max_units_per_call: u32::MAX,
+            max_units_per_peer_per_minute: u32::MAX,
+            ..WorkBudgetConfig::default()
+        });
+
+        assert!(budget.try_consume("peer", u32::MAX));
+        assert_eq!(budget.stats().near_quota_peers, 1);
+    }
+
+    #[test]
+    fn privacy_layer_rejects_unrepresentable_or_oversized_frames() {
+        let privacy = PrivacyLayerControl::new(true);
+        assert!(privacy.start());
+
+        assert!(privacy.transform_outbound(b"message", usize::MAX).is_none());
+        assert!(privacy
+            .transform_inbound(&vec![
+                0_u8;
+                PrivacyLayerControl::MAX_PADDED_MESSAGE_SIZE + 1
+            ])
+            .is_none());
     }
 }
