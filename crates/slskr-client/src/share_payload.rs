@@ -7,6 +7,10 @@ use crate::ClientError;
 
 pub const DEFAULT_MAX_DECOMPRESSED_SHARE_PAYLOAD: usize = 64 * 1024 * 1024;
 
+fn bounded_decompressed_len(value: usize) -> usize {
+    value.min(DEFAULT_MAX_DECOMPRESSED_SHARE_PAYLOAD)
+}
+
 pub fn decompress_zlib_payload(payload: &[u8]) -> Result<Vec<u8>, ClientError> {
     decompress_zlib_payload_with_limit(payload, DEFAULT_MAX_DECOMPRESSED_SHARE_PAYLOAD)
 }
@@ -15,6 +19,7 @@ pub fn decompress_zlib_payload_with_limit(
     payload: &[u8],
     max_decompressed_len: usize,
 ) -> Result<Vec<u8>, ClientError> {
+    let max_decompressed_len = bounded_decompressed_len(max_decompressed_len);
     let mut decoder = ZlibDecoder::new(payload);
     let limit = u64::try_from(max_decompressed_len)
         .unwrap_or(u64::MAX)
@@ -56,7 +61,19 @@ pub fn decompress_peer_share_payload(
 
 #[cfg(test)]
 mod tests {
-    use super::{compress_zlib_payload, decompress_zlib_payload_with_limit, ClientError};
+    use super::{
+        bounded_decompressed_len, compress_zlib_payload, decompress_zlib_payload_with_limit,
+        ClientError, DEFAULT_MAX_DECOMPRESSED_SHARE_PAYLOAD,
+    };
+
+    #[test]
+    fn explicit_decompression_limits_have_a_hard_upper_bound() {
+        assert_eq!(
+            bounded_decompressed_len(usize::MAX),
+            DEFAULT_MAX_DECOMPRESSED_SHARE_PAYLOAD
+        );
+        assert_eq!(bounded_decompressed_len(1024), 1024);
+    }
 
     #[test]
     fn decompression_rejects_trailing_bytes_and_concatenated_streams() {

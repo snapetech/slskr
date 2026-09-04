@@ -8,6 +8,12 @@ use slskr_protocol::{
 };
 
 pub const DEFAULT_MAX_FRAME_LEN: usize = 16 * 1024 * 1024;
+/// Absolute upper bound for one protocol frame, regardless of caller input.
+pub const MAX_FRAME_LEN: usize = DEFAULT_MAX_FRAME_LEN;
+
+fn bounded_frame_len(value: usize) -> usize {
+    value.min(MAX_FRAME_LEN)
+}
 
 pub async fn read_connection_kind<R>(reader: &mut R) -> Result<ConnectionKind, ClientError>
 where
@@ -43,6 +49,7 @@ pub async fn read_message_frame_with_max<R>(
 where
     R: AsyncRead + Unpin,
 {
+    let max_len = bounded_frame_len(max_len);
     let encoded = read_len_prefixed_frame(reader, max_len).await?;
     Ok(MessageFrame::decode(&encoded)?)
 }
@@ -60,6 +67,7 @@ pub async fn read_message_frame_buffered<R>(
 where
     R: AsyncRead + Unpin,
 {
+    let max_len = bounded_frame_len(max_len);
     loop {
         if buffer.len() >= 4 {
             let length = u32::from_le_bytes([buffer[0], buffer[1], buffer[2], buffer[3]]) as usize;
@@ -101,6 +109,7 @@ pub async fn write_message_frame_with_max<W>(
 where
     W: AsyncWrite + Unpin,
 {
+    let max_len = bounded_frame_len(max_len);
     validate_frame_len(frame.payload.len().saturating_add(4), max_len)?;
     writer.write_all(&frame.encode()?).await?;
     writer.flush().await?;
@@ -145,6 +154,7 @@ pub async fn write_obfuscated_message_frame_with_key_and_max<W>(
 where
     W: AsyncWrite + Unpin,
 {
+    let max_len = bounded_frame_len(max_len);
     validate_frame_len(frame.payload.len().saturating_add(4), max_len)?;
     writer
         .write_all(&encode_rotated(&frame.encode()?, key))
@@ -167,6 +177,7 @@ pub async fn read_init_frame_with_max<R>(
 where
     R: AsyncRead + Unpin,
 {
+    let max_len = bounded_frame_len(max_len);
     let encoded = read_len_prefixed_frame(reader, max_len).await?;
     Ok(InitFrame::decode(&encoded)?)
 }
@@ -189,6 +200,7 @@ pub async fn read_init_frame_with_first_len_byte_and_max<R>(
 where
     R: AsyncRead + Unpin,
 {
+    let max_len = bounded_frame_len(max_len);
     let mut length_bytes = [first_len_byte, 0, 0, 0];
     reader.read_exact(&mut length_bytes[1..]).await?;
     let length = u32::from_le_bytes(length_bytes) as usize;
@@ -222,6 +234,7 @@ pub async fn write_init_frame_with_max<W>(
 where
     W: AsyncWrite + Unpin,
 {
+    let max_len = bounded_frame_len(max_len);
     validate_frame_len(frame.payload.len().saturating_add(1), max_len)?;
     writer.write_all(&frame.encode()?).await?;
     writer.flush().await?;
@@ -266,6 +279,7 @@ pub async fn write_obfuscated_init_frame_with_key_and_max<W>(
 where
     W: AsyncWrite + Unpin,
 {
+    let max_len = bounded_frame_len(max_len);
     validate_frame_len(frame.payload.len().saturating_add(1), max_len)?;
     writer
         .write_all(&encode_rotated(&frame.encode()?, key))
@@ -289,6 +303,7 @@ pub async fn read_raw_frame_with_max<R>(
 where
     R: AsyncRead + Unpin,
 {
+    let max_len = bounded_frame_len(max_len);
     if length > max_len {
         return Err(ClientError::FrameTooLarge {
             length,
@@ -315,6 +330,7 @@ pub async fn write_raw_frame_with_max<W>(
 where
     W: AsyncWrite + Unpin,
 {
+    let max_len = bounded_frame_len(max_len);
     validate_frame_len(frame.payload.len(), max_len)?;
     writer.write_all(&frame.encode()).await?;
     writer.flush().await?;
@@ -346,6 +362,7 @@ async fn read_len_prefixed_frame<R>(reader: &mut R, max_len: usize) -> Result<Ve
 where
     R: AsyncRead + Unpin,
 {
+    let max_len = bounded_frame_len(max_len);
     let length = reader.read_u32_le().await? as usize;
     if length > max_len {
         return Err(ClientError::FrameTooLarge {
@@ -369,6 +386,7 @@ async fn read_obfuscated_len_prefixed_frame<R>(
 where
     R: AsyncRead + Unpin,
 {
+    let max_len = bounded_frame_len(max_len);
     let mut first_block = [0; 8];
     reader.read_exact(&mut first_block).await?;
     let decoded_first_block = decode_rotated(&first_block)?;

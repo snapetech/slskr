@@ -6,11 +6,12 @@ use slskr_client::{
         write_connection_kind, write_init_frame, write_init_frame_with_max, write_message_frame,
         write_message_frame_with_max, write_obfuscated_init_frame_with_key_and_max,
         write_obfuscated_message_frame_with_key_and_max, write_raw_frame, write_raw_frame_with_max,
+        MAX_FRAME_LEN,
     },
     ClientError,
 };
 use slskr_protocol::{InitFrame, MessageFrame, RawFrame};
-use tokio::io::{duplex, AsyncReadExt};
+use tokio::io::{duplex, AsyncReadExt, AsyncWriteExt};
 
 #[tokio::test]
 async fn connection_kind_round_trips() {
@@ -98,6 +99,26 @@ async fn oversized_message_frame_is_rejected_before_payload_read() {
     assert!(matches!(
         error,
         ClientError::FrameTooLarge { length: 7, max: 2 }
+    ));
+}
+
+#[tokio::test]
+async fn caller_frame_limit_cannot_raise_the_safety_ceiling() {
+    let (mut client, mut server) = duplex(64);
+    client
+        .write_u32_le((MAX_FRAME_LEN + 1) as u32)
+        .await
+        .unwrap();
+
+    let error = read_message_frame_with_max(&mut server, usize::MAX)
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        ClientError::FrameTooLarge {
+            length,
+            max
+        } if length == MAX_FRAME_LEN + 1 && max == MAX_FRAME_LEN
     ));
 }
 
