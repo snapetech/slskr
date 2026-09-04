@@ -665,6 +665,27 @@ fn string_vec_rejects_untrusted_count_without_looping() {
 }
 
 #[test]
+fn string_vec_rejects_object_count_amplification() {
+    let count = 65_537_u32;
+    let empty_strings = vec![0_u8; count as usize * 4];
+    let payload = [count.to_le_bytes().as_slice(), empty_strings.as_slice()].concat();
+    let error = ServerMessage::decode(
+        MessageFrame::new(ServerCode::PrivilegedUsers.as_u32(), payload),
+        Direction::ServerToClient,
+    )
+    .expect_err("string-vector object amplification must be rejected");
+
+    assert!(matches!(
+        error,
+        slskr_protocol::DecodeError::InvalidCount {
+            field: "string vec",
+            count: 65_537,
+            maximum: 65_536,
+        }
+    ));
+}
+
+#[test]
 fn unknown_server_codes_preserve_payload() {
     let frame = MessageFrame::new(4, [1, 2, 3]);
 

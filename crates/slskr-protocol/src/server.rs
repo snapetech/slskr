@@ -2087,9 +2087,23 @@ fn encode_targeted_search_request(
     writer.write_string(&value.query)
 }
 
+// A string vector allocates a `String` header for every item, even when its
+// wire representation is an empty four-byte string.  The wire-byte bound
+// alone would allow a maximum-sized frame to create millions of headers.
+// Keep the cap high enough for real server lists while bounding the decoder's
+// object-count amplification.
+const MAX_STRING_VEC_ITEMS: usize = 65_536;
+
 fn decode_string_vec(reader: &mut Reader<'_>) -> Result<Vec<String>, DecodeError> {
     let count = reader.read_bounded_count("string vec", 4)?;
-    let mut values = Vec::new();
+    if count > MAX_STRING_VEC_ITEMS {
+        return Err(DecodeError::InvalidCount {
+            field: "string vec",
+            count,
+            maximum: MAX_STRING_VEC_ITEMS,
+        });
+    }
+    let mut values = Vec::with_capacity(count);
     for _ in 0..count {
         values.push(reader.read_string()?);
     }
