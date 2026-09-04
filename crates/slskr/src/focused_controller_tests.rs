@@ -157,7 +157,7 @@ fn test_state_with_env(
         transfers: RwLock::new(super::TransferQueue::new(&config)),
         events: RwLock::new(super::EventStore::new(super::EVENT_HISTORY_LIMIT)),
         event_tx,
-        webhooks: RwLock::new(super::webhooks::WebhookManager::new()),
+        webhooks: Arc::new(RwLock::new(super::webhooks::WebhookManager::new())),
         webhook_deliveries: Arc::new(super::Semaphore::new(super::MAX_WEBHOOK_DELIVERY_TASKS)),
         share_scans: Arc::new(super::Semaphore::new(super::MAX_SHARE_SCAN_TASKS)),
         incoming_connections: Arc::new(super::Semaphore::new(super::MAX_INCOMING_CONNECTION_TASKS)),

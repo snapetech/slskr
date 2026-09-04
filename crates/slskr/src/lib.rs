@@ -17800,7 +17800,7 @@ struct AppState {
     transfers: RwLock<TransferQueue>,
     events: RwLock<EventStore>,
     event_tx: broadcast::Sender<EventRecord>,
-    webhooks: RwLock<webhooks::WebhookManager>,
+    webhooks: Arc<RwLock<webhooks::WebhookManager>>,
     webhook_deliveries: Arc<Semaphore>,
     share_scans: Arc<Semaphore>,
     incoming_connections: Arc<Semaphore>,
@@ -73126,7 +73126,7 @@ async fn serve(invocation: ServeInvocation) -> Result<(), String> {
         transfers: RwLock::new(TransferQueue::new(&config)),
         events: RwLock::new(event_store),
         event_tx,
-        webhooks: RwLock::new(webhook_manager),
+        webhooks: Arc::new(RwLock::new(webhook_manager)),
         webhook_deliveries: Arc::new(Semaphore::new(MAX_WEBHOOK_DELIVERY_TASKS)),
         share_scans: Arc::new(Semaphore::new(MAX_SHARE_SCAN_TASKS)),
         incoming_connections: Arc::new(Semaphore::new(10_000)),
@@ -87486,21 +87486,20 @@ async fn dispatch_webhook_event(
     );
     dispatch_frozen_webhook_event(state, event, &data).await;
     let webhooks = state.webhooks.read().await;
-    let webhooks_clone = webhooks.clone();
-    drop(webhooks);
     let request_body = webhooks::WebhookPayload::new(event, correlation_id.clone(), data.clone())
         .to_string()
         .unwrap_or_default();
     persist_webhook_dispatch_logs(
         state,
-        &webhooks_clone,
+        &webhooks,
         event,
         &correlation_id,
         &request_body,
     )
     .await;
+    drop(webhooks);
     webhooks::WebhookDispatcher::dispatch(
-        &webhooks_clone,
+        Arc::clone(&state.webhooks),
         Arc::clone(&state.webhook_deliveries),
         state.db.clone(),
         correlation_id,

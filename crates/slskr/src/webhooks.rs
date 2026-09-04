@@ -13,7 +13,7 @@ use std::future::Future;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::Semaphore;
+use tokio::sync::{RwLock, Semaphore};
 use tokio_rustls::rustls;
 use uuid::Uuid;
 
@@ -22,6 +22,7 @@ use crate::utils::{is_blocked_outbound_ipv4, is_blocked_outbound_ipv6};
 
 const WEBHOOK_MIN_TIMEOUT_SECONDS: u32 = 1;
 const WEBHOOK_MAX_TIMEOUT_SECONDS: u32 = 30;
+const WEBHOOK_MAX_RETRIES: u32 = 8;
 pub const MAX_WEBHOOKS: usize = 64;
 pub const MIN_WEBHOOK_SECRET_BYTES: usize = 32;
 pub const MAX_WEBHOOK_SECRET_BYTES: usize = 4 * 1024;
@@ -619,14 +620,21 @@ impl WebhookDispatcher {
 
     /// Dispatch event to all matching webhooks
     pub async fn dispatch(
-        manager: &WebhookManager,
+        manager: Arc<RwLock<WebhookManager>>,
         deliveries: Arc<Semaphore>,
         database: Option<DatabaseManager>,
         correlation_id: String,
         event: WebhookEvent,
         data: serde_json::Value,
     ) {
-        let webhooks = manager.get_for_event(event);
+        let webhooks = {
+            let manager = manager.read().await;
+            manager
+                .get_for_event(event)
+                .into_iter()
+                .cloned()
+                .collect::<Vec<_>>()
+        };
 
         if webhooks.is_empty() {
             return;
@@ -654,6 +662,7 @@ impl WebhookDispatcher {
                         eprintln!("[WEBHOOK] Failed to persist dropped delivery outcome: {error}");
                     }
                 }
+                Self::record_delivery_stats(&manager, database.as_ref(), &webhook.id, 0).await;
                 continue;
             };
             // Spawn async task for each webhook delivery (no blocking)
@@ -665,10 +674,11 @@ impl WebhookDispatcher {
             let payload_clone = payload_json.clone();
             let database = database.clone();
             let correlation_id = correlation_id.clone();
+            let manager = Arc::clone(&manager);
 
             tokio::spawn(async move {
                 let _delivery_permit = delivery_permit;
-                let (status, error_message) = match Self::send_webhook_with_retries(
+                let (status, retry_count, error_message) = match Self::send_webhook_with_retries(
                     &webhook_url,
                     &webhook_secret,
                     &payload_clone,
@@ -677,23 +687,30 @@ impl WebhookDispatcher {
                 )
                 .await
                 {
-                    Ok(()) => ("success", None),
+                    Ok(retry_count) => ("success", retry_count, None),
                     Err(error) => {
                         let error = sanitized_webhook_delivery_error(&error.to_string());
                         eprintln!(
                             "[WEBHOOK] Delivery to {} failed: {error}",
                             sanitized_webhook_url_for_log(&webhook_url)
                         );
-                        ("failed", Some(error))
+                        (
+                            "failed",
+                            webhook_max_retries.min(WEBHOOK_MAX_RETRIES),
+                            Some(error),
+                        )
                     }
                 };
+                Self::record_delivery_stats(&manager, database.as_ref(), &webhook_id, retry_count)
+                    .await;
                 if let Some(database) = database {
                     if let Err(error) = database
-                        .complete_webhook_logs(
+                        .complete_webhook_logs_with_attempt(
                             &webhook_id,
                             &correlation_id,
                             status,
                             error_message.as_deref(),
+                            Some(i32::try_from(retry_count.saturating_add(1)).unwrap_or(i32::MAX)),
                         )
                         .await
                     {
@@ -701,6 +718,33 @@ impl WebhookDispatcher {
                     }
                 }
             });
+        }
+    }
+
+    async fn record_delivery_stats(
+        manager: &Arc<RwLock<WebhookManager>>,
+        database: Option<&DatabaseManager>,
+        webhook_id: &str,
+        retry_count: u32,
+    ) {
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+        {
+            let mut manager = manager.write().await;
+            if let Some(webhook) = manager.get_mut(webhook_id) {
+                webhook.last_triggered = Some(timestamp);
+                webhook.retry_count = retry_count;
+            }
+        }
+        if let Some(database) = database {
+            if let Err(error) = database
+                .update_webhook_delivery_stats(webhook_id, timestamp, retry_count)
+                .await
+            {
+                eprintln!("[WEBHOOK] Failed to persist delivery statistics: {error}");
+            }
         }
     }
 
@@ -714,7 +758,8 @@ impl WebhookDispatcher {
         payload: &str,
         timeout_secs: u32,
         max_retries: u32,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<u32, Box<dyn std::error::Error>> {
+        let max_retries = max_retries.min(WEBHOOK_MAX_RETRIES);
         let attempts = max_retries.saturating_add(1);
         let mut last_error = "webhook delivery failed".to_owned();
         for attempt in 1..=attempts {
@@ -725,7 +770,7 @@ impl WebhookDispatcher {
                 }
             }
             match Self::send_webhook(url, secret, payload, timeout_secs).await {
-                Ok(()) => return Ok(()),
+                Ok(()) => return Ok(attempt - 1),
                 Err(error) => last_error = error.to_string(),
             }
         }
@@ -1383,14 +1428,18 @@ mod tests {
 
     #[tokio::test]
     async fn dispatch_does_not_spawn_when_delivery_pool_is_full() {
-        let mut manager = WebhookManager::new();
+        let manager = Arc::new(RwLock::new(WebhookManager::new()));
         let webhook = Webhook::new(
             "https://example.com/hook".to_owned(),
             vec![WebhookEvent::SearchCreated],
             Webhook::generate_secret().expect("test randomness"),
         );
         let webhook_id = webhook.id.clone();
-        manager.register(webhook.clone()).expect("register webhook");
+        manager
+            .write()
+            .await
+            .register(webhook.clone())
+            .expect("register webhook");
         let database = DatabaseManager::in_memory().await.expect("in-memory db");
         database
             .insert_webhook(&crate::persistence::WebhookRecord {
@@ -1426,7 +1475,7 @@ mod tests {
         let deliveries = Arc::new(Semaphore::new(0));
 
         WebhookDispatcher::dispatch(
-            &manager,
+            Arc::clone(&manager),
             Arc::clone(&deliveries),
             Some(database.clone()),
             "correlation".to_owned(),
@@ -1446,6 +1495,19 @@ mod tests {
             logs[0].error_message.as_deref(),
             Some("webhook delivery pool is full")
         );
+        let manager = manager.read().await;
+        let webhook = manager
+            .get(&webhook_id)
+            .expect("webhook remains registered");
+        assert!(webhook.last_triggered.is_some());
+        assert_eq!(webhook.retry_count, 0);
+        let persisted = database
+            .get_webhook(&webhook_id)
+            .await
+            .expect("read webhook statistics")
+            .expect("webhook remains persisted");
+        assert!(persisted.last_triggered.is_some());
+        assert_eq!(persisted.retry_count, 0);
     }
 
     #[test]

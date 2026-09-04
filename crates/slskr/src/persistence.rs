@@ -5296,6 +5296,23 @@ impl DatabaseManager {
         Ok(())
     }
 
+    /// Record the most recent delivery outcome for a webhook.
+    pub async fn update_webhook_delivery_stats(
+        &self,
+        id: &str,
+        last_triggered: i64,
+        retry_count: u32,
+    ) -> Result<u64, Box<dyn std::error::Error>> {
+        let retry_count = i32::try_from(retry_count).unwrap_or(i32::MAX);
+        let result = query("UPDATE webhooks SET last_triggered = ?, retry_count = ? WHERE id = ?")
+            .bind(last_triggered)
+            .bind(retry_count)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(result.rows_affected())
+    }
+
     /// Insert webhook log record
     pub async fn insert_webhook_log(
         &self,
@@ -5331,15 +5348,35 @@ impl DatabaseManager {
         status: &str,
         error_message: Option<&str>,
     ) -> Result<u64, Box<dyn std::error::Error>> {
+        self.complete_webhook_logs_with_attempt(
+            webhook_id,
+            correlation_id,
+            status,
+            error_message,
+            None,
+        )
+        .await
+    }
+
+    /// Mark queued logs with their terminal outcome and actual attempt count.
+    pub async fn complete_webhook_logs_with_attempt(
+        &self,
+        webhook_id: &str,
+        correlation_id: &str,
+        status: &str,
+        error_message: Option<&str>,
+        attempt: Option<i32>,
+    ) -> Result<u64, Box<dyn std::error::Error>> {
         let result = query(
             r#"
             UPDATE webhook_logs
-            SET status = ?, error_message = ?
+            SET status = ?, error_message = ?, attempt = COALESCE(?, attempt)
             WHERE webhook_id = ? AND correlation_id = ? AND status = 'queued'
             "#,
         )
         .bind(status)
         .bind(error_message)
+        .bind(attempt)
         .bind(webhook_id)
         .bind(correlation_id)
         .execute(&self.pool)
@@ -5387,7 +5424,7 @@ impl DatabaseManager {
         limit: i32,
     ) -> Result<Vec<WebhookLogRecord>, Box<dyn std::error::Error>> {
         let records = query_as::<_, WebhookLogRecord>(
-            r#"SELECT id, webhook_id, event, correlation_id, status, request_body, response_status, response_body, error_message, attempt, timestamp FROM webhook_logs WHERE status IN ('failed', 'timeout') AND attempt < (SELECT max_retries FROM webhooks WHERE webhooks.id = webhook_logs.webhook_id) ORDER BY timestamp ASC LIMIT ?"#
+            r#"SELECT id, webhook_id, event, correlation_id, status, request_body, response_status, response_body, error_message, attempt, timestamp FROM webhook_logs WHERE status IN ('failed', 'timeout') AND attempt <= (SELECT max_retries FROM webhooks WHERE webhooks.id = webhook_logs.webhook_id) ORDER BY timestamp ASC LIMIT ?"#
         )
         .bind(limit)
         .fetch_all(&self.pool)
@@ -6216,6 +6253,8 @@ mod tests {
         let logs = db.get_webhook_logs("hook_1", 10, 0).await.unwrap();
         assert_eq!(logs[0].status, "failed");
         assert_eq!(logs[0].error_message.as_deref(), Some("delivery rejected"));
+        assert_eq!(logs[0].attempt, 1);
+        assert_eq!(db.get_failed_webhook_logs(10).await.unwrap().len(), 1);
 
         let mut successful_log = log.clone();
         successful_log.id = "log_2".to_owned();
