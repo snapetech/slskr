@@ -27251,6 +27251,28 @@ fn destination_validation_allows_children_but_rejects_escape_paths() {
         .normalize_explicit_path("relative/nested")
         .is_none());
 
+    let missing = root.join("new").join("nested");
+    assert_eq!(
+        destinations.normalize_explicit_path(&missing.display().to_string()),
+        Some(missing)
+    );
+
+    #[cfg(unix)]
+    {
+        let outside = std::env::temp_dir().join(format!(
+            "slskr-destination-validation-outside-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&outside).unwrap();
+        let link = root.join("escape");
+        std::os::unix::fs::symlink(&outside, &link).unwrap();
+        let escaped_missing = link.join("not-yet-created");
+        assert!(destinations
+            .normalize_explicit_path(&escaped_missing.display().to_string())
+            .is_none());
+        std::fs::remove_dir_all(outside).unwrap();
+    }
+
     std::fs::remove_dir_all(root).unwrap();
 }
 

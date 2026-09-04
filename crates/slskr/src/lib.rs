@@ -3607,6 +3607,15 @@ async fn delete_persisted_transfers(
     Ok(())
 }
 
+#[cfg(feature = "legacy-route-dispatch")]
+async fn controller_remove_transfer_file_if_present(path: &str) -> Result<(), String> {
+    match tokio::fs::remove_file(path).await {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!("transfer file removal failed: {error}")),
+    }
+}
+
 fn controller_transfer_state(status: &str) -> &str {
     match status {
         "queued" => "Queued",
@@ -16014,10 +16023,9 @@ fn songid_path_is_within_root(path: &Path, root: &Path) -> bool {
     if !path.starts_with(&root) {
         return false;
     }
-    match (path.canonicalize(), root.canonicalize()) {
-        (Ok(path), Ok(root)) => path.starts_with(root),
-        _ => true,
-    }
+    canonicalize_with_missing_tail(&path)
+        .zip(canonicalize_with_missing_tail(&root))
+        .is_some_and(|(path, root)| path.starts_with(root))
 }
 
 /// Local SongID analysis is restricted to downloads, incomplete files, and
@@ -16326,14 +16334,38 @@ impl DestinationStore {
                 if !normalized.starts_with(&root) {
                     return false;
                 }
-                match (normalized.canonicalize(), root.canonicalize()) {
-                    (Ok(canonical_path), Ok(canonical_root)) => {
+                canonicalize_with_missing_tail(&normalized)
+                    .zip(canonicalize_with_missing_tail(&root))
+                    .is_some_and(|(canonical_path, canonical_root)| {
                         canonical_path.starts_with(canonical_root)
-                    }
-                    _ => true,
-                }
+                    })
             })
             .then_some(normalized)
+    }
+}
+
+/// Resolve an absolute path through every existing ancestor and append any
+/// missing tail. This preserves validation for destinations that will be
+/// created later while still following symlinks in existing ancestors. Any
+/// non-NotFound filesystem error is rejected by returning `None`.
+fn canonicalize_with_missing_tail(path: &Path) -> Option<PathBuf> {
+    let mut existing = path;
+    let mut missing = Vec::new();
+    loop {
+        match existing.canonicalize() {
+            Ok(mut canonical) => {
+                for component in missing.iter().rev() {
+                    canonical.push(component);
+                }
+                return Some(canonical);
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                let name = existing.file_name()?.to_os_string();
+                missing.push(name);
+                existing = existing.parent()?;
+            }
+            Err(_) => return None,
+        }
     }
 }
 
@@ -24417,7 +24449,13 @@ async fn route_http_request_with_headers(
                      return Ok(routing::service_unavailable_response(&error));
                  }
              }
-              if remove_file { if let Some(path) = target.local_path.as_deref() { let _ = fs::remove_file(path); } }
+              if remove_file {
+                  if let Some(path) = target.local_path.as_deref() {
+                      if let Err(error) = controller_remove_transfer_file_if_present(path).await {
+                          return Ok(routing::service_unavailable_response(&error));
+                      }
+                  }
+              }
               Ok(routing::no_content_response())
          }
 
@@ -24448,7 +24486,13 @@ async fn route_http_request_with_headers(
                      return Ok(routing::service_unavailable_response(&error));
                  }
              }
-              if remove_file { if let Some(path) = target.local_path.as_deref() { let _ = fs::remove_file(path); } }
+              if remove_file {
+                  if let Some(path) = target.local_path.as_deref() {
+                      if let Err(error) = controller_remove_transfer_file_if_present(path).await {
+                          return Ok(routing::service_unavailable_response(&error));
+                      }
+                  }
+              }
               Ok(routing::no_content_response())
          }
 

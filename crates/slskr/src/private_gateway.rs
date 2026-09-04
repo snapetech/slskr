@@ -771,12 +771,19 @@ impl Gateway {
                 )
                 .await
                 {
-                    session
+                    if session
                         .sender
                         .send(buffer[..received.0].to_vec())
                         .await
-                        .ok();
-                    quic_sessions.insert(received.1, session);
+                        .is_ok()
+                    {
+                        quic_sessions.insert(received.1, session);
+                    } else {
+                        tracing::debug!(
+                            remote = ?received.1,
+                            "overlay QUIC proxy closed before initial datagram was forwarded"
+                        );
+                    }
                 }
                 continue;
             }
@@ -832,8 +839,12 @@ impl Gateway {
             let Some(connection) = server.accept().await else {
                 return;
             };
-            let Ok(connection) = connection else {
-                continue;
+            let connection = match connection {
+                Ok(connection) => connection,
+                Err(error) => {
+                    tracing::debug!(%error, "overlay QUIC control connection rejected");
+                    continue;
+                }
             };
             let remote_ip = connection.remote_address().ip();
             if !self
@@ -859,8 +870,12 @@ impl Gateway {
             let Some(connection) = server.accept().await else {
                 return;
             };
-            let Ok(connection) = connection else {
-                continue;
+            let connection = match connection {
+                Ok(connection) => connection,
+                Err(error) => {
+                    tracing::debug!(%error, "overlay QUIC data connection rejected");
+                    continue;
+                }
             };
             let remote_ip = connection.remote_address().ip();
             if !self
@@ -937,7 +952,11 @@ impl Gateway {
                 }
             });
         }
-        while stream_tasks.join_next().await.is_some() {}
+        while let Some(result) = stream_tasks.join_next().await {
+            if let Err(error) = result {
+                tracing::warn!(%error, ?remote, "overlay QUIC data stream task failed");
+            }
+        }
     }
 
     async fn handle_quic_data_stream(
@@ -1464,8 +1483,7 @@ async fn copy_tcp_to_quic(
             .map_err(|error| error.to_string())?;
         total = total.saturating_add(read as u64);
     }
-    let _ = send.finish();
-    Ok(())
+    send.finish().map_err(|error| error.to_string())
 }
 
 impl Gateway {
@@ -2635,23 +2653,45 @@ fn valid_destination_ip(ip: IpAddr) -> bool {
 fn valid_public_relay_ip(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(address) => {
-            let [first, second, ..] = address.octets();
+            let [first, second, third, ..] = address.octets();
             first != 0
                 && first != 10
                 && first != 127
                 && !(first == 100 && (64..=127).contains(&second))
                 && !(first == 169 && second == 254)
                 && !(first == 172 && (16..=31).contains(&second))
+                && !(first == 192
+                    && ((second == 0 && (third == 0 || third == 2))
+                        || (second == 31 && third == 196)
+                        || (second == 52 && third == 193)
+                        || (second == 88 && third == 99)))
                 && !(first == 192 && second == 168)
+                && !(first == 198 && (second == 18 || second == 19))
+                && !(first == 198 && second == 51 && third == 100)
+                && !(first == 203 && second == 0 && third == 113)
                 && first < 224
         }
         IpAddr::V6(address) => {
             let bytes = address.octets();
+            if let Some(mapped) = address.to_ipv4() {
+                return valid_public_relay_ip(IpAddr::V4(mapped));
+            }
+            let segments = address.segments();
+            let special_use = segments[0] == 0x2001
+                && (segments[1] == 0x0002
+                    || matches!(segments[1] & 0xfff0, 0x0010 | 0x0020)
+                    || segments[1] == 0x0db8)
+                || (segments[0] == 0x3fff && (segments[1] & 0xf000) == 0)
+                || (segments[0] == 0x0100
+                    && segments[1] == 0
+                    && segments[2] == 0
+                    && segments[3] == 0);
             !address.is_unspecified()
                 && !address.is_loopback()
                 && !address.is_unicast_link_local()
                 && !address.is_unique_local()
                 && !address.is_multicast()
+                && !special_use
                 && (bytes[0] & 0xfe) != 0xfc
         }
     }
@@ -2858,6 +2898,27 @@ mod tests {
             "224.0.0.1",
             "fc00::1",
             "fe80::1",
+        ] {
+            assert!(
+                !valid_public_relay_ip(address.parse().unwrap()),
+                "{address}"
+            );
+        }
+        for address in [
+            "192.0.0.1",
+            "192.0.2.1",
+            "192.31.196.1",
+            "192.52.193.1",
+            "192.88.99.1",
+            "198.18.0.1",
+            "198.51.100.1",
+            "203.0.113.1",
+            "::ffff:10.0.0.1",
+            "::ffff:192.0.2.1",
+            "2001:db8::1",
+            "2001:2::1",
+            "2001:20::1",
+            "100::1",
         ] {
             assert!(
                 !valid_public_relay_ip(address.parse().unwrap()),
