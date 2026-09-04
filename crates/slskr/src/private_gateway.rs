@@ -854,9 +854,14 @@ impl Gateway {
             {
                 continue;
             }
+            let Ok(permit) = Arc::clone(&self.connections).try_acquire_owned() else {
+                self.overlay_rate_limiter.record_disconnection(remote_ip);
+                continue;
+            };
             let gateway = Arc::clone(&self);
             let connection_state = Arc::clone(&state);
             tokio::spawn(async move {
+                let _permit = permit;
                 gateway
                     .handle_quic_connection(connection, connection_state)
                     .await;
