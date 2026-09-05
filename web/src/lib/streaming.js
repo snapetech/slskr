@@ -1,11 +1,39 @@
 import api from './api';
 import { apiBaseUrl, urlBase } from '../config';
 
+const requireTicket = (data, label) => {
+  if (
+    !data ||
+    typeof data !== 'object' ||
+    Array.isArray(data) ||
+    typeof data.ticket !== 'string' ||
+    data.ticket.trim() === ''
+  ) {
+    throw new Error(`Streaming API returned an invalid ${label} response`);
+  }
+  return data.ticket;
+};
+
+const requirePeerTicket = (data) => {
+  if (
+    !data ||
+    typeof data !== 'object' ||
+    Array.isArray(data) ||
+    typeof data.ticket !== 'string' ||
+    data.ticket.trim() === '' ||
+    typeof data.streamUrl !== 'string' ||
+    data.streamUrl.trim() === ''
+  ) {
+    throw new Error('Streaming API returned an invalid peer ticket response');
+  }
+  return data;
+};
+
 export const createStreamTicket = async (contentId) => {
   const response = await api.post(
     `/streams/${encodeURIComponent(contentId)}/ticket`,
   );
-  return response.data?.ticket || '';
+  return requireTicket(response.data, 'stream ticket');
 };
 
 export const buildTicketedStreamUrl = (contentId, ticket) =>
@@ -20,7 +48,7 @@ export const createShareStreamTicket = async (contentId, shareToken) => {
     undefined,
     { headers: { 'X-Share-Token': shareToken } },
   );
-  return response.data?.ticket || '';
+  return requireTicket(response.data, 'share stream ticket');
 };
 
 export const buildDirectStreamUrl = (contentId) =>
@@ -32,7 +60,7 @@ export const createPeerStreamTicket = async ({ username, filename, size }) => {
     filename,
     size,
   });
-  return response.data || {};
+  return requirePeerTicket(response.data);
 };
 
 export const buildPeerStreamUrl = (streamUrl) => {

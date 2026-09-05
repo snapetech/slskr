@@ -1,12 +1,29 @@
 import api from './api';
 
+const isRecord = (value) =>
+  value && typeof value === 'object' && !Array.isArray(value);
+
+const requireArrayResponse = (data, resource) => {
+  if (!Array.isArray(data)) {
+    throw new Error(`Auto-replace API returned an invalid ${resource} response`);
+  }
+  return data;
+};
+
+const requireStatusResponse = (data, resource) => {
+  if (!isRecord(data) || typeof data.enabled !== 'boolean') {
+    throw new Error(`Auto-replace API returned an invalid ${resource} response`);
+  }
+  return data;
+};
+
 /**
  * Get all stuck downloads that are candidates for auto-replacement.
  * @returns {Promise<Array>} List of stuck downloads.
  */
 export const getStuckDownloads = async () => {
   const response = await api.get('/transfers/downloads/stuck');
-  return response.data;
+  return requireArrayResponse(response.data, 'stuck downloads');
 };
 
 /**
@@ -30,7 +47,7 @@ export const findAlternative = async ({
     threshold,
     username,
   });
-  return response.data;
+  return requireArrayResponse(response.data, 'alternative downloads');
 };
 
 /**
@@ -57,6 +74,9 @@ export const replaceDownload = async ({
     originalId,
     originalUsername,
   });
+  if (!isRecord(response.data)) {
+    throw new Error('Auto-replace API returned an invalid replacement response');
+  }
   return response.data;
 };
 
@@ -70,6 +90,9 @@ export const processStuckDownloads = async ({ threshold = 5 }) => {
   const response = await api.post('/transfers/downloads/auto-replace', {
     threshold,
   });
+  if (!isRecord(response.data)) {
+    throw new Error('Auto-replace API returned an invalid process response');
+  }
   return response.data;
 };
 
@@ -80,7 +103,7 @@ export const processStuckDownloads = async ({ threshold = 5 }) => {
 export const getAutoReplaceStatus = async () => {
   // Use the new backend API endpoint
   const response = await api.get('/autoreplace');
-  return response.data;
+  return requireStatusResponse(response.data, 'status');
 };
 
 /**
@@ -89,7 +112,7 @@ export const getAutoReplaceStatus = async () => {
  */
 export const enableAutoReplace = async () => {
   const response = await api.put('/autoreplace/enable');
-  return response.data;
+  return requireStatusResponse(response.data, 'enable');
 };
 
 /**
@@ -98,5 +121,5 @@ export const enableAutoReplace = async () => {
  */
 export const disableAutoReplace = async () => {
   const response = await api.put('/autoreplace/disable');
-  return response.data;
+  return requireStatusResponse(response.data, 'disable');
 };

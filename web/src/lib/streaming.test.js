@@ -3,7 +3,9 @@ import {
   buildDirectStreamUrl,
   buildPeerStreamUrl,
   buildTicketedStreamUrl,
+  createPeerStreamTicket,
   createShareStreamTicket,
+  createStreamTicket,
 } from './streaming';
 
 vi.mock('./api', () => ({
@@ -16,6 +18,36 @@ vi.mock('./api', () => ({
 describe('share streaming helpers', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it('returns validated stream ticket responses', async () => {
+    api.post.mockResolvedValueOnce({ data: { ticket: 'stream-ticket' } });
+    await expect(createStreamTicket('content/1')).resolves.toBe('stream-ticket');
+
+    api.post.mockResolvedValueOnce({
+      data: { streamUrl: '/api/v0/peer-streams/ticket', ticket: 'peer-ticket' },
+    });
+    await expect(
+      createPeerStreamTicket({ filename: 'song.flac', size: 42, username: 'peer' }),
+    ).resolves.toEqual({
+      streamUrl: '/api/v0/peer-streams/ticket',
+      ticket: 'peer-ticket',
+    });
+  });
+
+  it.each([
+    ['stream ticket', createStreamTicket, { data: {} }],
+    ['share stream ticket', createShareStreamTicket, { data: { ticket: '' } }],
+    ['peer ticket', createPeerStreamTicket, { data: { ticket: 'ticket' } }],
+  ])('rejects malformed %s responses', async (_, helper, response) => {
+    api.post.mockResolvedValue(response);
+    const promise =
+      helper === createStreamTicket
+        ? helper('content/1')
+        : helper === createShareStreamTicket
+          ? helper('content/1', 'share-token')
+          : helper({ filename: 'song.flac', size: 42, username: 'peer' });
+    await expect(promise).rejects.toThrow('Streaming API returned an invalid');
   });
 
   it('exchanges a header token for a short-lived stream ticket', async () => {
