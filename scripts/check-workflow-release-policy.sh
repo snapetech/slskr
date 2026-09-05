@@ -165,6 +165,11 @@ if ! rg -n -F -- "$ci_cancel_policy" .github/workflows/ci.yml >/dev/null; then
   printf 'workflow release policy check failed: main CI pushes must not cancel superseded runs\n' >&2
   status=1
 fi
+ci_group_policy='group: ci-${{ github.workflow }}-${{ github.event_name == '\''pull_request'\'' && github.ref || github.sha }}'
+if ! rg -n -F -- "$ci_group_policy" .github/workflows/ci.yml >/dev/null; then
+  printf 'workflow release policy check failed: main CI pushes must use commit-specific concurrency groups\n' >&2
+  status=1
+fi
 
 for expected in \
   'scripts/submit-winget-release.ps1' \
