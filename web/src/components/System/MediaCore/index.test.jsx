@@ -11,6 +11,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('../../../lib/mediacore', () => ({
   getConflictStrategies: vi.fn(),
   getContentIdStats: vi.fn(),
+  searchContent: vi.fn(),
+  searchMessages: vi.fn(),
   getSupportedHashAlgorithms: vi.fn(),
 }));
 
@@ -34,6 +36,8 @@ describe('MediaCore', () => {
       descriptions: {},
     });
     mediacore.getConflictStrategies.mockResolvedValue([]);
+    mediacore.searchContent.mockResolvedValue([]);
+    mediacore.searchMessages.mockResolvedValue([]);
   });
 
   it('renders a pod workflow index with safety framing', async () => {
@@ -107,5 +111,43 @@ describe('MediaCore', () => {
         .getAllByPlaceholderText('e.g., content:audio:track:mb-12345')
         .map((input) => input.value),
     ).toContain('content:audio:track:mb-12345');
+  });
+
+  it('reports message-search failures instead of showing no matches', async () => {
+    mediacore.searchMessages.mockRejectedValueOnce(
+      new Error('Message search unavailable'),
+    );
+
+    render(<MediaCore />);
+    await screen.findByText('MediaCore ContentID Registry');
+
+    fireEvent.change(screen.getByPlaceholderText('Search messages...'), {
+      target: { value: 'hello' },
+    });
+    fireEvent.click(screen.getAllByRole('button', { name: 'Search' })[0]);
+
+    expect(await screen.findByTestId('message-search-error')).toHaveTextContent(
+      'Message search unavailable',
+    );
+    expect(screen.queryByText(/No messages found matching/)).not.toBeInTheDocument();
+  });
+
+  it('reports content-search failures explicitly', async () => {
+    mediacore.searchContent.mockRejectedValueOnce(
+      new Error('Content search unavailable'),
+    );
+
+    render(<MediaCore />);
+    await screen.findByText('MediaCore ContentID Registry');
+
+    fireEvent.change(
+      screen.getByPlaceholderText('Search for content (artist, album, movie, etc.)'),
+      { target: { value: 'album' } },
+    );
+    fireEvent.click(screen.getAllByRole('button', { name: 'Search' })[1]);
+
+    expect(await screen.findByTestId('content-search-error')).toHaveTextContent(
+      'Content search unavailable',
+    );
   });
 });

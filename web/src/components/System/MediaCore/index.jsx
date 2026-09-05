@@ -293,6 +293,7 @@ const MediaCore = () => {
   const [vacuumLoading, setVacuumLoading] = useMountedState(mountedRef, false);
   const [searchQuery, setSearchQuery] = useMountedState(mountedRef, '');
   const [searchResults, setSearchResults] = useMountedState(mountedRef, null);
+  const [searchError, setSearchError] = useMountedState(mountedRef, null);
   const [searchLoading, setSearchLoading] = useMountedState(mountedRef, false);
 
   // Pod Message Backfill states
@@ -320,6 +321,7 @@ const MediaCore = () => {
   const [contentMetadata, setContentMetadata] = useMountedState(mountedRef, null);
   const [contentSearchQuery, setContentSearchQuery] = useMountedState(mountedRef, '');
   const [contentSearchResults, setContentSearchResults] = useMountedState(mountedRef, []);
+  const [contentSearchError, setContentSearchError] = useMountedState(mountedRef, null);
   const [contentValidationLoading, setContentValidationLoading] =
     useMountedState(mountedRef, false);
   const [contentMetadataLoading, setContentMetadataLoading] = useMountedState(mountedRef, false);
@@ -1902,6 +1904,7 @@ const MediaCore = () => {
 
     try {
       setSearchLoading(true);
+      setSearchError(null);
       setSearchResults(null);
       const result = await mediacore.searchMessages(
         'all',
@@ -1912,6 +1915,7 @@ const MediaCore = () => {
       setSearchResults(result);
     } catch (error_) {
       setSearchResults([]);
+      setSearchError(toDisplayError(error_, 'Failed to search messages'));
       toast.error(`Failed to search messages: ${toDisplayError(error_)}`);
     } finally {
       setSearchLoading(false);
@@ -2128,6 +2132,7 @@ const MediaCore = () => {
 
     try {
       setContentSearchLoading(true);
+      setContentSearchError(null);
       setContentSearchResults([]);
       const results = await mediacore.searchContent(
         contentSearchQuery.trim(),
@@ -2137,6 +2142,7 @@ const MediaCore = () => {
       setContentSearchResults(results);
     } catch (error_) {
       toast.error(`Failed to search content: ${toDisplayError(error_)}`);
+      setContentSearchError(toDisplayError(error_, 'Failed to search content'));
       setContentSearchResults([]);
     } finally {
       setContentSearchLoading(false);
@@ -7177,7 +7183,17 @@ const MediaCore = () => {
                 value={searchQuery}
               />
 
-              {searchResults && searchResults.length > 0 && (
+              {searchError && (
+                <Message
+                  data-testid="message-search-error"
+                  negative
+                  size="small"
+                >
+                  {searchError}
+                </Message>
+              )}
+
+              {searchResults && searchResults.length > 0 && !searchError && (
                 <Message size="small">
                   <Message.Header>
                     Search Results ({searchResults.length})
@@ -7206,7 +7222,10 @@ const MediaCore = () => {
                 </Message>
               )}
 
-              {searchResults && searchResults.length === 0 && searchQuery && (
+              {searchResults &&
+                searchResults.length === 0 &&
+                searchQuery &&
+                !searchError && (
                 <Message
                   size="small"
                   warning
@@ -7584,6 +7603,16 @@ const MediaCore = () => {
               />
 
               {/* Search Results */}
+              {contentSearchError && (
+                <Message
+                  data-testid="content-search-error"
+                  negative
+                  size="small"
+                >
+                  {contentSearchError}
+                </Message>
+              )}
+
               {contentSearchResults.length > 0 && (
                 <div style={{ marginBottom: '1em' }}>
                   <Header size="tiny">Search Results</Header>
