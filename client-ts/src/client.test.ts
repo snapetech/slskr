@@ -281,6 +281,19 @@ describe('SlskrClient request lifecycle', () => {
       if (parsed.pathname === '/api/rooms/lounge%20room') {
         return new Response('{"name":"lounge room","userCount":3,"members":["alice"]}', { status: 200 });
       }
+      if (parsed.pathname === '/api/shares') {
+        return new Response('{"local":[{"localPath":"/music","files":2}]}', { status: 200 });
+      }
+      if (parsed.pathname === '/api/shares/rescan' && init?.method === 'POST') {
+        return new Response('{"accepted":true}', { status: 202 });
+      }
+      if (parsed.pathname === '/api/config/download-filter' && init?.method === 'GET') {
+        return new Response('{"exclude":["tmp"],"maxTerms":100}', { status: 200 });
+      }
+      if (parsed.pathname === '/api/config/download-filter' && init?.method === 'PUT') {
+        expect(JSON.parse(String(init.body))).toEqual({ exclude: ['private'] });
+        return new Response('{"exclude":["private"],"maxTerms":100}', { status: 200 });
+      }
       if (parsed.pathname === '/api/events') {
         return new Response('[{"type":"message"}]', { status: 200 });
       }
@@ -330,6 +343,17 @@ describe('SlskrClient request lifecycle', () => {
       users: ['alice'],
     });
     await expect(client.leaveRoom('lounge room')).resolves.toBeUndefined();
+    await expect(client.listShares({ limit: 10, offset: 2 })).resolves.toEqual([
+      { localPath: '/music', files: 2 },
+    ]);
+    await expect(client.refreshShares()).resolves.toEqual({ accepted: true });
+    await expect(client.getFilters()).resolves.toMatchObject({
+      exclude: ['tmp'],
+      maxTerms: 100,
+    });
+    await expect(client.updateFilters({ exclude: ['private'] })).resolves.toMatchObject({
+      exclude: ['private'],
+    });
     await expect(client.getEvents()).resolves.toMatchObject([{ type: 'message', data: {} }]);
     await expect(client.getEvents({
       limit: 10,
@@ -349,6 +373,9 @@ describe('SlskrClient request lifecycle', () => {
     expect(filteredEventsRequest?.url).toContain('q=ambient+%26+live');
     expect(filteredEventsRequest?.url).toContain('limit=10');
     expect(filteredEventsRequest?.url).toContain('offset=20');
+    const sharesRequest = requests.find((request) => request.url.includes('/api/shares?'));
+    expect(sharesRequest?.url).toContain('limit=10');
+    expect(sharesRequest?.url).toContain('offset=2');
     const usersRequest = requests.find((request) => request.url.includes('/api/users?'));
     expect(usersRequest?.url).toContain('limit=10');
     expect(usersRequest?.url).toContain('offset=2');
@@ -510,7 +537,7 @@ describe('SlskrClient request lifecycle', () => {
       total_requests: 4,
       hit_rate: 0.75,
     });
-    await expect(client.invalidateCache(['content:audio:track:1'])).resolves.toBeUndefined();
+    await expect(client.invalidateCache(['content:audio:track:1'])).resolves.toEqual({ success: true });
 
     expect(requests.some((request) => request.url.endsWith('/api/sessions'))).toBe(false);
     expect(requests.some((request) => request.url.endsWith('/api/cache/stats'))).toBe(false);

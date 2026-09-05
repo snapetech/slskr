@@ -1,7 +1,7 @@
 /**
  * Main HTTP API client for slskr
  */
-import { ClientConfig, HealthStatus, VersionInfo, Capabilities, Configuration, Statistics, Session, SessionPrivileges, User, UserInfo, Search, SearchDetails, SearchCreateRequest, Message, MessageSendRequest, Transfer, TransferCreateRequest, Room, BrowseResult, BrowseRequest, Event, PaginationParams, CacheStats } from './types';
+import { ClientConfig, HealthStatus, VersionInfo, Capabilities, Configuration, Statistics, Session, SessionPrivileges, User, UserInfo, Search, SearchDetails, SearchCreateRequest, Message, MessageSendRequest, Transfer, TransferCreateRequest, Room, BrowseResult, BrowseRequest, Share, DownloadFilter, Event, PaginationParams, CacheStats } from './types';
 export declare class SlskrClient {
     private baseUrl;
     private token;
@@ -44,6 +44,10 @@ export declare class SlskrClient {
     getRoom(name: string): Promise<Room>;
     joinRoom(name: string): Promise<Room>;
     leaveRoom(name: string): Promise<void>;
+    listShares(params?: PaginationParams): Promise<Share[]>;
+    refreshShares(): Promise<Record<string, unknown>>;
+    getFilters(): Promise<DownloadFilter>;
+    updateFilters(filters: DownloadFilter): Promise<DownloadFilter>;
     browseUser(username: string, params?: {
         folder?: string;
     } & PaginationParams): Promise<BrowseResult>;
@@ -58,7 +62,7 @@ export declare class SlskrClient {
         query?: string;
     } & PaginationParams): Promise<Event[]>;
     getCacheStats(): Promise<CacheStats>;
-    invalidateCache(keys: string[]): Promise<void>;
+    invalidateCache(keys?: string[]): Promise<Record<string, unknown>>;
     private get;
     private getAuth;
     private post;

@@ -149,6 +149,13 @@ export interface BrowseRequest {
     status: 'pending' | 'accepted' | 'rejected';
     requested_at: string;
 }
+export type Share = Record<string, unknown>;
+export interface DownloadFilter {
+    exclude: string[];
+    maxTerms?: number;
+    maxTermLength?: number;
+    [key: string]: unknown;
+}
 export type EventType = 'search.started' | 'search.completed' | 'search.result' | 'transfer.started' | 'transfer.completed' | 'transfer.failed' | 'message.received' | 'connection.status' | 'room.joined' | 'room.user_joined' | 'room.user_left';
 export interface Event {
     id: string;

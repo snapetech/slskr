@@ -168,6 +168,12 @@ new SlskrClient({
 - `joinRoom(name)` - Join room
 - `leaveRoom(name)` - Leave room
 
+**Shares & Filters**
+- `listShares(params)` - List shared directories
+- `refreshShares()` - Rescan configured shares
+- `getFilters()` - Get download-filter settings
+- `updateFilters(filters)` - Update download-filter settings
+
 **Browse**
 - `browseUser(username, params)` - Browse user files
 - `requestBrowse(username, folder)` - Request to browse
@@ -179,7 +185,7 @@ new SlskrClient({
 
 **Cache**
 - `getCacheStats()` - Get cache statistics
-- `invalidateCache(keys)` - Clear cache entries
+- `invalidateCache(keys)` - Clear cache entries and return the daemon response
 
 ### BatchClient
 

@@ -294,6 +294,23 @@ function normalizeBrowseResult(response) {
         ...(typeof object.folder === 'string' ? { folder: object.folder } : {}),
     };
 }
+function normalizeShare(response) {
+    return responseObject(response);
+}
+function normalizeDownloadFilter(response) {
+    const object = responseObject(response);
+    const rawTerms = Array.isArray(object.exclude)
+        ? object.exclude
+        : Array.isArray(object.terms)
+            ? object.terms
+            : [];
+    return {
+        ...object,
+        exclude: rawTerms.filter((term) => typeof term === 'string'),
+        ...(typeof object.maxTerms === 'number' ? { maxTerms: object.maxTerms } : {}),
+        ...(typeof object.maxTermLength === 'number' ? { maxTermLength: object.maxTermLength } : {}),
+    };
+}
 function normalizeCacheStats(response) {
     const object = responseObject(response);
     const hits = typeof object.cacheHits === 'number' ? object.cacheHits : 0;
@@ -499,6 +516,22 @@ class SlskrClient {
         await this.deleteAuth(`/api/rooms/${this.pathSegment(name)}/join`);
     }
     // =========================================================================
+    // Shares & Filters
+    // =========================================================================
+    async listShares(params) {
+        const response = await this.getAuth('/api/shares', params);
+        return responseList(response, 'shares', 'local', 'entries').map(normalizeShare);
+    }
+    async refreshShares() {
+        return this.postAuth('/api/shares/rescan', {});
+    }
+    async getFilters() {
+        return normalizeDownloadFilter(await this.getAuth('/api/config/download-filter'));
+    }
+    async updateFilters(filters) {
+        return normalizeDownloadFilter(await this.putAuth('/api/config/download-filter', filters));
+    }
+    // =========================================================================
     // Browse
     // =========================================================================
     async browseUser(username, params) {
@@ -547,8 +580,8 @@ class SlskrClient {
     async getCacheStats() {
         return normalizeCacheStats(await this.getAuth('/api/mediacore/retrieve/stats'));
     }
-    async invalidateCache(keys) {
-        await this.postAuth('/api/mediacore/retrieve/cache/clear', { keys });
+    async invalidateCache(keys = []) {
+        return this.postAuth('/api/mediacore/retrieve/cache/clear', { keys });
     }
     // =========================================================================
     // HTTP Methods

@@ -219,6 +219,19 @@ export interface BrowseRequest {
 }
 
 // ============================================================================
+// Shares & Filters
+// ============================================================================
+
+export type Share = Record<string, unknown>;
+
+export interface DownloadFilter {
+  exclude: string[];
+  maxTerms?: number;
+  maxTermLength?: number;
+  [key: string]: unknown;
+}
+
+// ============================================================================
 // Events
 // ============================================================================
 

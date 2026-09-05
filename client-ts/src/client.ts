@@ -24,6 +24,8 @@ import {
   BrowseEntry,
   BrowseResult,
   BrowseRequest,
+  Share,
+  DownloadFilter,
   Event,
   PaginationParams,
   CacheStats,
@@ -347,6 +349,25 @@ function normalizeBrowseResult(response: unknown): BrowseResult {
   };
 }
 
+function normalizeShare(response: unknown): Share {
+  return responseObject(response);
+}
+
+function normalizeDownloadFilter(response: unknown): DownloadFilter {
+  const object = responseObject(response);
+  const rawTerms = Array.isArray(object.exclude)
+    ? object.exclude
+    : Array.isArray(object.terms)
+      ? object.terms
+      : [];
+  return {
+    ...object,
+    exclude: rawTerms.filter((term): term is string => typeof term === 'string'),
+    ...(typeof object.maxTerms === 'number' ? { maxTerms: object.maxTerms } : {}),
+    ...(typeof object.maxTermLength === 'number' ? { maxTermLength: object.maxTermLength } : {}),
+  };
+}
+
 function normalizeCacheStats(response: unknown): CacheStats {
   const object = responseObject(response);
   const hits = typeof object.cacheHits === 'number' ? object.cacheHits : 0;
@@ -607,6 +628,29 @@ export class SlskrClient {
   }
 
   // =========================================================================
+  // Shares & Filters
+  // =========================================================================
+
+  async listShares(params?: PaginationParams): Promise<Share[]> {
+    const response = await this.getAuth<unknown>('/api/shares', params);
+    return responseList<unknown>(response, 'shares', 'local', 'entries').map(normalizeShare);
+  }
+
+  async refreshShares(): Promise<Record<string, unknown>> {
+    return this.postAuth<Record<string, unknown>>('/api/shares/rescan', {});
+  }
+
+  async getFilters(): Promise<DownloadFilter> {
+    return normalizeDownloadFilter(await this.getAuth<unknown>('/api/config/download-filter'));
+  }
+
+  async updateFilters(filters: DownloadFilter): Promise<DownloadFilter> {
+    return normalizeDownloadFilter(
+      await this.putAuth<unknown>('/api/config/download-filter', filters),
+    );
+  }
+
+  // =========================================================================
   // Browse
   // =========================================================================
 
@@ -673,8 +717,8 @@ export class SlskrClient {
     return normalizeCacheStats(await this.getAuth<unknown>('/api/mediacore/retrieve/stats'));
   }
 
-  async invalidateCache(keys: string[]): Promise<void> {
-    await this.postAuth('/api/mediacore/retrieve/cache/clear', { keys });
+  async invalidateCache(keys: string[] = []): Promise<Record<string, unknown>> {
+    return this.postAuth<Record<string, unknown>>('/api/mediacore/retrieve/cache/clear', { keys });
   }
 
   // =========================================================================
