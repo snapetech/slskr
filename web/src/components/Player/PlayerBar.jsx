@@ -1536,9 +1536,11 @@ const PlayerLauncher = ({ compact = false, onPlayItem }) => {
   const mountedRef = useMountedRef();
   const collectionItemsRequestIdRef = useRef(0);
   const [collections, setCollections] = useState([]);
+  const [collectionsError, setCollectionsError] = useState('');
   const [collectionsOpen, setCollectionsOpen] = useState(false);
   const [selectedCollection, setSelectedCollection] = useState(null);
   const [collectionItems, setCollectionItems] = useState([]);
+  const [collectionItemsError, setCollectionItemsError] = useState('');
   const [collectionItemsLoading, setCollectionItemsLoading] = useState(false);
   const [items, setItems] = useState([]);
   const [browserDirectories, setBrowserDirectories] = useState([]);
@@ -1546,6 +1548,7 @@ const PlayerLauncher = ({ compact = false, onPlayItem }) => {
   const [browserHasMore, setBrowserHasMore] = useState(false);
   const [browserOffset, setBrowserOffset] = useState(0);
   const [browserPath, setBrowserPath] = useState('');
+  const [browserError, setBrowserError] = useState('');
   const [browserStats, setBrowserStats] = useState({
     duplicatesRemoved: 0,
     totalDirectories: 0,
@@ -1562,10 +1565,15 @@ const PlayerLauncher = ({ compact = false, onPlayItem }) => {
       .then((response) => {
         if (!canceled && mountedRef.current) {
           setCollections(Array.isArray(response.data) ? response.data : []);
+          setCollectionsError('');
         }
       })
-      .catch(() => {
-        if (!canceled && mountedRef.current) setCollections([]);
+      .catch((error) => {
+        if (!canceled && mountedRef.current) {
+          setCollectionsError(
+            toDisplayError(error, 'Failed to load collections'),
+          );
+        }
       });
 
     return () => {
@@ -1582,6 +1590,7 @@ const PlayerLauncher = ({ compact = false, onPlayItem }) => {
       setBrowserBreadcrumbs([]);
       setBrowserHasMore(false);
       setBrowserStats({ duplicatesRemoved: 0, totalDirectories: 0, totalFiles: 0 });
+      setBrowserError('');
       return undefined;
     }
 
@@ -1615,15 +1624,14 @@ const PlayerLauncher = ({ compact = false, onPlayItem }) => {
               totalDirectories: response.data?.totalDirectories || 0,
               totalFiles: response.data?.totalFiles || 0,
             });
+            setBrowserError('');
           }
         })
-        .catch(() => {
+        .catch((error) => {
           if (!canceled) {
-            setItems([]);
-            setBrowserDirectories([]);
-            setBrowserBreadcrumbs([]);
-            setBrowserHasMore(false);
-            setBrowserStats({ duplicatesRemoved: 0, totalDirectories: 0, totalFiles: 0 });
+            setBrowserError(
+              toDisplayError(error, 'Failed to browse local audio'),
+            );
           }
         })
         .finally(() => {
@@ -1641,6 +1649,7 @@ const PlayerLauncher = ({ compact = false, onPlayItem }) => {
     if (!mountedRef.current) return;
     const requestId = ++collectionItemsRequestIdRef.current;
     setSelectedCollection(collection);
+    setCollectionItemsError('');
     setCollectionItemsLoading(true);
     collectionsAPI
       .getCollectionItems(collection.id)
@@ -1650,14 +1659,17 @@ const PlayerLauncher = ({ compact = false, onPlayItem }) => {
           collectionItemsRequestIdRef.current === requestId
         ) {
           setCollectionItems(Array.isArray(response.data) ? response.data : []);
+          setCollectionItemsError('');
         }
       })
-      .catch(() => {
+      .catch((error) => {
         if (
           mountedRef.current &&
           collectionItemsRequestIdRef.current === requestId
         ) {
-          setCollectionItems([]);
+          setCollectionItemsError(
+            toDisplayError(error, 'Failed to load collection items'),
+          );
         }
       })
       .finally(() => {
@@ -1762,7 +1774,9 @@ const PlayerLauncher = ({ compact = false, onPlayItem }) => {
           <div className="player-browser-grid">
             <Segment className="player-browser-panel">
               <Header as="h4">Collections</Header>
-              {collections.length === 0 ? (
+              {collectionsError ? (
+                <Message negative>{collectionsError}</Message>
+              ) : collections.length === 0 ? (
                 <Message info>No collections found.</Message>
               ) : (
                 <Table compact selectable>
@@ -1794,6 +1808,8 @@ const PlayerLauncher = ({ compact = false, onPlayItem }) => {
                 <Message info>Select a collection to see its tracks.</Message>
               ) : collectionItemsLoading ? (
                 <Message info>Loading collection items...</Message>
+              ) : collectionItemsError ? (
+                <Message negative>{collectionItemsError}</Message>
               ) : collectionItems.length === 0 ? (
                 <Message info>No playable items in this collection.</Message>
               ) : (
@@ -1891,6 +1907,7 @@ const PlayerLauncher = ({ compact = false, onPlayItem }) => {
                   : ''}
               </div>
             </div>
+            {browserError && <Message negative>{browserError}</Message>}
 
             <div className="player-file-explorer-breadcrumbs">
               {(browserBreadcrumbs.length > 0
@@ -1916,7 +1933,7 @@ const PlayerLauncher = ({ compact = false, onPlayItem }) => {
                 <div className="player-file-explorer-section-title">
                   Folders
                 </div>
-                {query ? (
+                {browserError && browserDirectories.length === 0 ? null : query ? (
                   <Message info compact>
                     Clear search to browse folders.
                   </Message>
@@ -1955,7 +1972,7 @@ const PlayerLauncher = ({ compact = false, onPlayItem }) => {
                 </div>
                 {itemsLoading ? (
                   <Message info>Loading audio files...</Message>
-                ) : items.length === 0 ? (
+                ) : browserError && items.length === 0 ? null : items.length === 0 ? (
                   <Message info>
                     {query && query.length < 2
                       ? 'Type at least two characters to search.'

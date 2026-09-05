@@ -4,6 +4,7 @@ import { PlayerProvider, usePlayer } from './PlayerContext';
 import { MemoryRouter } from 'react-router-dom';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { vi } from 'vitest';
+import * as collectionsAPI from '../../lib/collections';
 import * as externalVisualizer from '../../lib/externalVisualizer';
 import * as searches from '../../lib/searches';
 import * as wishlistAPI from '../../lib/wishlist';
@@ -303,6 +304,33 @@ describe('PlayerBar', () => {
     expect(await screen.findByText('Downloads')).toBeInTheDocument();
     fireEvent.click(screen.getByTestId('player-file-folder-Downloads'));
     expect(await screen.findByText('Library stream.ogg')).toBeInTheDocument();
+  });
+
+  it('surfaces collection and local-library load failures', async () => {
+    collectionsAPI.getCollections.mockRejectedValueOnce(new Error('Collections unavailable'));
+    collectionsAPI.browseLibraryItems.mockRejectedValueOnce(new Error('Library unavailable'));
+
+    renderPlayer();
+
+    fireEvent.click(screen.getByTestId('player-open-collections-browser'));
+    expect(await screen.findByText('Collections unavailable')).toBeInTheDocument();
+
+    fireEvent.click(screen.getAllByText('Close')[0]);
+    fireEvent.click(screen.getByTestId('player-open-file-browser'));
+    expect(await screen.findByText('Library unavailable')).toBeInTheDocument();
+    expect(screen.queryByText('No local audio files found here.')).not.toBeInTheDocument();
+  });
+
+  it('surfaces collection-item load failures instead of an empty collection', async () => {
+    collectionsAPI.getCollectionItems.mockRejectedValueOnce(new Error('Collection items unavailable'));
+
+    renderPlayer();
+
+    fireEvent.click(screen.getByTestId('player-open-collections-browser'));
+    fireEvent.click(await screen.findByTestId('player-collection-row-collection-1'));
+
+    expect(await screen.findByText('Collection items unavailable')).toBeInTheDocument();
+    expect(screen.queryByText('No playable items in this collection.')).not.toBeInTheDocument();
   });
 
   it('searches the local file browser as a deduplicated explorer', async () => {
