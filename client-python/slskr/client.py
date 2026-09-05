@@ -579,6 +579,10 @@ class SlskrClient:
                         parsed_error = await self._read_json(response, MAX_HTTP_ERROR_BYTES)
                         if isinstance(parsed_error, dict):
                             error_data = parsed_error
+                    except asyncio.TimeoutError:
+                        # Preserve the request deadline even when the error
+                        # response body, rather than its headers, stalls.
+                        raise
                     except Exception:
                         pass
 

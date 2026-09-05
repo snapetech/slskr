@@ -7,7 +7,7 @@ import pytest
 
 from slskr import BatchClient, BatchBuilder, SlskrClient, WebSocketClient
 from slskr.batch import BatchOperation, BatchResponse, BatchResult
-from slskr.exceptions import ApiError, NetworkError, ResponseContractError
+from slskr.exceptions import ApiError, NetworkError, ResponseContractError, TimeoutError
 
 
 def test_client_url_and_path_segments_are_safe():
@@ -958,6 +958,24 @@ async def test_python_client_preserves_structured_api_errors_and_non_object_bodi
     with pytest.raises(ApiError) as raised:
         await client._request("GET", "/api/health")
     assert raised.value.code == "HTTP 422"
+
+
+@pytest.mark.asyncio
+async def test_python_client_preserves_timeout_while_reading_error_response():
+    response = MagicMock(status=502)
+    context = MagicMock()
+    context.__aenter__ = AsyncMock(return_value=response)
+    context.__aexit__ = AsyncMock(return_value=False)
+    session = MagicMock()
+    session.request.return_value = context
+    client = SlskrClient("https://example.test", "token", retries=3)
+    client.session = session
+    client._read_json = AsyncMock(side_effect=asyncio.TimeoutError())
+
+    with pytest.raises(TimeoutError, match="Request timeout"):
+        await client._request("GET", "/api/health")
+
+    session.request.assert_called_once()
 
 
 @pytest.mark.asyncio
