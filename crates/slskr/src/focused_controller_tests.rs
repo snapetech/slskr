@@ -1453,6 +1453,63 @@ async fn versioned_swarm_rejects_oversized_transfer_limits_before_discovery() {
 }
 
 #[tokio::test]
+async fn merge_routes_reject_oversized_arrays_before_store_deserialization() {
+    let (state, _receiver) =
+        test_state_with_env(MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "slskdn"));
+
+    let oversized_hash_body = serde_json::json!({
+        "entries": vec![serde_json::json!({}); super::content_discovery::MAX_MESH_MERGE_ENTRIES + 1]
+    })
+    .to_string();
+    let hash_response = super::route_http_request(
+        "POST",
+        "/api/v0/hashdb/sync/merge",
+        None,
+        &oversized_hash_body,
+        &state,
+    )
+    .await
+    .expect("oversized hash merge response");
+    assert_eq!(hash_response.status, "400 Bad Request");
+    assert!(hash_response.body.contains("at most 2000 entries"));
+
+    let oversized_records_body = serde_json::json!({
+        "records": vec![serde_json::json!({}); super::content_discovery::MAX_SHADOW_MERGE_RECORDS + 1]
+    })
+    .to_string();
+    let records_response = super::route_http_request(
+        "POST",
+        "/api/v0/virtualsoulfind/shadow-index/sync/merge",
+        None,
+        &oversized_records_body,
+        &state,
+    )
+    .await
+    .expect("oversized shadow merge response");
+    assert_eq!(records_response.status, "400 Bad Request");
+    assert!(records_response.body.contains("at most 256 records"));
+
+    let oversized_indexes_body = serde_json::json!({
+        "records": [{"recordingId":"bounded-route-test","peerIds":[]}],
+        "realmIndexes": vec![serde_json::json!({}); super::realm_subject_index::MAX_INDEXES + 1]
+    })
+    .to_string();
+    let indexes_response = super::route_http_request(
+        "POST",
+        "/api/v0/virtualsoulfind/shadow-index/sync/merge",
+        None,
+        &oversized_indexes_body,
+        &state,
+    )
+    .await
+    .expect("oversized realm-index merge response");
+    assert_eq!(indexes_response.status, "400 Bad Request");
+    assert!(indexes_response.body.contains("at most 1024 indexes"));
+
+    let _ = fs::remove_dir_all(&state.config.state_dir);
+}
+
+#[tokio::test]
 async fn library_browser_projects_share_tree_and_sha256_stream_ids() {
     let (state, _receiver) =
         test_state_with_env(MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "native"));

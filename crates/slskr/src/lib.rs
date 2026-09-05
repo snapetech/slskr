@@ -19504,6 +19504,12 @@ enum SearchDispatchTarget {
     Wishlist,
 }
 
+fn json_array_exceeds_limit(value: &serde_json::Value, limit: usize) -> bool {
+    value
+        .as_array()
+        .is_some_and(|items| items.len() > limit)
+}
+
 use routing::HttpResponse;
 
 #[cfg(not(feature = "legacy-route-dispatch"))]
@@ -54887,6 +54893,15 @@ async fn extended_controller_mutation_response(
             .get("entries")
             .cloned()
             .unwrap_or_else(|| serde_json::Value::Array(Vec::new()));
+        if json_array_exceeds_limit(
+            &entries,
+            content_discovery::MAX_MESH_MERGE_ENTRIES,
+        ) {
+            return routing::bad_request_response(&format!(
+                "entries must contain at most {} entries",
+                content_discovery::MAX_MESH_MERGE_ENTRIES
+            ));
+        }
         let entries = match serde_json::from_value::<Vec<content_discovery::HashDbEntry>>(entries) {
             Ok(entries) if !entries.is_empty() => entries,
             Ok(_) => return routing::bad_request_response("entries are required"),

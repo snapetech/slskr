@@ -11,7 +11,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 const STATE_VERSION: u32 = 1;
-const MAX_INDEXES: usize = 1_024;
+pub(crate) const MAX_INDEXES: usize = 1_024;
 const MAX_STATE_BYTES: usize = 8 * 1024 * 1024;
 const MAX_AUTHORITY_NOTE_CHARS: usize = 512;
 pub const DEFAULT_REALM_ID: &str = "default-realm";

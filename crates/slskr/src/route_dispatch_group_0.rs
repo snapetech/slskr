@@ -833,11 +833,25 @@ async fn route_dispatch_group_0(context: &RouteDispatchContext<'_, '_>) -> Route
                     body: serde_json::json!({"error":"mesh peer is quarantined"}).to_string(),
                 });
             }
-            let entries = match value.get("entries").cloned().and_then(|entries| {
-                serde_json::from_value::<Vec<content_discovery::HashDbEntry>>(entries).ok()
-            }) {
+            let entries_value = match value.get("entries") {
                 Some(entries) => entries,
                 None => return Ok(routing::bad_request_response("entries are required")),
+            };
+            let max_entries = if route.path.starts_with("/api/v0/") {
+                content_discovery::MAX_MESH_MERGE_ENTRIES
+            } else {
+                content_discovery::MAX_HASH_MERGE_ENTRIES
+            };
+            if json_array_exceeds_limit(entries_value, max_entries) {
+                return Ok(routing::bad_request_response(&format!(
+                    "entries must contain at most {max_entries} entries"
+                )));
+            }
+            let entries = match serde_json::from_value::<Vec<content_discovery::HashDbEntry>>(
+                entries_value.clone(),
+            ) {
+                Ok(entries) => entries,
+                Err(_) => return Ok(routing::bad_request_response("entries are required")),
             };
             let received = entries.len();
             let (
@@ -932,30 +946,43 @@ async fn route_dispatch_group_0(context: &RouteDispatchContext<'_, '_>) -> Route
                     ))
                 }
             };
-            let records = match value
-                .get("records")
-                .or_else(|| value.get("entries"))
-                .cloned()
-                .and_then(|records| {
-                    serde_json::from_value::<Vec<content_discovery::ShadowIndexRecord>>(records)
-                        .ok()
-                }) {
+            let records_value = match value.get("records").or_else(|| value.get("entries")) {
                 Some(records) => records,
                 None => return Ok(routing::bad_request_response("records are required")),
+            };
+            if json_array_exceeds_limit(records_value, content_discovery::MAX_SHADOW_MERGE_RECORDS)
+            {
+                return Ok(routing::bad_request_response(&format!(
+                    "records must contain at most {} records",
+                    content_discovery::MAX_SHADOW_MERGE_RECORDS
+                )));
+            }
+            let records = match serde_json::from_value::<Vec<content_discovery::ShadowIndexRecord>>(
+                records_value.clone(),
+            ) {
+                Ok(records) => records,
+                Err(_) => return Ok(routing::bad_request_response("records are required")),
             };
             let realm_indexes = match value
                 .get("realmIndexes")
                 .or_else(|| value.get("realm_indexes"))
-                .cloned()
             {
-                Some(indexes) => match serde_json::from_value::<Vec<serde_json::Value>>(indexes) {
-                    Ok(indexes) => indexes,
-                    Err(_) => {
-                        return Ok(routing::bad_request_response(
-                            "realmIndexes must be an array of objects",
-                        ))
+                Some(indexes) => {
+                    if json_array_exceeds_limit(indexes, realm_subject_index::MAX_INDEXES) {
+                        return Ok(routing::bad_request_response(&format!(
+                            "realmIndexes must contain at most {} indexes",
+                            realm_subject_index::MAX_INDEXES
+                        )));
                     }
-                },
+                    match serde_json::from_value::<Vec<serde_json::Value>>(indexes.clone()) {
+                        Ok(indexes) => indexes,
+                        Err(_) => {
+                            return Ok(routing::bad_request_response(
+                                "realmIndexes must be an array of objects",
+                            ))
+                        }
+                    }
+                }
                 None => Vec::new(),
             };
             let received = records.len();
