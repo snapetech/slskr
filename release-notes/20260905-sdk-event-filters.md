@@ -1,6 +1,6 @@
 ---
 category: changed
-audience: developers, operators
+audience: users, operators
 area: client-sdks
 action: none
 breaking: false
