@@ -5,6 +5,7 @@ Main HTTP API client for slskr
 import asyncio
 import json
 import logging
+import math
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote, urlencode, urlsplit, urlunsplit
 import aiohttp
@@ -226,12 +227,18 @@ class SlskrClient:
         """Create new search"""
         body = {"query": query, "room": room, "target": target}
         result = self._response_object(await self._post("/api/searches", body), "search")
-        if "id" not in result:
-            search_id = result.get("searchId")
-            if search_id is not None:
-                result = {**result, "id": search_id}
-        if not result.get("id"):
+        search_id = next(
+            (
+                result.get(key)
+                for key in ("id", "searchId", "token")
+                if self._valid_response_identifier(result.get(key))
+            ),
+            None,
+        )
+        if search_id is None:
             raise ResponseContractError("search")
+        if not self._valid_response_identifier(result.get("id")):
+            result = {**result, "id": search_id}
         return result
 
     async def get_search_details(
@@ -253,7 +260,7 @@ class SlskrClient:
     async def list_messages(self, limit: int = 50, offset: int = 0) -> List[Dict]:
         """List messages"""
         result = await self._get("/api/messages", params={"limit": limit, "offset": offset})
-        return self._response_list(result, "messages", "messages", "entries")
+        return self._response_list_with_identifier(result, "messages", "id")
 
     async def get_user_messages(
         self, username: str, limit: int = 50, offset: int = 0
@@ -263,12 +270,14 @@ class SlskrClient:
             f"/api/messages/{self._path_segment(username)}",
             params={"limit": limit, "offset": offset},
         )
-        return self._response_list(result, "messages", "messages", "entries")
+        return self._response_list_with_identifier(result, "messages", "id")
 
     async def send_message(self, recipient: str, content: str) -> Dict:
         """Send message to user"""
         body = {"username": recipient, "body": content}
-        return self._response_object(await self._post("/api/messages", body), "message")
+        return self._response_object_with_identifier(
+            await self._post("/api/messages", body), "message", "id"
+        )
 
     async def acknowledge_message(self, message_id: str) -> None:
         """Mark message as acknowledged"""
@@ -296,7 +305,7 @@ class SlskrClient:
             params["status"] = status
 
         result = await self._get("/api/transfers", params=params)
-        return self._response_list(result, "transfers", "transfers", "entries")
+        return self._response_list_with_identifier(result, "transfers", "id")
 
     async def create_transfer(
         self, direction: str, peer_username: str, filename: str
@@ -307,13 +316,16 @@ class SlskrClient:
             "peer_username": peer_username,
             "filename": filename,
         }
-        return self._response_object(await self._post("/api/transfers", body), "transfer")
+        return self._response_object_with_identifier(
+            await self._post("/api/transfers", body), "transfer", "id"
+        )
 
     async def get_transfer(self, transfer_id: str) -> Dict:
         """Get transfer details"""
-        return self._response_object(
+        return self._response_object_with_identifier(
             await self._get(f"/api/transfers/{self._path_segment(transfer_id)}"),
             "transfer",
+            "id",
         )
 
     async def cancel_transfer(self, transfer_id: str) -> None:
@@ -651,6 +663,31 @@ class SlskrClient:
         return result
 
     @staticmethod
+    def _valid_response_identifier(value: Any) -> bool:
+        if isinstance(value, bool):
+            return False
+        if isinstance(value, str):
+            return bool(value.strip())
+        if isinstance(value, int):
+            return abs(value) <= 9_007_199_254_740_991
+        if isinstance(value, float):
+            return (
+                math.isfinite(value)
+                and value.is_integer()
+                and abs(value) <= 9_007_199_254_740_991
+            )
+        return False
+
+    @classmethod
+    def _response_object_with_identifier(
+        cls, result: Any, resource: str, *keys: str
+    ) -> Dict[str, Any]:
+        response = cls._response_object(result, resource)
+        if not any(cls._valid_response_identifier(response.get(key)) for key in keys):
+            raise ResponseContractError(resource)
+        return response
+
+    @staticmethod
     def _response_list(result: Any, resource: str, *keys: str) -> List[Dict]:
         values = None
         if isinstance(result, list):
@@ -662,6 +699,18 @@ class SlskrClient:
                     values = value
                     break
         if values is None or any(not isinstance(value, dict) for value in values):
+            raise ResponseContractError(resource)
+        return values
+
+    @classmethod
+    def _response_list_with_identifier(
+        cls, result: Any, resource: str, *identifier_keys: str
+    ) -> List[Dict]:
+        values = cls._response_list(result, resource, resource, "entries")
+        if any(
+            not any(cls._valid_response_identifier(value.get(key)) for key in identifier_keys)
+            for value in values
+        ):
             raise ResponseContractError(resource)
         return values
 

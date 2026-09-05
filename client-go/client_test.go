@@ -382,6 +382,83 @@ func TestClientRejectsMalformedCreateSearchResponses(t *testing.T) {
 	}
 }
 
+func TestClientRejectsMalformedMessageAndTransferResponses(t *testing.T) {
+	tests := []struct {
+		name   string
+		method string
+		path   string
+		call   func(*Client) error
+	}{
+		{
+			name:   "list messages",
+			method: http.MethodGet,
+			path:   "/api/messages",
+			call: func(client *Client) error {
+				_, err := client.ListMessages(context.Background(), 10, 0)
+				return err
+			},
+		},
+		{
+			name:   "send message",
+			method: http.MethodPost,
+			path:   "/api/messages",
+			call: func(client *Client) error {
+				_, err := client.SendMessage(context.Background(), "alice", "hello")
+				return err
+			},
+		},
+		{
+			name:   "list transfers",
+			method: http.MethodGet,
+			path:   "/api/transfers",
+			call: func(client *Client) error {
+				_, err := client.ListTransfers(context.Background(), "", "", 10, 0)
+				return err
+			},
+		},
+		{
+			name:   "create transfer",
+			method: http.MethodPost,
+			path:   "/api/transfers",
+			call: func(client *Client) error {
+				_, err := client.CreateTransfer(context.Background(), "download", "alice", "track.flac")
+				return err
+			},
+		},
+		{
+			name:   "get transfer",
+			method: http.MethodGet,
+			path:   "/api/transfers/transfer-1",
+			call: func(client *Client) error {
+				_, err := client.GetTransfer(context.Background(), "transfer-1")
+				return err
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				if request.Method != test.method || request.URL.Path != test.path {
+					t.Errorf("unexpected request %s %s", request.Method, request.URL.RequestURI())
+				}
+				writer.Header().Set("Content-Type", "application/json")
+				_, _ = writer.Write([]byte(`{"entries":[{}]}`))
+			}))
+			defer server.Close()
+
+			if err := test.call(NewClient(server.URL, "token")); err == nil {
+				t.Fatal("expected malformed response error")
+			} else {
+				var contractErr *ResponseContractError
+				if !errors.As(err, &contractErr) {
+					t.Fatalf("expected ResponseContractError, got %T: %v", err, err)
+				}
+			}
+		})
+	}
+}
+
 func TestClientCoversSessionBrowseEventAndCacheRoutes(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")

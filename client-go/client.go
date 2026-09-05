@@ -247,6 +247,9 @@ func (c *Client) ListTransfers(ctx context.Context, direction, status string, li
 	var out []map[string]interface{}
 	for _, t := range transfers {
 		if m, ok := t.(map[string]interface{}); ok {
+			if err := requireResponseIdentifier(m, "transfer", "id"); err != nil {
+				return nil, err
+			}
 			out = append(out, m)
 		}
 	}
@@ -260,12 +263,26 @@ func (c *Client) CreateTransfer(ctx context.Context, direction, peerUsername, fi
 		"peer_username": peerUsername,
 		"filename":      filename,
 	}
-	return c.post(ctx, "/api/transfers", body, true)
+	result, err := c.post(ctx, "/api/transfers", body, true)
+	if err != nil {
+		return nil, err
+	}
+	if err := requireResponseIdentifier(result, "transfer", "id"); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 // GetTransfer gets transfer details.
 func (c *Client) GetTransfer(ctx context.Context, transferID string) (map[string]interface{}, error) {
-	return c.get(ctx, fmt.Sprintf("/api/transfers/%s", pathSegment(transferID)), true)
+	result, err := c.get(ctx, fmt.Sprintf("/api/transfers/%s", pathSegment(transferID)), true)
+	if err != nil {
+		return nil, err
+	}
+	if err := requireResponseIdentifier(result, "transfer", "id"); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 // CancelTransfer cancels a transfer.
@@ -293,6 +310,9 @@ func (c *Client) ListMessages(ctx context.Context, limit, offset int) ([]map[str
 	var out []map[string]interface{}
 	for _, m := range messages {
 		if msg, ok := m.(map[string]interface{}); ok {
+			if err := requireResponseIdentifier(msg, "message", "id"); err != nil {
+				return nil, err
+			}
 			out = append(out, msg)
 		}
 	}
@@ -323,6 +343,9 @@ func (c *Client) GetUserMessages(ctx context.Context, username string, limit int
 	var out []map[string]interface{}
 	for _, m := range messages {
 		if msg, ok := m.(map[string]interface{}); ok {
+			if err := requireResponseIdentifier(msg, "message", "id"); err != nil {
+				return nil, err
+			}
 			out = append(out, msg)
 		}
 	}
@@ -335,7 +358,14 @@ func (c *Client) SendMessage(ctx context.Context, recipient, content string) (ma
 		"username": recipient,
 		"body":     content,
 	}
-	return c.post(ctx, "/api/messages", body, true)
+	result, err := c.post(ctx, "/api/messages", body, true)
+	if err != nil {
+		return nil, err
+	}
+	if err := requireResponseIdentifier(result, "message", "id"); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 // AcknowledgeMessage marks message as acknowledged

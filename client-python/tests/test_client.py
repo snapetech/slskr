@@ -224,6 +224,22 @@ async def test_python_client_rejects_malformed_success_response_contracts():
     with pytest.raises(ResponseContractError, match="invalid events response"):
         await client.get_events()
 
+    client._post = AsyncMock(return_value={"body": "hello"})
+    with pytest.raises(ResponseContractError, match="invalid message response"):
+        await client.send_message("alice", "hello")
+
+    client._post = AsyncMock(return_value={"status": "queued"})
+    with pytest.raises(ResponseContractError, match="invalid transfer response"):
+        await client.create_transfer("download", "alice", "track.flac")
+
+    client._get = AsyncMock(return_value={"entries": [{"body": "hello"}]})
+    with pytest.raises(ResponseContractError, match="invalid messages response"):
+        await client.list_messages()
+
+    client._get = AsyncMock(return_value={"entries": [{"status": "queued"}]})
+    with pytest.raises(ResponseContractError, match="invalid transfers response"):
+        await client.list_transfers()
+
 
 @pytest.mark.asyncio
 async def test_python_batch_client_rejects_malformed_success_response():

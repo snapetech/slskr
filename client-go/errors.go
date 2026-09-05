@@ -33,3 +33,12 @@ func validResponseIdentifier(value interface{}) bool {
 		return false
 	}
 }
+
+func requireResponseIdentifier(result map[string]interface{}, resource string, keys ...string) error {
+	for _, key := range keys {
+		if value, ok := result[key]; ok && validResponseIdentifier(value) {
+			return nil
+		}
+	}
+	return &ResponseContractError{Resource: resource}
+}
