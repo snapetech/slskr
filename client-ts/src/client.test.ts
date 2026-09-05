@@ -81,6 +81,35 @@ describe('SlskrClient request lifecycle', () => {
     expect(global.fetch).toHaveBeenCalledTimes(1);
   });
 
+  it('does not turn a timed-out error body into an API error', async () => {
+    global.fetch = jest.fn().mockImplementation(
+      async (_input: RequestInfo | URL, init?: RequestInit) => {
+        let rejectRead: (reason?: unknown) => void = () => {};
+        const pendingRead = new Promise<unknown>((_, reject) => {
+          rejectRead = reject;
+        });
+        init?.signal?.addEventListener('abort', () => {
+          rejectRead(new DOMException('The operation was aborted', 'AbortError'));
+        });
+        return {
+          body: { getReader: () => ({ read: () => pendingRead }) },
+          headers: new Headers(),
+          ok: false,
+          status: 502,
+        } as unknown as Response;
+      },
+    );
+    const client = new SlskrClient({
+      baseUrl: 'http://localhost:8080',
+      token: 'test-token',
+      timeout: 10,
+      retries: 0,
+    });
+
+    await expect(client.health()).rejects.toBeInstanceOf(TimeoutError);
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+
   it('honors explicit zero lifecycle configuration', () => {
     const client = new SlskrClient({
       baseUrl: 'http://localhost:8080',

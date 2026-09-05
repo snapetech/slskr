@@ -11,6 +11,13 @@ const MAX_DATE_MILLISECONDS = 8640000000000000;
 function isRecord(value) {
     return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
+function isAbortError(value) {
+    return ((value instanceof Error && value.name === 'AbortError') ||
+        (typeof value === 'object' &&
+            value !== null &&
+            'name' in value &&
+            value.name === 'AbortError'));
+}
 function responseList(response, resource, ...keys) {
     let entries;
     if (Array.isArray(response)) {
@@ -694,7 +701,14 @@ class SlskrClient {
                 redirect: 'error',
             });
             if (!response.ok) {
-                const parsedError = await this.readJson(response, MAX_HTTP_ERROR_BYTES).catch(() => ({}));
+                let parsedError = {};
+                try {
+                    parsedError = await this.readJson(response, MAX_HTTP_ERROR_BYTES);
+                }
+                catch (error) {
+                    if (isAbortError(error))
+                        throw error;
+                }
                 const errorData = parsedError !== null &&
                     typeof parsedError === 'object' &&
                     !Array.isArray(parsedError)
@@ -725,11 +739,7 @@ class SlskrClient {
             if (error instanceof errors_1.ApiError || error instanceof errors_1.NetworkError) {
                 throw error;
             }
-            if ((error instanceof Error && error.name === 'AbortError') ||
-                (typeof error === 'object' &&
-                    error !== null &&
-                    'name' in error &&
-                    error.name === 'AbortError')) {
+            if (isAbortError(error)) {
                 throw new errors_1.TimeoutError(`Request timeout after ${this.timeout}ms`);
             }
             if (method === 'GET' && attempt < this.retries) {

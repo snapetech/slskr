@@ -45,6 +45,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
+function isAbortError(value: unknown): boolean {
+  return (
+    (value instanceof Error && value.name === 'AbortError') ||
+    (typeof value === 'object' &&
+      value !== null &&
+      'name' in value &&
+      value.name === 'AbortError')
+  );
+}
+
 function responseList<T>(response: unknown, resource: string, ...keys: string[]): T[] {
   let entries: unknown[] | undefined;
   if (Array.isArray(response)) {
@@ -879,7 +889,12 @@ export class SlskrClient {
         redirect: 'error',
       });
       if (!response.ok) {
-        const parsedError = await this.readJson(response, MAX_HTTP_ERROR_BYTES).catch(() => ({}));
+        let parsedError: unknown = {};
+        try {
+          parsedError = await this.readJson(response, MAX_HTTP_ERROR_BYTES);
+        } catch (error) {
+          if (isAbortError(error)) throw error;
+        }
         const errorData =
           parsedError !== null &&
           typeof parsedError === 'object' &&
@@ -920,13 +935,7 @@ export class SlskrClient {
         throw error;
       }
 
-      if (
-        (error instanceof Error && error.name === 'AbortError') ||
-        (typeof error === 'object' &&
-          error !== null &&
-          'name' in error &&
-          error.name === 'AbortError')
-      ) {
+      if (isAbortError(error)) {
         throw new TimeoutError(`Request timeout after ${this.timeout}ms`);
       }
 
