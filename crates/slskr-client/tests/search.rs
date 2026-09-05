@@ -889,6 +889,29 @@ fn responder_rejects_control_characters_before_searching_the_index() {
 }
 
 #[test]
+fn responder_rejects_blank_queries_before_searching_the_index() {
+    let calls = Cell::new(0);
+    let responder = SearchResponder::new("local", CountingIndex(&calls)).unwrap();
+
+    assert!(responder
+        .respond_to_server_search(&ServerMessage::FileSearchIncoming {
+            username: "remote".to_owned(),
+            token: 55,
+            query: "   ".to_owned(),
+        })
+        .is_none());
+    assert!(responder
+        .respond_to_distributed_search(&DistributedSearch {
+            identifier: 49,
+            username: "remote".to_owned(),
+            token: 56,
+            query: "\t  ".to_owned(),
+        })
+        .is_none());
+    assert_eq!(calls.get(), 0);
+}
+
+#[test]
 fn responder_bounds_files_in_a_single_search_response() {
     let entries = (0..(MAX_SEARCH_RESULT_FILES_PER_TOKEN + 1))
         .map(|index| entry(&format!("Music/match-{index}.flac")))

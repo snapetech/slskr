@@ -705,10 +705,11 @@ where
     }
 
     fn response_message(&self, token: u32, query: &str) -> Option<PeerMessage> {
-        if query.len() > MAX_INBOUND_SEARCH_QUERY_BYTES
-            || query.chars().any(char::is_control)
-            || normalize_terms(query).is_none()
-        {
+        if query.len() > MAX_INBOUND_SEARCH_QUERY_BYTES || query.chars().any(char::is_control) {
+            return None;
+        }
+        let terms = normalize_terms(query)?;
+        if terms.is_empty() {
             return None;
         }
         if !self.excluded_filter.allows_query(query) {
