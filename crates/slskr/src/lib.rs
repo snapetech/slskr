@@ -36411,7 +36411,7 @@ async fn legacy_route_http_request_with_headers_inner(
                     == ControllerProfile::Native
             {
                 if normalized_path == "/api/multisource/download" {
-                    return Ok(multisource_versioned_download_response(body));
+                    return Ok(multisource_versioned_download_response(body, state).await);
                 }
                 return Ok(multisource_versioned_swarm_response(
                     normalized_path.as_str(),
@@ -36499,7 +36499,7 @@ async fn legacy_route_http_request_with_headers_inner(
                 && state.config.controller_profile
                     == ControllerProfile::Native
             {
-                return Ok(multisource_versioned_download_response(body));
+                return Ok(multisource_versioned_download_response(body, state).await);
             }
             if route.path.starts_with("/api/v0/")
                 && serde_json::from_str::<serde_json::Value>(body)
@@ -58581,12 +58581,33 @@ async fn feature_controller_mutation_response(
     None
 }
 
-fn multisource_versioned_download_response(body: &str) -> HttpResponse {
+async fn multisource_versioned_download_response(body: &str, state: &AppState) -> HttpResponse {
     let payload = match serde_json::from_str::<serde_json::Value>(body) {
         Ok(payload @ serde_json::Value::Object(_)) => payload,
         Ok(_) => return routing::bad_request_response("invalid JSON body"),
         Err(_) => return routing::bad_request_response("invalid JSON body"),
     };
+    let sources = payload
+        .get("sources")
+        .and_then(serde_json::Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or(&[]);
+    if sources.len() > multisource::MAX_SOURCES {
+        return routing::bad_request_response(&format!(
+            "source count exceeds the {} source limit",
+            multisource::MAX_SOURCES
+        ));
+    }
+    if sources.iter().any(|source| {
+        source.get("url").is_some() || source.get("endpoint").is_some()
+    }) {
+        return multisource_versioned_swarm_response(
+            "/api/multisource/download",
+            body,
+            state,
+        )
+        .await;
+    }
     let filename = payload
         .get("filename")
         .and_then(serde_json::Value::as_str)
@@ -58595,11 +58616,6 @@ fn multisource_versioned_download_response(body: &str) -> HttpResponse {
     if filename.is_empty() {
         return routing::bad_request_response("Filename is required");
     }
-    let sources = payload
-        .get("sources")
-        .and_then(serde_json::Value::as_array)
-        .cloned()
-        .unwrap_or_default();
     let source_count = sources
         .iter()
         .filter_map(|source| {

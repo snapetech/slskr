@@ -1489,6 +1489,41 @@ async fn versioned_swarm_rejects_oversized_source_batches_before_deserialization
 }
 
 #[tokio::test]
+async fn versioned_download_range_sources_use_verified_executor() {
+    let (state, _receiver) =
+        test_state_with_env(MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "slskdn"));
+    let response = super::route_http_request(
+        "POST",
+        "/api/v0/multisource/download",
+        None,
+        &serde_json::json!({
+            "filename": "Track.flac",
+            "fileSize": 42,
+            "expectedHash": "00".repeat(32),
+            "sources": [
+                {"username": "alice", "url": "http://127.0.0.1:9/file"},
+                {"username": "bob", "url": "http://127.0.0.1:9/file"}
+            ]
+        })
+        .to_string(),
+        &state,
+    )
+    .await
+    .expect("versioned download response");
+    assert_eq!(response.status, "200 OK");
+    assert!(response.body.contains("\"success\":false"));
+    assert!(!response
+        .body
+        .contains("Multi-source download is unavailable"));
+    let multisource_store = state.multisource.read().await;
+    let jobs = multisource_store.list();
+    assert_eq!(jobs.len(), 1);
+    assert_eq!(jobs[0].status, "failed");
+
+    let _ = fs::remove_dir_all(&state.config.state_dir);
+}
+
+#[tokio::test]
 async fn versioned_swarm_requires_expected_hash_before_queueing() {
     let (state, _receiver) =
         test_state_with_env(MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "slskdn"));

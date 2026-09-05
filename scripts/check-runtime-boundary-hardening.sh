@@ -125,6 +125,8 @@ for anchor in \
   'merge_routes_reject_oversized_arrays_before_store_deserialization' \
   'expectedHash is required for verified swarm execution' \
   'versioned_swarm_requires_expected_hash_before_queueing' \
+  'multisource_versioned_download_response' \
+  'versioned_download_range_sources_use_verified_executor' \
   'browse_store_bounds_records_and_entries_but_updates_existing_users' \
   'MAX_MESSAGE_RECORDS' \
   'message_store_evicts_oldest_records_at_limit' \

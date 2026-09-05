@@ -1292,7 +1292,7 @@ async fn route_dispatch_group_7(context: &RouteDispatchContext<'_, '_>) -> Route
                 && state.config.controller_profile == ControllerProfile::Native
             {
                 if normalized_path == "/api/multisource/download" {
-                    return Ok(multisource_versioned_download_response(body));
+                    return Ok(multisource_versioned_download_response(body, state).await);
                 }
                 return Ok(
                     multisource_versioned_swarm_response(normalized_path, body, state).await,
@@ -1363,7 +1363,7 @@ async fn route_dispatch_group_7(context: &RouteDispatchContext<'_, '_>) -> Route
             if route.path.starts_with("/api/v0/")
                 && state.config.controller_profile == ControllerProfile::Native
             {
-                return Ok(multisource_versioned_download_response(body));
+                return Ok(multisource_versioned_download_response(body, state).await);
             }
             if route.path.starts_with("/api/v0/")
                 && serde_json::from_str::<serde_json::Value>(body)
