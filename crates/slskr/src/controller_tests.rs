@@ -36949,6 +36949,17 @@ async fn library_bloom_preview_reflects_real_hashdb_contents_not_an_empty_filter
     let differently_salted =
         serde_json::from_str::<serde_json::Value>(&differently_salted.body).unwrap();
     assert_ne!(populated["bitsBase64"], differently_salted["bitsBase64"]);
+
+    let oversized = super::route_http_request(
+        "POST",
+        "/api/v0/musicbrainz/library-bloom/snapshots/preview",
+        None,
+        r#"{"expectedItems":1000000,"falsePositiveRate":1e-300,"saltId":"audit-oversized"}"#,
+        &state,
+    )
+    .await
+    .unwrap();
+    assert_eq!(oversized.status, "400 Bad Request");
 }
 
 #[cfg_attr(test, tokio::test)]

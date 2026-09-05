@@ -10,6 +10,7 @@ source_files=(
   crates/slskr/src/event_store.rs
   crates/slskr/src/utils.rs
   crates/slskr/src/mesh_sync.rs
+  crates/slskr/src/bloom_filter.rs
 )
 http_source="crates/slskr/src/http_server.rs"
 credential_source="crates/slskr/src/credential_store.rs"
@@ -103,6 +104,8 @@ for anchor in \
   'shared_file_list_payload_rejects_excessive_wire_records_without_entries' \
   'shared_file_list_payload_rejects_excessive_sections_without_files' \
   'folder_browse_parsers_reject_excessive_wire_records' \
+  'MAX_BLOOM_FILTER_BYTES' \
+  'filter_rejects_unbounded_precision_requests' \
   'browse_store_bounds_records_and_entries_but_updates_existing_users' \
   'MAX_MESSAGE_RECORDS' \
   'message_store_evicts_oldest_records_at_limit' \

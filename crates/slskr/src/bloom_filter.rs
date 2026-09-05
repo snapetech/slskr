@@ -8,6 +8,7 @@
 //! on the `i32::MIN` hash-combination edge case (~1 in 4 billion). We treat
 //! that value safely via `i32::unsigned_abs` instead of importing the crash.
 
+#[derive(Debug)]
 pub struct SaltedBloomFilter {
     bits: Vec<u8>,
     bit_size: usize,
@@ -17,32 +18,64 @@ pub struct SaltedBloomFilter {
     item_count: u64,
 }
 
+const MAX_BLOOM_FILTER_BYTES: usize = 16 * 1024 * 1024;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BloomFilterError {
+    SizeExceeded { bytes: usize, max_bytes: usize },
+}
+
+impl std::fmt::Display for BloomFilterError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::SizeExceeded { bytes, max_bytes } => write!(
+                formatter,
+                "requested Bloom filter is {bytes} bytes; maximum is {max_bytes} bytes"
+            ),
+        }
+    }
+}
+
 impl SaltedBloomFilter {
     /// Builds an empty filter sized for `expected_items` at `false_positive_rate`,
     /// using the same optimal-size/hash-count formulas as the oracle.
-    pub fn new(expected_items: u64, false_positive_rate: f64) -> Self {
+    pub fn try_new(
+        expected_items: u64,
+        false_positive_rate: f64,
+    ) -> Result<Self, BloomFilterError> {
         let expected_items = expected_items.max(1);
-        let false_positive_rate = if false_positive_rate <= 0.0 || false_positive_rate >= 1.0 {
-            0.01
-        } else {
-            false_positive_rate
-        };
+        let false_positive_rate =
+            if !false_positive_rate.is_finite() || !(0.0..1.0).contains(&false_positive_rate) {
+                0.01
+            } else {
+                false_positive_rate
+            };
         let ln2_squared = std::f64::consts::LN_2 * std::f64::consts::LN_2;
-        let bit_size = ((-(expected_items as f64) * false_positive_rate.ln()) / ln2_squared)
-            .ceil()
-            .max(1.0) as usize;
+        let bit_size = (-(expected_items as f64) * false_positive_rate.ln()) / ln2_squared;
+        let max_bit_size = (MAX_BLOOM_FILTER_BYTES * 8) as f64;
+        if !bit_size.is_finite() || bit_size < 1.0 || bit_size > max_bit_size {
+            return Err(BloomFilterError::SizeExceeded {
+                bytes: if bit_size.is_finite() && bit_size >= 0.0 {
+                    (bit_size / 8.0).ceil() as usize
+                } else {
+                    usize::MAX
+                },
+                max_bytes: MAX_BLOOM_FILTER_BYTES,
+            });
+        }
+        let bit_size = bit_size.ceil() as usize;
         let hash_function_count = ((bit_size as f64 / expected_items as f64)
             * std::f64::consts::LN_2)
             .round()
             .max(1.0) as usize;
-        Self {
+        Ok(Self {
             bits: vec![0_u8; bit_size.div_ceil(8)],
             bit_size,
             hash_function_count,
             expected_items,
             false_positive_rate,
             item_count: 0,
-        }
+        })
     }
 
     pub fn bit_size(&self) -> usize {
@@ -152,7 +185,7 @@ mod tests {
 
     #[test]
     fn filter_reports_real_membership_and_nonzero_fill_after_adds() {
-        let mut filter = SaltedBloomFilter::new(16, 0.01);
+        let mut filter = SaltedBloomFilter::try_new(16, 0.01).unwrap();
         assert_eq!(filter.fill_ratio(), 0.0);
         assert_eq!(filter.item_count(), 0);
 
@@ -173,7 +206,7 @@ mod tests {
 
         // Different salts must not collide onto the same bits for the same
         // identifier -- that's the entire privacy point of salting.
-        let mut other_salt_filter = SaltedBloomFilter::new(16, 0.01);
+        let mut other_salt_filter = SaltedBloomFilter::try_new(16, 0.01).unwrap();
         let salted_differently = build_salted_item("salt-2", "musicbrainz:recording", "MBID-1");
         other_salt_filter.add(&salted_differently);
         assert_ne!(filter.to_base64(), other_salt_filter.to_base64());
@@ -181,7 +214,7 @@ mod tests {
 
     #[test]
     fn base64_round_trips_bit_size() {
-        let mut filter = SaltedBloomFilter::new(16, 0.01);
+        let mut filter = SaltedBloomFilter::try_new(16, 0.01).unwrap();
         filter.add("some-item");
         let expected_bytes = filter.bit_size().div_ceil(8);
         let decoded = base64::Engine::decode(
@@ -190,5 +223,16 @@ mod tests {
         )
         .unwrap();
         assert_eq!(decoded.len(), expected_bytes);
+    }
+
+    #[test]
+    fn filter_rejects_unbounded_precision_requests() {
+        let error = SaltedBloomFilter::try_new(1_000_000, f64::MIN_POSITIVE)
+            .expect_err("extreme precision must not allocate an unbounded filter");
+        assert!(matches!(
+            error,
+            BloomFilterError::SizeExceeded { bytes, max_bytes }
+                if bytes > max_bytes && max_bytes == MAX_BLOOM_FILTER_BYTES
+        ));
     }
 }

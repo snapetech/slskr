@@ -59752,7 +59752,13 @@ async fn musicbrainz_mutation_response(
             .and_then(serde_json::Value::as_f64)
             .filter(|value| (0.0..1.0).contains(value))
             .unwrap_or(0.01);
-        let mut filter = bloom_filter::SaltedBloomFilter::new(expected_items, false_positive_rate);
+        let mut filter = match bloom_filter::SaltedBloomFilter::try_new(
+            expected_items,
+            false_positive_rate,
+        ) {
+            Ok(filter) => filter,
+            Err(error) => return routing::bad_request_response(&error.to_string()),
+        };
         for mbid in &mbids {
             filter.add(&bloom_filter::build_salted_item(
                 &salt_id,
