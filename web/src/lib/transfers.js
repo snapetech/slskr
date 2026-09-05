@@ -1,17 +1,45 @@
 import api from './api';
 
+const requireArrayResponse = (value, resource) => {
+  if (!Array.isArray(value)) {
+    throw new Error(`Transfers API returned an invalid ${resource} response`);
+  }
+
+  return value;
+};
+
+const requireObjectResponse = (value, resource) => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`Transfers API returned an invalid ${resource} response`);
+  }
+
+  return value;
+};
+
+const requireFiniteNumber = (value, resource) => {
+  const number = Number(value);
+  if (!Number.isFinite(number)) {
+    throw new Error(`Transfers API returned an invalid ${resource} value`);
+  }
+
+  return number;
+};
+
+const requireBoolean = (value, resource) => {
+  if (typeof value !== 'boolean') {
+    throw new Error(`Transfers API returned an invalid ${resource} value`);
+  }
+
+  return value;
+};
+
 export const getAll = async ({ direction, includeCompleted = true }) => {
   const params = includeCompleted ? '' : '?includeCompleted=false';
   const response = (
     await api.get(`/transfers/${encodeURIComponent(direction)}s${params}`)
   ).data;
 
-  if (!Array.isArray(response)) {
-    console.warn('got non-array response from transfers API', response);
-    return [];
-  }
-
-  return response;
+  return requireArrayResponse(response, `${direction} transfers`);
 };
 
 /**
@@ -34,12 +62,7 @@ export const getFlat = async ({
   const response = (await api.get(`/transfers${query ? `?${query}` : ''}`))
     .data;
 
-  if (!Array.isArray(response)) {
-    console.warn('got non-array response from flat transfers API', response);
-    return [];
-  }
-
-  return response;
+  return requireArrayResponse(response, 'flat transfers');
 };
 
 /**
@@ -56,17 +79,16 @@ export const getChanges = async ({ since = null } = {}) => {
     params.set('since', since);
   }
   const response = (await api.get(`/transfers/changes?${params}`)).data;
-  const cursor = Number(response?.cursor);
-  const downloadCount = Number(response?.counts?.download);
-  const uploadCount = Number(response?.counts?.upload);
+  const changes = requireObjectResponse(response, 'transfer changes');
+  const counts = requireObjectResponse(changes.counts, 'transfer change counts');
 
   return {
     counts: {
-      download: Number.isFinite(downloadCount) ? downloadCount : 0,
-      upload: Number.isFinite(uploadCount) ? uploadCount : 0,
+      download: requireFiniteNumber(counts.download, 'download transfer count'),
+      upload: requireFiniteNumber(counts.upload, 'upload transfer count'),
     },
-    cursor: Number.isFinite(cursor) ? cursor : null,
-    transfers: Array.isArray(response?.transfers) ? response.transfers : [],
+    cursor: requireFiniteNumber(changes.cursor, 'transfer change cursor'),
+    transfers: requireArrayResponse(changes.transfers, 'transfer changes'),
   };
 };
 
@@ -79,14 +101,16 @@ export const getHistory = async ({
   const params = new URLSearchParams({ direction, limit, offset });
   if (asOf != null) params.set('asOf', asOf);
   const response = (await api.get(`/transfers/history?${params}`)).data;
-  const snapshotAt = Number(response?.asOf);
-  const nextOffset = Number(response?.nextOffset);
+  const history = requireObjectResponse(response, 'transfer history');
 
   return {
-    asOf: Number.isFinite(snapshotAt) ? snapshotAt : null,
-    hasMore: response?.hasMore === true,
-    nextOffset: Number.isFinite(nextOffset) ? nextOffset : offset,
-    transfers: Array.isArray(response?.transfers) ? response.transfers : [],
+    asOf: requireFiniteNumber(history.asOf, 'transfer history timestamp'),
+    hasMore: requireBoolean(history.hasMore, 'transfer history hasMore'),
+    nextOffset: requireFiniteNumber(
+      history.nextOffset,
+      'transfer history offset',
+    ),
+    transfers: requireArrayResponse(history.transfers, 'transfer history'),
   };
 };
 
