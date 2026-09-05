@@ -131,6 +131,9 @@ for anchor in \
   'browse_response_rejects_oversized_wire_batches_before_store_mutation' \
   'search_response_exceeds_wire_limits' \
   'search_response_rejects_oversized_wire_batches_before_store_mutation' \
+  'collection_reorder_exceeds_wire_limits' \
+  'collection_reorder_rejects_oversized_wire_batches_before_store_mutation' \
+  'musicbrainz_rejects_oversized_json_batches_before_state_mutation' \
   'browse_store_bounds_records_and_entries_but_updates_existing_users' \
   'MAX_MESSAGE_RECORDS' \
   'message_store_evicts_oldest_records_at_limit' \

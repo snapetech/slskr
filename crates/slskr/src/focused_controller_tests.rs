@@ -1742,6 +1742,99 @@ async fn search_response_rejects_oversized_wire_batches_before_store_mutation() 
 }
 
 #[tokio::test]
+async fn collection_reorder_rejects_oversized_wire_batches_before_store_mutation() {
+    let (state, _receiver) = test_state_with_env(MapEnv::default());
+    let (collection_id, item_id) = {
+        let mut collections = state.collections.write().await;
+        let collection = collections
+            .create(
+                "tester".to_owned(),
+                "Reorder bounds".to_owned(),
+                String::new(),
+            )
+            .expect("create collection");
+        let item = collections
+            .add_item(
+                &collection.id,
+                "content-1".to_owned(),
+                "Artist".to_owned(),
+                "Track".to_owned(),
+                "Audio".to_owned(),
+            )
+            .expect("add collection item")
+            .expect("collection item");
+        (collection.id, item.id)
+    };
+
+    let oversized_ids = (0..=super::MAX_COLLECTION_ITEMS)
+        .map(|index| serde_json::json!(format!("item-{index}")))
+        .collect::<Vec<_>>();
+    let response = super::route_http_request(
+        "POST",
+        &format!("/api/v0/collections/{collection_id}/items/reorder"),
+        None,
+        &serde_json::json!({"itemIds": oversized_ids}).to_string(),
+        &state,
+    )
+    .await
+    .expect("oversized collection reorder");
+    assert_eq!(response.status, "400 Bad Request");
+    assert!(response
+        .body
+        .contains("collection reorder exceeds item limits"));
+
+    let collections = state.collections.read().await;
+    let record = collections
+        .get(&collection_id)
+        .expect("collection remains present");
+    assert_eq!(record.items.len(), 1);
+    assert_eq!(record.items[0].id, item_id);
+    drop(collections);
+    let _ = fs::remove_dir_all(&state.config.state_dir);
+}
+
+#[tokio::test]
+async fn musicbrainz_rejects_oversized_json_batches_before_state_mutation() {
+    let (state, _receiver) = test_state_with_env(MapEnv::default());
+    let oversized_recording_ids = (0..=super::MAX_LIBRARY_ITEMS)
+        .map(|index| serde_json::json!(format!("recording-{index}")))
+        .collect::<Vec<_>>();
+    let diff_response = super::route_http_request(
+        "POST",
+        "/api/v0/musicbrainz/library-bloom/diffs",
+        None,
+        &serde_json::json!({"recordingIds": oversized_recording_ids}).to_string(),
+        &state,
+    )
+    .await
+    .expect("oversized MusicBrainz diff");
+    assert_eq!(diff_response.status, "400 Bad Request");
+    assert!(diff_response
+        .body
+        .contains("recordingIds must contain at most"));
+
+    let oversized_suggestions = (0..=super::MAX_WISHLIST_ITEMS)
+        .map(|index| serde_json::json!({"artist": "Artist", "title": format!("Release {index}")}))
+        .collect::<Vec<_>>();
+    let wishlist_response = super::route_http_request(
+        "POST",
+        "/api/v0/musicbrainz/library-bloom/wishlist",
+        None,
+        &serde_json::json!({"suggestions": oversized_suggestions}).to_string(),
+        &state,
+    )
+    .await
+    .expect("oversized MusicBrainz wishlist");
+    assert_eq!(wishlist_response.status, "400 Bad Request");
+    assert!(wishlist_response
+        .body
+        .contains("suggestions must contain at most"));
+    assert!(state.wishlist.read().await.records.is_empty());
+
+    let _ = fs::remove_dir_all(&state.config.state_dir);
+}
+
+#[tokio::test]
 async fn library_browser_projects_share_tree_and_sha256_stream_ids() {
     let (state, _receiver) =
         test_state_with_env(MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "native"));

@@ -9303,6 +9303,9 @@ impl CollectionStore {
     }
 
     fn reorder_items(&mut self, collection_id: &str, body: &str) -> Option<CollectionRecord> {
+        if collection_reorder_exceeds_wire_limits(body) {
+            return None;
+        }
         let now = unix_timestamp();
         let record = self
             .records
@@ -19556,6 +19559,16 @@ fn search_response_exceeds_wire_limits(payload: &serde_json::Value) -> bool {
         .map_or(0, Vec::len);
     file_count > MAX_SEARCH_RESULTS_PER_SEARCH
         || locked_file_count > MAX_SEARCH_RESULTS_PER_SEARCH.saturating_sub(file_count)
+}
+
+fn collection_reorder_exceeds_wire_limits(body: &str) -> bool {
+    let Ok(payload) = serde_json::from_str::<serde_json::Value>(body) else {
+        return false;
+    };
+    ["item_ids", "itemIds", "items"]
+        .into_iter()
+        .find_map(|field| payload.get(field))
+        .is_some_and(|value| json_array_exceeds_limit(value, MAX_COLLECTION_ITEMS))
 }
 
 use routing::HttpResponse;
@@ -59826,9 +59839,13 @@ async fn musicbrainz_mutation_response(
         let remote = payload
             .get("recordingIds")
             .or_else(|| payload.get("items"))
-            .and_then(serde_json::Value::as_array)
-            .cloned()
-            .unwrap_or_default();
+            .and_then(serde_json::Value::as_array);
+        if remote.is_some_and(|items| items.len() > MAX_LIBRARY_ITEMS) {
+            return routing::bad_request_response(&format!(
+                "recordingIds must contain at most {MAX_LIBRARY_ITEMS} items"
+            ));
+        }
+        let remote = remote.cloned().unwrap_or_default();
         let local = state
             .content_discovery
             .read()
@@ -59852,15 +59869,22 @@ async fn musicbrainz_mutation_response(
         );
     }
     if path == "/api/musicbrainz/library-bloom/wishlist" {
-        let suggestions = serde_json::from_str::<serde_json::Value>(body)
-            .ok()
+        let payload = serde_json::from_str::<serde_json::Value>(body).ok();
+        let suggestions = payload
+            .as_ref()
             .and_then(|value| {
                 value
                     .get("suggestions")
                     .or_else(|| value.get("items"))
                     .and_then(serde_json::Value::as_array)
-                    .cloned()
-            })
+            });
+        if suggestions.is_some_and(|items| items.len() > MAX_WISHLIST_ITEMS) {
+            return routing::bad_request_response(&format!(
+                "suggestions must contain at most {MAX_WISHLIST_ITEMS} items"
+            ));
+        }
+        let suggestions = suggestions
+            .cloned()
             .unwrap_or_default();
         let mut created = Vec::new();
         for suggestion in suggestions.into_iter().take(MAX_WISHLIST_ITEMS) {
@@ -60072,9 +60096,13 @@ async fn musicbrainz_mutation_response(
         let titles = payload
             .get("missingReleases")
             .or_else(|| payload.get("releases"))
-            .and_then(serde_json::Value::as_array)
-            .cloned()
-            .unwrap_or_default();
+            .and_then(serde_json::Value::as_array);
+        if titles.is_some_and(|items| items.len() > MAX_WISHLIST_ITEMS) {
+            return routing::bad_request_response(&format!(
+                "missingReleases must contain at most {MAX_WISHLIST_ITEMS} items"
+            ));
+        }
+        let titles = titles.cloned().unwrap_or_default();
         if titles.is_empty() {
             return routing::bad_request_response("missingReleases are required");
         }
@@ -62549,6 +62577,9 @@ async fn collection_item_controller_response(
     if (method == "PUT" || (method == "POST" && is_versioned_v0))
         && matches!(segments.as_slice(), [_, section, action] if section == "items" && action == "reorder")
     {
+        if collection_reorder_exceeds_wire_limits(body) {
+            return routing::bad_request_response("collection reorder exceeds item limits");
+        }
         let collection_id = &segments[0];
         let compatibility_contract = is_versioned_v0;
         if compatibility_contract {

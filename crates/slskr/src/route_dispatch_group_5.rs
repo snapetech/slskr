@@ -1555,6 +1555,11 @@ async fn route_dispatch_group_5(context: &RouteDispatchContext<'_, '_>) -> Route
         ("POST" | "PUT", path)
             if path.starts_with("/api/collections/") && path.contains("/items/reorder") =>
         {
+            if collection_reorder_exceeds_wire_limits(body) {
+                return Ok(routing::bad_request_response(
+                    "collection reorder exceeds item limits",
+                ));
+            }
             let collection_id = path
                 .strip_prefix("/api/collections/")
                 .and_then(|rest| rest.strip_suffix("/items/reorder"))
