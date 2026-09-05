@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { readResponseText } from '../lib/api';
+import { isAbortError, readResponseText } from '../lib/api';
 
 interface UseFetchOptions {
   headers?: HeadersInit;
@@ -91,7 +91,7 @@ export function useFetch<T>(
       }
     } catch (err) {
       // Ignore abort errors (caused by cleanup or new request)
-      if (err instanceof Error && err.name === 'AbortError') {
+      if (isAbortError(err)) {
         return;
       }
 

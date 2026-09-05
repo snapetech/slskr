@@ -96,6 +96,21 @@ describe('useFetch', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it('ignores DOMException aborts without reporting a fetch error', async () => {
+    const onError = vi.fn();
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockRejectedValue(
+      new DOMException('The operation was aborted', 'AbortError'),
+    );
+
+    const { result } = renderHook(() => useFetch('/api/health', { onError }));
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(result.current.error).toBeNull();
+    expect(onError).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
   it('clears stale state and stops loading when the URL is disabled', async () => {
     let resolveRequest: ((response: Response) => void) | undefined;
     const pendingResponse = new Promise<Response>((resolve) => {
