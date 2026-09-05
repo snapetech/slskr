@@ -1,9 +1,17 @@
 import api from './api';
 
+const requireArrayResponse = (value) => {
+  if (!Array.isArray(value)) {
+    throw new Error('Download requests API returned an invalid request list response');
+  }
+
+  return value;
+};
+
 export const list = async ({ state } = {}) => {
   const params = state ? `?state=${encodeURIComponent(state)}` : '';
   const { data } = await api.get(`/downloads/requests${params}`);
-  return Array.isArray(data) ? data : [];
+  return requireArrayResponse(data);
 };
 
 export const get = async (id) => {

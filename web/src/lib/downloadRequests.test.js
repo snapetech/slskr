@@ -30,4 +30,12 @@ describe('downloadRequests', () => {
     });
     expect(api.post).toHaveBeenCalledWith('/downloads/requests/request%2F1/cancel');
   });
+
+  it('rejects malformed request lists', async () => {
+    api.get.mockResolvedValue({ data: {} });
+
+    await expect(downloadRequests.list()).rejects.toThrow(
+      'Download requests API returned an invalid request list response',
+    );
+  });
 });

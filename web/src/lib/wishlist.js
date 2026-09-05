@@ -1,8 +1,16 @@
 import api from './api';
 
+const requireArrayResponse = (value, resource) => {
+  if (!Array.isArray(value)) {
+    throw new Error(`Wishlist API returned an invalid ${resource} response`);
+  }
+
+  return value;
+};
+
 export const getAll = async () => {
   const data = (await api.get('/wishlist')).data;
-  return Array.isArray(data) ? data : [];
+  return requireArrayResponse(data, 'wishlist');
 };
 
 export const get = async (id) => {
@@ -88,7 +96,7 @@ export const getSearches = async (id, limit = 50) => {
       `/wishlist/${encodeURIComponent(id)}/searches?limit=${encodeURIComponent(limit)}`,
     )
   ).data;
-  return Array.isArray(data) ? data : [];
+  return requireArrayResponse(data, 'wishlist searches');
 };
 
 export const markViewed = async (id) => {
@@ -103,7 +111,7 @@ export const getIgnoredResults = async (id) => {
   const data = (
     await api.get(`/wishlist/${encodeURIComponent(id)}/ignored-results`)
   ).data;
-  return Array.isArray(data) ? data : [];
+  return requireArrayResponse(data, 'ignored results');
 };
 
 export const ignoreResult = async (id, { username, directory }) => {

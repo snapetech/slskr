@@ -36,4 +36,12 @@ describe('songId api helpers', () => {
 
     expect(api.get).toHaveBeenCalledWith('/songid/runs?limit=25');
   });
+
+  it('rejects malformed run lists', async () => {
+    api.get.mockResolvedValue({ data: {} });
+
+    await expect(getRuns()).rejects.toThrow(
+      'SongID API returned an invalid run list response',
+    );
+  });
 });
