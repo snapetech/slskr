@@ -84,6 +84,7 @@ where
 pub struct UserWatchState {
     watched: HashMap<String, WatchedUser>,
     statuses: HashMap<String, UserStatus>,
+    identities: HashSet<String>,
     max_records: usize,
 }
 
@@ -104,21 +105,13 @@ impl UserWatchState {
         Self {
             watched: HashMap::new(),
             statuses: HashMap::new(),
+            identities: HashSet::new(),
             max_records: max_records.max(1),
         }
     }
 
-    fn can_insert(&self, username: &str) -> bool {
-        let key = username_key(username);
-        self.watched.contains_key(&key)
-            || self.statuses.contains_key(&key)
-            || self
-                .watched
-                .keys()
-                .chain(self.statuses.keys())
-                .collect::<HashSet<_>>()
-                .len()
-                < self.max_records
+    fn can_insert(&self, key: &str) -> bool {
+        self.identities.contains(key) || self.identities.len() < self.max_records
     }
 
     pub fn watch_message(username: impl Into<String>) -> Result<ServerMessage, ClientError> {
@@ -147,10 +140,12 @@ impl UserWatchState {
                 }
                 let mut user = user.clone();
                 user.username = user.username.trim().to_owned();
-                if user.username.is_empty() || !self.can_insert(&user.username) {
+                let key = username_key(&user.username);
+                if user.username.is_empty() || !self.can_insert(&key) {
                     return false;
                 }
-                self.watched.insert(username_key(&user.username), user);
+                self.identities.insert(key.clone());
+                self.watched.insert(key, user);
                 true
             }
             ServerMessage::GetUserStatusResponse(status) => {
@@ -161,10 +156,12 @@ impl UserWatchState {
                 }
                 let mut status = status.clone();
                 status.username = status.username.trim().to_owned();
-                if status.username.is_empty() || !self.can_insert(&status.username) {
+                let key = username_key(&status.username);
+                if status.username.is_empty() || !self.can_insert(&key) {
                     return false;
                 }
-                self.statuses.insert(username_key(&status.username), status);
+                self.identities.insert(key.clone());
+                self.statuses.insert(key, status);
                 true
             }
             ServerMessage::UnwatchUser { username } => {
@@ -173,6 +170,7 @@ impl UserWatchState {
                 };
                 self.watched.remove(&key);
                 self.statuses.remove(&key);
+                self.identities.remove(&key);
                 true
             }
             _ => false,
