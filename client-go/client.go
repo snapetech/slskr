@@ -204,12 +204,14 @@ func (c *Client) createSearch(ctx context.Context, query string, options *Search
 	if err != nil {
 		return nil, err
 	}
-	if _, hasID := result["id"]; !hasID {
-		if searchID, hasSearchID := result["searchId"]; hasSearchID {
-			result["id"] = searchID
-		}
+	if searchID, hasID := result["id"]; hasID && validResponseIdentifier(searchID) {
+		return result, nil
 	}
-	return result, nil
+	if searchID, hasSearchID := result["searchId"]; hasSearchID && validResponseIdentifier(searchID) {
+		result["id"] = searchID
+		return result, nil
+	}
+	return nil, &ResponseContractError{Resource: "search"}
 }
 
 // GetSearchDetails gets a search and its result page.

@@ -356,6 +356,32 @@ func TestClientUsesDaemonWireContracts(t *testing.T) {
 	}
 }
 
+func TestClientRejectsMalformedCreateSearchResponses(t *testing.T) {
+	for _, responseBody := range []string{
+		`{"query":"ambient"}`,
+		`{"id":""}`,
+		`{"searchId":"   "}`,
+		`{"id":null,"searchId":false}`,
+	} {
+		t.Run(responseBody, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				if request.Method != http.MethodPost || request.URL.Path != "/api/searches" {
+					t.Errorf("unexpected request %s %s", request.Method, request.URL.RequestURI())
+				}
+				writer.Header().Set("Content-Type", "application/json")
+				_, _ = writer.Write([]byte(responseBody))
+			}))
+			defer server.Close()
+
+			_, err := NewClient(server.URL, "token").CreateSearch(context.Background(), "ambient")
+			var contractErr *ResponseContractError
+			if !errors.As(err, &contractErr) {
+				t.Fatalf("expected ResponseContractError, got %T: %v", err, err)
+			}
+		})
+	}
+}
+
 func TestClientCoversSessionBrowseEventAndCacheRoutes(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")
