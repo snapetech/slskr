@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { readResponseText } from '../lib/api';
 
 interface UseFetchOptions {
   headers?: HeadersInit;
@@ -68,7 +69,7 @@ export function useFetch<T>(
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
 
-      const body = await response.text();
+      const body = await readResponseText(response);
       const result = body.trim() ? JSON.parse(body) as T : undefined as T;
 
       // Only update state if component is still mounted

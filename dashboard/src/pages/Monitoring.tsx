@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { isAbortError } from '../lib/api';
+import { isAbortError, readResponseText } from '../lib/api';
 import { parseMonitoringMetrics, type MonitoringMetrics } from '../lib/prometheus';
 
 interface MonitoringPageProps {
@@ -34,7 +34,7 @@ export default function Monitoring({ apiUrl, apiKey }: MonitoringPageProps) {
           redirect: 'error',
         });
         if (!res.ok) throw new Error('Failed to fetch metrics');
-        const nextMetrics = parseMonitoringMetrics(await res.text());
+        const nextMetrics = parseMonitoringMetrics(await readResponseText(res));
         if (active && controller === requestController) {
           setMetrics(nextMetrics);
         }

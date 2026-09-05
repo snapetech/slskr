@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { isAbortError, requestJson } from './api';
+import { isAbortError, readResponseText, requestJson } from './api';
 
 describe('requestJson', () => {
   it('rejects redirects even when a caller requests follow behavior', async () => {
@@ -22,6 +22,34 @@ describe('requestJson', () => {
     );
     const [, init] = fetchMock.mock.calls[0];
     expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer secret');
+  });
+});
+
+describe('readResponseText', () => {
+  it('rejects a response that declares more bytes than the limit', async () => {
+    await expect(
+      readResponseText(
+        new Response('ok', { headers: { 'Content-Length': '4' } }),
+        3,
+      ),
+    ).rejects.toThrow('exceeds 3 bytes');
+  });
+
+  it('cancels a streaming response when it crosses the limit', async () => {
+    const cancel = vi.fn().mockResolvedValue(undefined);
+    const reader = {
+      read: vi
+        .fn()
+        .mockResolvedValueOnce({ done: false, value: new Uint8Array([1, 2, 3, 4]) }),
+      cancel,
+    };
+    const response = {
+      body: { getReader: () => reader },
+      headers: new Headers(),
+    } as unknown as Response;
+
+    await expect(readResponseText(response, 3)).rejects.toThrow('exceeds 3 bytes');
+    expect(cancel).toHaveBeenCalledOnce();
   });
 });
 

@@ -5,6 +5,53 @@ export function requestHeaders(apiKey: string | null, body?: BodyInit | null): H
   return headers;
 }
 
+export const MAX_HTTP_RESPONSE_BYTES = 8 * 1024 * 1024;
+export const MAX_HTTP_ERROR_BYTES = 64 * 1024;
+
+export async function readResponseText(
+  response: Response,
+  maximum: number = MAX_HTTP_RESPONSE_BYTES,
+): Promise<string> {
+  const declaredLength = response.headers.get('content-length');
+  if (declaredLength !== null) {
+    const length = Number(declaredLength);
+    if (Number.isFinite(length) && length > maximum) {
+      await response.body?.cancel();
+      throw new Error(`HTTP response body exceeds ${maximum} bytes`);
+    }
+  }
+
+  const reader = response.body?.getReader();
+  if (!reader) {
+    const text = await response.text();
+    if (new TextEncoder().encode(text).byteLength > maximum) {
+      throw new Error(`HTTP response body exceeds ${maximum} bytes`);
+    }
+    return text;
+  }
+
+  const chunks: Uint8Array[] = [];
+  let length = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    length += value.byteLength;
+    if (length > maximum) {
+      await reader.cancel();
+      throw new Error(`HTTP response body exceeds ${maximum} bytes`);
+    }
+    chunks.push(value);
+  }
+
+  const body = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(body);
+}
+
 function responseMessage(status: number, statusText: string, body: string): string {
   if (body) {
     try {
@@ -34,7 +81,10 @@ export async function requestJson<T>(
     redirect: 'error',
     headers,
   });
-  const body = await response.text();
+  const body = await readResponseText(
+    response,
+    response.ok ? MAX_HTTP_RESPONSE_BYTES : MAX_HTTP_ERROR_BYTES,
+  );
 
   if (!response.ok) {
     throw new Error(responseMessage(response.status, response.statusText, body));
