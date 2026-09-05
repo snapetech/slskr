@@ -141,6 +141,10 @@ new SlskrClient({
 - `disconnectSession(id)` - Close session
 - `getSessionPrivileges(id)` - Get session privileges
 
+**Users**
+- `listUsers(params)` - List watched users
+- `getUser(username)` - Get user information
+
 **Search**
 - `listSearches(params)` - List searches
 - `createSearch(request)` - Create new search

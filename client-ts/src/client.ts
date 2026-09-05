@@ -11,6 +11,8 @@ import {
   Statistics,
   Session,
   SessionPrivileges,
+  User,
+  UserInfo,
   Search,
   SearchDetails,
   SearchCreateRequest,
@@ -267,6 +269,44 @@ function normalizeRoom(response: unknown): Room {
   } as Room;
 }
 
+function nullableNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function normalizeUser(response: unknown): User {
+  const object = responseObject(response);
+  return {
+    ...object,
+    username: String(object.username ?? ''),
+    watched: object.watched === true,
+    status: typeof object.status === 'string' ? object.status : null,
+    average_speed: nullableNumber(object.average_speed ?? object.averageSpeed),
+    upload_count: nullableNumber(object.upload_count ?? object.uploadCount),
+    file_count: nullableNumber(object.file_count ?? object.fileCount),
+    directory_count: nullableNumber(object.directory_count ?? object.directoryCount),
+    updated_at: numberValue(object.updated_at ?? object.updatedAt),
+  };
+}
+
+function normalizeUserInfo(response: unknown, fallbackUsername: string): UserInfo {
+  const object = responseObject(response);
+  const picture = object.picture;
+  return {
+    ...object,
+    username: String(object.username ?? fallbackUsername),
+    description: typeof object.description === 'string' ? object.description : '',
+    hasFreeUploadSlot: object.hasFreeUploadSlot === true || object.has_free_upload_slot === true,
+    hasPicture: object.hasPicture === true || object.has_picture === true,
+    picture: typeof picture === 'string' || picture === null ? picture : null,
+    queueLength: numberValue(object.queueLength ?? object.queue_length),
+    uploadSlots: numberValue(object.uploadSlots ?? object.upload_slots),
+    uploadSpeed: numberValue(object.uploadSpeed ?? object.upload_speed),
+    uploadCount: numberValue(object.uploadCount ?? object.upload_count),
+    fileCount: numberValue(object.fileCount ?? object.file_count),
+    directoryCount: numberValue(object.directoryCount ?? object.directory_count),
+  };
+}
+
 function browseRequestFromResponse(response: unknown, fallbackUsername = ''): BrowseRequest {
   const object = responseObject(response);
   const username = String(object.username ?? object.from ?? fallbackUsername);
@@ -447,6 +487,22 @@ export class SlskrClient {
       user_id: String(snapshot.username ?? ''),
       privileges: seconds > 0 ? ['privileged'] : [],
     };
+  }
+
+  // =========================================================================
+  // Users
+  // =========================================================================
+
+  async listUsers(params?: PaginationParams): Promise<User[]> {
+    const response = await this.getAuth<unknown>('/api/users', params);
+    return responseList<unknown>(response, 'users', 'entries').map(normalizeUser);
+  }
+
+  async getUser(username: string): Promise<UserInfo> {
+    return normalizeUserInfo(
+      await this.getAuth<unknown>(`/api/users/${this.pathSegment(username)}/info`),
+      username,
+    );
   }
 
   // =========================================================================

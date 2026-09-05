@@ -1,7 +1,7 @@
 /**
  * Main HTTP API client for slskr
  */
-import { ClientConfig, HealthStatus, VersionInfo, Capabilities, Configuration, Statistics, Session, SessionPrivileges, Search, SearchDetails, SearchCreateRequest, Message, MessageSendRequest, Transfer, TransferCreateRequest, Room, BrowseResult, BrowseRequest, Event, PaginationParams, CacheStats } from './types';
+import { ClientConfig, HealthStatus, VersionInfo, Capabilities, Configuration, Statistics, Session, SessionPrivileges, User, UserInfo, Search, SearchDetails, SearchCreateRequest, Message, MessageSendRequest, Transfer, TransferCreateRequest, Room, BrowseResult, BrowseRequest, Event, PaginationParams, CacheStats } from './types';
 export declare class SlskrClient {
     private baseUrl;
     private token;
@@ -24,6 +24,8 @@ export declare class SlskrClient {
     }>;
     disconnectSession(_id: string): Promise<void>;
     getSessionPrivileges(_id: string): Promise<SessionPrivileges>;
+    listUsers(params?: PaginationParams): Promise<User[]>;
+    getUser(username: string): Promise<UserInfo>;
     listSearches(params?: PaginationParams): Promise<Search[]>;
     createSearch(request: SearchCreateRequest): Promise<Search>;
     getSearchDetails(id: string, params?: PaginationParams): Promise<SearchDetails>;

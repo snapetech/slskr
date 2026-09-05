@@ -52,6 +52,29 @@ export interface SessionPrivileges {
     user_id: string;
     privileges: string[];
 }
+export interface User {
+    username: string;
+    watched: boolean;
+    status: string | null;
+    average_speed: number | null;
+    upload_count: number | null;
+    file_count: number | null;
+    directory_count: number | null;
+    updated_at: number;
+}
+export interface UserInfo {
+    username: string;
+    description: string;
+    hasFreeUploadSlot: boolean;
+    hasPicture: boolean;
+    picture: string | null;
+    queueLength: number;
+    uploadSlots: number;
+    uploadSpeed: number;
+    uploadCount: number;
+    fileCount: number;
+    directoryCount: number;
+}
 export interface SearchResult {
     username: string;
     filename: string;

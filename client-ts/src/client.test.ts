@@ -241,6 +241,15 @@ describe('SlskrClient request lifecycle', () => {
       if (parsed.pathname === '/api/searches') {
         return new Response('[{"id":"search-1"}]', { status: 200 });
       }
+      if (parsed.pathname === '/api/users') {
+        return new Response(
+          '{"entries":[{"username":"alice","watched":true,"status":"online","updated_at":1700000000}]}',
+          { status: 200 },
+        );
+      }
+      if (parsed.pathname === '/api/users/alice%2Fbob/info') {
+        return new Response('{"description":"listener","uploadSpeed":42}', { status: 200 });
+      }
       if (parsed.pathname === '/api/messages' && init?.method === 'GET') {
         return new Response('{"entries":[{"id":"message-1"}]}', { status: 200 });
       }
@@ -285,6 +294,17 @@ describe('SlskrClient request lifecycle', () => {
     });
 
     await expect(client.listSearches()).resolves.toMatchObject([{ id: 'search-1', status: 'active' }]);
+    await expect(client.listUsers({ limit: 10, offset: 2 })).resolves.toMatchObject([{
+      username: 'alice',
+      watched: true,
+      status: 'online',
+      updated_at: 1700000000,
+    }]);
+    await expect(client.getUser('alice/bob')).resolves.toMatchObject({
+      username: 'alice/bob',
+      description: 'listener',
+      uploadSpeed: 42,
+    });
     await expect(client.listMessages()).resolves.toMatchObject([{ id: 'message-1' }]);
     await expect(client.getUserMessages('alice')).resolves.toMatchObject([{ id: 'message-2' }]);
     await expect(client.sendMessage({ recipient: 'alice', content: 'hello' })).resolves.toMatchObject({
@@ -329,6 +349,10 @@ describe('SlskrClient request lifecycle', () => {
     expect(filteredEventsRequest?.url).toContain('q=ambient+%26+live');
     expect(filteredEventsRequest?.url).toContain('limit=10');
     expect(filteredEventsRequest?.url).toContain('offset=20');
+    const usersRequest = requests.find((request) => request.url.includes('/api/users?'));
+    expect(usersRequest?.url).toContain('limit=10');
+    expect(usersRequest?.url).toContain('offset=2');
+    expect(requests.some((request) => request.url.endsWith('/api/users/alice%2Fbob/info'))).toBe(true);
     expect(requests.some((request) => request.url.endsWith('/api/rooms/lounge%20room/join'))).toBe(true);
   });
 
