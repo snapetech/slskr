@@ -4,7 +4,22 @@
 
 import api from './api';
 
-const asArray = (value) => (Array.isArray(value) ? value : []);
+const requireArrayResponse = (value, resource) => {
+  if (!Array.isArray(value)) {
+    throw new Error(`Swarm analytics API returned an invalid ${resource} response`);
+  }
+
+  return value;
+};
+
+const requireObjectResponse = (value, resource) => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`Swarm analytics API returned an invalid ${resource} response`);
+  }
+
+  return value;
+};
+
 const queryString = (parameters) =>
   new URLSearchParams(
     Object.fromEntries(
@@ -25,7 +40,7 @@ export const getDashboard = async (
   const response = await api.get('/swarm/analytics/dashboard', {
     params: { rankingLimit, timeWindowHours },
   });
-  return response.data;
+  return requireObjectResponse(response.data, 'dashboard');
 };
 
 /**
@@ -38,7 +53,7 @@ export const getPerformanceMetrics = async (timeWindowHours = 24) => {
     const response = await api.get(
       `/swarm/analytics/performance?${queryString({ timeWindowHours })}`,
     );
-    return response.data;
+    return requireObjectResponse(response.data, 'performance metrics');
   } catch (error) {
     console.error('Failed to fetch performance metrics:', error);
     throw error;
@@ -55,7 +70,7 @@ export const getPeerRankings = async (limit = 20) => {
     const response = await api.get(
       `/swarm/analytics/peers/rankings?${queryString({ limit })}`,
     );
-    return asArray(response.data);
+    return requireArrayResponse(response.data, 'peer rankings');
   } catch (error) {
     console.error('Failed to fetch peer rankings:', error);
     throw error;
@@ -72,7 +87,7 @@ export const getEfficiencyMetrics = async (timeWindowHours = 24) => {
     const response = await api.get(
       `/swarm/analytics/efficiency?${queryString({ timeWindowHours })}`,
     );
-    return response.data;
+    return requireObjectResponse(response.data, 'efficiency metrics');
   } catch (error) {
     console.error('Failed to fetch efficiency metrics:', error);
     throw error;
@@ -90,7 +105,7 @@ export const getTrends = async (timeWindowHours = 24, dataPoints = 24) => {
     const response = await api.get(
       `/swarm/analytics/trends?${queryString({ timeWindowHours, dataPoints })}`,
     );
-    return response.data;
+    return requireObjectResponse(response.data, 'trend data');
   } catch (error) {
     console.error('Failed to fetch trends:', error);
     throw error;
@@ -104,7 +119,7 @@ export const getTrends = async (timeWindowHours = 24, dataPoints = 24) => {
 export const getRecommendations = async () => {
   try {
     const response = await api.get('/swarm/analytics/recommendations');
-    return asArray(response.data);
+    return requireArrayResponse(response.data, 'recommendations');
   } catch (error) {
     console.error('Failed to fetch recommendations:', error);
     throw error;

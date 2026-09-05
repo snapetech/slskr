@@ -171,4 +171,21 @@ describe('swarmAnalytics', () => {
       expect(result).toEqual([]);
     });
   });
+
+  describe('response contracts', () => {
+    it.each([
+      ['dashboard', () => swarmAnalytics.getDashboard(), []],
+      ['performance metrics', () => swarmAnalytics.getPerformanceMetrics(), []],
+      ['peer rankings', () => swarmAnalytics.getPeerRankings(), {}],
+      ['efficiency metrics', () => swarmAnalytics.getEfficiencyMetrics(), []],
+      ['trend data', () => swarmAnalytics.getTrends(), []],
+      ['recommendations', () => swarmAnalytics.getRecommendations(), {}],
+    ])('rejects malformed %s payloads', async (resource, request, data) => {
+      api.get.mockResolvedValue({ data });
+
+      await expect(request()).rejects.toThrow(
+        `Swarm analytics API returned an invalid ${resource} response`,
+      );
+    });
+  });
 });
