@@ -696,30 +696,10 @@ async fn route_dispatch_group_7(context: &RouteDispatchContext<'_, '_>) -> Route
                 .or_else(|| extract_json_string_field(body, "text"))
                 .or_else(|| extract_json_string_field(body, "content"))
                 .unwrap_or_else(|| body.trim().trim_matches('"').to_owned());
-            let parsed_items = raw
-                .lines()
-                .map(str::trim)
-                .filter(|line| !line.is_empty())
-                .enumerate()
-                .filter_map(|(index, line)| {
-                    let parts = line.split(',').map(str::trim).collect::<Vec<_>>();
-                    if index == 0
-                        && parts
-                            .first()
-                            .is_some_and(|value| value.eq_ignore_ascii_case("artist"))
-                    {
-                        return None;
-                    }
-                    let (artist, title) = if parts.len() >= 2 {
-                        (parts[0].to_owned(), parts[1].to_owned())
-                    } else if let Some((artist, title)) = line.split_once(" - ") {
-                        (artist.trim().to_owned(), title.trim().to_owned())
-                    } else {
-                        (String::new(), line.to_owned())
-                    };
-                    Some((artist, title, "Audio".to_owned()))
-                })
-                .collect::<Vec<_>>();
+            let parsed_items = match parse_simple_wishlist_import_rows(&raw) {
+                Ok(parsed_items) => parsed_items,
+                Err(error) => return Ok(routing::bad_request_response(error)),
+            };
             let mut wishlist = state.wishlist.write().await;
             let previous = wishlist.clone();
             if !wishlist.can_add_items(parsed_items.len()) {

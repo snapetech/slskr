@@ -555,6 +555,8 @@ const MAX_WISHLIST_IGNORED_RESULTS_PER_ITEM: usize = 10_000;
 const MAX_WISHLIST_FILTER_BYTES: usize = 4 * 1024;
 const MAX_WISHLIST_RESULTS: usize = 10_000;
 const MAX_WISHLIST_DOWNLOADS: u64 = 1_000_000;
+const MAX_CSV_IMPORT_ROWS: usize = 10_000;
+const MAX_SOURCE_PREVIEW_ROWS: usize = MAX_CSV_IMPORT_ROWS;
 const MAX_LIST_NAME_BYTES: usize = 4 * 1024;
 const MAX_LIST_DESCRIPTION_BYTES: usize = 16 * 1024;
 const MAX_LIST_CONTENT_ID_BYTES: usize = 4 * 1024;
@@ -34210,12 +34212,15 @@ async fn legacy_route_http_request_with_headers_inner(
                       .get("includeAlbum")
                       .and_then(serde_json::Value::as_bool)
                       .unwrap_or(false);
-                  let result = preview_local_source_feed(
+                  let result = match preview_local_source_feed(
                       &raw,
                       &requested_kind,
                       include_album,
                       usize::try_from(safe_limit).unwrap_or(usize::MAX),
-                  );
+                  ) {
+                      Ok(result) => result,
+                      Err(error) => return Ok(routing::bad_request_response(error)),
+                  };
                   let mut history = state.source_feed_import_history.write().await;
                   let previous = history.clone();
                   history.record(&request, &raw, &result);
@@ -34235,25 +34240,10 @@ async fn legacy_route_http_request_with_headers_inner(
                   .or_else(|| extract_json_string_field(body, "content"))
                   .or_else(|| extract_json_string_field(body, "playlist"))
                   .unwrap_or_else(|| body.trim().trim_matches('"').to_owned());
-              let items = raw
-                  .lines()
-                  .map(str::trim)
-                  .filter(|line| !line.is_empty())
-                  .enumerate()
-                  .map(|(index, line)| {
-                      let (artist, title) = line
-                          .split_once(" - ")
-                          .map(|(artist, title)| (artist.trim(), title.trim()))
-                          .unwrap_or(("", line));
-                      serde_json::json!({
-                          "id": format!("preview-{}", index + 1),
-                          "artist": artist,
-                          "title": title,
-                          "searchText": line,
-                          "valid": !line.is_empty(),
-                      })
-                  })
-                  .collect::<Vec<_>>();
+              let items = match parse_simple_source_preview_items(&raw) {
+                  Ok(items) => items,
+                  Err(error) => return Ok(routing::bad_request_response(error)),
+              };
               let count = items.len();
               Ok(routing::ok_response(serde_json::json!({
                   "items": items,
@@ -35997,33 +35987,10 @@ async fn legacy_route_http_request_with_headers_inner(
                  .or_else(|| extract_json_string_field(body, "text"))
                  .or_else(|| extract_json_string_field(body, "content"))
                  .unwrap_or_else(|| body.trim().trim_matches('"').to_owned());
-             let parsed_items = raw
-                 .lines()
-                 .map(str::trim)
-                 .filter(|line| !line.is_empty())
-                 .enumerate()
-                 .filter_map(|(index, line)| {
-                     let parts = line
-                         .split(',')
-                         .map(str::trim)
-                         .collect::<Vec<_>>();
-                     if index == 0
-                         && parts
-                             .first()
-                             .is_some_and(|value| value.eq_ignore_ascii_case("artist"))
-                     {
-                         return None;
-                     }
-                     let (artist, title) = if parts.len() >= 2 {
-                         (parts[0].to_owned(), parts[1].to_owned())
-                     } else if let Some((artist, title)) = line.split_once(" - ") {
-                         (artist.trim().to_owned(), title.trim().to_owned())
-                     } else {
-                         (String::new(), line.to_owned())
-                     };
-                     Some((artist, title, "Audio".to_owned()))
-                 })
-                 .collect::<Vec<_>>();
+             let parsed_items = match parse_simple_wishlist_import_rows(&raw) {
+                 Ok(parsed_items) => parsed_items,
+                 Err(error) => return Ok(routing::bad_request_response(error)),
+             };
              let mut wishlist = state.wishlist.write().await;
              let previous = wishlist.clone();
              if !wishlist.can_add_items(parsed_items.len()) {
@@ -47139,10 +47106,13 @@ fn detect_local_source_kind(source_text: &str) -> &'static str {
     }
 }
 
-fn local_csv_rows(source_text: &str, include_album: bool) -> Vec<SpotifySourceRow> {
-    let rows = parse_wishlist_csv_rows(source_text);
+fn local_csv_rows(
+    source_text: &str,
+    include_album: bool,
+) -> Result<Vec<SpotifySourceRow>, &'static str> {
+    let rows = parse_wishlist_csv_rows(source_text)?;
     let Some(first) = rows.first() else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
     let header_names = first
         .iter()
@@ -47183,7 +47153,8 @@ fn local_csv_rows(source_text: &str, include_album: bool) -> Vec<SpotifySourceRo
     let url_index = has_header
         .then(|| wishlist_csv_column(first, &["url", "spotifyurl", "trackurl", "link"]))
         .flatten();
-    rows.iter()
+    Ok(rows
+        .iter()
         .enumerate()
         .skip(usize::from(has_header))
         .map(|(index, row)| {
@@ -47210,25 +47181,30 @@ fn local_csv_rows(source_text: &str, include_album: bool) -> Vec<SpotifySourceRo
                 raw_text: row.join(","),
             }
         })
-        .collect()
+        .collect())
 }
 
-fn local_playlist_rows(source_text: &str) -> Vec<SpotifySourceRow> {
-    source_text
-        .lines()
-        .enumerate()
-        .filter_map(|(index, line)| {
-            let line = line.trim();
-            if !line
-                .get(..8)
-                .is_some_and(|prefix| prefix.eq_ignore_ascii_case("#EXTINF:"))
-            {
-                return None;
-            }
-            let title = line.rsplit_once(',')?.1;
-            Some(loose_source_row(title, "m3u", index + 1))
-        })
-        .collect()
+fn local_playlist_rows(
+    source_text: &str,
+) -> Result<Vec<SpotifySourceRow>, &'static str> {
+    let mut rows = Vec::new();
+    for (index, line) in source_text.lines().enumerate() {
+        let line = line.trim();
+        if !line
+            .get(..8)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("#EXTINF:"))
+        {
+            continue;
+        }
+        if rows.len() >= MAX_SOURCE_PREVIEW_ROWS {
+            return Err("Source preview exceeds 10000 rows");
+        }
+        let Some(title) = line.rsplit_once(',').map(|(_, title)| title) else {
+            continue;
+        };
+        rows.push(loose_source_row(title, "m3u", index + 1));
+    }
+    Ok(rows)
 }
 
 fn local_xml_values(source_text: &str, element: &str) -> Vec<String> {
@@ -47281,7 +47257,7 @@ fn local_xml_values(source_text: &str, element: &str) -> Vec<String> {
     values
 }
 
-fn local_xml_rows(source_text: &str) -> Vec<SpotifySourceRow> {
+fn local_xml_rows(source_text: &str) -> Result<Vec<SpotifySourceRow>, &'static str> {
     let mut rows = Vec::new();
     let lower = source_text.to_ascii_lowercase();
     let mut offset = 0_usize;
@@ -47310,6 +47286,9 @@ fn local_xml_rows(source_text: &str) -> Vec<SpotifySourceRow> {
                     .into_iter()
                     .next()
                     .unwrap_or_default();
+                if rows.len() >= MAX_SOURCE_PREVIEW_ROWS {
+                    return Err("Source preview exceeds 10000 rows");
+                }
                 rows.push(loose_source_row(&title, "rss", rows.len() + 1));
                 offset = content_end + close.len();
                 continue;
@@ -47346,11 +47325,42 @@ fn local_xml_rows(source_text: &str) -> Vec<SpotifySourceRow> {
                 .or_else(|| attributes.iter().find(|(name, _)| name == "title"))
                 .map(|(_, value)| value.as_str())
                 .unwrap_or_default();
+            if rows.len() >= MAX_SOURCE_PREVIEW_ROWS {
+                return Err("Source preview exceeds 10000 rows");
+            }
             rows.push(loose_source_row(text, "opml", outline_index));
         }
         offset = tag_end + 1;
     }
-    rows
+    Ok(rows)
+}
+
+fn parse_simple_source_preview_items(
+    raw: &str,
+) -> Result<Vec<serde_json::Value>, &'static str> {
+    let mut items = Vec::new();
+    for (index, line) in raw
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .enumerate()
+    {
+        if index >= MAX_SOURCE_PREVIEW_ROWS {
+            return Err("Source preview exceeds 10000 rows");
+        }
+        let (artist, title) = line
+            .split_once(" - ")
+            .map(|(artist, title)| (artist.trim(), title.trim()))
+            .unwrap_or(("", line));
+        items.push(serde_json::json!({
+            "id": format!("preview-{}", index + 1),
+            "artist": artist,
+            "title": title,
+            "searchText": line,
+            "valid": !line.is_empty(),
+        }));
+    }
+    Ok(items)
 }
 
 fn preview_local_source_feed(
@@ -47358,22 +47368,30 @@ fn preview_local_source_feed(
     requested_kind: &str,
     include_album: bool,
     limit: usize,
-) -> serde_json::Value {
+) -> Result<serde_json::Value, &'static str> {
     let kind = if requested_kind == "auto" {
         detect_local_source_kind(source_text)
     } else {
         requested_kind
     };
     let rows = match kind {
-        "csv" => local_csv_rows(source_text, include_album),
-        "m3u" | "pls" => local_playlist_rows(source_text),
-        "rss" | "opml" => local_xml_rows(source_text),
-        _ => source_text
-            .lines()
-            .filter(|line| !line.trim().is_empty())
-            .enumerate()
-            .map(|(index, line)| loose_source_row(line, "text", index + 1))
-            .collect(),
+        "csv" => local_csv_rows(source_text, include_album)?,
+        "m3u" | "pls" => local_playlist_rows(source_text)?,
+        "rss" | "opml" => local_xml_rows(source_text)?,
+        _ => {
+            let mut rows = Vec::new();
+            for (index, line) in source_text
+                .lines()
+                .filter(|line| !line.trim().is_empty())
+                .enumerate()
+            {
+                if index >= MAX_SOURCE_PREVIEW_ROWS {
+                    return Err("Source preview exceeds 10000 rows");
+                }
+                rows.push(loose_source_row(line, "text", index + 1));
+            }
+            rows
+        }
     };
     let mut result =
         build_provider_source_result("local", "", rows.into_iter().take(limit).collect(), 0);
@@ -47384,7 +47402,7 @@ fn preview_local_source_feed(
             suggestion["reason"] = serde_json::json!(format!("Imported from local {kind}."));
         }
     }
-    result
+    Ok(result)
 }
 
 fn html_escape(value: &str) -> String {
@@ -59529,7 +59547,7 @@ fn native_model_validation_response() -> HttpResponse {
     }
 }
 
-fn parse_wishlist_csv_rows(csv: &str) -> Vec<Vec<String>> {
+fn parse_wishlist_csv_rows(csv: &str) -> Result<Vec<Vec<String>>, &'static str> {
     let mut rows = Vec::new();
     let mut row = Vec::new();
     let mut field = String::new();
@@ -59549,6 +59567,9 @@ fn parse_wishlist_csv_rows(csv: &str) -> Vec<Vec<String>> {
                 }
                 row.push(std::mem::take(&mut field));
                 if row.iter().any(|value| !value.trim().is_empty()) {
+                    if rows.len() >= MAX_CSV_IMPORT_ROWS {
+                        return Err("CSV import exceeds 10000 rows");
+                    }
                     rows.push(std::mem::take(&mut row));
                 } else {
                     row.clear();
@@ -59559,9 +59580,45 @@ fn parse_wishlist_csv_rows(csv: &str) -> Vec<Vec<String>> {
     }
     row.push(field);
     if row.iter().any(|value| !value.trim().is_empty()) {
+        if rows.len() >= MAX_CSV_IMPORT_ROWS {
+            return Err("CSV import exceeds 10000 rows");
+        }
         rows.push(row);
     }
-    rows
+    Ok(rows)
+}
+
+fn parse_simple_wishlist_import_rows(
+    raw: &str,
+) -> Result<Vec<(String, String, String)>, &'static str> {
+    let mut parsed_items = Vec::new();
+    for (index, line) in raw
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .enumerate()
+    {
+        if index >= MAX_CSV_IMPORT_ROWS {
+            return Err("CSV import exceeds 10000 rows");
+        }
+        let parts = line.split(',').map(str::trim).collect::<Vec<_>>();
+        if index == 0
+            && parts
+                .first()
+                .is_some_and(|value| value.eq_ignore_ascii_case("artist"))
+        {
+            continue;
+        }
+        let (artist, title) = if parts.len() >= 2 {
+            (parts[0].to_owned(), parts[1].to_owned())
+        } else if let Some((artist, title)) = line.split_once(" - ") {
+            (artist.trim().to_owned(), title.trim().to_owned())
+        } else {
+            (String::new(), line.to_owned())
+        };
+        parsed_items.push((artist, title, "Audio".to_owned()));
+    }
+    Ok(parsed_items)
 }
 
 fn normalized_wishlist_csv_header(value: &str) -> String {
@@ -59623,7 +59680,10 @@ async fn versioned_wishlist_csv_import_response(body: &str, state: &AppState) ->
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(false);
 
-    let rows = parse_wishlist_csv_rows(csv);
+    let rows = match parse_wishlist_csv_rows(csv) {
+        Ok(rows) => rows,
+        Err(error) => return routing::bad_request_response(error),
+    };
     if rows.is_empty() {
         return routing::bad_request_response("CSV did not contain any track rows");
     }

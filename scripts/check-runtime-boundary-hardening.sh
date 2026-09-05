@@ -156,6 +156,11 @@ for anchor in \
   'legacy-route-dispatch' \
   'legacy dispatcher merge-array parity' \
   'legacy merge paths use bounded route dispatcher' \
+  'MAX_CSV_IMPORT_ROWS' \
+  'MAX_SOURCE_PREVIEW_ROWS' \
+  'parse_simple_wishlist_import_rows' \
+  'parse_simple_source_preview_items' \
+  'wishlist_csv_import_rejects_oversized_row_batches' \
   'issue_ids must contain 1 to 25 values' \
   'browse_store_bounds_records_and_entries_but_updates_existing_users' \
   'MAX_MESSAGE_RECORDS' \

@@ -5694,7 +5694,8 @@ fn source_feed_local_formats_match_frozen_parsing_and_deduplication() {
         "auto",
         true,
         10,
-    );
+    )
+    .expect("CSV source preview");
     assert_eq!(csv["sourceKind"], "csv");
     assert_eq!(csv["suggestionCount"], 2);
     assert_eq!(csv["suggestions"][0]["title"], "Song, One");
@@ -5708,7 +5709,8 @@ fn source_feed_local_formats_match_frozen_parsing_and_deduplication() {
         "auto",
         false,
         10,
-    );
+    )
+    .expect("M3U source preview");
     assert_eq!(m3u["sourceKind"], "m3u");
     assert_eq!(m3u["suggestionCount"], 2);
     assert_eq!(m3u["suggestions"][0]["searchText"], "Artist One Song One");
@@ -5719,7 +5721,8 @@ fn source_feed_local_formats_match_frozen_parsing_and_deduplication() {
         "auto",
         false,
         10,
-    );
+    )
+    .expect("RSS source preview");
     assert_eq!(rss["sourceKind"], "rss");
     assert_eq!(rss["totalRows"], 2);
     assert_eq!(rss["suggestionCount"], 1);
@@ -5734,7 +5737,8 @@ fn source_feed_local_formats_match_frozen_parsing_and_deduplication() {
         "opml",
         false,
         10,
-    );
+    )
+    .expect("OPML source preview");
     assert_eq!(opml["sourceKind"], "opml");
     assert_eq!(opml["totalRows"], 3);
     assert_eq!(opml["suggestionCount"], 2);

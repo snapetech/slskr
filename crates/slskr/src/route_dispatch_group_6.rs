@@ -2608,12 +2608,15 @@ async fn route_dispatch_group_6(context: &RouteDispatchContext<'_, '_>) -> Route
                       .get("includeAlbum")
                       .and_then(serde_json::Value::as_bool)
                       .unwrap_or(false);
-                  let result = preview_local_source_feed(
+                  let result = match preview_local_source_feed(
                       &raw,
                       &requested_kind,
                       include_album,
                       usize::try_from(safe_limit).unwrap_or(usize::MAX),
-                  );
+                  ) {
+                      Ok(result) => result,
+                      Err(error) => return Ok(routing::bad_request_response(error)),
+                  };
                   let mut history = state.source_feed_import_history.write().await;
                   let previous = history.clone();
                   history.record(&request, &raw, &result);
@@ -2633,25 +2636,10 @@ async fn route_dispatch_group_6(context: &RouteDispatchContext<'_, '_>) -> Route
                   .or_else(|| extract_json_string_field(body, "content"))
                   .or_else(|| extract_json_string_field(body, "playlist"))
                   .unwrap_or_else(|| body.trim().trim_matches('"').to_owned());
-              let items = raw
-                  .lines()
-                  .map(str::trim)
-                  .filter(|line| !line.is_empty())
-                  .enumerate()
-                  .map(|(index, line)| {
-                      let (artist, title) = line
-                          .split_once(" - ")
-                          .map(|(artist, title)| (artist.trim(), title.trim()))
-                          .unwrap_or(("", line));
-                      serde_json::json!({
-                          "id": format!("preview-{}", index + 1),
-                          "artist": artist,
-                          "title": title,
-                          "searchText": line,
-                          "valid": !line.is_empty(),
-                      })
-                  })
-                  .collect::<Vec<_>>();
+              let items = match parse_simple_source_preview_items(&raw) {
+                  Ok(items) => items,
+                  Err(error) => return Ok(routing::bad_request_response(error)),
+              };
               let count = items.len();
               Ok(routing::ok_response(serde_json::json!({
                   "items": items,

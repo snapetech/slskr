@@ -2223,6 +2223,65 @@ async fn remaining_controller_array_routes_reject_oversized_wire_batches_before_
 }
 
 #[tokio::test]
+async fn wishlist_csv_import_rejects_oversized_row_batches() {
+    let (state, _receiver) = test_state_with_env(MapEnv::default());
+    let oversized_csv = (0..=super::MAX_CSV_IMPORT_ROWS)
+        .map(|index| format!("artist-{index},title-{index}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let unversioned_response = super::route_http_request(
+        "POST",
+        "/api/wishlist/import/csv",
+        None,
+        &oversized_csv,
+        &state,
+    )
+    .await
+    .expect("oversized unversioned CSV import");
+    assert_eq!(unversioned_response.status, "400 Bad Request");
+    assert!(unversioned_response
+        .body
+        .contains("CSV import exceeds 10000 rows"));
+
+    let versioned_response = super::route_http_request(
+        "POST",
+        "/api/v0/wishlist/import/csv",
+        None,
+        &serde_json::json!({"csvText": oversized_csv}).to_string(),
+        &state,
+    )
+    .await
+    .expect("oversized versioned CSV import");
+    assert_eq!(versioned_response.status, "400 Bad Request");
+    assert!(versioned_response
+        .body
+        .contains("CSV import exceeds 10000 rows"));
+    let preview_response = super::route_http_request(
+        "POST",
+        "/api/v0/source-feed-imports/preview",
+        None,
+        &serde_json::json!({
+            "sourceText": oversized_csv,
+            "sourceKind": "csv",
+            "fetchProviderUrls": false,
+            "limit": 500,
+        })
+        .to_string(),
+        &state,
+    )
+    .await
+    .expect("oversized source preview");
+    assert_eq!(preview_response.status, "400 Bad Request");
+    assert!(preview_response
+        .body
+        .contains("CSV import exceeds 10000 rows"));
+    assert!(state.wishlist.read().await.records.is_empty());
+
+    let _ = fs::remove_dir_all(&state.config.state_dir);
+}
+
+#[tokio::test]
 async fn library_browser_projects_share_tree_and_sha256_stream_ids() {
     let (state, _receiver) =
         test_state_with_env(MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "native"));
