@@ -198,6 +198,21 @@ function normalizeBrowseStatus(value) {
             return 'pending';
     }
 }
+function normalizeRoom(response) {
+    const object = responseObject(response);
+    const rawUsers = Array.isArray(object.users)
+        ? object.users
+        : Array.isArray(object.members)
+            ? object.members
+            : undefined;
+    const users = rawUsers?.filter((user) => typeof user === 'string');
+    return {
+        ...object,
+        name: String(object.name ?? object.room ?? ''),
+        user_count: numberValue(object.user_count ?? object.userCount ?? object.memberCount, users?.length ?? 0),
+        ...(users ? { users } : {}),
+    };
+}
 function browseRequestFromResponse(response, fallbackUsername = '') {
     const object = responseObject(response);
     const username = String(object.username ?? object.from ?? fallbackUsername);
@@ -421,13 +436,13 @@ class SlskrClient {
     // =========================================================================
     async listRooms(params) {
         const response = await this.getAuth('/api/rooms', params);
-        return responseList(response, 'rooms', 'entries');
+        return responseList(response, 'rooms', 'entries').map(normalizeRoom);
     }
     async getRoom(name) {
-        return this.getAuth(`/api/rooms/${this.pathSegment(name)}`);
+        return normalizeRoom(await this.getAuth(`/api/rooms/${this.pathSegment(name)}`));
     }
     async joinRoom(name) {
-        return this.postAuth(`/api/rooms/${this.pathSegment(name)}/join`, {});
+        return normalizeRoom(await this.postAuth(`/api/rooms/${this.pathSegment(name)}/join`, {}));
     }
     async leaveRoom(name) {
         await this.deleteAuth(`/api/rooms/${this.pathSegment(name)}/join`);

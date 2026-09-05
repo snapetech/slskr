@@ -244,13 +244,16 @@ describe('SlskrClient request lifecycle', () => {
         return new Response('{"entries":[{"id":"transfer-1"}]}', { status: 200 });
       }
       if (parsed.pathname === '/api/rooms') {
-        return new Response('{"entries":[{"name":"lounge"}]}', { status: 200 });
+        return new Response(
+          '{"entries":[{"name":"lounge","user_count":2,"users":["alice","bob"]}]}',
+          { status: 200 },
+        );
       }
       if (parsed.pathname === '/api/rooms/lounge%20room/join') {
         return new Response('{"name":"lounge room","userCount":0,"users":[]}', { status: 201 });
       }
       if (parsed.pathname === '/api/rooms/lounge%20room') {
-        return new Response('{"name":"lounge room"}', { status: 200 });
+        return new Response('{"name":"lounge room","userCount":3,"members":["alice"]}', { status: 200 });
       }
       if (parsed.pathname === '/api/events') {
         return new Response('[{"type":"message"}]', { status: 200 });
@@ -274,9 +277,20 @@ describe('SlskrClient request lifecycle', () => {
     await expect(client.listTransfers({ direction: 'download' })).resolves.toMatchObject([
       { id: 'transfer-1' },
     ]);
-    await expect(client.listRooms()).resolves.toEqual([{ name: 'lounge' }]);
+    await expect(client.listRooms()).resolves.toEqual([{
+      name: 'lounge',
+      user_count: 2,
+      users: ['alice', 'bob'],
+    }]);
     await expect(client.joinRoom('lounge room')).resolves.toMatchObject({
       name: 'lounge room',
+      user_count: 0,
+      users: [],
+    });
+    await expect(client.getRoom('lounge room')).resolves.toMatchObject({
+      name: 'lounge room',
+      user_count: 3,
+      users: ['alice'],
     });
     await expect(client.leaveRoom('lounge room')).resolves.toBeUndefined();
     await expect(client.getEvents()).resolves.toMatchObject([{ type: 'message', data: {} }]);

@@ -237,6 +237,25 @@ function normalizeBrowseStatus(value: unknown): BrowseRequest['status'] {
   }
 }
 
+function normalizeRoom(response: unknown): Room {
+  const object = responseObject(response);
+  const rawUsers = Array.isArray(object.users)
+    ? object.users
+    : Array.isArray(object.members)
+      ? object.members
+      : undefined;
+  const users = rawUsers?.filter((user): user is string => typeof user === 'string');
+  return {
+    ...object,
+    name: String(object.name ?? object.room ?? ''),
+    user_count: numberValue(
+      object.user_count ?? object.userCount ?? object.memberCount,
+      users?.length ?? 0,
+    ),
+    ...(users ? { users } : {}),
+  } as Room;
+}
+
 function browseRequestFromResponse(response: unknown, fallbackUsername = ''): BrowseRequest {
   const object = responseObject(response);
   const username = String(object.username ?? object.from ?? fallbackUsername);
@@ -505,15 +524,17 @@ export class SlskrClient {
 
   async listRooms(params?: PaginationParams): Promise<Room[]> {
     const response = await this.getAuth<unknown>('/api/rooms', params);
-    return responseList<Room>(response, 'rooms', 'entries');
+    return responseList<unknown>(response, 'rooms', 'entries').map(normalizeRoom);
   }
 
   async getRoom(name: string): Promise<Room> {
-    return this.getAuth<Room>(`/api/rooms/${this.pathSegment(name)}`);
+    return normalizeRoom(await this.getAuth<unknown>(`/api/rooms/${this.pathSegment(name)}`));
   }
 
   async joinRoom(name: string): Promise<Room> {
-    return this.postAuth<Room>(`/api/rooms/${this.pathSegment(name)}/join`, {});
+    return normalizeRoom(
+      await this.postAuth<unknown>(`/api/rooms/${this.pathSegment(name)}/join`, {}),
+    );
   }
 
   async leaveRoom(name: string): Promise<void> {
