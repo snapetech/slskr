@@ -1,13 +1,30 @@
 import api from './api';
 import { encodePathSegment } from './pathEncoding';
 
+const requireObjectResponse = (value, resource) => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`Bridge API returned an invalid ${resource} response`);
+  }
+
+  return value;
+};
+
+const requireClientsResponse = (value) => {
+  const response = requireObjectResponse(value, 'clients');
+  if (!Array.isArray(response.clients)) {
+    throw new Error('Bridge API returned an invalid client list response');
+  }
+
+  return response.clients;
+};
+
 /**
  * Bridge API library for legacy client compatibility.
  */
 
 export const getConfig = async () => {
   const response = await api.get('/bridge/admin/config');
-  return response.data;
+  return requireObjectResponse(response.data, 'configuration');
 };
 
 export const updateConfig = async (config) => {
@@ -17,22 +34,22 @@ export const updateConfig = async (config) => {
 
 export const getDashboard = async () => {
   const response = await api.get('/bridge/admin/dashboard');
-  return response.data;
+  return requireObjectResponse(response.data, 'dashboard');
 };
 
 export const getClients = async () => {
   const response = await api.get('/bridge/admin/clients');
-  return Array.isArray(response.data?.clients) ? response.data.clients : [];
+  return requireClientsResponse(response.data);
 };
 
 export const getStats = async () => {
   const response = await api.get('/bridge/admin/stats');
-  return response.data;
+  return requireObjectResponse(response.data, 'stats');
 };
 
 export const getStatus = async () => {
   const response = await api.get('/bridge/status');
-  return response.data;
+  return requireObjectResponse(response.data, 'status');
 };
 
 export const startBridge = async () => {
@@ -49,5 +66,5 @@ export const getTransferProgress = async (transferId) => {
   const response = await api.get(
     `/bridge/transfer/${encodePathSegment(transferId)}/progress`,
   );
-  return response.data;
+  return requireObjectResponse(response.data, 'transfer progress');
 };

@@ -38,10 +38,26 @@ describe('bridge', () => {
   });
 
   it('returns an empty client list when the response has no clients', async () => {
-    api.get.mockResolvedValue({ data: {} });
+    api.get.mockResolvedValue({ data: { clients: [] } });
 
     const result = await bridge.getClients();
 
     expect(result).toEqual([]);
+  });
+
+  it.each([
+    ['configuration', bridge.getConfig],
+    ['dashboard', bridge.getDashboard],
+    ['stats', bridge.getStats],
+    ['status', bridge.getStatus],
+    ['clients', bridge.getClients],
+  ])('rejects malformed %s responses', async (resource, request) => {
+    api.get.mockResolvedValue({ data: resource === 'clients' ? {} : [] });
+
+    await expect(request()).rejects.toThrow(
+      resource === 'clients'
+        ? 'Bridge API returned an invalid client list response'
+        : `Bridge API returned an invalid ${resource} response`,
+    );
   });
 });
