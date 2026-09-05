@@ -20,8 +20,13 @@ describe('SharedWithMe', () => {
     render(<SharedWithMe />);
 
     await waitFor(() => {
-      expect(screen.getByText(/session expired/i)).toBeInTheDocument();
+      expect(screen.getByTestId('incoming-shares-load-error')).toHaveTextContent(
+        'session expired',
+      );
     });
-    expect(screen.getByText('No shares yet')).toBeInTheDocument();
+    expect(screen.getByTestId('incoming-shares-load-error')).toHaveTextContent(
+      'Shared collections unavailable',
+    );
+    expect(screen.queryByText('No shares yet')).not.toBeInTheDocument();
   });
 });

@@ -13,6 +13,7 @@ import {
   Icon,
   Label,
   Modal,
+  Message,
   Segment,
   Table,
 } from 'semantic-ui-react';
@@ -52,6 +53,7 @@ export default class SharedWithMe extends Component {
     backfillResult: null,
     error: null,
     loading: true,
+    sharesLoadError: null,
     manifest: null,
     manifestLoading: false,
     manifestModalOpen: false,
@@ -95,6 +97,7 @@ export default class SharedWithMe extends Component {
         this.setState({
           loading: false,
           shares: asRecords(sharesRes?.data).map(normalizeShare),
+          sharesLoadError: null,
         });
       }
     } catch (error) {
@@ -102,6 +105,7 @@ export default class SharedWithMe extends Component {
         this.setState({
           error: toDisplayError(error, 'Failed to load shared collections'),
           loading: false,
+          sharesLoadError: toDisplayError(error, 'Failed to load shared collections'),
         });
       }
     }
@@ -250,6 +254,7 @@ export default class SharedWithMe extends Component {
       manifestModalOpen,
       selectedShare,
       shares,
+      sharesLoadError,
     } = this.state;
 
     if (loading) return <LoaderSegment />;
@@ -266,7 +271,15 @@ export default class SharedWithMe extends Component {
 
         {error && <ErrorSegment caption={error} />}
 
-        {shares.length === 0 ? (
+        {sharesLoadError ? (
+          <Message
+            data-testid="incoming-shares-load-error"
+            error
+          >
+            <Message.Header>Shared collections unavailable</Message.Header>
+            <p>{sharesLoadError}</p>
+          </Message>
+        ) : shares.length === 0 ? (
           <Segment placeholder>
             <Header icon>
               <Icon name="inbox" />
