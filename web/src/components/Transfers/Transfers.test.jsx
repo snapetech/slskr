@@ -309,6 +309,22 @@ describe('Transfers', () => {
     );
   });
 
+  it('surfaces transfer-load failures instead of showing an empty transfer list', async () => {
+    transfersLibrary.getAll.mockRejectedValueOnce(new Error('Transfer service unavailable'));
+
+    render(
+      <Transfers
+        direction="download"
+        server={{ isConnected: true }}
+      />,
+    );
+
+    expect(await screen.findByTestId('transfers-load-error')).toHaveTextContent(
+      'Transfer service unavailable',
+    );
+    expect(screen.queryByText('No downloads to display')).not.toBeInTheDocument();
+  });
+
   it('toggles accelerated downloads from the downloads header', async () => {
     render(
       <Transfers

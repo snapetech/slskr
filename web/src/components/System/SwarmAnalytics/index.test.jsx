@@ -221,6 +221,10 @@ describe('SwarmAnalytics', () => {
     await waitFor(() => {
       expect(toast.error).toHaveBeenCalled();
     });
+    expect(await screen.findByTestId('swarm-analytics-error')).toHaveTextContent(
+      'Network error',
+    );
+    expect(screen.queryByText('No Analytics Data')).not.toBeInTheDocument();
   });
 
   it('refreshes data periodically', async () => {

@@ -165,6 +165,7 @@ const PodChannelSession = ({ channel, state }) => {
   const sendInFlightRef = useRef(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
+  const [messagesLoadError, setMessagesLoadError] = useState('');
 
   useEffect(() => {
     mountedRef.current = true;
@@ -192,10 +193,17 @@ const PodChannelSession = ({ channel, state }) => {
     }
 
     if (messagesResult.status === 'rejected') {
+      setMessagesLoadError(
+        toDisplayError(
+          messagesResult.reason,
+          'Failed to load pod channel messages',
+        ),
+      );
       throw messagesResult.reason;
     }
 
     setMessages(asRecords(messagesResult.value));
+    setMessagesLoadError('');
     if (membersResult.status === 'fulfilled') {
       setMembers(asRecords(membersResult.value));
       setError('');
@@ -284,7 +292,7 @@ const PodChannelSession = ({ channel, state }) => {
         {error ? <Message negative>{error}</Message> : null}
         <Segment.Group>
           <Segment className="pod-message-session-history">
-            {messages.length === 0 ? (
+            {messagesLoadError ? null : messages.length === 0 ? (
               <PlaceholderSegment
                 caption="No messages yet"
                 icon="comments"

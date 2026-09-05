@@ -40,7 +40,7 @@ describe('Events', () => {
     expect(
       await screen.findByText('event backend unavailable'),
     ).toBeInTheDocument();
-    expect(screen.getByText('No events')).toBeInTheDocument();
+    expect(screen.queryByText('No events')).not.toBeInTheDocument();
   });
 
   it('passes applied filters to the paginated event request', async () => {

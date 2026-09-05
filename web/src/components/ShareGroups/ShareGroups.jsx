@@ -347,7 +347,7 @@ export default class ShareGroups extends Component {
           </Button>
         </div>
 
-        {shareGroups.length === 0 ? (
+        {error && shareGroups.length === 0 ? null : shareGroups.length === 0 ? (
           <Segment placeholder>
             <Header icon>
               <Icon name="users" />

@@ -146,6 +146,7 @@ const Transfers = ({ runtimeProfile, direction, server }) => {
   const testId = direction === 'download' ? 'downloads-root' : 'uploads-root';
   const [connecting, setConnecting] = useState(true);
   const [transfers, setTransfers] = useState([]);
+  const [transfersLoadError, setTransfersLoadError] = useState(null);
 
   const [retryingSingle, setRetryingSingle] = useState(false);
   const [cancellingSingle, setCancellingSingle] = useState(false);
@@ -418,11 +419,14 @@ const Transfers = ({ runtimeProfile, direction, server }) => {
         fetchId === latestFetchIdRef.current
       ) {
         setTransfers(filterHiddenTransfers(responseWithQueuePositions));
+        setTransfersLoadError(null);
       }
     } catch (error) {
       console.error(error);
       if (mountedRef.current) {
-        toast.error(getErrorMessage(error));
+        setTransfersLoadError(
+          toDisplayError(error, 'Failed to load transfers'),
+        );
       }
     }
   };
@@ -740,6 +744,17 @@ const Transfers = ({ runtimeProfile, direction, server }) => {
         server={server}
         transfers={transfers}
       />
+      {transfersLoadError && (
+        <Message
+          data-testid="transfers-load-error"
+          negative
+        >
+          <Message.Header>
+            {direction === 'download' ? 'Downloads unavailable' : 'Uploads unavailable'}
+          </Message.Header>
+          <p>{transfersLoadError}</p>
+        </Message>
+      )}
       {modeStatusError && (
         <Message
           data-testid="transfer-mode-status-error"
@@ -750,7 +765,7 @@ const Transfers = ({ runtimeProfile, direction, server }) => {
           <p>The mode toggles are disabled until the daemon reports their current state.</p>
         </Message>
       )}
-      {transfers.length === 0 ? (
+      {transfersLoadError ? null : transfers.length === 0 ? (
         <PlaceholderSegment
           caption={`No ${direction}s to display`}
           icon={direction}

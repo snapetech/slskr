@@ -27,6 +27,6 @@ describe('ShareGroups', () => {
     await waitFor(() => {
       expect(screen.getByText(/forbidden/i)).toBeInTheDocument();
     });
-    expect(screen.getByText('No share groups yet')).toBeInTheDocument();
+    expect(screen.queryByText('No share groups yet')).not.toBeInTheDocument();
   });
 });

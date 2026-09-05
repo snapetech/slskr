@@ -31,6 +31,7 @@ const SwarmAnalytics = () => {
   const [trends, setTrends] = useState(null);
   const [recommendations, setRecommendations] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [timeWindow, setTimeWindow] = useState(24);
   const [rankingLimit, setRankingLimit] = useState(20);
   const mountedRef = useMountedRef();
@@ -49,6 +50,7 @@ const SwarmAnalytics = () => {
     const requestId = ++requestIdRef.current;
     try {
       setLoading(true);
+      setError(null);
       const [performance, peers, efficiency, trendsData, recs] =
         await Promise.all([
           swarmAnalyticsLibrary.getPerformanceMetrics(timeWindow),
@@ -82,7 +84,9 @@ const SwarmAnalytics = () => {
         mountedRef.current &&
         requestIdRef.current === requestId
       ) {
-        toast.error(toDisplayError(error, 'Failed to load analytics'));
+        const message = toDisplayError(error, 'Failed to load analytics');
+        setError(message);
+        toast.error(message);
         console.error('Failed to fetch analytics:', error);
       }
     } finally {
@@ -179,6 +183,15 @@ const SwarmAnalytics = () => {
 
       {!loading && (
         <>
+          {error && (
+            <Message
+              data-testid="swarm-analytics-error"
+              negative
+            >
+              <Message.Header>Analytics unavailable</Message.Header>
+              <p>{error}</p>
+            </Message>
+          )}
           {/* Performance Metrics */}
           {performanceMetrics && (
             <Card fluid>
@@ -430,7 +443,7 @@ const SwarmAnalytics = () => {
             </Card>
           )}
 
-          {!performanceMetrics &&
+          {!error && !performanceMetrics &&
             !efficiencyMetrics &&
             peerRankings.length === 0 &&
             recommendations.length === 0 && (

@@ -411,6 +411,35 @@ describe('Messaging', () => {
     expect(await screen.findByText('Listen Along general compact')).toBeInTheDocument();
   });
 
+  it('does not present an empty pod history when message loading fails', async () => {
+    chat.getAll.mockResolvedValue([]);
+    rooms.getJoined.mockResolvedValue([]);
+    pods.list.mockResolvedValue([
+      {
+        channels: [{ channelId: 'general', kind: 'Room', name: 'General' }],
+        name: 'Gold Star Club',
+        podId: 'pod-1',
+      },
+    ]);
+    pods.get.mockResolvedValue({
+      channels: [{ channelId: 'general', kind: 'Room', name: 'General' }],
+      name: 'Gold Star Club',
+      podId: 'pod-1',
+    });
+    pods.getMessages.mockRejectedValue(new Error('message service unavailable'));
+
+    render(
+      <MemoryRouter>
+        <Messaging state={{ user: { username: 'me' } }} />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(await screen.findByText('Gold Star Club / General'));
+
+    expect(await screen.findByText('message service unavailable')).toBeInTheDocument();
+    expect(screen.queryByText('No messages yet')).not.toBeInTheDocument();
+  });
+
   it('uses the room-style member rail for pod room channels', async () => {
     chat.getAll.mockResolvedValue([]);
     rooms.getJoined.mockResolvedValue([]);

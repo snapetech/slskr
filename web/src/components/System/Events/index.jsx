@@ -105,8 +105,6 @@ const Events = () => {
           return;
         }
 
-        setEvents([]);
-        setTotalPages(0);
         setError(getErrorMessage(loadError));
       } finally {
         if (active) {
@@ -191,7 +189,7 @@ const Events = () => {
           </Table.Row>
         </Table.Header>
         <Table.Body className="events-table-body">
-          {events?.length === 0 ? (
+          {error ? null : events?.length === 0 ? (
             <Table.Row>
               <Table.Cell
                 colSpan={99}
