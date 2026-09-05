@@ -11,6 +11,8 @@ import {
   buildAutomationRunHistory,
   automationRecipes,
   formatAutomationRunHistoryReport,
+  getAutomationRecipeInputs,
+  getAutomationRecipeState,
 } from '../../../lib/automationRecipes';
 import * as libraryHealthAPI from '../../../lib/libraryHealth';
 import * as wishlistAPI from '../../../lib/wishlist';
@@ -168,6 +170,41 @@ describe('AutomationCenter', () => {
         expect.stringContaining('slskr automation review history'),
       );
     });
+  });
+
+  it('bounds and projects malformed persisted recipe state', () => {
+    localStorage.setItem(
+      automationRecipeStorageKey,
+      JSON.stringify({
+        'local-diagnostics': {
+          enabled: 'yes',
+          lastRunReport: {
+            extra: 'discarded',
+            summary: 'x'.repeat(3_000),
+          },
+        },
+      }),
+    );
+    localStorage.setItem(
+      automationRecipeInputStorageKey,
+      JSON.stringify({
+        'library-health-scan': {
+          extra: 'discarded',
+          libraryPath: 'x'.repeat(3_000),
+        },
+      }),
+    );
+
+    const recipeState = getAutomationRecipeState();
+    const recipeInputs = getAutomationRecipeInputs();
+    expect(recipeState['local-diagnostics'].enabled).toBe(true);
+    expect(recipeState['local-diagnostics'].lastRunReport.summary).toHaveLength(2_048);
+    expect(recipeState['local-diagnostics'].lastRunReport.extra).toBeUndefined();
+    expect(recipeInputs['library-health-scan'].libraryPath).toHaveLength(2_048);
+    expect(recipeInputs['library-health-scan'].extra).toBeUndefined();
+
+    localStorage.setItem(automationRecipeStorageKey, 'x'.repeat(128 * 1024 + 1));
+    expect(getAutomationRecipeState()['local-diagnostics'].enabled).toBe(true);
   });
 
   it('builds bounded dry-run reports without execution', () => {

@@ -1,11 +1,18 @@
 import {
   getLocalStorageItem,
-  removeLocalStorageItem,
   setLocalStorageItem,
 } from './storage';
+import {
+  maxPersistedJsonCharacters,
+  readBoundedJson,
+  writeBoundedObject,
+} from './persistedJson';
 
 const storageKey = 'slskr.automationRecipeState';
 const inputStorageKey = 'slskr.automationRecipeInputs';
+const maxAutomationStorageCharacters = 128 * 1024;
+const maxAutomationTextCharacters = 2_048;
+const maxAutomationInputEntries = 16;
 const executableRecipeIds = new Set([
   'dashboard-refresh',
   'library-health-scan',
@@ -116,39 +123,119 @@ const defaultState = automationRecipes.reduce((state, recipe) => {
   return state;
 }, {});
 
-const readStoredState = () => {
-  const stored = getLocalStorageItem(storageKey);
-  if (!stored) {
-    return {};
-  }
+const isPlainObject = (value) =>
+  value && typeof value === 'object' && !Array.isArray(value);
 
-  try {
-    const parsed = JSON.parse(stored);
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? parsed
-      : {};
-  } catch {
-    removeLocalStorageItem(storageKey);
-    return {};
-  }
+const normalizeText = (value, fallback = '') =>
+  typeof value === 'string' || typeof value === 'number'
+    ? String(value).trim().slice(0, maxAutomationTextCharacters)
+    : fallback;
+
+const normalizeCount = (value) => {
+  const count = Number(value);
+  return Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0;
+};
+
+const normalizeTimestamp = (value) => normalizeText(value) || null;
+
+const normalizeReport = (report) => {
+  if (!isPlainObject(report)) return null;
+
+  const normalized = {
+    approvalGate: normalizeText(report.approvalGate),
+    cooldown: normalizeText(report.cooldown),
+    executed: report.executed === true,
+    failed: normalizeCount(report.failed),
+    fileImpact: normalizeText(report.fileImpact),
+    generatedAt: normalizeText(report.generatedAt),
+    maxRunTime: normalizeText(report.maxRunTime),
+    networkImpact: normalizeText(report.networkImpact),
+    recipeId: normalizeText(report.recipeId),
+    runLimit: normalizeCount(report.runLimit),
+    skipped: normalizeCount(report.skipped),
+    started: normalizeCount(report.started),
+    summary: normalizeText(report.summary),
+    title: normalizeText(report.title),
+  };
+  const scanId = normalizeText(report.scanId);
+  if (scanId) normalized.scanId = scanId;
+  return normalized;
+};
+
+const normalizeRecipeState = (recipe, state = {}) => {
+  const source = isPlainObject(state) ? state : {};
+  return {
+    enabled:
+      typeof source.enabled === 'boolean'
+        ? source.enabled
+        : recipe.enabledByDefault,
+    lastDryRunAt: normalizeTimestamp(source.lastDryRunAt),
+    lastDryRunReport: normalizeReport(source.lastDryRunReport),
+    lastRunAt: normalizeTimestamp(source.lastRunAt),
+    lastRunReport: normalizeReport(source.lastRunReport),
+  };
+};
+
+const readStoredState = () => {
+  const parsed = readBoundedJson(
+    getLocalStorageItem,
+    storageKey,
+    {},
+    Math.min(maxPersistedJsonCharacters, maxAutomationStorageCharacters),
+  );
+  if (!isPlainObject(parsed)) return {};
+
+  return automationRecipes.reduce((state, recipe) => {
+    state[recipe.id] = normalizeRecipeState(recipe, parsed[recipe.id]);
+    return state;
+  }, {});
 };
 
 const readStoredInputs = () => {
-  const stored = getLocalStorageItem(inputStorageKey);
-  if (!stored) {
-    return {};
-  }
+  const parsed = readBoundedJson(
+    getLocalStorageItem,
+    inputStorageKey,
+    {},
+    Math.min(maxPersistedJsonCharacters, maxAutomationStorageCharacters),
+  );
+  if (!isPlainObject(parsed)) return {};
 
-  try {
-    const parsed = JSON.parse(stored);
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? parsed
-      : {};
-  } catch {
-    removeLocalStorageItem(inputStorageKey);
-    return {};
-  }
+  return automationRecipes.reduce((inputs, recipe) => {
+    const source = isPlainObject(parsed[recipe.id]) ? parsed[recipe.id] : {};
+    const libraryPath = normalizeText(source.libraryPath);
+    if (libraryPath) inputs[recipe.id] = { libraryPath };
+    return inputs;
+  }, {});
 };
+
+const writeRecipeState = (state) =>
+  writeBoundedObject(
+    setLocalStorageItem,
+    storageKey,
+    automationRecipes.reduce((normalized, recipe) => {
+      normalized[recipe.id] = normalizeRecipeState(recipe, state[recipe.id]);
+      return normalized;
+    }, {}),
+    {
+      maxCharacters: maxAutomationStorageCharacters,
+      maxEntries: automationRecipes.length,
+    },
+  );
+
+const writeRecipeInputs = (inputs) =>
+  writeBoundedObject(
+    setLocalStorageItem,
+    inputStorageKey,
+    automationRecipes.reduce((normalized, recipe) => {
+      const libraryPath = normalizeText(inputs[recipe.id]?.libraryPath);
+      if (libraryPath) normalized[recipe.id] = { libraryPath };
+      return normalized;
+    }, {}),
+    {
+      maxCharacters: maxAutomationStorageCharacters,
+      maxEntries: maxAutomationInputEntries,
+    },
+  );
 
 export const buildAutomationDryRunReport = (
   recipe,
@@ -183,11 +270,11 @@ export const buildAutomationExecutionReport = (
   networkImpact: recipe.networkImpact,
   recipeId: recipe.id,
   runLimit: result.runLimit || 0,
-  ...(result.scanId ? { scanId: result.scanId } : {}),
+  ...(normalizeText(result.scanId) ? { scanId: normalizeText(result.scanId) } : {}),
   skipped: result.skipped || 0,
   started: result.started || 0,
   summary:
-    result.summary ||
+    normalizeText(result.summary) ||
     `Started ${result.started || 0} action(s); ${result.failed || 0} failed; ${result.skipped || 0} skipped.`,
   title: recipe.title,
 });
@@ -247,20 +334,27 @@ export const getAutomationRecipeState = () => ({
 export const getAutomationRecipeInputs = () => readStoredInputs();
 
 export const setAutomationRecipeInput = (id, input) => {
+  if (!automationRecipes.some((recipe) => recipe.id === id)) {
+    return getAutomationRecipeInputs();
+  }
+
   const inputs = getAutomationRecipeInputs();
   const nextInputs = {
     ...inputs,
     [id]: {
       ...(inputs[id] || {}),
-      ...input,
+      libraryPath: normalizeText(input?.libraryPath),
     },
   };
 
-  setLocalStorageItem(inputStorageKey, JSON.stringify(nextInputs));
-  return nextInputs;
+  return writeRecipeInputs(nextInputs);
 };
 
 export const setAutomationRecipeEnabled = (id, enabled) => {
+  if (!automationRecipes.some((recipe) => recipe.id === id)) {
+    return getAutomationRecipeState();
+  }
+
   const state = getAutomationRecipeState();
   const recipeState = state[id] ?? {};
   const nextState = {
@@ -271,27 +365,27 @@ export const setAutomationRecipeEnabled = (id, enabled) => {
     },
   };
 
-  setLocalStorageItem(storageKey, JSON.stringify(nextState));
-  return nextState;
+  return writeRecipeState(nextState);
 };
 
 export const setAutomationRecipeDryRun = (id, timestamp = new Date().toISOString()) => {
   const state = getAutomationRecipeState();
   const recipeState = state[id] ?? {};
   const recipe = automationRecipes.find((item) => item.id === id);
+  if (!recipe) return state;
+  const normalizedTimestamp = normalizeText(timestamp);
   const nextState = {
     ...state,
     [id]: {
       ...recipeState,
-      lastDryRunAt: timestamp,
+      lastDryRunAt: normalizedTimestamp,
       lastDryRunReport: recipe
-        ? buildAutomationDryRunReport(recipe, timestamp)
-        : undefined,
+        ? buildAutomationDryRunReport(recipe, normalizedTimestamp)
+        : null,
     },
   };
 
-  setLocalStorageItem(storageKey, JSON.stringify(nextState));
-  return nextState;
+  return writeRecipeState(nextState);
 };
 
 export const setAutomationRecipeExecution = (
@@ -301,17 +395,18 @@ export const setAutomationRecipeExecution = (
 ) => {
   const state = getAutomationRecipeState();
   const recipeState = state[id] ?? {};
+  if (!automationRecipes.some((recipe) => recipe.id === id)) return state;
+  const normalizedTimestamp = normalizeText(timestamp);
   const nextState = {
     ...state,
     [id]: {
       ...recipeState,
-      lastRunAt: timestamp,
-      lastRunReport: report,
+      lastRunAt: normalizedTimestamp,
+      lastRunReport: normalizeReport(report),
     },
   };
 
-  setLocalStorageItem(storageKey, JSON.stringify(nextState));
-  return nextState;
+  return writeRecipeState(nextState);
 };
 
 export const automationRecipeStorageKey = storageKey;
