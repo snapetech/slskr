@@ -4,6 +4,7 @@
  */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.BatchBuilder = exports.BatchClient = exports.maxBatchOperations = void 0;
+const errors_1 = require("./errors");
 exports.maxBatchOperations = 100;
 function cloneJson(value) {
     if (Array.isArray(value)) {
@@ -29,6 +30,27 @@ function validateBatchOperationIds(operations) {
         seen.add(operation.id);
     }
 }
+function isRecord(value) {
+    return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+function parseBatchResponse(response) {
+    if (!isRecord(response) || !Array.isArray(response.results)) {
+        throw new errors_1.ResponseContractError('batch');
+    }
+    for (const result of response.results) {
+        if (!isRecord(result)
+            || typeof result.id !== 'string'
+            || result.id.trim() === ''
+            || typeof result.status !== 'number'
+            || !Number.isSafeInteger(result.status)
+            || result.status < 100
+            || result.status > 599
+            || !Object.prototype.hasOwnProperty.call(result, 'body')) {
+            throw new errors_1.ResponseContractError('batch');
+        }
+    }
+    return response;
+}
 class BatchClient {
     constructor(client) {
         this.client = client;
@@ -52,7 +74,7 @@ class BatchClient {
         validateBatchOperationIds(operations);
         const request = { operations: operations.map(cloneOperation) };
         // Use internal client method to make the request
-        return this.client.postAuth('/api/batch', request);
+        return parseBatchResponse(await this.client.postAuth('/api/batch', request));
     }
     /**
      * Check if all results were successful
@@ -174,7 +196,7 @@ class BatchBuilder {
         }
         validateBatchOperationIds(this.operations);
         const request = { operations: this.operations.map(cloneOperation) };
-        return this.client.postAuth('/api/batch', request);
+        return parseBatchResponse(await this.client.postAuth('/api/batch', request));
     }
     /**
      * Create shorthand for common operations

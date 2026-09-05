@@ -8,25 +8,53 @@ const errors_1 = require("./errors");
 const MAX_HTTP_RESPONSE_BYTES = 8 * 1024 * 1024;
 const MAX_HTTP_ERROR_BYTES = 64 * 1024;
 const MAX_DATE_MILLISECONDS = 8640000000000000;
-function responseList(response, ...keys) {
+function isRecord(value) {
+    return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+function responseList(response, resource, ...keys) {
+    let entries;
     if (Array.isArray(response)) {
-        return response;
+        entries = response;
     }
-    if (response === null || typeof response !== 'object') {
-        return [];
-    }
-    const object = response;
-    for (const key of keys) {
-        if (Array.isArray(object[key])) {
-            return object[key];
+    else if (isRecord(response)) {
+        for (const key of keys) {
+            if (Array.isArray(response[key])) {
+                entries = response[key];
+                break;
+            }
         }
     }
-    return [];
+    if (!entries || entries.some((entry) => !isRecord(entry))) {
+        throw new errors_1.ResponseContractError(resource);
+    }
+    return entries;
 }
-function responseObject(response) {
-    return response !== null && typeof response === 'object' && !Array.isArray(response)
-        ? response
-        : {};
+function responseObject(response, resource = 'object') {
+    if (!isRecord(response)) {
+        throw new errors_1.ResponseContractError(resource);
+    }
+    return response;
+}
+function requiredObject(response, resource) {
+    return responseObject(response, resource);
+}
+function requiredIdentifier(object, resource, ...keys) {
+    for (const key of keys) {
+        const value = object[key];
+        if (typeof value === 'string' && value.trim() !== '') {
+            return value;
+        }
+        if (typeof value === 'number' && Number.isSafeInteger(value)) {
+            return String(value);
+        }
+    }
+    throw new errors_1.ResponseContractError(resource);
+}
+function requiredText(value, resource) {
+    if (typeof value !== 'string' || value.trim() === '') {
+        throw new errors_1.ResponseContractError(resource);
+    }
+    return value;
 }
 function numberValue(value, fallback = 0) {
     return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
@@ -67,7 +95,7 @@ function normalizeSearchStatus(value) {
     }
 }
 function normalizeSearchResult(response) {
-    const object = responseObject(response);
+    const object = responseObject(response, 'search result');
     return {
         ...object,
         username: String(object.username ?? object.peer_username ?? ''),
@@ -82,11 +110,11 @@ function normalizeSearchResult(response) {
     };
 }
 function normalizeSearch(response) {
-    const object = responseObject(response);
+    const object = responseObject(response, 'search');
     const results = Array.isArray(object.results) ? object.results : [];
     return {
         ...object,
-        id: String(object.id ?? object.searchId ?? object.token ?? ''),
+        id: requiredIdentifier(object, 'search', 'id', 'searchId', 'token'),
         query: String(object.query ?? object.searchText ?? ''),
         status: normalizeSearchStatus(object.status ?? object.state),
         results_count: numberValue(object.results_count ?? object.result_count ?? object.resultsCount, results.length),
@@ -94,7 +122,7 @@ function normalizeSearch(response) {
     };
 }
 function normalizeSearchDetails(response) {
-    const object = responseObject(response);
+    const object = responseObject(response, 'search details');
     return {
         ...normalizeSearch(response),
         results: Array.isArray(object.results)
@@ -103,10 +131,10 @@ function normalizeSearchDetails(response) {
     };
 }
 function normalizeMessage(response) {
-    const object = responseObject(response);
+    const object = responseObject(response, 'message');
     return {
         ...object,
-        id: String(object.id ?? ''),
+        id: requiredIdentifier(object, 'message', 'id'),
         sender: String(object.sender ?? object.username ?? ''),
         content: String(object.content ?? object.body ?? object.message ?? ''),
         timestamp: normalizeTimestamp(object.timestamp ?? object.created_at ?? object.createdAtMs),
@@ -131,14 +159,14 @@ function normalizeTransferStatus(value) {
     }
 }
 function normalizeTransfer(response) {
-    const object = responseObject(response);
+    const object = responseObject(response, 'transfer');
     const direction = object.direction === 1
         || String(object.direction ?? '').toLowerCase() === 'upload'
         ? 'upload'
         : 'download';
     return {
         ...object,
-        id: String(object.id ?? ''),
+        id: requiredIdentifier(object, 'transfer', 'id'),
         direction,
         status: normalizeTransferStatus(object.status),
         peer_username: String(object.peer_username ?? object.username ?? ''),
@@ -148,7 +176,8 @@ function normalizeTransfer(response) {
     };
 }
 function normalizeEvent(response) {
-    const object = responseObject(response);
+    const object = responseObject(response, 'event');
+    const type = requiredText(object.type ?? object.kind, 'event');
     let data = object.data;
     if (typeof data === 'string') {
         try {
@@ -165,24 +194,25 @@ function normalizeEvent(response) {
     }
     return {
         ...object,
-        id: String(object.id ?? ''),
-        type: String(object.type ?? object.kind ?? 'events'),
+        id: requiredIdentifier(object, 'event', 'id'),
+        type: type,
         data: data,
         timestamp: normalizeTimestamp(object.timestamp ?? object.created_at),
     };
 }
 function sessionFromSnapshot(response) {
-    const snapshot = responseObject(response);
-    const state = typeof snapshot.state === 'string' ? snapshot.state : 'disconnected';
+    const snapshot = responseObject(response, 'session');
+    const rawState = snapshot.state ?? snapshot.status;
     const statuses = [
         'connecting',
         'connected',
         'disconnecting',
         'disconnected',
     ];
-    const status = statuses.includes(state)
-        ? state
-        : 'disconnected';
+    if (typeof rawState !== 'string' || !statuses.includes(rawState)) {
+        throw new errors_1.ResponseContractError('session');
+    }
+    const status = rawState;
     const connectedAt = snapshot.connected_at;
     const normalizedConnectedAt = normalizeEpochSeconds(connectedAt);
     return {
@@ -207,7 +237,8 @@ function normalizeBrowseStatus(value) {
     }
 }
 function normalizeRoom(response) {
-    const object = responseObject(response);
+    const object = responseObject(response, 'room');
+    const name = requiredText(object.name ?? object.room, 'room');
     const rawUsers = Array.isArray(object.users)
         ? object.users
         : Array.isArray(object.members)
@@ -216,7 +247,7 @@ function normalizeRoom(response) {
     const users = rawUsers?.filter((user) => typeof user === 'string');
     return {
         ...object,
-        name: String(object.name ?? object.room ?? ''),
+        name,
         user_count: numberValue(object.user_count ?? object.userCount ?? object.memberCount, users?.length ?? 0),
         ...(users ? { users } : {}),
     };
@@ -225,10 +256,10 @@ function nullableNumber(value) {
     return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 function normalizeUser(response) {
-    const object = responseObject(response);
+    const object = responseObject(response, 'user');
     return {
         ...object,
-        username: String(object.username ?? ''),
+        username: requiredText(object.username, 'user'),
         watched: object.watched === true,
         status: typeof object.status === 'string' ? object.status : null,
         average_speed: nullableNumber(object.average_speed ?? object.averageSpeed),
@@ -239,7 +270,7 @@ function normalizeUser(response) {
     };
 }
 function normalizeUserInfo(response, fallbackUsername) {
-    const object = responseObject(response);
+    const object = responseObject(response, 'user info');
     const picture = object.picture;
     return {
         ...object,
@@ -257,8 +288,8 @@ function normalizeUserInfo(response, fallbackUsername) {
     };
 }
 function browseRequestFromResponse(response, fallbackUsername = '') {
-    const object = responseObject(response);
-    const username = String(object.username ?? object.from ?? fallbackUsername);
+    const object = responseObject(response, 'browse request');
+    const username = requiredText(object.username ?? object.from ?? object.id ?? fallbackUsername, 'browse request');
     const requestedAt = object.requested_at ?? object.requestedAt;
     const requested_at = normalizeEpochSeconds(requestedAt);
     return {
@@ -269,25 +300,35 @@ function browseRequestFromResponse(response, fallbackUsername = '') {
     };
 }
 function normalizeBrowseResult(response) {
-    const object = responseObject(response);
-    const directEntries = Array.isArray(object.entries)
-        ? object.entries.filter((entry) => entry !== null && typeof entry === 'object')
-        : [];
+    const object = responseObject(response, 'browse result');
+    const hasEntries = Array.isArray(object.entries);
+    const hasDirectories = Array.isArray(object.directories);
+    if (!hasEntries && !hasDirectories) {
+        throw new errors_1.ResponseContractError('browse result');
+    }
+    const rawEntries = hasEntries ? object.entries : [];
+    const directEntries = rawEntries.filter((entry) => isRecord(entry));
+    if (hasEntries && directEntries.length !== rawEntries.length) {
+        throw new errors_1.ResponseContractError('browse result');
+    }
     if (directEntries.length > 0 || Array.isArray(object.entries)) {
         return {
             entries: directEntries,
             ...(typeof object.folder === 'string' ? { folder: object.folder } : {}),
         };
     }
-    const directories = Array.isArray(object.directories) ? object.directories : [];
+    const directories = hasDirectories ? object.directories : [];
+    if (directories.some((directory) => !isRecord(directory))) {
+        throw new errors_1.ResponseContractError('browse result');
+    }
     const entries = directories.flatMap((directory) => {
-        if (directory === null || typeof directory !== 'object') {
-            return [];
-        }
         const files = directory.files;
-        return Array.isArray(files)
-            ? files.filter((entry) => entry !== null && typeof entry === 'object')
-            : [];
+        if (!Array.isArray(files))
+            return [];
+        if (files.some((entry) => !isRecord(entry))) {
+            throw new errors_1.ResponseContractError('browse result');
+        }
+        return files;
     });
     return {
         entries,
@@ -295,24 +336,38 @@ function normalizeBrowseResult(response) {
     };
 }
 function normalizeShare(response) {
-    return responseObject(response);
+    return responseObject(response, 'share');
 }
 function normalizeDownloadFilter(response) {
-    const object = responseObject(response);
+    const object = responseObject(response, 'download filter');
     const rawTerms = Array.isArray(object.exclude)
         ? object.exclude
         : Array.isArray(object.terms)
             ? object.terms
-            : [];
+            : undefined;
+    if (!rawTerms || rawTerms.some((term) => typeof term !== 'string')) {
+        throw new errors_1.ResponseContractError('download filter');
+    }
+    const terms = rawTerms;
     return {
         ...object,
-        exclude: rawTerms.filter((term) => typeof term === 'string'),
+        exclude: terms,
         ...(typeof object.maxTerms === 'number' ? { maxTerms: object.maxTerms } : {}),
         ...(typeof object.maxTermLength === 'number' ? { maxTermLength: object.maxTermLength } : {}),
     };
 }
 function normalizeCacheStats(response) {
-    const object = responseObject(response);
+    const object = responseObject(response, 'cache stats');
+    const numericFields = [
+        'totalRetrievals',
+        'cacheHits',
+        'cacheMisses',
+        'cacheHitRatio',
+        'expiredEntriesCleaned',
+    ];
+    if (numericFields.some((field) => (typeof object[field] !== 'number' || !Number.isFinite(object[field])))) {
+        throw new errors_1.ResponseContractError('cache stats');
+    }
     const hits = typeof object.cacheHits === 'number' ? object.cacheHits : 0;
     const misses = typeof object.cacheMisses === 'number' ? object.cacheMisses : 0;
     const total_requests = typeof object.totalRetrievals === 'number'
@@ -370,25 +425,25 @@ class SlskrClient {
     // Health & Version
     // =========================================================================
     async health() {
-        return this.get('/api/health', {});
+        return requiredObject(await this.get('/api/health', {}), 'health');
     }
     async version() {
-        return this.get('/api/version', {});
+        return requiredObject(await this.get('/api/version', {}), 'version');
     }
     // =========================================================================
     // Configuration
     // =========================================================================
     async getConfig() {
-        return this.getAuth('/api/config');
+        return requiredObject(await this.getAuth('/api/config'), 'configuration');
     }
     async getStats() {
-        return this.getAuth('/api/stats');
+        return requiredObject(await this.getAuth('/api/stats'), 'statistics');
     }
     // =========================================================================
     // Capabilities
     // =========================================================================
     async getCapabilities() {
-        return this.get('/api/capabilities', {});
+        return requiredObject(await this.get('/api/capabilities', {}), 'capabilities');
     }
     // =========================================================================
     // Sessions
@@ -411,9 +466,12 @@ class SlskrClient {
     }
     async pingSession(_id) {
         const started = Date.now();
-        const response = await this.postAuth('/api/session/ping', {});
+        const response = requiredObject(await this.postAuth('/api/session/ping', {}), 'session ping');
+        if (typeof response.accepted !== 'boolean') {
+            throw new errors_1.ResponseContractError('session ping');
+        }
         return {
-            status: response?.accepted ? 'accepted' : 'unknown',
+            status: response.accepted ? 'accepted' : 'unknown',
             latency_ms: Date.now() - started,
         };
     }
@@ -422,7 +480,7 @@ class SlskrClient {
     }
     async getSessionPrivileges(_id) {
         await this.postAuth('/api/session/privileges/check', {});
-        const snapshot = responseObject(await this.getAuth('/api/session'));
+        const snapshot = responseObject(await this.getAuth('/api/session'), 'session');
         const seconds = typeof snapshot.privileges_seconds === 'number'
             ? snapshot.privileges_seconds
             : 0;
@@ -436,7 +494,7 @@ class SlskrClient {
     // =========================================================================
     async listUsers(params) {
         const response = await this.getAuth('/api/users', params);
-        return responseList(response, 'users', 'entries').map(normalizeUser);
+        return responseList(response, 'users', 'users', 'entries').map(normalizeUser);
     }
     async getUser(username) {
         return normalizeUserInfo(await this.getAuth(`/api/users/${this.pathSegment(username)}/info`), username);
@@ -446,7 +504,7 @@ class SlskrClient {
     // =========================================================================
     async listSearches(params) {
         const response = await this.getAuth('/api/searches', params);
-        return responseList(response, 'searches', 'entries').map(normalizeSearch);
+        return responseList(response, 'searches', 'searches', 'entries').map(normalizeSearch);
     }
     async createSearch(request) {
         return normalizeSearch(await this.postAuth('/api/searches', request));
@@ -459,11 +517,11 @@ class SlskrClient {
     // =========================================================================
     async listMessages(params) {
         const response = await this.getAuth('/api/messages', params);
-        return responseList(response, 'messages', 'entries').map(normalizeMessage);
+        return responseList(response, 'messages', 'messages', 'entries').map(normalizeMessage);
     }
     async getUserMessages(username, params) {
         const response = await this.getAuth(`/api/messages/${this.pathSegment(username)}`, params);
-        return responseList(response, 'messages', 'entries').map(normalizeMessage);
+        return responseList(response, 'messages', 'messages', 'entries').map(normalizeMessage);
     }
     async sendMessage(request) {
         return normalizeMessage(await this.postAuth('/api/messages', {
@@ -485,7 +543,7 @@ class SlskrClient {
                 : {}),
         };
         const response = await this.getAuth('/api/transfers', query);
-        return responseList(response, 'transfers', 'entries').map(normalizeTransfer);
+        return responseList(response, 'transfers', 'transfers', 'entries').map(normalizeTransfer);
     }
     async createTransfer(request) {
         return normalizeTransfer(await this.postAuth('/api/transfers', {
@@ -504,7 +562,7 @@ class SlskrClient {
     // =========================================================================
     async listRooms(params) {
         const response = await this.getAuth('/api/rooms', params);
-        return responseList(response, 'rooms', 'entries').map(normalizeRoom);
+        return responseList(response, 'rooms', 'rooms', 'entries').map(normalizeRoom);
     }
     async getRoom(name) {
         return normalizeRoom(await this.getAuth(`/api/rooms/${this.pathSegment(name)}`));
@@ -520,10 +578,10 @@ class SlskrClient {
     // =========================================================================
     async listShares(params) {
         const response = await this.getAuth('/api/shares', params);
-        return responseList(response, 'shares', 'local', 'entries').map(normalizeShare);
+        return responseList(response, 'shares', 'shares', 'local', 'entries').map(normalizeShare);
     }
     async refreshShares() {
-        return this.postAuth('/api/shares/rescan', {});
+        return requiredObject(await this.postAuth('/api/shares/rescan', {}), 'share rescan');
     }
     async getFilters() {
         return normalizeDownloadFilter(await this.getAuth('/api/config/download-filter'));
@@ -547,7 +605,7 @@ class SlskrClient {
     }
     async getBrowseRequests(params) {
         const response = await this.getAuth('/api/browse/requests', params);
-        return responseList(response, 'requests', 'entries')
+        return responseList(response, 'browse requests', 'requests', 'entries')
             .map((request) => browseRequestFromResponse(request));
     }
     async respondToBrowseRequest(id, action, folder) {
@@ -572,7 +630,7 @@ class SlskrClient {
             ...(params.query ? { q: params.query } : {}),
         };
         const response = await this.getAuth('/api/events', query);
-        return responseList(response, 'events', 'entries').map(normalizeEvent);
+        return responseList(response, 'events', 'events', 'entries').map(normalizeEvent);
     }
     // =========================================================================
     // Cache
@@ -581,7 +639,7 @@ class SlskrClient {
         return normalizeCacheStats(await this.getAuth('/api/mediacore/retrieve/stats'));
     }
     async invalidateCache(keys = []) {
-        return this.postAuth('/api/mediacore/retrieve/cache/clear', { keys });
+        return requiredObject(await this.postAuth('/api/mediacore/retrieve/cache/clear', { keys }), 'cache invalidation');
     }
     // =========================================================================
     // HTTP Methods

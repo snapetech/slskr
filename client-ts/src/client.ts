@@ -30,32 +30,72 @@ import {
   PaginationParams,
   CacheStats,
 } from './types';
-import { ApiError, NetworkError, TimeoutError } from './errors';
+import {
+  ApiError,
+  NetworkError,
+  ResponseContractError,
+  TimeoutError,
+} from './errors';
 
 const MAX_HTTP_RESPONSE_BYTES = 8 * 1024 * 1024;
 const MAX_HTTP_ERROR_BYTES = 64 * 1024;
 const MAX_DATE_MILLISECONDS = 8_640_000_000_000_000;
 
-function responseList<T>(response: unknown, ...keys: string[]): T[] {
-  if (Array.isArray(response)) {
-    return response as T[];
-  }
-  if (response === null || typeof response !== 'object') {
-    return [];
-  }
-  const object = response as Record<string, unknown>;
-  for (const key of keys) {
-    if (Array.isArray(object[key])) {
-      return object[key] as T[];
-    }
-  }
-  return [];
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-function responseObject(response: unknown): Record<string, unknown> {
-  return response !== null && typeof response === 'object' && !Array.isArray(response)
-    ? response as Record<string, unknown>
-    : {};
+function responseList<T>(response: unknown, resource: string, ...keys: string[]): T[] {
+  let entries: unknown[] | undefined;
+  if (Array.isArray(response)) {
+    entries = response;
+  } else if (isRecord(response)) {
+    for (const key of keys) {
+      if (Array.isArray(response[key])) {
+        entries = response[key];
+        break;
+      }
+    }
+  }
+  if (!entries || entries.some((entry) => !isRecord(entry))) {
+    throw new ResponseContractError(resource);
+  }
+  return entries as T[];
+}
+
+function responseObject(response: unknown, resource = 'object'): Record<string, unknown> {
+  if (!isRecord(response)) {
+    throw new ResponseContractError(resource);
+  }
+  return response;
+}
+
+function requiredObject<T>(response: unknown, resource: string): T {
+  return responseObject(response, resource) as T;
+}
+
+function requiredIdentifier(
+  object: Record<string, unknown>,
+  resource: string,
+  ...keys: string[]
+): string {
+  for (const key of keys) {
+    const value = object[key];
+    if (typeof value === 'string' && value.trim() !== '') {
+      return value;
+    }
+    if (typeof value === 'number' && Number.isSafeInteger(value)) {
+      return String(value);
+    }
+  }
+  throw new ResponseContractError(resource);
+}
+
+function requiredText(value: unknown, resource: string): string {
+  if (typeof value !== 'string' || value.trim() === '') {
+    throw new ResponseContractError(resource);
+  }
+  return value;
 }
 
 function numberValue(value: unknown, fallback = 0): number {
@@ -102,7 +142,7 @@ function normalizeSearchStatus(value: unknown): Search['status'] {
 }
 
 function normalizeSearchResult(response: unknown): SearchDetails['results'][number] {
-  const object = responseObject(response);
+  const object = responseObject(response, 'search result');
   return {
     ...object,
     username: String(object.username ?? object.peer_username ?? ''),
@@ -118,11 +158,11 @@ function normalizeSearchResult(response: unknown): SearchDetails['results'][numb
 }
 
 function normalizeSearch(response: unknown): Search {
-  const object = responseObject(response);
+  const object = responseObject(response, 'search');
   const results = Array.isArray(object.results) ? object.results : [];
   return {
     ...object,
-    id: String(object.id ?? object.searchId ?? object.token ?? ''),
+    id: requiredIdentifier(object, 'search', 'id', 'searchId', 'token'),
     query: String(object.query ?? object.searchText ?? ''),
     status: normalizeSearchStatus(object.status ?? object.state),
     results_count: numberValue(
@@ -134,7 +174,7 @@ function normalizeSearch(response: unknown): Search {
 }
 
 function normalizeSearchDetails(response: unknown): SearchDetails {
-  const object = responseObject(response);
+  const object = responseObject(response, 'search details');
   return {
     ...normalizeSearch(response),
     results: Array.isArray(object.results)
@@ -144,10 +184,10 @@ function normalizeSearchDetails(response: unknown): SearchDetails {
 }
 
 function normalizeMessage(response: unknown): Message {
-  const object = responseObject(response);
+  const object = responseObject(response, 'message');
   return {
     ...object,
-    id: String(object.id ?? ''),
+    id: requiredIdentifier(object, 'message', 'id'),
     sender: String(object.sender ?? object.username ?? ''),
     content: String(object.content ?? object.body ?? object.message ?? ''),
     timestamp: normalizeTimestamp(object.timestamp ?? object.created_at ?? object.createdAtMs),
@@ -174,14 +214,14 @@ function normalizeTransferStatus(value: unknown): Transfer['status'] {
 }
 
 function normalizeTransfer(response: unknown): Transfer {
-  const object = responseObject(response);
+  const object = responseObject(response, 'transfer');
   const direction = object.direction === 1
     || String(object.direction ?? '').toLowerCase() === 'upload'
     ? 'upload'
     : 'download';
   return {
     ...object,
-    id: String(object.id ?? ''),
+    id: requiredIdentifier(object, 'transfer', 'id'),
     direction,
     status: normalizeTransferStatus(object.status),
     peer_username: String(object.peer_username ?? object.username ?? ''),
@@ -192,7 +232,8 @@ function normalizeTransfer(response: unknown): Transfer {
 }
 
 function normalizeEvent(response: unknown): Event {
-  const object = responseObject(response);
+  const object = responseObject(response, 'event');
+  const type = requiredText(object.type ?? object.kind, 'event');
   let data: unknown = object.data;
   if (typeof data === 'string') {
     try {
@@ -208,25 +249,26 @@ function normalizeEvent(response: unknown): Event {
   }
   return {
     ...object,
-    id: String(object.id ?? ''),
-    type: String(object.type ?? object.kind ?? 'events') as Event['type'],
+    id: requiredIdentifier(object, 'event', 'id'),
+    type: type as Event['type'],
     data: data as Record<string, any>,
     timestamp: normalizeTimestamp(object.timestamp ?? object.created_at),
   };
 }
 
 function sessionFromSnapshot(response: unknown): Session {
-  const snapshot = responseObject(response);
-  const state = typeof snapshot.state === 'string' ? snapshot.state : 'disconnected';
+  const snapshot = responseObject(response, 'session');
+  const rawState = snapshot.state ?? snapshot.status;
   const statuses: Session['status'][] = [
     'connecting',
     'connected',
     'disconnecting',
     'disconnected',
   ];
-  const status = statuses.includes(state as Session['status'])
-    ? state as Session['status']
-    : 'disconnected';
+  if (typeof rawState !== 'string' || !statuses.includes(rawState as Session['status'])) {
+    throw new ResponseContractError('session');
+  }
+  const status = rawState as Session['status'];
   const connectedAt = snapshot.connected_at;
   const normalizedConnectedAt = normalizeEpochSeconds(connectedAt);
   return {
@@ -253,7 +295,8 @@ function normalizeBrowseStatus(value: unknown): BrowseRequest['status'] {
 }
 
 function normalizeRoom(response: unknown): Room {
-  const object = responseObject(response);
+  const object = responseObject(response, 'room');
+  const name = requiredText(object.name ?? object.room, 'room');
   const rawUsers = Array.isArray(object.users)
     ? object.users
     : Array.isArray(object.members)
@@ -262,7 +305,7 @@ function normalizeRoom(response: unknown): Room {
   const users = rawUsers?.filter((user): user is string => typeof user === 'string');
   return {
     ...object,
-    name: String(object.name ?? object.room ?? ''),
+    name,
     user_count: numberValue(
       object.user_count ?? object.userCount ?? object.memberCount,
       users?.length ?? 0,
@@ -276,10 +319,10 @@ function nullableNumber(value: unknown): number | null {
 }
 
 function normalizeUser(response: unknown): User {
-  const object = responseObject(response);
+  const object = responseObject(response, 'user');
   return {
     ...object,
-    username: String(object.username ?? ''),
+    username: requiredText(object.username, 'user'),
     watched: object.watched === true,
     status: typeof object.status === 'string' ? object.status : null,
     average_speed: nullableNumber(object.average_speed ?? object.averageSpeed),
@@ -291,7 +334,7 @@ function normalizeUser(response: unknown): User {
 }
 
 function normalizeUserInfo(response: unknown, fallbackUsername: string): UserInfo {
-  const object = responseObject(response);
+  const object = responseObject(response, 'user info');
   const picture = object.picture;
   return {
     ...object,
@@ -310,8 +353,11 @@ function normalizeUserInfo(response: unknown, fallbackUsername: string): UserInf
 }
 
 function browseRequestFromResponse(response: unknown, fallbackUsername = ''): BrowseRequest {
-  const object = responseObject(response);
-  const username = String(object.username ?? object.from ?? fallbackUsername);
+  const object = responseObject(response, 'browse request');
+  const username = requiredText(
+    object.username ?? object.from ?? object.id ?? fallbackUsername,
+    'browse request',
+  );
   const requestedAt = object.requested_at ?? object.requestedAt;
   const requested_at = normalizeEpochSeconds(requestedAt);
   return {
@@ -323,25 +369,34 @@ function browseRequestFromResponse(response: unknown, fallbackUsername = ''): Br
 }
 
 function normalizeBrowseResult(response: unknown): BrowseResult {
-  const object = responseObject(response);
-  const directEntries = Array.isArray(object.entries)
-    ? object.entries.filter((entry): entry is BrowseEntry => entry !== null && typeof entry === 'object')
-    : [];
+  const object = responseObject(response, 'browse result');
+  const hasEntries = Array.isArray(object.entries);
+  const hasDirectories = Array.isArray(object.directories);
+  if (!hasEntries && !hasDirectories) {
+    throw new ResponseContractError('browse result');
+  }
+  const rawEntries = hasEntries ? object.entries as unknown[] : [];
+  const directEntries = rawEntries.filter((entry): entry is BrowseEntry => isRecord(entry));
+  if (hasEntries && directEntries.length !== rawEntries.length) {
+    throw new ResponseContractError('browse result');
+  }
   if (directEntries.length > 0 || Array.isArray(object.entries)) {
     return {
       entries: directEntries,
       ...(typeof object.folder === 'string' ? { folder: object.folder } : {}),
     };
   }
-  const directories = Array.isArray(object.directories) ? object.directories : [];
+  const directories = hasDirectories ? object.directories as unknown[] : [];
+  if (directories.some((directory) => !isRecord(directory))) {
+    throw new ResponseContractError('browse result');
+  }
   const entries = directories.flatMap((directory) => {
-    if (directory === null || typeof directory !== 'object') {
-      return [];
-    }
     const files = (directory as Record<string, unknown>).files;
-    return Array.isArray(files)
-      ? files.filter((entry): entry is BrowseEntry => entry !== null && typeof entry === 'object')
-      : [];
+    if (!Array.isArray(files)) return [];
+    if (files.some((entry) => !isRecord(entry))) {
+      throw new ResponseContractError('browse result');
+    }
+    return files as BrowseEntry[];
   });
   return {
     entries,
@@ -350,26 +405,42 @@ function normalizeBrowseResult(response: unknown): BrowseResult {
 }
 
 function normalizeShare(response: unknown): Share {
-  return responseObject(response);
+  return responseObject(response, 'share');
 }
 
 function normalizeDownloadFilter(response: unknown): DownloadFilter {
-  const object = responseObject(response);
+  const object = responseObject(response, 'download filter');
   const rawTerms = Array.isArray(object.exclude)
     ? object.exclude
     : Array.isArray(object.terms)
       ? object.terms
-      : [];
+      : undefined;
+  if (!rawTerms || rawTerms.some((term) => typeof term !== 'string')) {
+    throw new ResponseContractError('download filter');
+  }
+  const terms = rawTerms as string[];
   return {
     ...object,
-    exclude: rawTerms.filter((term): term is string => typeof term === 'string'),
+    exclude: terms,
     ...(typeof object.maxTerms === 'number' ? { maxTerms: object.maxTerms } : {}),
     ...(typeof object.maxTermLength === 'number' ? { maxTermLength: object.maxTermLength } : {}),
   };
 }
 
 function normalizeCacheStats(response: unknown): CacheStats {
-  const object = responseObject(response);
+  const object = responseObject(response, 'cache stats');
+  const numericFields = [
+    'totalRetrievals',
+    'cacheHits',
+    'cacheMisses',
+    'cacheHitRatio',
+    'expiredEntriesCleaned',
+  ];
+  if (numericFields.some((field) => (
+    typeof object[field] !== 'number' || !Number.isFinite(object[field])
+  ))) {
+    throw new ResponseContractError('cache stats');
+  }
   const hits = typeof object.cacheHits === 'number' ? object.cacheHits : 0;
   const misses = typeof object.cacheMisses === 'number' ? object.cacheMisses : 0;
   const total_requests = typeof object.totalRetrievals === 'number'
@@ -437,11 +508,11 @@ export class SlskrClient {
   // =========================================================================
 
   async health(): Promise<HealthStatus> {
-    return this.get<HealthStatus>('/api/health', {});
+    return requiredObject<HealthStatus>(await this.get<unknown>('/api/health', {}), 'health');
   }
 
   async version(): Promise<VersionInfo> {
-    return this.get<VersionInfo>('/api/version', {});
+    return requiredObject<VersionInfo>(await this.get<unknown>('/api/version', {}), 'version');
   }
 
   // =========================================================================
@@ -449,11 +520,11 @@ export class SlskrClient {
   // =========================================================================
 
   async getConfig(): Promise<Configuration> {
-    return this.getAuth<Configuration>('/api/config');
+    return requiredObject<Configuration>(await this.getAuth<unknown>('/api/config'), 'configuration');
   }
 
   async getStats(): Promise<Statistics> {
-    return this.getAuth<Statistics>('/api/stats');
+    return requiredObject<Statistics>(await this.getAuth<unknown>('/api/stats'), 'statistics');
   }
 
   // =========================================================================
@@ -461,7 +532,10 @@ export class SlskrClient {
   // =========================================================================
 
   async getCapabilities(): Promise<Capabilities> {
-    return this.get<Capabilities>('/api/capabilities', {});
+    return requiredObject<Capabilities>(
+      await this.get<unknown>('/api/capabilities', {}),
+      'capabilities',
+    );
   }
 
   // =========================================================================
@@ -487,9 +561,15 @@ export class SlskrClient {
 
   async pingSession(_id: string): Promise<{ status: string; latency_ms: number }> {
     const started = Date.now();
-    const response = await this.postAuth<{ accepted?: boolean }>('/api/session/ping', {});
+    const response = requiredObject<{ accepted?: unknown }>(
+      await this.postAuth<unknown>('/api/session/ping', {}),
+      'session ping',
+    );
+    if (typeof response.accepted !== 'boolean') {
+      throw new ResponseContractError('session ping');
+    }
     return {
-      status: response?.accepted ? 'accepted' : 'unknown',
+      status: response.accepted ? 'accepted' : 'unknown',
       latency_ms: Date.now() - started,
     };
   }
@@ -500,7 +580,7 @@ export class SlskrClient {
 
   async getSessionPrivileges(_id: string): Promise<SessionPrivileges> {
     await this.postAuth('/api/session/privileges/check', {});
-    const snapshot = responseObject(await this.getAuth<unknown>('/api/session'));
+    const snapshot = responseObject(await this.getAuth<unknown>('/api/session'), 'session');
     const seconds = typeof snapshot.privileges_seconds === 'number'
       ? snapshot.privileges_seconds
       : 0;
@@ -516,7 +596,7 @@ export class SlskrClient {
 
   async listUsers(params?: PaginationParams): Promise<User[]> {
     const response = await this.getAuth<unknown>('/api/users', params);
-    return responseList<unknown>(response, 'users', 'entries').map(normalizeUser);
+    return responseList<unknown>(response, 'users', 'users', 'entries').map(normalizeUser);
   }
 
   async getUser(username: string): Promise<UserInfo> {
@@ -532,7 +612,7 @@ export class SlskrClient {
 
   async listSearches(params?: PaginationParams): Promise<Search[]> {
     const response = await this.getAuth<unknown>('/api/searches', params);
-    return responseList<unknown>(response, 'searches', 'entries').map(normalizeSearch);
+    return responseList<unknown>(response, 'searches', 'searches', 'entries').map(normalizeSearch);
   }
 
   async createSearch(request: SearchCreateRequest): Promise<Search> {
@@ -549,7 +629,7 @@ export class SlskrClient {
 
   async listMessages(params?: PaginationParams): Promise<Message[]> {
     const response = await this.getAuth<unknown>('/api/messages', params);
-    return responseList<unknown>(response, 'messages', 'entries').map(normalizeMessage);
+    return responseList<unknown>(response, 'messages', 'messages', 'entries').map(normalizeMessage);
   }
 
   async getUserMessages(username: string, params?: PaginationParams): Promise<Message[]> {
@@ -557,7 +637,7 @@ export class SlskrClient {
       `/api/messages/${this.pathSegment(username)}`,
       params
     );
-    return responseList<unknown>(response, 'messages', 'entries').map(normalizeMessage);
+    return responseList<unknown>(response, 'messages', 'messages', 'entries').map(normalizeMessage);
   }
 
   async sendMessage(request: MessageSendRequest): Promise<Message> {
@@ -586,7 +666,7 @@ export class SlskrClient {
         : {}),
     };
     const response = await this.getAuth<unknown>('/api/transfers', query);
-    return responseList<unknown>(response, 'transfers', 'entries').map(normalizeTransfer);
+    return responseList<unknown>(response, 'transfers', 'transfers', 'entries').map(normalizeTransfer);
   }
 
   async createTransfer(request: TransferCreateRequest): Promise<Transfer> {
@@ -610,7 +690,7 @@ export class SlskrClient {
 
   async listRooms(params?: PaginationParams): Promise<Room[]> {
     const response = await this.getAuth<unknown>('/api/rooms', params);
-    return responseList<unknown>(response, 'rooms', 'entries').map(normalizeRoom);
+    return responseList<unknown>(response, 'rooms', 'rooms', 'entries').map(normalizeRoom);
   }
 
   async getRoom(name: string): Promise<Room> {
@@ -633,11 +713,14 @@ export class SlskrClient {
 
   async listShares(params?: PaginationParams): Promise<Share[]> {
     const response = await this.getAuth<unknown>('/api/shares', params);
-    return responseList<unknown>(response, 'shares', 'local', 'entries').map(normalizeShare);
+    return responseList<unknown>(response, 'shares', 'shares', 'local', 'entries').map(normalizeShare);
   }
 
   async refreshShares(): Promise<Record<string, unknown>> {
-    return this.postAuth<Record<string, unknown>>('/api/shares/rescan', {});
+    return requiredObject<Record<string, unknown>>(
+      await this.postAuth<unknown>('/api/shares/rescan', {}),
+      'share rescan',
+    );
   }
 
   async getFilters(): Promise<DownloadFilter> {
@@ -672,7 +755,7 @@ export class SlskrClient {
 
   async getBrowseRequests(params?: { status?: string } & PaginationParams): Promise<BrowseRequest[]> {
     const response = await this.getAuth<unknown>('/api/browse/requests', params);
-    return responseList<unknown>(response, 'requests', 'entries')
+    return responseList<unknown>(response, 'browse requests', 'requests', 'entries')
       .map((request) => browseRequestFromResponse(request));
   }
 
@@ -706,7 +789,7 @@ export class SlskrClient {
       ...(params.query ? { q: params.query } : {}),
     };
     const response = await this.getAuth<unknown>('/api/events', query);
-    return responseList<unknown>(response, 'events', 'entries').map(normalizeEvent);
+    return responseList<unknown>(response, 'events', 'events', 'entries').map(normalizeEvent);
   }
 
   // =========================================================================
@@ -718,7 +801,10 @@ export class SlskrClient {
   }
 
   async invalidateCache(keys: string[] = []): Promise<Record<string, unknown>> {
-    return this.postAuth<Record<string, unknown>>('/api/mediacore/retrieve/cache/clear', { keys });
+    return requiredObject<Record<string, unknown>>(
+      await this.postAuth<unknown>('/api/mediacore/retrieve/cache/clear', { keys }),
+      'cache invalidation',
+    );
   }
 
   // =========================================================================

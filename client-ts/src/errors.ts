@@ -47,6 +47,14 @@ export class NetworkError extends Error {
   }
 }
 
+export class ResponseContractError extends NetworkError {
+  constructor(resource: string) {
+    super(`API returned an invalid ${resource} response`);
+    this.name = 'ResponseContractError';
+    Object.setPrototypeOf(this, ResponseContractError.prototype);
+  }
+}
+
 export class TimeoutError extends Error {
   constructor(message: string = 'Request timeout') {
     super(message);

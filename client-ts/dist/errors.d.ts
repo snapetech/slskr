@@ -17,6 +17,9 @@ export declare class NetworkError extends Error {
     cause?: Error | undefined;
     constructor(message: string, cause?: Error | undefined);
 }
+export declare class ResponseContractError extends NetworkError {
+    constructor(resource: string);
+}
 export declare class TimeoutError extends Error {
     constructor(message?: string);
 }

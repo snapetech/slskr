@@ -3,7 +3,7 @@
  * Error classes for slskr API client
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.NotImplementedError = exports.ValidationError = exports.TimeoutError = exports.NetworkError = exports.ApiError = void 0;
+exports.NotImplementedError = exports.ValidationError = exports.TimeoutError = exports.ResponseContractError = exports.NetworkError = exports.ApiError = void 0;
 class ApiError extends Error {
     constructor(status, code, message, details) {
         super(message || `API Error: ${code}`);
@@ -42,6 +42,14 @@ class NetworkError extends Error {
     }
 }
 exports.NetworkError = NetworkError;
+class ResponseContractError extends NetworkError {
+    constructor(resource) {
+        super(`API returned an invalid ${resource} response`);
+        this.name = 'ResponseContractError';
+        Object.setPrototypeOf(this, ResponseContractError.prototype);
+    }
+}
+exports.ResponseContractError = ResponseContractError;
 class TimeoutError extends Error {
     constructor(message = 'Request timeout') {
         super(message);

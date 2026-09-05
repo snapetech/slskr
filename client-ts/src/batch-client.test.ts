@@ -107,4 +107,17 @@ describe('Batch operation limits', () => {
     ])).rejects.toThrow('duplicate operation ID');
     expect(postAuth).not.toHaveBeenCalled();
   });
+
+  it('rejects malformed batch response envelopes', async () => {
+    const { client, postAuth } = mockClient();
+    const batch = new BatchClient(client);
+    postAuth.mockResolvedValue({ results: [{ id: 'op-1', status: 200 }] });
+
+    await expect(batch.execute([
+      { id: 'op-1', method: 'GET', path: '/api/health' },
+    ])).rejects.toMatchObject({
+      name: 'ResponseContractError',
+      message: 'API returned an invalid batch response',
+    });
+  });
 });

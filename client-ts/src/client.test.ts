@@ -1,5 +1,5 @@
 import { SlskrClient } from './client';
-import { ApiError, NetworkError } from './errors';
+import { ApiError, NetworkError, ResponseContractError } from './errors';
 
 describe('SlskrClient request lifecycle', () => {
   it('validates and normalizes the REST base URL', () => {
@@ -185,6 +185,33 @@ describe('SlskrClient request lifecycle', () => {
     await expect(client.health()).rejects.toBeInstanceOf(ApiError);
   });
 
+  it('rejects malformed successful response contracts instead of fabricating defaults', async () => {
+    const cases: Array<[string, (client: SlskrClient) => Promise<unknown>, unknown]> = [
+      ['health', (client) => client.health(), []],
+      ['users', (client) => client.listUsers(), {}],
+      ['session', (client) => client.getSessions(), { state: 'unknown' }],
+      ['search', (client) => client.createSearch({ query: 'ambient' }), { query: 'ambient' }],
+      ['event', (client) => client.getEvents(), [{ type: 'message' }]],
+      ['download filter', (client) => client.getFilters(), {}],
+      ['browse result', (client) => client.browseUser('alice'), {}],
+      ['cache stats', (client) => client.getCacheStats(), {}],
+    ];
+
+    for (const [resource, invoke, payload] of cases) {
+      global.fetch = jest.fn().mockResolvedValue(new Response(JSON.stringify(payload), { status: 200 }));
+      const client = new SlskrClient({
+        baseUrl: 'http://localhost:8080',
+        token: 'test-token',
+        retries: 0,
+      });
+
+      await expect(invoke(client)).rejects.toMatchObject({
+        name: ResponseContractError.name,
+        message: `API returned an invalid ${resource} response`,
+      });
+    }
+  });
+
   it('bounds streamed responses without a content length', async () => {
     const chunk = new Uint8Array(8 * 1024 * 1024 + 1);
     global.fetch = jest.fn().mockResolvedValue(new Response(new ReadableStream({
@@ -295,7 +322,7 @@ describe('SlskrClient request lifecycle', () => {
         return new Response('{"exclude":["private"],"maxTerms":100}', { status: 200 });
       }
       if (parsed.pathname === '/api/events') {
-        return new Response('[{"type":"message"}]', { status: 200 });
+        return new Response('[{"id":"event-1","type":"message"}]', { status: 200 });
       }
       return new Response('{}', { status: 200 });
     });

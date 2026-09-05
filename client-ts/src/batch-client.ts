@@ -4,6 +4,7 @@
 
 import { BatchOperation, BatchRequest, BatchResponse, BatchResult } from './types';
 import { SlskrClient } from './client';
+import { ResponseContractError } from './errors';
 
 type BatchCapableClient = {
   postAuth<T>(path: string, body: unknown): Promise<T>;
@@ -40,6 +41,31 @@ function validateBatchOperationIds(operations: BatchOperation[]): void {
   }
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function parseBatchResponse(response: unknown): BatchResponse {
+  if (!isRecord(response) || !Array.isArray(response.results)) {
+    throw new ResponseContractError('batch');
+  }
+  for (const result of response.results) {
+    if (
+      !isRecord(result)
+      || typeof result.id !== 'string'
+      || result.id.trim() === ''
+      || typeof result.status !== 'number'
+      || !Number.isSafeInteger(result.status)
+      || result.status < 100
+      || result.status > 599
+      || !Object.prototype.hasOwnProperty.call(result, 'body')
+    ) {
+      throw new ResponseContractError('batch');
+    }
+  }
+  return response as unknown as BatchResponse;
+}
+
 export class BatchClient {
   constructor(private client: SlskrClient) {}
 
@@ -67,7 +93,9 @@ export class BatchClient {
     const request: BatchRequest = { operations: operations.map(cloneOperation) };
     
     // Use internal client method to make the request
-    return (this.client as unknown as BatchCapableClient).postAuth<BatchResponse>('/api/batch', request);
+    return parseBatchResponse(
+      await (this.client as unknown as BatchCapableClient).postAuth<unknown>('/api/batch', request),
+    );
   }
 
   /**
@@ -203,7 +231,9 @@ export class BatchBuilder {
     validateBatchOperationIds(this.operations);
 
     const request: BatchRequest = { operations: this.operations.map(cloneOperation) };
-    return (this.client as unknown as BatchCapableClient).postAuth<BatchResponse>('/api/batch', request);
+    return parseBatchResponse(
+      await (this.client as unknown as BatchCapableClient).postAuth<unknown>('/api/batch', request),
+    );
   }
 
   /**
