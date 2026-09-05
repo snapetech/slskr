@@ -180,7 +180,6 @@ export default class Collections extends Component {
       if (this.isMountedFlag && requestId === this.requestIds.shares) {
         this.setState({
           sharesError: toDisplayError(error, 'Failed to load collection shares'),
-          shares: [],
         });
       }
     }
@@ -209,7 +208,6 @@ export default class Collections extends Component {
       ) {
         this.setState({
           collectionItemsError: toDisplayError(error, 'Failed to load collection items'),
-          selectedCollectionItems: [],
         });
       }
     }
@@ -312,13 +310,18 @@ export default class Collections extends Component {
   handleSelectCollection = async (collection) => {
     const selectionId = ++this.requestIds.selection;
     if (!this.isMountedFlag) return;
-    this.setState({
-      error: null,
-      selectedCollection: collection,
-      collectionItemsError: null,
-      selectedCollectionItems: [],
-      shares: [],
-      sharesError: null,
+    this.setState((previousState) => {
+      const sameCollection = previousState.selectedCollection?.id === collection.id;
+      return {
+        error: null,
+        selectedCollection: collection,
+        collectionItemsError: null,
+        selectedCollectionItems: sameCollection
+          ? previousState.selectedCollectionItems
+          : [],
+        shares: sameCollection ? previousState.shares : [],
+        sharesError: null,
+      };
     });
     await this.loadCollectionItems(collection.id);
     if (
@@ -737,16 +740,22 @@ export default class Collections extends Component {
               </div>
 
               <div data-testid="collection-items-table">
-                {collectionItemsError ? (
+                {collectionItemsError && (
                   <Message
                     data-testid="collection-items-load-error"
                     error
                   >
                     <Message.Header>Collection items unavailable</Message.Header>
                     <p>{collectionItemsError}</p>
+                    {selectedCollectionItems.length > 0 && (
+                      <p>Showing the last successfully loaded collection items.</p>
+                    )}
                   </Message>
-                ) : selectedCollectionItems.length === 0 ? (
+                )}
+                {selectedCollectionItems.length === 0 ? (
+                  collectionItemsError ? null : (
                   <Message info>No items in this collection yet.</Message>
+                  )
                 ) : (
                   <Table>
                     <Table.Header>
@@ -803,9 +812,15 @@ export default class Collections extends Component {
                   >
                     <Message.Header>Collection shares unavailable</Message.Header>
                     <p>{sharesError}</p>
+                    {collectionShares.length > 0 && (
+                      <p>Showing the last successfully loaded collection shares.</p>
+                    )}
                   </Message>
-                ) : collectionShares.length === 0 ? (
+                ) : null}
+                {collectionShares.length === 0 ? (
+                  sharesError ? null : (
                   <Message info>No shares yet.</Message>
+                  )
                 ) : (
                   <Table>
                     <Table.Header>

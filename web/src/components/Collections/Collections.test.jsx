@@ -9,6 +9,7 @@ vi.mock('../../lib/collections', () => ({
   getCollections: vi.fn(),
   getSharesByCollection: vi.fn(),
   getShareGroups: vi.fn(),
+  shareGrantAllows: vi.fn(() => false),
 }));
 
 describe('Collections', () => {
@@ -70,6 +71,56 @@ describe('Collections', () => {
       'Collection share service unavailable',
     );
     expect(screen.getByText('Collection shares unavailable')).toBeInTheDocument();
+    expect(screen.queryByText('No shares yet.')).not.toBeInTheDocument();
+  });
+
+  it('retains collection items when a refresh fails', async () => {
+    collectionsAPI.getCollections.mockResolvedValue({
+      data: [{ id: 'collection-1', title: 'Test collection', type: 'Playlist' }],
+    });
+    collectionsAPI.getCollectionItems
+      .mockResolvedValueOnce({
+        data: [{ contentId: 'content-1', fileName: 'fixture.flac', id: 'item-1' }],
+      })
+      .mockRejectedValueOnce(new Error('Collection item refresh unavailable'));
+
+    render(<Collections />);
+
+    const collectionRow = await screen.findByTestId('collection-row-Test collection');
+    fireEvent.click(collectionRow);
+    expect(await screen.findByText('fixture.flac')).toBeInTheDocument();
+
+    fireEvent.click(collectionRow);
+
+    expect(await screen.findByTestId('collection-items-load-error')).toHaveTextContent(
+      'Collection item refresh unavailable',
+    );
+    expect(screen.getByText('fixture.flac')).toBeInTheDocument();
+    expect(screen.queryByText('No items in this collection yet.')).not.toBeInTheDocument();
+  });
+
+  it('retains collection shares when a refresh fails', async () => {
+    collectionsAPI.getCollections.mockResolvedValue({
+      data: [{ id: 'collection-1', title: 'Test collection', type: 'Playlist' }],
+    });
+    collectionsAPI.getSharesByCollection
+      .mockResolvedValueOnce({
+        data: [{ id: 'share-1', username: 'fixture-peer', permissions: 'stream' }],
+      })
+      .mockRejectedValueOnce(new Error('Collection share refresh unavailable'));
+
+    render(<Collections />);
+
+    const collectionRow = await screen.findByTestId('collection-row-Test collection');
+    fireEvent.click(collectionRow);
+    expect(await screen.findByText('fixture-peer')).toBeInTheDocument();
+
+    fireEvent.click(collectionRow);
+
+    expect(await screen.findByTestId('collection-shares-load-error')).toHaveTextContent(
+      'Collection share refresh unavailable',
+    );
+    expect(screen.getByText('fixture-peer')).toBeInTheDocument();
     expect(screen.queryByText('No shares yet.')).not.toBeInTheDocument();
   });
 });
