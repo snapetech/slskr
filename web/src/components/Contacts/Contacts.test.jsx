@@ -99,4 +99,30 @@ describe('Contacts', () => {
     expect(detect).toHaveBeenCalled();
     expect(close).toHaveBeenCalled();
   });
+
+  it('surfaces access failures instead of showing an empty contact list', async () => {
+    identityAPI.getContacts.mockRejectedValueOnce({
+      response: {
+        data: { message: 'Contacts access denied' },
+        status: 403,
+      },
+    });
+
+    renderContacts();
+
+    expect(await screen.findByText(/Contacts access denied/)).toBeInTheDocument();
+    expect(screen.getByText('Contacts unavailable')).toBeInTheDocument();
+    expect(screen.queryByText('No contacts yet')).not.toBeInTheDocument();
+  });
+
+  it('keeps a missing contacts route as a compatibility empty state', async () => {
+    identityAPI.getContacts.mockRejectedValueOnce({
+      response: { status: 404 },
+    });
+
+    renderContacts();
+
+    expect(await screen.findByText('No contacts yet')).toBeInTheDocument();
+    expect(screen.queryByText('Contacts unavailable')).not.toBeInTheDocument();
+  });
 });

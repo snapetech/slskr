@@ -61,6 +61,7 @@ class Contacts extends Component {
     activeTab: 0,
     addFriendModalOpen: false,
     contacts: [],
+    contactsError: null,
     createInviteModalOpen: false,
     error: null,
     inviteFriendCode: null,
@@ -100,29 +101,37 @@ class Contacts extends Component {
     const requestId = ++this.requestIds.contacts;
     try {
       if (this.isMountedFlag && requestId === this.requestIds.contacts) {
-        this.setState({ error: null, loading: true });
+        this.setState({ contactsError: null, error: null, loading: true });
       }
       const response = await identityAPI.getContacts();
       if (this.isMountedFlag && requestId === this.requestIds.contacts) {
         this.setState({
           contacts: asRecords(response?.data).map(normalizeContact),
+          contactsError: null,
           loading: false,
         });
       }
     } catch (error) {
-      // If 401/403/404, feature not enabled or not authenticated - return empty list
-      if (
-        error?.response?.status === 401 ||
-        error?.response?.status === 403 ||
-        error?.response?.status === 404
-      ) {
+      // A missing route is the only compatibility case. Authentication,
+      // authorization, and server failures must remain visible to the user.
+      if (error?.response?.status === 404) {
         if (this.isMountedFlag && requestId === this.requestIds.contacts) {
-          this.setState({ contacts: [], error: null, loading: false });
+          this.setState({
+            contacts: [],
+            contactsError: null,
+            error: null,
+            loading: false,
+          });
         }
       } else {
         if (this.isMountedFlag && requestId === this.requestIds.contacts) {
+          const contactsError = toDisplayError(
+            error,
+            'Failed to load contacts',
+          );
           this.setState({
-            error: toDisplayError(error, 'Failed to load contacts'),
+            contactsError,
+            error: contactsError,
             loading: false,
           });
         }
@@ -304,6 +313,7 @@ class Contacts extends Component {
       activeTab,
       addFriendModalOpen,
       contacts,
+      contactsError,
       createInviteModalOpen,
       error,
       inviteFriendCode,
@@ -322,6 +332,13 @@ class Contacts extends Component {
           <Tab.Pane>
             {loading ? (
               <LoaderSegment />
+            ) : contactsError && contacts.length === 0 ? (
+              <Segment placeholder>
+                <Header icon>
+                  <Icon name="users" />
+                  Contacts unavailable
+                </Header>
+              </Segment>
             ) : contacts.length === 0 ? (
               <Segment placeholder>
                 <Header icon>
