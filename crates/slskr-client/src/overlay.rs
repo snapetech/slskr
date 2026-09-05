@@ -912,6 +912,7 @@ where
                 "mesh_search_resp" => {
                     let response: MeshSearchResponseMessage = serde_json::from_slice(&payload)?;
                     response.validate()?;
+                    validate_mesh_search_response_limit(&response, request.max_results)?;
                     if response.request_id == request.request_id {
                         return Ok(response);
                     }
@@ -1219,6 +1220,18 @@ fn validate_service_field(field: &'static str, value: &str) -> Result<(), Overla
 
 fn valid_text_field(value: &str, max_bytes: usize) -> bool {
     !value.trim().is_empty() && value.len() <= max_bytes && !value.chars().any(char::is_control)
+}
+
+fn validate_mesh_search_response_limit(
+    response: &MeshSearchResponseMessage,
+    max_results: i32,
+) -> Result<(), OverlayError> {
+    let max_results = usize::try_from(max_results)
+        .map_err(|_| OverlayError::InvalidMeshSearchResponse("max_results"))?;
+    if response.files.len() > max_results {
+        return Err(OverlayError::InvalidMeshSearchResponse("files"));
+    }
+    Ok(())
 }
 
 fn unix_seconds() -> Result<i64, OverlayError> {
@@ -1797,6 +1810,42 @@ mod tests {
             response,
             Err(OverlayError::InvalidMeshSearchResponse("file"))
         ));
+
+        let response = MeshSearchResponseMessage::new(
+            "00000000-0000-0000-0000-000000000001",
+            vec![
+                MeshSearchFileDto {
+                    filename: "first.flac".to_owned(),
+                    size: 1,
+                    extension: Some("flac".to_owned()),
+                    bitrate: None,
+                    duration: None,
+                    codec: None,
+                    media_kinds: None,
+                    content_id: None,
+                    hash: None,
+                },
+                MeshSearchFileDto {
+                    filename: "second.flac".to_owned(),
+                    size: 2,
+                    extension: Some("flac".to_owned()),
+                    bitrate: None,
+                    duration: None,
+                    codec: None,
+                    media_kinds: None,
+                    content_id: None,
+                    hash: None,
+                },
+            ],
+            false,
+            None,
+        )
+        .unwrap();
+        assert!(matches!(
+            validate_mesh_search_response_limit(&response, 1),
+            Err(OverlayError::InvalidMeshSearchResponse("files"))
+        ));
+        validate_mesh_search_response_limit(&response, 2).unwrap();
 
         let disconnect = Disconnect {
             magic: OVERLAY_MAGIC.to_owned(),
