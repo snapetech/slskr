@@ -1,7 +1,7 @@
 import '@testing-library/jest-dom';
 import CompatibilityDashboard from './CompatibilityDashboard';
 import React from 'react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -18,7 +18,13 @@ const searchCreate = vi.hoisted(() => vi.fn());
 
 vi.mock('../lib/reports', () => reportMocks);
 vi.mock('../lib/searches', () => ({ create: searchCreate }));
+vi.mock('uuid', () => ({ v4: () => 'bridge/search' }));
 vi.mock('react-toastify', () => ({ toast: { error: vi.fn(), info: vi.fn() } }));
+
+const LocationProbe = () => {
+  const location = useLocation();
+  return <output data-testid="location-path">{location.pathname}</output>;
+};
 
 describe('CompatibilityDashboard', () => {
   beforeEach(() => {
@@ -75,6 +81,25 @@ describe('CompatibilityDashboard', () => {
     await waitFor(() => {
       expect(searchCreate).toHaveBeenCalledWith(
         expect.objectContaining({ searchText: 'ambient' }),
+      );
+    });
+  });
+
+  it('encodes search IDs before opening result routes', async () => {
+    render(
+      <MemoryRouter>
+        <CompatibilityDashboard server={{ isConnected: true }} />
+        <LocationProbe />
+      </MemoryRouter>,
+    );
+
+    const input = await screen.findByPlaceholderText('Search phrase');
+    fireEvent.change(input, { target: { value: 'ambient' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Search and open results' }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('location-path')).toHaveTextContent(
+        '/searches/bridge%2Fsearch',
       );
     });
   });

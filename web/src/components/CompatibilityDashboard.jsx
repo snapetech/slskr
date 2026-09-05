@@ -1,5 +1,6 @@
 import './CompatibilityDashboard.css';
 import { toDisplayError } from '../lib/errors';
+import { encodePathSegment } from '../lib/pathEncoding';
 import * as reports from '../lib/reports';
 import * as searches from '../lib/searches';
 import { formatBytes, formatDate, formatSpeed, formatWait, getFileName, truncate } from '../lib/util';
@@ -186,7 +187,7 @@ const SearchBar = ({ server } = {}) => {
       if (!mountedRef.current) return;
       setSearchText('');
       if (navigateToResults) {
-        navigate(`/searches/${id}`);
+        navigate(`/searches/${encodePathSegment(id)}`);
       } else {
         const label = query.length > 30 ? `${query.slice(0, 15)}...` : query;
         toast.info(`Search for '${label}' started.`);
@@ -220,6 +221,7 @@ const SearchBar = ({ server } = {}) => {
               onClick={() => create()}
             />
             <Button
+              aria-label="Search and open results"
               disabled={!connected || creating || !searchText.trim()}
               icon="search"
               onClick={() => create({ navigateToResults: true })}
