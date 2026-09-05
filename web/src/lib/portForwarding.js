@@ -1,10 +1,11 @@
 import { urlBase } from '../config';
+import { fetchWithoutRedirects } from './http';
 import * as session from './session';
 
 const baseUrl = `${urlBase}/api/v0/port-forwarding`;
 
 export const startForwarding = async (config) => {
-  const response = await fetch(`${baseUrl}/start`, {
+  const response = await fetchWithoutRedirects(`${baseUrl}/start`, {
     body: JSON.stringify(config),
     headers: {
       ...session.authHeaders({ csrf: true }),
@@ -27,7 +28,7 @@ export const startForwarding = async (config) => {
 };
 
 export const stopForwarding = async (localPort) => {
-  const response = await fetch(`${baseUrl}/stop/${localPort}`, {
+  const response = await fetchWithoutRedirects(`${baseUrl}/stop/${localPort}`, {
     headers: session.authHeaders({ csrf: true }),
     method: 'POST',
   });
@@ -46,7 +47,7 @@ export const stopForwarding = async (localPort) => {
 };
 
 export const getForwardingStatus = async () => {
-  const response = await fetch(`${baseUrl}/status`, {
+  const response = await fetchWithoutRedirects(`${baseUrl}/status`, {
     headers: session.authHeaders(),
   });
 
@@ -58,7 +59,7 @@ export const getForwardingStatus = async () => {
 };
 
 export const getForwardingStatusByPort = async (localPort) => {
-  const response = await fetch(`${baseUrl}/status/${localPort}`, {
+  const response = await fetchWithoutRedirects(`${baseUrl}/status/${localPort}`, {
     headers: session.authHeaders(),
   });
 
@@ -83,7 +84,7 @@ export const getAvailablePorts = async (
   startPort = 1_024,
   endPort = 65_535,
 ) => {
-  const response = await fetch(
+  const response = await fetchWithoutRedirects(
     `${baseUrl}/available-ports?startPort=${startPort}&endPort=${endPort}`,
     {
       headers: session.authHeaders(),

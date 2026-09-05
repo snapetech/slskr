@@ -1,4 +1,5 @@
 import { urlBase } from '../config';
+import { fetchWithoutRedirects } from './http';
 import * as session from './session';
 import { encodePathSegment } from './pathEncoding';
 
@@ -7,7 +8,7 @@ const discoveryBaseUrl = `${urlBase}/api/v0/podcore/discovery`;
 const asArray = (value) => (Array.isArray(value) ? value : []);
 
 export const list = async () => {
-  const response = await fetch(baseUrl, {
+  const response = await fetchWithoutRedirects(baseUrl, {
     headers: session.authHeaders(),
   });
 
@@ -19,7 +20,7 @@ export const list = async () => {
 };
 
 export const get = async (podId) => {
-  const response = await fetch(`${baseUrl}/${encodePathSegment(podId)}`, {
+  const response = await fetchWithoutRedirects(`${baseUrl}/${encodePathSegment(podId)}`, {
     headers: session.authHeaders(),
   });
 
@@ -31,7 +32,7 @@ export const get = async (podId) => {
 };
 
 export const create = async (pod, requestingPeerId = 'local-peer') => {
-  const response = await fetch(baseUrl, {
+  const response = await fetchWithoutRedirects(baseUrl, {
     body: JSON.stringify({ pod, requestingPeerId }),
     headers: {
       ...session.authHeaders({ csrf: true }),
@@ -48,7 +49,7 @@ export const create = async (pod, requestingPeerId = 'local-peer') => {
 };
 
 export const update = async (podId, pod, requestingPeerId = 'local-peer') => {
-  const response = await fetch(`${baseUrl}/${encodePathSegment(podId)}`, {
+  const response = await fetchWithoutRedirects(`${baseUrl}/${encodePathSegment(podId)}`, {
     body: JSON.stringify({ pod, requestingPeerId }),
     headers: {
       ...session.authHeaders({ csrf: true }),
@@ -65,7 +66,7 @@ export const update = async (podId, pod, requestingPeerId = 'local-peer') => {
 };
 
 export const getMembers = async (podId) => {
-  const response = await fetch(`${baseUrl}/${encodePathSegment(podId)}/members`, {
+  const response = await fetchWithoutRedirects(`${baseUrl}/${encodePathSegment(podId)}/members`, {
     headers: session.authHeaders(),
   });
 
@@ -77,7 +78,7 @@ export const getMembers = async (podId) => {
 };
 
 export const join = async (podId, peerId) => {
-  const response = await fetch(`${baseUrl}/${encodePathSegment(podId)}/join`, {
+  const response = await fetchWithoutRedirects(`${baseUrl}/${encodePathSegment(podId)}/join`, {
     body: JSON.stringify({ peerId }),
     headers: {
       ...session.authHeaders({ csrf: true }),
@@ -94,7 +95,7 @@ export const join = async (podId, peerId) => {
 };
 
 export const leave = async (podId, peerId) => {
-  const response = await fetch(`${baseUrl}/${encodePathSegment(podId)}/leave`, {
+  const response = await fetchWithoutRedirects(`${baseUrl}/${encodePathSegment(podId)}/leave`, {
     body: JSON.stringify({ peerId }),
     headers: {
       ...session.authHeaders({ csrf: true }),
@@ -114,7 +115,7 @@ export const getMessages = async (podId, channelId, since = null) => {
   const parameters = since
     ? `?since=${encodeURIComponent(String(since))}`
     : '';
-  const response = await fetch(
+  const response = await fetchWithoutRedirects(
     `${baseUrl}/${encodePathSegment(podId)}/channels/${encodePathSegment(channelId)}/messages${parameters}`,
     {
       headers: session.authHeaders(),
@@ -135,7 +136,7 @@ export const sendMessage = async (
   senderPeerId,
   signature = null,
 ) => {
-  const response = await fetch(
+  const response = await fetchWithoutRedirects(
     `${baseUrl}/${encodePathSegment(podId)}/channels/${encodePathSegment(channelId)}/messages`,
     {
       body: JSON.stringify({ body, senderPeerId, signature }),
@@ -160,7 +161,7 @@ export const bindRoom = async (
   roomName,
   mode = 'readonly',
 ) => {
-  const response = await fetch(
+  const response = await fetchWithoutRedirects(
     `${baseUrl}/${encodePathSegment(podId)}/channels/${encodePathSegment(channelId)}/bind`,
     {
       body: JSON.stringify({ mode, roomName }),
@@ -180,7 +181,7 @@ export const bindRoom = async (
 };
 
 export const unbindRoom = async (podId, channelId) => {
-  const response = await fetch(
+  const response = await fetchWithoutRedirects(
     `${baseUrl}/${encodePathSegment(podId)}/channels/${encodePathSegment(channelId)}/unbind`,
     {
       headers: session.authHeaders({ csrf: true }),
@@ -205,7 +206,7 @@ const readDiscovery = async (response) => {
 };
 
 export const discoverAll = async (limit = 50) => {
-  const response = await fetch(`${discoveryBaseUrl}/all?limit=${limit}`, {
+  const response = await fetchWithoutRedirects(`${discoveryBaseUrl}/all?limit=${limit}`, {
     headers: session.authHeaders(),
   });
 
@@ -213,7 +214,7 @@ export const discoverAll = async (limit = 50) => {
 };
 
 export const discoverByName = async (name) => {
-  const response = await fetch(
+  const response = await fetchWithoutRedirects(
     `${discoveryBaseUrl}/name/${encodeURIComponent(name)}`,
     { headers: session.authHeaders() },
   );
@@ -222,7 +223,7 @@ export const discoverByName = async (name) => {
 };
 
 export const discoverByTag = async (tag) => {
-  const response = await fetch(
+  const response = await fetchWithoutRedirects(
     `${discoveryBaseUrl}/tag/${encodeURIComponent(tag)}`,
     { headers: session.authHeaders() },
   );
@@ -231,7 +232,7 @@ export const discoverByTag = async (tag) => {
 };
 
 export const refreshDiscovery = async () => {
-  const response = await fetch(`${discoveryBaseUrl}/refresh`, {
+  const response = await fetchWithoutRedirects(`${discoveryBaseUrl}/refresh`, {
     headers: session.authHeaders({ csrf: true }),
     method: 'POST',
   });

@@ -3,6 +3,7 @@ import {
   removeSessionStorageItem,
   setSessionStorageItem,
 } from './storage';
+import { fetchWithoutRedirects } from './http';
 
 const tokenStorageKey = 'slskr.listenbrainz.token';
 
@@ -42,7 +43,7 @@ export const submitListen = async (listenType, track) => {
     ],
   };
 
-  const response = await fetch('https://api.listenbrainz.org/1/submit-listens', {
+  const response = await fetchWithoutRedirects('https://api.listenbrainz.org/1/submit-listens', {
     body: JSON.stringify(payload),
     headers: {
       Authorization: `Token ${token}`,
@@ -86,7 +87,7 @@ export const submitListeningHistory = async (entries = [], { limit = 10 } = {}) 
     };
   }
 
-  const response = await fetch('https://api.listenbrainz.org/1/submit-listens', {
+  const response = await fetchWithoutRedirects('https://api.listenbrainz.org/1/submit-listens', {
     body: JSON.stringify({
       listen_type: 'import',
       payload: payloadEntries,

@@ -1,10 +1,11 @@
 import { urlBase } from '../config';
+import { fetchWithoutRedirects } from './http';
 import * as session from './session';
 
 const baseUrl = `${urlBase}/api/v0/mesh`;
 
 export const getStats = async () => {
-  const response = await fetch(`${baseUrl}/transport`, {
+  const response = await fetchWithoutRedirects(`${baseUrl}/transport`, {
     headers: session.authHeaders(),
   });
 

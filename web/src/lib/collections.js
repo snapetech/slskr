@@ -1,6 +1,7 @@
 // Collections & ShareGroups API client
 
 import api from './api';
+import { fetchWithoutRedirects } from './http';
 import { encodePathSegment } from './pathEncoding';
 
 // ShareGroups
@@ -83,17 +84,47 @@ export const shareGrantAllows = (permissions, token) =>
 // it. The shared axios client always injects this node's own session
 // Bearer token and reloads the app on any 401, neither of which applies to
 // a cross-node share-token request, so these go through plain fetch.
+const remoteShareUrl = (ownerEndpoint, path) => {
+  let base;
+  try {
+    base = new URL(ownerEndpoint);
+  } catch {
+    throw new Error('Remote share owner endpoint is invalid');
+  }
+
+  if (
+    !['http:', 'https:'].includes(base.protocol) ||
+    base.username ||
+    base.password
+  ) {
+    throw new Error('Remote share owner endpoint must be an HTTP(S) URL without credentials');
+  }
+
+  const prefix = base.pathname.replace(/\/+$/u, '');
+  return new URL(`${prefix}${path}`, base.origin).toString();
+};
+
 const shareFetch = async (ownerEndpoint, path, { method = 'GET', token, body } = {}) => {
-  const response = await fetch(`${ownerEndpoint}${path}`, {
+  const response = await fetchWithoutRedirects(remoteShareUrl(ownerEndpoint, path), {
     body: body === undefined ? undefined : JSON.stringify(body),
     headers: {
       ...(token ? { 'X-Share-Token': token } : {}),
       ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
     },
     method,
+    redirect: 'error',
   });
   const text = await response.text();
-  const data = text ? JSON.parse(text) : null;
+  let data = null;
+  if (text.trim()) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      if (response.ok) {
+        throw new Error('Remote share endpoint returned invalid JSON');
+      }
+    }
+  }
   if (!response.ok) {
     const error = new Error(data?.error || `Request failed: ${response.status}`);
     error.response = { data, status: response.status };
@@ -107,10 +138,11 @@ export const fetchRemoteShareManifest = (ownerEndpoint, shareGrantId, token) =>
     token,
   });
 
-export const remoteBackfillShare = (ownerEndpoint, shareGrantId) =>
+export const remoteBackfillShare = (ownerEndpoint, shareGrantId, token) =>
   shareFetch(ownerEndpoint, `/api/v0/share-grants/${encodeURIComponent(shareGrantId)}/backfill`, {
     body: {},
     method: 'POST',
+    token,
   });
 
 export const createRemoteShareStreamTicket = (ownerEndpoint, contentId, token) =>
@@ -120,7 +152,7 @@ export const createRemoteShareStreamTicket = (ownerEndpoint, contentId, token) =
   }).then((data) => data?.ticket);
 
 export const buildRemoteShareStreamUrl = (ownerEndpoint, contentId, ticket) =>
-  `${ownerEndpoint}/api/v0/streams/${encodeURIComponent(contentId)}?ticket=${encodeURIComponent(ticket)}`;
+  `${remoteShareUrl(ownerEndpoint, `/api/v0/streams/${encodeURIComponent(contentId)}`)}?ticket=${encodeURIComponent(ticket)}`;
 
 // Library Items (for Collections picker)
 // Note: api baseURL already includes /api/v0, so use relative path

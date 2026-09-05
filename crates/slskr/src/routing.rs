@@ -82,17 +82,32 @@ pub fn check_route_auth(
     headers: &RequestSecurityHeaders,
 ) -> Result<(), &'static str> {
     let normalized = normalize_api_path(path);
-    let delegated_share_route = (matches!(method, "GET" | "HEAD")
-        && normalized.starts_with("/api/streams/"))
-        || (matches!(method, "GET" | "HEAD")
-            && (normalized.starts_with("/api/peer-streams/")
-                || normalized.starts_with("/api/mesh-streams/")))
+    let starts_with_path = |legacy: &str, versioned: &str| {
+        normalized.starts_with(legacy) || normalized.starts_with(versioned)
+    };
+    let streams_path = starts_with_path("/api/streams/", "/api/v0/streams/");
+    let peer_streams_path = starts_with_path("/api/peer-streams/", "/api/v0/peer-streams/");
+    let mesh_streams_path = starts_with_path("/api/mesh-streams/", "/api/v0/mesh-streams/");
+    let share_grants_path = starts_with_path("/api/share-grants/", "/api/v0/share-grants/");
+    let delegated_share_route = (matches!(method, "GET" | "HEAD") && streams_path)
+        || (matches!(method, "GET" | "HEAD") && (peer_streams_path || mesh_streams_path))
+        || (method == "POST" && streams_path && normalized.ends_with("/share-ticket"))
         || (method == "POST"
-            && normalized.starts_with("/api/streams/")
-            && normalized.ends_with("/share-ticket"))
-        || (method == "GET"
-            && normalized.starts_with("/api/share-grants/")
-            && normalized.ends_with("/manifest"));
+            && share_grants_path
+            && normalized.ends_with("/backfill")
+            && (headers.x_share_token.is_some()
+                || auth.is_some_and(|value| {
+                    let Some((scheme, value)) = value.trim().split_once(' ') else {
+                        return false;
+                    };
+                    let Some((prefix, token)) = value.trim().split_once(':') else {
+                        return false;
+                    };
+                    scheme.eq_ignore_ascii_case("bearer")
+                        && prefix.eq_ignore_ascii_case("share")
+                        && !token.trim().is_empty()
+                })))
+        || (method == "GET" && share_grants_path && normalized.ends_with("/manifest"));
     let public_solid_client_id = method == "GET" && normalized == "/solid/clientid.jsonld";
 
     if config.controller_profile == ControllerProfile::Native
@@ -116,7 +131,8 @@ pub fn check_route_auth(
 
     let bearer_or_api_key = auth
         .is_some_and(|value| value.starts_with("Bearer ") || value.starts_with("ApiKey "))
-        || headers.x_gateway_api_key.is_some();
+        || headers.x_gateway_api_key.is_some()
+        || (delegated_share_route && headers.x_share_token.is_some());
     if !bearer_or_api_key && !csrf_origin_allowed(config, method, normalized, headers) {
         return Err("csrf");
     }

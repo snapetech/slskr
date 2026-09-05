@@ -46794,6 +46794,29 @@ fn controller_auth_enforces_native_roles_schemes_scopes_and_anonymous_routes() {
         check("GET", "/api/v0/transfers", Some("ApiKey nowplaying-token")),
         Err("forbidden")
     );
+
+    let delegated_headers = super::RequestSecurityHeaders {
+        origin: Some("https://recipient.example".to_owned()),
+        host: Some("owner.example".to_owned()),
+        x_share_token: Some("share-token".to_owned()),
+        ..Default::default()
+    };
+    assert!(super::routing::check_route_auth(
+        &config,
+        "POST",
+        "/api/v0/share-grants/grant-1/backfill",
+        None,
+        &delegated_headers,
+    )
+    .is_ok());
+    assert_eq!(
+        check(
+            "POST",
+            "/api/v0/share-grants/grant-1/backfill",
+            None,
+        ),
+        Err("unauthorized")
+    );
 }
 
 #[cfg_attr(test, test)]

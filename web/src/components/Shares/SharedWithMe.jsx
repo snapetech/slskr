@@ -211,6 +211,7 @@ export default class SharedWithMe extends Component {
       const result = await collectionsAPI.remoteBackfillShare(
         selectedShare.ownerEndpoint,
         selectedShare.shareGrantId,
+        selectedShare.token,
       );
       if (
         !this.isMountedFlag ||

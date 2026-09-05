@@ -761,6 +761,24 @@ async fn route_dispatch_group_7(context: &RouteDispatchContext<'_, '_>) -> Route
             let grant_id =
                 share_grant_helper_id(path, "backfill").expect("guarded share-grant backfill path");
             let versioned = route.path.starts_with("/api/v0/");
+            if versioned {
+                let delegated_authorized = if let Some(token) =
+                    request_share_token(authorization, headers)
+                {
+                    let mut tokens = state.share_access_tokens.write().await;
+                    let valid = tokens
+                        .validate(&token)
+                        .is_some_and(|record| record.grant_id == grant_id);
+                    drop(tokens);
+                    valid
+                } else {
+                    !state.config.auth_required
+                        || is_authorized(&state.config, authorization, headers.cookie.as_deref())
+                };
+                if !delegated_authorized {
+                    return Ok(routing::unauthorized_response());
+                }
+            }
             if versioned && state.share_grants.read().await.get(grant_id).is_none() {
                 return Ok(routing::not_found_response());
             }
