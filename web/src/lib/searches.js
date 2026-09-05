@@ -7,6 +7,22 @@ import {
 } from './persistedJson';
 import { v4 as uuidv4 } from 'uuid';
 
+const requireArrayResponse = (value, resource) => {
+  if (!Array.isArray(value)) {
+    throw new Error(`Searches API returned an invalid ${resource} response`);
+  }
+
+  return value;
+};
+
+const requireObjectResponse = (value, resource) => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`Searches API returned an invalid ${resource} response`);
+  }
+
+  return value;
+};
+
 const USER_DOWNLOAD_STATS_CACHE_TTL_MS = 30_000;
 let userDownloadStatsCache = null;
 let userDownloadStatsCacheExpiresAt = 0;
@@ -17,7 +33,8 @@ export const getAll = async (limit = 500, source = null) => {
   if (source && source !== 'all') {
     params.set('source', source);
   }
-  return (await api.get(`/searches?${params.toString()}`)).data;
+  const response = (await api.get(`/searches?${params.toString()}`)).data;
+  return requireArrayResponse(response, 'search list');
 };
 
 export const cleanupSearches = () => {
@@ -25,7 +42,8 @@ export const cleanupSearches = () => {
 };
 
 export const get = async ({ id }) => {
-  return (await api.get(`/searches/${encodeURIComponent(id)}`)).data;
+  const response = (await api.get(`/searches/${encodeURIComponent(id)}`)).data;
+  return requireObjectResponse(response, 'search');
 };
 
 export const stop = ({ id }) => {
@@ -56,12 +74,7 @@ export const getUserDownloadStats = () => {
   userDownloadStatsInflight = api
     .get('/transfers/downloads/user-stats')
     .then((response) => {
-      const stats =
-        response.data &&
-        typeof response.data === 'object' &&
-        !Array.isArray(response.data)
-          ? response.data
-          : {};
+      const stats = requireObjectResponse(response.data, 'user download stats');
       userDownloadStatsCache = stats;
       userDownloadStatsCacheExpiresAt =
         Date.now() + USER_DOWNLOAD_STATS_CACHE_TTL_MS;
@@ -223,11 +236,12 @@ export const getStatus = async ({ id, includeResponses = false }) => {
   const parameters = new URLSearchParams({
     includeResponses: String(includeResponses),
   });
-  return (
+  const response = (
     await api.get(
       `/searches/${encodeURIComponent(id)}?${parameters.toString()}`,
     )
   ).data;
+  return requireObjectResponse(response, 'search status');
 };
 
 export const getResponses = async ({ id }) => {
@@ -235,10 +249,7 @@ export const getResponses = async ({ id }) => {
     await api.get(`/searches/${encodeURIComponent(id)}/responses`)
   ).data;
 
-  if (!Array.isArray(response)) {
-    console.warn('got non-array response from searches API', response);
-    return [];
-  }
+  requireArrayResponse(response, 'search responses');
 
   return response
     .filter(

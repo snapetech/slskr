@@ -91,6 +91,33 @@ describe('getResponses', () => {
       },
     ]);
   });
+
+  it('rejects malformed response collections', async () => {
+    api.get.mockResolvedValue({ data: {} });
+
+    await expect(search.getResponses({ id: 'search-1' })).rejects.toThrow(
+      'Searches API returned an invalid search responses response',
+    );
+  });
+});
+
+describe('search status collections', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('rejects malformed search list and status responses', async () => {
+    api.get
+      .mockResolvedValueOnce({ data: {} })
+      .mockResolvedValueOnce({ data: [] });
+
+    await expect(search.getAll()).rejects.toThrow(
+      'Searches API returned an invalid search list response',
+    );
+    await expect(search.getStatus({ id: 'search-1' })).rejects.toThrow(
+      'Searches API returned an invalid search status response',
+    );
+  });
 });
 
 describe('filterResponse', () => {

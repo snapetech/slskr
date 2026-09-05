@@ -14,7 +14,11 @@ export const list = async ({ offset = 0, limit = 50, kind, topic, q } = {}) => {
 
   const response = await api.get(`/events?${parameters.toString()}`);
 
-  const events = Array.isArray(response.data) ? response.data : [];
+  if (!Array.isArray(response.data)) {
+    throw new Error('Events API returned an invalid event history response');
+  }
+
+  const events = response.data;
   const totalCount = response.headers['x-total-count'];
 
   return { events, totalCount };

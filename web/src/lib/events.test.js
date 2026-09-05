@@ -40,4 +40,12 @@ describe('event history API helpers', () => {
 
     expect(api.get).toHaveBeenCalledWith('/events?offset=0&limit=10');
   });
+
+  it('rejects malformed event history responses', async () => {
+    api.get.mockResolvedValue({ data: {} });
+
+    await expect(list()).rejects.toThrow(
+      'Events API returned an invalid event history response',
+    );
+  });
 });
