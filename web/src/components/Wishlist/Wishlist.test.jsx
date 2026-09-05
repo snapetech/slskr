@@ -78,6 +78,17 @@ describe('Wishlist', () => {
     expect(screen.getByText('23 left')).toBeInTheDocument();
   });
 
+  it('does not present a failed wishlist load as an empty wishlist', async () => {
+    wishlistAPI.getAll.mockRejectedValueOnce(new Error('wishlist service unavailable'));
+
+    renderWishlist();
+
+    expect(await screen.findByTestId('wishlist-load-error')).toHaveTextContent(
+      'wishlist service unavailable',
+    );
+    expect(screen.queryByText('No wishlist items yet')).not.toBeInTheDocument();
+  });
+
   it('keeps wishlist rows on direct request states without inbox promotion', async () => {
     renderWishlist();
 

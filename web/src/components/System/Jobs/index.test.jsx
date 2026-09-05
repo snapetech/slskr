@@ -220,6 +220,10 @@ describe('Jobs', () => {
     await waitFor(() => {
       expect(toast.error).toHaveBeenCalled();
     });
+    expect(await screen.findByTestId('jobs-load-error')).toHaveTextContent(
+      'Network error',
+    );
+    expect(screen.queryByText('No jobs found')).not.toBeInTheDocument();
   });
 
   it('surfaces active swarm job load failures instead of showing an empty list', async () => {

@@ -226,7 +226,8 @@ const Network = ({ options = {}, state = {}, theme }) => {
   const [statsError, setStatsError] = useState(null);
   const [meshPeers, setMeshPeers] = useState([]);
   const [discoveredPeers, setDiscoveredPeers] = useState([]);
-  const [peerError, setPeerError] = useState(null);
+  const [meshPeersError, setMeshPeersError] = useState(null);
+  const [discoveredPeersError, setDiscoveredPeersError] = useState(null);
   const [syncing, setSyncing] = useState({});
   const [backfilling, setBackfilling] = useState(false);
   const [backfillProgress, setBackfillProgress] = useState(null);
@@ -263,22 +264,25 @@ const Network = ({ options = {}, state = {}, theme }) => {
           );
         }
 
-        const peerErrors = [];
         if (peersResult.status === 'fulfilled') {
           setMeshPeers(normalizePeerRecords(peersResult.value));
+          setMeshPeersError(null);
         } else {
-          peerErrors.push(
-            `Mesh peers: ${toDisplayError(peersResult.reason, 'request failed')}`,
+          setMeshPeersError(
+            toDisplayError(peersResult.reason, 'Mesh peer list unavailable'),
           );
         }
         if (discoveredResult.status === 'fulfilled') {
           setDiscoveredPeers(normalizePeerRecords(discoveredResult.value));
+          setDiscoveredPeersError(null);
         } else {
-          peerErrors.push(
-            `Discovered peers: ${toDisplayError(discoveredResult.reason, 'request failed')}`,
+          setDiscoveredPeersError(
+            toDisplayError(
+              discoveredResult.reason,
+              'Discovered peer list unavailable',
+            ),
           );
         }
-        setPeerError(peerErrors.length > 0 ? peerErrors.join('; ') : null);
       }
     } catch (error) {
       console.error('Failed to fetch network stats:', error);
@@ -477,13 +481,25 @@ const Network = ({ options = {}, state = {}, theme }) => {
           </p>
         </Message>
       )}
-      {peerError && (
+      {meshPeersError && (
         <Message
+          data-testid="mesh-peers-load-error"
           className="network-diagnostic-message"
           warning
         >
-          <Message.Header>Peer lists unavailable</Message.Header>
-          <p>{peerError}</p>
+          <Message.Header>Mesh peer list unavailable</Message.Header>
+          <p>{meshPeersError}</p>
+          <p>Existing peer data is retained until the next successful poll.</p>
+        </Message>
+      )}
+      {discoveredPeersError && (
+        <Message
+          data-testid="discovered-peers-load-error"
+          className="network-diagnostic-message"
+          warning
+        >
+          <Message.Header>Discovered peer list unavailable</Message.Header>
+          <p>{discoveredPeersError}</p>
           <p>Existing peer data is retained until the next successful poll.</p>
         </Message>
       )}
@@ -809,7 +825,7 @@ const Network = ({ options = {}, state = {}, theme }) => {
               </Header.Content>
             </Header>
 
-            {meshPeers.length === 0 ? (
+            {meshPeersError && meshPeers.length === 0 ? null : meshPeers.length === 0 ? (
               <Segment
                 basic
                 placeholder
@@ -882,7 +898,7 @@ const Network = ({ options = {}, state = {}, theme }) => {
               </Header.Content>
             </Header>
 
-            {discoveredPeers.length === 0 ? (
+            {discoveredPeersError && discoveredPeers.length === 0 ? null : discoveredPeers.length === 0 ? (
               <Segment
                 basic
                 placeholder

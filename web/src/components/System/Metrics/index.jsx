@@ -5,6 +5,7 @@ import { useMountedRef } from '../../../lib/useMountedRef';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Divider,
+  Button,
   Grid,
   Header,
   Icon,
@@ -213,7 +214,7 @@ const Metrics = () => {
 
   if (loading && !metrics) return <LoaderSegment />;
 
-  if (error) {
+  if (error && !metrics) {
     return (
       <Message
         error
@@ -225,15 +226,30 @@ const Metrics = () => {
 
   return (
     <div>
+      {error && (
+        <Message
+          data-testid="metrics-load-error"
+          error
+        >
+          <Message.Header>Metrics refresh failed</Message.Header>
+          <p>{error}</p>
+          <p>Showing the last successfully loaded metrics snapshot.</p>
+        </Message>
+      )}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1em' }}>
         <Header size="medium">
           <Icon name="chart bar" />
           Prometheus Metrics
         </Header>
-        <span style={{ color: 'grey', fontSize: '0.9em', cursor: 'pointer' }} onClick={fetchMetrics}>
+        <Button
+          basic
+          onClick={fetchMetrics}
+          size="small"
+          type="button"
+        >
           <Icon name="refresh" />
           {lastUpdated ? `Updated ${lastUpdated.toLocaleTimeString()}` : 'Refresh'}
-        </span>
+        </Button>
       </div>
 
       <Grid stackable>

@@ -107,6 +107,21 @@ describe('Network', () => {
     expect(screen.queryByText('No slsk peers discovered yet')).not.toBeInTheDocument();
   });
 
+  it('does not present a failed mesh-peer request as an empty peer list', async () => {
+    slskrAPI.getMeshPeers.mockRejectedValueOnce(new Error('mesh peer service unavailable'));
+
+    render(<Network theme="light" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mesh-peers-load-error')).toHaveTextContent(
+        'mesh peer service unavailable',
+      );
+    });
+
+    expect(screen.queryByText('No mesh peers connected')).not.toBeInTheDocument();
+    expect(screen.getByText(/No slskr peers discovered yet/)).toBeInTheDocument();
+  });
+
   it('shows configured Soulseek credentials and auto-connect state', async () => {
     render(
       <Network

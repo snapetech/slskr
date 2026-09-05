@@ -47,6 +47,7 @@ const Jobs = () => {
   const [jobs, setJobs] = useState([]);
   const [swarmJobs, setSwarmJobs] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [jobsError, setJobsError] = useState('');
   const [swarmLoading, setSwarmLoading] = useState(true);
   const [swarmError, setSwarmError] = useState('');
   const [selectedSwarmJobId, setSelectedSwarmJobId] = useState(null);
@@ -93,6 +94,7 @@ const Jobs = () => {
           ? response.jobs.filter((job) => job && typeof job === 'object')
           : [],
       );
+      setJobsError('');
       setPagination((previous) => ({
         ...previous,
         hasMore: Boolean(response?.has_more),
@@ -103,7 +105,9 @@ const Jobs = () => {
         mountedRef.current &&
         jobsRequestIdRef.current === requestId
       ) {
-        toast.error(toDisplayError(error, 'Failed to fetch jobs'));
+        const message = toDisplayError(error, 'Failed to fetch jobs');
+        setJobsError(message);
+        toast.error(message);
         console.error('Failed to fetch jobs:', error);
       }
     } finally {
@@ -298,6 +302,16 @@ const Jobs = () => {
           <p>{swarmError}</p>
         </Message>
       )}
+      {jobsError && (
+        <Message
+          data-testid="jobs-load-error"
+          error
+        >
+          <Message.Header>Jobs unavailable</Message.Header>
+          <p>{jobsError}</p>
+          <p>Previously loaded jobs remain visible until the next successful refresh.</p>
+        </Message>
+      )}
 
       {/* Active Swarm Jobs */}
       {swarmJobs.length > 0 && (
@@ -475,13 +489,15 @@ const Jobs = () => {
             inline="centered"
           />
         ) : jobs.length === 0 ? (
-          <Segment placeholder>
-            <Header icon>
-              <Icon name="inbox" />
-              No jobs found
-            </Header>
-            <p>No jobs match the current filters.</p>
-          </Segment>
+          jobsError ? null : (
+            <Segment placeholder>
+              <Header icon>
+                <Icon name="inbox" />
+                No jobs found
+              </Header>
+              <p>No jobs match the current filters.</p>
+            </Segment>
+          )
         ) : (
           <>
             <Table celled>

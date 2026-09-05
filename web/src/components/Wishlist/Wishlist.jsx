@@ -21,6 +21,7 @@ import {
   Header,
   Icon,
   Label,
+  Message,
   Modal,
   Popup,
   Segment,
@@ -595,6 +596,7 @@ const CsvImportModal = ({ onClose, onImport }) => {
 const Wishlist = () => {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
   const [modalItem, setModalItem] = useState(null);
   const [showModal, setShowModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
@@ -720,6 +722,7 @@ const Wishlist = () => {
 
   const loadItems = useCallback(async () => {
     const requestId = ++loadRequestIdRef.current;
+    if (mountedRef.current) setLoadError(null);
     try {
       const data = await wishlistAPI.getAll();
       if (
@@ -730,6 +733,7 @@ const Wishlist = () => {
       }
       const nextItems = Array.isArray(data) ? data : [];
       setItems(nextItems);
+      setLoadError(null);
       setSelectedIds((current) => {
         const availableIds = new Set(nextItems.map((item) => item.id));
         return new Set(
@@ -741,7 +745,9 @@ const Wishlist = () => {
         mountedRef.current &&
         requestId === loadRequestIdRef.current
       ) {
-        toast.error(`Failed to load wishlist: ${toDisplayError(error)}`);
+        const message = toDisplayError(error, 'Failed to load wishlist');
+        setLoadError(message);
+        toast.error(message);
       }
     } finally {
       if (
@@ -1044,33 +1050,46 @@ const Wishlist = () => {
         </Segment>
       )}
 
+      {loadError && (
+        <Message
+          data-testid="wishlist-load-error"
+          error
+        >
+          <Message.Header>Wishlist unavailable</Message.Header>
+          <p>{loadError}</p>
+          <p>Previously loaded wishlist items remain visible until the next successful refresh.</p>
+        </Message>
+      )}
+
       {loading ? (
         <Segment
           loading
           placeholder
         />
       ) : items.length === 0 ? (
-        <Segment
-          inverted
-          placeholder
-        >
-          <Header
-            icon
+        loadError ? null : (
+          <Segment
             inverted
+            placeholder
           >
-            <Icon name="star outline" />
-            No wishlist items yet
-          </Header>
-          <p>
-            Add searches to your wishlist and they&apos;ll run automatically.
-          </p>
-          <Button
-            onClick={handleAdd}
-            primary
-          >
-            Add Your First Search
-          </Button>
-        </Segment>
+            <Header
+              icon
+              inverted
+            >
+              <Icon name="star outline" />
+              No wishlist items yet
+            </Header>
+            <p>
+              Add searches to your wishlist and they&apos;ll run automatically.
+            </p>
+            <Button
+              onClick={handleAdd}
+              primary
+            >
+              Add Your First Search
+            </Button>
+          </Segment>
+        )
       ) : (
         <Table
           celled
