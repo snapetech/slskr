@@ -1104,6 +1104,11 @@ async fn route_dispatch_group_2(context: &RouteDispatchContext<'_, '_>) -> Route
         }
 
         ("POST", "/api/transfers") => {
+            if controller_file_array_exceeds_wire_limits(body) {
+                return Ok(routing::bad_request_response(
+                    "transfer request exceeds file limits",
+                ));
+            }
             if let Some((username, mut files)) = controller_enqueue_request(body) {
                 let exclusions = effective_download_exclusions(state).await;
                 let filenames = files
@@ -1933,6 +1938,11 @@ async fn route_dispatch_group_2(context: &RouteDispatchContext<'_, '_>) -> Route
                 return Ok(routing::not_found_response());
             };
             let username = decoded_path_segment(username);
+            if controller_file_array_exceeds_wire_limits(body) {
+                return Ok(routing::bad_request_response(
+                    "download request exceeds file limits",
+                ));
+            }
             let mut files = controller_files_from_body(body);
             if route.path.starts_with("/api/v0/") && files.is_empty() {
                 return Ok(HttpResponse {

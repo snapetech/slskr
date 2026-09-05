@@ -1835,6 +1835,32 @@ async fn musicbrainz_rejects_oversized_json_batches_before_state_mutation() {
 }
 
 #[tokio::test]
+async fn transfer_rejects_oversized_file_batches_before_queue_mutation() {
+    let (state, _receiver) = test_state_with_env(MapEnv::default());
+    let files = (0..=super::MAX_TRANSFER_REQUEST_FILES)
+        .map(|index| serde_json::json!({"filename": format!("Music/{index}.flac"), "size": 1}))
+        .collect::<Vec<_>>();
+    let body = serde_json::json!({"username": "peer", "files": files}).to_string();
+    for path in [
+        "/api/v0/transfers/downloads/batches",
+        "/api/v0/transfers/downloads/peer",
+        "/api/transfers",
+    ] {
+        let response = super::route_http_request("POST", path, None, &body, &state)
+            .await
+            .expect("oversized transfer request");
+        assert_eq!(response.status, "400 Bad Request", "{path}");
+        assert!(
+            response.body.contains("file limits"),
+            "{path}: {}",
+            response.body
+        );
+    }
+    assert!(state.transfers.read().await.entries.is_empty());
+    let _ = fs::remove_dir_all(&state.config.state_dir);
+}
+
+#[tokio::test]
 async fn library_browser_projects_share_tree_and_sha256_stream_ids() {
     let (state, _receiver) =
         test_state_with_env(MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "native"));

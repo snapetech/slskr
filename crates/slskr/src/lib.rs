@@ -653,6 +653,7 @@ const MAX_TRANSFER_REQUEST_NAME_BYTES: usize = 512;
 const MAX_TRANSFER_METADATA_TEXT_BYTES: usize = 1024;
 const MAX_TRANSFER_STATUS_BYTES: usize = 64;
 const MAX_TRANSFER_REASON_BYTES: usize = 4 * 1024;
+const MAX_TRANSFER_REQUEST_FILES: usize = 10_000;
 
 fn controller_cors_headers(
     config: &AppConfig,
@@ -24189,6 +24190,11 @@ async fn legacy_route_http_request_with_headers_inner(
         }
 
         ("POST", "/api/transfers") => {
+            if controller_file_array_exceeds_wire_limits(body) {
+                return Ok(routing::bad_request_response(
+                    "transfer request exceeds file limits",
+                ));
+            }
             if let Some((username, mut files)) = controller_enqueue_request(body) {
                 let exclusions = effective_download_exclusions(state).await;
                 let filenames = files
@@ -24991,6 +24997,11 @@ async fn legacy_route_http_request_with_headers_inner(
                  return Ok(routing::not_found_response());
              };
              let username = decoded_path_segment(username);
+             if controller_file_array_exceeds_wire_limits(body) {
+                 return Ok(routing::bad_request_response(
+                     "download request exceeds file limits",
+                 ));
+             }
              let files = controller_files_from_body(body);
              if route.path.starts_with("/api/v0/") && files.is_empty() {
                  return Ok(HttpResponse {
@@ -50049,6 +50060,17 @@ fn file_storage_error_response(error: &str) -> HttpResponse {
     }
 }
 
+fn controller_file_array_exceeds_wire_limits(body: &str) -> bool {
+    let Ok(payload) = serde_json::from_str::<serde_json::Value>(body) else {
+        return false;
+    };
+    payload
+        .get("files")
+        .and_then(serde_json::Value::as_array)
+        .or_else(|| payload.as_array())
+        .is_some_and(|files| files.len() > MAX_TRANSFER_REQUEST_FILES)
+}
+
 fn controller_files_from_body(body: &str) -> Vec<serde_json::Value> {
     let Ok(payload) = serde_json::from_str::<serde_json::Value>(body) else {
         return Vec::new();
@@ -50229,6 +50251,13 @@ async fn controller_enqueue_download_batch(body: &str, state: &AppState) -> Http
         Ok(_) => return routing::bad_request_response("The request body must be an object"),
         Err(_) => return routing::bad_request_response("invalid JSON body"),
     };
+    if payload
+        .get("files")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|files| files.len() > MAX_TRANSFER_REQUEST_FILES)
+    {
+        return routing::bad_request_response("download batch exceeds file limits");
+    }
     let username = payload
         .get("username")
         .and_then(serde_json::Value::as_str)
