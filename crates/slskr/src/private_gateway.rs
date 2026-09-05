@@ -2097,16 +2097,17 @@ impl Gateway {
                 return Err((8, "Destination is not allowed by pod policy".to_owned()));
             }
         }
+        let peer_identity = gateway_peer_identity(remote_username);
         {
             let mut nonces = self.replay_nonces.lock().await;
             nonces.retain(|_, seen| now.saturating_sub(*seen) <= REQUEST_FRESHNESS_SECONDS);
-            let key = (remote_username.to_owned(), request.request_nonce.clone());
+            let key = gateway_replay_nonce_key(&peer_identity, &request.request_nonce);
             if nonces.contains_key(&key) {
                 return Err((8, "Tunnel request nonce was replayed".to_owned()));
             }
             if nonces
                 .keys()
-                .filter(|(username, _)| username.eq_ignore_ascii_case(remote_username))
+                .filter(|(username, _)| username == &peer_identity)
                 .count()
                 >= MAX_REPLAY_NONCES_PER_PEER
             {
@@ -2124,7 +2125,7 @@ impl Gateway {
         if tunnels.len() >= MAX_TUNNELS
             || tunnels
                 .values()
-                .filter(|tunnel| tunnel.owner == remote_username)
+                .filter(|tunnel| tunnel.owner == peer_identity)
                 .count()
                 >= MAX_TUNNELS_PER_PEER
         {
@@ -2145,7 +2146,7 @@ impl Gateway {
         if tunnels.len() >= MAX_TUNNELS
             || tunnels
                 .values()
-                .filter(|tunnel| tunnel.owner == remote_username)
+                .filter(|tunnel| tunnel.owner == peer_identity)
                 .count()
                 >= MAX_TUNNELS_PER_PEER
         {
@@ -2164,7 +2165,7 @@ impl Gateway {
         tunnels.insert(
             tunnel_id.clone(),
             Arc::new(Tunnel {
-                owner: remote_username.to_owned(),
+                owner: peer_identity,
                 connection_id: connection_id.to_owned(),
                 pod_id: request.pod_id,
                 writer: Mutex::new(writer),
@@ -2253,7 +2254,9 @@ impl Gateway {
             .get(tunnel_id)
             .cloned()
             .ok_or_else(|| (2, "Tunnel not found".to_owned()))?;
-        if tunnel.owner != remote_username || tunnel.connection_id != connection_id {
+        if tunnel.owner != gateway_peer_identity(remote_username)
+            || tunnel.connection_id != connection_id
+        {
             return Err((8, "Tunnel belongs to another peer".to_owned()));
         }
         Ok(tunnel)
@@ -2582,6 +2585,14 @@ fn bounded_required<'a>(
 
 fn valid_service_call(call: &MeshServiceCall) -> bool {
     call.validate().is_ok() && call.payload.len() <= MAX_OVERLAY_MESSAGE_BYTES
+}
+
+fn gateway_peer_identity(username: &str) -> String {
+    username.to_ascii_lowercase()
+}
+
+fn gateway_replay_nonce_key(username: &str, nonce: &str) -> (String, String) {
+    (gateway_peer_identity(username), nonce.to_owned())
 }
 
 fn valid_open_tunnel_request(request: &OpenTunnelRequest) -> bool {
@@ -3189,6 +3200,15 @@ mod tests {
         oversized = request;
         oversized.service_name = Some(String::new());
         assert!(!valid_open_tunnel_request(&oversized));
+    }
+
+    #[test]
+    fn gateway_replay_nonce_identity_is_case_insensitive() {
+        let mut nonces = BTreeMap::new();
+        nonces.insert(gateway_replay_nonce_key("Peer-One", "nonce"), 1);
+
+        assert!(nonces.contains_key(&gateway_replay_nonce_key("peer-one", "nonce")));
+        assert!(!nonces.contains_key(&gateway_replay_nonce_key("peer-two", "nonce")));
     }
 
     #[test]

@@ -672,7 +672,7 @@ class SlskrClient {
         return this.request('PUT', this.baseUrl + path, body, true);
     }
     async deleteAuth(path) {
-        await this.request('DELETE', this.baseUrl + path, {}, true);
+        await this.request('DELETE', this.baseUrl + path, undefined, true);
     }
     // =========================================================================
     // Core Request Handler
