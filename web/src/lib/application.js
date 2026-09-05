@@ -13,12 +13,13 @@ export const shutdown = async () => {
 };
 
 export const getVersion = async ({ forceCheck = false }) => {
-  return (await api.get(`/application/version/latest?forceCheck=${forceCheck}`))
-    .data;
+  const parameters = new URLSearchParams({ forceCheck: String(forceCheck) });
+  return (await api.get(`/application/version/latest?${parameters}`)).data;
 };
 
 export const getBuild = async ({ checkForUpdates = true } = {}) => {
-  return (
-    await api.get(`/application/build?checkForUpdates=${checkForUpdates}`)
-  ).data;
+  const parameters = new URLSearchParams({
+    checkForUpdates: String(checkForUpdates),
+  });
+  return (await api.get(`/application/build?${parameters}`)).data;
 };

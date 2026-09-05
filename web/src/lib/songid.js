@@ -17,7 +17,8 @@ export const getForensicMatrix = async (id) => {
 };
 
 export const getRuns = async (limit = 10) => {
-  const response = await api.get(`/songid/runs?limit=${limit}`);
+  const parameters = new URLSearchParams({ limit: String(limit) });
+  const response = await api.get(`/songid/runs?${parameters.toString()}`);
   return Array.isArray(response.data) ? response.data : [];
 };
 

@@ -26,8 +26,12 @@ export const getDashboard = (libraryPath, artistLimit = 10, issueLimit = 100) =>
 export const getIssues = (filter = {}) => {
   const parameters = new URLSearchParams();
   if (filter.libraryPath) parameters.append('libraryPath', filter.libraryPath);
-  if (filter.limit) parameters.append('limit', filter.limit);
-  if (filter.offset) parameters.append('offset', filter.offset);
+  if (filter.limit !== undefined && filter.limit !== null) {
+    parameters.append('limit', String(filter.limit));
+  }
+  if (filter.offset !== undefined && filter.offset !== null) {
+    parameters.append('offset', String(filter.offset));
+  }
   return api.get(`/library/health/issues?${parameters.toString()}`);
 };
 
@@ -38,11 +42,15 @@ export const getIssuesByType = (libraryPath = null) => {
   return api.get(`/library/health/issues/by-type${parameters}`);
 };
 
-export const getIssuesByArtist = (limit = 20) =>
-  api.get(`/library/health/issues/by-artist?limit=${limit}`);
+export const getIssuesByArtist = (limit = 20) => {
+  const parameters = new URLSearchParams({ limit: String(limit) });
+  return api.get(`/library/health/issues/by-artist?${parameters}`);
+};
 
-export const getIssuesByRelease = (limit = 20) =>
-  api.get(`/library/health/issues/by-release?limit=${limit}`);
+export const getIssuesByRelease = (limit = 20) => {
+  const parameters = new URLSearchParams({ limit: String(limit) });
+  return api.get(`/library/health/issues/by-release?${parameters}`);
+};
 
 export const updateIssueStatus = (issueId, status) =>
   api.patch(`/library/health/issues/${encodeURIComponent(issueId)}`, { status });

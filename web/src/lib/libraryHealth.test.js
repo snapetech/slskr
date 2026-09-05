@@ -52,6 +52,20 @@ describe('libraryHealth', () => {
     );
   });
 
+  it('retains zero offsets and serializes aggregate limits', async () => {
+    api.get.mockResolvedValue({ data: {} });
+
+    await libraryHealth.getIssues({ limit: 0, offset: 0 });
+    await libraryHealth.getIssuesByArtist('25&offset=0');
+    await libraryHealth.getIssuesByRelease(30);
+
+    expect(api.get).toHaveBeenCalledWith('/library/health/issues?limit=0&offset=0');
+    expect(api.get).toHaveBeenCalledWith(
+      '/library/health/issues/by-artist?limit=25%26offset%3D0',
+    );
+    expect(api.get).toHaveBeenCalledWith('/library/health/issues/by-release?limit=30');
+  });
+
   it('updates and remediates issues through versioned paths', async () => {
     api.patch.mockResolvedValue({});
     api.post.mockResolvedValue({});

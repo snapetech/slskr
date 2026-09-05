@@ -206,9 +206,13 @@ const readDiscovery = async (response) => {
 };
 
 export const discoverAll = async (limit = 50) => {
-  const response = await fetchWithoutRedirects(`${discoveryBaseUrl}/all?limit=${limit}`, {
-    headers: session.authHeaders(),
-  });
+  const parameters = new URLSearchParams({ limit: String(limit) });
+  const response = await fetchWithoutRedirects(
+    `${discoveryBaseUrl}/all?${parameters.toString()}`,
+    {
+      headers: session.authHeaders(),
+    },
+  );
 
   return readDiscovery(response);
 };

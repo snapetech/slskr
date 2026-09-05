@@ -1,4 +1,4 @@
-import { getForensicMatrix } from './songid';
+import { getForensicMatrix, getRuns } from './songid';
 import api from './api';
 
 vi.mock('./api', () => ({
@@ -27,5 +27,13 @@ describe('songId api helpers', () => {
       identityScore: 91,
       syntheticScore: 12,
     });
+  });
+
+  it('serializes the run limit as a query parameter', async () => {
+    api.get.mockResolvedValue({ data: [] });
+
+    await expect(getRuns(25)).resolves.toEqual([]);
+
+    expect(api.get).toHaveBeenCalledWith('/songid/runs?limit=25');
   });
 });

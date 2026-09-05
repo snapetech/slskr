@@ -8,6 +8,7 @@ import {
 } from '../../lib/acquisitionProfiles';
 import { createSearchHubConnection } from '../../lib/hubFactory';
 import { getCapabilities } from '../../lib/slskr';
+import { encodePathSegment } from '../../lib/pathEncoding';
 import { mergeSearchRecords } from '../../lib/searchState';
 import { getLocalStorageItem, setLocalStorageItem } from '../../lib/storage';
 import { useMountedRef } from '../../lib/useMountedRef';
@@ -197,7 +198,7 @@ const Searches = ({ runtimeProfile, server } = {}) => {
           return;
         }
         if (id) {
-          routerNavigate(`/searches/${id}`, { replace: true });
+          routerNavigate(`/searches/${encodePathSegment(id)}`, { replace: true });
           return;
         }
 
@@ -548,7 +549,7 @@ const Searches = ({ runtimeProfile, server } = {}) => {
       }
 
       if (navigate) {
-        routerNavigate(`/searches/${id}`);
+        routerNavigate(`/searches/${encodePathSegment(id)}`);
       }
 
       return id;

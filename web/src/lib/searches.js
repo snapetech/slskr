@@ -220,9 +220,12 @@ export const createBatch = async ({ queries = [], providers = null } = {}) => {
 };
 
 export const getStatus = async ({ id, includeResponses = false }) => {
+  const parameters = new URLSearchParams({
+    includeResponses: String(includeResponses),
+  });
   return (
     await api.get(
-      `/searches/${encodeURIComponent(id)}?includeResponses=${includeResponses}`,
+      `/searches/${encodeURIComponent(id)}?${parameters.toString()}`,
     )
   ).data;
 };
