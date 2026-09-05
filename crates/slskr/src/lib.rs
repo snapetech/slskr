@@ -12395,7 +12395,6 @@ fn restart_reload_fingerprint(config: &AppConfig) -> String {
         format!("{:?}", config.controller_web_allow_remote_no_auth),
         format!("{:?}", config.controller_web_max_request_body_size),
         format!("{:?}", config.controller_web_rate_limiting),
-        format!("{:?}", &config.controller_web_cors),
         format!("{:?}", config.controller_diagnostics_allow_memory_dump),
         format!("{:?}", config.controller_diagnostics_allow_remote_dump),
         format!("{:?}", config.soulseek_diagnostic_level),

@@ -98240,7 +98240,7 @@ async fn watched_native_swagger_updates_current_options_but_not_startup_options(
 
 #[cfg_attr(test, tokio::test)]
 #[cfg(feature = "full-controller-tests")]
-async fn watched_cors_changes_mark_restart_required() {
+async fn watched_cors_changes_do_not_mark_restart_required() {
     let (state, _receiver) = test_state_with_env(MapEnv::default());
     let yaml =
         "web:\n  cors:\n    enabled: true\n    allowed_origins: [https://allowed.example]\n";
@@ -98253,7 +98253,7 @@ async fn watched_cors_changes_mark_restart_required() {
     )
     .await;
 
-    assert!(state.runtime.read().await.application_restart_requested);
+    assert!(!state.runtime.read().await.application_restart_requested);
 }
 
 #[cfg_attr(test, tokio::test)]
