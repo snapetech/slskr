@@ -192,6 +192,36 @@ enum ApiAuthScheme {
     ApiKey,
 }
 
+fn parse_api_authorization(value: &str) -> Option<(ApiAuthScheme, &str)> {
+    let (scheme, token) = value.split_once(' ')?;
+    let scheme = if scheme.eq_ignore_ascii_case("Bearer") {
+        ApiAuthScheme::Jwt
+    } else if scheme.eq_ignore_ascii_case("ApiKey") {
+        ApiAuthScheme::ApiKey
+    } else {
+        return None;
+    };
+    Some((scheme, token))
+}
+
+pub(crate) fn api_authorization_token(authorization: Option<&str>) -> Option<&str> {
+    authorization
+        .and_then(parse_api_authorization)
+        .map(|(_, token)| token)
+}
+
+pub(crate) fn bearer_authorization_token(authorization: Option<&str>) -> Option<&str> {
+    authorization.and_then(|value| {
+        parse_api_authorization(value)
+            .filter(|(scheme, _)| *scheme == ApiAuthScheme::Jwt)
+            .map(|(_, token)| token)
+    })
+}
+
+pub(crate) fn has_api_authorization_scheme(value: &str) -> bool {
+    parse_api_authorization(value).is_some()
+}
+
 #[derive(Debug, Deserialize)]
 struct ControllerAuthRule {
     method: String,
@@ -399,14 +429,7 @@ fn api_credential(
     remote_addr: Option<SocketAddr>,
 ) -> Option<ApiCredential> {
     if let Some(value) = authorization {
-        let (scheme, token) = value
-            .strip_prefix("Bearer ")
-            .map(|token| (ApiAuthScheme::Jwt, token))
-            .or_else(|| {
-                value
-                    .strip_prefix("ApiKey ")
-                    .map(|token| (ApiAuthScheme::ApiKey, token))
-            })?;
+        let (scheme, token) = parse_api_authorization(value)?;
         let matches = |expected: Option<&str>| {
             expected.is_some_and(|expected| constant_time_eq(token.as_bytes(), expected.as_bytes()))
         };
@@ -1598,6 +1621,44 @@ mod controller_auth_tests {
         assert!(
             api_credential(&config, Some("ApiKey wrong-wrong-wrong"), None, loopback,).is_none()
         );
+    }
+
+    #[test]
+    fn api_authorization_schemes_are_case_insensitive_across_auth_helpers() {
+        let config = config("slskdn");
+        let loopback = Some("127.0.0.1:1234".parse().unwrap());
+
+        for authorization in [
+            "bearer admin-token",
+            "BEARER admin-token",
+            "bEaReR admin-token",
+        ] {
+            let credential = api_credential(&config, Some(authorization), None, loopback)
+                .expect("case-insensitive Bearer scheme must authenticate");
+            assert_eq!(credential.access, ApiAccess::Administrator);
+            assert_eq!(credential.scheme, ApiAuthScheme::Jwt);
+        }
+        for authorization in [
+            "apikey admin-token",
+            "APIKEY admin-token",
+            "aPiKeY admin-token",
+        ] {
+            let credential = api_credential(&config, Some(authorization), None, loopback)
+                .expect("case-insensitive ApiKey scheme must authenticate");
+            assert_eq!(credential.access, ApiAccess::Administrator);
+            assert_eq!(credential.scheme, ApiAuthScheme::ApiKey);
+        }
+
+        assert_eq!(
+            bearer_authorization_token(Some("bEaReR admin-token")),
+            Some("admin-token")
+        );
+        assert_eq!(
+            api_authorization_token(Some("aPiKeY admin-token")),
+            Some("admin-token")
+        );
+        assert!(has_api_authorization_scheme("BEARER "));
+        assert!(!has_api_authorization_scheme("Basic admin-token"));
     }
 
     #[test]

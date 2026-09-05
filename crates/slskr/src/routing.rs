@@ -129,8 +129,7 @@ pub fn check_route_auth(
         )?;
     }
 
-    let bearer_or_api_key = auth
-        .is_some_and(|value| value.starts_with("Bearer ") || value.starts_with("ApiKey "))
+    let bearer_or_api_key = auth.is_some_and(crate::utils::has_api_authorization_scheme)
         || headers.x_gateway_api_key.is_some()
         || (delegated_share_route && headers.x_share_token.is_some());
     if !bearer_or_api_key && !csrf_origin_allowed(config, method, normalized, headers) {

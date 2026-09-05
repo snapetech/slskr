@@ -18979,7 +18979,7 @@ impl LoginAttemptStore {
 }
 
 async fn request_uses_revoked_jwt(state: &AppState, authorization: Option<&str>) -> bool {
-    let Some(token) = authorization.and_then(|value| value.strip_prefix("Bearer ")) else {
+    let Some(token) = utils::bearer_authorization_token(authorization) else {
         return false;
     };
     let now = unix_timestamp();
@@ -19998,7 +19998,7 @@ async fn legacy_route_http_request_with_headers_inner(
     }
 
     if method == "DELETE" && route.path == "/api/v0/session" {
-        if let Some(token) = authorization.and_then(|value| value.strip_prefix("Bearer ")) {
+        if let Some(token) = utils::bearer_authorization_token(authorization) {
             let now = unix_timestamp();
             if let Some(claims) = utils::verify_admin_jwt(&state.config, token, now) {
                 let revoke_result = state
@@ -49537,12 +49537,7 @@ fn authenticated_rate_limit_user_key(
     if !utils::is_authorized_from(config, authorization, cookie, remote_addr) {
         return None;
     }
-    authorization
-        .and_then(|value| {
-            value
-                .strip_prefix("Bearer ")
-                .or_else(|| value.strip_prefix("ApiKey "))
-        })
+    utils::api_authorization_token(authorization)
         .map(str::to_owned)
         .or_else(|| cookie_session_token(cookie))
         .map(|token| rate_limit_user_key(&token))

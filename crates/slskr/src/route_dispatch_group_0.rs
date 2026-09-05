@@ -417,8 +417,7 @@ async fn route_dispatch_group_0(context: &RouteDispatchContext<'_, '_>) -> Route
                 // echo that token into the request body. Treat that already
                 // authenticated path as a valid session bootstrap while
                 // retaining the legacy username/password controller login.
-                let static_api_token_session = authorization
-                    .and_then(|value| value.strip_prefix("Bearer "))
+                let static_api_token_session = utils::bearer_authorization_token(authorization)
                     .is_some_and(|token| state.config.api_token.as_deref() == Some(token));
                 if username.trim().is_empty()
                     || (password.trim().is_empty() && !static_api_token_session)

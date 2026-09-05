@@ -46798,6 +46798,7 @@ fn controller_auth_enforces_native_roles_schemes_scopes_and_anonymous_routes() {
 
     assert_eq!(check("GET", "/api/v0/session", None), Err("unauthorized"));
     assert!(check("GET", "/api/v0/transfers", Some("Bearer read-token")).is_ok());
+    assert!(check("GET", "/api/v0/transfers", Some("bEaReR read-token")).is_ok());
     assert_eq!(
         check(
             "POST",
