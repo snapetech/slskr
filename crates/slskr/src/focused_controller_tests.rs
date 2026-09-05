@@ -1924,6 +1924,54 @@ async fn string_array_routes_reject_oversized_wire_batches_before_mutation() {
 }
 
 #[tokio::test]
+async fn mediacore_rejects_oversized_wire_batches_before_work() {
+    let (state, _receiver) = test_state_with_env(MapEnv::default());
+    let descriptors = (0..=super::MAX_MEDIACORE_BATCH_ITEMS)
+        .map(|index| serde_json::json!({"contentId": format!("content:test:{index}")}))
+        .collect::<Vec<_>>();
+    let content_ids = (0..=super::MAX_MEDIACORE_BATCH_ITEMS)
+        .map(|index| serde_json::json!(format!("content:test:{index}")))
+        .collect::<Vec<_>>();
+    let keys = (0..=super::MAX_MEDIACORE_BATCH_ITEMS)
+        .map(|index| serde_json::json!(format!("cache-key-{index}")))
+        .collect::<Vec<_>>();
+    for (path, body, expected) in [
+        (
+            "/api/v0/mediacore/publish/batch",
+            serde_json::json!({"descriptors": descriptors}).to_string(),
+            "descriptors must contain at most 100 items",
+        ),
+        (
+            "/api/v0/mediacore/publish/republish",
+            serde_json::json!({"contentIds": content_ids.clone()}).to_string(),
+            "contentIds must contain at most 100 items",
+        ),
+        (
+            "/api/v0/mediacore/retrieve/batch",
+            serde_json::json!({"contentIds": content_ids}).to_string(),
+            "contentIds must contain at most 100 items",
+        ),
+        (
+            "/api/v0/mediacore/retrieve/cache/clear",
+            serde_json::json!({"keys": keys}).to_string(),
+            "keys must contain at most 100 items",
+        ),
+    ] {
+        let response = super::route_http_request("POST", path, None, &body, &state)
+            .await
+            .expect("oversized MediaCore request");
+        assert_eq!(response.status, "400 Bad Request", "{path}");
+        assert!(
+            response.body.contains(expected),
+            "{path}: {}",
+            response.body
+        );
+    }
+
+    let _ = fs::remove_dir_all(&state.config.state_dir);
+}
+
+#[tokio::test]
 async fn library_browser_projects_share_tree_and_sha256_stream_ids() {
     let (state, _receiver) =
         test_state_with_env(MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "native"));

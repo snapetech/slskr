@@ -583,6 +583,7 @@ const MAX_INCOMING_SHARES: usize = 4_096;
 const MAX_INCOMING_SHARE_ITEMS: usize = 10_000;
 const MAX_LIBRARY_ITEMS: usize = 10_000;
 const MAX_CAPABILITY_NEGOTIATION_ITEMS: usize = 256;
+const MAX_MEDIACORE_BATCH_ITEMS: usize = 100;
 const MAX_DESTINATIONS: usize = 256;
 const MAX_SEARCH_RESULTS_PER_SEARCH: usize = 10_000;
 const MAX_TOTAL_SEARCH_RESULTS: usize = 50_000;
@@ -65876,6 +65877,11 @@ async fn mediacore_mutation_response(
         });
     }
     if path == "/api/mediacore/publish/batch" {
+        if json_array_field_exceeds_limit(body, "descriptors", MAX_MEDIACORE_BATCH_ITEMS) {
+            return Some(routing::bad_request_response(
+                "descriptors must contain at most 100 items",
+            ));
+        }
         let descriptors = serde_json::from_str::<serde_json::Value>(body)
             .ok()
             .and_then(|value| {
@@ -65941,6 +65947,11 @@ async fn mediacore_mutation_response(
         ));
     }
     if path == "/api/mediacore/publish/republish" {
+        if json_array_field_exceeds_limit(body, "contentIds", MAX_MEDIACORE_BATCH_ITEMS) {
+            return Some(routing::bad_request_response(
+                "contentIds must contain at most 100 items",
+            ));
+        }
         let started_at = Instant::now();
         let request = serde_json::from_str::<serde_json::Value>(body).unwrap_or_default();
         let requested = request.get("contentIds");
@@ -66022,6 +66033,11 @@ async fn mediacore_mutation_response(
         ));
     }
     if path == "/api/mediacore/retrieve/batch" {
+        if json_array_field_exceeds_limit(body, "contentIds", MAX_MEDIACORE_BATCH_ITEMS) {
+            return Some(routing::bad_request_response(
+                "contentIds must contain at most 100 items",
+            ));
+        }
         let ids = serde_json::from_str::<serde_json::Value>(body)
             .ok()
             .and_then(|value| {
@@ -66142,6 +66158,11 @@ async fn mediacore_mutation_response(
         ));
     }
     if path == "/api/mediacore/retrieve/cache/clear" {
+        if json_array_field_exceeds_limit(body, "keys", MAX_MEDIACORE_BATCH_ITEMS) {
+            return Some(routing::bad_request_response(
+                "keys must contain at most 100 items",
+            ));
+        }
         let mut features = state.controller_features.write().await;
         let requested_keys = serde_json::from_str::<serde_json::Value>(body)
             .ok()
