@@ -72635,7 +72635,15 @@ async fn initialize_telemetry(config: &AppConfig) -> Result<(), String> {
     }
     let response = time::timeout(
         Duration::from_secs(5),
-        reqwest::Client::new().post(endpoint).json(&payload).send(),
+        reqwest::Client::builder()
+            // Keep telemetry on the explicitly configured collector. A
+            // redirect could otherwise move startup data to a different host.
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .map_err(|error| format!("telemetry exporter client failed: {error}"))?
+            .post(endpoint)
+            .json(&payload)
+            .send(),
     )
     .await
     .map_err(|_| "telemetry exporter request timed out".to_owned())?
@@ -85516,7 +85524,17 @@ async fn record_daemon_log(
         });
         let loki_result = time::timeout(
             Duration::from_secs(2),
-            reqwest::Client::new().post(endpoint).json(&payload).send(),
+            async {
+                reqwest::Client::builder()
+                    // A redirect must not move log records away from the
+                    // configured Loki destination.
+                    .redirect(reqwest::redirect::Policy::none())
+                    .build()?
+                    .post(endpoint)
+                    .json(&payload)
+                    .send()
+                    .await
+            },
         )
         .await;
         match loki_result {
