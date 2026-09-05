@@ -60,7 +60,7 @@ export default function Dashboard() {
     );
   }
 
-  if (statsError) {
+  if (statsError && !stats) {
     return (
       <div className="bg-red-50 border border-red-200 rounded-lg p-4">
         <p className="text-red-800">Error: {statsError.message}</p>
@@ -71,6 +71,18 @@ export default function Dashboard() {
   return (
     <div className="space-y-6">
       <h2 className="text-2xl font-bold text-gray-900">Dashboard</h2>
+
+      {statsError && stats && (
+        <div
+          className="bg-yellow-50 border border-yellow-200 rounded-lg p-4"
+          role="alert"
+        >
+          <p className="text-yellow-800">
+            Live statistics refresh failed: {statsError.message}. Showing the
+            last successfully loaded values.
+          </p>
+        </div>
+      )}
 
       {/* Server Status */}
       <div className="bg-white rounded-lg shadow p-6">

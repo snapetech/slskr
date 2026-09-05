@@ -102,7 +102,6 @@ export function useFetch<T>(
         abortControllerRef.current === requestController
       ) {
         setError(error);
-        setData(null);
         currentOptions?.onError?.(error);
       }
     } finally {

@@ -74,6 +74,28 @@ describe('useFetch', () => {
     expect(result.current.data).toEqual({ value: 2 });
   });
 
+  it('retains the last successful data when a refresh fails', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ value: 1 }), {
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockRejectedValueOnce(new Error('refresh unavailable'));
+
+    const { result } = renderHook(() => useFetch<{ value: number }>('/api/value'));
+
+    await waitFor(() => expect(result.current.data).toEqual({ value: 1 }));
+    await act(async () => {
+      await result.current.refetch();
+    });
+
+    expect(result.current.data).toEqual({ value: 1 });
+    expect(result.current.error).toEqual(new Error('refresh unavailable'));
+    expect(result.current.loading).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it('clears stale state and stops loading when the URL is disabled', async () => {
     let resolveRequest: ((response: Response) => void) | undefined;
     const pendingResponse = new Promise<Response>((resolve) => {
