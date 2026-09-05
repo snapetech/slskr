@@ -305,9 +305,21 @@ const MediaCore = () => {
 
   // Pod Message Backfill states
   const [backfillStats, setBackfillStats] = useMountedState(mountedRef, null);
+  const [backfillStatsError, setBackfillStatsError] = useMountedState(
+    mountedRef,
+    null,
+  );
   const [backfillStatsLoading, setBackfillStatsLoading] = useMountedState(mountedRef, false);
   const [syncBackfillLoading, setSyncBackfillLoading] = useMountedState(mountedRef, false);
   const [lastSeenTimestamps, setLastSeenTimestamps] = useMountedState(mountedRef, null);
+  const [lastSeenTimestampsLoadedFor, setLastSeenTimestampsLoadedFor] =
+    useMountedState(mountedRef, null);
+  const [lastSeenTimestampsError, setLastSeenTimestampsError] = useMountedState(
+    mountedRef,
+    null,
+  );
+  const [lastSeenTimestampsLoading, setLastSeenTimestampsLoading] =
+    useMountedState(mountedRef, false);
   const [backfillPodId, setBackfillPodId] = useMountedState(mountedRef, '');
 
   // Pod Channel Management states
@@ -1984,19 +1996,31 @@ const MediaCore = () => {
   const handleGetBackfillStats = async () => {
     try {
       setBackfillStatsLoading(true);
-      setBackfillStats(null);
+      setBackfillStatsError(null);
       const result = await mediacore.getBackfillStats();
+      if (
+        result === null ||
+        typeof result !== 'object' ||
+        Array.isArray(result)
+      ) {
+        throw new Error('Invalid backfill statistics response');
+      }
       setBackfillStats(result);
     } catch (error_) {
-      setBackfillStats({ error: toDisplayError(error_) });
-      toast.error(`Failed to get backfill stats: ${toDisplayError(error_)}`);
+      const message = toDisplayError(
+        error_,
+        'Failed to get backfill statistics',
+      );
+      setBackfillStatsError(message);
+      toast.error(`Failed to get backfill stats: ${message}`);
     } finally {
       setBackfillStatsLoading(false);
     }
   };
 
   const handleSyncPodBackfill = async () => {
-    if (!backfillPodId.trim()) {
+    const requestedPodId = backfillPodId.trim();
+    if (!requestedPodId) {
       toast.error('Pod ID is required for backfill sync');
       return;
     }
@@ -2004,8 +2028,8 @@ const MediaCore = () => {
     try {
       setSyncBackfillLoading(true);
       // Get current last seen timestamps
-      const timestamps = await mediacore.getLastSeenTimestamps(backfillPodId);
-      const result = await mediacore.syncPodBackfill(backfillPodId, timestamps);
+      const timestamps = await mediacore.getLastSeenTimestamps(requestedPodId);
+      const result = await mediacore.syncPodBackfill(requestedPodId, timestamps);
       toast.success(
         `Backfill sync completed: ${result.totalMessagesReceived} messages received`,
       );
@@ -2019,17 +2043,34 @@ const MediaCore = () => {
   };
 
   const handleGetLastSeenTimestamps = async () => {
-    if (!backfillPodId.trim()) {
+    const requestedPodId = backfillPodId.trim();
+    if (!requestedPodId) {
       toast.error('Pod ID is required');
       return;
     }
 
     try {
-      const timestamps = await mediacore.getLastSeenTimestamps(backfillPodId);
+      setLastSeenTimestampsLoading(true);
+      setLastSeenTimestampsError(null);
+      const timestamps = await mediacore.getLastSeenTimestamps(requestedPodId);
+      if (
+        timestamps === null ||
+        typeof timestamps !== 'object' ||
+        Array.isArray(timestamps)
+      ) {
+        throw new Error('Invalid last-seen timestamps response');
+      }
       setLastSeenTimestamps(timestamps);
+      setLastSeenTimestampsLoadedFor(requestedPodId);
     } catch (error_) {
-      toast.error(`Failed to get last seen timestamps: ${toDisplayError(error_)}`);
-      setLastSeenTimestamps(null);
+      const message = toDisplayError(
+        error_,
+        'Failed to get last seen timestamps',
+      );
+      setLastSeenTimestampsError(message);
+      toast.error(`Failed to get last seen timestamps: ${message}`);
+    } finally {
+      setLastSeenTimestampsLoading(false);
     }
   };
 
@@ -2560,6 +2601,8 @@ const MediaCore = () => {
   const hasCurrentSearchResults =
     Array.isArray(searchResults) && searchResultsQuery === searchQuery.trim();
   const hasCurrentChannels = channelsLoadedFor === channelPodId.trim();
+  const hasCurrentLastSeenTimestamps =
+    lastSeenTimestampsLoadedFor === backfillPodId.trim();
   const currentOpinionQueryKey = opinionQueryKey(
     opinionPodId,
     opinionContentId,
@@ -7430,6 +7473,19 @@ const MediaCore = () => {
                 </Button>
               </div>
 
+              {backfillStatsError && (
+                <Message
+                  data-testid="media-core-backfill-stats-error"
+                  negative
+                  size="small"
+                >
+                  {backfillStatsError}
+                  {backfillStats && (
+                    <div>Showing last successfully loaded statistics.</div>
+                  )}
+                </Message>
+              )}
+
               {backfillStats && (
                 <Message
                   size="small"
@@ -7476,6 +7532,7 @@ const MediaCore = () => {
                     <Button
                       color="blue"
                       disabled={!backfillPodId.trim()}
+                      loading={lastSeenTimestampsLoading}
                       onClick={() => handleGetLastSeenTimestamps()}
                     >
                       Get Timestamps
@@ -7490,13 +7547,37 @@ const MediaCore = () => {
                     </Button>
                   </>
                 }
-                onChange={(e) => setBackfillPodId(e.target.value)}
+                onChange={(e) => {
+                  const nextPodId = e.target.value;
+                  setBackfillPodId(nextPodId);
+                  if (nextPodId.trim() !== backfillPodId.trim()) {
+                    setLastSeenTimestampsError(null);
+                    setLastSeenTimestampsLoadedFor(null);
+                  }
+                }}
                 placeholder="Pod ID for backfill sync"
                 style={{ marginBottom: '1em', width: '100%' }}
                 value={backfillPodId}
               />
 
-              {lastSeenTimestamps &&
+              {lastSeenTimestampsError && (
+                <Message
+                  data-testid="media-core-last-seen-error"
+                  negative
+                  size="small"
+                >
+                  {lastSeenTimestampsError}
+                  {hasCurrentLastSeenTimestamps &&
+                    Object.keys(lastSeenTimestamps).length > 0 && (
+                    <div>
+                      Showing last successfully loaded timestamps.
+                    </div>
+                  )}
+                </Message>
+              )}
+
+              {hasCurrentLastSeenTimestamps &&
+                lastSeenTimestamps &&
                 Object.keys(lastSeenTimestamps).length > 0 && (
                   <Message size="small">
                     <Message.Header>
@@ -7518,8 +7599,11 @@ const MediaCore = () => {
                   </Message>
                 )}
 
-              {lastSeenTimestamps &&
-                Object.keys(lastSeenTimestamps).length === 0 && (
+              {hasCurrentLastSeenTimestamps &&
+                lastSeenTimestamps &&
+                Object.keys(lastSeenTimestamps).length === 0 &&
+                !lastSeenTimestampsLoading &&
+                !lastSeenTimestampsError && (
                   <Message
                     info
                     size="small"

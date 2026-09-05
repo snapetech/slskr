@@ -11,12 +11,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('../../../lib/mediacore', () => ({
   getConflictStrategies: vi.fn(),
   getAggregatedOpinions: vi.fn(),
+  getBackfillStats: vi.fn(),
   getContentIdStats: vi.fn(),
   getContentOpinions: vi.fn(),
   getChannels: vi.fn(),
   getConsensusRecommendations: vi.fn(),
   getMemberAffinities: vi.fn(),
   getOpinionStatistics: vi.fn(),
+  getLastSeenTimestamps: vi.fn(),
   searchContent: vi.fn(),
   searchMessages: vi.fn(),
   getSupportedHashAlgorithms: vi.fn(),
@@ -51,6 +53,13 @@ describe('MediaCore', () => {
       variantAggregates: [],
       weightedAverageScore: 0,
     });
+    mediacore.getBackfillStats.mockResolvedValue({
+      averageBackfillDurationMs: 0,
+      totalBackfillBytesTransferred: 0,
+      totalBackfillRequestsReceived: 0,
+      totalBackfillRequestsSent: 0,
+      totalMessagesBackfilled: 0,
+    });
     mediacore.getChannels.mockResolvedValue([]);
     mediacore.getContentOpinions.mockResolvedValue([]);
     mediacore.getConsensusRecommendations.mockResolvedValue([]);
@@ -63,6 +72,7 @@ describe('MediaCore', () => {
       totalOpinions: 0,
       uniqueVariants: 0,
     });
+    mediacore.getLastSeenTimestamps.mockResolvedValue({});
     mediacore.searchContent.mockResolvedValue([]);
     mediacore.searchMessages.mockResolvedValue([]);
   });
@@ -176,6 +186,48 @@ describe('MediaCore', () => {
     expect(await screen.findByTestId('content-search-error')).toHaveTextContent(
       'Content search unavailable',
     );
+  });
+
+  it('keeps backfill data visible when refreshes fail', async () => {
+    mediacore.getBackfillStats
+      .mockResolvedValueOnce({
+        averageBackfillDurationMs: 12.5,
+        totalBackfillBytesTransferred: 1_048_576,
+        totalBackfillRequestsReceived: 2,
+        totalBackfillRequestsSent: 3,
+        totalMessagesBackfilled: 4,
+      })
+      .mockRejectedValueOnce(new Error('Backfill statistics unavailable'));
+    mediacore.getLastSeenTimestamps
+      .mockResolvedValueOnce({
+        'channel-1': '2026-09-05T00:00:00.000Z',
+      })
+      .mockRejectedValueOnce(new Error('Last-seen timestamps unavailable'));
+
+    render(<MediaCore />);
+    await screen.findByText('MediaCore ContentID Registry');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Get Backfill Stats' }));
+    expect((await screen.findByText(/Requests Sent:/)).parentElement).toHaveTextContent(
+      '3',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Get Backfill Stats' }));
+    expect(
+      await screen.findByTestId('media-core-backfill-stats-error'),
+    ).toHaveTextContent('Backfill statistics unavailable');
+    expect(screen.getByText(/Requests Sent:/).parentElement).toHaveTextContent('3');
+
+    const podInput = screen.getByPlaceholderText('Pod ID for backfill sync');
+    fireEvent.change(podInput, { target: { value: 'pod-1' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Get Timestamps' }));
+    expect(
+      await screen.findByText('Last Seen Timestamps for Pod pod-1'),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Get Timestamps' }));
+    expect(
+      await screen.findByTestId('media-core-last-seen-error'),
+    ).toHaveTextContent('Last-seen timestamps unavailable');
+    expect(screen.getByText(/channel-1:/)).toBeInTheDocument();
   });
 
   it('retains message search results when a same-query refresh fails', async () => {
