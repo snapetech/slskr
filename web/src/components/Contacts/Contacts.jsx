@@ -12,6 +12,7 @@ import {
   Icon,
   Label,
   List,
+  Message,
   Modal,
   Popup,
   Segment,
@@ -70,6 +71,7 @@ class Contacts extends Component {
     loading: true,
     mutating: false,
     nearby: [],
+    nearbyError: null,
     nearbyLoading: false,
   };
 
@@ -143,20 +145,23 @@ class Contacts extends Component {
     const requestId = ++this.requestIds.nearby;
     try {
       if (this.isMountedFlag && requestId === this.requestIds.nearby) {
-        this.setState({ nearbyLoading: true });
+        this.setState({ nearbyError: null, nearbyLoading: true });
       }
       const response = await identityAPI.getNearby();
       if (this.isMountedFlag && requestId === this.requestIds.nearby) {
         this.setState({
           nearby: asRecords(response?.data).map(normalizeNearbyPeer),
+          nearbyError: null,
           nearbyLoading: false,
         });
       }
-    } catch {
+    } catch (error) {
       if (this.isMountedFlag && requestId === this.requestIds.nearby) {
-        this.setState({ nearbyLoading: false });
+        this.setState({
+          nearbyError: toDisplayError(error, 'Nearby peer discovery unavailable'),
+          nearbyLoading: false,
+        });
       }
-      // Nearby may fail if mDNS not available, don't show error
     }
   };
 
@@ -322,6 +327,7 @@ class Contacts extends Component {
       loading,
       mutating,
       nearby,
+      nearbyError,
       nearbyLoading,
     } = this.state;
 
@@ -437,8 +443,28 @@ class Contacts extends Component {
         menuItem: 'Nearby',
         render: () => (
           <Tab.Pane>
+            {nearbyError && (
+              <Message
+                data-testid="contacts-nearby-load-error"
+                error
+              >
+                <Message.Header>Nearby peer discovery unavailable</Message.Header>
+                <p>{nearbyError}</p>
+                <p>Showing the last successfully discovered peers when available.</p>
+              </Message>
+            )}
             {nearbyLoading ? (
               <LoaderSegment />
+            ) : nearbyError && nearby.length === 0 ? (
+              <Segment placeholder>
+                <Header icon>
+                  <Icon name="wifi" />
+                  Nearby peers unavailable
+                </Header>
+                <Button disabled={nearbyLoading} onClick={this.loadNearby}>
+                  Retry Discovery
+                </Button>
+              </Segment>
             ) : nearby.length === 0 ? (
               <Segment placeholder>
                 <Header icon>

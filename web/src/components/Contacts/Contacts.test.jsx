@@ -125,4 +125,25 @@ describe('Contacts', () => {
     expect(await screen.findByText('No contacts yet')).toBeInTheDocument();
     expect(screen.queryByText('Contacts unavailable')).not.toBeInTheDocument();
   });
+
+  it('retains nearby peers and identifies discovery failures', async () => {
+    identityAPI.getNearby
+      .mockResolvedValueOnce({
+        data: [{ displayName: 'nearby-fixture', peerId: 'peer-fixture' }],
+      })
+      .mockRejectedValueOnce(new Error('mDNS discovery unavailable'));
+
+    renderContacts();
+
+    expect(await screen.findByText('nearby-fixture')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh Nearby' }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('contacts-nearby-load-error')).toHaveTextContent(
+        'mDNS discovery unavailable',
+      );
+      expect(screen.getByText('nearby-fixture')).toBeInTheDocument();
+    });
+    expect(screen.queryByText('No nearby peers found')).not.toBeInTheDocument();
+  });
 });
