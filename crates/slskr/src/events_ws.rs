@@ -3,7 +3,7 @@
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
     sync::{broadcast, mpsc, RwLock},
-    time::{self, Duration},
+    time::{self, Duration, Instant},
 };
 use tokio_tungstenite::tungstenite::handshake::derive_accept_key;
 
@@ -129,7 +129,10 @@ where
         }
     });
 
-    let mut heartbeat = time::interval(heartbeat_interval);
+    // Tokio intervals tick immediately on their first poll. Delay the first
+    // heartbeat so a newly connected client can complete a close handshake or
+    // send a control frame before the server starts its liveness probe.
+    let mut heartbeat = time::interval_at(Instant::now() + heartbeat_interval, heartbeat_interval);
     let mut awaiting_pong = false;
     let result = async {
         loop {
