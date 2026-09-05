@@ -70,4 +70,34 @@ describe('Events', () => {
       });
     });
   });
+
+  it('retains the previous page when a filtered refresh fails', async () => {
+    list
+      .mockResolvedValueOnce({
+        events: [
+          {
+            data: { message: 'fixture event' },
+            id: 'event-1',
+            timestamp: '2026-09-03T00:00:00Z',
+            type: 'SearchCreated',
+          },
+        ],
+        totalCount: 1,
+      })
+      .mockRejectedValueOnce(new Error('filtered event history unavailable'));
+
+    render(<Events />);
+    expect(await screen.findByText(/fixture event/)).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole('textbox', { name: 'Event text filter' }), {
+      target: { value: 'ambient' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Filter events' }));
+
+    expect(await screen.findByTestId('events-load-error')).toHaveTextContent(
+      'filtered event history unavailable',
+    );
+    expect(screen.getByText(/fixture event/)).toBeInTheDocument();
+    expect(screen.queryByText('No events')).not.toBeInTheDocument();
+  });
 });

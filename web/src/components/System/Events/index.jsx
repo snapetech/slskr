@@ -120,7 +120,7 @@ const Events = () => {
     };
   }, [activeFilters, page]);
 
-  if (loading) {
+  if (loading && events.length === 0) {
     return <LoaderSegment />;
   }
 
@@ -169,7 +169,24 @@ const Events = () => {
           totalPages={totalPages}
         />
       </div>
-      {error ? <Message negative>{error}</Message> : null}
+      {loading && (
+        <Message
+          data-testid="events-refreshing"
+          info
+        >
+          Refreshing event history…
+        </Message>
+      )}
+      {error ? (
+        <Message
+          data-testid="events-load-error"
+          negative
+        >
+          <Message.Header>Event history unavailable</Message.Header>
+          <p>{error}</p>
+          {events.length > 0 && <p>Showing the last successfully loaded events.</p>}
+        </Message>
+      ) : null}
       <Table
         className="events-table, unstackable"
         compact="very"
@@ -189,7 +206,8 @@ const Events = () => {
           </Table.Row>
         </Table.Header>
         <Table.Body className="events-table-body">
-          {error ? null : events?.length === 0 ? (
+          {events?.length === 0 ? (
+            error ? null : (
             <Table.Row>
               <Table.Cell
                 colSpan={99}
@@ -202,6 +220,7 @@ const Events = () => {
                 No events
               </Table.Cell>
             </Table.Row>
+            )
           ) : (
             events.map((event, index) => (
               <Table.Row key={`${event.id ?? 'event'}-${index}`}>
