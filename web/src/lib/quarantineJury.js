@@ -6,9 +6,17 @@ import api from './api';
 
 const baseUrl = '/quarantine-jury';
 
+const requireArrayResponse = (value, resource) => {
+  if (!Array.isArray(value)) {
+    throw new Error(`Quarantine Jury API returned an invalid ${resource} response`);
+  }
+
+  return value;
+};
+
 export const getRequests = async () => {
   const { data } = await api.get(`${baseUrl}/requests`);
-  return Array.isArray(data) ? data : [];
+  return requireArrayResponse(data, 'request list');
 };
 
 export const getReview = async (requestId) =>

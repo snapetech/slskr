@@ -1,9 +1,25 @@
 import api from './api';
 import { rootUrl } from '../config';
 
+const requireObjectResponse = (value, resource) => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`Listening party API returned an invalid ${resource} response`);
+  }
+
+  return value;
+};
+
+const requireArrayResponse = (value, resource) => {
+  if (!Array.isArray(value)) {
+    throw new Error(`Listening party API returned an invalid ${resource} response`);
+  }
+
+  return value;
+};
+
 export const getPartyDirectory = async () => {
   const { data } = await api.get('/listening-party');
-  return Array.isArray(data) ? data : [];
+  return requireArrayResponse(data, 'party directory');
 };
 
 export const getPartyState = async (podId, channelId) => {
@@ -12,7 +28,8 @@ export const getPartyState = async (podId, channelId) => {
     { validateStatus: (status) => status === 200 || status === 204 },
   );
 
-  return response.status === 204 ? null : response.data;
+  if (response.status === 204) return null;
+  return requireObjectResponse(response.data, 'party state');
 };
 
 export const publishPartyState = async (podId, channelId, event) => {
