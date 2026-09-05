@@ -151,7 +151,7 @@ where
     // unbounded per-connection memory growth.
     let mut listening_party_groups = HashSet::new();
     for (target, argument) in initial_hub_messages(&state, hub).await {
-        write_invocation(writer, &target, argument).await?;
+        write_invocation(writer, hub, &target, argument).await?;
     }
 
     let (inbound_tx, mut inbound_rx) = mpsc::channel(relay_ws::HUB_INBOUND_QUEUE_CAPACITY);
@@ -209,7 +209,7 @@ where
                         )
                         .await
                         {
-                            write_invocation(writer, &target, argument).await?;
+                            write_invocation(writer, hub, &target, argument).await?;
                         }
                     }
                     Err(broadcast::error::RecvError::Lagged(_)) => {}
@@ -369,10 +369,16 @@ where
     .await
 }
 
-async fn write_invocation<W>(writer: &mut W, target: &str, argument: Value) -> Result<(), String>
+async fn write_invocation<W>(
+    writer: &mut W,
+    hub: &str,
+    target: &str,
+    argument: Value,
+) -> Result<(), String>
 where
     W: AsyncWrite + Unpin,
 {
+    let argument = bounded_hub_argument(hub, target, argument);
     relay_ws::write_signalr_json(
         writer,
         &json!({
@@ -382,6 +388,106 @@ where
         }),
     )
     .await
+}
+
+fn invocation_size(target: &str, argument: &Value) -> usize {
+    json!({
+        "type": 1,
+        "target": target,
+        "arguments": [argument],
+    })
+    .to_string()
+    .len()
+}
+
+fn compact_search_record(value: Value) -> Value {
+    let Value::Object(mut object) = value else {
+        return value;
+    };
+    // SearchHub consumers fetch the detailed response collection from REST.
+    // Keep the normal payload unchanged while it fits, but remove the large
+    // result page when a populated search would exceed the SignalR ceiling.
+    object.remove("results");
+    Value::Object(object)
+}
+
+fn minimal_search_record(value: Value) -> Value {
+    let Value::Object(object) = value else {
+        return value;
+    };
+    const KEYS: &[&str] = &[
+        "id",
+        "token",
+        "query",
+        "searchText",
+        "target",
+        "target_name",
+        "wishlistItemId",
+        "status",
+        "state",
+        "isComplete",
+        "result_count",
+        "fileCount",
+        "lockedFileCount",
+        "responseCount",
+        "responsesAvailable",
+        "rawResponseCount",
+        "filteredOutCount",
+        "ignoredResultCount",
+        "hiddenLockedCount",
+        "fallbackAttempts",
+        "responses",
+        "startedAt",
+        "endedAt",
+        "expires_at",
+        "created_at",
+        "updated_at",
+    ];
+    let mut minimal = serde_json::Map::new();
+    for key in KEYS {
+        if let Some(value) = object.get(*key) {
+            minimal.insert((*key).to_owned(), value.clone());
+        }
+    }
+    Value::Object(minimal)
+}
+
+fn bounded_search_argument(target: &str, argument: Value) -> Value {
+    if let Value::Array(records) = argument {
+        let mut bounded = Vec::new();
+        for record in records {
+            let compacted = compact_search_record(record);
+            let compacted =
+                if invocation_size(target, &compacted) <= relay_ws::MAX_SIGNALR_MESSAGE_BYTES {
+                    compacted
+                } else {
+                    minimal_search_record(compacted)
+                };
+            bounded.push(compacted);
+            if invocation_size(target, &Value::Array(bounded.clone()))
+                > relay_ws::MAX_SIGNALR_MESSAGE_BYTES
+            {
+                bounded.pop();
+                break;
+            }
+        }
+        return Value::Array(bounded);
+    }
+
+    let compacted = compact_search_record(argument);
+    if invocation_size(target, &compacted) <= relay_ws::MAX_SIGNALR_MESSAGE_BYTES {
+        compacted
+    } else {
+        minimal_search_record(compacted)
+    }
+}
+
+fn bounded_hub_argument(hub: &str, target: &str, argument: Value) -> Value {
+    if hub != "search" || invocation_size(target, &argument) <= relay_ws::MAX_SIGNALR_MESSAGE_BYTES
+    {
+        return argument;
+    }
+    bounded_search_argument(target, argument)
 }
 
 async fn initial_hub_messages(state: &AppState, hub: &str) -> Vec<(String, Value)> {
@@ -760,6 +866,51 @@ mod tests {
         assert!(payload.get("responses").is_none());
         let native_payload = search_hub_payload(&search, true).expect("native hub payload");
         assert_eq!(native_payload["responses"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn oversized_search_update_drops_only_the_result_page() {
+        let argument = serde_json::json!({
+            "id": "search-1",
+            "query": "parity",
+            "results": (0..10_000)
+                .map(|id| serde_json::json!({"filename": format!("{id}-{}.flac", "x".repeat(32))}))
+                .collect::<Vec<_>>(),
+        });
+        let bounded = super::bounded_hub_argument("search", "UPDATE", argument);
+
+        assert!(
+            super::invocation_size("UPDATE", &bounded)
+                <= super::relay_ws::MAX_SIGNALR_MESSAGE_BYTES
+        );
+        assert_eq!(bounded["id"], "search-1");
+        assert_eq!(bounded["query"], "parity");
+        assert!(bounded.get("results").is_none());
+    }
+
+    #[test]
+    fn oversized_search_list_keeps_newest_records_that_fit() {
+        let argument = serde_json::Value::Array(
+            (0..200)
+                .map(|id| {
+                    serde_json::json!({
+                        "id": format!("search-{id}"),
+                        "query": "x".repeat(4 * 1024),
+                        "results": [{"filename": "unused"}],
+                    })
+                })
+                .collect(),
+        );
+        let bounded = super::bounded_hub_argument("search", "LIST", argument);
+
+        assert!(
+            super::invocation_size("LIST", &bounded) <= super::relay_ws::MAX_SIGNALR_MESSAGE_BYTES
+        );
+        assert!(bounded
+            .as_array()
+            .is_some_and(|records| records.len() < 200));
+        assert_eq!(bounded[0]["id"], "search-0");
+        assert!(bounded[0].get("results").is_none());
     }
 
     #[test]

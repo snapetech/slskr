@@ -19,7 +19,7 @@ use uuid::Uuid;
 use crate::{relay, AppState};
 
 const SIGNALR_RECORD_SEPARATOR: char = '\x1e';
-const MAX_SIGNALR_MESSAGE_BYTES: usize = relay::MAX_HUB_MESSAGE_BYTES;
+pub(crate) const MAX_SIGNALR_MESSAGE_BYTES: usize = relay::MAX_HUB_MESSAGE_BYTES;
 const MAX_SIGNALR_MESSAGES_PER_FRAME: usize = 256;
 const MAX_WEBSOCKET_FRAME_BYTES: u64 = 4 * 1024 * 1024;
 pub(crate) const WEBSOCKET_READ_TIMEOUT: Duration = Duration::from_secs(120);
