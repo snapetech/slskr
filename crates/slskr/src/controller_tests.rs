@@ -682,9 +682,9 @@ async fn watched_search_filters_preserve_reloaded_case_mode() {
     ]);
     super::apply_watched_controller_configuration(&state, Some(yaml), &cli_environment).await;
 
-    assert!(!super::build_file_search_response(&state, 1, "SECRET")
+    assert!(super::build_file_search_response(&state, 1, "SECRET")
         .await
-        .is_some());
+        .is_none());
 }
 
 #[cfg_attr(test, test)]
@@ -11404,9 +11404,8 @@ async fn controller_api_differential_automation_compat_routes_use_expected_shape
             && (versioned == "/api/v0/searches/1"
                 || versioned.starts_with("/api/v0/conversations/")
                 || versioned == "/api/v0/shares"
-                || versioned == "/api/v0/rooms/joined/contract-room")
-            || (method == "DELETE"
-                && versioned.starts_with("/api/v0/transfers/uploads/peer1/1"))
+                || versioned == "/api/v0/rooms/joined/contract-room"
+                || versioned.starts_with("/api/v0/transfers/uploads/peer1/1"))
             || (method == "GET" && versioned.starts_with("/api/v0/transfers/uploads/peer1"))
             || (method == "GET" && versioned.starts_with("/api/v0/shares/root"))
             || (method == "GET"
@@ -12908,7 +12907,7 @@ async fn transfer_cancellation_returns_frozen_statuses() {
     assert_eq!(cancelled.status, "204 No Content");
 }
 
-static APPLICATION_DUMP_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+static APPLICATION_DUMP_ENV_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 #[cfg_attr(test, tokio::test)]
 #[cfg(any(
@@ -12983,9 +12982,7 @@ async fn controller_api_differential_controller_application_dump_contracts() {
         }
     }
 
-    let _env_lock = APPLICATION_DUMP_ENV_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _env_lock = APPLICATION_DUMP_ENV_LOCK.lock().await;
     let _audit_mode_guard = AuditModeGuard(std::env::var_os("SLSKR_CONTROLLER_AUDIT_MODE"));
     std::env::set_var("SLSKR_CONTROLLER_AUDIT_MODE", "1");
 
@@ -13118,9 +13115,7 @@ async fn controller_api_differential_native_application_dump_gates_impl() {
         }
     }
 
-    let _env_lock = APPLICATION_DUMP_ENV_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _env_lock = APPLICATION_DUMP_ENV_LOCK.lock().await;
     let _audit_mode_guard = AuditModeGuard(std::env::var_os("SLSKR_CONTROLLER_AUDIT_MODE"));
     std::env::set_var("SLSKR_CONTROLLER_AUDIT_MODE", "1");
 
@@ -28517,14 +28512,12 @@ async fn virtual_soulfind_bridge_timeout_and_reconnect(
         let _ = server.await;
         return false;
     }
-    let timed_out = matches!(
-        tokio::time::timeout(
-            Duration::from_millis(25),
-            super::bridge_read_frame(&mut first_client),
-        )
-        .await,
-        Err(_)
-    );
+    let timed_out = tokio::time::timeout(
+        Duration::from_millis(25),
+        super::bridge_read_frame(&mut first_client),
+    )
+    .await
+    .is_err();
     drop(first_client);
 
     let mut second_client = match tokio::net::TcpStream::connect(address).await {
@@ -43210,8 +43203,7 @@ async fn versioned_relay_controller_upload_tokens_are_one_use() {
             .read()
             .await
             .protocol
-            .remote_file_for_agent("edge-one", "Remote/Agent.flac")
-            .map(|(filename, size)| (filename, size)),
+            .remote_file_for_agent("edge-one", "Remote/Agent.flac"),
         Some(("Remote/Agent.flac".to_owned(), 6))
     );
     let stored_share = state
@@ -74575,7 +74567,7 @@ async fn controller_api_differential_podcore_membership_storage() {
             membership_route,
             "concurrency-and-idempotency",
             responses.iter().all(|response| {
-                response.as_ref().is_ok_and(|response| is_success(response))
+                response.as_ref().is_ok_and(is_success)
             }) && loaded
                 .member_for_verification(pod_id, "delete-target")
                 .is_none()
@@ -74752,7 +74744,7 @@ async fn controller_api_differential_podcore_membership_storage() {
             action_route,
             "concurrency-and-idempotency",
             responses.iter().all(|response| {
-                response.as_ref().is_ok_and(|response| is_success(response))
+                response.as_ref().is_ok_and(is_success)
             }) && loaded_member.as_ref().is_some_and(|member| {
                 member.role == expected_role && member.is_banned == expected_banned
             })
@@ -74837,7 +74829,7 @@ async fn controller_api_differential_podcore_membership_storage() {
             publish_route,
             "concurrency-and-idempotency",
             responses.iter().all(|response| {
-                response.as_ref().is_ok_and(|response| is_success(response))
+                response.as_ref().is_ok_and(is_success)
             }) && loaded
                 .member_for_verification(pod_id, "membership-owner")
                 .is_some_and(|member| member.role == "owner")
@@ -74923,7 +74915,7 @@ async fn controller_api_differential_podcore_membership_storage() {
             update_route,
             "concurrency-and-idempotency",
             responses.iter().all(|response| {
-                response.as_ref().is_ok_and(|response| is_success(response))
+                response.as_ref().is_ok_and(is_success)
             }) && loaded
                 .member_for_verification(pod_id, "update-target")
                 .is_some_and(|member| member.role == "mod")
@@ -75202,7 +75194,7 @@ async fn controller_api_differential_podcore_discovery_storage() {
             register_route,
             "concurrency-and-idempotency",
             responses.iter().all(|response| {
-                response.as_ref().is_ok_and(|response| is_success(response))
+                response.as_ref().is_ok_and(is_success)
             }) && loaded.get(&key).is_some()
                 && feature_path.is_file()
         );
@@ -75318,7 +75310,7 @@ async fn controller_api_differential_podcore_discovery_storage() {
             update_route,
             "concurrency-and-idempotency",
             responses.iter().all(|response| {
-                response.as_ref().is_ok_and(|response| is_success(response))
+                response.as_ref().is_ok_and(is_success)
             }) && loaded.get(&key).is_some()
                 && feature_path.is_file()
         );
@@ -82991,8 +82983,7 @@ async fn controller_api_differential_pod_and_jury_stats() {
             "hasValidSignature": false,
             "isNotBanned": false,
             "errorMessage": "Invalid channel ID format",
-        })
-        .to_string();
+        });
 
     let missing_pod_id = super::route_http_request(
         "POST",
@@ -90397,7 +90388,7 @@ async fn controller_api_differential_native_profile_contracts() {
         concurrent_invites.iter().all(|response| {
             response
                 .as_ref()
-                .is_ok_and(|response| valid_invite(response))
+                .is_ok_and(valid_invite)
         })
     );
 
@@ -90475,7 +90466,7 @@ async fn controller_api_differential_native_profile_contracts() {
         concurrent_updates.iter().all(|response| {
             response
                 .as_ref()
-                .is_ok_and(|response| valid_profile(response))
+                .is_ok_and(valid_profile)
         })
     );
 
@@ -97000,7 +96991,7 @@ async fn persistence_lifecycle_differential_covered_domains_corrupt_state_and_up
                 .await
                 .records
                 .first()
-                .map(|record| record.id.clone())
+                .map(|record| record.id)
                 .expect("differential message id");
             db.execute_raw_for_test(&format!(
                 "UPDATE messages SET created_at = 'not-a-number' WHERE id = '{id}'"
@@ -97202,7 +97193,7 @@ fn activitypub_actor_binding_matches_oracle_contract() {
 /// test's `Drop` could clear the override while a concurrently running
 /// test is still relying on it, intermittently failing key fetches for
 /// a reason that has nothing to do with the signature under test.
-static ACTIVITYPUB_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+static ACTIVITYPUB_ENV_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 struct ActivityPubSignatureFixture {
     signing_key: super::SigningKey,
@@ -97210,7 +97201,7 @@ struct ActivityPubSignatureFixture {
     body: String,
     digest: String,
     _server: tokio::task::JoinHandle<()>,
-    _env_guard: std::sync::MutexGuard<'static, ()>,
+    _env_guard: tokio::sync::MutexGuard<'static, ()>,
 }
 
 impl ActivityPubSignatureFixture {
@@ -97225,9 +97216,7 @@ impl ActivityPubSignatureFixture {
         use sha2::Digest;
         use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
-        let env_guard = ACTIVITYPUB_ENV_LOCK
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let env_guard = ACTIVITYPUB_ENV_LOCK.lock().await;
         let signing_key =
             super::new_capability_signing_key().expect("generate fixture Ed25519 signing key");
         const ED25519_SPKI_PREFIX: [u8; 12] = [
@@ -112841,7 +112830,7 @@ async fn controller_api_differential_controller_upload_lifecycle() {
         "/api/v0/transfers/uploads/{username}/{id}",
         "populated-dynamic-state",
         detail.status == "200 OK"
-            && detail_json["id"] == upload_id.to_string()
+            && detail_json["id"] == upload_id
             && detail_json["bytesTransferred"] == 17
     );
 
@@ -113602,9 +113591,7 @@ async fn controller_api_differential_controller_transfer_batch_cleanup_and_failu
         "POST",
         "/api/v0/transfers/downloads/batches",
         None,
-        &format!(
-            r#"{{"id":"66666666-6666-4666-8666-666666666666","username":"batch-peer","files":[{{"filename":"Failure/Batch.flac","size":1}}]}}"#
-        ),
+        r#"{"id":"66666666-6666-4666-8666-666666666666","username":"batch-peer","files":[{"filename":"Failure/Batch.flac","size":1}]}"#,
         &failure_state,
     )
     .await
@@ -121179,7 +121166,7 @@ async fn security_controls_differential_mesh_transport() {
             )
     );
     let deep_json =
-        "[".repeat(MAX_PARSE_DEPTH + 1) + &"0".to_owned() + &"]".repeat(MAX_PARSE_DEPTH + 1);
+        "[".repeat(MAX_PARSE_DEPTH + 1) + "0" + &"]".repeat(MAX_PARSE_DEPTH + 1);
     record!(
         SECURITY_UTILS,
         "rejected-malicious-and-boundary-input",
@@ -121574,8 +121561,7 @@ async fn security_controls_differential_mesh_transport() {
         OVERLAY_BLOCKLIST,
         "rejected-malicious-and-boundary-input",
         !overlay_blocklist.is_blocked_username("")
-            && overlay_blocklist.unblock_ip("198.51.100.8".parse().expect("missing IP"))
-                == false
+            && !overlay_blocklist.unblock_ip("198.51.100.8".parse().expect("missing IP"))
     );
     let concurrent_blocklist = Arc::new(OverlayBlocklist::new());
     let handles = (0..16)
@@ -125842,7 +125828,7 @@ async fn controller_api_differential_hashdb_domain_contracts() {
             .await
             .expect("store frozen HashDb verification request");
     let stored_json = serde_json::from_str::<serde_json::Value>(&stored.body)
-        .unwrap_or_else(|_| serde_json::Value::Null);
+        .unwrap_or(serde_json::Value::Null);
     record!(
         "POST",
         "/api/v0/hashdb/hash",
@@ -125859,7 +125845,7 @@ async fn controller_api_differential_hashdb_domain_contracts() {
     .await
     .expect("read stored HashDb verification entry");
     let lookup_json = serde_json::from_str::<serde_json::Value>(&lookup.body)
-        .unwrap_or_else(|_| serde_json::Value::Null);
+        .unwrap_or(serde_json::Value::Null);
     record!(
         "GET",
         "/api/v0/hashdb/hash/{flacKey}",
@@ -125898,7 +125884,7 @@ async fn controller_api_differential_hashdb_domain_contracts() {
     .expect("read HashDb inventory by size");
     let inventory_by_size_json =
         serde_json::from_str::<serde_json::Value>(&inventory_by_size.body)
-            .unwrap_or_else(|_| serde_json::Value::Null);
+        .unwrap_or(serde_json::Value::Null);
     record!(
         "GET",
         "/api/v0/hashdb/inventory/by-size/{size}",
@@ -125912,7 +125898,7 @@ async fn controller_api_differential_hashdb_domain_contracts() {
             .await
             .expect("read unhashed HashDb inventory");
     let unhashed_json = serde_json::from_str::<serde_json::Value>(&unhashed.body)
-        .unwrap_or_else(|_| serde_json::Value::Null);
+        .unwrap_or(serde_json::Value::Null);
     record!(
         "GET",
         "/api/v0/hashdb/inventory/unhashed",
@@ -125934,7 +125920,7 @@ async fn controller_api_differential_hashdb_domain_contracts() {
     .await
     .expect("generate populated HashDb key");
     let generated_key_json = serde_json::from_str::<serde_json::Value>(&generated_key.body)
-        .unwrap_or_else(|_| serde_json::Value::Null);
+        .unwrap_or(serde_json::Value::Null);
     record!(
         "GET",
         "/api/v0/hashdb/key",
@@ -125945,7 +125931,7 @@ async fn controller_api_differential_hashdb_domain_contracts() {
         .await
         .expect("read populated HashDb schema");
     let schema_json = serde_json::from_str::<serde_json::Value>(&schema.body)
-        .unwrap_or_else(|_| serde_json::Value::Null);
+        .unwrap_or(serde_json::Value::Null);
     record!(
         "GET",
         "/api/v0/hashdb/schema",
@@ -125999,7 +125985,7 @@ async fn controller_api_differential_hashdb_domain_contracts() {
     .await
     .expect("merge HashDb sync entries");
     let merged_json = serde_json::from_str::<serde_json::Value>(&merged.body)
-        .unwrap_or_else(|_| serde_json::Value::Null);
+        .unwrap_or(serde_json::Value::Null);
     record!(
         "POST",
         "/api/v0/hashdb/sync/merge",
@@ -126031,7 +126017,7 @@ async fn controller_api_differential_hashdb_domain_contracts() {
     .await
     .expect("idempotent HashDb sync merge");
     let idempotent_json = serde_json::from_str::<serde_json::Value>(&idempotent.body)
-        .unwrap_or_else(|_| serde_json::Value::Null);
+        .unwrap_or(serde_json::Value::Null);
     record!(
         "POST",
         "/api/v0/hashdb/sync/merge",
@@ -126129,7 +126115,7 @@ async fn controller_api_differential_hashdb_domain_contracts() {
             .await
             .expect("HashDb optimize mutation");
         let value = serde_json::from_str::<serde_json::Value>(&response.body)
-            .unwrap_or_else(|_| serde_json::Value::Null);
+        .unwrap_or(serde_json::Value::Null);
         record!(
             "POST",
             path,
@@ -126198,7 +126184,7 @@ async fn controller_api_differential_hashdb_domain_contracts() {
         "mutation-side-effects-and-readback",
         profile.status == "200 OK"
             && serde_json::from_str::<serde_json::Value>(&profile.body)
-                .unwrap_or_else(|_| serde_json::Value::Null)["query"]
+                .unwrap_or(serde_json::Value::Null)["query"]
                 == "SELECT * FROM hash_entries"
     );
     let profile_restart = super::route_http_request(
@@ -129783,8 +129769,8 @@ async fn controller_api_differential_rooms_controller_residuals() {
                 "GET",
                 route,
                 "runtime-failure-and-timeout",
-                response.status == "200 OK" && json_body(&response).is_object()
-                    || response.status == "200 OK" && json_body(&response).is_array()
+                response.status == "200 OK"
+                    && (json_body(&response).is_object() || json_body(&response).is_array())
             );
         }
     }
@@ -130181,7 +130167,7 @@ async fn controller_api_differential_rooms_controller_residuals() {
             responses
                 .iter()
                 .all(|response| response.status == "201 Created")
-                && state.rooms.read().await.records[0].members.len() >= 1
+                && !state.rooms.read().await.records[0].members.is_empty()
         );
     }
 
@@ -138999,7 +138985,7 @@ async fn controller_api_differential_audio_canonical_dedupe_and_migration() {
         response.status == "200 OK"
             && response.content_type.starts_with("application/json")
             && value["recordingId"] == recording_id
-            && entries.is_some_and(|entries| populated == !entries.is_empty() || !populated)
+            && entries.is_some_and(|entries| !populated || entries.is_empty())
     };
 
     for (path, route, field) in [
@@ -145421,7 +145407,7 @@ fn run_bounded_security_control_tests() {
         security_controls_differential_share_token_store();
         run_controller_future_on_large_stack(
             "security-controls-csrf-filter-bounded",
-            || security_controls_differential_csrf_filter_impl(),
+            security_controls_differential_csrf_filter_impl,
         );
         security_controls_differential_hardening_validator();
         security_controls_differential_certificate_manager().await;

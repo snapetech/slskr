@@ -809,6 +809,13 @@ impl Gateway {
                 }
                 continue;
             }
+            if !self
+                .overlay_rate_limiter
+                .check_message(&received.1.to_string())
+                .allowed
+            {
+                continue;
+            }
             let Ok(envelope) = ControlEnvelope::decode(&buffer[..received.0]) else {
                 continue;
             };
@@ -1121,12 +1128,22 @@ impl Gateway {
         state: Arc<super::AppState>,
     ) {
         let remote = connection.remote_address();
+        let connection_id = uuid::Uuid::new_v4().simple().to_string();
         loop {
+            if !self
+                .overlay_rate_limiter
+                .check_message(&connection_id)
+                .allowed
+            {
+                self.overlay_rate_limiter.remove_connection(&connection_id);
+                return;
+            }
             let envelope =
                 match timeout(OVERLAY_MESSAGE_READ_TIMEOUT, connection.accept_envelope()).await {
                     Ok(Ok(envelope)) => envelope,
                     Ok(Err(QuicControlError::Connection(error))) => {
                         tracing::debug!(%error, ?remote, "overlay QUIC control connection closed");
+                        self.overlay_rate_limiter.remove_connection(&connection_id);
                         return;
                     }
                     Ok(Err(error)) => {
@@ -1622,6 +1639,13 @@ impl Gateway {
                     }
                     Err(_) => continue,
                 };
+                if !self
+                    .overlay_rate_limiter
+                    .check_message(&connection_id)
+                    .allowed
+                {
+                    return Err("overlay message rate exceeded".to_owned());
+                }
                 let message_type = serde_json::from_slice::<serde_json::Value>(&raw)
                     .ok()
                     .and_then(|value| {
@@ -1652,6 +1676,13 @@ impl Gateway {
                         // violation; it does not manufacture a response for malformed input.
                         if request.validate().is_err() {
                             continue;
+                        }
+                        if !self
+                            .overlay_rate_limiter
+                            .check_mesh_search_request(&hello.username)
+                            .allowed
+                        {
+                            return Err("overlay mesh search rate exceeded".to_owned());
                         }
                         let response = self.handle_mesh_search(request, state).await;
                         framer.write(&response).await.map_err(|error| {
@@ -1688,6 +1719,7 @@ impl Gateway {
             }
         }
         .await;
+        self.overlay_rate_limiter.remove_connection(&connection_id);
         self.remove_connection_tunnels(&connection_id).await;
         self.overlay_connections
             .write()

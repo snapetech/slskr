@@ -452,13 +452,14 @@ impl OverlayRateLimiter {
         queue: impl Fn(&mut OverlayPeerState) -> &mut VecDeque<Instant>,
         reason: &str,
     ) -> OverlayRateLimitResult {
-        if !valid_overlay_id(peer_id) {
+        let peer_id = peer_id.trim().to_ascii_lowercase();
+        if !valid_overlay_id(&peer_id) {
             self.record_rejection();
             return OverlayRateLimitResult::rejected("overlay peer identity is invalid");
         }
         let now = Instant::now();
         let mut peers = self.peer_states.lock().expect("overlay peer limiter lock");
-        if !peers.contains_key(peer_id) && peers.len() >= MAX_OVERLAY_TRACKED_PEERS {
+        if !peers.contains_key(&peer_id) && peers.len() >= MAX_OVERLAY_TRACKED_PEERS {
             prune_overlay_peer_states(&mut peers, now);
             if peers.len() >= MAX_OVERLAY_TRACKED_PEERS {
                 drop(peers);
@@ -2164,5 +2165,19 @@ mod tests {
         }
         assert!(!limiter.check_message("peer-over-cap").allowed);
         assert_eq!(limiter.stats().tracked_peers, MAX_OVERLAY_TRACKED_PEERS);
+    }
+
+    #[test]
+    fn overlay_limiter_enforces_message_and_case_insensitive_search_budgets() {
+        let limiter = OverlayRateLimiter::new();
+        for _ in 0..OVERLAY_MAX_MESSAGES_PER_SECOND {
+            assert!(limiter.check_message("connection").allowed);
+        }
+        assert!(!limiter.check_message("connection").allowed);
+
+        for _ in 0..OVERLAY_MAX_MESH_SEARCH_REQUESTS_PER_MINUTE {
+            assert!(limiter.check_mesh_search_request("Peer-One").allowed);
+        }
+        assert!(!limiter.check_mesh_search_request("peer-one").allowed);
     }
 }
