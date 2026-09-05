@@ -1,10 +1,15 @@
 use std::{net::IpAddr, time::Duration};
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
+use futures_util::StreamExt;
 use reqwest::{header, StatusCode};
 use serde::Deserialize;
 
 use crate::config::{ControllerProfile, VpnIntegrationSettings};
+
+const MAX_VPN_RESPONSE_BYTES: usize = 512 * 1024;
+const MAX_VPN_TEXT_BYTES: usize = 4 * 1024;
+const MAX_VPN_PORT_FORWARDS: usize = 256;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Status {
@@ -175,10 +180,7 @@ async fn get_json<T: serde::de::DeserializeOwned>(
     let response = response
         .error_for_status()
         .map_err(|error| format!("Gluetun request failed: {error}"))?;
-    response
-        .json::<T>()
-        .await
-        .map_err(|error| format!("Unexpected Gluetun response: {error}"))
+    read_bounded_json(response, "Gluetun").await
 }
 
 async fn get_optional_json<T: serde::de::DeserializeOwned>(
@@ -196,11 +198,37 @@ async fn get_optional_json<T: serde::de::DeserializeOwned>(
     let response = response
         .error_for_status()
         .map_err(|error| format!("Gluetun request failed: {error}"))?;
-    response
-        .json::<T>()
-        .await
-        .map(Some)
-        .map_err(|error| format!("Unexpected Gluetun response: {error}"))
+    read_bounded_json(response, "Gluetun").await.map(Some)
+}
+
+async fn read_bounded_json<T: serde::de::DeserializeOwned>(
+    response: reqwest::Response,
+    label: &str,
+) -> Result<T, String> {
+    if response
+        .content_length()
+        .is_some_and(|length| length > MAX_VPN_RESPONSE_BYTES as u64)
+    {
+        return Err(format!(
+            "{label} response exceeds {MAX_VPN_RESPONSE_BYTES} bytes"
+        ));
+    }
+    let mut body = Vec::new();
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|error| format!("{label} response read failed: {error}"))?;
+        if body.len().saturating_add(chunk.len()) > MAX_VPN_RESPONSE_BYTES {
+            return Err(format!(
+                "{label} response exceeds {MAX_VPN_RESPONSE_BYTES} bytes"
+            ));
+        }
+        body.extend_from_slice(&chunk);
+    }
+    serde_json::from_slice(&body).map_err(|error| format!("Unexpected {label} response: {error}"))
+}
+
+fn bounded_vpn_text(value: String) -> String {
+    crate::truncate_utf8_bytes(value, MAX_VPN_TEXT_BYTES)
 }
 
 pub(crate) async fn poll_once(
@@ -218,8 +246,8 @@ pub(crate) async fn poll_once(
         get_optional_json::<RelayResponse>(&client, options, "/v1/slskr/relay")
             .await?
             .map(|relay| RelayStatus {
-                mode: relay.mode,
-                transport: relay.transport,
+                mode: bounded_vpn_text(relay.mode),
+                transport: bounded_vpn_text(relay.transport),
                 connected: relay.connected,
                 latency_ms: relay.latency_ms,
                 rx_bytes: relay.rx_bytes,
@@ -227,8 +255,8 @@ pub(crate) async fn poll_once(
                 active_connections: relay.active_connections,
                 connection_limit: relay.connection_limit,
                 bandwidth_limit_mbit: relay.bandwidth_limit_mbit,
-                latest_handshake_at: relay.latest_handshake_at,
-                path: relay.path,
+                latest_handshake_at: relay.latest_handshake_at.map(bounded_vpn_text),
+                path: bounded_vpn_text(relay.path),
             })
     } else {
         None
@@ -269,22 +297,20 @@ pub(crate) async fn poll_once(
                 let response = response
                     .error_for_status()
                     .map_err(|error| format!("Gluetun request failed: {error}"))?;
-                let multi = response
-                    .json::<PortForwardsResponse>()
-                    .await
-                    .map_err(|error| format!("Unexpected Gluetun response: {error}"))?;
+                let multi = read_bounded_json::<PortForwardsResponse>(response, "Gluetun").await?;
                 port_forwards = multi
                     .forwards
                     .into_iter()
                     .filter(|forward| forward.public_port > 0)
+                    .take(MAX_VPN_PORT_FORWARDS)
                     .map(|forward| PortForward {
                         slot: forward.slot,
                         local_port: forward.local_port,
                         target_port: forward.target_port,
-                        proto: forward.proto,
+                        proto: bounded_vpn_text(forward.proto),
                         public_port: forward.public_port,
                         public_ip_address: forward.public_ip.parse().ok(),
-                        namespace: forward.namespace,
+                        namespace: bounded_vpn_text(forward.namespace),
                     })
                     .collect();
                 if forwarded_port.is_none() {
@@ -301,7 +327,11 @@ pub(crate) async fn poll_once(
         is_ready: !options.port_forwarding || forwarded_port.is_some(),
         is_connected: true,
         public_ip_address: Some(parsed_public_ip),
-        location: format!("{}, {}", public_ip.city, public_ip.country),
+        location: format!(
+            "{}, {}",
+            bounded_vpn_text(public_ip.city),
+            bounded_vpn_text(public_ip.country)
+        ),
         forwarded_port,
         port_forwards,
         relay,
@@ -511,5 +541,32 @@ mod tests {
         assert!(status.is_ready);
         assert_eq!(status.forwarded_port, Some(45_678));
         assert!(status.port_forwards.is_empty());
+    }
+
+    #[tokio::test]
+    async fn oversized_gluetun_json_is_rejected_before_deserialization() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let body = format!(
+            r#"{{"public_ip":"203.0.113.9","city":"{}","country":"Canada"}}"#,
+            "x".repeat(MAX_VPN_RESPONSE_BYTES)
+        );
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut buffer = [0_u8; 4096];
+            let _ = stream.read(&mut buffer).await.unwrap();
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            let _ = stream.write_all(response.as_bytes()).await;
+        });
+        let mut settings = options(format!("http://{address}"));
+        settings.port_forwarding = false;
+        let error = poll_once(&settings, ControllerProfile::Native)
+            .await
+            .expect_err("oversized Gluetun response");
+        server.await.unwrap();
+        assert!(error.contains("response exceeds"), "{error}");
     }
 }
