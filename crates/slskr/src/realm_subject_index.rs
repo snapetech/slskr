@@ -12,7 +12,12 @@ use sha2::{Digest, Sha256};
 
 const STATE_VERSION: u32 = 1;
 pub(crate) const MAX_INDEXES: usize = 1_024;
+pub(crate) const MAX_ENTRIES_PER_INDEX: usize = 10_000;
+pub(crate) const MAX_ALIASES_PER_ENTRY: usize = 256;
+pub(crate) const MAX_EVIDENCE_LINKS_PER_ENTRY: usize = 256;
 const MAX_STATE_BYTES: usize = 8 * 1024 * 1024;
+const MAX_EXTERNAL_IDS_PER_ENTRY: usize = 64;
+const MAX_WORK_REF_METADATA_FIELDS: usize = 64;
 const MAX_AUTHORITY_NOTE_CHARS: usize = 512;
 pub const DEFAULT_REALM_ID: &str = "default-realm";
 pub const DEFAULT_GOVERNANCE_ROOT: &str = "default-governance";
@@ -445,6 +450,17 @@ fn validate_index(
     let entries = object.get("entries").and_then(Value::as_array);
     if entries.is_none_or(Vec::is_empty) {
         errors.push("Index must contain at least one entry.".to_owned());
+    } else if entries.is_some_and(|entries| entries.len() > MAX_ENTRIES_PER_INDEX) {
+        errors.push(format!(
+            "Index must contain at most {MAX_ENTRIES_PER_INDEX} entries."
+        ));
+    } else if let Some(entries) = entries {
+        for entry in entries {
+            validate_entry(entry, &mut errors);
+        }
+    }
+    if !errors.is_empty() {
+        return Err(errors.join(" "));
     }
 
     let signature = object.get("signature").and_then(Value::as_object);
@@ -476,11 +492,6 @@ fn validate_index(
         errors.push("Signature payload hash does not match index contents.".to_owned());
     }
 
-    if let Some(entries) = entries {
-        for entry in entries {
-            validate_entry(entry, &mut errors);
-        }
-    }
     if errors.is_empty() {
         Ok(index_key(
             realm_id.expect("validated realm id"),
@@ -552,17 +563,66 @@ fn validate_entry(entry: &Value, errors: &mut Vec<String>) {
         errors.push("Entry subject id is required.".to_owned());
     }
     let work_ref = object.get("workRef").and_then(Value::as_object);
-    if work_ref.is_none_or(|work_ref| !work_ref_is_safe(work_ref)) {
-        errors.push(format!(
+    match work_ref {
+        Some(work_ref) => {
+            let external_ids_exceeded = work_ref
+                .get("externalIds")
+                .and_then(Value::as_object)
+                .is_some_and(|external_ids| external_ids.len() > MAX_EXTERNAL_IDS_PER_ENTRY);
+            let metadata_exceeded = work_ref
+                .get("metadata")
+                .and_then(Value::as_object)
+                .is_some_and(|metadata| metadata.len() > MAX_WORK_REF_METADATA_FIELDS);
+            if external_ids_exceeded {
+                errors.push(format!(
+                    "Entry '{subject_id}' WorkRef has too many external ids (maximum {MAX_EXTERNAL_IDS_PER_ENTRY})."
+                ));
+            }
+            if metadata_exceeded {
+                errors.push(format!(
+                    "Entry '{subject_id}' WorkRef has too many metadata fields (maximum {MAX_WORK_REF_METADATA_FIELDS})."
+                ));
+            }
+            if !external_ids_exceeded && !metadata_exceeded && !work_ref_is_safe(work_ref) {
+                errors.push(format!(
+                    "Entry '{subject_id}' has an unsafe or incomplete WorkRef."
+                ));
+            }
+        }
+        None => errors.push(format!(
             "Entry '{subject_id}' has an unsafe or incomplete WorkRef."
+        )),
+    }
+    if object
+        .get("externalIds")
+        .and_then(Value::as_object)
+        .is_some_and(|external_ids| external_ids.len() > MAX_EXTERNAL_IDS_PER_ENTRY)
+    {
+        errors.push(format!(
+            "Entry '{subject_id}' has too many external ids (maximum {MAX_EXTERNAL_IDS_PER_ENTRY})."
+        ));
+    }
+    if object
+        .get("aliases")
+        .and_then(Value::as_array)
+        .is_some_and(|aliases| aliases.len() > MAX_ALIASES_PER_ENTRY)
+    {
+        errors.push(format!(
+            "Entry '{subject_id}' has too many aliases (maximum {MAX_ALIASES_PER_ENTRY})."
         ));
     }
     if let Some(evidence_links) = object.get("evidenceLinks") {
         if let Some(evidence_links) = evidence_links.as_array() {
-            for evidence_link in evidence_links {
-                let valid = evidence_link.as_str().is_some_and(is_safe_evidence_link);
-                if !valid {
-                    errors.push(format!("Entry '{subject_id}' has an unsafe evidence link."));
+            if evidence_links.len() > MAX_EVIDENCE_LINKS_PER_ENTRY {
+                errors.push(format!(
+                    "Entry '{subject_id}' has too many evidence links (maximum {MAX_EVIDENCE_LINKS_PER_ENTRY})."
+                ));
+            } else {
+                for evidence_link in evidence_links {
+                    let valid = evidence_link.as_str().is_some_and(is_safe_evidence_link);
+                    if !valid {
+                        errors.push(format!("Entry '{subject_id}' has an unsafe evidence link."));
+                    }
                 }
             }
         } else {
@@ -1211,6 +1271,43 @@ mod tests {
             serde_json::json!(compute_payload_hash(&unsafe_evidence));
         let error = store.merge_indexes(vec![unsafe_evidence]).unwrap_err();
         assert!(error.contains("unsafe evidence link"), "{error}");
+    }
+
+    #[test]
+    fn merge_rejects_oversized_nested_index_collections_before_hashing() {
+        let mut oversized_entries = valid_index("oversized-entries");
+        let entry = oversized_entries["entries"][0].clone();
+        oversized_entries["entries"] =
+            serde_json::Value::Array(vec![entry; MAX_ENTRIES_PER_INDEX + 1]);
+        let mut store = Store::with_identity("realm-a", ["governance-a"]);
+        let error = store.merge_indexes(vec![oversized_entries]).unwrap_err();
+        assert!(error.contains("at most 10000 entries"), "{error}");
+
+        let mut oversized_fields = valid_index("oversized-fields");
+        oversized_fields["entries"][0]["aliases"] =
+            serde_json::json!(vec!["alias"; MAX_ALIASES_PER_ENTRY + 1]);
+        oversized_fields["entries"][0]["evidenceLinks"] = serde_json::json!(vec![
+            "https://example.test/evidence";
+            MAX_EVIDENCE_LINKS_PER_ENTRY + 1
+        ]);
+        oversized_fields["entries"][0]["externalIds"] = serde_json::json!((0
+            ..=MAX_EXTERNAL_IDS_PER_ENTRY)
+            .map(|index| (format!("id-{index}"), serde_json::json!("value")))
+            .collect::<serde_json::Map<_, _>>());
+        oversized_fields["entries"][0]["workRef"]["externalIds"] = serde_json::json!((0
+            ..=MAX_EXTERNAL_IDS_PER_ENTRY)
+            .map(|index| (format!("work-id-{index}"), serde_json::json!("value")))
+            .collect::<serde_json::Map<_, _>>());
+        oversized_fields["entries"][0]["workRef"]["metadata"] = serde_json::json!((0
+            ..=MAX_WORK_REF_METADATA_FIELDS)
+            .map(|index| (format!("field-{index}"), serde_json::json!("value")))
+            .collect::<serde_json::Map<_, _>>());
+        let error = store.merge_indexes(vec![oversized_fields]).unwrap_err();
+        assert!(error.contains("too many aliases"), "{error}");
+        assert!(error.contains("too many evidence links"), "{error}");
+        assert!(error.contains("too many external ids"), "{error}");
+        assert!(error.contains("too many metadata fields"), "{error}");
+        assert!(store.indexes_for_realm("realm-a").is_empty());
     }
 
     #[test]

@@ -161,6 +161,12 @@ for anchor in \
   'parse_simple_wishlist_import_rows' \
   'parse_simple_source_preview_items' \
   'wishlist_csv_import_rejects_oversized_row_batches' \
+  'MAX_ENTRIES_PER_INDEX' \
+  'MAX_ALIASES_PER_ENTRY' \
+  'MAX_EVIDENCE_LINKS_PER_ENTRY' \
+  'MAX_EXTERNAL_IDS_PER_ENTRY' \
+  'MAX_WORK_REF_METADATA_FIELDS' \
+  'merge_rejects_oversized_nested_index_collections_before_hashing' \
   'issue_ids must contain 1 to 25 values' \
   'browse_store_bounds_records_and_entries_but_updates_existing_users' \
   'MAX_MESSAGE_RECORDS' \

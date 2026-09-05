@@ -1600,6 +1600,45 @@ async fn merge_routes_reject_oversized_arrays_before_store_deserialization() {
     assert_eq!(indexes_response.status, "400 Bad Request");
     assert!(indexes_response.body.contains("at most 1024 indexes"));
 
+    let oversized_nested_index = serde_json::json!({
+        "id": "nested-limit",
+        "realmId": super::realm_subject_index::DEFAULT_REALM_ID,
+        "subjectNamespace": "music",
+        "revision": 1,
+        "entries": vec![serde_json::json!({
+            "subjectId": "nested-limit",
+            "workRef": {
+                "domain": "music",
+                "title": "Nested Limit"
+            }
+        }); super::realm_subject_index::MAX_ENTRIES_PER_INDEX + 1]
+    });
+    let nested_response = super::route_http_request(
+        "POST",
+        "/api/v0/virtualsoulfind/shadow-index/sync/merge",
+        None,
+        &serde_json::json!({
+            "records": [{"recordingId":"nested-limit","peerIds":["peer-a"]}],
+            "realmIndexes": [oversized_nested_index]
+        })
+        .to_string(),
+        &state,
+    )
+    .await
+    .expect("oversized nested realm-index response");
+    assert_eq!(nested_response.status, "400 Bad Request");
+    assert!(
+        nested_response.body.contains("at most 10000 entries"),
+        "{}",
+        nested_response.body
+    );
+    assert!(state
+        .realm_subject_indexes
+        .read()
+        .await
+        .indexes_for_realm(super::realm_subject_index::DEFAULT_REALM_ID)
+        .is_empty());
+
     let _ = fs::remove_dir_all(&state.config.state_dir);
 }
 
