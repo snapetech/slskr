@@ -1,4 +1,5 @@
 import { bands, setEqGains } from './audioGraph';
+import { readBoundedJson } from '../../lib/persistedJson';
 import { getLocalStorageItem, setLocalStorageItem } from '../../lib/storage';
 import React, { useEffect, useState } from 'react';
 import { Button, Dropdown, Icon, Popup } from 'semantic-ui-react';
@@ -20,18 +21,30 @@ const defaultState = {
   preset: 'Flat',
 };
 
+const normalizeGain = (value) => {
+  const gain = Number(value);
+  return Number.isFinite(gain) ? Math.min(Math.max(gain, -12), 12) : 0;
+};
+
 const readStoredState = () => {
-  try {
-    const stored = JSON.parse(getLocalStorageItem(storageKey, 'null'));
-    if (!stored || !Array.isArray(stored.gains)) return defaultState;
-    return {
-      enabled: stored.enabled === true,
-      gains: bands.map((_, index) => Number(stored.gains[index]) || 0),
-      preset: stored.preset || 'Custom',
-    };
-  } catch {
+  const stored = readBoundedJson(
+    getLocalStorageItem,
+    storageKey,
+    null,
+    16 * 1024,
+  );
+  if (!stored || typeof stored !== 'object' || Array.isArray(stored) || !Array.isArray(stored.gains)) {
     return defaultState;
   }
+
+  return {
+    enabled: stored.enabled === true,
+    gains: bands.map((_, index) => normalizeGain(stored.gains[index])),
+    preset:
+      typeof stored.preset === 'string'
+        ? stored.preset.trim().slice(0, 64) || 'Custom'
+        : 'Custom',
+  };
 };
 
 const formatBand = (frequency) =>

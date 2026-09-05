@@ -10,6 +10,10 @@ import * as rooms from '../lib/rooms';
 import { connect, disconnect } from '../lib/server';
 import * as session from '../lib/session';
 import { getLocalStorageItem, setLocalStorageItem } from '../lib/storage';
+import {
+  readBoundedJson,
+  writeBoundedObject,
+} from '../lib/persistedJson';
 import { isPassthroughEnabled } from '../lib/token';
 import AppContext from './AppContext';
 import LoginForm from './LoginForm';
@@ -45,6 +49,9 @@ const LEGACY_VPN_PORT_NOTICE_STORAGE_KEY =
   'slskr.vpnForwardedPorts.dismissedSignature';
 const ROOM_ACTIVITY_SEEN_STORAGE_KEY = 'slskr.rooms.lastSeenActivity';
 const NAV_ACTIVITY_POLL_INTERVAL_MS = 10_000;
+const MAX_ROOM_ACTIVITY_ROOMS = 500;
+const MAX_ROOM_ACTIVITY_NAME_CHARACTERS = 2_048;
+const MAX_ROOM_ACTIVITY_STORAGE_CHARACTERS = 64 * 1024;
 
 const Browse = lazy(() => import('./Browse/Browse'));
 const Chat = lazy(() => import('./Chat/Chat'));
@@ -238,15 +245,49 @@ const storeDismissedVpnPortNotice = (signature, portForwards) => {
 };
 
 const getStoredRoomActivity = () => {
-  try {
-    return JSON.parse(getLocalStorageItem(ROOM_ACTIVITY_SEEN_STORAGE_KEY, '{}')) || {};
-  } catch {
-    return {};
-  }
+  const stored = readBoundedJson(
+    getLocalStorageItem,
+    ROOM_ACTIVITY_SEEN_STORAGE_KEY,
+    {},
+    MAX_ROOM_ACTIVITY_STORAGE_CHARACTERS,
+  );
+  if (!stored || typeof stored !== 'object' || Array.isArray(stored)) return {};
+
+  return Object.fromEntries(
+    Object.entries(stored)
+      .map(([roomName, timestamp]) => [
+        typeof roomName === 'string'
+          ? roomName.trim().slice(0, MAX_ROOM_ACTIVITY_NAME_CHARACTERS)
+          : '',
+        Number(timestamp),
+      ])
+      .filter(([roomName, timestamp]) => roomName && Number.isFinite(timestamp) && timestamp > 0)
+      .slice(-MAX_ROOM_ACTIVITY_ROOMS),
+  );
 };
 
 const storeRoomActivity = (activity) => {
-  setLocalStorageItem(ROOM_ACTIVITY_SEEN_STORAGE_KEY, JSON.stringify(activity));
+  const normalized = Object.fromEntries(
+    Object.entries(activity && typeof activity === 'object' ? activity : {})
+      .map(([roomName, timestamp]) => [
+        typeof roomName === 'string'
+          ? roomName.trim().slice(0, MAX_ROOM_ACTIVITY_NAME_CHARACTERS)
+          : '',
+        Number(timestamp),
+      ])
+      .filter(([roomName, timestamp]) => roomName && Number.isFinite(timestamp) && timestamp > 0)
+      .slice(-MAX_ROOM_ACTIVITY_ROOMS),
+  );
+
+  writeBoundedObject(
+    setLocalStorageItem,
+    ROOM_ACTIVITY_SEEN_STORAGE_KEY,
+    normalized,
+    {
+      maxCharacters: MAX_ROOM_ACTIVITY_STORAGE_CHARACTERS,
+      maxEntries: MAX_ROOM_ACTIVITY_ROOMS,
+    },
+  );
 };
 
 const getMessageTimestamp = (message) => {
@@ -779,7 +820,11 @@ class App extends Component {
   getRoomsActivity = async () => {
     const joinedRoomsResponse = await rooms.getJoined();
     const joinedRooms = Array.isArray(joinedRoomsResponse)
-      ? joinedRoomsResponse.filter((roomName) => typeof roomName === 'string' && roomName)
+      ? Array.from(new Set(
+          joinedRoomsResponse.filter(
+            (roomName) => typeof roomName === 'string' && roomName,
+          ),
+        )).slice(0, MAX_ROOM_ACTIVITY_ROOMS)
       : [];
     const roomMessages = await Promise.all(
       joinedRooms.map(async (roomName) => {

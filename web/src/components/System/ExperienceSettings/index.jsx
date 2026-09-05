@@ -1,5 +1,11 @@
 import { copyToClipboard } from '../../../lib/clipboard';
 import { toDisplayError } from '../../../lib/errors';
+import { readBoundedJson } from '../../../lib/persistedJson';
+import {
+  getLocalStorageItem,
+  removeLocalStorageItem,
+  setLocalStorageItem,
+} from '../../../lib/storage';
 import { useMountedRef } from '../../../lib/useMountedRef';
 import React, { useEffect, useState } from 'react';
 import {
@@ -84,18 +90,54 @@ const options = {
   ],
 };
 
+const maxPreferenceTextCharacters = 2_048;
+const preferenceOptionValues = {
+  discoveryApprovalFilter: options.approvalFilter.map((option) => option.value),
+  discoveryExplanationDetail: options.explanationDetail.map((option) => option.value),
+  playerDefaultVisualizer: options.visualizerDefault.map((option) => option.value),
+  playerRadioSeedMode: options.radioSeedMode.map((option) => option.value),
+  playerScrobbleMode: options.scrobbleMode.map((option) => option.value),
+  searchActionPreviewDensity: options.actionPreviewDensity.map((option) => option.value),
+  searchPreferredCondition: options.preferredCondition.map((option) => option.value),
+  searchRankingProfile: options.rankingProfile.map((option) => option.value),
+};
+
+const normalizePreferences = (stored = {}) => {
+  const source = stored && typeof stored === 'object' && !Array.isArray(stored)
+    ? stored
+    : {};
+
+  return Object.keys(defaults).reduce((preferences, key) => {
+    const defaultValue = defaults[key];
+    const value = source[key];
+
+    if (typeof defaultValue === 'boolean') {
+      preferences[key] = typeof value === 'boolean' ? value : defaultValue;
+      return preferences;
+    }
+
+    if (typeof value !== 'string') {
+      preferences[key] = defaultValue;
+      return preferences;
+    }
+
+    const normalized = value.trim().slice(0, maxPreferenceTextCharacters);
+    const allowedValues = preferenceOptionValues[key];
+    preferences[key] = allowedValues && !allowedValues.includes(normalized)
+      ? defaultValue
+      : normalized;
+    return preferences;
+  }, {});
+};
+
 const readStoredPreferences = () => {
-  try {
-    const stored = JSON.parse(localStorage.getItem(storageKey) || '{}');
-    return {
-      ...defaults,
-      ...(stored && typeof stored === 'object' && !Array.isArray(stored)
-        ? stored
-        : {}),
-    };
-  } catch {
-    return defaults;
-  }
+  const stored = readBoundedJson(
+    getLocalStorageItem,
+    storageKey,
+    {},
+    64 * 1024,
+  );
+  return normalizePreferences(stored);
 };
 
 const buildReport = (form) =>
@@ -122,22 +164,25 @@ const ExperienceSettings = () => {
   };
 
   const save = () => {
-    try {
-      localStorage.setItem(storageKey, JSON.stringify(form));
-      setMessage('Experience preferences saved locally in this browser.');
-    } catch {
-      setMessage('Unable to save experience preferences in this browser.');
-    }
+    const saved = setLocalStorageItem(
+      storageKey,
+      JSON.stringify(normalizePreferences(form)),
+    );
+    setMessage(
+      saved
+        ? 'Experience preferences saved locally in this browser.'
+        : 'Unable to save experience preferences in this browser.',
+    );
   };
 
   const reset = () => {
-    try {
-      localStorage.removeItem(storageKey);
-      setForm(defaults);
-      setMessage('Experience preferences reset to defaults.');
-    } catch {
-      setMessage('Unable to reset experience preferences in this browser.');
-    }
+    const removed = removeLocalStorageItem(storageKey);
+    setForm(defaults);
+    setMessage(
+      removed
+        ? 'Experience preferences reset to defaults.'
+        : 'Unable to reset experience preferences in this browser.',
+    );
   };
 
   const copyReport = async () => {
