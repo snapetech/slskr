@@ -82,6 +82,19 @@ describe('SwarmVisualization', () => {
     );
   });
 
+  it('clears the previous job when the selected job is removed', async () => {
+    const { rerender } = render(<SwarmVisualization jobId="swarm-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Swarm Download Status')).toBeInTheDocument();
+    });
+
+    rerender(<SwarmVisualization jobId={null} />);
+
+    expect(await screen.findByText('No swarm job selected')).toBeInTheDocument();
+    expect(screen.queryByText('Swarm Download Status')).not.toBeInTheDocument();
+  });
+
   it('displays job status when loaded', async () => {
     render(<SwarmVisualization jobId="swarm-1" />);
 

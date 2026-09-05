@@ -15,6 +15,7 @@ import {
   Icon,
   Label,
   Loader,
+  Message,
   Progress,
   Segment,
   Statistic,
@@ -28,13 +29,24 @@ const SwarmVisualization = ({ jobId }) => {
   const [error, setError] = useState(null);
   const mountedRef = useMountedRef();
   const requestIdRef = useRef(0);
+  const lastJobIdRef = useRef(jobId);
 
   const fetchData = useCallback(async () => {
     if (!mountedRef.current) return;
     const requestId = ++requestIdRef.current;
     if (!jobId) {
+      lastJobIdRef.current = jobId;
+      setError(null);
+      setJobStatus(null);
+      setTraceSummary(null);
       setLoading(false);
       return;
+    }
+
+    if (lastJobIdRef.current !== jobId) {
+      lastJobIdRef.current = jobId;
+      setJobStatus(null);
+      setTraceSummary(null);
     }
 
     try {
@@ -54,9 +66,13 @@ const SwarmVisualization = ({ jobId }) => {
       }
 
       if (status.status === 'fulfilled') {
-        setJobStatus(
-          normalizeSwarmJob(status.value),
-        );
+        const normalizedStatus = normalizeSwarmJob(status.value);
+        if (normalizedStatus) {
+          setJobStatus(normalizedStatus);
+          setError(null);
+        } else {
+          setError('The swarm job status response was invalid.');
+        }
       } else {
         setError(toDisplayError(status.reason, 'Failed to fetch job status'));
       }
@@ -198,6 +214,16 @@ const SwarmVisualization = ({ jobId }) => {
 
   return (
     <div>
+      {error && (
+        <Message
+          data-testid="swarm-status-load-error"
+          error
+        >
+          <Message.Header>Swarm status refresh failed</Message.Header>
+          <p>{error}</p>
+          <p>Showing the last successfully loaded swarm snapshot.</p>
+        </Message>
+      )}
       {/* Job Overview */}
       <Segment>
         <Header as="h3">
