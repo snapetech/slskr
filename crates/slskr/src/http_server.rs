@@ -713,6 +713,24 @@ pub async fn write_http_response<W: AsyncWrite + Unpin>(
     .await
 }
 
+/// Write an HTTP response while optionally suppressing its representation
+/// bytes. HTTP HEAD uses the same representation metadata as GET, including
+/// Content-Length, but must not send the body.
+pub async fn write_http_response_with_body<W: AsyncWrite + Unpin>(
+    writer: &mut W,
+    response: &HttpResponse,
+    include_body: bool,
+    keep_alive: bool,
+    extra_headers: &str,
+) -> Result<(), String> {
+    time::timeout(
+        RESPONSE_WRITE_TIMEOUT,
+        write_http_response_inner(writer, response, include_body, keep_alive, extra_headers),
+    )
+    .await
+    .map_err(|_| "response write deadline exceeded".to_owned())?
+}
+
 async fn write_http_response_with_timeout<W: AsyncWrite + Unpin>(
     writer: &mut W,
     response: &HttpResponse,
@@ -722,7 +740,7 @@ async fn write_http_response_with_timeout<W: AsyncWrite + Unpin>(
 ) -> Result<(), String> {
     time::timeout(
         timeout,
-        write_http_response_inner(writer, response, keep_alive, extra_headers),
+        write_http_response_inner(writer, response, true, keep_alive, extra_headers),
     )
     .await
     .map_err(|_| "response write deadline exceeded".to_owned())?
@@ -731,6 +749,7 @@ async fn write_http_response_with_timeout<W: AsyncWrite + Unpin>(
 async fn write_http_response_inner<W: AsyncWrite + Unpin>(
     writer: &mut W,
     response: &HttpResponse,
+    include_body: bool,
     keep_alive: bool,
     extra_headers: &str,
 ) -> Result<(), String> {
@@ -784,8 +803,11 @@ Strict-Transport-Security: max-age=31536000; includeSubDomains\r\n",
         .map_err(e)?;
     writer.write_all(b"\r\n").await.map_err(e)?;
 
-    // Write body
-    writer.write_all(body_bytes).await.map_err(e)?;
+    // HEAD responses retain the GET representation for headers but do not
+    // transmit its bytes.
+    if include_body {
+        writer.write_all(body_bytes).await.map_err(e)?;
+    }
     writer.flush().await.map_err(e)?;
 
     Ok(())
@@ -1692,6 +1714,28 @@ mod tests {
         assert!(raw.contains("<meta name=\"csp-nonce\" content=\""));
         assert!(!raw.contains("'unsafe-inline'"));
         assert!(!raw.contains("wasm-unsafe-eval"));
+    }
+
+    #[tokio::test]
+    async fn head_response_preserves_length_without_writing_body() {
+        let (client, mut server) = tokio::io::duplex(4096);
+        let response = HttpResponse {
+            status: "200 OK",
+            content_type: "application/json",
+            body: r#"{"status":"ok"}"#.to_string(),
+        };
+        let expected_length = response.body.len();
+        let mut writer = BufWriter::new(client);
+        write_http_response_with_body(&mut writer, &response, false, false, "")
+            .await
+            .unwrap();
+        drop(writer);
+
+        let mut raw = String::new();
+        server.read_to_string(&mut raw).await.unwrap();
+        assert!(raw.contains(&format!("Content-Length: {expected_length}\r\n")));
+        assert!(raw.ends_with("\r\n\r\n"));
+        assert!(!raw.ends_with(&response.body));
     }
 
     #[tokio::test]

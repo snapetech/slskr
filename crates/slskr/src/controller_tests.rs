@@ -9370,7 +9370,7 @@ async fn head_spa_routes_return_ok_without_body() {
 
         assert_eq!(response.status, "200 OK");
         assert_eq!(response.content_type, "text/html; charset=utf-8");
-        assert!(response.body.is_empty());
+        assert!(!response.body.is_empty());
     }
 }
 

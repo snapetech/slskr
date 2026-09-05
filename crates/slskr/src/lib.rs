@@ -37317,10 +37317,9 @@ fn fallback_dashboard_response() -> HttpResponse {
 }
 
 fn head_response(response: HttpResponse) -> HttpResponse {
-    HttpResponse {
-        body: String::new(),
-        ..response
-    }
+    // Keep the GET representation so the HTTP writer can advertise its
+    // length for HEAD while suppressing the body bytes on the wire.
+    response
 }
 
 fn web_build_root(
@@ -89673,7 +89672,14 @@ where
         }
 
         // Write response
-        http_server::write_http_response(&mut writer, &response, keep_alive, &extra).await?;
+        http_server::write_http_response_with_body(
+            &mut writer,
+            &response,
+            method != "HEAD",
+            keep_alive,
+            &extra,
+        )
+        .await?;
 
         // Log
         let resp_log = logging::HttpResponseLog {
