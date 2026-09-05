@@ -671,6 +671,7 @@ class SlskrClient {
     // Core Request Handler
     // =========================================================================
     async request(method, url, body, authenticated = false, attempt = 0) {
+        let timeoutId;
         try {
             if (this.debug) {
                 console.debug('[slskr] request', method, url, this.debugBody(body));
@@ -682,24 +683,16 @@ class SlskrClient {
                 headers['Authorization'] = `Bearer ${this.token}`;
             }
             const controller = new AbortController();
-            const timeoutId = this.timeout > 0
+            timeoutId = this.timeout > 0
                 ? setTimeout(() => controller.abort(), this.timeout)
                 : undefined;
-            let response;
-            try {
-                response = await fetch(url, {
-                    method,
-                    headers,
-                    body: body === undefined ? undefined : JSON.stringify(body),
-                    signal: controller.signal,
-                    redirect: 'error',
-                });
-            }
-            finally {
-                if (timeoutId !== undefined) {
-                    clearTimeout(timeoutId);
-                }
-            }
+            const response = await fetch(url, {
+                method,
+                headers,
+                body: body === undefined ? undefined : JSON.stringify(body),
+                signal: controller.signal,
+                redirect: 'error',
+            });
             if (!response.ok) {
                 const parsedError = await this.readJson(response, MAX_HTTP_ERROR_BYTES).catch(() => ({}));
                 const errorData = parsedError !== null &&
@@ -732,7 +725,11 @@ class SlskrClient {
             if (error instanceof errors_1.ApiError || error instanceof errors_1.NetworkError) {
                 throw error;
             }
-            if (error instanceof Error && error.name === 'AbortError') {
+            if ((error instanceof Error && error.name === 'AbortError') ||
+                (typeof error === 'object' &&
+                    error !== null &&
+                    'name' in error &&
+                    error.name === 'AbortError')) {
                 throw new errors_1.TimeoutError(`Request timeout after ${this.timeout}ms`);
             }
             if (method === 'GET' && attempt < this.retries) {
@@ -740,6 +737,11 @@ class SlskrClient {
                 return this.request(method, url, body, authenticated, attempt + 1);
             }
             throw new errors_1.NetworkError(`Failed to ${method} ${url}`, error instanceof Error ? error : undefined);
+        }
+        finally {
+            if (timeoutId !== undefined) {
+                clearTimeout(timeoutId);
+            }
         }
     }
     async readJson(response, maximum) {

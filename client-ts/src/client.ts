@@ -852,6 +852,7 @@ export class SlskrClient {
     authenticated: boolean = false,
     attempt: number = 0
   ): Promise<T> {
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
     try {
       if (this.debug) {
         console.debug('[slskr] request', method, url, this.debugBody(body));
@@ -866,25 +867,17 @@ export class SlskrClient {
       }
 
       const controller = new AbortController();
-      const timeoutId = this.timeout > 0
+      timeoutId = this.timeout > 0
         ? setTimeout(() => controller.abort(), this.timeout)
         : undefined;
 
-      let response: Response;
-      try {
-        response = await fetch(url, {
-          method,
-          headers,
-          body: body === undefined ? undefined : JSON.stringify(body),
-          signal: controller.signal,
-          redirect: 'error',
-        });
-      } finally {
-        if (timeoutId !== undefined) {
-          clearTimeout(timeoutId);
-        }
-      }
-
+      const response = await fetch(url, {
+        method,
+        headers,
+        body: body === undefined ? undefined : JSON.stringify(body),
+        signal: controller.signal,
+        redirect: 'error',
+      });
       if (!response.ok) {
         const parsedError = await this.readJson(response, MAX_HTTP_ERROR_BYTES).catch(() => ({}));
         const errorData =
@@ -927,7 +920,13 @@ export class SlskrClient {
         throw error;
       }
 
-      if (error instanceof Error && error.name === 'AbortError') {
+      if (
+        (error instanceof Error && error.name === 'AbortError') ||
+        (typeof error === 'object' &&
+          error !== null &&
+          'name' in error &&
+          error.name === 'AbortError')
+      ) {
         throw new TimeoutError(`Request timeout after ${this.timeout}ms`);
       }
 
@@ -940,6 +939,10 @@ export class SlskrClient {
         `Failed to ${method} ${url}`,
         error instanceof Error ? error : undefined
       );
+    } finally {
+      if (timeoutId !== undefined) {
+        clearTimeout(timeoutId);
+      }
     }
   }
 

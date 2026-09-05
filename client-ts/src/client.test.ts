@@ -1,5 +1,5 @@
 import { SlskrClient } from './client';
-import { ApiError, NetworkError, ResponseContractError } from './errors';
+import { ApiError, NetworkError, ResponseContractError, TimeoutError } from './errors';
 
 describe('SlskrClient request lifecycle', () => {
   it('validates and normalizes the REST base URL', () => {
@@ -36,6 +36,49 @@ describe('SlskrClient request lifecycle', () => {
     await expect(client.health()).rejects.toBeInstanceOf(NetworkError);
 
     expect(clearTimeoutSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the request timeout active while reading a response body', async () => {
+    global.fetch = jest.fn().mockImplementation(
+      async (_input: RequestInfo | URL, init?: RequestInit) => {
+        let rejectRead: (reason?: unknown) => void = () => {};
+        let firstRead = true;
+        const pendingRead = new Promise<unknown>((_, reject) => {
+          rejectRead = reject;
+        });
+        init?.signal?.addEventListener('abort', () => {
+          rejectRead(new DOMException('The operation was aborted', 'AbortError'));
+        });
+        return {
+          body: {
+            getReader: () => ({
+              read: () => {
+                if (firstRead) {
+                  firstRead = false;
+                  return Promise.resolve({
+                    done: false,
+                    value: new TextEncoder().encode('{"status":"'),
+                  });
+                }
+                return pendingRead;
+              },
+            }),
+          },
+          headers: new Headers(),
+          ok: true,
+          status: 200,
+        } as unknown as Response;
+      },
+    );
+    const client = new SlskrClient({
+      baseUrl: 'http://localhost:8080',
+      token: 'test-token',
+      timeout: 10,
+      retries: 0,
+    });
+
+    await expect(client.health()).rejects.toBeInstanceOf(TimeoutError);
+    expect(global.fetch).toHaveBeenCalledTimes(1);
   });
 
   it('honors explicit zero lifecycle configuration', () => {
