@@ -160,6 +160,12 @@ for expected in \
   fi
 done
 
+ci_cancel_policy='cancel-in-progress: ${{ github.event_name == '\''pull_request'\'' }}'
+if ! rg -n -F -- "$ci_cancel_policy" .github/workflows/ci.yml >/dev/null; then
+  printf 'workflow release policy check failed: main CI pushes must not cancel superseded runs\n' >&2
+  status=1
+fi
+
 for expected in \
   'scripts/submit-winget-release.ps1' \
   'WINGETCREATE_GITHUB_TOKEN'; do
