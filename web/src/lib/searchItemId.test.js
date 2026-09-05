@@ -1,4 +1,7 @@
-import { getSearchResultItemId } from './searchItemId';
+import {
+  buildSearchResultActionPath,
+  getSearchResultItemId,
+} from './searchItemId';
 
 describe('getSearchResultItemId', () => {
   it('uses the stable backend result index for reordered responses', () => {
@@ -32,5 +35,13 @@ describe('getSearchResultItemId', () => {
         response: { files: [] },
       }),
     ).toBeNull();
+  });
+});
+
+describe('buildSearchResultActionPath', () => {
+  it('encodes search and item identifiers as route segments', () => {
+    expect(
+      buildSearchResultActionPath('bridge/search', '0:3', 'download'),
+    ).toBe('/searches/bridge%2Fsearch/items/0%3A3/download');
   });
 });

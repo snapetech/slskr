@@ -1,5 +1,6 @@
 import { urlBase } from '../config';
 import { fetchWithoutRedirects, readJsonResponse } from './http';
+import { encodePathSegment } from './pathEncoding';
 import * as session from './session';
 
 const baseUrl = `${urlBase}/api/v0/port-forwarding`;
@@ -27,10 +28,13 @@ export const startForwarding = async (config) => {
 };
 
 export const stopForwarding = async (localPort) => {
-  const response = await fetchWithoutRedirects(`${baseUrl}/stop/${localPort}`, {
-    headers: session.authHeaders({ csrf: true }),
-    method: 'POST',
-  });
+  const response = await fetchWithoutRedirects(
+    `${baseUrl}/stop/${encodePathSegment(localPort)}`,
+    {
+      headers: session.authHeaders({ csrf: true }),
+      method: 'POST',
+    },
+  );
 
   if (!response.ok) {
     const errorData = await readJsonResponse(response)
@@ -57,9 +61,12 @@ export const getForwardingStatus = async () => {
 };
 
 export const getForwardingStatusByPort = async (localPort) => {
-  const response = await fetchWithoutRedirects(`${baseUrl}/status/${localPort}`, {
-    headers: session.authHeaders(),
-  });
+  const response = await fetchWithoutRedirects(
+    `${baseUrl}/status/${encodePathSegment(localPort)}`,
+    {
+      headers: session.authHeaders(),
+    },
+  );
 
   if (!response.ok) {
     if (response.status === 404) {
@@ -81,8 +88,12 @@ export const getAvailablePorts = async (
   startPort = 1_024,
   endPort = 65_535,
 ) => {
+  const parameters = new URLSearchParams({
+    startPort: String(startPort),
+    endPort: String(endPort),
+  });
   const response = await fetchWithoutRedirects(
-    `${baseUrl}/available-ports?startPort=${startPort}&endPort=${endPort}`,
+    `${baseUrl}/available-ports?${parameters.toString()}`,
     {
       headers: session.authHeaders(),
     },

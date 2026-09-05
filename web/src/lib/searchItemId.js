@@ -1,3 +1,5 @@
+import { encodePathSegment } from './pathEncoding';
+
 const parseIndex = (value) => {
   if (typeof value !== 'number' && typeof value !== 'string') {
     return null;
@@ -51,3 +53,6 @@ export const getSearchResultItemId = ({
   const offset = file?.locked ? 0 : files.length;
   return `${parseIndex(responseIndex) ?? 0}:${offset + fallbackIndex}`;
 };
+
+export const buildSearchResultActionPath = (searchId, itemId, action) =>
+  `/searches/${encodePathSegment(searchId)}/items/${encodePathSegment(itemId)}/${action}`;

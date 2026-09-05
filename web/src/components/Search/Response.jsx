@@ -13,7 +13,10 @@ import {
   recordCommunityQualitySignal,
 } from '../../lib/communityQualitySignals';
 import { getDirectoryContents, getGroup } from '../../lib/users';
-import { getSearchResultItemId } from '../../lib/searchItemId';
+import {
+  buildSearchResultActionPath,
+  getSearchResultItemId,
+} from '../../lib/searchItemId';
 import { toDisplayError } from '../../lib/errors';
 import { formatBytes, getDirectoryName, getFileName } from '../../lib/util';
 import DiscoveryGraphModal from './DiscoveryGraphModal';
@@ -226,7 +229,9 @@ class Response extends Component {
               throw new Error(`File ${file.filename} not found in response`);
             }
 
-            return api.post(`/searches/${searchId}/items/${itemId}/download`);
+            return api.post(
+              buildSearchResultActionPath(searchId, itemId, 'download'),
+            );
           });
 
           await Promise.all(downloadPromises);
@@ -637,7 +642,7 @@ class Response extends Component {
                       if (!itemId) return;
 
                       const result = await api.post(
-                        `/searches/${searchId}/items/${itemId}/stream`,
+                        buildSearchResultActionPath(searchId, itemId, 'stream'),
                       );
 
                       if (result.data?.stream_url) {

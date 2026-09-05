@@ -5,6 +5,12 @@
 import api from './api';
 
 const asArray = (value) => (Array.isArray(value) ? value : []);
+const queryString = (parameters) =>
+  new URLSearchParams(
+    Object.fromEntries(
+      Object.entries(parameters).map(([key, value]) => [key, String(value)]),
+    ),
+  ).toString();
 
 /**
  * Get the complete swarm analytics dashboard from one server snapshot.
@@ -30,7 +36,7 @@ export const getDashboard = async (
 export const getPerformanceMetrics = async (timeWindowHours = 24) => {
   try {
     const response = await api.get(
-      `/swarm/analytics/performance?timeWindowHours=${timeWindowHours}`,
+      `/swarm/analytics/performance?${queryString({ timeWindowHours })}`,
     );
     return response.data;
   } catch (error) {
@@ -47,7 +53,7 @@ export const getPerformanceMetrics = async (timeWindowHours = 24) => {
 export const getPeerRankings = async (limit = 20) => {
   try {
     const response = await api.get(
-      `/swarm/analytics/peers/rankings?limit=${limit}`,
+      `/swarm/analytics/peers/rankings?${queryString({ limit })}`,
     );
     return asArray(response.data);
   } catch (error) {
@@ -64,7 +70,7 @@ export const getPeerRankings = async (limit = 20) => {
 export const getEfficiencyMetrics = async (timeWindowHours = 24) => {
   try {
     const response = await api.get(
-      `/swarm/analytics/efficiency?timeWindowHours=${timeWindowHours}`,
+      `/swarm/analytics/efficiency?${queryString({ timeWindowHours })}`,
     );
     return response.data;
   } catch (error) {
@@ -82,7 +88,7 @@ export const getEfficiencyMetrics = async (timeWindowHours = 24) => {
 export const getTrends = async (timeWindowHours = 24, dataPoints = 24) => {
   try {
     const response = await api.get(
-      `/swarm/analytics/trends?timeWindowHours=${timeWindowHours}&dataPoints=${dataPoints}`,
+      `/swarm/analytics/trends?${queryString({ timeWindowHours, dataPoints })}`,
     );
     return response.data;
   } catch (error) {

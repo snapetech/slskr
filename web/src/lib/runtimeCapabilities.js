@@ -35,7 +35,11 @@ export const getHashDatabaseStats = async () => {
 };
 
 export const getHashDatabaseEntries = async (limit = 100, offset = 0) => {
-  return safeGet(`/hashdb/entries?limit=${limit}&offset=${offset}`, {
+  const parameters = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset),
+  });
+  return safeGet(`/hashdb/entries?${parameters.toString()}`, {
     entries: [],
   });
 };
@@ -67,7 +71,10 @@ export const getBackfillStats = async () => {
 };
 
 export const getBackfillCandidates = async (limit = 50) => {
-  return safeGet(`/backfill/candidates?limit=${limit}`, { candidates: [] });
+  const parameters = new URLSearchParams({ limit: String(limit) });
+  return safeGet(`/backfill/candidates?${parameters.toString()}`, {
+    candidates: [],
+  });
 };
 
 export const backfillFromSearchHistory = async (options = {}) => {
