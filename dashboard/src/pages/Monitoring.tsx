@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { isAbortError, requestText } from '../lib/api';
+import { apiEndpoint, isAbortError, requestText } from '../lib/api';
 import { parseMonitoringMetrics, type MonitoringMetrics } from '../lib/prometheus';
 
 interface MonitoringPageProps {
@@ -13,7 +13,7 @@ export default function Monitoring({ apiUrl, apiKey }: MonitoringPageProps) {
   const [error, setError] = useState<string | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [downloadingMetrics, setDownloadingMetrics] = useState(false);
-  const metricsUrl = `${apiUrl.replace(/\/+$/, '')}/api/metrics`;
+  const metricsUrl = apiEndpoint(apiUrl, '/api/metrics');
 
   useEffect(() => {
     let active = true;

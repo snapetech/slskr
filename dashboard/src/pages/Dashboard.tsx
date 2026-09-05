@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { Activity, Users, Database, Zap } from 'lucide-react';
 import { useApi } from '../context/ApiContext';
 import { useFetch } from '../hooks/useFetch';
+import { apiEndpoint } from '../lib/api';
 
 interface ServerStats {
   session?: {
@@ -47,7 +48,7 @@ export default function Dashboard() {
     loading, 
     error: statsError 
   } = useFetch<ServerStats>(
-    `${apiUrl}/api/stats`,
+    apiEndpoint(apiUrl, '/api/stats'),
     { headers, interval: 5000 }
   );
 

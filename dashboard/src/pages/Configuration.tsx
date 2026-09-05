@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Save } from 'lucide-react';
-import { isAbortError, requestJson } from '../lib/api';
+import { apiEndpoint, isAbortError, requestJson } from '../lib/api';
 
 interface ConfigurationPageProps {
   apiUrl: string;
@@ -18,6 +18,62 @@ interface DownloadFilter {
   exclude?: string[];
   maxTerms?: number;
   maxTermLength?: number;
+}
+
+function record(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function normalizePreferences(value: unknown): Preferences | null {
+  const item = record(value);
+  if (!item) return null;
+  for (const key of ['auto_connect', 'transfer_allow_outbound', 'autoreplace_enabled']) {
+    if (item[key] !== undefined && typeof item[key] !== 'boolean') return null;
+  }
+  if (
+    item.transfer_max_active !== undefined &&
+    (typeof item.transfer_max_active !== 'number' || !Number.isFinite(item.transfer_max_active))
+  ) {
+    return null;
+  }
+  return {
+    auto_connect: typeof item.auto_connect === 'boolean' ? item.auto_connect : undefined,
+    transfer_allow_outbound: typeof item.transfer_allow_outbound === 'boolean'
+      ? item.transfer_allow_outbound
+      : undefined,
+    transfer_max_active: typeof item.transfer_max_active === 'number'
+      ? item.transfer_max_active
+      : undefined,
+    autoreplace_enabled: typeof item.autoreplace_enabled === 'boolean'
+      ? item.autoreplace_enabled
+      : undefined,
+  };
+}
+
+function normalizeDownloadFilter(value: unknown): DownloadFilter | null {
+  const item = record(value);
+  if (!item) return null;
+  if (
+    item.exclude !== undefined &&
+    (!Array.isArray(item.exclude) || !item.exclude.every((term) => typeof term === 'string'))
+  ) {
+    return null;
+  }
+  for (const key of ['maxTerms', 'maxTermLength']) {
+    if (
+      item[key] !== undefined &&
+      (typeof item[key] !== 'number' || !Number.isSafeInteger(item[key]) || item[key] <= 0)
+    ) {
+      return null;
+    }
+  }
+  return {
+    exclude: Array.isArray(item.exclude) ? item.exclude as string[] : [],
+    maxTerms: typeof item.maxTerms === 'number' ? item.maxTerms : undefined,
+    maxTermLength: typeof item.maxTermLength === 'number' ? item.maxTermLength : undefined,
+  };
 }
 
 export default function Configuration({ apiUrl, apiKey }: ConfigurationPageProps) {
@@ -38,19 +94,24 @@ export default function Configuration({ apiUrl, apiKey }: ConfigurationPageProps
       setError(null);
       try {
         const [nextPreferences, nextFilter] = await Promise.all([
-          requestJson<Preferences>(`${apiUrl}/api/config/preferences`, apiKey, {
+          requestJson<unknown>(apiEndpoint(apiUrl, '/api/config/preferences'), apiKey, {
             signal: controller.signal,
           }),
-          requestJson<DownloadFilter>(`${apiUrl}/api/config/download-filter`, apiKey, {
+          requestJson<unknown>(apiEndpoint(apiUrl, '/api/config/download-filter'), apiKey, {
             signal: controller.signal,
           }),
         ]);
         if (!active) return;
-        setPreferences(nextPreferences);
-        setExclusions((nextFilter.exclude ?? []).join('\n'));
+        const normalizedPreferences = normalizePreferences(nextPreferences);
+        const normalizedFilter = normalizeDownloadFilter(nextFilter);
+        if (!normalizedPreferences || !normalizedFilter) {
+          throw new Error('The server returned an invalid configuration response');
+        }
+        setPreferences(normalizedPreferences);
+        setExclusions((normalizedFilter.exclude ?? []).join('\n'));
         setLimits({
-          maxTerms: nextFilter.maxTerms ?? 100,
-          maxTermLength: nextFilter.maxTermLength ?? 256,
+          maxTerms: normalizedFilter.maxTerms ?? 100,
+          maxTermLength: normalizedFilter.maxTermLength ?? 256,
         });
       } catch (loadError) {
         if (!active || isAbortError(loadError)) return;
@@ -73,7 +134,7 @@ export default function Configuration({ apiUrl, apiKey }: ConfigurationPageProps
     setError(null);
     setMessage(null);
     try {
-      await requestJson(`${apiUrl}/api/config/preferences`, apiKey, {
+      await requestJson(apiEndpoint(apiUrl, '/api/config/preferences'), apiKey, {
         method: 'PUT',
         body: JSON.stringify({
           autoreplace_enabled: Boolean(preferences.autoreplace_enabled),
@@ -96,7 +157,7 @@ export default function Configuration({ apiUrl, apiKey }: ConfigurationPageProps
         .split('\n')
         .map((term) => term.trim())
         .filter(Boolean);
-      await requestJson(`${apiUrl}/api/config/download-filter`, apiKey, {
+      await requestJson(apiEndpoint(apiUrl, '/api/config/download-filter'), apiKey, {
         method: 'PUT',
         body: JSON.stringify({ exclude }),
       });

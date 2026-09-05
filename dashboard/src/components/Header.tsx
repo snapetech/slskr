@@ -1,29 +1,45 @@
 import React, { useState, useCallback } from 'react';
 import { Server, Settings } from 'lucide-react';
 import { useApi } from '../context/ApiContext';
+import { normalizeApiUrl } from '../lib/api';
 
 export default function Header() {
   const { apiUrl, apiKey, isConnected, setApiUrl, setApiKey } = useApi();
   const [showSettings, setShowSettings] = useState(false);
   const [tempUrl, setTempUrl] = useState(apiUrl);
   const [tempKey, setTempKey] = useState('');
+  const [urlError, setUrlError] = useState<string | null>(null);
 
   const handleSave = useCallback(() => {
-    if (tempUrl) {
-      setApiUrl(tempUrl);
+    try {
+      if (tempUrl.trim()) {
+        setApiUrl(normalizeApiUrl(tempUrl));
+      }
+      if (tempKey) {
+        setApiKey(tempKey);
+      }
+      setUrlError(null);
+      setShowSettings(false);
+      setTempKey('');
+    } catch (error) {
+      setUrlError(error instanceof Error ? error.message : 'Invalid API URL');
     }
-    if (tempKey) {
-      setApiKey(tempKey);
-    }
-    setShowSettings(false);
-    setTempKey('');
   }, [tempUrl, tempKey, setApiUrl, setApiKey]);
 
   const handleCancel = useCallback(() => {
     setShowSettings(false);
     setTempUrl(apiUrl);
     setTempKey('');
+    setUrlError(null);
   }, [apiUrl]);
+
+  const toggleSettings = () => {
+    if (!showSettings) {
+      setTempUrl(apiUrl);
+      setUrlError(null);
+    }
+    setShowSettings(!showSettings);
+  };
 
   return (
     <header className="bg-white shadow-sm border-b border-gray-200">
@@ -41,7 +57,7 @@ export default function Header() {
         </div>
 
         <button
-          onClick={() => setShowSettings(!showSettings)}
+          onClick={toggleSettings}
           className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
           aria-label="Toggle settings"
         >
@@ -63,6 +79,7 @@ export default function Header() {
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                 placeholder="http://127.0.0.1:5030"
               />
+              {urlError && <p className="mt-1 text-sm text-red-700">{urlError}</p>}
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">

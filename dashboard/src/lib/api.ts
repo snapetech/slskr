@@ -1,3 +1,24 @@
+export function normalizeApiUrl(value: string): string {
+  const parsed = new URL(value.trim());
+  if (
+    !['http:', 'https:'].includes(parsed.protocol) ||
+    !parsed.hostname ||
+    parsed.username ||
+    parsed.password
+  ) {
+    throw new Error('API URL must be an absolute HTTP or HTTPS URL without credentials');
+  }
+
+  parsed.pathname = parsed.pathname.replace(/\/+$/, '');
+  parsed.search = '';
+  parsed.hash = '';
+  return parsed.toString().replace(/\/$/, '');
+}
+
+export function apiEndpoint(apiUrl: string, path: string): string {
+  return `${apiUrl.trim().replace(/\/+$/, '')}/${path.replace(/^\/+/, '')}`;
+}
+
 export function requestHeaders(apiKey: string | null, body?: BodyInit | null): Headers {
   const headers = new Headers();
   if (apiKey) headers.set('Authorization', `Bearer ${apiKey}`);

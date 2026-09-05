@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Trash2, Database as DatabaseIcon } from 'lucide-react';
-import { isAbortError, requestJson } from '../lib/api';
+import { apiEndpoint, isAbortError, requestJson } from '../lib/api';
 
 interface DatabasePageProps {
   apiUrl: string;
@@ -24,7 +24,7 @@ export default function Database({ apiUrl, apiKey }: DatabasePageProps) {
     try {
       setLoading(true);
       setError(null);
-      const data = await requestJson<DatabaseStats>(`${apiUrl}/api/admin/database/stats`, apiKey, { signal });
+      const data = await requestJson<DatabaseStats>(apiEndpoint(apiUrl, '/api/admin/database/stats'), apiKey, { signal });
       if (requestId !== requestIdRef.current) return;
       setStats(data);
     } catch (err) {
@@ -48,7 +48,7 @@ export default function Database({ apiUrl, apiKey }: DatabasePageProps) {
     if (!window.confirm(`Delete records older than ${days} days?`)) return;
 
     try {
-      await requestJson(`${apiUrl}/api/admin/database/cleanup`, apiKey, {
+      await requestJson(apiEndpoint(apiUrl, '/api/admin/database/cleanup'), apiKey, {
         method: 'POST',
         body: JSON.stringify({ days }),
       });
@@ -64,7 +64,7 @@ export default function Database({ apiUrl, apiKey }: DatabasePageProps) {
     if (!window.confirm('Optimize database? This may take time.')) return;
 
     try {
-      await requestJson(`${apiUrl}/api/admin/database/vacuum`, apiKey, {
+      await requestJson(apiEndpoint(apiUrl, '/api/admin/database/vacuum'), apiKey, {
         method: 'POST',
       });
 

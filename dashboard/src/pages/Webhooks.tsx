@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Plus, Trash2, TestTube } from 'lucide-react';
-import { isAbortError, requestJson } from '../lib/api';
+import { apiEndpoint, isAbortError, requestJson } from '../lib/api';
 
 interface WebhooksPageProps {
   apiUrl: string;
@@ -14,6 +14,49 @@ interface Webhook {
   active: boolean;
   created_at: number;
   last_triggered?: number;
+}
+
+function record(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function normalizeWebhook(value: unknown): Webhook | null {
+  const item = record(value);
+  if (
+    !item ||
+    typeof item.id !== 'string' ||
+    typeof item.url !== 'string' ||
+    !Array.isArray(item.events) ||
+    !item.events.every((event) => typeof event === 'string') ||
+    typeof item.active !== 'boolean' ||
+    typeof item.created_at !== 'number' ||
+    !Number.isFinite(item.created_at)
+  ) {
+    return null;
+  }
+  return {
+    id: item.id,
+    url: item.url,
+    events: item.events as string[],
+    active: item.active,
+    created_at: item.created_at,
+    last_triggered: typeof item.last_triggered === 'number' && Number.isFinite(item.last_triggered)
+      ? item.last_triggered
+      : undefined,
+  };
+}
+
+function normalizeWebhookResponse(value: unknown): Webhook[] | null {
+  const entries = Array.isArray(value)
+    ? value
+    : record(value)?.webhooks;
+  if (!Array.isArray(entries)) return null;
+  const webhooks = entries.map(normalizeWebhook);
+  return webhooks.some((webhook): webhook is null => webhook === null)
+    ? null
+    : webhooks as Webhook[];
 }
 
 export default function Webhooks({ apiUrl, apiKey }: WebhooksPageProps) {
@@ -42,13 +85,15 @@ export default function Webhooks({ apiUrl, apiKey }: WebhooksPageProps) {
       setLoading(true);
       setError(null);
 
-      const data = await requestJson<Webhook[] | { webhooks?: Webhook[] }>(
-        `${apiUrl}/api/admin/webhooks`,
+      const data = await requestJson<unknown>(
+        apiEndpoint(apiUrl, '/api/admin/webhooks'),
         apiKey,
         { signal },
       );
       if (signal?.aborted || requestId !== requestIdRef.current) return;
-      setWebhooks(Array.isArray(data) ? data : data.webhooks || []);
+      const normalized = normalizeWebhookResponse(data);
+      if (!normalized) throw new Error('The server returned an invalid webhook response');
+      setWebhooks(normalized);
     } catch (err) {
       if (signal?.aborted || isAbortError(err) || requestId !== requestIdRef.current) return;
       setError(err instanceof Error ? err.message : 'Unknown error');
@@ -70,7 +115,7 @@ export default function Webhooks({ apiUrl, apiKey }: WebhooksPageProps) {
     if (!newUrl) return;
 
     try {
-      await requestJson(`${apiUrl}/api/admin/webhooks`, apiKey, {
+      await requestJson(apiEndpoint(apiUrl, '/api/admin/webhooks'), apiKey, {
         method: 'POST',
         body: JSON.stringify({
           url: newUrl,
@@ -91,7 +136,7 @@ export default function Webhooks({ apiUrl, apiKey }: WebhooksPageProps) {
     if (!window.confirm('Delete this webhook?')) return;
 
     try {
-      await requestJson(`${apiUrl}/api/admin/webhooks/${id}`, apiKey, {
+      await requestJson(apiEndpoint(apiUrl, `/api/admin/webhooks/${encodeURIComponent(id)}`), apiKey, {
         method: 'DELETE',
       });
       await fetchWebhooks();
@@ -102,7 +147,7 @@ export default function Webhooks({ apiUrl, apiKey }: WebhooksPageProps) {
 
   const handleTestWebhook = async (id: string) => {
     try {
-      await requestJson(`${apiUrl}/api/admin/webhooks/${id}/test`, apiKey, {
+      await requestJson(apiEndpoint(apiUrl, `/api/admin/webhooks/${encodeURIComponent(id)}/test`), apiKey, {
         method: 'POST',
       });
 

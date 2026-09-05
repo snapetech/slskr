@@ -11,6 +11,7 @@ import Webhooks from './pages/Webhooks';
 import Database from './pages/Database';
 import Monitoring from './pages/Monitoring';
 import Configuration from './pages/Configuration';
+import { apiEndpoint } from './lib/api';
 
 /**
  * Inner app component that uses ApiContext
@@ -27,7 +28,7 @@ function AppContent() {
 
   // Fetch health check with auto-refresh
   const { data: health } = useFetch(
-    `${apiUrl}/api/health`,
+    apiEndpoint(apiUrl, '/api/health'),
     { headers: healthHeaders, interval: 5000 }
   );
 

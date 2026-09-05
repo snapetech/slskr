@@ -1,5 +1,6 @@
-import React, { createContext, useContext, ReactNode } from 'react';
+import React, { createContext, useCallback, useContext, useMemo, ReactNode } from 'react';
 import { useLocalStorage, useSessionStorage } from '../hooks/useLocalStorage';
+import { normalizeApiUrl } from '../lib/api';
 
 interface ApiContextType {
   apiUrl: string;
@@ -11,6 +12,7 @@ interface ApiContextType {
 }
 
 const ApiContext = createContext<ApiContextType | undefined>(undefined);
+const DEFAULT_API_URL = 'http://127.0.0.1:5030';
 
 interface ApiProviderProps {
   children: ReactNode;
@@ -21,9 +23,20 @@ interface ApiProviderProps {
  * Eliminates prop drilling for apiUrl and apiKey
  */
 export function ApiProvider({ children }: ApiProviderProps) {
-  const [apiUrl, setApiUrl] = useLocalStorage('apiUrl', 'http://127.0.0.1:5030');
+  const [storedApiUrl, setStoredApiUrl] = useLocalStorage('apiUrl', DEFAULT_API_URL);
   const [apiKey, setApiKey] = useSessionStorage<string | null>('apiKey', null);
   const [isConnected, setIsConnected] = React.useState(false);
+  const apiUrl = useMemo(() => {
+    try {
+      return normalizeApiUrl(storedApiUrl);
+    } catch {
+      return DEFAULT_API_URL;
+    }
+  }, [storedApiUrl]);
+  const setApiUrl = useCallback(
+    (url: string) => setStoredApiUrl(normalizeApiUrl(url)),
+    [setStoredApiUrl],
+  );
 
   const value: ApiContextType = {
     apiUrl,

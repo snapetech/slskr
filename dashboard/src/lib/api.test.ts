@@ -1,5 +1,30 @@
 import { describe, expect, it, vi } from 'vitest';
-import { isAbortError, readResponseText, requestJson, requestText } from './api';
+import {
+  apiEndpoint,
+  isAbortError,
+  normalizeApiUrl,
+  readResponseText,
+  requestJson,
+  requestText,
+} from './api';
+
+describe('API URL helpers', () => {
+  it('normalizes user-entered HTTP URLs and joins paths without duplicate slashes', () => {
+    expect(normalizeApiUrl(' https://example.test/slskr/?debug=true#fragment ')).toBe(
+      'https://example.test/slskr',
+    );
+    expect(apiEndpoint('https://example.test/slskr/', '/api/health')).toBe(
+      'https://example.test/slskr/api/health',
+    );
+  });
+
+  it('rejects non-HTTP URLs and URLs containing credentials', () => {
+    expect(() => normalizeApiUrl('ftp://example.test')).toThrow('absolute HTTP or HTTPS');
+    expect(() => normalizeApiUrl('https://user:pass@example.test')).toThrow(
+      'without credentials',
+    );
+  });
+});
 
 describe('requestJson', () => {
   it('rejects redirects even when a caller requests follow behavior', async () => {

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Copy, Check } from 'lucide-react';
-import { isAbortError, requestJson } from '../lib/api';
+import { apiEndpoint, isAbortError, requestJson } from '../lib/api';
 
 interface ApiKeysPageProps {
   apiUrl: string;
@@ -16,11 +16,53 @@ interface ApiKey {
   active?: boolean;
 }
 
-interface ApiKeyResponse {
-  keys?: ApiKey[];
-  total?: number;
-  mode?: string;
-  reason?: string;
+function record(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function normalizeApiKey(value: unknown): ApiKey | null {
+  const item = record(value);
+  if (!item || typeof item.id !== 'string') return null;
+  return {
+    id: item.id,
+    key: typeof item.key === 'string' ? item.key : undefined,
+    scopes: Array.isArray(item.scopes)
+      ? item.scopes.filter((scope): scope is string => typeof scope === 'string')
+      : [],
+    created_at: typeof item.created_at === 'number' && Number.isFinite(item.created_at)
+      ? item.created_at
+      : undefined,
+    expires_at: typeof item.expires_at === 'number' && Number.isFinite(item.expires_at)
+      ? item.expires_at
+      : undefined,
+    active: typeof item.active === 'boolean' ? item.active : undefined,
+  };
+}
+
+function normalizeApiKeyResponse(value: unknown): { keys: ApiKey[]; mode: string; reason: string } | null {
+  if (Array.isArray(value)) {
+    const keys = value.map(normalizeApiKey);
+    if (keys.some((key): key is null => key === null)) return null;
+    return {
+      keys: keys as ApiKey[],
+      mode: keys.length > 0 ? 'managed' : 'static',
+      reason: '',
+    };
+  }
+  const response = record(value);
+  if (!response || (response.keys !== undefined && !Array.isArray(response.keys))) return null;
+  const rawKeys = response.keys ?? [];
+  const keys = rawKeys.map(normalizeApiKey);
+  if (keys.some((key): key is null => key === null)) return null;
+  if (response.mode !== undefined && typeof response.mode !== 'string') return null;
+  if (response.reason !== undefined && typeof response.reason !== 'string') return null;
+  return {
+    keys: keys as ApiKey[],
+    mode: typeof response.mode === 'string' ? response.mode : 'static',
+    reason: typeof response.reason === 'string' ? response.reason : '',
+  };
 }
 
 export default function ApiKeys({ apiUrl, apiKey }: ApiKeysPageProps) {
@@ -46,19 +88,15 @@ export default function ApiKeys({ apiUrl, apiKey }: ApiKeysPageProps) {
       setLoading(true);
       setError(null);
       try {
-        const data = await requestJson<ApiKeyResponse | ApiKey[]>(`${apiUrl}/api/admin/keys`, apiKey, {
+        const data = await requestJson<unknown>(apiEndpoint(apiUrl, '/api/admin/keys'), apiKey, {
           signal: controller.signal,
         });
         if (!active) return;
-        if (Array.isArray(data)) {
-          setKeys(data);
-          setMode(data.length > 0 ? 'managed' : 'static');
-          setReason('');
-        } else {
-          setKeys(data.keys ?? []);
-          setMode(data.mode ?? 'static');
-          setReason(data.reason ?? '');
-        }
+        const normalized = normalizeApiKeyResponse(data);
+        if (!normalized) throw new Error('The server returned an invalid API key response');
+        setKeys(normalized.keys);
+        setMode(normalized.mode);
+        setReason(normalized.reason);
       } catch (fetchError) {
         if (!active || isAbortError(fetchError)) return;
         setError(fetchError instanceof Error ? fetchError.message : 'Failed to fetch API keys');
