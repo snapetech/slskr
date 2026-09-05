@@ -369,7 +369,7 @@ func TestClientCoversSessionBrowseEventAndCacheRoutes(t *testing.T) {
 				(request.URL.Query().Get("limit") != "10" || request.URL.Query().Get("offset") != "20") {
 				t.Errorf("filtered event pagination was not encoded: %q", request.URL.RawQuery)
 			}
-			write(`{"events":[{"type":"transfer.completed"}]}`)
+			write(`[{"type":"transfer.completed"}]`)
 		case request.Method == http.MethodGet && request.URL.Path == "/api/mediacore/retrieve/stats":
 			write(`{"entries":4}`)
 		case request.Method == http.MethodPost && request.URL.Path == "/api/mediacore/retrieve/cache/clear":

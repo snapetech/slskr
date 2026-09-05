@@ -562,7 +562,7 @@ func (c *Client) GetEventsWithFilters(ctx context.Context, eventType, topic, que
 	if query != "" {
 		params.Set("q", query)
 	}
-	result, err := c.getWithParams(ctx, "/api/events", params, true)
+	result, err := c.getRawWithParams(ctx, "/api/events", params, true)
 	if err != nil {
 		return nil, err
 	}
