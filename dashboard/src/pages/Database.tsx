@@ -92,7 +92,7 @@ export default function Database({ apiUrl, apiKey }: DatabasePageProps) {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-gray-600 text-sm">Searches</p>
-              <p className="text-3xl font-bold text-gray-900 mt-2">{stats?.searches ?? 0}</p>
+              <p className="text-3xl font-bold text-gray-900 mt-2">{stats?.searches ?? '—'}</p>
             </div>
             <DatabaseIcon className="w-12 h-12 text-blue-100" />
           </div>
@@ -102,7 +102,7 @@ export default function Database({ apiUrl, apiKey }: DatabasePageProps) {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-gray-600 text-sm">Transfers</p>
-              <p className="text-3xl font-bold text-gray-900 mt-2">{stats?.transfers ?? 0}</p>
+              <p className="text-3xl font-bold text-gray-900 mt-2">{stats?.transfers ?? '—'}</p>
             </div>
             <DatabaseIcon className="w-12 h-12 text-green-100" />
           </div>
@@ -112,7 +112,7 @@ export default function Database({ apiUrl, apiKey }: DatabasePageProps) {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-gray-600 text-sm">Messages</p>
-              <p className="text-3xl font-bold text-gray-900 mt-2">{stats?.messages ?? 0}</p>
+              <p className="text-3xl font-bold text-gray-900 mt-2">{stats?.messages ?? '—'}</p>
             </div>
             <DatabaseIcon className="w-12 h-12 text-purple-100" />
           </div>

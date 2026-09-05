@@ -107,22 +107,22 @@ export default function Monitoring({ apiUrl, apiKey }: MonitoringPageProps) {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="bg-white rounded-lg shadow p-6">
           <p className="text-gray-600 text-sm">Shared Files</p>
-          <p className="text-4xl font-bold text-blue-600 mt-2">{metrics?.sharesFiles ?? 0}</p>
+          <p className="text-4xl font-bold text-blue-600 mt-2">{metrics?.sharesFiles ?? '—'}</p>
         </div>
 
         <div className="bg-white rounded-lg shadow p-6">
           <p className="text-gray-600 text-sm">Total Transfers</p>
-          <p className="text-4xl font-bold text-purple-600 mt-2">{metrics?.transfersTotal ?? 0}</p>
+          <p className="text-4xl font-bold text-purple-600 mt-2">{metrics?.transfersTotal ?? '—'}</p>
         </div>
 
         <div className="bg-white rounded-lg shadow p-6">
           <p className="text-gray-600 text-sm">Active Transfers</p>
-          <p className="text-4xl font-bold text-green-600 mt-2">{metrics?.transfersActive ?? 0}</p>
+          <p className="text-4xl font-bold text-green-600 mt-2">{metrics?.transfersActive ?? '—'}</p>
         </div>
 
         <div className="bg-white rounded-lg shadow p-6">
           <p className="text-gray-600 text-sm">Recorded Events</p>
-          <p className="text-4xl font-bold text-orange-600 mt-2">{metrics?.eventsTotal ?? 0}</p>
+          <p className="text-4xl font-bold text-orange-600 mt-2">{metrics?.eventsTotal ?? '—'}</p>
         </div>
       </div>
 
