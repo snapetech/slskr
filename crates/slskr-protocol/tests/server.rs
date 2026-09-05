@@ -5,7 +5,7 @@ use slskr_protocol::{
     server::{
         Direction, JoinedRoom, LoginRequest, LoginResponse, ObfuscatedPort, PeerAddress, RoomList,
         RoomListEntry, RoomUser, ServerCode, ServerMessage, TargetedSearchRequest, UserInterests,
-        UserStats, WaitPort,
+        UserStats, WaitPort, MAX_SERVER_LIST_ITEMS,
     },
     Writer,
 };
@@ -682,6 +682,70 @@ fn string_vec_rejects_object_count_amplification() {
             count: 65_537,
             maximum: 65_536,
         }
+    ));
+}
+
+#[test]
+fn server_list_decoders_reject_object_count_amplification() {
+    let count = MAX_SERVER_LIST_ITEMS + 1;
+    let count_u32 = u32::try_from(count).unwrap();
+    let fixed_payload = |item_bytes: usize| {
+        let mut payload = count_u32.to_le_bytes().to_vec();
+        payload.resize(payload.len() + count * item_bytes, 0);
+        payload
+    };
+    let room_tickers_payload = {
+        let mut payload = vec![0; 4];
+        payload.extend_from_slice(&count_u32.to_le_bytes());
+        payload.resize(payload.len() + count * 8, 0);
+        payload
+    };
+    let joined_room_payload = {
+        let mut payload = vec![0; 4];
+        payload.extend_from_slice(&count_u32.to_le_bytes());
+        payload.resize(payload.len() + count * 36, 0);
+        payload
+    };
+    for (code, payload, expected_field) in [
+        (
+            ServerCode::Recommendations,
+            fixed_payload(8),
+            "recommendation",
+        ),
+        (ServerCode::SimilarUsers, fixed_payload(8), "similar user"),
+        (
+            ServerCode::PossibleParents,
+            fixed_payload(12),
+            "possible parents",
+        ),
+        (ServerCode::RoomTickers, room_tickers_payload, "room ticker"),
+        (ServerCode::JoinRoom, joined_room_payload, "room users"),
+    ] {
+        let error = ServerMessage::decode(
+            MessageFrame::new(code.as_u32(), payload),
+            Direction::ServerToClient,
+        )
+        .expect_err("server list object amplification must be rejected");
+        assert!(matches!(
+            error,
+            slskr_protocol::DecodeError::InvalidCount {
+                field,
+                count: actual_count,
+                maximum,
+            } if field == expected_field
+                && actual_count == count
+                && maximum == MAX_SERVER_LIST_ITEMS
+        ));
+    }
+
+    let oversized = ServerMessage::PrivilegedUsers(vec!["user".to_owned(); count]);
+    assert!(matches!(
+        oversized.encode(),
+        Err(slskr_protocol::EncodeError::CountTooLarge {
+            field: "string vec",
+            count: actual_count,
+            maximum: MAX_SERVER_LIST_ITEMS,
+        }) if actual_count == count
     ));
 }
 

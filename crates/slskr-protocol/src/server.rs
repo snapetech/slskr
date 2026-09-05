@@ -2087,22 +2087,41 @@ fn encode_targeted_search_request(
     writer.write_string(&value.query)
 }
 
-// A string vector allocates a `String` header for every item, even when its
-// wire representation is an empty four-byte string.  The wire-byte bound
-// alone would allow a maximum-sized frame to create millions of headers.
-// Keep the cap high enough for real server lists while bounding the decoder's
-// object-count amplification.
-const MAX_STRING_VEC_ITEMS: usize = 65_536;
+// Server list decoders allocate a Rust object for every declared item, while
+// the wire-byte bound alone would allow a maximum-sized frame to create
+// hundreds of thousands or millions of objects. Keep the cap high enough for
+// real server lists while bounding decoder object-count amplification.
+pub const MAX_SERVER_LIST_ITEMS: usize = 65_536;
 
-fn decode_string_vec(reader: &mut Reader<'_>) -> Result<Vec<String>, DecodeError> {
-    let count = reader.read_bounded_count("string vec", 4)?;
-    if count > MAX_STRING_VEC_ITEMS {
+fn decode_server_list_count(
+    reader: &mut Reader<'_>,
+    field: &'static str,
+    minimum_bytes_per_item: usize,
+) -> Result<usize, DecodeError> {
+    let count = reader.read_bounded_count(field, minimum_bytes_per_item)?;
+    if count > MAX_SERVER_LIST_ITEMS {
         return Err(DecodeError::InvalidCount {
-            field: "string vec",
+            field,
             count,
-            maximum: MAX_STRING_VEC_ITEMS,
+            maximum: MAX_SERVER_LIST_ITEMS,
         });
     }
+    Ok(count)
+}
+
+fn validate_server_list_count(field: &'static str, count: usize) -> Result<(), EncodeError> {
+    if count > MAX_SERVER_LIST_ITEMS {
+        return Err(EncodeError::CountTooLarge {
+            field,
+            count,
+            maximum: MAX_SERVER_LIST_ITEMS,
+        });
+    }
+    Ok(())
+}
+
+fn decode_string_vec(reader: &mut Reader<'_>) -> Result<Vec<String>, DecodeError> {
+    let count = decode_server_list_count(reader, "string vec", 4)?;
     let mut values = Vec::with_capacity(count);
     for _ in 0..count {
         values.push(reader.read_string()?);
@@ -2111,6 +2130,7 @@ fn decode_string_vec(reader: &mut Reader<'_>) -> Result<Vec<String>, DecodeError
 }
 
 fn encode_string_vec(writer: &mut Writer, values: &[String]) -> Result<(), EncodeError> {
+    validate_server_list_count("string vec", values.len())?;
     let count = u32::try_from(values.len())
         .map_err(|_| EncodeError::length_overflow("string vec", values.len()))?;
     writer.write_u32_le(count);
@@ -2143,7 +2163,7 @@ fn decode_joined_room(reader: &mut Reader<'_>) -> Result<JoinedRoom, DecodeError
     // allocation against their combined minimum wire footprint so a
     // malformed count cannot reserve a large username vector before the
     // later vector headers are validated.
-    let user_count = reader.read_bounded_count("room users", 36)?;
+    let user_count = decode_server_list_count(reader, "room users", 36)?;
     let mut users = Vec::with_capacity(user_count);
     for _ in 0..user_count {
         users.push(RoomUser {
@@ -2195,6 +2215,7 @@ fn decode_joined_room(reader: &mut Reader<'_>) -> Result<JoinedRoom, DecodeError
 }
 
 fn encode_joined_room(writer: &mut Writer, value: &JoinedRoom) -> Result<(), EncodeError> {
+    validate_server_list_count("room users", value.users.len())?;
     let count = u32::try_from(value.users.len())
         .map_err(|_| EncodeError::length_overflow("room users", value.users.len()))?;
     writer.write_string(&value.room)?;
@@ -2253,7 +2274,7 @@ fn encode_room_user(writer: &mut Writer, value: &RoomUser) -> Result<(), EncodeE
 }
 
 fn decode_recommendation_list(reader: &mut Reader<'_>) -> Result<Vec<Recommendation>, DecodeError> {
-    let count = reader.read_bounded_count("recommendation", 8)?;
+    let count = decode_server_list_count(reader, "recommendation", 8)?;
     let mut values = Vec::with_capacity(count);
     for _ in 0..count {
         values.push(Recommendation {
@@ -2268,6 +2289,7 @@ fn encode_recommendation_list(
     writer: &mut Writer,
     values: &[Recommendation],
 ) -> Result<(), EncodeError> {
+    validate_server_list_count("recommendations", values.len())?;
     let count = u32::try_from(values.len())
         .map_err(|_| EncodeError::length_overflow("recommendations", values.len()))?;
     writer.write_u32_le(count);
@@ -2288,7 +2310,7 @@ fn decode_recommendation_lists(
 }
 
 fn decode_similar_users(reader: &mut Reader<'_>) -> Result<Vec<SimilarUser>, DecodeError> {
-    let count = reader.read_bounded_count("similar user", 8)?;
+    let count = decode_server_list_count(reader, "similar user", 8)?;
     let mut values = Vec::with_capacity(count);
     for _ in 0..count {
         values.push(SimilarUser {
@@ -2300,6 +2322,7 @@ fn decode_similar_users(reader: &mut Reader<'_>) -> Result<Vec<SimilarUser>, Dec
 }
 
 fn encode_similar_users(writer: &mut Writer, values: &[SimilarUser]) -> Result<(), EncodeError> {
+    validate_server_list_count("similar users", values.len())?;
     let count = u32::try_from(values.len())
         .map_err(|_| EncodeError::length_overflow("similar users", values.len()))?;
     writer.write_u32_le(count);
@@ -2343,7 +2366,7 @@ fn encode_item_similar_users(
 }
 
 fn decode_room_tickers(reader: &mut Reader<'_>) -> Result<Vec<RoomTicker>, DecodeError> {
-    let count = reader.read_bounded_count("room ticker", 8)?;
+    let count = decode_server_list_count(reader, "room ticker", 8)?;
     let mut values = Vec::with_capacity(count);
     for _ in 0..count {
         values.push(RoomTicker {
@@ -2355,6 +2378,7 @@ fn decode_room_tickers(reader: &mut Reader<'_>) -> Result<Vec<RoomTicker>, Decod
 }
 
 fn encode_room_tickers(writer: &mut Writer, values: &[RoomTicker]) -> Result<(), EncodeError> {
+    validate_server_list_count("room tickers", values.len())?;
     let count = u32::try_from(values.len())
         .map_err(|_| EncodeError::length_overflow("room tickers", values.len()))?;
     writer.write_u32_le(count);
@@ -2403,6 +2427,7 @@ fn decode_room_entries(reader: &mut Reader<'_>) -> Result<Vec<RoomListEntry>, De
 }
 
 fn encode_room_entries(writer: &mut Writer, entries: &[RoomListEntry]) -> Result<(), EncodeError> {
+    validate_server_list_count("room entries", entries.len())?;
     let count = u32::try_from(entries.len())
         .map_err(|_| EncodeError::length_overflow("room entries", entries.len()))?;
     writer.write_u32_le(count);
@@ -2417,7 +2442,7 @@ fn encode_room_entries(writer: &mut Writer, entries: &[RoomListEntry]) -> Result
 }
 
 fn decode_possible_parents(reader: &mut Reader<'_>) -> Result<Vec<PossibleParent>, DecodeError> {
-    let count = reader.read_bounded_count("possible parents", 12)?;
+    let count = decode_server_list_count(reader, "possible parents", 12)?;
     let mut parents = Vec::new();
     for _ in 0..count {
         parents.push(PossibleParent {
@@ -2433,6 +2458,7 @@ fn encode_possible_parents(
     writer: &mut Writer,
     values: &[PossibleParent],
 ) -> Result<(), EncodeError> {
+    validate_server_list_count("possible parents", values.len())?;
     let count = u32::try_from(values.len())
         .map_err(|_| EncodeError::length_overflow("possible parents", values.len()))?;
     writer.write_u32_le(count);
