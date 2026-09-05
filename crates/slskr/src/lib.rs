@@ -15790,6 +15790,7 @@ async fn songid_fetch_spotify_page_metadata(source: &str) -> Result<serde_json::
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
         .redirect(reqwest::redirect::Policy::none())
+        .no_proxy()
         .resolve_to_addrs(host, &addresses)
         .build()
         .map_err(|error| format!("failed to build Spotify metadata client: {error}"))?;
@@ -15964,6 +15965,7 @@ async fn songid_acoustid_lookup(
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(20))
         .redirect(reqwest::redirect::Policy::none())
+        .no_proxy()
         .resolve_to_addrs(&resolved.host, &resolved.addrs)
         .build()
         .map_err(|error| format!("failed to build AcoustID client: {error}"))?;
@@ -46250,6 +46252,7 @@ async fn fetch_provider_metadata_page(
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(timeout_seconds))
         .redirect(reqwest::redirect::Policy::none())
+        .no_proxy()
         .resolve_to_addrs(&resolved.host, &resolved.addrs)
         .build()
         .map_err(|error| format!("failed to build provider client: {error}"))?;
@@ -46289,6 +46292,7 @@ async fn send_ntfy_notification_to(
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(30))
         .redirect(reqwest::redirect::Policy::none())
+        .no_proxy()
         .resolve_to_addrs(&resolved.host, &resolved.addrs)
         .build()
         .map_err(|error| format!("failed to build Ntfy client: {error}"))?;
@@ -48923,6 +48927,7 @@ async fn musicbrainz_json_request(
     let client = reqwest::Client::builder()
         .timeout(timeout)
         .redirect(reqwest::redirect::Policy::none())
+        .no_proxy()
         .resolve_to_addrs(&resolved.host, &resolved.addrs)
         .build()
         .map_err(|error| format!("failed to build MusicBrainz client: {error}"))?;
@@ -57044,7 +57049,8 @@ async fn fetch_activitypub_remote_public_key(key_id: &str) -> Result<VerifyingKe
     let resolved = validate_integration_base_url(actor_url)?;
     let mut client_builder = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(5))
-        .redirect(reqwest::redirect::Policy::none());
+        .redirect(reqwest::redirect::Policy::none())
+        .no_proxy();
     for addr in &resolved.addrs {
         client_builder = client_builder.resolve(&resolved.host, *addr);
     }
@@ -58217,7 +58223,8 @@ async fn feature_controller_mutation_response(
         let request_host = url.host_str().unwrap_or(host.as_str());
         let mut client_builder = reqwest::Client::builder()
             .timeout(solid.timeout)
-            .redirect(reqwest::redirect::Policy::none());
+            .redirect(reqwest::redirect::Policy::none())
+            .no_proxy();
         if let Some(addresses) = resolved_addresses.as_deref() {
             client_builder = client_builder.resolve_to_addrs(request_host, addresses);
         }
