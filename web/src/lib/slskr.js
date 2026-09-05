@@ -6,6 +6,22 @@ import { normalizeSwarmJobList } from './swarmJobs';
 const isRecord = (value) =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
 
+const requireRecord = (value, resource) => {
+  if (!isRecord(value)) {
+    throw new Error(`slskR API returned an invalid ${resource} response`);
+  }
+
+  return value;
+};
+
+const requireArrayField = (value, resource) => {
+  if (!Array.isArray(value)) {
+    throw new Error(`slskR API returned an invalid ${resource} response`);
+  }
+
+  return value;
+};
+
 // Older daemon profiles may not expose every optional endpoint. Preserve the
 // compatibility fallback for that case, but surface real outages and auth
 // failures so the UI cannot report fabricated empty state.
@@ -29,9 +45,9 @@ const MAX_PEER_RECORDS = 512;
 const normalizePeerList = (value) => {
   const peers = Array.isArray(value)
     ? value
-    : value && typeof value === 'object' && Array.isArray(value.peers)
+    : isRecord(value) && Array.isArray(value.peers)
       ? value.peers
-      : [];
+      : requireArrayField(value, 'peer list');
 
   return peers
     .filter((peer) => peer && typeof peer === 'object' && !Array.isArray(peer))
@@ -40,7 +56,10 @@ const normalizePeerList = (value) => {
 
 // Capabilities API
 export const getCapabilities = async () => {
-  return safeGet('/capabilities', { features: [] });
+  return requireRecord(
+    await safeGet('/capabilities', { features: [] }),
+    'capabilities',
+  );
 };
 
 export const getDiscoveredPeers = async () => {
@@ -49,7 +68,10 @@ export const getDiscoveredPeers = async () => {
 
 // HashDatabase API
 export const getHashDatabaseStats = async () => {
-  return safeGet('/hashdb/stats', { currentSeqId: 0, totalHashEntries: 0 });
+  return requireRecord(
+    await safeGet('/hashdb/stats', { currentSeqId: 0, totalHashEntries: 0 }),
+    'hash database stats',
+  );
 };
 
 export const getHashDatabaseEntries = async (limit = 100, offset = 0) => {
@@ -57,26 +79,36 @@ export const getHashDatabaseEntries = async (limit = 100, offset = 0) => {
     limit: String(limit),
     offset: String(offset),
   });
-  return safeGet(`/hashdb/entries?${parameters.toString()}`, {
+  const response = await safeGet(`/hashdb/entries?${parameters.toString()}`, {
     entries: [],
   });
+  const entries = requireRecord(response, 'hash database entries');
+  requireArrayField(entries.entries, 'hash database entry list');
+  return entries;
 };
 
 export const getMetadataProcessingStatus = async (limit = 50) => {
   const parameters = new URLSearchParams({ limit: String(limit) });
-  return safeGet(`/hashdb/metadata-processing?${parameters.toString()}`, {
+  const response = await safeGet(`/hashdb/metadata-processing?${parameters.toString()}`, {
     active: [],
     history: [],
   });
+  const status = requireRecord(response, 'metadata processing status');
+  requireArrayField(status.active, 'metadata processing active list');
+  requireArrayField(status.history, 'metadata processing history list');
+  return status;
 };
 
 // Mesh API
 export const getMeshStats = async () => {
-  return safeGet('/mesh/stats', {
-    currentSeqId: 0,
-    isSyncing: false,
-    knownMeshPeers: 0,
-  });
+  return requireRecord(
+    await safeGet('/mesh/stats', {
+      currentSeqId: 0,
+      isSyncing: false,
+      knownMeshPeers: 0,
+    }),
+    'mesh stats',
+  );
 };
 
 export const getMeshPeers = async () => {
@@ -93,14 +125,20 @@ export const triggerMeshSync = async (username) => {
 
 // Backfill API
 export const getBackfillStats = async () => {
-  return safeGet('/backfill/stats', { isActive: false, isRunning: false });
+  return requireRecord(
+    await safeGet('/backfill/stats', { isActive: false, isRunning: false }),
+    'backfill stats',
+  );
 };
 
 export const getBackfillCandidates = async (limit = 50) => {
   const parameters = new URLSearchParams({ limit: String(limit) });
-  return safeGet(`/backfill/candidates?${parameters.toString()}`, {
+  const response = await safeGet(`/backfill/candidates?${parameters.toString()}`, {
     candidates: [],
   });
+  const candidates = requireRecord(response, 'backfill candidates');
+  requireArrayField(candidates.candidates, 'backfill candidate list');
+  return candidates;
 };
 
 export const backfillFromSearchHistory = async (options = {}) => {
@@ -127,11 +165,20 @@ export const backfillFromSearchHistory = async (options = {}) => {
 
 // MultiSource API
 export const getActiveSwarmJobs = async () => {
-  return normalizeSwarmJobList(await safeGet('/multisource/jobs', { jobs: [] }));
+  const response = await safeGet('/multisource/jobs', { jobs: [] });
+  if (!Array.isArray(response)) {
+    const jobs = requireRecord(response, 'swarm jobs');
+    requireArrayField(jobs.jobs, 'swarm job list');
+  }
+  return normalizeSwarmJobList(response);
 };
 
 export const getSwarmJob = async (jobId) => {
-  return safeGet(`/multisource/jobs/${encodePathSegment(jobId)}`, null);
+  const response = await safeGet(
+    `/multisource/jobs/${encodePathSegment(jobId)}`,
+    null,
+  );
+  return response === null ? null : requireRecord(response, 'swarm job');
 };
 
 // DHT API
@@ -143,7 +190,7 @@ export const getDhtStatus = async () => {
     isDhtRunning: false,
     verifiedBeaconCount: 0,
   });
-  const normalizedDht = isRecord(dht) ? dht : {};
+  const normalizedDht = requireRecord(dht, 'DHT status');
 
   return {
     ...normalizedDht,

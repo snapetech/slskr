@@ -4,7 +4,9 @@ import {
   getActiveSwarmJobs,
   getMetadataProcessingStatus,
   getDiscoveredPeers,
+  getHashDatabaseStats,
   getMeshPeers,
+  getMeshStats,
   getSlskrStats,
 } from './slskr';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -77,5 +79,32 @@ describe('slskr runtime API helpers', () => {
         totalBytes: 0,
       },
     ]);
+  });
+
+  it('rejects malformed runtime envelopes instead of manufacturing empty state', async () => {
+    api.get.mockResolvedValueOnce({ data: [] });
+    await expect(getCapabilities()).rejects.toThrow(
+      'slskR API returned an invalid capabilities response',
+    );
+
+    api.get.mockResolvedValueOnce({ data: {} });
+    await expect(getMeshPeers()).rejects.toThrow(
+      'slskR API returned an invalid peer list response',
+    );
+
+    api.get.mockResolvedValueOnce({ data: { jobs: {} } });
+    await expect(getActiveSwarmJobs()).rejects.toThrow(
+      'slskR API returned an invalid swarm job list response',
+    );
+
+    api.get.mockResolvedValueOnce({ data: [] });
+    await expect(getHashDatabaseStats()).rejects.toThrow(
+      'slskR API returned an invalid hash database stats response',
+    );
+
+    api.get.mockResolvedValueOnce({ data: [] });
+    await expect(getMeshStats()).rejects.toThrow(
+      'slskR API returned an invalid mesh stats response',
+    );
   });
 });
