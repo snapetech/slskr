@@ -2,6 +2,8 @@ import api from './api';
 import {
   getCapabilities,
   getMetadataProcessingStatus,
+  getDiscoveredPeers,
+  getMeshPeers,
 } from './slskr';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -28,5 +30,23 @@ describe('slskr runtime API helpers', () => {
     api.get.mockRejectedValue(error);
 
     await expect(getMetadataProcessingStatus()).rejects.toBe(error);
+  });
+
+  it('normalizes peer endpoint envelopes for the network dashboard', async () => {
+    api.get
+      .mockResolvedValueOnce({
+        data: {
+          count: 1,
+          peers: [{ username: 'mesh-peer' }, null, 'invalid-peer'],
+        },
+      })
+      .mockResolvedValueOnce({
+        data: [{ username: 'discovered-peer' }],
+      });
+
+    await expect(getMeshPeers()).resolves.toEqual([{ username: 'mesh-peer' }]);
+    await expect(getDiscoveredPeers()).resolves.toEqual([
+      { username: 'discovered-peer' },
+    ]);
   });
 });

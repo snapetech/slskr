@@ -58,6 +58,18 @@ const formatTimeAgo = (dateString) => {
   return `${Math.floor(seconds / 86_400)}d ago`;
 };
 
+const normalizePeerRecords = (value) => {
+  const peers = Array.isArray(value)
+    ? value
+    : value && typeof value === 'object' && Array.isArray(value.peers)
+      ? value.peers
+      : [];
+
+  return peers.filter(
+    (peer) => peer && typeof peer === 'object' && !Array.isArray(peer),
+  );
+};
+
 const StatCard = ({ color, icon, inverted = false, label, subLabel, value }) => (
   <Card raised={inverted}>
     <Card.Content>
@@ -240,8 +252,8 @@ const Network = ({ options = {}, state = {}, theme }) => {
             ? statsData
             : {},
         );
-        setMeshPeers(Array.isArray(peersData) ? peersData : []);
-        setDiscoveredPeers(Array.isArray(discoveredData) ? discoveredData : []);
+        setMeshPeers(normalizePeerRecords(peersData));
+        setDiscoveredPeers(normalizePeerRecords(discoveredData));
       }
     } catch (error) {
       console.error('Failed to fetch network stats:', error);

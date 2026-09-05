@@ -21,13 +21,27 @@ const safeGet = async (endpoint, fallback = null) => {
   }
 };
 
+const MAX_PEER_RECORDS = 512;
+
+const normalizePeerList = (value) => {
+  const peers = Array.isArray(value)
+    ? value
+    : value && typeof value === 'object' && Array.isArray(value.peers)
+      ? value.peers
+      : [];
+
+  return peers
+    .filter((peer) => peer && typeof peer === 'object' && !Array.isArray(peer))
+    .slice(0, MAX_PEER_RECORDS);
+};
+
 // Capabilities API
 export const getCapabilities = async () => {
   return safeGet('/capabilities', { features: [] });
 };
 
 export const getDiscoveredPeers = async () => {
-  return safeGet('/capabilities/peers', { peers: [] });
+  return normalizePeerList(await safeGet('/capabilities/peers', { peers: [] }));
 };
 
 // HashDatabase API
@@ -58,7 +72,7 @@ export const getMeshStats = async () => {
 };
 
 export const getMeshPeers = async () => {
-  return safeGet('/mesh/peers', { count: 0, peers: [] });
+  return normalizePeerList(await safeGet('/mesh/peers', { peers: [] }));
 };
 
 export const triggerMeshSync = async (username) => {

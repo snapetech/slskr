@@ -71,6 +71,27 @@ describe('Network', () => {
     expect(screen.getByText('Needs attention')).toBeInTheDocument();
   });
 
+  it('renders peer records returned in compatibility envelopes', async () => {
+    slskrAPI.getMeshPeers.mockResolvedValueOnce({
+      count: 1,
+      peers: [{ username: 'mesh-peer' }],
+    });
+    slskrAPI.getDiscoveredPeers.mockResolvedValueOnce({
+      count: 1,
+      peers: [{ username: 'discovered-peer' }],
+    });
+
+    render(<Network theme="light" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('mesh-peer')).toBeInTheDocument();
+      expect(screen.getByText('discovered-peer')).toBeInTheDocument();
+    });
+
+    expect(screen.queryByText('No mesh peers connected')).not.toBeInTheDocument();
+    expect(screen.queryByText('No slsk peers discovered yet')).not.toBeInTheDocument();
+  });
+
   it('shows configured Soulseek credentials and auto-connect state', async () => {
     render(
       <Network
