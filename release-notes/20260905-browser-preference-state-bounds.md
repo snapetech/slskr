@@ -1,7 +1,7 @@
 ---
 category: security
 audience: users, operators
-area: browser-preferences-and-navigation
+area: browser-preferences-navigation
 action: none
 breaking: false
 ---
