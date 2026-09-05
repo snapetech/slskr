@@ -19,6 +19,7 @@ import {
   Icon,
   Label,
   Loader,
+  Message,
   Modal,
   Pagination,
   Progress,
@@ -47,6 +48,7 @@ const Jobs = () => {
   const [swarmJobs, setSwarmJobs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [swarmLoading, setSwarmLoading] = useState(true);
+  const [swarmError, setSwarmError] = useState('');
   const [selectedSwarmJobId, setSelectedSwarmJobId] = useState(null);
   const [showVisualization, setShowVisualization] = useState(false);
   const [filters, setFilters] = useState({
@@ -130,14 +132,15 @@ const Jobs = () => {
             ? jobs.filter((job) => job && typeof job === 'object')
             : [],
         );
+        setSwarmError('');
       }
     } catch (error) {
       if (
         mountedRef.current &&
         swarmRequestIdRef.current === requestId
       ) {
-        console.debug('Failed to fetch swarm jobs:', error);
-        setSwarmJobs([]);
+        setSwarmError(toDisplayError(error, 'Failed to fetch swarm jobs'));
+        console.error('Failed to fetch swarm jobs:', error);
       }
     } finally {
       if (
@@ -288,6 +291,13 @@ const Jobs = () => {
           </Grid.Column>
         </Grid>
       </Segment>
+
+      {swarmError && (
+        <Message negative>
+          <Message.Header>Active swarm jobs unavailable</Message.Header>
+          <p>{swarmError}</p>
+        </Message>
+      )}
 
       {/* Active Swarm Jobs */}
       {swarmJobs.length > 0 && (

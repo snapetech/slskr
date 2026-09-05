@@ -222,6 +222,17 @@ describe('Jobs', () => {
     });
   });
 
+  it('surfaces active swarm job load failures instead of showing an empty list', async () => {
+    jobsLibrary.getActiveSwarmJobs.mockRejectedValue(new Error('Swarm API unavailable'));
+
+    render(<Jobs />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Active swarm jobs unavailable')).toBeInTheDocument();
+    });
+    expect(screen.getByText('Swarm API unavailable')).toBeInTheDocument();
+  });
+
   it('refreshes swarm jobs periodically', async () => {
     jest.useFakeTimers();
     render(<Jobs />);
