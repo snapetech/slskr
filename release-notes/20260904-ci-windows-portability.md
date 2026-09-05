@@ -1,6 +1,6 @@
 ---
 category: fixed
-audience: operators, developers
+audience: operators
 area: ci
 action: none
 breaking: false

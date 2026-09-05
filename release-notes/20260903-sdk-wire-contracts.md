@@ -1,6 +1,6 @@
 ---
 category: fixed
-audience: users, integrators
+audience: users, operators
 area: client-libraries
 action: none
 breaking: false

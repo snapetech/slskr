@@ -1,6 +1,6 @@
 ---
 category: changed
-audience: operators, developers
+audience: operators
 area: dependencies
 action: none
 breaking: false

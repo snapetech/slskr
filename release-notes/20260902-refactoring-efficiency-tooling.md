@@ -1,6 +1,6 @@
 ---
 category: changed
-audience: developers, operators
+audience: operators
 area: performance-tooling
 action: none
 breaking: false
