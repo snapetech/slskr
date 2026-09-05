@@ -520,6 +520,28 @@ describe('PlayerBar', () => {
     expect(await screen.findByText('RustyMilk launched.')).toBeInTheDocument();
   });
 
+  it('retains the last known visualizer status when refresh fails', async () => {
+    renderPlayer();
+
+    fireEvent.click(screen.getByTestId('player-open-integrations'));
+    expect(
+      await screen.findByText('Ready to launch on the slskr host.'),
+    ).toBeInTheDocument();
+
+    externalVisualizer.getExternalVisualizerStatus.mockRejectedValueOnce(
+      new Error('temporary status failure'),
+    );
+    fireEvent.click(screen.getByTestId('player-refresh-external-visualizer'));
+
+    expect(
+      await screen.findByText('External visualizer status is unavailable.'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('/opt/RustyMilk/RustyMilk 3.exe')).toBeInTheDocument();
+    expect(
+      screen.getByTestId('player-launch-external-visualizer'),
+    ).toBeEnabled();
+  });
+
   it('shows now-playing source badges and stores local discovery ratings', async () => {
     renderPlayer();
 

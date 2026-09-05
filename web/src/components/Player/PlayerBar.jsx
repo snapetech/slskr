@@ -2474,7 +2474,6 @@ const PlayerBar = ({ runtimeProfile } = {}) => {
           mountedRef.current &&
           externalStatusRequestIdRef.current === requestId
         ) {
-          setExternalVisualizerStatus(null);
           setExternalVisualizerMessage('External visualizer status is unavailable.');
         }
       })
