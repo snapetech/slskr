@@ -72,10 +72,11 @@ describe('audioVerification', () => {
 
   it('caches browser fingerprints for repeated verification', async () => {
     const fileOptions = { lastModified: 123, type: 'audio/flac' };
-    const first = await verifyAudioFile(new File(['abc'], 'track.flac', fileOptions), {
+    const file = new File(['abc'], 'track.flac', fileOptions);
+    const first = await verifyAudioFile(file, {
       profileId: 'balanced',
     });
-    const second = await verifyAudioFile(new File(['abc'], 'track.flac', fileOptions), {
+    const second = await verifyAudioFile(file, {
       profileId: 'balanced',
     });
 
@@ -85,5 +86,26 @@ describe('audioVerification', () => {
 
     clearAudioVerificationCache();
     expect(JSON.parse(localStorage.getItem(audioVerificationCacheStorageKey))).toEqual({});
+  });
+
+  it('rehashes a different file with colliding metadata', async () => {
+    const fileOptions = { lastModified: 123, type: 'audio/flac' };
+    const first = await verifyAudioFile(new File(['abc'], 'track.flac', fileOptions), {
+      profileId: 'balanced',
+    });
+    const second = await verifyAudioFile(
+      new File(['different contents'], 'track.flac', fileOptions),
+      { profileId: 'balanced' },
+    );
+
+    expect(first.fingerprint.cacheHit).toBe(false);
+    expect(second.fingerprint.cacheHit).toBe(false);
+    expect(second.fingerprint.value).not.toBe(first.fingerprint.value);
+  });
+
+  it('ignores oversized persisted cache data', () => {
+    localStorage.setItem(audioVerificationCacheStorageKey, 'x'.repeat(600 * 1024));
+
+    expect(getAudioVerificationCache()).toEqual({});
   });
 });

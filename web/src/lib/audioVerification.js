@@ -3,6 +3,9 @@ import { getLocalStorageItem, setLocalStorageItem } from './storage';
 
 export const audioVerificationCacheStorageKey = 'slskr.audioVerification.cache';
 
+const maxAudioVerificationCacheEntries = 128;
+const maxAudioVerificationCacheCharacters = 512 * 1024;
+
 export const audioVerificationProfiles = [
   {
     codecStrict: true,
@@ -45,31 +48,68 @@ const normalizeProfile = (profileId) =>
   audioVerificationProfiles[1];
 
 const getCacheKey = (file) =>
-  [
+  JSON.stringify([
     file.name || file.fileName || 'unknown',
     file.size || 0,
     file.lastModified || '',
-  ].join(':');
+    file.type || '',
+    file.webkitRelativePath || '',
+  ]);
+
+const isObjectLike = (value) =>
+  value !== null && (typeof value === 'object' || typeof value === 'function');
+
+let inMemoryFingerprints = new WeakMap();
 
 const readCache = (getItem = getLocalStorageItem) => {
   try {
-    const parsed = JSON.parse(getItem(audioVerificationCacheStorageKey, '{}'));
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? parsed
-      : {};
+    const raw = getItem(audioVerificationCacheStorageKey, '{}');
+    if (typeof raw !== 'string' || raw.length > maxAudioVerificationCacheCharacters) {
+      return {};
+    }
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return {};
+    }
+    return Object.fromEntries(
+      Object.entries(parsed).slice(-maxAudioVerificationCacheEntries),
+    );
   } catch {
     return {};
   }
 };
 
 const saveCache = (cache, setItem = setLocalStorageItem) => {
-  setItem(audioVerificationCacheStorageKey, JSON.stringify(cache));
-  return cache;
+  const entries = Object.entries(cache).slice(-maxAudioVerificationCacheEntries);
+  while (entries.length > 0) {
+    const bounded = Object.fromEntries(entries);
+    const serialized = JSON.stringify(bounded);
+    if (serialized.length <= maxAudioVerificationCacheCharacters) {
+      try {
+        setItem(audioVerificationCacheStorageKey, serialized);
+      } catch {
+        // Browser storage is an optional audit trail; verification must not
+        // fail when storage is unavailable or full.
+      }
+      return bounded;
+    }
+    entries.shift();
+  }
+
+  try {
+    setItem(audioVerificationCacheStorageKey, '{}');
+  } catch {
+    // Browser storage is optional.
+  }
+  return {};
 };
 
 export const getAudioVerificationCache = () => readCache();
 
-export const clearAudioVerificationCache = () => saveCache({});
+export const clearAudioVerificationCache = () => {
+  inMemoryFingerprints = new WeakMap();
+  return saveCache({});
+};
 
 const getCachedFingerprint = async (
   file,
@@ -80,11 +120,11 @@ const getCachedFingerprint = async (
   } = {},
 ) => {
   const key = getCacheKey(file);
-  const cache = readCache(getItem);
-  if (cacheEnabled && cache[key]) {
+  if (cacheEnabled && isObjectLike(file) && inMemoryFingerprints.has(file)) {
     return {
-      ...cache[key],
+      ...inMemoryFingerprints.get(file),
       cacheHit: true,
+      cacheKey: key,
     };
   }
 
@@ -95,10 +135,14 @@ const getCachedFingerprint = async (
     cacheKey: key,
   };
 
+  if (cacheEnabled && fingerprint.status === 'Verified' && isObjectLike(file)) {
+    inMemoryFingerprints.set(file, cached);
+  }
+
   if (cacheEnabled && fingerprint.status === 'Verified') {
     saveCache(
       {
-        ...cache,
+        ...readCache(getItem),
         [key]: cached,
       },
       setItem,
