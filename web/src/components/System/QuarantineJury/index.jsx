@@ -235,6 +235,7 @@ const QuarantineJury = () => {
   const [loadingReview, setLoadingReview] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [errorContext, setErrorContext] = useState('action');
   const [routeForm, setRouteForm] = useState({
     channelId: '',
     podId: 'quarantine-jury',
@@ -268,6 +269,7 @@ const QuarantineJury = () => {
     if (!requestId || !mountedRef.current) return;
     setLoadingReview(true);
     setError('');
+    setErrorContext('load');
 
     try {
       const nextReview = normalizeReview(
@@ -290,7 +292,6 @@ const QuarantineJury = () => {
         reviewRequestId === requestIdsRef.current.review &&
         selectedIdRef.current === requestId
       ) {
-        setReview(null);
         setError(toDisplayError(loadError, 'Unable to load Quarantine Jury review'));
       }
     } finally {
@@ -308,6 +309,7 @@ const QuarantineJury = () => {
     if (!mountedRef.current) return;
     setLoadingRequests(true);
     setError('');
+    setErrorContext('load');
 
     try {
       const response = await quarantineJuryApi.getRequests();
@@ -324,6 +326,9 @@ const QuarantineJury = () => {
         selectedId && normalized.some((request) => request.id === selectedId)
           ? selectedId
           : normalized[0]?.id || '';
+      if (nextSelected !== selectedIdRef.current) {
+        setReview(null);
+      }
       selectedIdRef.current = nextSelected;
       setSelectedId(nextSelected);
       if (nextSelected) {
@@ -364,6 +369,7 @@ const QuarantineJury = () => {
     if (!mountedRef.current) return;
     selectedIdRef.current = requestId;
     setSelectedId(requestId);
+    setReview(null);
     setMessage('');
     void loadReview(requestId);
   };
@@ -374,6 +380,7 @@ const QuarantineJury = () => {
     const requestToRoute = selectedId;
     setSaving(true);
     setError('');
+    setErrorContext('action');
 
     try {
       await quarantineJuryApi.routeRequest(requestToRoute, {
@@ -414,6 +421,7 @@ const QuarantineJury = () => {
     const requestToAccept = selectedId;
     setSaving(true);
     setError('');
+    setErrorContext('action');
 
     try {
       await quarantineJuryApi.acceptReleaseCandidate(requestToAccept, acceptForm);
@@ -514,8 +522,17 @@ const QuarantineJury = () => {
 
       {error && (
         <Message
+          data-testid={
+            errorContext === 'load'
+              ? 'quarantine-jury-load-error'
+              : 'quarantine-jury-action-error'
+          }
           error
-          header="Quarantine Jury action failed"
+          header={
+            errorContext === 'load'
+              ? 'Quarantine Jury load failed'
+              : 'Quarantine Jury action failed'
+          }
           content={String(error)}
         />
       )}

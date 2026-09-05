@@ -45,6 +45,7 @@ const initialState = {
   createVisibility: 'Unlisted',
   creatingPod: false,
   discoveryLoading: false,
+  discoveryError: null,
   discoveryQuery: '',
   discoveryResults: [],
   leavingPod: false,
@@ -572,11 +573,20 @@ class Pods extends Component {
         requestId === this.requestIds.discovery
       ) {
         this.setState({
+          discoveryError: null,
           discoveryResults: asRecords(discovered).map(normalizePod).filter(Boolean),
         });
       }
     } catch (error) {
       console.error('Failed to discover pods:', error);
+      if (
+        this.isMountedFlag &&
+        requestId === this.requestIds.discovery
+      ) {
+        this.setState({
+          discoveryError: toDisplayError(error, 'Failed to discover pods'),
+        });
+      }
       toast.error(`Failed to discover pods: ${toDisplayError(error)}`);
     } finally {
       if (
@@ -700,6 +710,7 @@ class Pods extends Component {
       createTags,
       createVisibility,
       discoveryLoading,
+      discoveryError,
       discoveryQuery,
       discoveryResults,
       podsError,
@@ -756,6 +767,7 @@ class Pods extends Component {
                 content="Find listed pods through the pod discovery index."
                 trigger={
                   <Button
+                    aria-label="Discover pods"
                     disabled={discoveryLoading}
                     icon="search"
                     loading={discoveryLoading}
@@ -777,6 +789,18 @@ class Pods extends Component {
             size="small"
             value={discoveryQuery}
           />
+          {discoveryError && (
+            <Message
+              data-testid="pods-discovery-error"
+              error
+            >
+              <Message.Header>Pod discovery unavailable</Message.Header>
+              <p>{discoveryError}</p>
+              {discoveryResults.length > 0 && (
+                <p>Showing the last successfully discovered pods.</p>
+              )}
+            </Message>
+          )}
           {discoveryResults.length > 0 && (
             <Segment className="pod-discovery-results">
               <Header

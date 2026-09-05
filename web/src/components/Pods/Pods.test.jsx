@@ -1,7 +1,7 @@
 import '@testing-library/jest-dom';
 import * as pods from '../../lib/pods';
 import Pods from './Pods';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import React from 'react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -104,5 +104,24 @@ describe('Pods', () => {
     );
     expect(screen.getByText('Messages unavailable')).toBeInTheDocument();
     expect(screen.queryByText('No messages yet')).not.toBeInTheDocument();
+  });
+
+  it('reports discovery failures instead of hiding the failed lookup', async () => {
+    pods.list.mockResolvedValue([]);
+    pods.discoverAll.mockRejectedValue(new Error('Discovery service unavailable'));
+
+    render(
+      <MemoryRouter>
+        <Pods />
+      </MemoryRouter>,
+    );
+
+    const searchButton = await screen.findByRole('button', { name: 'Discover pods' });
+    fireEvent.click(searchButton);
+
+    expect(await screen.findByTestId('pods-discovery-error')).toHaveTextContent(
+      'Discovery service unavailable',
+    );
+    expect(screen.getByText('Pod discovery unavailable')).toBeInTheDocument();
   });
 });

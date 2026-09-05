@@ -129,4 +129,21 @@ describe('QuarantineJury', () => {
     );
     expect(await screen.findByText('Release-candidate recommendation accepted for this review.')).toBeInTheDocument();
   });
+
+  it('retains the selected review when a refresh fails', async () => {
+    render(<QuarantineJury />);
+
+    expect(await screen.findByText('Fixture content id evidence')).toBeInTheDocument();
+    quarantineJuryApi.getReview.mockRejectedValueOnce(
+      new Error('Review service unavailable'),
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh Quarantine Jury reviews' }));
+
+    expect(await screen.findByTestId('quarantine-jury-load-error')).toHaveTextContent(
+      'Review service unavailable',
+    );
+    expect(screen.getByText('Fixture content id evidence')).toBeInTheDocument();
+    expect(screen.getByText('Quarantine Jury load failed')).toBeInTheDocument();
+  });
 });

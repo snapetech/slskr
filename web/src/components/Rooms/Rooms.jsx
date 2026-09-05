@@ -34,6 +34,12 @@ const asRecords = (value) =>
     (record) => record && typeof record === 'object' && !Array.isArray(record),
   );
 
+const normalizeJoinedRooms = (value) =>
+  (Array.isArray(value) ? value : [])
+    .filter((roomName) => typeof roomName === 'string' && roomName.trim())
+    .map((roomName) => roomName.trim())
+    .sort();
+
 const normalizeTab = (tab) => {
   if (!tab || typeof tab !== 'object' || Array.isArray(tab)) return null;
   const roomName = boundedTabText(tab.roomName);
@@ -183,10 +189,7 @@ const Rooms = ({ runtimeProfile } = {}) => {
       ) {
         return;
       }
-      const normalized = (Array.isArray(joined) ? joined : [])
-        .filter((roomName) => typeof roomName === 'string' && roomName.trim())
-        .map((roomName) => roomName.trim())
-        .sort();
+      const normalized = normalizeJoinedRooms(joined);
       setJoinedRooms(normalized);
       setJoinedRoomsError('');
       if (normalized.length > 0) {
@@ -230,9 +233,9 @@ const Rooms = ({ runtimeProfile } = {}) => {
   }, [hydrateJoinedRooms, mountedRef]);
 
   const fetchAvailableRooms = async () => {
-    const requestId = ++availableRoomsRequestIdRef.current;
     if (!mountedRef.current || roomsRequestInFlightRef.current) return;
 
+    const requestId = ++availableRoomsRequestIdRef.current;
     roomsRequestInFlightRef.current = true;
     setRoomSearchLoading(true);
     try {
@@ -289,11 +292,8 @@ const Rooms = ({ runtimeProfile } = {}) => {
       ) {
         return;
       }
-      setJoinedRooms(
-        (Array.isArray(joined) ? joined : [])
-          .filter((name) => typeof name === 'string' && name.trim())
-          .map((name) => name.trim()),
-      );
+      setJoinedRooms(normalizeJoinedRooms(joined));
+      setJoinedRoomsError('');
       openRoomTab(trimmedRoomName);
     } catch (error) {
       console.error('Failed to join room:', error);
@@ -320,11 +320,8 @@ const Rooms = ({ runtimeProfile } = {}) => {
       ) {
         return;
       }
-      setJoinedRooms(
-        (Array.isArray(joined) ? joined : [])
-          .filter((name) => typeof name === 'string' && name.trim())
-          .map((name) => name.trim()),
-      );
+      setJoinedRooms(normalizeJoinedRooms(joined));
+      setJoinedRoomsError('');
 
       // Close the tab for this room
       const tabToClose = tabs.find((t) => t.roomName === trimmedRoomName);
