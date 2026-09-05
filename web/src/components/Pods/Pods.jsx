@@ -1,6 +1,6 @@
 import './Pods.css';
-import { urlBase } from '../../config';
 import { toDisplayError } from '../../lib/errors';
+import { encodePathSegment } from '../../lib/pathEncoding';
 import * as pods from '../../lib/pods';
 import { createPollingController } from '../../lib/usePolling';
 import PlaceholderSegment from '../Shared/PlaceholderSegment';
@@ -369,9 +369,11 @@ class Pods extends Component {
     const currentChannelId = this.props.params?.channelId;
     if (podId !== currentPodId || channelId !== currentChannelId) {
       if (channelId) {
-        this.props.navigate(`${urlBase}/pods/${podId}/channels/${channelId}`);
+        this.props.navigate(
+          `/pods/${encodePathSegment(podId)}/channels/${encodePathSegment(channelId)}`,
+        );
       } else {
-        this.props.navigate(`${urlBase}/pods/${podId}`);
+        this.props.navigate(`/pods/${encodePathSegment(podId)}`);
       }
     }
 
@@ -412,7 +414,7 @@ class Pods extends Component {
       channel.channelId !== currentChannelId
     ) {
       this.props.navigate(
-        `${urlBase}/pods/${activePodId}/channels/${channel.channelId}`,
+        `/pods/${encodePathSegment(activePodId)}/channels/${encodePathSegment(channel.channelId)}`,
       );
     }
 

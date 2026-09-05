@@ -1,5 +1,4 @@
 import './Wishlist.css';
-import { urlBase } from '../../config';
 import {
   buildWishlistRequestReviewPacket,
   buildWishlistRequestSummary,
@@ -8,6 +7,7 @@ import {
   getRunnableWishlistRequests,
 } from '../../lib/acquisitionRequests';
 import { toDisplayError } from '../../lib/errors';
+import { encodePathSegment } from '../../lib/pathEncoding';
 import { readFileTextBounded } from '../../lib/fileReaders';
 import * as wishlistAPI from '../../lib/wishlist';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -143,7 +143,7 @@ const WishlistItemRow = ({
       </Table.Cell>
       <Table.Cell>
         {item.lastSearchId && (
-          <Link to={`${urlBase}/searches/${encodeURIComponent(item.lastSearchId)}`}>
+          <Link to={`/searches/${encodePathSegment(item.lastSearchId)}`}>
             <Button
               compact
               icon="search"

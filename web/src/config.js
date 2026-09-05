@@ -1,4 +1,20 @@
-const urlBase = (window.urlBase === '/' ? '' : window.urlBase) || '';
+export const normalizeUrlBase = (value) => {
+  if (typeof value !== 'string') return '';
+  const trimmed = value.trim();
+  if (!trimmed || trimmed === '/') return '';
+  if (
+    !trimmed.startsWith('/') ||
+    trimmed.includes('?') ||
+    trimmed.includes('#') ||
+    trimmed.split('/').some((segment) => segment === '..' || segment === '.')
+  ) {
+    return '';
+  }
+  const path = trimmed.replace(/^\/+|\/+$/gu, '');
+  return path ? `/${path}` : '';
+};
+
+const urlBase = normalizeUrlBase(window.urlBase);
 const developmentPort =
   window.port ?? (import.meta.env.VITE_SLSKR_PORT || 5_030);
 const rootUrl =
