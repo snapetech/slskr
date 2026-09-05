@@ -370,16 +370,18 @@ mod tests {
             "DownloadFileComplete",
             &serde_json::json!({"localFilename": "/downloads/file.flac"}),
         );
+        let event_path = directory.join("event.json");
+        let mut payload = None;
         for _ in 0..100 {
-            if directory.join("event.json").exists() {
-                break;
+            if let Ok(contents) = tokio::fs::read_to_string(&event_path).await {
+                if let Ok(value) = serde_json::from_str::<serde_json::Value>(&contents) {
+                    payload = Some(value);
+                    break;
+                }
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
-        let payload = tokio::fs::read_to_string(directory.join("event.json"))
-            .await
-            .unwrap();
-        let payload = serde_json::from_str::<serde_json::Value>(&payload).unwrap();
+        let payload = payload.expect("script event payload was not written as valid JSON");
         assert_eq!(payload["type"], "DownloadFileComplete");
         assert_eq!(payload["version"], 0);
         assert_eq!(payload["localFilename"], "/downloads/file.flac");

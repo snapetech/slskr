@@ -77,6 +77,18 @@ describe('MediaCore', () => {
     mediacore.searchMessages.mockResolvedValue([]);
   });
 
+  const renderOpinionQuery = async () => {
+    render(<MediaCore />);
+    await screen.findByText('MediaCore ContentID Registry');
+    fireEvent.change(screen.getByPlaceholderText('Pod ID'), {
+      target: { value: 'pod-1' },
+    });
+    fireEvent.change(
+      screen.getByPlaceholderText('Content ID (e.g., content:audio:album:mb-id)'),
+      { target: { value: 'content-1' } },
+    );
+  };
+
   it('renders a pod workflow index with safety framing', async () => {
     render(<MediaCore />);
 
@@ -324,7 +336,7 @@ describe('MediaCore', () => {
     ).toBeInTheDocument();
   });
 
-  it('keeps opinion summaries visible when their refreshes fail', async () => {
+  it('keeps opinion statistics visible when their refresh fails', async () => {
     mediacore.getOpinionStatistics
       .mockResolvedValueOnce({
         averageScore: 8,
@@ -335,49 +347,8 @@ describe('MediaCore', () => {
         uniqueVariants: 1,
       })
       .mockRejectedValueOnce(new Error('Statistics refresh unavailable'));
-    mediacore.getAggregatedOpinions
-      .mockResolvedValueOnce({
-        consensusStrength: 0.8,
-        contributingMembers: 2,
-        totalOpinions: 2,
-        uniqueVariants: 1,
-        unweightedAverageScore: 8,
-        variantAggregates: [],
-        weightedAverageScore: 8.5,
-      })
-      .mockRejectedValueOnce(new Error('Aggregate refresh unavailable'));
-    mediacore.getMemberAffinities
-      .mockResolvedValueOnce({
-        'peer-12345678': {
-          affinityScore: 0.8,
-          lastActivity: '2026-09-05T00:00:00.000Z',
-          messageCount: 4,
-          opinionCount: 2,
-          trustScore: 0.9,
-        },
-      })
-      .mockRejectedValueOnce(new Error('Affinity refresh unavailable'));
-    mediacore.getConsensusRecommendations
-      .mockResolvedValueOnce([
-        {
-          consensusScore: 0.8,
-          reasoning: 'consistent scores',
-          recommendation: 'Recommended',
-          supportingFactors: ['agreement'],
-          variantHash: 'variant-123456',
-        },
-      ])
-      .mockRejectedValueOnce(new Error('Recommendation refresh unavailable'));
 
-    render(<MediaCore />);
-    await screen.findByText('MediaCore ContentID Registry');
-    fireEvent.change(screen.getByPlaceholderText('Pod ID'), {
-      target: { value: 'pod-1' },
-    });
-    fireEvent.change(
-      screen.getByPlaceholderText('Content ID (e.g., content:audio:album:mb-id)'),
-      { target: { value: 'content-1' } },
-    );
+    await renderOpinionQuery();
 
     fireEvent.click(screen.getByRole('button', { name: 'Get Statistics' }));
     expect((await screen.findByText(/Average Score:/)).parentElement).toHaveTextContent(
@@ -390,6 +361,22 @@ describe('MediaCore', () => {
     expect(screen.getByText(/Average Score:/).parentElement).toHaveTextContent(
       '8.0',
     );
+  });
+
+  it('keeps aggregated opinion summaries visible when their refresh fails', async () => {
+    mediacore.getAggregatedOpinions
+      .mockResolvedValueOnce({
+        consensusStrength: 0.8,
+        contributingMembers: 2,
+        totalOpinions: 2,
+        uniqueVariants: 1,
+        unweightedAverageScore: 8,
+        variantAggregates: [],
+        weightedAverageScore: 8.5,
+      })
+      .mockRejectedValueOnce(new Error('Aggregate refresh unavailable'));
+
+    await renderOpinionQuery();
 
     fireEvent.click(
       screen.getByRole('button', { name: 'Get Aggregated Opinions' }),
@@ -406,6 +393,22 @@ describe('MediaCore', () => {
     expect(screen.getByText(/Weighted Average:/).parentElement).toHaveTextContent(
       '8.50',
     );
+  });
+
+  it('keeps member affinity summaries visible when their refresh fails', async () => {
+    mediacore.getMemberAffinities
+      .mockResolvedValueOnce({
+        'peer-12345678': {
+          affinityScore: 0.8,
+          lastActivity: '2026-09-05T00:00:00.000Z',
+          messageCount: 4,
+          opinionCount: 2,
+          trustScore: 0.9,
+        },
+      })
+      .mockRejectedValueOnce(new Error('Affinity refresh unavailable'));
+
+    await renderOpinionQuery();
 
     fireEvent.click(
       screen.getByRole('button', { name: 'Get Member Affinities' }),
@@ -418,6 +421,22 @@ describe('MediaCore', () => {
       await screen.findByTestId('media-core-member-affinities-error'),
     ).toHaveTextContent('Affinity refresh unavailable');
     expect(screen.getByText('Member Affinities (1)')).toBeInTheDocument();
+  });
+
+  it('keeps consensus recommendations visible when their refresh fails', async () => {
+    mediacore.getConsensusRecommendations
+      .mockResolvedValueOnce([
+        {
+          consensusScore: 0.8,
+          reasoning: 'consistent scores',
+          recommendation: 'Recommended',
+          supportingFactors: ['agreement'],
+          variantHash: 'variant-123456',
+        },
+      ])
+      .mockRejectedValueOnce(new Error('Recommendation refresh unavailable'));
+
+    await renderOpinionQuery();
 
     fireEvent.click(screen.getByRole('button', { name: 'Get Recommendations' }));
     expect(
