@@ -80,6 +80,31 @@ const visualTileStorageKey = 'slskr.player.visualTileMode';
 const analyzerModeStorageKey = 'slskr.player.analyzerMode';
 const playerBrowserPageSize = 80;
 
+const requireArrayData = (response, resource) => {
+  if (!Array.isArray(response?.data)) {
+    throw new Error(`Player API returned an invalid ${resource} response`);
+  }
+
+  return response.data;
+};
+
+const requireBrowserData = (response) => {
+  const data = response?.data;
+  if (
+    !data ||
+    typeof data !== 'object' ||
+    Array.isArray(data) ||
+    !Array.isArray(data.breadcrumbs) ||
+    !Array.isArray(data.directories) ||
+    !Array.isArray(data.files) ||
+    typeof data.hasMore !== 'boolean'
+  ) {
+    throw new Error('Player API returned an invalid library browser response');
+  }
+
+  return data;
+};
+
 const readStoredBoolean = (key) => {
   return getLocalStorageItem(key) === 'true';
 };
@@ -1564,7 +1589,7 @@ const PlayerLauncher = ({ compact = false, onPlayItem }) => {
       .getCollections()
       .then((response) => {
         if (!canceled && mountedRef.current) {
-          setCollections(Array.isArray(response.data) ? response.data : []);
+          setCollections(requireArrayData(response, 'collection list'));
           setCollectionsError('');
         }
       })
@@ -1607,22 +1632,15 @@ const PlayerLauncher = ({ compact = false, onPlayItem }) => {
         })
         .then((response) => {
           if (!canceled) {
-            setItems(Array.isArray(response.data?.files) ? response.data.files : []);
-            setBrowserDirectories(
-              Array.isArray(response.data?.directories)
-                ? response.data.directories
-                : [],
-            );
-            setBrowserBreadcrumbs(
-              Array.isArray(response.data?.breadcrumbs)
-                ? response.data.breadcrumbs
-                : [],
-            );
-            setBrowserHasMore(Boolean(response.data?.hasMore));
+            const data = requireBrowserData(response);
+            setItems(data.files);
+            setBrowserDirectories(data.directories);
+            setBrowserBreadcrumbs(data.breadcrumbs);
+            setBrowserHasMore(data.hasMore);
             setBrowserStats({
-              duplicatesRemoved: response.data?.duplicatesRemoved || 0,
-              totalDirectories: response.data?.totalDirectories || 0,
-              totalFiles: response.data?.totalFiles || 0,
+              duplicatesRemoved: data.duplicatesRemoved || 0,
+              totalDirectories: data.totalDirectories || 0,
+              totalFiles: data.totalFiles || 0,
             });
             setBrowserError('');
           }
@@ -1658,7 +1676,7 @@ const PlayerLauncher = ({ compact = false, onPlayItem }) => {
           mountedRef.current &&
           collectionItemsRequestIdRef.current === requestId
         ) {
-          setCollectionItems(Array.isArray(response.data) ? response.data : []);
+          setCollectionItems(requireArrayData(response, 'collection items'));
           setCollectionItemsError('');
         }
       })

@@ -321,6 +321,24 @@ describe('PlayerBar', () => {
     expect(screen.queryByText('No local audio files found here.')).not.toBeInTheDocument();
   });
 
+  it('surfaces malformed collection and browser responses', async () => {
+    collectionsAPI.getCollections.mockResolvedValueOnce({ data: {} });
+    collectionsAPI.browseLibraryItems.mockResolvedValueOnce({ data: {} });
+
+    renderPlayer();
+
+    fireEvent.click(screen.getByTestId('player-open-collections-browser'));
+    expect(
+      await screen.findByText('Player API returned an invalid collection list response'),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getAllByText('Close')[0]);
+    fireEvent.click(screen.getByTestId('player-open-file-browser'));
+    expect(
+      await screen.findByText('Player API returned an invalid library browser response'),
+    ).toBeInTheDocument();
+  });
+
   it('surfaces collection-item load failures instead of an empty collection', async () => {
     collectionsAPI.getCollectionItems.mockRejectedValueOnce(new Error('Collection items unavailable'));
 

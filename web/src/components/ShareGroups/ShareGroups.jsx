@@ -45,6 +45,14 @@ const normalizeContact = (contact) => {
   };
 };
 
+const requireArrayData = (response, resource) => {
+  if (!Array.isArray(response?.data)) {
+    throw new Error(`Share groups API returned an invalid ${resource} response`);
+  }
+
+  return response.data;
+};
+
 export default class ShareGroups extends Component {
   isMountedFlag = false;
   operationInFlight = false;
@@ -142,7 +150,7 @@ export default class ShareGroups extends Component {
       ) {
         return;
       }
-      const members = Array.isArray(membersRes.data) ? membersRes.data : [];
+      const members = requireArrayData(membersRes, 'member list');
       window.alert(
         `Members:\n${members
           .filter((member) => member && typeof member === 'object')

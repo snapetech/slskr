@@ -4,18 +4,77 @@ import api from './api';
 import { fetchWithoutRedirects, readJsonResponse } from './http';
 import { encodePathSegment } from './pathEncoding';
 
+const requireArrayResponse = (response, resource) => {
+  if (!Array.isArray(response?.data)) {
+    throw new Error(`Collections API returned an invalid ${resource} response`);
+  }
+
+  return response;
+};
+
+const requireObjectResponse = (response, resource) => {
+  if (
+    !response?.data ||
+    typeof response.data !== 'object' ||
+    Array.isArray(response.data)
+  ) {
+    throw new Error(`Collections API returned an invalid ${resource} response`);
+  }
+
+  return response;
+};
+
+const requireLibrarySearchResponse = (response, resource) => {
+  if (
+    !response?.data ||
+    typeof response.data !== 'object' ||
+    Array.isArray(response.data) ||
+    !Array.isArray(response.data.items)
+  ) {
+    throw new Error(`Collections API returned an invalid ${resource} response`);
+  }
+
+  return response;
+};
+
+const requireLibraryBrowserResponse = (response) => {
+  const data = response?.data;
+  if (
+    !data ||
+    typeof data !== 'object' ||
+    Array.isArray(data) ||
+    !Array.isArray(data.breadcrumbs) ||
+    !Array.isArray(data.directories) ||
+    !Array.isArray(data.files) ||
+    typeof data.hasMore !== 'boolean'
+  ) {
+    throw new Error(
+      'Collections API returned an invalid library browser response',
+    );
+  }
+
+  return response;
+};
+
 // ShareGroups
-export const getShareGroups = () => api.get('/sharegroups');
-export const getShareGroup = (id) =>
-  api.get(`/sharegroups/${encodePathSegment(id)}`);
+export const getShareGroups = async () =>
+  requireArrayResponse(await api.get('/sharegroups'), 'share groups');
+export const getShareGroup = async (id) =>
+  requireObjectResponse(
+    await api.get(`/sharegroups/${encodePathSegment(id)}`),
+    'share group',
+  );
 export const createShareGroup = (data) => api.post('/sharegroups', data);
 export const updateShareGroup = (id, data) =>
   api.put(`/sharegroups/${encodePathSegment(id)}`, data);
 export const deleteShareGroup = (id) =>
   api.delete(`/sharegroups/${encodePathSegment(id)}`);
-export const getShareGroupMembers = (id, detailed = false) =>
-  api.get(
-    `/sharegroups/${encodePathSegment(id)}/members${detailed ? '?detailed=true' : ''}`,
+export const getShareGroupMembers = async (id, detailed = false) =>
+  requireArrayResponse(
+    await api.get(
+      `/sharegroups/${encodePathSegment(id)}/members${detailed ? '?detailed=true' : ''}`,
+    ),
+    'share group members',
   );
 export const addShareGroupMember = (id, data) =>
   api.post(`/sharegroups/${encodePathSegment(id)}/members`, data);
@@ -25,16 +84,23 @@ export const removeShareGroupMember = (id, userId) =>
   );
 
 // Collections
-export const getCollections = () => api.get('/collections');
-export const getCollection = (id) =>
-  api.get(`/collections/${encodePathSegment(id)}`);
+export const getCollections = async () =>
+  requireArrayResponse(await api.get('/collections'), 'collections');
+export const getCollection = async (id) =>
+  requireObjectResponse(
+    await api.get(`/collections/${encodePathSegment(id)}`),
+    'collection',
+  );
 export const createCollection = (data) => api.post('/collections', data);
 export const updateCollection = (id, data) =>
   api.put(`/collections/${encodePathSegment(id)}`, data);
 export const deleteCollection = (id) =>
   api.delete(`/collections/${encodePathSegment(id)}`);
-export const getCollectionItems = (id) =>
-  api.get(`/collections/${encodePathSegment(id)}/items`);
+export const getCollectionItems = async (id) =>
+  requireArrayResponse(
+    await api.get(`/collections/${encodePathSegment(id)}/items`),
+    'collection items',
+  );
 export const addCollectionItem = (id, data) =>
   api.post(`/collections/${encodePathSegment(id)}/items`, data);
 export const updateCollectionItem = (itemId, data) =>
@@ -45,15 +111,23 @@ export const reorderCollectionItems = (id, itemIds) =>
   api.put(`/collections/${encodePathSegment(id)}/items/reorder`, { itemIds });
 
 // Share Grants (Shares)
-export const getShares = () => api.get('/share-grants');
+export const getShares = async () =>
+  requireArrayResponse(await api.get('/share-grants'), 'shares');
 // Shares announced to this node by another node's owner (see
 // /api/v0/share-grants/announce) — distinct from getShares(), which lists
 // grants this node itself owns.
-export const getIncomingShares = () => api.get('/share-grants/incoming');
-export const getShare = (id) =>
-  api.get(`/share-grants/${encodePathSegment(id)}`);
-export const getSharesByCollection = (collectionId) =>
-  api.get(`/share-grants/by-collection/${encodeURIComponent(collectionId)}`);
+export const getIncomingShares = async () =>
+  requireArrayResponse(await api.get('/share-grants/incoming'), 'incoming shares');
+export const getShare = async (id) =>
+  requireObjectResponse(
+    await api.get(`/share-grants/${encodePathSegment(id)}`),
+    'share',
+  );
+export const getSharesByCollection = async (collectionId) =>
+  requireArrayResponse(
+    await api.get(`/share-grants/by-collection/${encodeURIComponent(collectionId)}`),
+    'collection shares',
+  );
 export const createShare = (data) => api.post('/share-grants', data);
 export const updateShare = (id, data) =>
   api.put(`/share-grants/${encodePathSegment(id)}`, data);
@@ -154,15 +228,18 @@ export const buildRemoteShareStreamUrl = (ownerEndpoint, contentId, ticket) =>
 
 // Library Items (for Collections picker)
 // Note: api baseURL already includes /api/v0, so use relative path
-export const searchLibraryItems = (query, kinds, limit = 100) => {
+export const searchLibraryItems = async (query, kinds, limit = 100) => {
   const parameters = new URLSearchParams();
   if (query) parameters.append('query', query);
   if (kinds) parameters.append('kinds', kinds);
   parameters.append('limit', limit.toString());
-  return api.get(`library/items?${parameters.toString()}`);
+  return requireLibrarySearchResponse(
+    await api.get(`library/items?${parameters.toString()}`),
+    'library search',
+  );
 };
 
-export const browseLibraryItems = ({
+export const browseLibraryItems = async ({
   kinds = 'Audio',
   limit = 100,
   offset = 0,
@@ -175,8 +252,13 @@ export const browseLibraryItems = ({
   if (kinds) parameters.append('kinds', kinds);
   parameters.append('limit', limit.toString());
   parameters.append('offset', offset.toString());
-  return api.get(`library/items/browser?${parameters.toString()}`);
+  return requireLibraryBrowserResponse(
+    await api.get(`library/items/browser?${parameters.toString()}`),
+  );
 };
 
-export const getLibraryItem = (contentId) =>
-  api.get(`library/items/${encodeURIComponent(contentId)}`);
+export const getLibraryItem = async (contentId) =>
+  requireObjectResponse(
+    await api.get(`library/items/${encodeURIComponent(contentId)}`),
+    'library item',
+  );

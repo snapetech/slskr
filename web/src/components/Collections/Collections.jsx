@@ -19,6 +19,28 @@ import {
   Table,
 } from 'semantic-ui-react';
 
+const requireArrayData = (response, resource) => {
+  if (!Array.isArray(response?.data)) {
+    throw new Error(`Collections API returned an invalid ${resource} response`);
+  }
+
+  return response.data;
+};
+
+const requireLibrarySearchData = (response) => {
+  const data = response?.data;
+  if (
+    !data ||
+    typeof data !== 'object' ||
+    Array.isArray(data) ||
+    !Array.isArray(data.items)
+  ) {
+    throw new Error('Collections API returned an invalid library search response');
+  }
+
+  return data.items;
+};
+
 export default class Collections extends Component {
   constructor(props) {
     super(props);
@@ -88,7 +110,7 @@ export default class Collections extends Component {
       const response = await readOptionalApiResponse(() => collectionsAPI.getCollections());
       if (this.isMountedFlag && requestId === this.requestIds.collections) {
         this.setState({
-          collections: Array.isArray(response.data) ? response.data : [],
+          collections: requireArrayData(response, 'collections'),
           loading: false,
         });
       }
@@ -111,7 +133,7 @@ export default class Collections extends Component {
         this.setState({ shareGroupsLoading: true });
       }
       const response = await readOptionalApiResponse(() => collectionsAPI.getShareGroups());
-      const shareGroups = Array.isArray(response.data) ? response.data : [];
+      const shareGroups = requireArrayData(response, 'share groups');
       if (this.isMountedFlag && requestId === this.requestIds.shareGroups) {
         this.setState((previousState) => ({
           shareAudienceId:
@@ -145,7 +167,7 @@ export default class Collections extends Component {
       );
       if (this.isMountedFlag && requestId === this.requestIds.shares) {
         this.setState({
-          shares: Array.isArray(response.data) ? response.data : [],
+          shares: requireArrayData(response, 'collection shares'),
         });
       }
     } catch (error) {
@@ -167,9 +189,10 @@ export default class Collections extends Component {
         requestId === this.requestIds.collectionItems
       ) {
         this.setState({
-          selectedCollectionItems: Array.isArray(response.data)
-            ? response.data
-            : [],
+          selectedCollectionItems: requireArrayData(
+            response,
+            'collection items',
+          ),
         });
       }
     } catch (error) {
@@ -319,9 +342,7 @@ export default class Collections extends Component {
     }
     try {
       const response = await collectionsAPI.searchLibraryItems(query, null, 20);
-      const items = Array.isArray(response.data?.items)
-        ? response.data.items
-        : [];
+      const items = requireLibrarySearchData(response);
       if (this.isMountedFlag && requestId === this.requestIds.search) {
         this.setState({
           itemSearchLoading: false,

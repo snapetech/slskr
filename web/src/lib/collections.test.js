@@ -3,8 +3,17 @@ import {
   buildRemoteShareStreamUrl,
   createShareToken,
   fetchRemoteShareManifest,
+  getCollectionItems,
+  getCollections,
+  getIncomingShares,
+  getShareGroupMembers,
+  getShareGroups,
+  getShares,
+  getSharesByCollection,
+  browseLibraryItems,
   getShareManifest,
   remoteBackfillShare,
+  searchLibraryItems,
 } from './collections';
 
 vi.mock('./api', () => ({
@@ -103,5 +112,74 @@ describe('share API helpers', () => {
         'ticket/1',
       ),
     ).toBe('https://owner.example/base/api/v0/streams/content%2F1?ticket=ticket%2F1');
+  });
+
+  it('validates collection, share, and library list responses', async () => {
+    api.get
+      .mockResolvedValueOnce({ data: [{ id: 'collection-1' }] })
+      .mockResolvedValueOnce({ data: [{ id: 'group-1' }] })
+      .mockResolvedValueOnce({ data: [{ id: 'item-1' }] })
+      .mockResolvedValueOnce({ data: [{ id: 'share-1' }] })
+      .mockResolvedValueOnce({ data: [{ id: 'incoming-1' }] })
+      .mockResolvedValueOnce({ data: [{ id: 'member-1' }] })
+      .mockResolvedValueOnce({ data: { items: [] } })
+      .mockResolvedValueOnce({
+        data: {
+          breadcrumbs: [],
+          directories: [],
+          files: [],
+          hasMore: false,
+        },
+      });
+
+    await expect(getCollections()).resolves.toEqual({
+      data: [{ id: 'collection-1' }],
+    });
+    await expect(getShareGroups()).resolves.toEqual({
+      data: [{ id: 'group-1' }],
+    });
+    await expect(getCollectionItems('collection-1')).resolves.toEqual({
+      data: [{ id: 'item-1' }],
+    });
+    await expect(getShares()).resolves.toEqual({
+      data: [{ id: 'share-1' }],
+    });
+    await expect(getIncomingShares()).resolves.toEqual({
+      data: [{ id: 'incoming-1' }],
+    });
+    await expect(getShareGroupMembers('group-1')).resolves.toEqual({
+      data: [{ id: 'member-1' }],
+    });
+    await expect(searchLibraryItems('ambient')).resolves.toEqual({
+      data: { items: [] },
+    });
+    await expect(browseLibraryItems()).resolves.toEqual({
+      data: { breadcrumbs: [], directories: [], files: [], hasMore: false },
+    });
+  });
+
+  it.each([
+    ['collections', getCollections, { data: {} }],
+    ['share groups', getShareGroups, { data: {} }],
+    [
+      'collection items',
+      () => getCollectionItems('collection-1'),
+      { data: {} },
+    ],
+    ['shares', getShares, { data: {} }],
+    ['incoming shares', getIncomingShares, { data: {} }],
+    [
+      'share group members',
+      () => getShareGroupMembers('group-1'),
+      { data: {} },
+    ],
+    ['library search', () => searchLibraryItems('ambient'), { data: [] }],
+    ['library browser', browseLibraryItems, { data: { files: [] } }],
+  ])('rejects malformed %s responses', async (resource, request, response) => {
+    api.get.mockResolvedValue(response);
+
+    await expect(request()).rejects.toThrow(
+      `Collections API returned an invalid ${resource} response`,
+    );
   });
 });
