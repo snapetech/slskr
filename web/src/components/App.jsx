@@ -52,6 +52,10 @@ const NAV_ACTIVITY_POLL_INTERVAL_MS = 10_000;
 const MAX_ROOM_ACTIVITY_ROOMS = 500;
 const MAX_ROOM_ACTIVITY_NAME_CHARACTERS = 2_048;
 const MAX_ROOM_ACTIVITY_STORAGE_CHARACTERS = 64 * 1024;
+const MAX_NETWORK_ENDPOINT_FORWARDS = 32;
+const MAX_NETWORK_ENDPOINT_TEXT_CHARACTERS = 256;
+const MAX_NETWORK_ENDPOINT_SIGNATURE_CHARACTERS = 64 * 1024;
+const MAX_NETWORK_ENDPOINT_STORAGE_CHARACTERS = 64 * 1024;
 
 const Browse = lazy(() => import('./Browse/Browse'));
 const Chat = lazy(() => import('./Chat/Chat'));
@@ -111,7 +115,53 @@ const toDisplayError = (error, fallback = 'Request failed') => {
 };
 
 const normalizePortForwardProtocol = (proto) =>
-  `${proto || ''}`.trim().toUpperCase();
+  (typeof proto === 'string' ? proto : '').trim().toUpperCase().slice(0, MAX_NETWORK_ENDPOINT_TEXT_CHARACTERS);
+
+const normalizeNetworkEndpointText = (value) =>
+  (typeof value === 'string' || typeof value === 'number')
+    ? String(value).trim().slice(0, MAX_NETWORK_ENDPOINT_TEXT_CHARACTERS)
+    : undefined;
+
+const normalizeNetworkEndpointSignature = (value) =>
+  typeof value === 'string'
+    ? value.trim().slice(0, MAX_NETWORK_ENDPOINT_SIGNATURE_CHARACTERS)
+    : undefined;
+
+const normalizeNetworkEndpointPort = (value) => {
+  const port = Number(value);
+  return Number.isInteger(port) && port > 0 && port <= 65_535 ? port : undefined;
+};
+
+const normalizeNetworkEndpointForward = (forward) => {
+  if (!forward || typeof forward !== 'object' || Array.isArray(forward)) return null;
+  const publicPort = normalizeNetworkEndpointPort(forward.publicPort);
+  if (!publicPort) return null;
+
+  const slot = Number(forward.slot);
+  return {
+    localPort: normalizeNetworkEndpointPort(forward.localPort),
+    namespace: normalizeNetworkEndpointText(forward.namespace),
+    proto: normalizePortForwardProtocol(forward.proto),
+    publicIp: normalizeNetworkEndpointText(forward.publicIPAddress || forward.publicIp),
+    publicPort,
+    slot: Number.isSafeInteger(slot) ? slot : undefined,
+    targetPort: normalizeNetworkEndpointPort(forward.targetPort),
+  };
+};
+
+const normalizeNetworkEndpointForwards = (forwards) =>
+  (Array.isArray(forwards) ? forwards : [])
+    .slice(0, MAX_NETWORK_ENDPOINT_FORWARDS)
+    .map(normalizeNetworkEndpointForward)
+    .filter(Boolean)
+    .sort((left, right) => (left.slot ?? 0) - (right.slot ?? 0));
+
+const normalizeNetworkEndpointSnapshot = (snapshot) => {
+  if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) return null;
+  const signature = normalizeNetworkEndpointSignature(snapshot.signature);
+  const portForwards = normalizeNetworkEndpointForwards(snapshot.portForwards);
+  return signature && portForwards.length > 0 ? { portForwards, signature } : null;
+};
 
 const getOption = (source, ...keys) => {
   for (const key of keys) {
@@ -130,26 +180,16 @@ const toConfiguredPort = (value, fallback) => {
 
 const getVpnPortForwards = (vpn = {}) => {
   if (Array.isArray(vpn.portForwards) && vpn.portForwards.length > 0) {
-    return vpn.portForwards
-      .filter((forward) => forward?.publicPort > 0)
-      .map((forward) => ({
-        localPort: forward.localPort,
-        namespace: forward.namespace,
-        proto: normalizePortForwardProtocol(forward.proto),
-        publicIp: forward.publicIPAddress || forward.publicIp,
-        publicPort: forward.publicPort,
-        slot: forward.slot,
-        targetPort: forward.targetPort,
-      }))
-      .sort((left, right) => (left.slot ?? 0) - (right.slot ?? 0));
+    return normalizeNetworkEndpointForwards(vpn.portForwards);
   }
 
-  if (vpn.forwardedPort > 0) {
+  const forwardedPort = normalizeNetworkEndpointPort(vpn.forwardedPort);
+  if (forwardedPort) {
     return [
       {
         proto: 'TCP',
-        publicIp: vpn.publicIPAddress,
-        publicPort: vpn.forwardedPort,
+        publicIp: normalizeNetworkEndpointText(vpn.publicIPAddress),
+        publicPort: forwardedPort,
         slot: 0,
       },
     ];
@@ -173,13 +213,16 @@ const getVpnPortSignature = (forwards) =>
     .join('|');
 
 const parseLegacyVpnPortSignature = (signature) => {
-  if (!signature) return null;
+  if (
+    typeof signature !== 'string'
+    || !signature
+    || signature.length > MAX_NETWORK_ENDPOINT_SIGNATURE_CHARACTERS
+  ) return null;
 
   const portForwards = signature
-    .split('|')
+    .split('|', MAX_NETWORK_ENDPOINT_FORWARDS)
     .map((entry) => {
-      const [slot, proto, publicIp, publicPort, localPort, targetPort] =
-        entry.split(':');
+      const [slot, proto, publicIp, publicPort, localPort, targetPort] = entry.split(':', 6);
       const slotNumber = Number.parseInt(slot, 10);
       const normalizedProto = normalizePortForwardProtocol(proto);
 
@@ -188,12 +231,12 @@ const parseLegacyVpnPortSignature = (signature) => {
           slotNumber === 0
             ? 'Soulseek'
             : normalizedProto || 'Forward',
-        localPort: Number.parseInt(localPort, 10) || undefined,
+        localPort: normalizeNetworkEndpointPort(localPort),
         proto: normalizedProto,
-        publicIp: publicIp || undefined,
-        publicPort: Number.parseInt(publicPort, 10) || undefined,
+        publicIp: normalizeNetworkEndpointText(publicIp),
+        publicPort: normalizeNetworkEndpointPort(publicPort),
         slot: Number.isFinite(slotNumber) ? slotNumber : undefined,
-        targetPort: Number.parseInt(targetPort, 10) || undefined,
+        targetPort: normalizeNetworkEndpointPort(targetPort),
       };
     })
     .filter((forward) => forward.publicPort > 0);
@@ -205,27 +248,20 @@ const hasDismissedVpnPortNotice = (signature) => {
   return getLocalStorageItem(NETWORK_ENDPOINT_NOTICE_STORAGE_KEY) === signature;
 };
 
-const getStoredNetworkEndpointSnapshot = () => {
-  try {
-    const snapshot = JSON.parse(
-      getLocalStorageItem(NETWORK_ENDPOINT_SNAPSHOT_STORAGE_KEY, 'null'),
+export const getStoredNetworkEndpointSnapshot = () => {
+  for (const storageKey of [
+    NETWORK_ENDPOINT_SNAPSHOT_STORAGE_KEY,
+    LEGACY_NETWORK_ENDPOINT_SNAPSHOT_STORAGE_KEY,
+  ]) {
+    const snapshot = normalizeNetworkEndpointSnapshot(
+      readBoundedJson(
+        getLocalStorageItem,
+        storageKey,
+        null,
+        MAX_NETWORK_ENDPOINT_STORAGE_CHARACTERS,
+      ),
     );
-    if (snapshot?.signature) {
-      return snapshot;
-    }
-  } catch {
-    // Fall through to the legacy key used by the earlier VPN-only banner.
-  }
-
-  try {
-    const snapshot = JSON.parse(
-      getLocalStorageItem(LEGACY_NETWORK_ENDPOINT_SNAPSHOT_STORAGE_KEY, 'null'),
-    );
-    if (snapshot?.signature) {
-      return snapshot;
-    }
-  } catch {
-    // Fall through to the original single-signature key.
+    if (snapshot) return snapshot;
   }
 
   return parseLegacyVpnPortSignature(
@@ -234,14 +270,18 @@ const getStoredNetworkEndpointSnapshot = () => {
 };
 
 const storeDismissedVpnPortNotice = (signature, portForwards) => {
-  setLocalStorageItem(NETWORK_ENDPOINT_NOTICE_STORAGE_KEY, signature);
-  setLocalStorageItem(
-    NETWORK_ENDPOINT_SNAPSHOT_STORAGE_KEY,
-    JSON.stringify({
-      portForwards,
-      signature,
-    }),
-  );
+  const normalizedSignature = normalizeNetworkEndpointSignature(signature);
+  const snapshot = normalizeNetworkEndpointSnapshot({
+    portForwards,
+    signature: normalizedSignature,
+  });
+  if (!snapshot) return;
+
+  setLocalStorageItem(NETWORK_ENDPOINT_NOTICE_STORAGE_KEY, snapshot.signature);
+  const serialized = JSON.stringify(snapshot);
+  if (serialized.length <= MAX_NETWORK_ENDPOINT_STORAGE_CHARACTERS) {
+    setLocalStorageItem(NETWORK_ENDPOINT_SNAPSHOT_STORAGE_KEY, serialized);
+  }
 };
 
 const getStoredRoomActivity = () => {
@@ -1336,11 +1376,12 @@ class App extends Component {
     const { scanPending: pendingShareRescan } = shares;
     const vpnPortForwards = getVpnPortForwards(applicationState.vpn);
     const vpnPortSignature = getVpnPortSignature(vpnPortForwards);
+    const previousNetworkEndpointSnapshot = getStoredNetworkEndpointSnapshot();
     const showVpnPortNotice =
       vpnPortSignature &&
       applicationState.vpn?.isReady &&
-      !hasDismissedVpnPortNotice(vpnPortSignature);
-    const previousNetworkEndpointSnapshot = getStoredNetworkEndpointSnapshot();
+      !hasDismissedVpnPortNotice(vpnPortSignature) &&
+      previousNetworkEndpointSnapshot?.signature !== vpnPortSignature;
 
     const { controller, mode } = relay;
     const runtimeProfile = ['legacy', 'native'].includes(

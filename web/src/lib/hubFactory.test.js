@@ -4,6 +4,7 @@ import {
   createMetricsHubConnection,
   createMessagesHubConnection,
   eventFeedProtocols,
+  MAX_WEBSOCKET_MESSAGE_BYTES,
   websocketAuthProtocolPrefix,
 } from './hubFactory';
 import { setToken } from './token';
@@ -150,6 +151,25 @@ describe('fallback event feed websocket lifecycle', () => {
     secondSocket.readyState = MockEventFeedWebSocket.OPEN;
     secondSocket.onopen?.();
     await second;
+    await connection.stop();
+  });
+
+  it('ignores oversized and non-object fallback websocket messages', async () => {
+    const connection = createMessagesHubConnection();
+    const started = connection.start();
+    const socket = MockEventFeedWebSocket.instances[0];
+    socket.readyState = MockEventFeedWebSocket.OPEN;
+    socket.onopen?.();
+    await started;
+
+    const changed = vi.fn();
+    connection.on('changed', changed);
+    socket.onmessage?.({ data: 'null' });
+    socket.onmessage?.({ data: `{"topic":"messages","type":"changed","data":{"ok":true}}` });
+    socket.onmessage?.({ data: 'x'.repeat(MAX_WEBSOCKET_MESSAGE_BYTES + 1) });
+
+    expect(changed).toHaveBeenCalledTimes(1);
+    expect(changed).toHaveBeenCalledWith({ ok: true });
     await connection.stop();
   });
 });

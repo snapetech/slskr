@@ -8,6 +8,7 @@ import {
 import { resumeAudioGraph } from './audioGraph';
 import { toDisplayError } from '../../lib/errors';
 import { readFileTextBounded } from '../../lib/fileReaders';
+import { readBoundedJson } from '../../lib/persistedJson';
 import SpectrumAnalyzer from './SpectrumAnalyzer';
 import { createRustyMilkEngine } from './visualizers/rustyMilkEngine';
 import { useMountedRef } from '../../lib/useMountedRef';
@@ -36,6 +37,7 @@ const nativeTextureAssetFileNameMaxBytes = 1024;
 const nativeStoredPresetJsonMaxCharacters = 16 * 1024 * 1024;
 const nativeStoredPresetLibraryJsonMaxCharacters = 32 * 1024 * 1024;
 const nativeStoredPlaylistJsonMaxCharacters = 512 * 1024;
+const nativeStoredAutomationJsonMaxCharacters = 16 * 1024;
 const nativeEditableParameters = [
   {
     defaultValue: 0.9,
@@ -162,11 +164,14 @@ const readStoredRustyMilkAutomationSettings = () => {
   if (['beat', 'timed', 'off'].includes(stored)) {
     return normalizeRustyMilkAutomationSettings({ mode: stored });
   }
-  try {
-    return normalizeRustyMilkAutomationSettings(JSON.parse(stored || '{}'));
-  } catch {
-    return defaultRustyMilkAutomationSettings;
-  }
+  return normalizeRustyMilkAutomationSettings(
+    readBoundedJson(
+      getLocalStorageItem,
+      rustyMilkPresetAutomationStorageKey,
+      {},
+      nativeStoredAutomationJsonMaxCharacters,
+    ),
+  );
 };
 
 const writeStoredRustyMilkAutomationSettings = (settings) => {
@@ -252,15 +257,7 @@ const truncateUtf8 = (value, maximumBytes) => {
 };
 
 const readStoredJson = (key, fallback, maximumCharacters) => {
-  const stored = getLocalStorageItem(key);
-  if (typeof stored !== 'string' || stored.length > maximumCharacters) {
-    return fallback;
-  }
-  try {
-    return JSON.parse(stored);
-  } catch {
-    return fallback;
-  }
+  return readBoundedJson(getLocalStorageItem, key, fallback, maximumCharacters);
 };
 
 const normalizeStoredRustyMilkTextureAssets = (textureAssets) => {

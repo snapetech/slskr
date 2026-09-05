@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom';
-import App from './App';
+import App, { getStoredNetworkEndpointSnapshot } from './App';
 import React from 'react';
 import { MemoryRouter } from 'react-router-dom';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -165,6 +165,39 @@ describe('App', () => {
     document
       .querySelectorAll('meta[name="slskr-runtime-profile"]')
       .forEach((element) => element.remove());
+  });
+
+  it('bounds and projects persisted network endpoint snapshots', () => {
+    const forwards = Array.from({ length: 64 }, (_, index) => ({
+      publicPort: 50_000 + index,
+      slot: 64 - index,
+      unexpected: 'discarded',
+      publicIp: 'x'.repeat(300),
+    }));
+    localStorage.setItem(
+      'slskr.networkEndpoints.v2.lastDismissedSnapshot',
+      JSON.stringify({
+        portForwards: forwards,
+        signature: 'endpoint-signature',
+        unexpected: 'discarded',
+      }),
+    );
+
+    const snapshot = getStoredNetworkEndpointSnapshot();
+    expect(snapshot.portForwards).toHaveLength(32);
+    expect(snapshot.portForwards[0]).toMatchObject({
+      publicIp: 'x'.repeat(256),
+      publicPort: 50_031,
+      slot: 33,
+    });
+    expect(snapshot.portForwards[0]).not.toHaveProperty('unexpected');
+    expect(snapshot).not.toHaveProperty('unexpected');
+
+    localStorage.setItem(
+      'slskr.networkEndpoints.v2.lastDismissedSnapshot',
+      'x'.repeat(64 * 1024 + 1),
+    );
+    expect(getStoredNetworkEndpointSnapshot()).toBeNull();
   });
 
   it('redirects the root route to searches without logging a route miss', async () => {

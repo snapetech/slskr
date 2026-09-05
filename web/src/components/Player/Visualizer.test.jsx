@@ -661,6 +661,30 @@ describe('Visualizer', () => {
     });
   });
 
+  it('ignores oversized persisted native automation settings', async () => {
+    window.localStorage.setItem('slskr.player.visualizerEngine', 'native');
+    window.localStorage.setItem(
+      'slskr.player.rustyMilkPresetAutomation',
+      'x'.repeat(16 * 1024 + 1),
+    );
+
+    render(
+      <Visualizer
+        audioElement={{}}
+        mode="inline"
+        onModeChange={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(nativeEngine.setPresetAutomation).toHaveBeenCalledWith({
+        beatsPerPreset: 8,
+        mode: 'off',
+        timedIntervalSeconds: 30,
+      });
+    });
+  });
+
   it('updates displayed RustyMilk preset name when automation advances', async () => {
     window.localStorage.setItem('slskr.player.visualizerEngine', 'native');
     let animationFrameCalled = false;

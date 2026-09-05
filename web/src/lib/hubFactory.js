@@ -10,6 +10,7 @@ const RECONNECT_DELAYS_MS = [
   0, 100, 250, 500, 1_000, 2_000, 3_000, 5_000, 5_000, 5_000, 5_000, 5_000,
 ];
 export const WEBSOCKET_CONNECT_TIMEOUT_MS = 15_000;
+export const MAX_WEBSOCKET_MESSAGE_BYTES = 8 * 1024 * 1024;
 
 const SIGNALR_HUB_TOPICS = new Set([
   'application',
@@ -285,6 +286,16 @@ class WebSocketHubConnection {
   }
 
   handleMessage(data) {
+    if (typeof data !== 'string') {
+      return;
+    }
+    const messageBytes = typeof TextEncoder === 'function'
+      ? new TextEncoder().encode(data).byteLength
+      : data.length;
+    if (messageBytes > MAX_WEBSOCKET_MESSAGE_BYTES) {
+      return;
+    }
+
     let message;
     try {
       message = JSON.parse(data);
@@ -292,12 +303,18 @@ class WebSocketHubConnection {
       return;
     }
 
+    if (!message || typeof message !== 'object' || Array.isArray(message)) {
+      return;
+    }
     if (!this.acceptsTopic(message.topic)) {
       return;
     }
 
     const eventName =
       eventAliases[this.topic]?.[message.type] ?? message.type ?? 'event';
+    if (typeof eventName !== 'string') {
+      return;
+    }
     this.emit(eventName, message.data ?? message.event ?? message);
   }
 
