@@ -36,4 +36,17 @@ describe('tabStorage', () => {
     expect(parsed.tabs).toHaveLength(maxStoredTabs);
     expect(parsed.tabs[0].key).toBe('tab-4');
   });
+
+  it('does not throw when browser storage rejects a write', () => {
+    expect(() =>
+      writeBoundedTabState(
+        () => {
+          throw new Error('storage quota exceeded');
+        },
+        'tabs',
+        1,
+        [{ key: 'tab-1', label: 'Tab 1' }],
+      ),
+    ).not.toThrow();
+  });
 });

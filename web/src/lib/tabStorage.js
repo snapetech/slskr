@@ -53,12 +53,20 @@ export const writeBoundedTabState = (
       tabs: entries,
     });
     if (serialized.length <= maxTabStorageCharacters) {
-      setItem(storageKey, serialized);
+      try {
+        setItem(storageKey, serialized);
+      } catch {
+        // Browser persistence is optional and must not break tab updates.
+      }
       return entries;
     }
     entries.shift();
   }
 
-  setItem(storageKey, JSON.stringify({ tabCounter: boundedCounter, tabs: [] }));
+  try {
+    setItem(storageKey, JSON.stringify({ tabCounter: boundedCounter, tabs: [] }));
+  } catch {
+    // Browser persistence is optional and must not break tab updates.
+  }
   return [];
 };
