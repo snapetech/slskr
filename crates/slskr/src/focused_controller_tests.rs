@@ -1604,6 +1604,93 @@ async fn merge_routes_reject_oversized_arrays_before_store_deserialization() {
 }
 
 #[tokio::test]
+async fn browse_response_rejects_oversized_wire_batches_before_store_mutation() {
+    let (state, _receiver) = test_state_with_env(MapEnv::default());
+    let oversized_entries = (0..=super::MAX_BROWSE_WIRE_FILES_PER_RESPONSE)
+        .map(|index| serde_json::json!({"filename": format!("file-{index}.flac")}))
+        .collect::<Vec<_>>();
+    let entries_response = super::route_http_request(
+        "POST",
+        "/api/v0/browse-responses",
+        None,
+        &serde_json::json!({
+            "username": "oversized-entries",
+            "entries": oversized_entries
+        })
+        .to_string(),
+        &state,
+    )
+    .await
+    .expect("oversized browse entries response");
+    assert_eq!(entries_response.status, "400 Bad Request");
+    assert!(entries_response
+        .body
+        .contains("browse response exceeds wire entry limits"));
+    assert!(state.browse.read().await.get("oversized-entries").is_none());
+
+    let oversized_directory_files = super::MAX_BROWSE_WIRE_FILES_PER_RESPONSE / 2 + 1;
+    let nested_response = super::route_http_request(
+        "POST",
+        "/api/v0/browse-responses",
+        None,
+        &serde_json::json!({
+            "username": "oversized-nested-files",
+            "directories": [
+                {
+                    "name": "one",
+                    "files": (0..oversized_directory_files)
+                        .map(|index| serde_json::json!({"filename": format!("one-{index}.flac")}))
+                        .collect::<Vec<_>>()
+                },
+                {
+                    "name": "two",
+                    "files": (0..oversized_directory_files)
+                        .map(|index| serde_json::json!({"filename": format!("two-{index}.flac")}))
+                        .collect::<Vec<_>>()
+                }
+            ]
+        })
+        .to_string(),
+        &state,
+    )
+    .await
+    .expect("oversized nested browse entries response");
+    assert_eq!(nested_response.status, "400 Bad Request");
+    assert!(state
+        .browse
+        .read()
+        .await
+        .get("oversized-nested-files")
+        .is_none());
+
+    let oversized_directories = (0..=super::MAX_BROWSE_WIRE_FOLDERS_PER_RESPONSE)
+        .map(|index| serde_json::json!({"name": format!("folder-{index}")}))
+        .collect::<Vec<_>>();
+    let directories_response = super::route_http_request(
+        "POST",
+        "/api/v0/browse-responses",
+        None,
+        &serde_json::json!({
+            "username": "oversized-directories",
+            "directories": oversized_directories
+        })
+        .to_string(),
+        &state,
+    )
+    .await
+    .expect("oversized browse directory response");
+    assert_eq!(directories_response.status, "400 Bad Request");
+    assert!(state
+        .browse
+        .read()
+        .await
+        .get("oversized-directories")
+        .is_none());
+
+    let _ = fs::remove_dir_all(&state.config.state_dir);
+}
+
+#[tokio::test]
 async fn library_browser_projects_share_tree_and_sha256_stream_ids() {
     let (state, _receiver) =
         test_state_with_env(MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "native"));

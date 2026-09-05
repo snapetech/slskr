@@ -127,6 +127,8 @@ for anchor in \
   'versioned_swarm_requires_expected_hash_before_queueing' \
   'multisource_versioned_download_response' \
   'versioned_download_range_sources_use_verified_executor' \
+  'browse_response_exceeds_wire_limits' \
+  'browse_response_rejects_oversized_wire_batches_before_store_mutation' \
   'browse_store_bounds_records_and_entries_but_updates_existing_users' \
   'MAX_MESSAGE_RECORDS' \
   'message_store_evicts_oldest_records_at_limit' \

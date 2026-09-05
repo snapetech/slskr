@@ -19511,6 +19511,40 @@ fn json_array_exceeds_limit(value: &serde_json::Value, limit: usize) -> bool {
         .is_some_and(|items| items.len() > limit)
 }
 
+fn browse_response_exceeds_wire_limits(payload: &serde_json::Value) -> bool {
+    let mut file_count = payload
+        .get("entries")
+        .and_then(serde_json::Value::as_array)
+        .map_or(0, Vec::len);
+    if file_count > MAX_BROWSE_WIRE_FILES_PER_RESPONSE {
+        return true;
+    }
+
+    let Some(directories) = payload
+        .get("directories")
+        .and_then(serde_json::Value::as_array)
+    else {
+        return false;
+    };
+    if directories.len() > MAX_BROWSE_WIRE_FOLDERS_PER_RESPONSE {
+        return true;
+    }
+
+    for directory in directories {
+        let Some(files) = directory
+            .get("files")
+            .and_then(serde_json::Value::as_array)
+        else {
+            continue;
+        };
+        if files.len() > MAX_BROWSE_WIRE_FILES_PER_RESPONSE.saturating_sub(file_count) {
+            return true;
+        }
+        file_count += files.len();
+    }
+    false
+}
+
 use routing::HttpResponse;
 
 #[cfg(not(feature = "legacy-route-dispatch"))]
@@ -26692,6 +26726,11 @@ async fn legacy_route_http_request_with_headers_inner(
                 Ok(payload) => payload,
                 Err(_) => return Ok(routing::bad_request_response("invalid JSON body")),
             };
+            if browse_response_exceeds_wire_limits(&payload) {
+                return Ok(routing::bad_request_response(
+                    "browse response exceeds wire entry limits",
+                ));
+            }
 
             let mut entries = Vec::new();
             if let Some(array) = payload.get("entries").and_then(serde_json::Value::as_array) {

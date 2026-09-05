@@ -471,6 +471,11 @@ async fn route_dispatch_group_3(context: &RouteDispatchContext<'_, '_>) -> Route
                 Ok(payload) => payload,
                 Err(_) => return Ok(routing::bad_request_response("invalid JSON body")),
             };
+            if browse_response_exceeds_wire_limits(&payload) {
+                return Ok(routing::bad_request_response(
+                    "browse response exceeds wire entry limits",
+                ));
+            }
 
             let mut entries = Vec::new();
             if let Some(array) = payload.get("entries").and_then(serde_json::Value::as_array) {
