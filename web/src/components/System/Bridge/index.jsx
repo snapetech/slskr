@@ -102,6 +102,7 @@ const normalizeDashboard = (value) => {
 const Bridge = () => {
   const [config, setConfig] = useState(null);
   const [dashboard, setDashboard] = useState(null);
+  const [dashboardError, setDashboardError] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
@@ -125,9 +126,17 @@ const Bridge = () => {
         dashboardRequestIdRef.current === requestId
       ) {
         setDashboard(normalizeDashboard(dashboardData));
+        setDashboardError(null);
       }
-    } catch {
-      // Silently fail on refresh
+    } catch (error_) {
+      if (
+        mountedRef.current &&
+        dashboardRequestIdRef.current === requestId
+      ) {
+        setDashboardError(
+          toDisplayError(error_, 'Live bridge dashboard unavailable'),
+        );
+      }
     }
   }, [mountedRef]);
 
@@ -150,6 +159,7 @@ const Bridge = () => {
         }
         setConfig(normalizeConfig(configData));
         setDashboard(normalizeDashboard(dashboardData));
+        setDashboardError(null);
       } catch (error_) {
         if (
           mountedRef.current &&
@@ -318,6 +328,17 @@ const Bridge = () => {
         <Message success>
           <Message.Header>Success</Message.Header>
           <p>{success}</p>
+        </Message>
+      )}
+
+      {dashboardError && (
+        <Message
+          data-testid="bridge-dashboard-error"
+          warning
+        >
+          <Message.Header>Live bridge dashboard unavailable</Message.Header>
+          <p>{dashboardError}</p>
+          <p>Showing the last successfully received dashboard values.</p>
         </Message>
       )}
 
