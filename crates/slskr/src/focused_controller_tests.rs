@@ -1638,6 +1638,13 @@ async fn merge_routes_reject_oversized_arrays_before_store_deserialization() {
         .await
         .indexes_for_realm(super::realm_subject_index::DEFAULT_REALM_ID)
         .is_empty());
+    assert!(state
+        .content_discovery
+        .read()
+        .await
+        .shadow_records()
+        .iter()
+        .all(|record| record.recording_id != "nested-limit"));
 
     let _ = fs::remove_dir_all(&state.config.state_dir);
 }

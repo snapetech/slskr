@@ -173,15 +173,14 @@ impl Store {
         !realm_id.trim().is_empty() && normalize(&self.local_realm_id) == normalize(realm_id)
     }
 
+    pub(crate) fn validate_indexes(&self, indexes: &[Value]) -> Result<(), String> {
+        self.validated_index_keys(indexes).map(|_| ())
+    }
+
     pub fn merge_indexes(&mut self, indexes: Vec<Value>) -> Result<usize, String> {
-        if indexes.is_empty() || indexes.len() > MAX_INDEXES {
-            return Err(format!(
-                "realm subject-index merge requires 1 to {MAX_INDEXES} indexes"
-            ));
-        }
+        let keys = self.validated_index_keys(&indexes)?;
         let previous = self.indexes.clone();
-        for index in indexes {
-            let key = validate_index(&index, &self.local_realm_id, &self.trusted_governance_roots)?;
+        for (key, index) in keys.into_iter().zip(indexes) {
             if self.indexes.len() >= MAX_INDEXES && !self.indexes.contains_key(&key) {
                 self.indexes = previous;
                 return Err("realm subject-index capacity is full".to_owned());
@@ -193,6 +192,25 @@ impl Store {
             return Err(error);
         }
         Ok(self.indexes.len().saturating_sub(previous.len()))
+    }
+
+    fn validated_index_keys(&self, indexes: &[Value]) -> Result<Vec<String>, String> {
+        if indexes.is_empty() || indexes.len() > MAX_INDEXES {
+            return Err(format!(
+                "realm subject-index merge requires 1 to {MAX_INDEXES} indexes"
+            ));
+        }
+        let mut keys = self.indexes.keys().cloned().collect::<BTreeSet<_>>();
+        let mut validated_keys = Vec::with_capacity(indexes.len());
+        for index in indexes {
+            let key = validate_index(index, &self.local_realm_id, &self.trusted_governance_roots)?;
+            if keys.len() >= MAX_INDEXES && !keys.contains(&key) {
+                return Err("realm subject-index capacity is full".to_owned());
+            }
+            keys.insert(key.clone());
+            validated_keys.push(key);
+        }
+        Ok(validated_keys)
     }
 
     pub fn indexes_for_realm(&self, realm_id: &str) -> Vec<Value> {
@@ -1307,6 +1325,19 @@ mod tests {
         assert!(error.contains("too many evidence links"), "{error}");
         assert!(error.contains("too many external ids"), "{error}");
         assert!(error.contains("too many metadata fields"), "{error}");
+        assert!(store.indexes_for_realm("realm-a").is_empty());
+    }
+
+    #[test]
+    fn merge_validates_the_entire_batch_before_mutation() {
+        let valid = valid_index("valid-first");
+        let mut invalid = valid_index("invalid-second");
+        invalid["signature"]["payloadHash"] = serde_json::json!("not-the-payload-hash");
+        let mut store = Store::with_identity("realm-a", ["governance-a"]);
+
+        let error = store.merge_indexes(vec![valid, invalid]).unwrap_err();
+
+        assert!(error.contains("payload hash"), "{error}");
         assert!(store.indexes_for_realm("realm-a").is_empty());
     }
 

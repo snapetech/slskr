@@ -21280,18 +21280,19 @@ async fn legacy_route_http_request_with_headers_inner(
             };
             let received = records.len();
             let mut discovery = state.content_discovery.write().await;
+            let mut realm_store = state.realm_subject_indexes.write().await;
+            if !realm_indexes.is_empty() {
+                if let Err(error) = realm_store.validate_indexes(&realm_indexes) {
+                    return Ok(routing::bad_request_response(&error));
+                }
+            }
             match discovery.merge_shadow_records(records) {
                 Ok(merged) => {
                     drop(discovery);
                     let indexes_merged = if realm_indexes.is_empty() {
                         0
                     } else {
-                        match state
-                            .realm_subject_indexes
-                            .write()
-                            .await
-                            .merge_indexes(realm_indexes)
-                        {
+                        match realm_store.merge_indexes(realm_indexes) {
                             Ok(merged) => merged,
                             Err(error) => return Ok(routing::bad_request_response(&error)),
                         }
