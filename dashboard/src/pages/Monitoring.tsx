@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { isAbortError, readResponseText } from '../lib/api';
+import { isAbortError, requestText } from '../lib/api';
 import { parseMonitoringMetrics, type MonitoringMetrics } from '../lib/prometheus';
 
 interface MonitoringPageProps {
@@ -12,6 +12,8 @@ export default function Monitoring({ apiUrl, apiKey }: MonitoringPageProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
+  const [downloadingMetrics, setDownloadingMetrics] = useState(false);
+  const metricsUrl = `${apiUrl.replace(/\/+$/, '')}/api/metrics`;
 
   useEffect(() => {
     let active = true;
@@ -25,16 +27,9 @@ export default function Monitoring({ apiUrl, apiKey }: MonitoringPageProps) {
       try {
         setLoading(true);
         setError(null);
-        const headers: HeadersInit = {};
-        if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
-
-        const res = await fetch(`${apiUrl}/api/metrics`, {
-          headers,
-          signal: requestController.signal,
-          redirect: 'error',
-        });
-        if (!res.ok) throw new Error('Failed to fetch metrics');
-        const nextMetrics = parseMonitoringMetrics(await readResponseText(res));
+        const nextMetrics = parseMonitoringMetrics(
+          await requestText(metricsUrl, apiKey, { signal: requestController.signal }),
+        );
         if (active && controller === requestController) {
           setMetrics(nextMetrics);
         }
@@ -69,7 +64,27 @@ export default function Monitoring({ apiUrl, apiKey }: MonitoringPageProps) {
       active = false;
       controller?.abort();
     };
-  }, [apiUrl, apiKey, autoRefresh]);
+  }, [apiKey, autoRefresh, metricsUrl]);
+
+  const downloadMetrics = async () => {
+    setDownloadingMetrics(true);
+    try {
+      const body = await requestText(metricsUrl, apiKey);
+      const objectUrl = URL.createObjectURL(
+        new Blob([body], { type: 'text/plain;charset=utf-8' }),
+      );
+      const link = document.createElement('a');
+      link.href = objectUrl;
+      link.download = 'slskr-metrics.txt';
+      link.rel = 'noopener';
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to download metrics');
+    } finally {
+      setDownloadingMetrics(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -117,14 +132,14 @@ export default function Monitoring({ apiUrl, apiKey }: MonitoringPageProps) {
           Raw Prometheus metrics are available at:{' '}
           <code className="bg-gray-100 px-2 py-1 rounded text-sm">/api/metrics</code>
         </p>
-        <a
-          href={`${apiUrl}/api/metrics`}
-          target="_blank"
-          rel="noopener noreferrer"
+        <button
+          type="button"
+          onClick={downloadMetrics}
+          disabled={downloadingMetrics}
           className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
         >
-          View Metrics →
-        </a>
+          {downloadingMetrics ? 'Preparing Metrics…' : 'Download Raw Metrics ↓'}
+        </button>
       </div>
     </div>
   );

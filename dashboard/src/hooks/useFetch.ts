@@ -46,7 +46,16 @@ export function useFetch<T>(
   const requestHeadersKey = headersKey(options?.headers);
 
   const fetchData = useCallback(async () => {
-    if (!url) return;
+    if (!url) {
+      abortControllerRef.current?.abort();
+      abortControllerRef.current = null;
+      if (isMountedRef.current) {
+        setData(null);
+        setError(null);
+        setLoading(false);
+      }
+      return;
+    }
 
     const currentOptions = optionsRef.current;
 

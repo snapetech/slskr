@@ -73,4 +73,39 @@ describe('useFetch', () => {
     });
     expect(result.current.data).toEqual({ value: 2 });
   });
+
+  it('clears stale state and stops loading when the URL is disabled', async () => {
+    let resolveRequest: ((response: Response) => void) | undefined;
+    const pendingResponse = new Promise<Response>((resolve) => {
+      resolveRequest = resolve;
+    });
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockReturnValue(pendingResponse);
+
+    const { result, rerender } = renderHook(
+      ({ url }: { url: string | null }) => useFetch<{ value: number }>(url),
+      { initialProps: { url: '/api/value' as string | null } },
+    );
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(result.current.loading).toBe(true);
+
+    rerender({ url: null });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.data).toBeNull();
+    expect(result.current.error).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveRequest?.(
+        new Response(JSON.stringify({ value: 1 }), {
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+      await pendingResponse;
+    });
+
+    expect(result.current.data).toBeNull();
+    expect(result.current.loading).toBe(false);
+  });
 });

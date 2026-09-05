@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { isAbortError, readResponseText, requestJson } from './api';
+import { isAbortError, readResponseText, requestJson, requestText } from './api';
 
 describe('requestJson', () => {
   it('rejects redirects even when a caller requests follow behavior', async () => {
@@ -15,6 +15,28 @@ describe('requestJson', () => {
 
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/config',
+      expect.objectContaining({
+        redirect: 'error',
+        headers: expect.any(Headers),
+      }),
+    );
+    const [, init] = fetchMock.mock.calls[0];
+    expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer secret');
+  });
+});
+
+describe('requestText', () => {
+  it('returns authenticated text responses while rejecting redirects', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response('slskr_events_total 3\n'),
+    );
+
+    await expect(requestText('/api/metrics', 'secret')).resolves.toBe(
+      'slskr_events_total 3\n',
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/metrics',
       expect.objectContaining({
         redirect: 'error',
         headers: expect.any(Headers),

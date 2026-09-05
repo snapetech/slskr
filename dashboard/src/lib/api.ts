@@ -66,11 +66,11 @@ function responseMessage(status: number, statusText: string, body: string): stri
   return `HTTP ${status}${statusText ? `: ${statusText}` : ''}`;
 }
 
-export async function requestJson<T>(
+export async function requestText(
   url: string,
   apiKey: string | null,
   init: RequestInit = {},
-): Promise<T> {
+): Promise<string> {
   const headers = requestHeaders(apiKey, init.body);
   new Headers(init.headers).forEach((value, key) => headers.set(key, value));
 
@@ -89,6 +89,15 @@ export async function requestJson<T>(
   if (!response.ok) {
     throw new Error(responseMessage(response.status, response.statusText, body));
   }
+  return body;
+}
+
+export async function requestJson<T>(
+  url: string,
+  apiKey: string | null,
+  init: RequestInit = {},
+): Promise<T> {
+  const body = await requestText(url, apiKey, init);
   if (!body.trim()) return undefined as T;
 
   try {
