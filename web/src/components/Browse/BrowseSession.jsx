@@ -49,6 +49,12 @@ const initialState = {
 
 const MAX_BROWSE_CACHE_ENTRIES = 50;
 const BROWSE_CACHE_PREFIX = 'slskr-browse-state-';
+const MAX_BROWSE_CACHE_COMPRESSED_CHARACTERS = 512 * 1024;
+const MAX_BROWSE_CACHE_JSON_CHARACTERS = 4 * 1024 * 1024;
+const MAX_BROWSE_DIRECTORY_NODES = 10_000;
+const MAX_BROWSE_FILES_PER_DIRECTORY = 2_000;
+const MAX_BROWSE_TEXT_CHARACTERS = 2_048;
+const MAX_BROWSE_TREE_DEPTH = 64;
 
 export const getBrowseErrorMessage = (error) => {
   const data = error?.response?.data;
@@ -83,35 +89,66 @@ const toNonNegativeInteger = (value) => {
 
 const normalizeBrowseFile = (file) => {
   if (!file || typeof file !== 'object' || Array.isArray(file)) return null;
-  const filename = typeof file.filename === 'string' ? file.filename : '';
+  const filename = typeof file.filename === 'string'
+    ? file.filename.trim().slice(0, MAX_BROWSE_TEXT_CHARACTERS)
+    : '';
   if (!filename) return null;
+  const id = typeof file.id === 'string' || typeof file.id === 'number'
+    ? String(file.id).trim().slice(0, MAX_BROWSE_TEXT_CHARACTERS)
+    : '';
   return {
-    ...file,
+    ...(id ? { id } : {}),
+    bitDepth: toNonNegativeInteger(file.bitDepth),
+    bitRate: toNonNegativeInteger(file.bitRate),
     filename,
+    isVariableBitRate: file.isVariableBitRate === true,
     length: toNonNegativeInteger(file.length),
+    sampleRate: toNonNegativeInteger(file.sampleRate),
     size: toNonNegativeInteger(file.size),
   };
 };
 
-const normalizeDirectory = (directory) => {
-  if (!directory || typeof directory !== 'object' || Array.isArray(directory)) {
+const normalizeDirectory = (
+  directory,
+  depth = 0,
+  budget = { remaining: MAX_BROWSE_DIRECTORY_NODES },
+) => {
+  if (
+    !directory
+    || typeof directory !== 'object'
+    || Array.isArray(directory)
+    || depth > MAX_BROWSE_TREE_DEPTH
+    || budget.remaining <= 0
+  ) {
     return null;
   }
-  const name = typeof directory.name === 'string' ? directory.name : '';
+  budget.remaining -= 1;
+  const name = typeof directory.name === 'string'
+    ? directory.name.trim().slice(0, MAX_BROWSE_TEXT_CHARACTERS)
+    : '';
   if (!name) return null;
   return {
-    ...directory,
-    children: asRecords(directory.children)
-      .map(normalizeDirectory)
-      .filter(Boolean),
+    children: depth < MAX_BROWSE_TREE_DEPTH
+      ? asRecords(directory.children)
+          .map((child) => normalizeDirectory(child, depth + 1, budget))
+          .filter(Boolean)
+      : [],
     fileCount: toNonNegativeInteger(directory.fileCount),
-    files: asRecords(directory.files).map(normalizeBrowseFile).filter(Boolean),
+    files: asRecords(directory.files)
+      .slice(0, MAX_BROWSE_FILES_PER_DIRECTORY)
+      .map(normalizeBrowseFile)
+      .filter(Boolean),
+    locked: directory.locked === true,
     name,
   };
 };
 
-const normalizeDirectories = (value) =>
-  asRecords(value).map(normalizeDirectory).filter(Boolean);
+const normalizeDirectories = (value) => {
+  const budget = { remaining: MAX_BROWSE_DIRECTORY_NODES };
+  return asRecords(value)
+    .map((directory) => normalizeDirectory(directory, 0, budget))
+    .filter(Boolean);
+};
 
 // Cleanup old browse cache entries using LRU strategy
 const cleanupBrowseCache = () => {
@@ -380,9 +417,27 @@ class BrowseSession extends Component {
     // Only save if we have actual browse data
     if (this.state.username && this.state.tree.length > 0) {
       try {
+        const persistedState = {
+          info: {
+            directories: toNonNegativeInteger(this.state.info?.directories),
+            files: toNonNegativeInteger(this.state.info?.files),
+            lockedDirectories: toNonNegativeInteger(this.state.info?.lockedDirectories),
+            lockedFiles: toNonNegativeInteger(this.state.info?.lockedFiles),
+          },
+          selectedDirectory: normalizeDirectory(this.state.selectedDirectory),
+          separator: ['\\', '/'].includes(this.state.separator)
+            ? this.state.separator
+            : initialState.separator,
+          tree: normalizeDirectories(this.state.tree),
+          username: this.state.username.slice(0, MAX_BROWSE_TEXT_CHARACTERS),
+        };
+        const serializedState = JSON.stringify(persistedState);
+        if (serializedState.length > MAX_BROWSE_CACHE_JSON_CHARACTERS) return;
+        const compressedState = lzString.compress(serializedState);
+        if (compressedState.length > MAX_BROWSE_CACHE_COMPRESSED_CHARACTERS) return;
         setLocalStorageItem(
           this.getStorageKey(),
-          lzString.compress(JSON.stringify(this.state)),
+          compressedState,
         );
         // Cleanup old cache entries to prevent unbounded growth
         cleanupBrowseCache();
@@ -399,18 +454,31 @@ class BrowseSession extends Component {
     if (username) {
       try {
         const key = `slskr-browse-state-${username}`;
-        const savedState = JSON.parse(
-          lzString.decompress(getLocalStorageItem(key, '') || ''),
-        );
+        const compressedState = getLocalStorageItem(key, '') || '';
+        if (
+          typeof compressedState !== 'string'
+          || compressedState.length > MAX_BROWSE_CACHE_COMPRESSED_CHARACTERS
+        ) {
+          return false;
+        }
+        const decompressedState = lzString.decompress(compressedState);
+        if (
+          typeof decompressedState !== 'string'
+          || decompressedState.length > MAX_BROWSE_CACHE_JSON_CHARACTERS
+        ) {
+          return false;
+        }
+        const savedState = JSON.parse(decompressedState);
 
         const savedTree = normalizeDirectories(savedState?.tree);
         if (savedState && savedTree.length > 0) {
           // We have cached data - use it instead of re-fetching
           this.setState({
-            ...savedState,
             info: {
-              ...initialState.info,
-              ...(savedState.info || {}),
+              directories: toNonNegativeInteger(savedState.info?.directories),
+              files: toNonNegativeInteger(savedState.info?.files),
+              lockedDirectories: toNonNegativeInteger(savedState.info?.lockedDirectories),
+              lockedFiles: toNonNegativeInteger(savedState.info?.lockedFiles),
             },
             separator: ['\\', '/'].includes(savedState.separator)
               ? savedState.separator
@@ -421,7 +489,7 @@ class BrowseSession extends Component {
             tree: savedTree,
             username:
               typeof savedState.username === 'string'
-                ? savedState.username
+                ? savedState.username.slice(0, MAX_BROWSE_TEXT_CHARACTERS)
                 : username,
             browseState: 'complete',
           });

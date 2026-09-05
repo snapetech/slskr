@@ -3,8 +3,14 @@ import {
   removeLocalStorageItem,
   setLocalStorageItem,
 } from './storage';
+import { readBoundedJson } from './persistedJson';
 
 export const meshEvidencePolicyStorageKey = 'slskr.meshEvidencePolicy';
+
+const maxMeshPolicyStorageCharacters = 64 * 1024;
+const maxEvidenceReviewInputCharacters = 1 * 1024 * 1024;
+const maxEvidenceReviewEntries = 500;
+const maxEvidenceTextCharacters = 2_048;
 
 export const inboundTrustTiers = [
   {
@@ -90,22 +96,23 @@ const sanitizePolicy = (policy = {}) => {
     inboundTrustTier,
     outbound,
     provenanceRequired: true,
-    updatedAt: policy.updatedAt || null,
+    updatedAt:
+      typeof policy.updatedAt === 'string'
+        ? policy.updatedAt.trim().slice(0, maxEvidenceTextCharacters) || null
+        : null,
   };
 };
 
 export const getMeshEvidencePolicy = () => {
-  const stored = getLocalStorageItem(meshEvidencePolicyStorageKey);
-  if (!stored) {
-    return defaultMeshEvidencePolicy;
-  }
-
-  try {
-    return sanitizePolicy(JSON.parse(stored));
-  } catch (_error) {
-    removeLocalStorageItem(meshEvidencePolicyStorageKey);
-    return defaultMeshEvidencePolicy;
-  }
+  const stored = readBoundedJson(
+    getLocalStorageItem,
+    meshEvidencePolicyStorageKey,
+    null,
+    maxMeshPolicyStorageCharacters,
+  );
+  return stored && typeof stored === 'object' && !Array.isArray(stored)
+    ? sanitizePolicy(stored)
+    : defaultMeshEvidencePolicy;
 };
 
 export const saveMeshEvidencePolicy = (policy) => {
@@ -165,28 +172,50 @@ const trustedInboundTiers = {
 };
 
 const normalizeEvidenceEntries = (entries) => {
-  if (Array.isArray(entries)) return entries;
-  if (Array.isArray(entries?.evidence)) return entries.evidence;
-  if (Array.isArray(entries?.items)) return entries.items;
+  if (Array.isArray(entries)) return entries.slice(0, maxEvidenceReviewEntries);
+  if (Array.isArray(entries?.evidence)) {
+    return entries.evidence.slice(0, maxEvidenceReviewEntries);
+  }
+  if (Array.isArray(entries?.items)) {
+    return entries.items.slice(0, maxEvidenceReviewEntries);
+  }
   return [];
 };
 
-const normalizeEvidenceEntry = (entry = {}) => ({
-  confidence: Number.isFinite(entry.confidence) ? entry.confidence : 0,
-  containsExactHoldings: entry.containsExactHoldings === true,
-  containsPath: entry.containsPath === true,
-  containsRawListeningHistory: entry.containsRawListeningHistory === true,
-  id: entry.id || `${entry.type || 'evidence'}:${entry.subject || 'unknown'}`,
-  provenance: {
-    peerId: entry.provenance?.peerId || entry.peerId || '',
-    realmId: entry.provenance?.realmId || entry.realmId || '',
-    signature: entry.provenance?.signature || entry.signature || '',
-    trustTier: entry.provenance?.trustTier || entry.trustTier || 'untrusted',
-  },
-  subject: entry.subject || 'unknown',
-  type: entry.type || 'unknown',
-  witnessCount: Number.isFinite(entry.witnessCount) ? entry.witnessCount : 0,
-});
+const normalizeEvidenceText = (value, fallback = '') =>
+  typeof value === 'string' || typeof value === 'number'
+    ? String(value).trim().slice(0, maxEvidenceTextCharacters)
+    : fallback;
+
+const normalizeEvidenceEntry = (entry = {}) => {
+  const source = entry && typeof entry === 'object' && !Array.isArray(entry)
+    ? entry
+    : {};
+  const type = normalizeEvidenceText(source.type, 'unknown');
+  const subject = normalizeEvidenceText(source.subject, 'unknown');
+  const confidence = Number(source.confidence);
+  const witnessCount = Number(source.witnessCount);
+
+  return {
+    confidence: Number.isFinite(confidence) ? Math.min(Math.max(confidence, 0), 1) : 0,
+    containsExactHoldings: source.containsExactHoldings === true,
+    containsPath: source.containsPath === true,
+    containsRawListeningHistory: source.containsRawListeningHistory === true,
+    id: normalizeEvidenceText(source.id, `${type}:${subject}`),
+    provenance: {
+      peerId: normalizeEvidenceText(source.provenance?.peerId || source.peerId),
+      realmId: normalizeEvidenceText(source.provenance?.realmId || source.realmId),
+      signature: normalizeEvidenceText(source.provenance?.signature || source.signature),
+      trustTier: normalizeEvidenceText(
+        source.provenance?.trustTier || source.trustTier,
+        'untrusted',
+      ),
+    },
+    subject,
+    type,
+    witnessCount: Number.isFinite(witnessCount) ? Math.max(Math.floor(witnessCount), 0) : 0,
+  };
+};
 
 export const evaluateMeshEvidenceEntries = (
   entries,
@@ -253,7 +282,8 @@ export const evaluateMeshEvidenceEntries = (
 };
 
 export const parseMeshEvidenceReviewInput = (value) => {
-  if (!value?.trim()) return [];
+  if (typeof value !== 'string' || !value.trim()) return [];
+  if (value.length > maxEvidenceReviewInputCharacters) return [];
 
   const parsed = JSON.parse(value);
   return normalizeEvidenceEntries(parsed);

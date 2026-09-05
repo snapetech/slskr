@@ -1,6 +1,7 @@
 import {
   getMeshEvidencePolicy,
   getMeshEvidencePolicySummary,
+  defaultMeshEvidencePolicy,
   evaluateMeshEvidenceEntries,
   formatMeshEvidenceReviewReport,
   meshEvidencePolicyStorageKey,
@@ -74,6 +75,17 @@ describe('meshEvidencePolicy', () => {
     expect(policy.provenanceRequired).toBe(true);
   });
 
+  it('rejects oversized stored policy and review payloads', () => {
+    localStorage.setItem(
+      meshEvidencePolicyStorageKey,
+      'x'.repeat(64 * 1024 + 1),
+    );
+
+    expect(getMeshEvidencePolicy()).toEqual(defaultMeshEvidencePolicy);
+    expect(parseMeshEvidenceReviewInput('x'.repeat(1_048_577))).toEqual([]);
+    expect(parseMeshEvidenceReviewInput(null)).toEqual([]);
+  });
+
   it('resets policy to private defaults', () => {
     setMeshEvidenceInboundTrustTier('realm');
     setMeshEvidenceOutboundEnabled('metadataCorrection', true);
@@ -127,6 +139,16 @@ describe('meshEvidencePolicy', () => {
         'contains raw path data',
       ]),
     );
+  });
+
+  it('ignores malformed evidence entries without throwing', () => {
+    expect(
+      evaluateMeshEvidenceEntries([null, 'invalid', { subject: 'valid' }]),
+    ).toMatchObject({
+      summary: {
+        total: 3,
+      },
+    });
   });
 
   it('parses and formats mesh evidence review reports', () => {
