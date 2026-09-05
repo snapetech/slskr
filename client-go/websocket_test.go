@@ -13,6 +13,17 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+func TestWebSocketURLRejectsCredentials(t *testing.T) {
+	for _, baseURL := range []string{
+		"https://user@example.test",
+		"https://user:password@example.test",
+	} {
+		if _, err := websocketURL(baseURL); err == nil {
+			t.Fatalf("expected credentials to be rejected for %q", baseURL)
+		}
+	}
+}
+
 func TestWebSocketSubscriptionFramesTrackLocalState(t *testing.T) {
 	frames := make(chan map[string]interface{}, 2)
 	upgrader := websocket.Upgrader{}

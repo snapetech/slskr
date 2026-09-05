@@ -259,7 +259,7 @@ func (w *WebSocketClient) connect(ctx context.Context, automatic bool) error {
 
 func websocketURL(baseURL string) (string, error) {
 	parsed, err := url.Parse(baseURL)
-	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.User != nil {
 		return "", fmt.Errorf("base URL must be an absolute HTTP or HTTPS URL")
 	}
 	if parsed.Scheme == "https" {
