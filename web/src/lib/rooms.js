@@ -1,34 +1,37 @@
 import api from './api';
 
+const requireArrayResponse = (value, resource) => {
+  if (!Array.isArray(value)) {
+    throw new Error(`Rooms API returned an invalid ${resource} response`);
+  }
+
+  return value;
+};
+
+const requireObjectResponse = (value, resource) => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`Rooms API returned an invalid ${resource} response`);
+  }
+
+  return value;
+};
+
 export const getAvailable = async () => {
   const response = (await api.get('/rooms/available')).data;
 
-  if (!Array.isArray(response)) {
-    console.warn('got non-array response from rooms API', response);
-    return [];
-  }
-
-  return response;
+  return requireArrayResponse(response, 'available rooms');
 };
 
 export const getJoined = async () => {
   const response = (await api.get('/rooms/joined')).data;
 
-  if (!Array.isArray(response)) {
-    console.warn('got non-array response from rooms API', response);
-    return [];
-  }
-
-  return response;
+  return requireArrayResponse(response, 'joined rooms');
 };
 
 export const getActivity = async () => {
   const response = (await api.get('/rooms/activity')).data;
 
-  if (!response || typeof response !== 'object' || Array.isArray(response)) {
-    console.warn('got non-object response from room activity API', response);
-    return {};
-  }
+  requireObjectResponse(response, 'room activity');
 
   return Object.fromEntries(
     Object.entries(response)
@@ -49,12 +52,7 @@ export const getMessages = async ({ roomName, since = null }) => {
     )
   ).data;
 
-  if (!Array.isArray(response)) {
-    console.warn('got non-array response from rooms API', response);
-    return [];
-  }
-
-  return response;
+  return requireArrayResponse(response, 'room messages');
 };
 
 export const getUsers = async ({ roomName }) => {
@@ -62,12 +60,7 @@ export const getUsers = async ({ roomName }) => {
     await api.get(`/rooms/joined/${encodeURIComponent(roomName)}/users`)
   ).data;
 
-  if (!Array.isArray(response)) {
-    console.warn('got non-array response from rooms API', response);
-    return [];
-  }
-
-  return response;
+  return requireArrayResponse(response, 'room users');
 };
 
 export const join = async ({ roomName }) => {
