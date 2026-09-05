@@ -161,41 +161,7 @@ async fn route_dispatch_group_5(context: &RouteDispatchContext<'_, '_>) -> Route
             Ok(routing::ok_response(json))
         }
         ("GET", "/api/library/items/browser") => {
-            let library = state.library.read().await;
-            let path = query_parameter(route.query, "path").unwrap_or_default();
-            let limit = query_parameter(route.query, "limit")
-                .and_then(|value| value.parse::<usize>().ok())
-                .unwrap_or(100)
-                .clamp(1, 1_000);
-            let offset = query_parameter(route.query, "offset")
-                .and_then(|value| value.parse::<usize>().ok())
-                .unwrap_or(0);
-            let total_files = library.records.len();
-            let files = library
-                .records
-                .iter()
-                .skip(offset)
-                .take(limit)
-                .map(|record| {
-                    serde_json::from_str::<serde_json::Value>(&record.json()).unwrap_or_default()
-                })
-                .collect::<Vec<_>>();
-            let returned_files = files.len();
-            let json = serde_json::json!({
-                "path": path,
-                "breadcrumbs": [],
-                "directories": [],
-                "files": files,
-                "totalFiles": total_files,
-                "totalDirectories": 0,
-                "offset": offset,
-                "limit": limit,
-                "hasMore": offset.saturating_add(returned_files) < total_files,
-                "duplicatesRemoved": 0,
-            })
-            .to_string();
-            drop(library);
-            Ok(routing::ok_response(json))
+            Ok(library_browser_response(state, route.query).await)
         }
         ("POST", "/api/library/items") => {
             let artist = extract_json_string_field(body, "artist").unwrap_or_default();

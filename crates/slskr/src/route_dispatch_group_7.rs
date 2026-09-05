@@ -1116,18 +1116,13 @@ async fn route_dispatch_group_7(context: &RouteDispatchContext<'_, '_>) -> Route
             if ticket.is_some() && ticket_record.is_none() {
                 return Ok(routing::unauthorized_response());
             }
+            let share = find_shared_entry_for_content(state, None, Some(&stream_id)).await;
             let transfers = state.transfers.read().await;
-            let shares = state.shares.read().await;
             let transfer = stream_id
                 .strip_prefix("transfer-")
                 .and_then(|id| id.parse::<u64>().ok())
                 .and_then(|id| transfers.entries.iter().find(|entry| entry.id == id));
-            let share = shares.entries.iter().find(|entry| {
-                entry.filename == stream_id
-                    || stable_content_hash(&entry.filename, entry.size).to_string() == stream_id
-            });
             if !api_authorized && ticket_record.is_none() {
-                drop(shares);
                 drop(transfers);
                 return Ok(routing::unauthorized_response());
             }
@@ -1148,7 +1143,6 @@ async fn route_dispatch_group_7(context: &RouteDispatchContext<'_, '_>) -> Route
                     "extension": entry.extension,
                 })),
             }).to_string();
-            drop(shares);
             drop(transfers);
             Ok(routing::ok_response(body))
         }

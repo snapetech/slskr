@@ -9,6 +9,7 @@ use base64::Engine;
 use tokio::sync::{mpsc, RwLock};
 
 use crate::config::{ConfigEnv, FileConfig};
+use slskr_client::protocol::peer::FileEntry;
 
 #[derive(Clone, Default)]
 struct MapEnv {
@@ -1417,6 +1418,135 @@ async fn versioned_search_accepts_web_acquisition_profiles() {
     .expect("rejected versioned search response");
     assert_eq!(rejected.status, "400 Bad Request");
     assert!(rejected.body.contains("known acquisition profile"));
+}
+
+#[tokio::test]
+async fn library_browser_projects_share_tree_and_sha256_stream_ids() {
+    let (state, _receiver) =
+        test_state_with_env(MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "native"));
+    let root = std::env::temp_dir().join(format!(
+        "slskr-browser-test-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0)
+    ));
+    fs::create_dir_all(root.join("Album")).expect("create browser fixture directory");
+    let local_file = root.join("Album").join("Track.flac");
+    fs::write(&local_file, b"browser stream fixture").expect("write browser fixture");
+    {
+        let mut shares = state.shares.write().await;
+        shares.entries.push(FileEntry {
+            filename_encoding: Default::default(),
+            extension_encoding: Default::default(),
+            code: 1,
+            filename: "Local/Album/Track.flac".to_owned(),
+            size: fs::metadata(&local_file)
+                .expect("browser fixture metadata")
+                .len(),
+            extension: "flac".to_owned(),
+            attributes: Vec::new(),
+        });
+        shares
+            .local_paths
+            .insert("Local/Album/Track.flac".to_owned(), local_file.clone());
+    }
+
+    let root_response = super::route_http_request(
+        "GET",
+        "/api/v0/library/items/browser?kinds=Audio",
+        None,
+        "",
+        &state,
+    )
+    .await
+    .expect("library browser root response");
+    assert_eq!(root_response.status, "200 OK");
+    let root_body =
+        serde_json::from_str::<serde_json::Value>(&root_response.body).expect("browser root JSON");
+    assert_eq!(root_body["files"].as_array().unwrap().len(), 0);
+    assert!(root_body["directories"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|directory| directory["path"] == "Local"));
+
+    let folder_response = super::route_http_request(
+        "GET",
+        "/api/v0/library/items/browser?kinds=Audio&path=Local",
+        None,
+        "",
+        &state,
+    )
+    .await
+    .expect("library browser folder response");
+    assert_eq!(folder_response.status, "200 OK");
+    let folder_body = serde_json::from_str::<serde_json::Value>(&folder_response.body)
+        .expect("browser folder JSON");
+    let directories = folder_body["directories"].as_array().unwrap();
+    assert_eq!(directories[0]["path"], "Local/Album");
+    assert_eq!(directories[0]["fileCount"], 1);
+
+    let album_response = super::route_http_request(
+        "GET",
+        "/api/v0/library/items/browser?kinds=Audio&path=Local%2FAlbum",
+        None,
+        "",
+        &state,
+    )
+    .await
+    .expect("library browser album response");
+    let album_body = serde_json::from_str::<serde_json::Value>(&album_response.body)
+        .expect("browser album JSON");
+    let file = &album_body["files"][0];
+    assert_eq!(file["fileName"], "Track.flac");
+    let content_id = file["contentId"].as_str().unwrap();
+    assert!(content_id.starts_with("sha256:"));
+    assert!(super::open_primary_stream_file(&state, content_id, None)
+        .await
+        .expect("open sha256 stream")
+        .is_some());
+
+    let encoded_content_id = content_id.replace(':', "%3A");
+    let stream_status = super::route_http_request(
+        "GET",
+        &format!("/api/v0/streams/{encoded_content_id}"),
+        None,
+        "",
+        &state,
+    )
+    .await
+    .expect("sha256 stream status");
+    assert_eq!(stream_status.status, "200 OK");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&stream_status.body).unwrap()["status"],
+        "available"
+    );
+
+    let ticket = super::route_http_request(
+        "POST",
+        &format!("/api/v0/streams/{encoded_content_id}/ticket"),
+        None,
+        "{}",
+        &state,
+    )
+    .await
+    .expect("sha256 stream ticket");
+    assert_eq!(ticket.status, "200 OK", "{}", ticket.body);
+
+    let invalid_path = super::route_http_request(
+        "GET",
+        "/api/v0/library/items/browser?path=..",
+        None,
+        "",
+        &state,
+    )
+    .await
+    .expect("invalid browser path response");
+    assert_eq!(invalid_path.status, "400 Bad Request");
+
+    let _ = fs::remove_dir_all(root);
 }
 
 #[test]

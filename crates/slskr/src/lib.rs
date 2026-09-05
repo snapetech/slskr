@@ -14390,6 +14390,275 @@ async fn sha256_local_file(path: &Path) -> Option<String> {
     Some(hex::encode(hasher.finalize()))
 }
 
+fn is_sha256_hex(value: &str) -> bool {
+    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+/// Resolve a player/library content identifier against the share index.
+///
+/// Native library projections expose a real sha256:<digest> identifier for
+/// local files, while the Soulseek-facing share index historically addressed
+/// the same files by virtual filename or its bounded compatibility hash. Keep
+/// all three forms usable by the ticket and stream paths.
+async fn find_shared_entry_for_content(
+    state: &AppState,
+    filename: Option<&str>,
+    content_id: Option<&str>,
+) -> Option<FileEntry> {
+    let expected_sha256 = content_id
+        .and_then(|value| value.strip_prefix("sha256:"))
+        .filter(|value| is_sha256_hex(value));
+    let (direct, candidates) = {
+        let shares = state.shares.read().await;
+        let direct = shares
+            .entries
+            .iter()
+            .find(|entry| {
+                filename.is_some_and(|value| entry.filename == value)
+                    || content_id.is_some_and(|value| {
+                        entry.filename == value
+                            || stable_content_hash(&entry.filename, entry.size).to_string() == value
+                    })
+            })
+            .cloned();
+        let candidates = if expected_sha256.is_some() {
+            shares
+                .entries
+                .iter()
+                .filter_map(|entry| {
+                    shares
+                        .local_paths
+                        .get(&entry.filename)
+                        .map(|path| (entry.clone(), path.clone()))
+                })
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+        (direct, candidates)
+    };
+    if direct.is_some() {
+        return direct;
+    }
+
+    let expected_sha256 = expected_sha256?;
+    for (entry, path) in candidates {
+        if sha256_local_file(&path)
+            .await
+            .is_some_and(|actual| actual.eq_ignore_ascii_case(expected_sha256))
+        {
+            return Some(entry);
+        }
+    }
+    None
+}
+
+fn normalize_library_browser_path(raw_path: Option<String>) -> Result<String, String> {
+    let raw_path = raw_path.unwrap_or_default();
+    if raw_path.len() > 4_096 {
+        return Err("library browser path is too long".to_owned());
+    }
+    let normalized = raw_path.replace('\\', "/");
+    let mut segments = Vec::new();
+    for segment in normalized.split('/') {
+        let segment = segment.trim();
+        if segment.is_empty() {
+            continue;
+        }
+        if segment == "."
+            || segment == ".."
+            || segment.chars().any(char::is_control)
+        {
+            return Err("library browser path contains an invalid segment".to_owned());
+        }
+        segments.push(segment);
+    }
+    Ok(segments.join("/"))
+}
+
+fn library_browser_relative_path(filename: &str, path: &str) -> Option<String> {
+    let filename = filename.replace('\\', "/");
+    if path.is_empty() {
+        return Some(filename);
+    }
+    filename
+        .strip_prefix(path)
+        .and_then(|relative| relative.strip_prefix('/'))
+        .map(ToOwned::to_owned)
+}
+
+fn library_browser_breadcrumbs(path: &str) -> Vec<serde_json::Value> {
+    let mut breadcrumbs = vec![serde_json::json!({
+        "name": "Library",
+        "path": "",
+    })];
+    let mut prefix = String::new();
+    for segment in path.split('/').filter(|segment| !segment.is_empty()) {
+        if !prefix.is_empty() {
+            prefix.push('/');
+        }
+        prefix.push_str(segment);
+        breadcrumbs.push(serde_json::json!({
+            "name": segment,
+            "path": prefix,
+        }));
+    }
+    breadcrumbs
+}
+
+fn library_browser_query_terms(raw_query: Option<String>) -> Vec<String> {
+    raw_query
+        .unwrap_or_default()
+        .split_whitespace()
+        .map(str::to_ascii_lowercase)
+        .filter(|term| !term.is_empty())
+        .collect()
+}
+
+fn library_browser_kind_filter(raw_kinds: Option<String>) -> Option<HashSet<String>> {
+    let kinds = raw_kinds
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|kind| !kind.is_empty())
+        .map(str::to_ascii_lowercase)
+        .collect::<HashSet<_>>();
+    (!kinds.is_empty()).then_some(kinds)
+}
+
+fn library_browser_entry_matches(
+    entry: &FileEntry,
+    query_terms: &[String],
+    kinds: Option<&HashSet<String>>,
+) -> bool {
+    let kind_matches = kinds.is_none_or(|kinds| {
+        kinds.contains(&library_media_kind(&entry.extension).to_ascii_lowercase())
+    });
+    let filename = entry.filename.replace('\\', "/");
+    kind_matches
+        && query_terms
+            .iter()
+            .all(|term| filename.to_ascii_lowercase().contains(term))
+}
+
+/// Return the real share-backed files behind the Web UI's local library
+/// explorer. The old compatibility implementation returned metadata records
+/// from LibraryStore, which have no streamable path and ignored path, query,
+/// kinds, and directory navigation.
+async fn library_browser_response(
+    state: &AppState,
+    raw_query: Option<&str>,
+) -> HttpResponse {
+    let path = match normalize_library_browser_path(query_parameter(raw_query, "path")) {
+        Ok(path) => path,
+        Err(error) => return routing::bad_request_response(&error),
+    };
+    let query_terms = library_browser_query_terms(query_parameter(raw_query, "query"));
+    let kinds = library_browser_kind_filter(query_parameter(raw_query, "kinds"));
+    let limit = query_parameter(raw_query, "limit")
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(100)
+        .clamp(1, 1_000);
+    let offset = query_parameter(raw_query, "offset")
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(0);
+
+    let (entries, local_paths, scan_failed) = {
+        let shares = state.shares.read().await;
+        (
+            shares.entries.clone(),
+            shares.local_paths.clone(),
+            !shares.scan_errors.is_empty(),
+        )
+    };
+    if scan_failed {
+        return routing::service_unavailable_response("share browse unavailable");
+    }
+
+    let is_search = !query_terms.is_empty();
+    let mut files = Vec::new();
+    let mut directory_stats = BTreeMap::<String, (usize, HashSet<String>)>::new();
+    for entry in entries.iter().filter(|entry| {
+        library_browser_entry_matches(entry, &query_terms, kinds.as_ref())
+    }) {
+        if is_search {
+            files.push(entry.clone());
+            continue;
+        }
+        let Some(relative) = library_browser_relative_path(&entry.filename, &path) else {
+            continue;
+        };
+        let segments = relative
+            .split('/')
+            .filter(|segment| !segment.is_empty())
+            .collect::<Vec<_>>();
+        if segments.len() == 1 {
+            files.push(entry.clone());
+        } else if segments.len() > 1 {
+            let summary = directory_stats
+                .entry(segments[0].to_owned())
+                .or_insert_with(|| (0, HashSet::new()));
+            summary.0 += 1;
+            if segments.len() > 2 {
+                summary.1.insert(segments[1].to_owned());
+            }
+        }
+    }
+    files.sort_by(|left, right| left.filename.cmp(&right.filename));
+
+    let total_files = files.len();
+    let directories = directory_stats
+        .iter()
+        .map(|(name, (file_count, children))| {
+            let directory_path = if path.is_empty() {
+                name.clone()
+            } else {
+                format!("{path}/{name}")
+            };
+            serde_json::json!({
+                "name": name,
+                "path": directory_path,
+                "fileCount": file_count,
+                "childDirectoryCount": children.len(),
+            })
+        })
+        .collect::<Vec<_>>();
+    let total_directories = directories.len();
+    let page = files
+        .iter()
+        .skip(offset)
+        .take(limit)
+        .collect::<Vec<_>>();
+    let mut file_values = Vec::with_capacity(page.len());
+    for entry in page {
+        let local_path = local_paths.get(&entry.filename);
+        file_values.push(
+            native_library_item_value(
+                entry,
+                local_path.map(PathBuf::as_path),
+                &entry.filename,
+            )
+            .await,
+        );
+    }
+    let returned_files = file_values.len();
+    routing::ok_response(
+        serde_json::json!({
+            "path": path,
+            "breadcrumbs": library_browser_breadcrumbs(&path),
+            "directories": directories,
+            "files": file_values,
+            "totalFiles": total_files,
+            "totalDirectories": total_directories,
+            "offset": offset,
+            "limit": limit,
+            "hasMore": offset.saturating_add(returned_files) < total_files,
+            "duplicatesRemoved": 0,
+        })
+        .to_string(),
+    )
+}
+
 async fn native_library_item_value(
     entry: &FileEntry,
     local_path: Option<&Path>,
@@ -14400,14 +14669,7 @@ async fn native_library_item_value(
         None => None,
     };
     let content_id = sha256.as_ref().map_or_else(
-        || {
-            format!(
-                "path:{}",
-                hex::encode(Sha256::digest(
-                    format!("{}|{}", entry.filename, entry.size).as_bytes()
-                ))
-            )
-        },
+        || stable_content_hash(&entry.filename, entry.size).to_string(),
         |sha256| format!("sha256:{sha256}"),
     );
     let file_name = display_path
@@ -19183,6 +19445,93 @@ async fn route_http_request_with_state(
 
 #[cfg(feature = "legacy-route-dispatch")]
 async fn route_http_request_with_headers(
+    method: &str,
+    path: &str,
+    authorization: Option<&str>,
+    body: &str,
+    state: &AppState,
+    headers: RequestSecurityHeaders,
+) -> Result<HttpResponse, String> {
+    let route = routing::parse_route(method, path);
+    let normalized_path = route
+        .normalized_path
+        .strip_prefix("/api/v0/")
+        .or_else(|| route.normalized_path.strip_prefix("/api/v1/"))
+        .or_else(|| route.normalized_path.strip_prefix("/api/v2/"))
+        .map_or_else(
+            || route.normalized_path.to_owned(),
+            |versioned_path| format!("/api/{versioned_path}"),
+        );
+    // The historical dispatcher future is intentionally retained for
+    // differential coverage, but its monolithic match can overflow the
+    // default Tokio worker stack. Keep this high-frequency read on a small
+    // entry path so production and focused tests can use the real share tree.
+    if method == "GET" && normalized_path == "/api/library/items/browser" {
+        let span = tracing::RequestSpan::new(
+            method.to_owned(),
+            path.to_owned(),
+            None,
+            headers
+                .remote_addr
+                .map(|address| address.ip().to_string()),
+        );
+        tracing::set_request_span(span);
+
+        if request_uses_revoked_jwt(state, authorization).await {
+            tracing::complete_request_span(401);
+            return Ok(routing::unauthorized_response());
+        }
+        if let Err(error) =
+            routing::check_route_auth(&state.config, method, route.path, authorization, &headers)
+        {
+            let status = if error == "unauthorized" { 401 } else { 403 };
+            tracing::complete_request_span(status);
+            return Ok(match error {
+                "unauthorized" => routing::unauthorized_response(),
+                "csrf" => routing::forbidden_response("cross-site mutating request rejected"),
+                _ => routing::forbidden_response("insufficient permissions for this route"),
+            });
+        }
+
+        let response = library_browser_response(state, route.query).await;
+        let status_code = response
+            .status
+            .split(' ')
+            .next()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(500);
+        tracing::complete_request_span(status_code);
+        return Ok(response);
+    }
+
+    if normalized_path.starts_with("/api/streams/")
+        && (matches!(method, "GET" | "HEAD")
+            || (method == "POST" && normalized_path.ends_with("/ticket")))
+    {
+        return route_dispatch::route_http_request_with_headers(
+            method,
+            path,
+            authorization,
+            body,
+            state,
+            &headers,
+        )
+        .await;
+    }
+
+    Box::pin(legacy_route_http_request_with_headers_inner(
+        method,
+        path,
+        authorization,
+        body,
+        state,
+        headers,
+    ))
+    .await
+}
+
+#[cfg(feature = "legacy-route-dispatch")]
+async fn legacy_route_http_request_with_headers_inner(
     method: &str,
     path: &str,
     authorization: Option<&str>,
@@ -29067,38 +29416,7 @@ async fn route_http_request_with_headers(
             Ok(routing::ok_response(json))
         }
         ("GET", "/api/library/items/browser") => {
-            let library = state.library.read().await;
-            let path = query_parameter(route.query, "path").unwrap_or_default();
-            let limit = query_parameter(route.query, "limit")
-                .and_then(|value| value.parse::<usize>().ok())
-                .unwrap_or(100)
-                .clamp(1, 1_000);
-            let offset = query_parameter(route.query, "offset")
-                .and_then(|value| value.parse::<usize>().ok())
-                .unwrap_or(0);
-            let total_files = library.records.len();
-            let files = library
-                .records
-                .iter()
-                .skip(offset)
-                .take(limit)
-                .map(|record| serde_json::from_str::<serde_json::Value>(&record.json()).unwrap_or_default())
-                .collect::<Vec<_>>();
-            let returned_files = files.len();
-            let json = serde_json::json!({
-                "path": path,
-                "breadcrumbs": [],
-                "directories": [],
-                "files": files,
-                "totalFiles": total_files,
-                "totalDirectories": 0,
-                "offset": offset,
-                "limit": limit,
-                "hasMore": offset.saturating_add(returned_files) < total_files,
-                "duplicatesRemoved": 0,
-            }).to_string();
-            drop(library);
-            Ok(routing::ok_response(json))
+            Ok(library_browser_response(state, route.query).await)
         }
         ("POST", "/api/library/items") => {
             let artist = extract_json_string_field(body, "artist").unwrap_or_default();
@@ -35451,7 +35769,7 @@ async fn route_http_request_with_headers(
                  .expect("guarded share-grant backfill path");
              let versioned = route.path.starts_with("/api/v0/");
              if versioned {
-                 let delegated_authorized = if let Some(token) = request_share_token(authorization, headers) {
+                 let delegated_authorized = if let Some(token) = request_share_token(authorization, &headers) {
                      let mut tokens = state.share_access_tokens.write().await;
                      let valid = tokens
                          .validate(&token)
@@ -35805,17 +36123,13 @@ async fn route_http_request_with_headers(
             if ticket.is_some() && ticket_record.is_none() {
                 return Ok(routing::unauthorized_response());
             }
+            let share = find_shared_entry_for_content(state, None, Some(&stream_id)).await;
             let transfers = state.transfers.read().await;
-            let shares = state.shares.read().await;
             let transfer = stream_id
                 .strip_prefix("transfer-")
                 .and_then(|id| id.parse::<u64>().ok())
                 .and_then(|id| transfers.entries.iter().find(|entry| entry.id == id));
-            let share = shares.entries.iter().find(|entry| {
-                entry.filename == stream_id || stable_content_hash(&entry.filename, entry.size).to_string() == stream_id
-            });
             if !api_authorized && ticket_record.is_none() {
-                drop(shares);
                 drop(transfers);
                 return Ok(routing::unauthorized_response());
             }
@@ -35836,7 +36150,6 @@ async fn route_http_request_with_headers(
                     "extension": entry.extension,
                 })),
             }).to_string();
-            drop(shares);
             drop(transfers);
             Ok(routing::ok_response(body))
         }
@@ -51461,10 +51774,21 @@ async fn create_preview_stream_ticket(
     if mesh_contract && content_id.as_deref().is_none_or(str::is_empty) {
         return Err("contentId is required".to_owned());
     }
+    let share = find_shared_entry_for_content(
+        state,
+        Some(&filename),
+        content_id.as_deref(),
+    )
+    .await;
+    let content_type_filename = share
+        .as_ref()
+        .map(|entry| entry.filename.as_str())
+        .unwrap_or(filename.as_str());
     let content_type = if mesh_contract {
-        mesh_preview_stream_content_type(&filename).unwrap_or("application/octet-stream")
+        mesh_preview_stream_content_type(content_type_filename)
+            .unwrap_or("application/octet-stream")
     } else {
-        preview_stream_content_type(&filename)
+        preview_stream_content_type(content_type_filename)
     };
     if content_type == "application/octet-stream" {
         return Err(if mesh_contract {
@@ -51503,15 +51827,8 @@ async fn create_preview_stream_ticket(
         None => None,
     };
 
-    let shares = state.shares.read().await;
     let transfers = state.transfers.read().await;
     let searches = state.searches.read().await;
-    let share = shares.entries.iter().find(|entry| {
-        let hash = stable_content_hash(&entry.filename, entry.size).to_string();
-        entry.filename == filename
-            || content_id.as_deref() == Some(entry.filename.as_str())
-            || content_id.as_deref() == Some(hash.as_str())
-    });
     let transfer = transfers.entries.iter().find(|entry| {
         entry.filename == filename
             || content_id
@@ -51530,11 +51847,13 @@ async fn create_preview_stream_ticket(
     });
 
     let resolved_filename = share
+        .as_ref()
         .map(|entry| entry.filename.clone())
         .or_else(|| transfer.map(|entry| entry.filename.clone()))
         .or_else(|| search_result.map(|entry| entry.filename.clone()))
         .unwrap_or(filename);
     let resolved_size = share
+        .as_ref()
         .map(|entry| entry.size)
         .or_else(|| transfer.and_then(|entry| entry.size))
         .or_else(|| search_result.map(|entry| entry.size))
@@ -51558,7 +51877,6 @@ async fn create_preview_stream_ticket(
     };
     drop(searches);
     drop(transfers);
-    drop(shares);
 
     let remote_overlay = if family == "mesh"
         && remote_mesh.is_none()
@@ -54686,11 +55004,13 @@ async fn extended_controller_mutation_response(
                         || format!("content:music:recording:{}", entry.music_brainz_id)
                             .eq_ignore_ascii_case(&decoded_content_id)
                 });
-            let share_exists = state.shares.read().await.entries.iter().any(|entry| {
-                entry.filename == decoded_content_id
-                    || stable_content_hash(&entry.filename, entry.size).to_string()
-                        == decoded_content_id
-            });
+            let share_exists = find_shared_entry_for_content(
+                state,
+                None,
+                Some(&decoded_content_id),
+            )
+            .await
+            .is_some();
             if !descriptor_exists && !discovery_exists && !share_exists {
                 return routing::not_found_response();
             }
@@ -78667,19 +78987,13 @@ async fn open_primary_stream_file(
         None
     };
 
-    let shared_filename = {
-        let shares = state.shares.read().await;
-        shares
-            .entries
-            .iter()
-            .find(|entry| {
-                let hash = stable_content_hash(&entry.filename, entry.size).to_string();
-                entry.filename == stream_id
-                    || hash == stream_id
-                    || ticket_filename.as_deref() == Some(entry.filename.as_str())
-            })
-            .map(|entry| entry.filename.clone())
-    };
+    let shared_filename = find_shared_entry_for_content(
+        state,
+        ticket_filename.as_deref(),
+        Some(stream_id),
+    )
+    .await
+    .map(|entry| entry.filename);
     if let Some(filename) = shared_filename {
         if let Some(shared) = find_shared_local_file(state, &filename).await {
             let file = open_shared_local_file(state, &shared.local_path).await?;
