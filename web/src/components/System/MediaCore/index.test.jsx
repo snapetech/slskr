@@ -11,6 +11,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('../../../lib/mediacore', () => ({
   getConflictStrategies: vi.fn(),
   getContentIdStats: vi.fn(),
+  getContentOpinions: vi.fn(),
+  getChannels: vi.fn(),
   searchContent: vi.fn(),
   searchMessages: vi.fn(),
   getSupportedHashAlgorithms: vi.fn(),
@@ -36,6 +38,8 @@ describe('MediaCore', () => {
       descriptions: {},
     });
     mediacore.getConflictStrategies.mockResolvedValue([]);
+    mediacore.getChannels.mockResolvedValue([]);
+    mediacore.getContentOpinions.mockResolvedValue([]);
     mediacore.searchContent.mockResolvedValue([]);
     mediacore.searchMessages.mockResolvedValue([]);
   });
@@ -149,5 +153,99 @@ describe('MediaCore', () => {
     expect(await screen.findByTestId('content-search-error')).toHaveTextContent(
       'Content search unavailable',
     );
+  });
+
+  it('retains message search results when a same-query refresh fails', async () => {
+    mediacore.searchMessages
+      .mockResolvedValueOnce([
+        {
+          body: 'retained message',
+          channelId: 'channel-1',
+          senderPeerId: 'peer-1',
+          timestampUnixMs: 1_700_000_000_000,
+        },
+      ])
+      .mockRejectedValueOnce(new Error('Message search refresh unavailable'));
+
+    render(<MediaCore />);
+    await screen.findByText('MediaCore ContentID Registry');
+
+    const searchInput = screen.getByPlaceholderText('Search messages...');
+    fireEvent.change(searchInput, { target: { value: 'hello' } });
+    fireEvent.click(screen.getAllByRole('button', { name: 'Search' })[0]);
+    expect(await screen.findByText('retained message')).toBeInTheDocument();
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Search' })[0]);
+
+    expect(
+      await screen.findByTestId('message-search-error'),
+    ).toHaveTextContent('Message search refresh unavailable');
+    expect(screen.getByText('retained message')).toBeInTheDocument();
+    expect(
+      screen.getByText('Showing last successfully loaded results.'),
+    ).toBeInTheDocument();
+  });
+
+  it('retains channels and reports a failed channel refresh', async () => {
+    mediacore.getChannels
+      .mockResolvedValueOnce([
+        { channelId: 'channel-1', kind: 'General', name: 'General' },
+      ])
+      .mockRejectedValueOnce(new Error('Channel refresh unavailable'));
+
+    render(<MediaCore />);
+    await screen.findByText('MediaCore ContentID Registry');
+
+    fireEvent.change(screen.getByPlaceholderText('Pod ID for channel management'), {
+      target: { value: 'pod-1' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Load Channels' }));
+    expect(await screen.findByText(/ID: channel-1/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Load Channels' }));
+
+    expect(
+      await screen.findByTestId('media-core-channels-error'),
+    ).toHaveTextContent('Channel refresh unavailable');
+    expect(screen.getByText(/ID: channel-1/)).toBeInTheDocument();
+    expect(
+      screen.getByText('Showing last successfully loaded channels.'),
+    ).toBeInTheDocument();
+  });
+
+  it('retains opinions and reports a failed opinion refresh', async () => {
+    mediacore.getContentOpinions
+      .mockResolvedValueOnce([
+        {
+          note: 'trusted source',
+          score: 9,
+          senderPeerId: 'peer-1',
+          variantHash: 'variant-123456',
+        },
+      ])
+      .mockRejectedValueOnce(new Error('Opinion refresh unavailable'));
+
+    render(<MediaCore />);
+    await screen.findByText('MediaCore ContentID Registry');
+
+    fireEvent.change(screen.getByPlaceholderText('Pod ID'), {
+      target: { value: 'pod-1' },
+    });
+    fireEvent.change(
+      screen.getByPlaceholderText('Content ID (e.g., content:audio:album:mb-id)'),
+      { target: { value: 'content-1' } },
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Get Opinions' }));
+    expect(await screen.findByText(/variant-\.\.\./)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Get Opinions' }));
+
+    expect(
+      await screen.findByTestId('media-core-opinions-error'),
+    ).toHaveTextContent('Opinion refresh unavailable');
+    expect(screen.getByText(/variant-\.\.\./)).toBeInTheDocument();
+    expect(
+      screen.getByText('Showing last successfully loaded opinions.'),
+    ).toBeInTheDocument();
   });
 });

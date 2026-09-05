@@ -42,6 +42,9 @@ const useMountedState = (mountedRef, initialValue) => {
   return [value, setMountedValue];
 };
 
+const opinionQueryKey = (podId, contentId) =>
+  JSON.stringify([podId.trim(), contentId.trim()]);
+
 const MediaCore = () => {
   const mountedRef = useRef(false);
 
@@ -293,6 +296,10 @@ const MediaCore = () => {
   const [vacuumLoading, setVacuumLoading] = useMountedState(mountedRef, false);
   const [searchQuery, setSearchQuery] = useMountedState(mountedRef, '');
   const [searchResults, setSearchResults] = useMountedState(mountedRef, null);
+  const [searchResultsQuery, setSearchResultsQuery] = useMountedState(
+    mountedRef,
+    null,
+  );
   const [searchError, setSearchError] = useMountedState(mountedRef, null);
   const [searchLoading, setSearchLoading] = useMountedState(mountedRef, false);
 
@@ -305,6 +312,11 @@ const MediaCore = () => {
 
   // Pod Channel Management states
   const [channels, setChannels] = useMountedState(mountedRef, []);
+  const [channelsLoadedFor, setChannelsLoadedFor] = useMountedState(
+    mountedRef,
+    null,
+  );
+  const [channelsError, setChannelsError] = useMountedState(mountedRef, null);
   const [channelsLoading, setChannelsLoading] = useMountedState(mountedRef, false);
   const [createChannelLoading, setCreateChannelLoading] = useMountedState(mountedRef, false);
   const [updateChannelLoading, setUpdateChannelLoading] = useMountedState(mountedRef, false);
@@ -337,6 +349,11 @@ const MediaCore = () => {
   const [opinionScore, setOpinionScore] = useMountedState(mountedRef, 5);
   const [opinionNote, setOpinionNote] = useMountedState(mountedRef, '');
   const [opinions, setOpinions] = useMountedState(mountedRef, []);
+  const [opinionsLoadedFor, setOpinionsLoadedFor] = useMountedState(
+    mountedRef,
+    null,
+  );
+  const [opinionsError, setOpinionsError] = useMountedState(mountedRef, null);
   const [opinionStatistics, setOpinionStatistics] = useMountedState(mountedRef, null);
   const [publishOpinionLoading, setPublishOpinionLoading] = useMountedState(mountedRef, false);
   const [getOpinionsLoading, setGetOpinionsLoading] = useMountedState(mountedRef, false);
@@ -1900,21 +1917,24 @@ const MediaCore = () => {
   };
 
   const handleSearchMessages = async () => {
-    if (!searchQuery.trim()) return;
+    const requestedQuery = searchQuery.trim();
+    if (!requestedQuery) return;
 
     try {
       setSearchLoading(true);
       setSearchError(null);
-      setSearchResults(null);
       const result = await mediacore.searchMessages(
         'all',
-        searchQuery,
+        requestedQuery,
         null,
         50,
       ); // Search all pods
+      if (!Array.isArray(result)) {
+        throw new Error('Invalid message search response');
+      }
       setSearchResults(result);
+      setSearchResultsQuery(requestedQuery);
     } catch (error_) {
-      setSearchResults([]);
       setSearchError(toDisplayError(error_, 'Failed to search messages'));
       toast.error(`Failed to search messages: ${toDisplayError(error_)}`);
     } finally {
@@ -1977,18 +1997,25 @@ const MediaCore = () => {
 
   // Pod Channel Management handlers
   const handleGetChannels = async () => {
-    if (!channelPodId.trim()) {
+    const requestedPodId = channelPodId.trim();
+    if (!requestedPodId) {
       toast.error('Pod ID is required');
       return;
     }
 
     try {
       setChannelsLoading(true);
-      const result = await mediacore.getChannels(channelPodId);
+      setChannelsError(null);
+      const result = await mediacore.getChannels(requestedPodId);
+      if (!Array.isArray(result)) {
+        throw new Error('Invalid channels response');
+      }
       setChannels(result);
+      setChannelsLoadedFor(requestedPodId);
     } catch (error_) {
-      toast.error(`Failed to get channels: ${toDisplayError(error_)}`);
-      setChannels([]);
+      const message = toDisplayError(error_, 'Failed to get channels');
+      setChannelsError(message);
+      toast.error(`Failed to get channels: ${message}`);
     } finally {
       setChannelsLoading(false);
     }
@@ -2256,21 +2283,29 @@ const MediaCore = () => {
   };
 
   const handleGetOpinions = async () => {
-    if (!opinionPodId.trim() || !opinionContentId.trim()) {
+    const requestedPodId = opinionPodId.trim();
+    const requestedContentId = opinionContentId.trim();
+    if (!requestedPodId || !requestedContentId) {
       toast.error('Pod ID and Content ID are required');
       return;
     }
 
     try {
       setGetOpinionsLoading(true);
+      setOpinionsError(null);
       const result = await mediacore.getContentOpinions(
-        opinionPodId.trim(),
-        opinionContentId.trim(),
+        requestedPodId,
+        requestedContentId,
       );
+      if (!Array.isArray(result)) {
+        throw new Error('Invalid opinions response');
+      }
       setOpinions(result);
+      setOpinionsLoadedFor(opinionQueryKey(requestedPodId, requestedContentId));
     } catch (error_) {
-      toast.error(`Failed to get opinions: ${toDisplayError(error_)}`);
-      setOpinions([]);
+      const message = toDisplayError(error_, 'Failed to get opinions');
+      setOpinionsError(message);
+      toast.error(`Failed to get opinions: ${message}`);
     } finally {
       setGetOpinionsLoading(false);
     }
@@ -2423,6 +2458,11 @@ const MediaCore = () => {
   const selectedPodWorkflow = podWorkflowSections.find(
     (section) => section.href.slice(1) === podWorkflowFilter,
   );
+  const hasCurrentSearchResults =
+    Array.isArray(searchResults) && searchResultsQuery === searchQuery.trim();
+  const hasCurrentChannels = channelsLoadedFor === channelPodId.trim();
+  const hasCurrentOpinions =
+    opinionsLoadedFor === opinionQueryKey(opinionPodId, opinionContentId);
 
   if (loading && !stats) {
     return (
@@ -7177,7 +7217,14 @@ const MediaCore = () => {
                     Search
                   </Button>
                 }
-                onChange={(e) => setSearchQuery(e.target.value)}
+                onChange={(e) => {
+                  const nextQuery = e.target.value;
+                  setSearchQuery(nextQuery);
+                  if (nextQuery.trim() !== searchQuery.trim()) {
+                    setSearchError(null);
+                    setSearchResultsQuery(null);
+                  }
+                }}
                 placeholder="Search messages..."
                 style={{ marginBottom: '1em', width: '100%' }}
                 value={searchQuery}
@@ -7190,10 +7237,13 @@ const MediaCore = () => {
                   size="small"
                 >
                   {searchError}
+                  {hasCurrentSearchResults && searchResults.length > 0 && (
+                    <div>Showing last successfully loaded results.</div>
+                  )}
                 </Message>
               )}
 
-              {searchResults && searchResults.length > 0 && !searchError && (
+              {hasCurrentSearchResults && searchResults.length > 0 && (
                 <Message size="small">
                   <Message.Header>
                     Search Results ({searchResults.length})
@@ -7222,7 +7272,7 @@ const MediaCore = () => {
                 </Message>
               )}
 
-              {searchResults &&
+              {hasCurrentSearchResults &&
                 searchResults.length === 0 &&
                 searchQuery &&
                 !searchError && (
@@ -7404,11 +7454,31 @@ const MediaCore = () => {
                     Load Channels
                   </Button>
                 }
-                onChange={(e) => setChannelPodId(e.target.value)}
+                onChange={(e) => {
+                  const nextPodId = e.target.value;
+                  setChannelPodId(nextPodId);
+                  if (nextPodId.trim() !== channelPodId.trim()) {
+                    setChannelsError(null);
+                    setChannelsLoadedFor(null);
+                  }
+                }}
                 placeholder="Pod ID for channel management"
                 style={{ marginBottom: '1em', width: '100%' }}
                 value={channelPodId}
               />
+
+              {channelsError && (
+                <Message
+                  data-testid="media-core-channels-error"
+                  negative
+                  size="small"
+                >
+                  {channelsError}
+                  {hasCurrentChannels && channels.length > 0 && (
+                    <div>Showing last successfully loaded channels.</div>
+                  )}
+                </Message>
+              )}
 
               {/* Create New Channel */}
               <Header size="tiny">Create New Channel</Header>
@@ -7445,7 +7515,7 @@ const MediaCore = () => {
               />
 
               {/* Channels List */}
-              {channels.length > 0 && (
+              {hasCurrentChannels && channels.length > 0 && (
                 <div>
                   <Header size="tiny">Existing Channels</Header>
                   <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
@@ -7548,7 +7618,11 @@ const MediaCore = () => {
                 </div>
               )}
 
-              {channels.length === 0 && channelPodId && !channelsLoading && (
+              {hasCurrentChannels &&
+                channels.length === 0 &&
+                channelPodId &&
+                !channelsLoading &&
+                !channelsError && (
                 <Message
                   info
                   size="small"
@@ -7754,7 +7828,17 @@ const MediaCore = () => {
 
               {/* Pod Selection */}
               <Input
-                onChange={(e) => setOpinionPodId(e.target.value)}
+                onChange={(e) => {
+                  const nextPodId = e.target.value;
+                  setOpinionPodId(nextPodId);
+                  if (
+                    opinionQueryKey(nextPodId, opinionContentId) !==
+                    opinionQueryKey(opinionPodId, opinionContentId)
+                  ) {
+                    setOpinionsError(null);
+                    setOpinionsLoadedFor(null);
+                  }
+                }}
                 placeholder="Pod ID"
                 style={{ marginBottom: '1em', width: '100%' }}
                 value={opinionPodId}
@@ -7773,11 +7857,34 @@ const MediaCore = () => {
               {/* Content Opinions */}
               <Header size="tiny">Content Opinions</Header>
               <Input
-                onChange={(e) => setOpinionContentId(e.target.value)}
+                onChange={(e) => {
+                  const nextContentId = e.target.value;
+                  setOpinionContentId(nextContentId);
+                  if (
+                    opinionQueryKey(opinionPodId, nextContentId) !==
+                    opinionQueryKey(opinionPodId, opinionContentId)
+                  ) {
+                    setOpinionsError(null);
+                    setOpinionsLoadedFor(null);
+                  }
+                }}
                 placeholder="Content ID (e.g., content:audio:album:mb-id)"
                 style={{ marginBottom: '1em', width: '100%' }}
                 value={opinionContentId}
               />
+
+              {opinionsError && (
+                <Message
+                  data-testid="media-core-opinions-error"
+                  negative
+                  size="small"
+                >
+                  {opinionsError}
+                  {hasCurrentOpinions && opinions.length > 0 && (
+                    <div>Showing last successfully loaded opinions.</div>
+                  )}
+                </Message>
+              )}
 
               <div style={{ marginBottom: '1em' }}>
                 <Button
@@ -7827,7 +7934,7 @@ const MediaCore = () => {
               )}
 
               {/* Opinions List */}
-              {opinions.length > 0 && (
+              {hasCurrentOpinions && opinions.length > 0 && (
                 <div style={{ marginBottom: '1em' }}>
                   <Header size="tiny">Opinions ({opinions.length})</Header>
                   {opinions.map((opinion, index) => (
@@ -7860,6 +7967,16 @@ const MediaCore = () => {
                     </Card>
                   ))}
                 </div>
+              )}
+
+              {hasCurrentOpinions &&
+                opinions.length === 0 &&
+                opinionContentId &&
+                !getOpinionsLoading &&
+                !opinionsError && (
+                <Message info size="small">
+                  No opinions found for {opinionContentId}.
+                </Message>
               )}
 
               {/* Publish Opinion */}
