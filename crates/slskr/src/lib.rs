@@ -51650,8 +51650,8 @@ fn relay_upload_error_response(error: &str) -> HttpResponse {
 }
 
 fn cleanup_relay_upload(path: &Path) {
-    if let Err(error) = fs::remove_file(path) {
-        eprintln!("relay upload cleanup failed for {}: {error}", path.display());
+    if fs::remove_file(path).is_err() {
+        eprintln!("relay upload cleanup failed");
     }
 }
 

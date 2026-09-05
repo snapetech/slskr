@@ -848,7 +848,7 @@ export class SlskrClient {
   }
 
   private async deleteAuth(path: string): Promise<void> {
-    await this.request('DELETE', this.baseUrl + path, {}, true);
+    await this.request('DELETE', this.baseUrl + path, undefined, true);
   }
 
   // =========================================================================

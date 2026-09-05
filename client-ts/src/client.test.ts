@@ -480,6 +480,10 @@ describe('SlskrClient request lifecycle', () => {
     expect(usersRequest?.url).toContain('offset=2');
     expect(requests.some((request) => request.url.endsWith('/api/users/alice%2Fbob/info'))).toBe(true);
     expect(requests.some((request) => request.url.endsWith('/api/rooms/lounge%20room/join'))).toBe(true);
+    const leaveRequest = requests.find((request) => (
+      request.url.endsWith('/api/rooms/lounge%20room/join') && request.init?.method === 'DELETE'
+    ));
+    expect(leaveRequest?.init?.body).toBeUndefined();
   });
 
   it('normalizes the daemon create-search identifier and terminal cancellation', async () => {
