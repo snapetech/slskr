@@ -21390,6 +21390,100 @@ fn shared_file_confined_open_rejects_symlinked_parent() {
     let _ = std::fs::remove_dir_all(outside);
 }
 
+#[cfg(unix)]
+#[cfg_attr(test, tokio::test)]
+#[cfg(feature = "full-controller-tests")]
+async fn mesh_sync_chunk_reads_remain_confined_to_share_roots() {
+    use std::os::unix::fs::symlink;
+    use slskr_client::mesh_sync::{
+        MeshMessageType, MeshReqChunkMessage, MeshSyncBase, MeshSyncMessage,
+    };
+
+    let unique = uuid::Uuid::new_v4().simple().to_string();
+    let root = std::env::temp_dir().join(format!(
+        "slskr-mesh-sync-share-root-{}-{unique}",
+        std::process::id()
+    ));
+    let outside = std::env::temp_dir().join(format!(
+        "slskr-mesh-sync-share-outside-{}-{unique}",
+        std::process::id()
+    ));
+    let album = root.join("album");
+    fs::create_dir_all(&album).expect("create mesh-sync share root");
+    fs::create_dir_all(&outside).expect("create mesh-sync outside directory");
+    let local_path = album.join("secret.flac");
+    let inside_bytes = b"inside-mesh-sync";
+    fs::write(&local_path, inside_bytes).expect("write mesh-sync shared file");
+    fs::write(outside.join("secret.flac"), b"outside-mesh-sync")
+        .expect("write mesh-sync outside file");
+
+    let (state, _receiver) = test_state_with_env(
+        MapEnv::default()
+            .with("SLSKR_SHARE_FIXTURE", "")
+            .with("SLSKR_SHARE_DIRS", &root.display().to_string()),
+    );
+    let (filename, size) = {
+        let shares = state.shares.read().await;
+        shares
+            .entries
+            .iter()
+            .find_map(|entry| {
+                shares
+                    .local_paths
+                    .get(&entry.filename)
+                    .filter(|path| path.as_path() == local_path.as_path())
+                    .map(|_| (entry.filename.clone(), entry.size))
+            })
+            .expect("mesh-sync fixture must be indexed")
+    };
+    let flac_key = super::content_discovery::generate_flac_key(&filename, size);
+    let signing_key = ed25519_dalek::SigningKey::from_bytes(&[67; 32]);
+    let mut request = MeshSyncMessage::ReqChunk(MeshReqChunkMessage {
+        message_type: MeshMessageType::ReqChunk,
+        base: MeshSyncBase::default(),
+        flac_key: flac_key.clone(),
+        offset: 0,
+        length: 6,
+    });
+    request
+        .sign_at(&signing_key, super::unix_timestamp_millis() as i64)
+        .expect("sign mesh-sync confined read request");
+    let response = super::mesh_sync::handle_signed_message(&state, "mesh-peer", request)
+        .await
+        .expect("mesh-sync response before path swap");
+    match response {
+        MeshSyncMessage::RespChunk(message) => assert!(message.success),
+        other => panic!("unexpected mesh-sync response before path swap: {other:?}"),
+    }
+
+    fs::rename(&album, root.join("album-real")).expect("move original mesh-sync directory");
+    symlink(&outside, &album).expect("swap mesh-sync parent with symlink");
+    let mut swapped_request = MeshSyncMessage::ReqChunk(MeshReqChunkMessage {
+        message_type: MeshMessageType::ReqChunk,
+        base: MeshSyncBase::default(),
+        flac_key,
+        offset: 0,
+        length: 6,
+    });
+    swapped_request
+        .sign_at(&signing_key, super::unix_timestamp_millis() as i64)
+        .expect("sign swapped mesh-sync read request");
+    let response = super::mesh_sync::handle_signed_message(&state, "mesh-peer", swapped_request)
+        .await
+        .expect("mesh-sync response after path swap");
+    match response {
+        MeshSyncMessage::RespChunk(message) => {
+            assert!(!message.success, "swapped share parent must fail closed");
+            assert!(message.data_base64.is_empty());
+        }
+        other => panic!("unexpected mesh-sync response after path swap: {other:?}"),
+    }
+
+    let _ = fs::remove_dir_all(root);
+    let _ = fs::remove_dir_all(outside);
+    let _ = fs::remove_dir_all(state.config.state_dir.clone());
+}
+
 #[cfg_attr(test, tokio::test)]
 #[cfg(feature = "full-controller-tests")]
 async fn transfer_start_with_peer_requests_peer_address() {

@@ -9,6 +9,7 @@ source_files=(
   crates/slskr/src/controller_tests.rs
   crates/slskr/src/event_store.rs
   crates/slskr/src/utils.rs
+  crates/slskr/src/mesh_sync.rs
 )
 http_source="crates/slskr/src/http_server.rs"
 credential_source="crates/slskr/src/credential_store.rs"
@@ -29,8 +30,11 @@ for anchor in \
   'storage directory confined open failed' \
   'scoped_storage_listing_rejects_symlinked_parent' \
   'open_shared_local_file_unix' \
+  'open_shared_local_file(state, &path)' \
   'shared directory confined open failed' \
   'shared_file_confined_open_rejects_symlinked_parent' \
+  'read_file_chunk(file, offset, length, indexed_size)' \
+  'mesh_sync_chunk_reads_remain_confined_to_share_roots' \
   'scan_share_root_unix' \
   'share_scan_does_not_follow_symlinked_directory' \
   'MAX_SHARE_SCAN_ENTRIES' \

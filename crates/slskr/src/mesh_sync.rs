@@ -4,7 +4,6 @@
 use std::{
     fs::File,
     io::{Read as _, Seek as _, SeekFrom},
-    path::PathBuf,
 };
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
@@ -338,7 +337,7 @@ async fn lookup_key(state: &super::AppState, request: MeshReqKeyMessage) -> Mesh
 }
 
 async fn read_chunk(state: &super::AppState, request: MeshReqChunkMessage) -> MeshRespChunkMessage {
-    let path = {
+    let file_info = {
         let shares = state.shares.read().await;
         shares
             .entries
@@ -348,14 +347,32 @@ async fn read_chunk(state: &super::AppState, request: MeshReqChunkMessage) -> Me
                     && super::content_discovery::generate_flac_key(&entry.filename, entry.size)
                         .eq_ignore_ascii_case(&request.flac_key)
             })
-            .and_then(|entry| shares.local_paths.get(&entry.filename).cloned())
+            .and_then(|entry| {
+                shares
+                    .local_paths
+                    .get(&entry.filename)
+                    .cloned()
+                    .map(|path| (path, entry.size))
+            })
     };
-    let Some(path) = path else {
+    let Some((path, indexed_size)) = file_info else {
         return failed_chunk(&request);
     };
+    let file = match super::open_shared_local_file(state, &path).await {
+        Ok(file) => file,
+        Err(error) => {
+            tracing::debug!(%error, "mesh-sync shared file open rejected");
+            return failed_chunk(&request);
+        }
+    };
+    if indexed_size == 0 {
+        return failed_chunk(&request);
+    }
     let offset = request.offset;
     let length = request.length;
-    let result = tokio::task::spawn_blocking(move || read_file_chunk(path, offset, length)).await;
+    let result =
+        tokio::task::spawn_blocking(move || read_file_chunk(file, offset, length, indexed_size))
+            .await;
     match result {
         Ok(Ok(data)) => MeshRespChunkMessage {
             message_type: MeshMessageType::RespChunk,
@@ -380,11 +397,19 @@ fn failed_chunk(request: &MeshReqChunkMessage) -> MeshRespChunkMessage {
     }
 }
 
-fn read_file_chunk(path: PathBuf, offset: i64, length: i32) -> Result<Vec<u8>, String> {
+fn read_file_chunk(
+    mut file: File,
+    offset: i64,
+    length: i32,
+    indexed_size: u64,
+) -> Result<Vec<u8>, String> {
     let offset = u64::try_from(offset).map_err(|_| "negative chunk offset".to_owned())?;
     let length = usize::try_from(length).map_err(|_| "invalid chunk length".to_owned())?;
-    let mut file = File::open(path).map_err(|error| error.to_string())?;
-    let size = file.metadata().map_err(|error| error.to_string())?.len();
+    let metadata = file.metadata().map_err(|error| error.to_string())?;
+    if !metadata.is_file() || metadata.len() != indexed_size {
+        return Err("shared file size changed since indexing".to_owned());
+    }
+    let size = indexed_size;
     if offset >= size {
         return Err("chunk offset is outside the file".to_owned());
     }
@@ -466,9 +491,11 @@ fn _mesh_sync_message_types_are_exhaustive(message: &MeshSyncMessage) {
 
 #[cfg(test)]
 mod tests {
+    use std::fs::File;
+
     use slskr_client::mesh_sync::MeshHashEntry;
 
-    use super::{hash_db_entry, MAX_MESH_FILE_SIZE};
+    use super::{hash_db_entry, read_file_chunk, MAX_MESH_FILE_SIZE};
 
     fn entry_with_size(flac_key: &str, size: i64) -> MeshHashEntry {
         MeshHashEntry {
@@ -505,5 +532,26 @@ mod tests {
             (MAX_MESH_FILE_SIZE + 1) as i64,
         ))
         .is_none());
+    }
+
+    #[test]
+    fn mesh_chunk_reader_requires_the_indexed_regular_file_size() {
+        let path = std::env::temp_dir().join(format!(
+            "slskr-mesh-sync-read-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::write(&path, b"mesh-sync").expect("write mesh-sync read fixture");
+
+        let file = File::open(&path).expect("open mesh-sync read fixture");
+        assert_eq!(
+            read_file_chunk(file, 2, 4, 9).expect("read indexed chunk"),
+            b"sh-s"
+        );
+
+        let file = File::open(&path).expect("reopen mesh-sync read fixture");
+        assert!(read_file_chunk(file, 0, 4, 8).is_err());
+
+        let _ = std::fs::remove_file(path);
     }
 }
