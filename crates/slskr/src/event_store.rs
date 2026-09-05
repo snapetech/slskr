@@ -96,6 +96,26 @@ impl EventRecord {
     }
 }
 
+fn matches_controller_filter(record: &EventRecord, filter: &crate::RecordListFilter) -> bool {
+    filter
+        .kind
+        .as_deref()
+        .is_none_or(|kind| record.kind == kind)
+        && filter
+            .topic
+            .as_deref()
+            .is_none_or(|topic| record.topic() == topic)
+        && filter.q.as_deref().is_none_or(|q| {
+            record.kind.to_ascii_lowercase().contains(q)
+                || record.topic().contains(q)
+                || record.resource.to_ascii_lowercase().contains(q)
+                || record
+                    .detail
+                    .as_deref()
+                    .is_some_and(|detail| detail.to_ascii_lowercase().contains(q))
+        })
+}
+
 fn topic_for_event_kind(kind: &str) -> &'static str {
     match kind.split('.').next().unwrap_or(kind) {
         "application" | "session" => "application",
@@ -231,29 +251,7 @@ impl EventStore {
         let records = self
             .records
             .iter()
-            .filter(|record| {
-                filter
-                    .kind
-                    .as_deref()
-                    .is_none_or(|kind| record.kind == kind)
-            })
-            .filter(|record| {
-                filter
-                    .topic
-                    .as_deref()
-                    .is_none_or(|topic| record.topic() == topic)
-            })
-            .filter(|record| {
-                filter.q.as_deref().is_none_or(|q| {
-                    record.kind.to_ascii_lowercase().contains(q)
-                        || record.topic().contains(q)
-                        || record.resource.to_ascii_lowercase().contains(q)
-                        || record
-                            .detail
-                            .as_deref()
-                            .is_some_and(|detail| detail.to_ascii_lowercase().contains(q))
-                })
-            })
+            .filter(|record| matches_controller_filter(record, &filter))
             .collect::<Vec<_>>();
         let filtered_count = records.len();
         let entries = records
@@ -276,34 +274,20 @@ impl EventStore {
         )
     }
 
+    pub(crate) fn controller_total_count(&self, query: Option<&str>) -> usize {
+        let filter = crate::RecordListFilter::from_query(query);
+        self.records
+            .iter()
+            .filter(|record| matches_controller_filter(record, &filter))
+            .count()
+    }
+
     pub(crate) fn controller_json(&self, query: Option<&str>) -> String {
         let filter = crate::RecordListFilter::from_query(query);
         let entries = self
             .records
             .iter()
-            .filter(|record| {
-                filter
-                    .kind
-                    .as_deref()
-                    .is_none_or(|kind| record.kind == kind)
-            })
-            .filter(|record| {
-                filter
-                    .topic
-                    .as_deref()
-                    .is_none_or(|topic| record.topic() == topic)
-            })
-            .filter(|record| {
-                filter.q.as_deref().is_none_or(|q| {
-                    record.kind.to_ascii_lowercase().contains(q)
-                        || record.topic().contains(q)
-                        || record.resource.to_ascii_lowercase().contains(q)
-                        || record
-                            .detail
-                            .as_deref()
-                            .is_some_and(|detail| detail.to_ascii_lowercase().contains(q))
-                })
-            })
+            .filter(|record| matches_controller_filter(record, &filter))
             .rev()
             .skip(filter.offset)
             .take(filter.limit.unwrap_or(usize::MAX))
@@ -327,5 +311,18 @@ mod tests {
             serde_json::from_str(&store.json(None)).expect("event records must be valid JSON");
         assert_eq!(parsed["entries"][0]["kind"], kind);
         assert!(parsed["entries"][0].get("injected").is_none());
+    }
+
+    #[test]
+    fn controller_total_count_ignores_paging_but_applies_filters() {
+        let mut store = EventStore::new(10);
+        store.record("search.started", "one", Some("ambient".to_owned()));
+        store.record("transfer.completed", "two", Some("ambient".to_owned()));
+        store.record("search.failed", "three", Some("noise".to_owned()));
+
+        assert_eq!(store.controller_total_count(Some("limit=1&offset=1")), 3);
+        assert_eq!(store.controller_total_count(Some("topic=searches")), 2);
+        assert_eq!(store.controller_total_count(Some("q=ambient")), 2);
+        assert_eq!(store.controller_total_count(Some("kind=search.started")), 1);
     }
 }

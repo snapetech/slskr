@@ -17501,6 +17501,52 @@ async fn events_api_records_mutating_workflows() {
 
 #[cfg_attr(test, tokio::test)]
 #[cfg(feature = "full-controller-tests")]
+async fn events_controller_emits_filtered_total_count_header() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let (state, _receiver) =
+        test_state_with_env(MapEnv::default().with("SLSKR_AUTH_DISABLED", "true"));
+    {
+        let mut events = state.events.write().await;
+        events.record("search.started", "one", Some("ambient".to_owned()));
+        events.record("search.completed", "two", Some("ambient".to_owned()));
+        events.record("transfer.completed", "three", Some("ambient".to_owned()));
+    }
+
+    let (mut client, server) = tokio::io::duplex(1024 * 1024);
+    let task = tokio::spawn(super::handle_http_stream(
+        server,
+        Some("127.0.0.1:1".parse().expect("local test peer")),
+        false,
+        state,
+    ));
+    client
+        .write_all(
+            b"GET /api/v0/events?topic=searches&limit=1 HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+        )
+        .await
+        .expect("write events pagination request");
+    let mut response = Vec::new();
+    client
+        .read_to_end(&mut response)
+        .await
+        .expect("read events pagination response");
+    task.await
+        .expect("events pagination HTTP task")
+        .expect("events pagination HTTP response");
+
+    let response = String::from_utf8(response).expect("events response is UTF-8");
+    let (headers, body) = response
+        .split_once("\r\n\r\n")
+        .expect("events response header boundary");
+    assert!(headers.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(headers.contains("X-Total-Count: 2\r\n"));
+    let events = serde_json::from_str::<serde_json::Value>(body).expect("events JSON");
+    assert_eq!(events.as_array().map(Vec::len), Some(1));
+}
+
+#[cfg_attr(test, tokio::test)]
+#[cfg(feature = "full-controller-tests")]
 async fn webhook_registration_rejects_invalid_events_and_caps_count() {
     let (state, _receiver) = test_state();
 

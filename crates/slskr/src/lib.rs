@@ -89523,9 +89523,32 @@ where
         } else {
             ""
         };
+        let total_count_hdr = if method == "GET"
+            && response.status == "200 OK"
+            && matches!(
+                path,
+                "/api/events"
+                    | "/api/events/slskd"
+                    | "/api/v0/events"
+                    | "/api/v0/events/slskd"
+            ) {
+            let events = state.events.read().await;
+            format!(
+                "X-Total-Count: {}\r\n",
+                events.controller_total_count(req.query.as_deref())
+            )
+        } else {
+            String::new()
+        };
         let extra = format!(
-            "{}{}{}{}{}X-Request-ID: {}\r\n",
-            cache_hdr, etag_hdr, cors_str, location_hdr, metrics_authenticate_hdr, request_id
+            "{}{}{}{}{}{}X-Request-ID: {}\r\n",
+            cache_hdr,
+            etag_hdr,
+            cors_str,
+            location_hdr,
+            metrics_authenticate_hdr,
+            total_count_hdr,
+            request_id
         );
 
         if let Some(stream) = stream_file {

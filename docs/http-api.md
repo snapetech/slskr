@@ -683,6 +683,9 @@ write through to the durable `events` table.
 ]
 ```
 
+The response includes `X-Total-Count`, containing the number of events that
+match the supplied filters before `limit` and `offset` are applied.
+
 #### `GET /api/events/records`
 
 Get historical events with the slskr metadata envelope used by the dashboard.
