@@ -11,6 +11,8 @@ source_files=(
   crates/slskr/src/utils.rs
   crates/slskr/src/mesh_sync.rs
   crates/slskr/src/bloom_filter.rs
+  crates/slskr/src/multisource.rs
+  crates/slskr/src/focused_controller_tests.rs
 )
 http_source="crates/slskr/src/http_server.rs"
 credential_source="crates/slskr/src/credential_store.rs"
@@ -106,6 +108,8 @@ for anchor in \
   'folder_browse_parsers_reject_excessive_wire_records' \
   'MAX_BLOOM_FILTER_BYTES' \
   'filter_rejects_unbounded_precision_requests' \
+  'validate_file_size_and_chunk_size' \
+  'versioned_swarm_rejects_oversized_transfer_limits_before_discovery' \
   'browse_store_bounds_records_and_entries_but_updates_existing_users' \
   'MAX_MESSAGE_RECORDS' \
   'message_store_evicts_oldest_records_at_limit' \

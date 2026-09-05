@@ -58755,6 +58755,10 @@ async fn multisource_versioned_swarm_response(
         .and_then(serde_json::Value::as_u64)
         .filter(|size| *size > 0)
         .unwrap_or(multisource::DEFAULT_CHUNK_SIZE);
+    let chunk_size = match multisource::validate_file_size_and_chunk_size(size, chunk_size) {
+        Ok(chunk_size) => chunk_size,
+        Err(error) => return routing::bad_request_response(&error),
+    };
 
     let expected_hash_value = payload
         .get("expectedHash")
@@ -58778,6 +58782,9 @@ async fn multisource_versioned_swarm_response(
         .flat_map(|record| record.results.iter())
         .filter(|result| result.size == size && filename_matches(result))
     {
+        if source_names.len() >= multisource::MAX_SOURCES {
+            break;
+        }
         let Some(username) = result.peer_username.as_deref() else {
             continue;
         };

@@ -25,7 +25,7 @@ use crate::utils::{is_blocked_outbound_ipv4, is_blocked_outbound_ipv6};
 pub const DEFAULT_CHUNK_SIZE: u64 = 512 * 1024;
 const MIN_CHUNK_SIZE: u64 = 64 * 1024;
 const MAX_CHUNK_SIZE: u64 = 8 * 1024 * 1024;
-const MAX_SOURCES: usize = 16;
+pub const MAX_SOURCES: usize = 16;
 const MAX_CHUNKS: u64 = 65_536;
 const MAX_FILE_SIZE: u64 = 16 * 1024 * 1024 * 1024;
 const MAX_FILENAME_BYTES: usize = 4 * 1024;
@@ -126,6 +126,29 @@ where
     } else {
         value as u64
     })
+}
+
+pub fn validate_file_size_and_chunk_size(file_size: u64, chunk_size: u64) -> Result<u64, String> {
+    if file_size == 0 {
+        return Err("size is required (exact file size in bytes)".to_owned());
+    }
+    if file_size > MAX_FILE_SIZE {
+        return Err(format!("size exceeds the {MAX_FILE_SIZE} byte limit"));
+    }
+    let chunk_size = if chunk_size == 0 {
+        DEFAULT_CHUNK_SIZE
+    } else {
+        chunk_size
+    };
+    if !(MIN_CHUNK_SIZE..=MAX_CHUNK_SIZE).contains(&chunk_size) {
+        return Err(format!(
+            "chunkSize must be between {MIN_CHUNK_SIZE} and {MAX_CHUNK_SIZE} bytes"
+        ));
+    }
+    if file_size.div_ceil(chunk_size) > MAX_CHUNKS {
+        return Err(format!("download exceeds the {MAX_CHUNKS} chunk limit"));
+    }
+    Ok(chunk_size)
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -261,24 +284,7 @@ pub fn validate_request(request: &mut SwarmRequest) -> Result<String, String> {
     {
         return Err("outputPath is too long".to_owned());
     }
-    if request.file_size == 0 {
-        return Err("size is required (exact file size in bytes)".to_owned());
-    }
-    if request.file_size > MAX_FILE_SIZE {
-        return Err(format!("size exceeds the {MAX_FILE_SIZE} byte limit"));
-    }
-    if request.chunk_size == 0 {
-        request.chunk_size = DEFAULT_CHUNK_SIZE;
-    }
-    if !(MIN_CHUNK_SIZE..=MAX_CHUNK_SIZE).contains(&request.chunk_size) {
-        return Err(format!(
-            "chunkSize must be between {MIN_CHUNK_SIZE} and {MAX_CHUNK_SIZE} bytes"
-        ));
-    }
-    let chunk_count = request.file_size.div_ceil(request.chunk_size);
-    if chunk_count > MAX_CHUNKS {
-        return Err(format!("download exceeds the {MAX_CHUNKS} chunk limit"));
-    }
+    request.chunk_size = validate_file_size_and_chunk_size(request.file_size, request.chunk_size)?;
     if request.sources.len() < 2 {
         return Err("at least two range sources are required".to_owned());
     }

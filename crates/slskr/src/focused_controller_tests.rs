@@ -1421,6 +1421,38 @@ async fn versioned_search_accepts_web_acquisition_profiles() {
 }
 
 #[tokio::test]
+async fn versioned_swarm_rejects_oversized_transfer_limits_before_discovery() {
+    let (state, _receiver) =
+        test_state_with_env(MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "slskdn"));
+
+    let oversized = super::route_http_request(
+        "POST",
+        "/api/v0/multisource/swarm/async",
+        None,
+        r#"{"filename":"Track.flac","size":17592186044417}"#,
+        &state,
+    )
+    .await
+    .expect("oversized versioned swarm response");
+    assert_eq!(oversized.status, "400 Bad Request");
+    assert!(oversized.body.contains("size exceeds"));
+
+    let oversized_chunks = super::route_http_request(
+        "POST",
+        "/api/v0/multisource/swarm/async",
+        None,
+        r#"{"filename":"Track.flac","size":42,"chunkSize":16777216}"#,
+        &state,
+    )
+    .await
+    .expect("oversized versioned swarm chunk response");
+    assert_eq!(oversized_chunks.status, "400 Bad Request");
+    assert!(oversized_chunks.body.contains("chunkSize must be between"));
+
+    let _ = fs::remove_dir_all(&state.config.state_dir);
+}
+
+#[tokio::test]
 async fn library_browser_projects_share_tree_and_sha256_stream_ids() {
     let (state, _receiver) =
         test_state_with_env(MapEnv::default().with("SLSKR_CONTROLLER_PROFILE", "native"));
