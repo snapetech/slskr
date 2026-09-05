@@ -292,6 +292,23 @@ describe('Transfers', () => {
     );
   });
 
+  it('reports unavailable download mode status instead of treating it as disabled', async () => {
+    transfersLibrary.getAcceleratedMode.mockRejectedValueOnce(
+      new Error('Accelerated mode unavailable'),
+    );
+
+    render(
+      <Transfers
+        direction="download"
+        server={{ isConnected: true }}
+      />,
+    );
+
+    expect(await screen.findByTestId('transfer-mode-status-error')).toHaveTextContent(
+      'Accelerated mode unavailable',
+    );
+  });
+
   it('toggles accelerated downloads from the downloads header', async () => {
     render(
       <Transfers

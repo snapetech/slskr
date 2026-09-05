@@ -8,6 +8,7 @@ import TransferGroup from './TransferGroup';
 import TransfersHeader from './TransfersHeader';
 import React, { useEffect, useRef, useState } from 'react';
 import { toast } from 'react-toastify';
+import { Message } from 'semantic-ui-react';
 
 const AUTO_REPLACE_THRESHOLD = 0; // 0% = exact match only (configurable on backend)
 
@@ -153,6 +154,7 @@ const Transfers = ({ runtimeProfile, direction, server }) => {
 
   const [autoReplaceEnabled, setAutoReplaceEnabled] = useState(false);
   const [acceleratedEnabled, setAcceleratedEnabled] = useState(false);
+  const [modeStatusError, setModeStatusError] = useState(null);
   const autoReplaceThreshold = AUTO_REPLACE_THRESHOLD;
 
   const bulkQueueRef = useRef([]);
@@ -622,10 +624,16 @@ const Transfers = ({ runtimeProfile, direction, server }) => {
         if (!cancelled && mountedRef.current) {
           setAutoReplaceEnabled(autoReplaceStatus?.enabled ?? false);
           setAcceleratedEnabled(acceleratedStatus?.enabled ?? false);
+          setModeStatusError(null);
         }
       } catch (error) {
         if (!cancelled) {
           console.error('Failed to fetch download mode status:', error);
+          if (mountedRef.current) {
+            setModeStatusError(
+              getErrorMessage(error) || 'Download mode status unavailable',
+            );
+          }
         }
       }
     };
@@ -719,6 +727,7 @@ const Transfers = ({ runtimeProfile, direction, server }) => {
         autoReplaceEnabled={autoReplaceEnabled}
         autoReplaceThreshold={autoReplaceThreshold}
         autoReplaceChanging={autoReplaceChanging}
+        modeStatusError={modeStatusError}
         cancelling={cancelling}
         direction={direction}
         onAutoReplaceChange={handleAutoReplaceChange}
@@ -731,6 +740,16 @@ const Transfers = ({ runtimeProfile, direction, server }) => {
         server={server}
         transfers={transfers}
       />
+      {modeStatusError && (
+        <Message
+          data-testid="transfer-mode-status-error"
+          warning
+        >
+          <Message.Header>Download mode status unavailable</Message.Header>
+          <p>{modeStatusError}</p>
+          <p>The mode toggles are disabled until the daemon reports their current state.</p>
+        </Message>
+      )}
       {transfers.length === 0 ? (
         <PlaceholderSegment
           caption={`No ${direction}s to display`}
