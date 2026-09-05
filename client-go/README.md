@@ -99,6 +99,7 @@ func main() {
 - `BrowseUser(ctx, username, folder, limit, offset)` / `RequestBrowse(ctx, username[, folder])` - Browse a user's shares
 - `GetBrowseRequests(ctx, status, limit, offset)` / `RespondToBrowseRequest(ctx, username, action, folder)` - Manage browse requests
 - `GetEvents(ctx, eventType, limit, offset)` - Read recorded events
+- `GetEventsWithFilters(ctx, eventType, topic, query, limit, offset)` - Read events with kind, topic, and text filters
 - `ListShares(ctx, limit, offset)` / `RefreshShares(ctx)` - Read or rescan shares
 - `GetFilters(ctx)` / `UpdateFilters(ctx, filters)` - Read or update filters
 - `GetCacheStats(ctx)` / `InvalidateCache(ctx, keys)` - Inspect or clear the MediaCore cache

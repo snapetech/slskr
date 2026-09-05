@@ -154,6 +154,11 @@ async def test_python_client_covers_session_and_extended_api_routes():
     assert await client.get_events(event_type="search.completed") == [
         {"type": "search.completed"}
     ]
+    assert await client.get_events(
+        event_type="search.completed",
+        topic="searches",
+        query="ambient & live",
+    ) == [{"type": "search.completed"}]
     assert await client.list_shares() == [{"filename": "track.flac"}]
     assert await client.refresh_shares() == {}
     assert await client.get_filters() == {"enabled": True}
@@ -164,6 +169,17 @@ async def test_python_client_covers_session_and_extended_api_routes():
     assert ("/api/rooms/lounge%20room", None, True) in get_calls
     assert ("/api/users/bob/browse", {"limit": 50, "offset": 0, "folder": "Albums"}, True) in get_calls
     assert ("/api/events", {"limit": 50, "offset": 0, "kind": "search.completed"}, True) in get_calls
+    assert (
+        "/api/events",
+        {
+            "limit": 50,
+            "offset": 0,
+            "kind": "search.completed",
+            "topic": "searches",
+            "q": "ambient & live",
+        },
+        True,
+    ) in get_calls
     assert ("/api/users/bob/browse/cancel", {"reason": "rejected by client"}, True) in post_calls
     assert ("/api/users/bob/browse/request", {}, True) in post_calls
     assert ("/api/users/bob/browse/folder", {"folder": "Albums"}, True) in post_calls

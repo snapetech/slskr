@@ -9,24 +9,38 @@ Classification rule: any accepted row must be ledgered, fixed with behavior
 coverage, sibling-swept, and promoted into a durable gate before closure.
 
 ## Protocol-controlled allocations and lengths
-crates/slskr-protocol/src/peer.rs:727:        let compressed = compress_zlib(&vec![b'x'; 1024]).expect("compress fixture");
-crates/slskr-protocol/src/peer.rs:740:        let compressed = compress_zlib(&vec![b'x'; MAX_DECOMPRESSED_SEARCH_RESPONSE_BYTES + 1])
-crates/slskr-protocol/src/obfuscation.rs:6:    let mut output = Vec::with_capacity(4 + input.len());
-crates/slskr-protocol/src/distributed.rs:114:                    payload: reader.read_bytes(reader.remaining())?.to_vec(),
-crates/slskr-client/src/listener.rs:240:        let mut encoded = Vec::with_capacity(4 + candidate_length);
-crates/slskr-client/src/listener.rs:268:    let mut obfuscated = Vec::with_capacity(8 + length);
-crates/slskr-client/src/listener.rs:380:            let mut nested = Vec::with_capacity(nested_len);
 crates/slskr-client/src/quic_data.rs:588:    pub async fn read_chunk(&mut self, buffer: &mut [u8]) -> Result<usize, QuicDataError> {
 crates/slskr-client/src/quic_data.rs:987:        let received = receive.read_chunk(&mut buffer).await;
 crates/slskr-client/src/quic_data.rs:989:            .read_chunk(&mut buffer)
+crates/slskr-client/src/listener.rs:240:        let mut encoded = Vec::with_capacity(4 + candidate_length);
+crates/slskr-client/src/listener.rs:268:    let mut obfuscated = Vec::with_capacity(8 + length);
+crates/slskr-client/src/listener.rs:380:            let mut nested = Vec::with_capacity(nested_len);
 crates/slskr-client/src/transfer.rs:208:            connection.read_chunk(remaining).await
 crates/slskr-client/src/mesh_sync.rs:434:        let mut output = Vec::with_capacity(encoded.len());
 crates/slskr-client/src/mesh_sync.rs:1053:            MeshSyncMessage::decode_json(&vec![b' '; MAX_MESH_SYNC_PAYLOAD_BYTES + 1]),
+crates/slskr-client/src/io.rs:215:    let mut encoded = Vec::with_capacity(encoded_len);
+crates/slskr-client/src/io.rs:313:    let mut payload = vec![0; length];
+crates/slskr-client/src/io.rs:375:    let mut encoded = Vec::with_capacity(encoded_len);
+crates/slskr-client/src/io.rs:407:    let mut obfuscated = Vec::with_capacity(encoded_len);
+crates/slskr-client/src/quic_control.rs:41:    let mut encoded = Vec::with_capacity(key_value_len + 5);
+crates/slskr-client/src/file_transfer.rs:134:    pub async fn read_chunk(&mut self, length: usize) -> Result<Vec<u8>, ClientError> {
+crates/slskr-client/src/file_transfer.rs:154:        let mut chunk = vec![0; length];
+crates/slskr-client/src/file_transfer.rs:174:        let mut frame = Vec::with_capacity(OBFUSCATED_TRANSFER_FRAME_PREFIX_LEN + payload.len());
+crates/slskr-client/src/file_transfer.rs:200:        let mut payload = Vec::with_capacity(length);
+crates/slskr-client/src/file_transfer.rs:224:        let mut encoded = Vec::with_capacity(first_block.len() + length);
 crates/slskr-client/src/capabilities.rs:173:        let mut features = Vec::with_capacity(feature_count);
 crates/slskr-client/src/capabilities.rs:596:    String::from_utf8(reader.read_bytes(length)?.to_vec())
 crates/slskr-client/src/capabilities.rs:617:    let bytes = reader.read_bytes(N)?;
 crates/slskr-client/src/capabilities.rs:668:    let mut output = Vec::with_capacity(values.len());
-crates/slskr-client/src/quic_control.rs:41:    let mut encoded = Vec::with_capacity(key_value_len + 5);
+crates/slskr-client/src/overlay_control.rs:77:        let mut encoded = Vec::with_capacity(self.payload.len() + 256);
+crates/slskr-client/src/overlay_control.rs:111:        let payload = reader.read_bytes("payload")?;
+crates/slskr-client/src/overlay_control.rs:357:    fn read_bytes(&mut self, field: &'static str) -> Result<Vec<u8>, ControlEnvelopeError> {
+crates/slskr-client/src/search.rs:576:        let mut drained = Vec::with_capacity(expired.len());
+crates/slskr-client/src/overlay.rs:213:        let mut payload = vec![0_u8; length];
+crates/slskr-client/src/overlay.rs:1312:        let mut payload = vec![0; 15];
+crates/slskr-client/src/overlay.rs:1543:        let mut signature = vec![0_u8; 64];
+crates/slskr-client/src/overlay.rs:1740:                vec![0; MAX_OVERLAY_MESSAGE_BYTES + 1],
+crates/slskr-client/src/overlay.rs:1752:            payload: vec![0; MAX_OVERLAY_MESSAGE_BYTES + 1],
 crates/slskr-protocol/src/server.rs:1220:                let payload = reader.read_bytes(reader.remaining())?.to_vec();
 crates/slskr-protocol/src/server.rs:2106:    let mut values = Vec::with_capacity(count);
 crates/slskr-protocol/src/server.rs:2147:    let mut users = Vec::with_capacity(user_count);
@@ -34,81 +48,31 @@ crates/slskr-protocol/src/server.rs:2257:    let mut values = Vec::with_capacity
 crates/slskr-protocol/src/server.rs:2292:    let mut values = Vec::with_capacity(count);
 crates/slskr-protocol/src/server.rs:2347:    let mut values = Vec::with_capacity(count);
 crates/slskr-protocol/src/server.rs:2395:    let mut entries = Vec::with_capacity(names.len());
+crates/slskr-protocol/src/distributed.rs:114:                    payload: reader.read_bytes(reader.remaining())?.to_vec(),
 crates/slskr-protocol/src/frame.rs:23:        let length = reader.read_u32_le()? as usize;
 crates/slskr-protocol/src/frame.rs:38:        let payload = reader.read_bytes(length - 4)?.to_vec();
 crates/slskr-protocol/src/frame.rs:77:        let length = reader.read_u32_le()? as usize;
 crates/slskr-protocol/src/frame.rs:92:        let payload = reader.read_bytes(length - 1)?.to_vec();
-crates/slskr-client/src/overlay_control.rs:77:        let mut encoded = Vec::with_capacity(self.payload.len() + 256);
-crates/slskr-client/src/overlay_control.rs:111:        let payload = reader.read_bytes("payload")?;
-crates/slskr-client/src/overlay_control.rs:357:    fn read_bytes(&mut self, field: &'static str) -> Result<Vec<u8>, ControlEnvelopeError> {
-crates/slskr-client/src/search.rs:576:        let mut drained = Vec::with_capacity(expired.len());
 crates/slskr-protocol/src/primitives.rs:107:        let length = self.read_u32_le()? as usize;
 crates/slskr-protocol/src/primitives.rs:133:        let length = self.read_u32_le()? as usize;
 crates/slskr-protocol/src/primitives.rs:134:        Ok(self.read_bytes(length)?.to_vec())
 crates/slskr-protocol/src/primitives.rs:142:        let count = self.read_u32_le()? as usize;
 crates/slskr-protocol/src/primitives.rs:159:    pub fn read_bytes(&mut self, length: usize) -> Result<&'a [u8], DecodeError> {
 crates/slskr-protocol/src/primitives.rs:192:            output: Vec::with_capacity(capacity),
-crates/slskr-client/src/file_transfer.rs:134:    pub async fn read_chunk(&mut self, length: usize) -> Result<Vec<u8>, ClientError> {
-crates/slskr-client/src/file_transfer.rs:154:        let mut chunk = vec![0; length];
-crates/slskr-client/src/file_transfer.rs:174:        let mut frame = Vec::with_capacity(OBFUSCATED_TRANSFER_FRAME_PREFIX_LEN + payload.len());
-crates/slskr-client/src/file_transfer.rs:200:        let mut payload = Vec::with_capacity(length);
-crates/slskr-client/src/file_transfer.rs:224:        let mut encoded = Vec::with_capacity(first_block.len() + length);
-crates/slskr-client/src/overlay.rs:213:        let mut payload = vec![0_u8; length];
-crates/slskr-client/src/overlay.rs:1312:        let mut payload = vec![0; 15];
-crates/slskr-client/src/overlay.rs:1543:        let mut signature = vec![0_u8; 64];
-crates/slskr-client/src/overlay.rs:1740:                vec![0; MAX_OVERLAY_MESSAGE_BYTES + 1],
-crates/slskr-client/src/overlay.rs:1752:            payload: vec![0; MAX_OVERLAY_MESSAGE_BYTES + 1],
+crates/slskr-protocol/src/obfuscation.rs:6:    let mut output = Vec::with_capacity(4 + input.len());
+crates/slskr-protocol/src/peer.rs:727:        let compressed = compress_zlib(&vec![b'x'; 1024]).expect("compress fixture");
+crates/slskr-protocol/src/peer.rs:740:        let compressed = compress_zlib(&vec![b'x'; MAX_DECOMPRESSED_SEARCH_RESPONSE_BYTES + 1])
+crates/slskr/src/relay_ws.rs:427:    let mut header = Vec::with_capacity(10);
+crates/slskr/src/relay_ws.rs:510:    let mut payload = vec![0_u8; length as usize];
+crates/slskr/src/relay_ws.rs:565:        let mut frame = Vec::with_capacity(6 + payload.len());
+crates/slskr/src/route_dispatch.rs:82:    let mut normalized = Vec::with_capacity(terms.len());
+crates/slskr/src/quic_alpn.rs:172:    let mut output = vec![0_u8; length];
+crates/slskr/src/quic_alpn.rs:185:    let mut info = Vec::with_capacity(2 + 1 + full_label.len() + 1);
+crates/slskr/src/search_fallback.rs:37:    let mut queries = Vec::with_capacity(MAXIMUM_FALLBACK_QUERIES);
 crates/slskr/src/events_ws.rs:259:    let mut payload = vec![0_u8; len as usize];
 crates/slskr/src/events_ws.rs:377:    let mut header = Vec::with_capacity(10);
 crates/slskr/src/events_ws.rs:576:        let mut frame = Vec::with_capacity(6 + payload.len());
 crates/slskr/src/events_ws.rs:752:        let payload = vec![b'x'; 1024 * 1024];
-crates/slskr/src/bloom_filter.rs:39:            bits: vec![0_u8; bit_size.div_ceil(8)],
-crates/slskr-client/src/io.rs:215:    let mut encoded = Vec::with_capacity(encoded_len);
-crates/slskr-client/src/io.rs:313:    let mut payload = vec![0; length];
-crates/slskr-client/src/io.rs:375:    let mut encoded = Vec::with_capacity(encoded_len);
-crates/slskr-client/src/io.rs:407:    let mut obfuscated = Vec::with_capacity(encoded_len);
-crates/slskr/src/content_discovery.rs:238:        let mut normalized_hashes = Vec::with_capacity(state.hash_entries.len());
-crates/slskr/src/content_discovery.rs:247:        let mut normalized_shadow = Vec::with_capacity(state.shadow_records.len());
-crates/slskr/src/content_discovery.rs:361:        let mut normalized = Vec::with_capacity(entries.len());
-crates/slskr/src/content_discovery.rs:660:        let mut valid = Vec::with_capacity(entries.len());
-crates/slskr/src/content_discovery.rs:675:        let mut candidates = Vec::with_capacity(valid.len());
-crates/slskr/src/content_discovery.rs:839:    let mut peer_ids = Vec::with_capacity(record.peer_ids.len());
-crates/slskr/src/content_discovery.rs:931:    let mut deduped: Vec<HashDbEntry> = Vec::with_capacity(entries.len());
-crates/slskr/src/content_discovery.rs:960:    let mut deduped: Vec<ShadowIndexRecord> = Vec::with_capacity(records.len());
-crates/slskr/src/utils.rs:736:    let mut decoded = Vec::with_capacity(bytes.len());
-crates/slskr/src/utils.rs:754:    let mut decoded = Vec::with_capacity(bytes.len());
-crates/slskr/src/utils.rs:1086:    let mut output = Vec::with_capacity(bytes.len());
-crates/slskr/src/scripts.rs:325:        let data = vec![b'x'; MAX_SCRIPT_OUTPUT_BYTES + 1];
-crates/slskr/src/route_dispatch.rs:82:    let mut normalized = Vec::with_capacity(terms.len());
-crates/slskr/src/relay_ws.rs:427:    let mut header = Vec::with_capacity(10);
-crates/slskr/src/relay_ws.rs:510:    let mut payload = vec![0_u8; length as usize];
-crates/slskr/src/relay_ws.rs:565:        let mut frame = Vec::with_capacity(6 + payload.len());
-crates/slskr/src/quic_alpn.rs:172:    let mut output = vec![0_u8; length];
-crates/slskr/src/quic_alpn.rs:185:    let mut info = Vec::with_capacity(2 + 1 + full_label.len() + 1);
-crates/slskr/src/search_fallback.rs:37:    let mut queries = Vec::with_capacity(MAXIMUM_FALLBACK_QUERIES);
-crates/slskr/src/cli.rs:1120:    let bytes = time::timeout(timeout, file.read_chunk(remaining))
-crates/slskr/src/cli.rs:1347:    let bytes = time::timeout(timeout, file.read_chunk(remaining))
-crates/slskr/src/cli.rs:2897:    let downloaded = time::timeout(timeout, file.read_chunk(remaining.len()))
-crates/slskr/src/cli.rs:3209:    let downloaded = time::timeout(timeout, file.read_chunk(expected_bytes.len()))
-crates/slskr/src/cli.rs:3660:        .read_chunk(5)
-crates/slskr/src/route_dispatch_group_2.rs:1825:            let mut session_command_permits = Vec::with_capacity(replacements.len());
-crates/slskr-web/src/lib.rs:17789:        let frequency_bins = RefCell::new(vec![0; analyser.frequency_bin_count() as usize]);
-crates/slskr-web/src/lib.rs:17790:        let waveform_bins = RefCell::new(vec![0; analyser.fft_size() as usize]);
-crates/slskr/src/webhooks.rs:1381:        let mut persisted = vec![invalid; MAX_WEBHOOKS];
-crates/slskr/src/port_forwarding.rs:293:            let mut buffer = vec![0_u8; TUNNEL_CHUNK_BYTES];
-crates/slskr/src/port_forwarding.rs:784:            data: vec![7; TUNNEL_CHUNK_BYTES],
-crates/slskr/src/port_forwarding.rs:794:            data: vec![7; TUNNEL_CHUNK_BYTES + 1],
-crates/slskr/src/route_dispatch_group_4.rs:1834:            let mut visible = Vec::with_capacity(records.len());
-crates/slskr/src/dotnet_regex.rs:340:    let mut unnamed_slots = Vec::with_capacity(unnamed.len());
-crates/slskr/src/dotnet_regex.rs:355:    let mut named_slots = Vec::with_capacity(named.len());
-crates/slskr/src/multisource.rs:480:        let mut sources = Vec::with_capacity(request.sources.len());
-crates/slskr/src/multisource.rs:522:        let mut source_busy = vec![false; sources.len()];
-crates/slskr/src/multisource.rs:526:        let mut results = Vec::with_capacity(chunks.len());
-crates/slskr/src/multisource.rs:760:    let mut buffer = vec![0_u8; 64 * 1024];
-crates/slskr/src/mesh_sync.rs:120:            Some(MeshSyncMessage::RespChunk(read_chunk(state, request).await))
-crates/slskr/src/mesh_sync.rs:239:    let mut incoming = Vec::with_capacity(received);
-crates/slskr/src/mesh_sync.rs:340:async fn read_chunk(state: &super::AppState, request: MeshReqChunkMessage) -> MeshRespChunkMessage {
-crates/slskr/src/mesh_sync.rs:394:    let mut data = vec![0_u8; to_read];
 crates/slskr/src/private_gateway.rs:1207:            let mut response = vec![0_u8; 65_536];
 crates/slskr/src/private_gateway.rs:1397:    let mut bytes = Vec::with_capacity(256);
 crates/slskr/src/private_gateway.rs:1400:        let read = receive.read_chunk(&mut byte).await?;
@@ -118,19 +82,55 @@ crates/slskr/src/private_gateway.rs:2155:            let mut buffer = vec![0_u8;
 crates/slskr/src/private_gateway.rs:3063:        call.payload = vec![0; MAX_OVERLAY_MESSAGE_BYTES + 1];
 crates/slskr/src/private_gateway.rs:3103:        let mut packet = vec![0_u8; 1_200];
 crates/slskr/src/private_gateway.rs:3347:            vec![1_u8; MAX_CERTIFICATE_BYTES as usize + 1],
-crates/slskr/src/config.rs:9900:    let mut peers = Vec::with_capacity(values.len());
+crates/slskr/src/cli.rs:1120:    let bytes = time::timeout(timeout, file.read_chunk(remaining))
+crates/slskr/src/cli.rs:1347:    let bytes = time::timeout(timeout, file.read_chunk(remaining))
+crates/slskr/src/cli.rs:2897:    let downloaded = time::timeout(timeout, file.read_chunk(remaining.len()))
+crates/slskr/src/cli.rs:3209:    let downloaded = time::timeout(timeout, file.read_chunk(expected_bytes.len()))
+crates/slskr/src/cli.rs:3660:        .read_chunk(5)
 crates/slskr/src/mesh_dht.rs:1102:                &vec![b'x'; MAX_OVERLAY_MESSAGE_BYTES + 1],
 crates/slskr/src/mesh_dht.rs:1132:        let mut output = vec![0; MAX_DHT_VALUE_BYTES - 1];
+crates/slskr/src/webhooks.rs:1381:        let mut persisted = vec![invalid; MAX_WEBHOOKS];
+crates/slskr/src/utils.rs:736:    let mut decoded = Vec::with_capacity(bytes.len());
+crates/slskr/src/utils.rs:754:    let mut decoded = Vec::with_capacity(bytes.len());
+crates/slskr/src/utils.rs:1086:    let mut output = Vec::with_capacity(bytes.len());
+crates/slskr/src/multisource.rs:480:        let mut sources = Vec::with_capacity(request.sources.len());
+crates/slskr/src/multisource.rs:522:        let mut source_busy = vec![false; sources.len()];
+crates/slskr/src/multisource.rs:526:        let mut results = Vec::with_capacity(chunks.len());
+crates/slskr/src/multisource.rs:760:    let mut buffer = vec![0_u8; 64 * 1024];
+crates/slskr/src/scripts.rs:325:        let data = vec![b'x'; MAX_SCRIPT_OUTPUT_BYTES + 1];
+crates/slskr/src/bloom_filter.rs:39:            bits: vec![0_u8; bit_size.div_ceil(8)],
+crates/slskr/src/content_discovery.rs:238:        let mut normalized_hashes = Vec::with_capacity(state.hash_entries.len());
+crates/slskr/src/content_discovery.rs:247:        let mut normalized_shadow = Vec::with_capacity(state.shadow_records.len());
+crates/slskr/src/content_discovery.rs:361:        let mut normalized = Vec::with_capacity(entries.len());
+crates/slskr/src/content_discovery.rs:660:        let mut valid = Vec::with_capacity(entries.len());
+crates/slskr/src/content_discovery.rs:675:        let mut candidates = Vec::with_capacity(valid.len());
+crates/slskr/src/content_discovery.rs:839:    let mut peer_ids = Vec::with_capacity(record.peer_ids.len());
+crates/slskr/src/content_discovery.rs:931:    let mut deduped: Vec<HashDbEntry> = Vec::with_capacity(entries.len());
+crates/slskr/src/content_discovery.rs:960:    let mut deduped: Vec<ShadowIndexRecord> = Vec::with_capacity(records.len());
+crates/slskr/src/port_forwarding.rs:293:            let mut buffer = vec![0_u8; TUNNEL_CHUNK_BYTES];
+crates/slskr/src/port_forwarding.rs:784:            data: vec![7; TUNNEL_CHUNK_BYTES],
+crates/slskr/src/port_forwarding.rs:794:            data: vec![7; TUNNEL_CHUNK_BYTES + 1],
+crates/slskr/src/mesh_sync.rs:120:            Some(MeshSyncMessage::RespChunk(read_chunk(state, request).await))
+crates/slskr/src/mesh_sync.rs:239:    let mut incoming = Vec::with_capacity(received);
+crates/slskr/src/mesh_sync.rs:340:async fn read_chunk(state: &super::AppState, request: MeshReqChunkMessage) -> MeshRespChunkMessage {
+crates/slskr/src/mesh_sync.rs:394:    let mut data = vec![0_u8; to_read];
+crates/slskr/src/http_server.rs:453:        let mut buf = vec![0_u8; content_length];
+crates/slskr/src/http_server.rs:557:    let mut decoded = Vec::with_capacity(bytes.len());
+crates/slskr/src/http_server.rs:944:        let mut buffer = vec![0_u8; 64 * 1024];
+crates/slskr/src/http_server.rs:1100:        let body = vec![b'x'; 100 * 1024];
 crates/slskr/src/relay_agent.rs:774:        let mut buffer = vec![0_u8; RELAY_FILE_CHUNK_BYTES];
 crates/slskr/src/relay_agent.rs:977:        let mut buffer = vec![0_u8; RELAY_FILE_CHUNK_BYTES];
 crates/slskr/src/relay.rs:425:        let mut shares = Vec::with_capacity(rows.len());
 crates/slskr/src/relay.rs:1531:        let mut quotient = Vec::with_capacity(source.len());
 crates/slskr/src/relay.rs:1930:        let records = vec![record.clone(); MAX_RELAY_SHARE_UPLOAD_RECORDS + 1];
+crates/slskr-web/src/lib.rs:17789:        let frequency_bins = RefCell::new(vec![0; analyser.frequency_bin_count() as usize]);
+crates/slskr-web/src/lib.rs:17790:        let waveform_bins = RefCell::new(vec![0; analyser.fft_size() as usize]);
 crates/slskr/src/security_controls.rs:1923:        let mut transformed = Vec::with_capacity(transformed_len);
-crates/slskr/src/http_server.rs:453:        let mut buf = vec![0_u8; content_length];
-crates/slskr/src/http_server.rs:557:    let mut decoded = Vec::with_capacity(bytes.len());
-crates/slskr/src/http_server.rs:944:        let mut buffer = vec![0_u8; 64 * 1024];
-crates/slskr/src/http_server.rs:1100:        let body = vec![b'x'; 100 * 1024];
+crates/slskr/src/route_dispatch_group_2.rs:1825:            let mut session_command_permits = Vec::with_capacity(replacements.len());
+crates/slskr/src/route_dispatch_group_4.rs:1834:            let mut visible = Vec::with_capacity(records.len());
+crates/slskr/src/dotnet_regex.rs:340:    let mut unnamed_slots = Vec::with_capacity(unnamed.len());
+crates/slskr/src/dotnet_regex.rs:355:    let mut named_slots = Vec::with_capacity(named.len());
+crates/slskr/src/config.rs:9900:    let mut peers = Vec::with_capacity(values.len());
 crates/slskr/src/lib.rs:6688:            let mut bytes = Vec::with_capacity(33);
 crates/slskr/src/lib.rs:10485:        let mut updated = Vec::with_capacity(distinct_ids.len());
 crates/slskr/src/lib.rs:14546:    let mut items = Vec::with_capacity(candidates.len());
@@ -188,14 +188,12 @@ crates/slskr/src/controller_tests.rs:118266:        vec![0_u8; 64 * 1024 + 1],
 crates/slskr/src/controller_tests.rs:120206:    let low = entropy.check(&vec![0_u8; EntropyControl::SAMPLE_SIZE]);
 
 ## Proxy, redirect, SSRF, and outbound trust boundaries
+crates/slskr/src/private_gateway.rs:276:    /// DHT port. DHT-shaped datagrams are forwarded to mainline's internal
+crates/slskr/src/private_gateway.rs:806:                            "overlay QUIC proxy closed before initial datagram was forwarded"
+crates/slskr/src/private_gateway.rs:3136:        .expect("DHT response should be forwarded")
 crates/slskr/src/multisource.rs:656:    let mut builder = Client::builder()
 crates/slskr/src/multisource.rs:657:        .redirect(Policy::none())
 crates/slskr/src/multisource.rs:661:        builder = builder.resolve(host, SocketAddr::new(address.ip(), port));
-crates/slskr/src/webhooks.rs:584:        let mut client_builder = reqwest::Client::builder()
-crates/slskr/src/webhooks.rs:585:            .redirect(reqwest::redirect::Policy::none())
-crates/slskr/src/webhooks.rs:808:        let mut client_builder = reqwest::Client::builder()
-crates/slskr/src/webhooks.rs:809:            .redirect(reqwest::redirect::Policy::none())
-crates/slskr/src/webhooks.rs:812:            client_builder = client_builder.resolve(&resolved.host, *addr);
 crates/slskr/src/port_forwarding.rs:84:                "Port {} is already being forwarded",
 crates/slskr/src/port_forwarding.rs:101:            bytes_forwarded: Arc::new(AtomicU64::new(0)),
 crates/slskr/src/port_forwarding.rs:162:    bytes_forwarded: Arc<AtomicU64>,
@@ -206,23 +204,15 @@ crates/slskr/src/port_forwarding.rs:374:            bytes_forwarded,
 crates/slskr/src/port_forwarding.rs:379:            performance: Performance::new(active_connections, bytes_forwarded),
 crates/slskr/src/port_forwarding.rs:552:    pub bytes_forwarded: u64,
 crates/slskr/src/port_forwarding.rs:912:                if status.bytes_forwarded == 10 {
-crates/slskr/src/application_state.rs:43:        "forwardedPort": runtime.vpn.forwarded_port,
-crates/slskr/src/private_gateway.rs:276:    /// DHT port. DHT-shaped datagrams are forwarded to mainline's internal
-crates/slskr/src/private_gateway.rs:806:                            "overlay QUIC proxy closed before initial datagram was forwarded"
-crates/slskr/src/private_gateway.rs:3136:        .expect("DHT response should be forwarded")
+crates/slskr/src/webhooks.rs:584:        let mut client_builder = reqwest::Client::builder()
+crates/slskr/src/webhooks.rs:585:            .redirect(reqwest::redirect::Policy::none())
+crates/slskr/src/webhooks.rs:808:        let mut client_builder = reqwest::Client::builder()
+crates/slskr/src/webhooks.rs:809:            .redirect(reqwest::redirect::Policy::none())
+crates/slskr/src/webhooks.rs:812:            client_builder = client_builder.resolve(&resolved.host, *addr);
 crates/slskr/src/cli.rs:2499:    let forwarded = tree
 crates/slskr/src/cli.rs:2503:    if forwarded != 1 {
 crates/slskr/src/cli.rs:2505:            "distributed search reached {forwarded} children instead of one"
-crates/slskr/src/http_server.rs:67:    pub forwarded: Option<String>,
-crates/slskr/src/http_server.rs:68:    pub x_forwarded_for: Option<String>,
-crates/slskr/src/http_server.rs:122:                    "forwarded" => headers.forwarded = Some(value.to_string()),
-crates/slskr/src/http_server.rs:123:                    "x-forwarded-for" => headers.x_forwarded_for = Some(value.to_string()),
-crates/slskr/src/http_server.rs:379:            "forwarded" => append_list_header(&mut headers.forwarded, value),
-crates/slskr/src/http_server.rs:380:            "x-forwarded-for" => append_list_header(&mut headers.x_forwarded_for, value),
-crates/slskr/src/http_server.rs:1062:            headers.forwarded,
-crates/slskr/src/http_server.rs:1066:            headers.x_forwarded_for,
-crates/slskr/src/http_server.rs:1263:            request.headers.x_forwarded_for.as_deref(),
-crates/slskr/src/http_server.rs:1267:            request.headers.forwarded.as_deref(),
+crates/slskr/src/application_state.rs:43:        "forwardedPort": runtime.vpn.forwarded_port,
 crates/slskr/src/vpn.rs:20:    pub forwarded_port: Option<u16>,
 crates/slskr/src/vpn.rs:153:    client: &reqwest::Client,
 crates/slskr/src/vpn.rs:172:    client: &reqwest::Client,
@@ -238,8 +228,16 @@ crates/slskr/src/vpn.rs:335:        forwarded_port,
 crates/slskr/src/vpn.rs:439:        assert_eq!(status.forwarded_port, Some(44_444));
 crates/slskr/src/vpn.rs:475:        assert_eq!(status.forwarded_port, Some(55_555));
 crates/slskr/src/vpn.rs:542:        assert_eq!(status.forwarded_port, Some(45_678));
-crates/slskr/src/route_dispatch_group_7.rs:2164:                    "totalBytesForwarded": rules.iter().map(|rule| rule.bytes_forwarded).sum::<u64>(),
-crates/slskr/src/route_dispatch_group_7.rs:2368:                Err(error) if error.contains("already being forwarded") => {
+crates/slskr/src/http_server.rs:67:    pub forwarded: Option<String>,
+crates/slskr/src/http_server.rs:68:    pub x_forwarded_for: Option<String>,
+crates/slskr/src/http_server.rs:122:                    "forwarded" => headers.forwarded = Some(value.to_string()),
+crates/slskr/src/http_server.rs:123:                    "x-forwarded-for" => headers.x_forwarded_for = Some(value.to_string()),
+crates/slskr/src/http_server.rs:379:            "forwarded" => append_list_header(&mut headers.forwarded, value),
+crates/slskr/src/http_server.rs:380:            "x-forwarded-for" => append_list_header(&mut headers.x_forwarded_for, value),
+crates/slskr/src/http_server.rs:1062:            headers.forwarded,
+crates/slskr/src/http_server.rs:1066:            headers.x_forwarded_for,
+crates/slskr/src/http_server.rs:1263:            request.headers.x_forwarded_for.as_deref(),
+crates/slskr/src/http_server.rs:1267:            request.headers.forwarded.as_deref(),
 crates/slskr/src/relay_agent.rs:261:) -> Result<reqwest::Client, String> {
 crates/slskr/src/relay_agent.rs:262:    let mut builder = reqwest::Client::builder()
 crates/slskr/src/relay_agent.rs:263:        .redirect(reqwest::redirect::Policy::none())
@@ -248,6 +246,8 @@ crates/slskr/src/relay_agent.rs:821:    client: &reqwest::Client,
 crates/slskr/src/relay_agent.rs:941:    client: &reqwest::Client,
 crates/slskr/src/relay_agent.rs:1002:    client: &reqwest::Client,
 crates/slskr/src/relay_agent.rs:1038:    client: &reqwest::Client,
+crates/slskr/src/route_dispatch_group_7.rs:2164:                    "totalBytesForwarded": rules.iter().map(|rule| rule.bytes_forwarded).sum::<u64>(),
+crates/slskr/src/route_dispatch_group_7.rs:2368:                Err(error) if error.contains("already being forwarded") => {
 crates/slskr/src/lib.rs:15470:        .to_socket_addrs()
 crates/slskr/src/lib.rs:15480:    let client = reqwest::Client::builder()
 crates/slskr/src/lib.rs:15482:        .redirect(reqwest::redirect::Policy::none())
@@ -352,7 +352,43 @@ crates/slskr/src/controller_tests.rs:93929:                && application["vpn"]
 crates/slskr/src/controller_tests.rs:99418:        let client = reqwest::Client::new();
 
 ## Filesystem and persistent-state boundaries
-crates/slskr/src/virtual_soulfind_v2.rs:583:        std::fs::remove_file(path).expect("remove executable catalogue fixture");
+crates/slskr/src/realm_subject_index.rs:105:        let mut options = fs::OpenOptions::new();
+crates/slskr/src/realm_subject_index.rs:1246:        fs::create_dir_all(&state_dir).unwrap();
+crates/slskr/src/realm_subject_index.rs:1262:        fs::remove_dir_all(state_dir).unwrap();
+crates/slskr/src/realm_subject_index.rs:1275:        fs::create_dir_all(&state_dir).unwrap();
+crates/slskr/src/realm_subject_index.rs:1284:        fs::remove_dir_all(root).unwrap();
+crates/slskr/src/private_gateway.rs:2728:    fs::create_dir_all(state_dir)
+crates/slskr/src/private_gateway.rs:2754:        return match fs::remove_file(certificate_path) {
+crates/slskr/src/private_gateway.rs:2783:    let mut options = fs::OpenOptions::new();
+crates/slskr/src/private_gateway.rs:2826:    let mut options = fs::OpenOptions::new();
+crates/slskr/src/private_gateway.rs:2838:        let _ = fs::remove_file(&temporary);
+crates/slskr/src/private_gateway.rs:2843:        let _ = fs::remove_file(&temporary);
+crates/slskr/src/private_gateway.rs:2846:    if let Err(error) = fs::remove_file(&temporary) {
+crates/slskr/src/private_gateway.rs:2864:        fs::create_dir_all(&path).unwrap();
+crates/slskr/src/private_gateway.rs:3231:        fs::remove_dir_all(root).unwrap();
+crates/slskr/src/private_gateway.rs:3257:        fs::remove_dir_all(root).unwrap();
+crates/slskr/src/private_gateway.rs:3287:        fs::remove_dir_all(root).unwrap();
+crates/slskr/src/private_gateway.rs:3330:        fs::remove_dir_all(root).unwrap();
+crates/slskr/src/private_gateway.rs:3339:        fs::remove_dir_all(root).unwrap();
+crates/slskr/src/private_gateway.rs:3353:        fs::remove_dir_all(root).unwrap();
+crates/slskr/src/private_gateway.rs:3368:        fs::remove_dir_all(root).unwrap();
+crates/slskr/src/private_gateway.rs:3379:        fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
+crates/slskr/src/private_gateway.rs:3384:        fs::remove_dir_all(root).unwrap();
+crates/slskr/src/private_gateway.rs:3400:        fs::remove_dir_all(root).unwrap();
+crates/slskr/src/private_gateway.rs:3414:        fs::remove_dir_all(root).unwrap();
+crates/slskr/src/private_gateway.rs:3433:        fs::remove_dir_all(root).unwrap();
+crates/slskr/src/ftp.rs:700:        tokio::fs::create_dir_all(&album).await.unwrap();
+crates/slskr/src/ftp.rs:724:        tokio::fs::remove_dir_all(root).await.unwrap();
+crates/slskr/src/ftp.rs:731:        tokio::fs::create_dir_all(&album).await.unwrap();
+crates/slskr/src/ftp.rs:754:        tokio::fs::remove_dir_all(root).await.unwrap();
+crates/slskr/src/ftp.rs:762:            tokio::fs::create_dir_all(&album).await.unwrap();
+crates/slskr/src/ftp.rs:794:            tokio::fs::remove_dir_all(root).await.unwrap();
+crates/slskr/src/ftp.rs:807:        tokio::fs::remove_dir_all(root).await.unwrap();
+crates/slskr/src/ftp.rs:820:        tokio::fs::remove_dir_all(root).await.unwrap();
+crates/slskr/src/ftp.rs:832:        tokio::fs::remove_dir_all(root).await.unwrap();
+crates/slskr/src/ftp.rs:839:        tokio::fs::create_dir_all(&album).await.unwrap();
+crates/slskr/src/ftp.rs:860:        tokio::fs::remove_dir_all(root).await.unwrap();
+crates/slskr/src/ftp.rs:899:        tokio::fs::remove_file(file).await.unwrap();
 crates/slskr/src/pod_channels.rs:434:    let mut options = fs::OpenOptions::new();
 crates/slskr/src/pod_channels.rs:534:        std::fs::create_dir_all(&state_dir).unwrap();
 crates/slskr/src/pod_channels.rs:556:        std::fs::remove_dir_all(state_dir).unwrap();
@@ -374,33 +410,38 @@ crates/slskr/src/mesh_services.rs:601:        std::fs::create_dir_all(&root).unw
 crates/slskr/src/mesh_services.rs:626:        std::fs::remove_dir_all(root).unwrap();
 crates/slskr/src/mesh_services.rs:649:        std::fs::create_dir_all(&root).unwrap();
 crates/slskr/src/mesh_services.rs:690:        std::fs::remove_dir_all(root).unwrap();
-crates/slskr/src/ftp.rs:700:        tokio::fs::create_dir_all(&album).await.unwrap();
-crates/slskr/src/ftp.rs:724:        tokio::fs::remove_dir_all(root).await.unwrap();
-crates/slskr/src/ftp.rs:731:        tokio::fs::create_dir_all(&album).await.unwrap();
-crates/slskr/src/ftp.rs:754:        tokio::fs::remove_dir_all(root).await.unwrap();
-crates/slskr/src/ftp.rs:762:            tokio::fs::create_dir_all(&album).await.unwrap();
-crates/slskr/src/ftp.rs:794:            tokio::fs::remove_dir_all(root).await.unwrap();
-crates/slskr/src/ftp.rs:807:        tokio::fs::remove_dir_all(root).await.unwrap();
-crates/slskr/src/ftp.rs:820:        tokio::fs::remove_dir_all(root).await.unwrap();
-crates/slskr/src/ftp.rs:832:        tokio::fs::remove_dir_all(root).await.unwrap();
-crates/slskr/src/ftp.rs:839:        tokio::fs::create_dir_all(&album).await.unwrap();
-crates/slskr/src/ftp.rs:860:        tokio::fs::remove_dir_all(root).await.unwrap();
-crates/slskr/src/ftp.rs:899:        tokio::fs::remove_file(file).await.unwrap();
-crates/slskr/src/realm_subject_index.rs:105:        let mut options = fs::OpenOptions::new();
-crates/slskr/src/realm_subject_index.rs:1246:        fs::create_dir_all(&state_dir).unwrap();
-crates/slskr/src/realm_subject_index.rs:1262:        fs::remove_dir_all(state_dir).unwrap();
-crates/slskr/src/realm_subject_index.rs:1275:        fs::create_dir_all(&state_dir).unwrap();
-crates/slskr/src/realm_subject_index.rs:1284:        fs::remove_dir_all(root).unwrap();
-crates/slskr/src/content_discovery.rs:989:    let mut options = fs::OpenOptions::new();
-crates/slskr/src/content_discovery.rs:1367:        fs::create_dir_all(&root).expect("create state directory");
-crates/slskr/src/content_discovery.rs:1391:        fs::remove_dir_all(root).expect("remove state directory");
-crates/slskr/src/content_discovery.rs:1400:        fs::create_dir_all(&root).expect("create state directory");
-crates/slskr/src/content_discovery.rs:1419:        fs::remove_dir_all(root).expect("remove state directory");
 crates/slskr/src/scripts.rs:103:    tokio::fs::create_dir_all(script_directory)
 crates/slskr/src/scripts.rs:278:        tokio::fs::remove_dir_all(directory).await.unwrap();
 crates/slskr/src/scripts.rs:302:        tokio::fs::remove_dir_all(directory).await.unwrap();
 crates/slskr/src/scripts.rs:320:        tokio::fs::remove_dir_all(directory).await.unwrap();
 crates/slskr/src/scripts.rs:388:        tokio::fs::remove_dir_all(directory).await.unwrap();
+crates/slskr/src/focused_controller_tests.rs:42:    fs::create_dir_all(&state_dir).expect("create focused test state directory");
+crates/slskr/src/focused_controller_tests.rs:236:    fs::create_dir_all(&evidence_dir).expect("create focused evidence directory");
+crates/slskr/src/focused_controller_tests.rs:248:    fs::create_dir_all(&evidence_dir).expect("create focused file evidence directory");
+crates/slskr/src/focused_controller_tests.rs:285:    fs::create_dir_all(downloads.join("Artist/Album")).expect("downloads fixture");
+crates/slskr/src/focused_controller_tests.rs:287:    fs::create_dir_all(incomplete.join("Partial")).expect("incomplete fixture");
+crates/slskr/src/focused_controller_tests.rs:383:        fs::create_dir_all(path.parent().expect("delete fixture parent"))
+crates/slskr/src/focused_controller_tests.rs:386:            fs::create_dir_all(&path).expect("delete fixture directory path");
+crates/slskr/src/focused_controller_tests.rs:609:            fs::create_dir_all(&target_dir).expect("create storage list target");
+crates/slskr/src/focused_controller_tests.rs:638:            let _ = fs::remove_file(link);
+crates/slskr/src/focused_controller_tests.rs:639:            let _ = fs::remove_dir_all(target_dir);
+crates/slskr/src/focused_controller_tests.rs:679:    let _ = fs::remove_file(downloads_conflict);
+crates/slskr/src/focused_controller_tests.rs:680:    let _ = fs::remove_file(incomplete_conflict);
+crates/slskr/src/focused_controller_tests.rs:1040:    fs::create_dir_all(managed_file.parent().expect("managed file parent"))
+crates/slskr/src/focused_controller_tests.rs:1297:        let _ = fs::remove_dir_all(&state_dir);
+crates/slskr/src/focused_controller_tests.rs:1301:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
+crates/slskr/src/focused_controller_tests.rs:1432:    fs::create_dir_all(root.join("legacy")).expect("create legacy profile root");
+crates/slskr/src/focused_controller_tests.rs:1433:    fs::create_dir_all(root.join("native")).expect("create native profile root");
+crates/slskr/src/focused_controller_tests.rs:1472:    let _ = fs::remove_dir_all(root);
+crates/slskr/src/focused_controller_tests.rs:1493:    let _ = fs::remove_dir_all(&state.config.state_dir);
+crates/slskr/src/content_discovery.rs:989:    let mut options = fs::OpenOptions::new();
+crates/slskr/src/content_discovery.rs:1367:        fs::create_dir_all(&root).expect("create state directory");
+crates/slskr/src/content_discovery.rs:1391:        fs::remove_dir_all(root).expect("remove state directory");
+crates/slskr/src/content_discovery.rs:1400:        fs::create_dir_all(&root).expect("create state directory");
+crates/slskr/src/content_discovery.rs:1419:        fs::remove_dir_all(root).expect("remove state directory");
+crates/slskr/src/mesh_security.rs:1310:                fs::create_dir_all(&mesh_directory)
+crates/slskr/src/mesh_security.rs:1465:        let mut options = fs::OpenOptions::new();
+crates/slskr/src/mesh_security.rs:2150:        std::fs::remove_dir_all(root).unwrap();
 crates/slskr/src/relay.rs:1354:        let mut options = fs::OpenOptions::new();
 crates/slskr/src/relay.rs:1369:        fs::rename(&temporary_path, &manifest_path)
 crates/slskr/src/relay.rs:1374:        let _ = fs::remove_file(&temporary_path);
@@ -418,8 +459,31 @@ crates/slskr/src/relay.rs:1950:        std::fs::create_dir_all(&incoming).expect
 crates/slskr/src/relay.rs:1967:        std::fs::remove_dir_all(root).expect("remove invalid agent manifest fixture");
 crates/slskr/src/relay.rs:2085:        std::fs::create_dir_all(&incoming).expect("create concurrent manifest directory");
 crates/slskr/src/relay.rs:2134:        std::fs::remove_dir_all(root).expect("remove concurrent manifest fixture");
-crates/slskr/src/http_server.rs:1771:        std::fs::remove_file(path).unwrap();
-crates/slskr/src/http_server.rs:1813:        std::fs::remove_file(path).unwrap();
+crates/slskr/src/pods.rs:1428:    let mut options = fs::OpenOptions::new();
+crates/slskr/src/pods.rs:1571:        std::fs::create_dir_all(&state_dir).unwrap();
+crates/slskr/src/pods.rs:1584:        std::fs::remove_dir_all(state_dir).unwrap();
+crates/slskr/src/pods.rs:1593:        std::fs::create_dir_all(&state_dir).unwrap();
+crates/slskr/src/pods.rs:1599:        std::fs::remove_dir_all(state_dir).unwrap();
+crates/slskr/src/pods.rs:1608:        std::fs::create_dir_all(&state_dir).unwrap();
+crates/slskr/src/pods.rs:1622:        std::fs::remove_dir_all(state_dir).unwrap();
+crates/slskr/src/pods.rs:1662:        std::fs::create_dir_all(&state_dir).unwrap();
+crates/slskr/src/pods.rs:1691:        std::fs::remove_dir_all(state_dir).unwrap();
+crates/slskr/src/pods.rs:1700:        std::fs::create_dir_all(&state_dir).unwrap();
+crates/slskr/src/pods.rs:1725:        std::fs::remove_dir_all(state_dir).unwrap();
+crates/slskr/src/pods.rs:1734:        std::fs::create_dir_all(&state_dir).unwrap();
+crates/slskr/src/pods.rs:1757:        std::fs::remove_dir_all(state_dir).unwrap();
+crates/slskr/src/pods.rs:1766:        std::fs::create_dir_all(&state_dir).unwrap();
+crates/slskr/src/pods.rs:1798:        std::fs::remove_dir_all(state_dir).unwrap();
+crates/slskr/src/pods.rs:1807:        std::fs::create_dir_all(&state_dir).unwrap();
+crates/slskr/src/pods.rs:1832:        std::fs::remove_dir_all(state_dir).unwrap();
+crates/slskr/src/pods.rs:1841:        std::fs::create_dir_all(&state_dir).unwrap();
+crates/slskr/src/pods.rs:1906:        std::fs::remove_dir_all(state_dir).unwrap();
+crates/slskr/src/pods.rs:1915:        std::fs::create_dir_all(&state_dir).unwrap();
+crates/slskr/src/pods.rs:1928:        std::fs::remove_dir_all(state_dir).unwrap();
+crates/slskr/src/pods.rs:1937:        std::fs::create_dir_all(&state_dir).unwrap();
+crates/slskr/src/pods.rs:1962:        std::fs::remove_dir_all(state_dir).unwrap();
+crates/slskr/src/pods.rs:1971:        std::fs::create_dir_all(&state_dir).unwrap();
+crates/slskr/src/pods.rs:1989:        std::fs::remove_dir_all(state_dir).unwrap();
 crates/slskr/src/relay_agent.rs:763:    fs::create_dir_all(&relay_directory)
 crates/slskr/src/relay_agent.rs:798:    let cleanup = fs::remove_file(&database_path).await;
 crates/slskr/src/relay_agent.rs:1129:    fs::rename(&temporary, &destination)
@@ -427,9 +491,20 @@ crates/slskr/src/relay_agent.rs:1138:    let mut options = fs::OpenOptions::new(
 crates/slskr/src/relay_agent.rs:1183:            match std::fs::remove_file(&self.path) {
 crates/slskr/src/relay_agent.rs:1303:        fs::remove_file(path)
 crates/slskr/src/relay_agent.rs:1338:        std::fs::remove_file(path).unwrap();
-crates/slskr/src/mesh_security.rs:1310:                fs::create_dir_all(&mesh_directory)
-crates/slskr/src/mesh_security.rs:1465:        let mut options = fs::OpenOptions::new();
-crates/slskr/src/mesh_security.rs:2150:        std::fs::remove_dir_all(root).unwrap();
+crates/slskr/src/http_server.rs:1771:        std::fs::remove_file(path).unwrap();
+crates/slskr/src/http_server.rs:1813:        std::fs::remove_file(path).unwrap();
+crates/slskr/src/multisource.rs:72:            let _ = fs::remove_file(&self.path);
+crates/slskr/src/multisource.rs:94:        let _ = fs::remove_dir_all(&self.path);
+crates/slskr/src/multisource.rs:474:    fs::create_dir_all(parent).map_err(|_| "output directory could not be created".to_owned())?;
+crates/slskr/src/multisource.rs:603:        let _ = fs::remove_file(&assembly_path);
+crates/slskr/src/multisource.rs:792:    fs::remove_file(assembly_path)
+crates/slskr/src/multisource.rs:821:    let mut options = fs::OpenOptions::new();
+crates/slskr/src/multisource.rs:1136:        fs::remove_dir_all(root).expect("remove permissions test root");
+crates/slskr/src/multisource.rs:1208:        fs::remove_dir_all(root).expect("remove swarm test root");
+crates/slskr/src/multisource.rs:1277:        fs::remove_dir_all(root).expect("remove swarm cancellation test root");
+crates/slskr/src/multisource.rs:1306:        fs::remove_dir_all(root).expect("remove mesh preview test root");
+crates/slskr/src/multisource.rs:1367:        fs::remove_dir_all(root).expect("remove mesh preview test root");
+crates/slskr/src/storage.rs:106:    OpenOptions::new()
 crates/slskr/src/credential_store.rs:129:    let mut options = fs::OpenOptions::new();
 crates/slskr/src/credential_store.rs:340:    fs::create_dir_all(parent).map_err(|error| {
 crates/slskr/src/credential_store.rs:368:            fs::set_permissions(parent, fs::Permissions::from_mode(0o700)).map_err(|error| {
@@ -470,87 +545,12 @@ crates/slskr/src/credential_store.rs:641:        let _ = fs::remove_dir_all(&roo
 crates/slskr/src/credential_store.rs:642:        fs::create_dir_all(&root).expect("create fixture directory");
 crates/slskr/src/credential_store.rs:646:        fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
 crates/slskr/src/credential_store.rs:659:        let _ = fs::remove_dir_all(root);
+crates/slskr/src/virtual_soulfind_v2.rs:583:        std::fs::remove_file(path).expect("remove executable catalogue fixture");
+crates/slskr/src/route_dispatch_group_2.rs:3301:    match tokio::fs::remove_file(path).await {
 crates/slskr/src/persistence.rs:21:    let file = OpenOptions::new()
 crates/slskr/src/persistence.rs:34:    file.set_permissions(std::fs::Permissions::from_mode(0o600))
 crates/slskr/src/persistence.rs:5692:        std::fs::set_permissions(&db_path, std::fs::Permissions::from_mode(0o666)).unwrap();
 crates/slskr/src/persistence.rs:5708:        std::fs::remove_dir_all(root).unwrap();
-crates/slskr/src/private_gateway.rs:2728:    fs::create_dir_all(state_dir)
-crates/slskr/src/private_gateway.rs:2754:        return match fs::remove_file(certificate_path) {
-crates/slskr/src/private_gateway.rs:2783:    let mut options = fs::OpenOptions::new();
-crates/slskr/src/private_gateway.rs:2826:    let mut options = fs::OpenOptions::new();
-crates/slskr/src/private_gateway.rs:2838:        let _ = fs::remove_file(&temporary);
-crates/slskr/src/private_gateway.rs:2843:        let _ = fs::remove_file(&temporary);
-crates/slskr/src/private_gateway.rs:2846:    if let Err(error) = fs::remove_file(&temporary) {
-crates/slskr/src/private_gateway.rs:2864:        fs::create_dir_all(&path).unwrap();
-crates/slskr/src/private_gateway.rs:3231:        fs::remove_dir_all(root).unwrap();
-crates/slskr/src/private_gateway.rs:3257:        fs::remove_dir_all(root).unwrap();
-crates/slskr/src/private_gateway.rs:3287:        fs::remove_dir_all(root).unwrap();
-crates/slskr/src/private_gateway.rs:3330:        fs::remove_dir_all(root).unwrap();
-crates/slskr/src/private_gateway.rs:3339:        fs::remove_dir_all(root).unwrap();
-crates/slskr/src/private_gateway.rs:3353:        fs::remove_dir_all(root).unwrap();
-crates/slskr/src/private_gateway.rs:3368:        fs::remove_dir_all(root).unwrap();
-crates/slskr/src/private_gateway.rs:3379:        fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
-crates/slskr/src/private_gateway.rs:3384:        fs::remove_dir_all(root).unwrap();
-crates/slskr/src/private_gateway.rs:3400:        fs::remove_dir_all(root).unwrap();
-crates/slskr/src/private_gateway.rs:3414:        fs::remove_dir_all(root).unwrap();
-crates/slskr/src/private_gateway.rs:3433:        fs::remove_dir_all(root).unwrap();
-crates/slskr/src/focused_controller_tests.rs:42:    fs::create_dir_all(&state_dir).expect("create focused test state directory");
-crates/slskr/src/focused_controller_tests.rs:236:    fs::create_dir_all(&evidence_dir).expect("create focused evidence directory");
-crates/slskr/src/focused_controller_tests.rs:248:    fs::create_dir_all(&evidence_dir).expect("create focused file evidence directory");
-crates/slskr/src/focused_controller_tests.rs:285:    fs::create_dir_all(downloads.join("Artist/Album")).expect("downloads fixture");
-crates/slskr/src/focused_controller_tests.rs:287:    fs::create_dir_all(incomplete.join("Partial")).expect("incomplete fixture");
-crates/slskr/src/focused_controller_tests.rs:383:        fs::create_dir_all(path.parent().expect("delete fixture parent"))
-crates/slskr/src/focused_controller_tests.rs:386:            fs::create_dir_all(&path).expect("delete fixture directory path");
-crates/slskr/src/focused_controller_tests.rs:609:            fs::create_dir_all(&target_dir).expect("create storage list target");
-crates/slskr/src/focused_controller_tests.rs:638:            let _ = fs::remove_file(link);
-crates/slskr/src/focused_controller_tests.rs:639:            let _ = fs::remove_dir_all(target_dir);
-crates/slskr/src/focused_controller_tests.rs:679:    let _ = fs::remove_file(downloads_conflict);
-crates/slskr/src/focused_controller_tests.rs:680:    let _ = fs::remove_file(incomplete_conflict);
-crates/slskr/src/focused_controller_tests.rs:1040:    fs::create_dir_all(managed_file.parent().expect("managed file parent"))
-crates/slskr/src/focused_controller_tests.rs:1297:        let _ = fs::remove_dir_all(&state_dir);
-crates/slskr/src/focused_controller_tests.rs:1301:    fs::create_dir_all(&evidence_dir).expect("create parity evidence directory");
-crates/slskr/src/focused_controller_tests.rs:1432:    fs::create_dir_all(root.join("legacy")).expect("create legacy profile root");
-crates/slskr/src/focused_controller_tests.rs:1433:    fs::create_dir_all(root.join("native")).expect("create native profile root");
-crates/slskr/src/focused_controller_tests.rs:1472:    let _ = fs::remove_dir_all(root);
-crates/slskr/src/focused_controller_tests.rs:1493:    let _ = fs::remove_dir_all(&state.config.state_dir);
-crates/slskr/src/storage.rs:106:    OpenOptions::new()
-crates/slskr/src/multisource.rs:72:            let _ = fs::remove_file(&self.path);
-crates/slskr/src/multisource.rs:94:        let _ = fs::remove_dir_all(&self.path);
-crates/slskr/src/multisource.rs:474:    fs::create_dir_all(parent).map_err(|_| "output directory could not be created".to_owned())?;
-crates/slskr/src/multisource.rs:603:        let _ = fs::remove_file(&assembly_path);
-crates/slskr/src/multisource.rs:792:    fs::remove_file(assembly_path)
-crates/slskr/src/multisource.rs:821:    let mut options = fs::OpenOptions::new();
-crates/slskr/src/multisource.rs:1136:        fs::remove_dir_all(root).expect("remove permissions test root");
-crates/slskr/src/multisource.rs:1208:        fs::remove_dir_all(root).expect("remove swarm test root");
-crates/slskr/src/multisource.rs:1277:        fs::remove_dir_all(root).expect("remove swarm cancellation test root");
-crates/slskr/src/multisource.rs:1306:        fs::remove_dir_all(root).expect("remove mesh preview test root");
-crates/slskr/src/multisource.rs:1367:        fs::remove_dir_all(root).expect("remove mesh preview test root");
-crates/slskr/src/pods.rs:1428:    let mut options = fs::OpenOptions::new();
-crates/slskr/src/pods.rs:1571:        std::fs::create_dir_all(&state_dir).unwrap();
-crates/slskr/src/pods.rs:1584:        std::fs::remove_dir_all(state_dir).unwrap();
-crates/slskr/src/pods.rs:1593:        std::fs::create_dir_all(&state_dir).unwrap();
-crates/slskr/src/pods.rs:1599:        std::fs::remove_dir_all(state_dir).unwrap();
-crates/slskr/src/pods.rs:1608:        std::fs::create_dir_all(&state_dir).unwrap();
-crates/slskr/src/pods.rs:1622:        std::fs::remove_dir_all(state_dir).unwrap();
-crates/slskr/src/pods.rs:1662:        std::fs::create_dir_all(&state_dir).unwrap();
-crates/slskr/src/pods.rs:1691:        std::fs::remove_dir_all(state_dir).unwrap();
-crates/slskr/src/pods.rs:1700:        std::fs::create_dir_all(&state_dir).unwrap();
-crates/slskr/src/pods.rs:1725:        std::fs::remove_dir_all(state_dir).unwrap();
-crates/slskr/src/pods.rs:1734:        std::fs::create_dir_all(&state_dir).unwrap();
-crates/slskr/src/pods.rs:1757:        std::fs::remove_dir_all(state_dir).unwrap();
-crates/slskr/src/pods.rs:1766:        std::fs::create_dir_all(&state_dir).unwrap();
-crates/slskr/src/pods.rs:1798:        std::fs::remove_dir_all(state_dir).unwrap();
-crates/slskr/src/pods.rs:1807:        std::fs::create_dir_all(&state_dir).unwrap();
-crates/slskr/src/pods.rs:1832:        std::fs::remove_dir_all(state_dir).unwrap();
-crates/slskr/src/pods.rs:1841:        std::fs::create_dir_all(&state_dir).unwrap();
-crates/slskr/src/pods.rs:1906:        std::fs::remove_dir_all(state_dir).unwrap();
-crates/slskr/src/pods.rs:1915:        std::fs::create_dir_all(&state_dir).unwrap();
-crates/slskr/src/pods.rs:1928:        std::fs::remove_dir_all(state_dir).unwrap();
-crates/slskr/src/pods.rs:1937:        std::fs::create_dir_all(&state_dir).unwrap();
-crates/slskr/src/pods.rs:1962:        std::fs::remove_dir_all(state_dir).unwrap();
-crates/slskr/src/pods.rs:1971:        std::fs::create_dir_all(&state_dir).unwrap();
-crates/slskr/src/pods.rs:1989:        std::fs::remove_dir_all(state_dir).unwrap();
-crates/slskr/src/route_dispatch_group_2.rs:3301:    match tokio::fs::remove_file(path).await {
 crates/slskr/src/config.rs:1974:    let file = fs::OpenOptions::new()
 crates/slskr/src/config.rs:1980:    fs::remove_file(&probe).map_err(|_| format!("{field} writeability probe cleanup failed"))?;
 crates/slskr/src/config.rs:8496:    let mut options = fs::OpenOptions::new();
@@ -1392,6 +1392,19 @@ crates/slskr/src/controller_tests.rs:144938:            fs::create_dir_all(&albu
 crates/slskr/src/controller_tests.rs:144964:    fs::create_dir_all(&evidence_dir).expect("create files evidence directory");
 
 ## Async task and channel lifecycle boundaries
+crates/slskr-client/src/transfer.rs:156:        self.receive_file_from_with_timeout(
+crates/slskr-client/src/transfer.rs:204:        let result = time::timeout(timeout, async {
+crates/slskr-client/src/transfer.rs:451:        self.send_file_to_with_timeout(connection, bytes, DEFAULT_TRANSFER_IO_TIMEOUT)
+crates/slskr-client/src/transfer.rs:481:        let result = time::timeout(timeout, async {
+crates/slskr-client/src/peer_cache.rs:125:        self.send_to_with_timeout(username, message, DEFAULT_PEER_IO_TIMEOUT)
+crates/slskr-client/src/peer_cache.rs:129:    pub async fn send_to_with_timeout(
+crates/slskr-client/src/peer_cache.rs:146:        match time::timeout(timeout, active.send(message)).await {
+crates/slskr-client/src/peer_cache.rs:167:        self.receive_from_with_timeout(username, DEFAULT_PEER_IO_TIMEOUT)
+crates/slskr-client/src/peer_cache.rs:171:    pub async fn receive_from_with_timeout(
+crates/slskr-client/src/peer_cache.rs:187:        match time::timeout(timeout, active.receive()).await {
+crates/slskr-client/src/manager.rs:122:        self.ensure_peer_messages_with_timeout(username, DEFAULT_MANAGER_CONNECT_TIMEOUT)
+crates/slskr-client/src/manager.rs:126:    pub async fn ensure_peer_messages_with_timeout(
+crates/slskr-client/src/manager.rs:136:        time::timeout(timeout, async {
 crates/slskr-client/src/quic_data.rs:116:        Some(match timeout(QUIC_CONNECT_TIMEOUT, incoming).await {
 crates/slskr-client/src/quic_data.rs:692:    tokio::spawn(async move {
 crates/slskr-client/src/quic_data.rs:733:    let connection = timeout(QUIC_CONNECT_TIMEOUT, connecting)
@@ -1400,41 +1413,6 @@ crates/slskr-client/src/quic_data.rs:920:        let server = tokio::spawn(async
 crates/slskr-client/src/quic_data.rs:966:        let server = tokio::spawn(async move {
 crates/slskr-client/src/quic_data.rs:1018:        let server = tokio::spawn(async move {
 crates/slskr-client/src/quic_data.rs:1059:        let server = tokio::spawn(async move {
-crates/slskr-client/src/quic_control.rs:253:    let connection = timeout(QUIC_CONNECT_TIMEOUT, connecting)
-crates/slskr-client/src/quic_control.rs:308:        Some(match timeout(QUIC_CONNECT_TIMEOUT, incoming).await {
-crates/slskr-client/src/quic_control.rs:385:    let connection = timeout(QUIC_CONNECT_TIMEOUT, connecting)
-crates/slskr-client/src/quic_control.rs:402:    tokio::spawn(async move {
-crates/slskr-client/src/quic_control.rs:451:        let server = tokio::spawn(async move {
-crates/slskr-client/src/quic_control.rs:498:        let server = tokio::spawn(async move {
-crates/slskr-client/src/overlay.rs:58:    let tcp = timeout(TCP_CONNECT_TIMEOUT, TcpStream::connect(endpoint))
-crates/slskr-client/src/overlay.rs:75:    let tls = timeout(TLS_HANDSHAKE_TIMEOUT, connector.connect(server_name, tcp))
-crates/slskr-client/src/overlay.rs:86:    let mut client = timeout(
-crates/slskr-client/src/overlay.rs:789:        self.call_with_timeout(call, SERVICE_CALL_TIMEOUT).await
-crates/slskr-client/src/overlay.rs:796:        self.search_with_timeout(request, SERVICE_CALL_TIMEOUT)
-crates/slskr-client/src/overlay.rs:800:    pub async fn call_with_timeout(
-crates/slskr-client/src/overlay.rs:816:        match timeout(deadline, self.call_inner(call)).await {
-crates/slskr-client/src/overlay.rs:870:    pub async fn search_with_timeout(
-crates/slskr-client/src/overlay.rs:886:        match timeout(deadline, self.search_inner(request)).await {
-crates/slskr-client/src/overlay.rs:1303:        let task = tokio::spawn(async move {
-crates/slskr-client/src/overlay.rs:1327:        let writer = tokio::spawn(async move {
-crates/slskr-client/src/overlay.rs:1331:        let decoded = timeout(
-crates/slskr-client/src/overlay.rs:1566:        let server = tokio::spawn(async move {
-crates/slskr-client/src/overlay.rs:1647:        assert!(timeout(Duration::from_millis(10), wire.read_u8())
-crates/slskr-client/src/overlay.rs:1816:        let server = tokio::spawn(async move {
-crates/slskr-client/src/overlay.rs:1882:        let server = tokio::spawn(async move {
-crates/slskr-client/src/overlay.rs:2046:        let server = tokio::spawn(async move {
-crates/slskr-client/src/overlay.rs:2093:        let server = tokio::spawn(async move {
-crates/slskr-client/src/overlay.rs:2108:        let server = tokio::spawn(async move {
-crates/slskr-client/src/overlay.rs:2138:            .call_with_timeout(&call, Duration::from_millis(10))
-crates/slskr-client/src/overlay.rs:2147:                .call_with_timeout(&call, Duration::from_secs(1))
-crates/slskr-client/src/peer_cache.rs:125:        self.send_to_with_timeout(username, message, DEFAULT_PEER_IO_TIMEOUT)
-crates/slskr-client/src/peer_cache.rs:129:    pub async fn send_to_with_timeout(
-crates/slskr-client/src/peer_cache.rs:146:        match time::timeout(timeout, active.send(message)).await {
-crates/slskr-client/src/peer_cache.rs:167:        self.receive_from_with_timeout(username, DEFAULT_PEER_IO_TIMEOUT)
-crates/slskr-client/src/peer_cache.rs:171:    pub async fn receive_from_with_timeout(
-crates/slskr-client/src/peer_cache.rs:187:        match time::timeout(timeout, active.receive()).await {
-crates/slskr-client/src/stream.rs:35:        Self::connect_with_timeout(address, DEFAULT_CONNECT_TIMEOUT).await
-crates/slskr-client/src/stream.rs:42:        let stream = time::timeout(timeout, TcpStream::connect(address))
 crates/slskr-client/src/listener.rs:75:        self.accept_with_timeout(DEFAULT_INIT_HANDSHAKE_TIMEOUT)
 crates/slskr-client/src/listener.rs:79:    pub async fn accept_with_timeout(
 crates/slskr-client/src/listener.rs:83:        time::timeout(timeout, async {
@@ -1447,112 +1425,20 @@ crates/slskr-client/src/listener.rs:131:        time::timeout(timeout, async {
 crates/slskr-client/src/listener.rs:148:        self.accept_shared_mesh_with_timeout(DEFAULT_INIT_HANDSHAKE_TIMEOUT)
 crates/slskr-client/src/listener.rs:152:    pub async fn accept_shared_mesh_with_timeout(
 crates/slskr-client/src/listener.rs:156:        time::timeout(timeout, async {
-crates/slskr-client/src/search.rs:81:    pub fn next_interval(&self, server_interval: Option<Duration>) -> Duration {
-crates/slskr-client/src/search.rs:128:    pub fn interval(&self) -> Duration {
-crates/slskr-client/src/search.rs:129:        self.options.next_interval(self.server_interval)
-crates/slskr-client/src/search.rs:159:    pub fn set_server_interval(&mut self, seconds: Option<u64>) {
-crates/slskr-client/src/transfer.rs:156:        self.receive_file_from_with_timeout(
-crates/slskr-client/src/transfer.rs:204:        let result = time::timeout(timeout, async {
-crates/slskr-client/src/transfer.rs:451:        self.send_file_to_with_timeout(connection, bytes, DEFAULT_TRANSFER_IO_TIMEOUT)
-crates/slskr-client/src/transfer.rs:481:        let result = time::timeout(timeout, async {
-crates/slskr-client/src/manager.rs:122:        self.ensure_peer_messages_with_timeout(username, DEFAULT_MANAGER_CONNECT_TIMEOUT)
-crates/slskr-client/src/manager.rs:126:    pub async fn ensure_peer_messages_with_timeout(
-crates/slskr-client/src/manager.rs:136:        time::timeout(timeout, async {
-crates/slskr-client/src/peer_connect.rs:210:    connect_peer_messages_with_timeout(address, username, DEFAULT_CONNECT_TIMEOUT).await
-crates/slskr-client/src/peer_connect.rs:238:    connect_distributed_with_timeout(address, username, DEFAULT_CONNECT_TIMEOUT).await
-crates/slskr-client/src/peer_connect.rs:266:    connect_file_transfer_with_timeout(address, username, DEFAULT_CONNECT_TIMEOUT).await
-crates/slskr-client/src/peer_connect.rs:295:    time::timeout(timeout, future)
 crates/slskr-client/src/distributed_tree.rs:343:        self.send_branch_info_to_parent_with_timeout(DEFAULT_DISTRIBUTED_IO_TIMEOUT)
 crates/slskr-client/src/distributed_tree.rs:347:    pub async fn send_branch_info_to_parent_with_timeout(
 crates/slskr-client/src/distributed_tree.rs:359:        let result = time::timeout(timeout, async {
 crates/slskr-client/src/distributed_tree.rs:385:        self.forward_search_to_children_with_timeout(
 crates/slskr-client/src/distributed_tree.rs:393:    pub async fn forward_search_to_children_with_timeout(
 crates/slskr-client/src/distributed_tree.rs:406:        let result = time::timeout(timeout, async {
-crates/slskr/src/mesh_services.rs:407:    timeout(deadline, operation)
-crates/slskr/src/mesh_services.rs:553:        let server = tokio::spawn(async move {
-crates/slskr/src/mesh_services.rs:567:        let fetch = tokio::spawn(async move {
-crates/slskr/src/mesh_services.rs:654:        let server = tokio::spawn(async move {
-crates/slskr/src/mesh_services.rs:668:        let fetch = tokio::spawn(async move {
-crates/slskr/src/dotnet_regex.rs:83:    pub fn is_match_with_timeout(&self, value: &str, timeout: Duration) -> Result<bool, String> {
-crates/slskr/src/dotnet_regex.rs:107:        match receiver.recv_timeout(timeout) {
-crates/slskr/src/batch.rs:410:    fn test_batch_rejects_invalid_timeout() {
-crates/slskr/src/events_ws.rs:122:    let reader_task = tokio::spawn(async move {
-crates/slskr/src/events_ws.rs:124:            let frame = read_client_frame_with_timeout(&mut reader, WEBSOCKET_READ_TIMEOUT).await;
-crates/slskr/src/events_ws.rs:132:    let mut heartbeat = time::interval(heartbeat_interval);
-crates/slskr/src/events_ws.rs:287:    time::timeout(timeout, read_client_frame(reader))
-crates/slskr/src/events_ws.rs:356:    write_frame_with_timeout(writer, opcode, payload, WEBSOCKET_WRITE_TIMEOUT).await
-crates/slskr/src/events_ws.rs:368:    time::timeout(timeout, write_frame_inner(writer, opcode, payload))
-crates/slskr/src/events_ws.rs:525:        let (event_tx, _) = broadcast::channel(10);
-crates/slskr/src/events_ws.rs:530:        tokio::spawn(async move {
-crates/slskr/src/events_ws.rs:559:        let message = time::timeout(Duration::from_secs(2), async {
-crates/slskr/src/events_ws.rs:681:        let (_event_tx, receiver) = broadcast::channel(1);
-crates/slskr/src/events_ws.rs:704:        let (event_tx, receiver) = broadcast::channel(1);
-crates/slskr/src/events_ws.rs:728:        let (_event_tx, receiver) = broadcast::channel(1);
-crates/slskr/src/events_ws.rs:731:        let error = time::timeout(
-crates/slskr/src/events_ws.rs:754:            write_frame_with_timeout(&mut writer, 0x82, &payload, Duration::from_millis(50))
-crates/slskr/src/events_ws.rs:763:        let error = time::timeout(
-crates/slskr/src/events_ws.rs:765:            read_client_frame_with_timeout(&mut reader, Duration::from_millis(10)),
-crates/slskr/src/dht.rs:188:        let bootstrapped = timeout(self.lookup_timeout, self.client.bootstrapped())
-crates/slskr/src/dht.rs:201:                match timeout(
-crates/slskr/src/dht.rs:246:        timeout(self.lookup_timeout, async {
-crates/slskr/src/scripts.rs:21:fn format_timeout(duration: Duration) -> String {
-crates/slskr/src/scripts.rs:93:    run_with_timeout(script, script_directory, target, payload, SCRIPT_TIMEOUT).await
-crates/slskr/src/scripts.rs:96:async fn run_with_timeout(
-crates/slskr/src/scripts.rs:125:    let output = time::timeout(timeout_duration, async {
-crates/slskr/src/scripts.rs:140:            format_timeout(timeout_duration)
-crates/slskr/src/scripts.rs:215:        tokio::spawn(async move {
-crates/slskr/src/scripts.rs:291:        let error = run_with_timeout(
-crates/slskr/src/multisource.rs:659:        .timeout(SOURCE_TIMEOUT);
-crates/slskr/src/multisource.rs:699:    timeout(deadline, resolution)
-crates/slskr/src/multisource.rs:899:        let task = tokio::spawn(async move {
-crates/slskr/src/multisource.rs:905:                tokio::spawn(async move {
-crates/slskr/src/multisource.rs:955:        let task = tokio::spawn(async move {
-crates/slskr/src/multisource.rs:1240:        let download = tokio::spawn(execute(
-crates/slskr/src/multisource.rs:1316:        let server = tokio::spawn(async move {
-crates/slskr/src/multisource.rs:1342:        let fetch = tokio::spawn(async move {
-crates/slskr/src/relay_ws.rs:51:    let handshake = read_ws_frame_with_timeout(&mut reader, WEBSOCKET_READ_TIMEOUT).await?;
-crates/slskr/src/relay_ws.rs:106:    let reader_task = tokio::spawn(async move {
-crates/slskr/src/relay_ws.rs:108:            let frame = read_ws_frame_with_timeout(&mut reader, WEBSOCKET_READ_TIMEOUT).await;
-crates/slskr/src/relay_ws.rs:116:    let mut keepalive = time::interval(SIGNALR_KEEPALIVE_INTERVAL);
-crates/slskr/src/relay_ws.rs:415:    time::timeout(
-crates/slskr/src/relay_ws.rs:555:    time::timeout(timeout, read_ws_frame(reader))
-crates/slskr/src/relay_ws.rs:576:        let error = time::timeout(
-crates/slskr/src/relay_ws.rs:578:            read_ws_frame_with_timeout(&mut reader, Duration::from_millis(10)),
-crates/slskr/src/ftp.rs:228:            let ftp = tokio::time::timeout(timeout, AsyncFtpStream::connect(&endpoint))
-crates/slskr/src/ftp.rs:236:            let ftp = tokio::time::timeout(
-crates/slskr/src/ftp.rs:250:            let ftp = tokio::time::timeout(timeout, AsyncRustlsFtpStream::connect(&endpoint))
-crates/slskr/src/ftp.rs:254:            let ftp = tokio::time::timeout(
-crates/slskr/src/ftp.rs:272:            if let Ok(Ok(ftp)) = tokio::time::timeout(timeout, secure).await {
-crates/slskr/src/ftp.rs:275:            let ftp = tokio::time::timeout(timeout, AsyncFtpStream::connect(&endpoint))
-crates/slskr/src/ftp.rs:325:        let server = tokio::spawn(async move {
-crates/slskr/src/ftp.rs:544:        let server = tokio::spawn(async move {
-crates/slskr/src/ftp.rs:579:        let server = tokio::spawn(async move {
-crates/slskr/src/ftp.rs:884:            tokio::time::timeout(Duration::from_millis(50), listener.accept())
-crates/slskr/src/ftp.rs:889:        let attempted = tokio::spawn(async move {
-crates/slskr/src/webhooks.rs:610:                .timeout(timeout)
-crates/slskr/src/webhooks.rs:683:            tokio::spawn(async move {
-crates/slskr/src/webhooks.rs:822:            .timeout(request_timeout)
-crates/slskr/src/webhooks.rs:945:    tokio::time::timeout(timeout, resolution)
-crates/slskr/src/webhooks.rs:1073:        let server = tokio::spawn(async move {
-crates/slskr/src/webhooks.rs:1105:        let server = tokio::spawn(async move {
-crates/slskr/src/port_forwarding.rs:110:        let task = tokio::spawn(async move {
-crates/slskr/src/port_forwarding.rs:126:            if timeout(Duration::from_secs(5), &mut task).await.is_err() {
-crates/slskr/src/port_forwarding.rs:193:                            tokio::spawn(async move {
-crates/slskr/src/port_forwarding.rs:292:        let mut send = tokio::spawn(async move {
-crates/slskr/src/port_forwarding.rs:313:        let mut receive = tokio::spawn(async move {
-crates/slskr/src/port_forwarding.rs:345:            match timeout(TUNNEL_CLOSE_TIMEOUT, close_tunnel(&client, &tunnel_id)).await {
-crates/slskr/src/port_forwarding.rs:491:    let reply = timeout(SERVICE_CALL_TIMEOUT, async {
-crates/slskr/src/port_forwarding.rs:669:        timeout(Duration::from_secs(1), async {
-crates/slskr/src/port_forwarding.rs:721:        let stalled_gateway = tokio::spawn(async move {
-crates/slskr/src/port_forwarding.rs:735:        timeout(Duration::from_secs(2), async {
-crates/slskr/src/port_forwarding.rs:748:        timeout(Duration::from_secs(2), async {
-crates/slskr/src/port_forwarding.rs:815:        let gateway = tokio::spawn(async move {
-crates/slskr/src/port_forwarding.rs:904:        timeout(Duration::from_secs(5), local.read_exact(&mut echoed))
-crates/slskr/src/port_forwarding.rs:909:        timeout(Duration::from_secs(2), async {
-crates/slskr/src/port_forwarding.rs:924:        timeout(Duration::from_secs(5), gateway)
-crates/slskr/src/route_dispatch_group_1.rs:501:                let response = tokio::time::timeout(
-crates/slskr/src/route_dispatch_group_1.rs:1464:                tokio::spawn(async move {
-crates/slskr/src/route_dispatch.rs:272:    tokio::spawn(async move {
+crates/slskr-client/src/stream.rs:35:        Self::connect_with_timeout(address, DEFAULT_CONNECT_TIMEOUT).await
+crates/slskr-client/src/stream.rs:42:        let stream = time::timeout(timeout, TcpStream::connect(address))
+crates/slskr-client/src/quic_control.rs:253:    let connection = timeout(QUIC_CONNECT_TIMEOUT, connecting)
+crates/slskr-client/src/quic_control.rs:308:        Some(match timeout(QUIC_CONNECT_TIMEOUT, incoming).await {
+crates/slskr-client/src/quic_control.rs:385:    let connection = timeout(QUIC_CONNECT_TIMEOUT, connecting)
+crates/slskr-client/src/quic_control.rs:402:    tokio::spawn(async move {
+crates/slskr-client/src/quic_control.rs:451:        let server = tokio::spawn(async move {
+crates/slskr-client/src/quic_control.rs:498:        let server = tokio::spawn(async move {
 crates/slskr/src/cli.rs:559:    let stream = time::timeout(
 crates/slskr/src/cli.rs:595:            let stream = time::timeout(
 crates/slskr/src/cli.rs:653:        time::timeout(timeout, peer.receive())
@@ -1642,8 +1528,121 @@ crates/slskr/src/cli.rs:4802:        match time::timeout(Duration::from_secs(5),
 crates/slskr/src/cli.rs:4848:    match time::timeout(Duration::from_secs(5), peer.receive_user_info_request()).await {
 crates/slskr/src/cli.rs:5384:        let failed = tokio::spawn(async { Err("fixture send failed".to_owned()) });
 crates/slskr/src/cli.rs:5392:        let completed = tokio::spawn(async { Ok(()) });
-crates/slskr/src/focused_controller_tests.rs:60:    let (event_tx, _) = tokio::sync::broadcast::channel(super::EVENT_HISTORY_LIMIT);
-crates/slskr/src/route_dispatch_group_3.rs:751:                tokio::spawn(async move {
+crates/slskr-client/src/peer_connect.rs:210:    connect_peer_messages_with_timeout(address, username, DEFAULT_CONNECT_TIMEOUT).await
+crates/slskr-client/src/peer_connect.rs:238:    connect_distributed_with_timeout(address, username, DEFAULT_CONNECT_TIMEOUT).await
+crates/slskr-client/src/peer_connect.rs:266:    connect_file_transfer_with_timeout(address, username, DEFAULT_CONNECT_TIMEOUT).await
+crates/slskr-client/src/peer_connect.rs:295:    time::timeout(timeout, future)
+crates/slskr/src/relay_ws.rs:51:    let handshake = read_ws_frame_with_timeout(&mut reader, WEBSOCKET_READ_TIMEOUT).await?;
+crates/slskr/src/relay_ws.rs:106:    let reader_task = tokio::spawn(async move {
+crates/slskr/src/relay_ws.rs:108:            let frame = read_ws_frame_with_timeout(&mut reader, WEBSOCKET_READ_TIMEOUT).await;
+crates/slskr/src/relay_ws.rs:116:    let mut keepalive = time::interval(SIGNALR_KEEPALIVE_INTERVAL);
+crates/slskr/src/relay_ws.rs:415:    time::timeout(
+crates/slskr/src/relay_ws.rs:555:    time::timeout(timeout, read_ws_frame(reader))
+crates/slskr/src/relay_ws.rs:576:        let error = time::timeout(
+crates/slskr/src/relay_ws.rs:578:            read_ws_frame_with_timeout(&mut reader, Duration::from_millis(10)),
+crates/slskr/src/ftp.rs:228:            let ftp = tokio::time::timeout(timeout, AsyncFtpStream::connect(&endpoint))
+crates/slskr/src/ftp.rs:236:            let ftp = tokio::time::timeout(
+crates/slskr/src/ftp.rs:250:            let ftp = tokio::time::timeout(timeout, AsyncRustlsFtpStream::connect(&endpoint))
+crates/slskr/src/ftp.rs:254:            let ftp = tokio::time::timeout(
+crates/slskr/src/ftp.rs:272:            if let Ok(Ok(ftp)) = tokio::time::timeout(timeout, secure).await {
+crates/slskr/src/ftp.rs:275:            let ftp = tokio::time::timeout(timeout, AsyncFtpStream::connect(&endpoint))
+crates/slskr/src/ftp.rs:325:        let server = tokio::spawn(async move {
+crates/slskr/src/ftp.rs:544:        let server = tokio::spawn(async move {
+crates/slskr/src/ftp.rs:579:        let server = tokio::spawn(async move {
+crates/slskr/src/ftp.rs:884:            tokio::time::timeout(Duration::from_millis(50), listener.accept())
+crates/slskr/src/ftp.rs:889:        let attempted = tokio::spawn(async move {
+crates/slskr-client/src/search.rs:81:    pub fn next_interval(&self, server_interval: Option<Duration>) -> Duration {
+crates/slskr-client/src/search.rs:128:    pub fn interval(&self) -> Duration {
+crates/slskr-client/src/search.rs:129:        self.options.next_interval(self.server_interval)
+crates/slskr-client/src/search.rs:159:    pub fn set_server_interval(&mut self, seconds: Option<u64>) {
+crates/slskr/src/webhooks.rs:610:                .timeout(timeout)
+crates/slskr/src/webhooks.rs:683:            tokio::spawn(async move {
+crates/slskr/src/webhooks.rs:822:            .timeout(request_timeout)
+crates/slskr/src/webhooks.rs:945:    tokio::time::timeout(timeout, resolution)
+crates/slskr/src/webhooks.rs:1073:        let server = tokio::spawn(async move {
+crates/slskr/src/webhooks.rs:1105:        let server = tokio::spawn(async move {
+crates/slskr-client/src/overlay.rs:58:    let tcp = timeout(TCP_CONNECT_TIMEOUT, TcpStream::connect(endpoint))
+crates/slskr-client/src/overlay.rs:75:    let tls = timeout(TLS_HANDSHAKE_TIMEOUT, connector.connect(server_name, tcp))
+crates/slskr-client/src/overlay.rs:86:    let mut client = timeout(
+crates/slskr-client/src/overlay.rs:789:        self.call_with_timeout(call, SERVICE_CALL_TIMEOUT).await
+crates/slskr-client/src/overlay.rs:796:        self.search_with_timeout(request, SERVICE_CALL_TIMEOUT)
+crates/slskr-client/src/overlay.rs:800:    pub async fn call_with_timeout(
+crates/slskr-client/src/overlay.rs:816:        match timeout(deadline, self.call_inner(call)).await {
+crates/slskr-client/src/overlay.rs:870:    pub async fn search_with_timeout(
+crates/slskr-client/src/overlay.rs:886:        match timeout(deadline, self.search_inner(request)).await {
+crates/slskr-client/src/overlay.rs:1303:        let task = tokio::spawn(async move {
+crates/slskr-client/src/overlay.rs:1327:        let writer = tokio::spawn(async move {
+crates/slskr-client/src/overlay.rs:1331:        let decoded = timeout(
+crates/slskr-client/src/overlay.rs:1566:        let server = tokio::spawn(async move {
+crates/slskr-client/src/overlay.rs:1647:        assert!(timeout(Duration::from_millis(10), wire.read_u8())
+crates/slskr-client/src/overlay.rs:1816:        let server = tokio::spawn(async move {
+crates/slskr-client/src/overlay.rs:1882:        let server = tokio::spawn(async move {
+crates/slskr-client/src/overlay.rs:2046:        let server = tokio::spawn(async move {
+crates/slskr-client/src/overlay.rs:2093:        let server = tokio::spawn(async move {
+crates/slskr-client/src/overlay.rs:2108:        let server = tokio::spawn(async move {
+crates/slskr-client/src/overlay.rs:2138:            .call_with_timeout(&call, Duration::from_millis(10))
+crates/slskr-client/src/overlay.rs:2147:                .call_with_timeout(&call, Duration::from_secs(1))
+crates/slskr/src/mesh_services.rs:407:    timeout(deadline, operation)
+crates/slskr/src/mesh_services.rs:553:        let server = tokio::spawn(async move {
+crates/slskr/src/mesh_services.rs:567:        let fetch = tokio::spawn(async move {
+crates/slskr/src/mesh_services.rs:654:        let server = tokio::spawn(async move {
+crates/slskr/src/mesh_services.rs:668:        let fetch = tokio::spawn(async move {
+crates/slskr/src/port_forwarding.rs:110:        let task = tokio::spawn(async move {
+crates/slskr/src/port_forwarding.rs:126:            if timeout(Duration::from_secs(5), &mut task).await.is_err() {
+crates/slskr/src/port_forwarding.rs:193:                            tokio::spawn(async move {
+crates/slskr/src/port_forwarding.rs:292:        let mut send = tokio::spawn(async move {
+crates/slskr/src/port_forwarding.rs:313:        let mut receive = tokio::spawn(async move {
+crates/slskr/src/port_forwarding.rs:345:            match timeout(TUNNEL_CLOSE_TIMEOUT, close_tunnel(&client, &tunnel_id)).await {
+crates/slskr/src/port_forwarding.rs:491:    let reply = timeout(SERVICE_CALL_TIMEOUT, async {
+crates/slskr/src/port_forwarding.rs:669:        timeout(Duration::from_secs(1), async {
+crates/slskr/src/port_forwarding.rs:721:        let stalled_gateway = tokio::spawn(async move {
+crates/slskr/src/port_forwarding.rs:735:        timeout(Duration::from_secs(2), async {
+crates/slskr/src/port_forwarding.rs:748:        timeout(Duration::from_secs(2), async {
+crates/slskr/src/port_forwarding.rs:815:        let gateway = tokio::spawn(async move {
+crates/slskr/src/port_forwarding.rs:904:        timeout(Duration::from_secs(5), local.read_exact(&mut echoed))
+crates/slskr/src/port_forwarding.rs:909:        timeout(Duration::from_secs(2), async {
+crates/slskr/src/port_forwarding.rs:924:        timeout(Duration::from_secs(5), gateway)
+crates/slskr/src/dht.rs:188:        let bootstrapped = timeout(self.lookup_timeout, self.client.bootstrapped())
+crates/slskr/src/dht.rs:201:                match timeout(
+crates/slskr/src/dht.rs:246:        timeout(self.lookup_timeout, async {
+crates/slskr/src/scripts.rs:21:fn format_timeout(duration: Duration) -> String {
+crates/slskr/src/scripts.rs:93:    run_with_timeout(script, script_directory, target, payload, SCRIPT_TIMEOUT).await
+crates/slskr/src/scripts.rs:96:async fn run_with_timeout(
+crates/slskr/src/scripts.rs:125:    let output = time::timeout(timeout_duration, async {
+crates/slskr/src/scripts.rs:140:            format_timeout(timeout_duration)
+crates/slskr/src/scripts.rs:215:        tokio::spawn(async move {
+crates/slskr/src/scripts.rs:291:        let error = run_with_timeout(
+crates/slskr/src/events_ws.rs:122:    let reader_task = tokio::spawn(async move {
+crates/slskr/src/events_ws.rs:124:            let frame = read_client_frame_with_timeout(&mut reader, WEBSOCKET_READ_TIMEOUT).await;
+crates/slskr/src/events_ws.rs:132:    let mut heartbeat = time::interval(heartbeat_interval);
+crates/slskr/src/events_ws.rs:287:    time::timeout(timeout, read_client_frame(reader))
+crates/slskr/src/events_ws.rs:356:    write_frame_with_timeout(writer, opcode, payload, WEBSOCKET_WRITE_TIMEOUT).await
+crates/slskr/src/events_ws.rs:368:    time::timeout(timeout, write_frame_inner(writer, opcode, payload))
+crates/slskr/src/events_ws.rs:525:        let (event_tx, _) = broadcast::channel(10);
+crates/slskr/src/events_ws.rs:530:        tokio::spawn(async move {
+crates/slskr/src/events_ws.rs:559:        let message = time::timeout(Duration::from_secs(2), async {
+crates/slskr/src/events_ws.rs:681:        let (_event_tx, receiver) = broadcast::channel(1);
+crates/slskr/src/events_ws.rs:704:        let (event_tx, receiver) = broadcast::channel(1);
+crates/slskr/src/events_ws.rs:728:        let (_event_tx, receiver) = broadcast::channel(1);
+crates/slskr/src/events_ws.rs:731:        let error = time::timeout(
+crates/slskr/src/events_ws.rs:754:            write_frame_with_timeout(&mut writer, 0x82, &payload, Duration::from_millis(50))
+crates/slskr/src/events_ws.rs:763:        let error = time::timeout(
+crates/slskr/src/events_ws.rs:765:            read_client_frame_with_timeout(&mut reader, Duration::from_millis(10)),
+crates/slskr/src/dotnet_regex.rs:83:    pub fn is_match_with_timeout(&self, value: &str, timeout: Duration) -> Result<bool, String> {
+crates/slskr/src/dotnet_regex.rs:107:        match receiver.recv_timeout(timeout) {
+crates/slskr/src/batch.rs:410:    fn test_batch_rejects_invalid_timeout() {
+crates/slskr/src/multisource.rs:659:        .timeout(SOURCE_TIMEOUT);
+crates/slskr/src/multisource.rs:699:    timeout(deadline, resolution)
+crates/slskr/src/multisource.rs:899:        let task = tokio::spawn(async move {
+crates/slskr/src/multisource.rs:905:                tokio::spawn(async move {
+crates/slskr/src/multisource.rs:955:        let task = tokio::spawn(async move {
+crates/slskr/src/multisource.rs:1240:        let download = tokio::spawn(execute(
+crates/slskr/src/multisource.rs:1316:        let server = tokio::spawn(async move {
+crates/slskr/src/multisource.rs:1342:        let fetch = tokio::spawn(async move {
+crates/slskr/src/signalr_ws.rs:130:        relay_ws::read_ws_frame_with_timeout(&mut reader, relay_ws::WEBSOCKET_READ_TIMEOUT).await?;
+crates/slskr/src/signalr_ws.rs:158:    let reader_task = tokio::spawn(async move {
+crates/slskr/src/signalr_ws.rs:161:                relay_ws::read_ws_frame_with_timeout(&mut reader, relay_ws::WEBSOCKET_READ_TIMEOUT)
+crates/slskr/src/signalr_ws.rs:170:    let mut keepalive = tokio::time::interval(relay_ws::SIGNALR_KEEPALIVE_INTERVAL);
 crates/slskr/src/http_server.rs:187:    read_http_request_with_timeout(reader, REQUEST_READ_TIMEOUT, body_size_limit).await
 crates/slskr/src/http_server.rs:195:    time::timeout(timeout, read_http_request_inner(reader, body_size_limit))
 crates/slskr/src/http_server.rs:454:        time::timeout(BODY_READ_TIMEOUT, reader.read_exact(&mut buf))
@@ -1661,7 +1660,15 @@ crates/slskr/src/http_server.rs:1598:        tokio::spawn(async move {
 crates/slskr/src/http_server.rs:1606:        let error = read_http_request_with_timeout(
 crates/slskr/src/http_server.rs:1681:        let error = write_http_response_with_timeout(
 crates/slskr/src/http_server.rs:1849:        tokio::spawn(async move {
-crates/slskr/src/route_dispatch_group_7.rs:1345:                tokio::spawn(multisource::execute(
+crates/slskr/src/route_dispatch_group_1.rs:501:                let response = tokio::time::timeout(
+crates/slskr/src/route_dispatch_group_1.rs:1464:                tokio::spawn(async move {
+crates/slskr/src/vpn.rs:241:        .timeout(Duration::from_millis(options.gluetun.timeout))
+crates/slskr/src/vpn.rs:370:        let server = tokio::spawn(async move {
+crates/slskr/src/vpn.rs:415:        let server = tokio::spawn(async move {
+crates/slskr/src/vpn.rs:455:        let server = tokio::spawn(async move {
+crates/slskr/src/vpn.rs:490:            let server = tokio::spawn(async move {
+crates/slskr/src/vpn.rs:515:        let server = tokio::spawn(async move {
+crates/slskr/src/vpn.rs:554:        let server = tokio::spawn(async move {
 crates/slskr/src/relay_agent.rs:56:    tokio::spawn(async move {
 crates/slskr/src/relay_agent.rs:80:    let relay_target = time::timeout(
 crates/slskr/src/relay_agent.rs:101:    let mut socket = time::timeout(
@@ -1671,14 +1678,13 @@ crates/slskr/src/relay_agent.rs:143:    let share_token = time::timeout(
 crates/slskr/src/relay_agent.rs:179:            messages = time::timeout(
 crates/slskr/src/relay_agent.rs:264:        .timeout(RELAY_REQUEST_TIMEOUT)
 crates/slskr/src/relay_agent.rs:555:    time::timeout(
+crates/slskr/src/route_dispatch.rs:272:    tokio::spawn(async move {
+crates/slskr/src/route_dispatch_group_3.rs:751:                tokio::spawn(async move {
+crates/slskr/src/focused_controller_tests.rs:60:    let (event_tx, _) = tokio::sync::broadcast::channel(super::EVENT_HISTORY_LIMIT);
 crates/slskr/src/mesh_sync.rs:358:    let result = tokio::task::spawn_blocking(move || read_file_chunk(path, offset, length)).await;
-crates/slskr/src/vpn.rs:241:        .timeout(Duration::from_millis(options.gluetun.timeout))
-crates/slskr/src/vpn.rs:370:        let server = tokio::spawn(async move {
-crates/slskr/src/vpn.rs:415:        let server = tokio::spawn(async move {
-crates/slskr/src/vpn.rs:455:        let server = tokio::spawn(async move {
-crates/slskr/src/vpn.rs:490:            let server = tokio::spawn(async move {
-crates/slskr/src/vpn.rs:515:        let server = tokio::spawn(async move {
-crates/slskr/src/vpn.rs:554:        let server = tokio::spawn(async move {
+crates/slskr/src/route_dispatch_group_7.rs:1345:                tokio::spawn(multisource::execute(
+crates/slskr/src/route_dispatch_group_2.rs:2879:            let interests = match time::timeout(
+crates/slskr/src/persistence.rs:1117:            .busy_timeout(Duration::from_secs(30));
 crates/slskr/src/private_gateway.rs:574:        tokio::spawn(async move {
 crates/slskr/src/private_gateway.rs:683:            tokio::spawn(async move {
 crates/slskr/src/private_gateway.rs:697:            tokio::spawn(async move {
@@ -1714,12 +1720,6 @@ crates/slskr/src/private_gateway.rs:2890:        let reader_task = tokio::spawn(
 crates/slskr/src/private_gateway.rs:2906:        let result = timeout(Duration::from_secs(1), reader_task)
 crates/slskr/src/private_gateway.rs:3123:        let forwarder = tokio::spawn(forward_dht_responses(
 crates/slskr/src/private_gateway.rs:3131:        let (size, source) = tokio::time::timeout(
-crates/slskr/src/signalr_ws.rs:130:        relay_ws::read_ws_frame_with_timeout(&mut reader, relay_ws::WEBSOCKET_READ_TIMEOUT).await?;
-crates/slskr/src/signalr_ws.rs:158:    let reader_task = tokio::spawn(async move {
-crates/slskr/src/signalr_ws.rs:161:                relay_ws::read_ws_frame_with_timeout(&mut reader, relay_ws::WEBSOCKET_READ_TIMEOUT)
-crates/slskr/src/signalr_ws.rs:170:    let mut keepalive = tokio::time::interval(relay_ws::SIGNALR_KEEPALIVE_INTERVAL);
-crates/slskr/src/route_dispatch_group_2.rs:2879:            let interests = match time::timeout(
-crates/slskr/src/persistence.rs:1117:            .busy_timeout(Duration::from_secs(30));
 crates/slskr/src/route_dispatch_group_6.rs:2951:                        tokio::task::spawn_blocking(move || {
 crates/slskr/src/config.rs:1101:        let reconnect_delay = validated_runtime_interval(
 crates/slskr/src/config.rs:1110:        let ping_interval = validated_runtime_interval(
@@ -2022,18 +2022,12 @@ crates/slskr/src/controller_tests.rs:142290:        let task = tokio::spawn(supe
 crates/slskr/src/controller_tests.rs:142928:    let stream_task = tokio::spawn(async move { live_get(stream_state, &stream_path).await });
 
 ## Browser injection, token storage, and opener boundaries
-dashboard/src/components/Sidebar.tsx:67:            target="_blank"
-dashboard/src/components/Sidebar.tsx:76:            target="_blank"
-dashboard/src/pages/Monitoring.tsx:122:          target="_blank"
 dashboard/src/hooks/useLocalStorage.ts:8:  storageName: 'localStorage' | 'sessionStorage',
 dashboard/src/hooks/useLocalStorage.ts:42: * Custom hook for managing localStorage with React state.
 dashboard/src/hooks/useLocalStorage.ts:45:  return useBrowserStorage(key, initialValue, 'localStorage');
 dashboard/src/hooks/useLocalStorage.ts:49: * Custom hook for managing sessionStorage with React state.
 dashboard/src/hooks/useLocalStorage.ts:52:  return useBrowserStorage(key, initialValue, 'sessionStorage');
-web/scripts/audit-react-webui.mjs:614:      window.localStorage.setItem('slskr-theme', 'slskr');
-web/scripts/audit-react-webui.mjs:615:      window.sessionStorage.setItem('slskr-token', token || 'audit-token');
-web/scripts/audit-react-webui.mjs:616:      if (activeUser) window.localStorage.setItem('slskr-active-user', activeUser);
-web/scripts/audit-react-webui.mjs:618:        window.localStorage.setItem(
+dashboard/src/pages/Monitoring.tsx:122:          target="_blank"
 web/scripts/capture-readme-screenshots.mjs:311:  window.localStorage.setItem('slskr-theme', 'slskr');
 web/scripts/capture-readme-screenshots.mjs:312:  window.sessionStorage.setItem('slskr-token', 'readme-screenshot-token');
 web/e2e/helpers.ts:254:        sessionStorage.getItem('slskr-token') ||
@@ -2046,16 +2040,14 @@ web/e2e/helpers.ts:482:        sessionStorage.getItem('slskr-token') ||
 web/e2e/helpers.ts:483:        localStorage.getItem('slskr-token');
 web/e2e/helpers.ts:681:      sessionStorage.getItem('slskr-token') ||
 web/e2e/helpers.ts:682:      localStorage.getItem('slskr-token') ||
-web/src/components/Rooms/Rooms.jsx:48:// Load tabs from localStorage
-web/src/components/Rooms/Rooms.jsx:58:// Save tabs to localStorage
-web/src/components/Rooms/Rooms.jsx:146:  // Save tabs to localStorage whenever they change
-web/src/components/Browse/Browse.jsx:15:// Load tabs from localStorage
-web/src/components/Browse/Browse.jsx:37:// Save tabs to localStorage
-web/src/components/Browse/Browse.jsx:110:  // Save tabs to localStorage whenever they change
-web/src/components/Chat/Chat.jsx:46:// Load tabs from localStorage
-web/src/components/Chat/Chat.jsx:56:// Save tabs to localStorage
-web/src/components/Chat/Chat.jsx:209:  // Save tabs to localStorage whenever they change
-web/src/lib/communityQualitySignals.js:41:    return window.localStorage;
+dashboard/src/components/Sidebar.tsx:67:            target="_blank"
+dashboard/src/components/Sidebar.tsx:76:            target="_blank"
+web/scripts/audit-react-webui.mjs:614:      window.localStorage.setItem('slskr-theme', 'slskr');
+web/scripts/audit-react-webui.mjs:615:      window.sessionStorage.setItem('slskr-token', token || 'audit-token');
+web/scripts/audit-react-webui.mjs:616:      if (activeUser) window.localStorage.setItem('slskr-active-user', activeUser);
+web/scripts/audit-react-webui.mjs:618:        window.localStorage.setItem(
+web/src/lib/session.js:18:  setToken(sessionStorage, tokenPassthroughValue);
+web/src/lib/session.js:31:  setToken(sessionStorage, token);
 web/src/components/Shared/Footer.jsx:193:              target="_blank"
 web/src/components/Shared/Footer.jsx:219:              target="_blank"
 web/src/components/Shared/Footer.jsx:284:                target="_blank"
@@ -2063,6 +2055,9 @@ web/src/components/Shared/Footer.jsx:304:                  target="_blank"
 web/src/components/Shared/Footer.jsx:313:                  target="_blank"
 web/src/components/Shared/Footer.jsx:325:                  target="_blank"
 web/src/components/Shared/Footer.jsx:335:                target="_blank"
+web/src/lib/communityQualitySignals.js:41:    return window.localStorage;
+web/src/lib/searches.js:77:// Blocked users management (localStorage-based)
+web/src/lib/safeOpen.js:22:    const opened = window.open(url, '_blank', 'noopener,noreferrer');
 web/src/lib/storage.js:5:    const value = window.localStorage.getItem(key);
 web/src/lib/storage.js:16:    window.localStorage.setItem(key, value);
 web/src/lib/storage.js:27:    window.localStorage.removeItem(key);
@@ -2071,23 +2066,18 @@ web/src/lib/storage.js:40:      (_, index) => window.localStorage.key(index),
 web/src/lib/storage.js:51:    const value = window.sessionStorage.getItem(key);
 web/src/lib/storage.js:62:    window.sessionStorage.setItem(key, value);
 web/src/lib/storage.js:82:    window.sessionStorage.removeItem(key);
-web/src/lib/session.js:18:  setToken(sessionStorage, tokenPassthroughValue);
-web/src/lib/session.js:31:  setToken(sessionStorage, token);
-web/src/lib/safeOpen.js:22:    const opened = window.open(url, '_blank', 'noopener,noreferrer');
-web/src/lib/searches.js:77:// Blocked users management (localStorage-based)
+web/src/components/Chat/Chat.jsx:46:// Load tabs from localStorage
+web/src/components/Chat/Chat.jsx:56:// Save tabs to localStorage
+web/src/components/Chat/Chat.jsx:209:  // Save tabs to localStorage whenever they change
+web/src/components/Rooms/Rooms.jsx:48:// Load tabs from localStorage
+web/src/components/Rooms/Rooms.jsx:58:// Save tabs to localStorage
+web/src/components/Rooms/Rooms.jsx:146:  // Save tabs to localStorage whenever they change
+web/src/components/Browse/Browse.jsx:15:// Load tabs from localStorage
+web/src/components/Browse/Browse.jsx:37:// Save tabs to localStorage
+web/src/components/Browse/Browse.jsx:110:  // Save tabs to localStorage whenever they change
 web/src/components/Search/Detail/SearchDetail.jsx:283:  // Sync hasSavedDefault across tabs/searches when localStorage changes
 
 ## Suppressed CI and script failures
-scripts/run-council-scan.sh:14:    "$@" >"$tmp" || true
-scripts/check-csp-policy.sh:16:    | rg -v 'assert!\(!' || true
-scripts/run-proton-natpmp-command.sh:35:    natpmpc -g "$gateway" -a "$public_port" "$private_port" tcp "$lifetime" >/dev/null 2>&1 || true
-scripts/run-proton-natpmp-command.sh:42:trap 'kill "$renew_pid" 2>/dev/null || true' EXIT
-scripts/check-proton-wg-labels.sh:38:  set +e
-scripts/start-proton-listener-soak.sh:21:tmux kill-session -t "$session" 2>/dev/null || true
-scripts/start-proton-listener-soak.sh:22:sudo wg-quick down "$interface" 2>/dev/null || true
-scripts/start-proton-listener-soak.sh:23:sudo ip link del "$interface" 2>/dev/null || true
-scripts/start-proton-listener-soak.sh:24:sudo ip netns pids "$namespace" 2>/dev/null | xargs -r sudo kill 2>/dev/null || true
-scripts/start-proton-listener-soak.sh:25:sudo ip netns del "$namespace" 2>/dev/null || true
 scripts/run-in-proton-wg-netns.sh:37:    sudo ip netns pids "$namespace" 2>/dev/null | xargs -r sudo kill 2>/dev/null || true
 scripts/run-in-proton-wg-netns.sh:38:    sudo ip netns del "$namespace" 2>/dev/null || true
 scripts/run-in-proton-wg-netns.sh:39:    sudo rm -rf "/etc/netns/$namespace" 2>/dev/null || true
@@ -2099,19 +2089,29 @@ scripts/run-in-proton-wg-netns.sh:46:    sudo iptables -D FORWARD -o "$host_veth
 scripts/run-in-proton-wg-netns.sh:139:sudo ip netns exec "$namespace" bash -lc 'timeout 3 bash -c "</dev/udp/1.1.1.1/53" 2>/dev/null || true'
 scripts/check-public-posture.sh:24:      | rg -v -i 'do not|should not|must not|unless|avoid|remove casual|presenting the repository|not copied|not copy|not import|not say|prohibited|forbidden|current web ui as the reference implementation|based on error type' || true
 .github/workflows/release.yml:366:          previous_tag="$(git describe --tags --match 'release-v*' --abbrev=0 "${GITHUB_SHA}^" 2>/dev/null || true)"
+scripts/run-council-scan.sh:14:    "$@" >"$tmp" || true
+scripts/run-proton-natpmp-command.sh:35:    natpmpc -g "$gateway" -a "$public_port" "$private_port" tcp "$lifetime" >/dev/null 2>&1 || true
+scripts/run-proton-natpmp-command.sh:42:trap 'kill "$renew_pid" 2>/dev/null || true' EXIT
+scripts/check-proton-wg-labels.sh:38:  set +e
+scripts/start-proton-listener-soak.sh:21:tmux kill-session -t "$session" 2>/dev/null || true
+scripts/start-proton-listener-soak.sh:22:sudo wg-quick down "$interface" 2>/dev/null || true
+scripts/start-proton-listener-soak.sh:23:sudo ip link del "$interface" 2>/dev/null || true
+scripts/start-proton-listener-soak.sh:24:sudo ip netns pids "$namespace" 2>/dev/null | xargs -r sudo kill 2>/dev/null || true
+scripts/start-proton-listener-soak.sh:25:sudo ip netns del "$namespace" 2>/dev/null || true
 .github/workflows/release-publish.yml:273:            KRB5CCNAME="FILE:$armor" kdestroy || true
 .github/workflows/release-publish.yml:380:            --jq '.commit.committer.date' 2>/dev/null | { read -r d && date -u -d "$d" +%s; } || true)"
 .github/workflows/release-publish.yml:419:            getent ahosts ppa.launchpad.net || true
 .github/workflows/release-publish.yml:462:            ssh-keyscan -T 30 -t rsa,ecdsa,ed25519 ppa.launchpad.net >> ~/.ssh/known_hosts 2>/dev/null || true
 .github/workflows/release-publish.yml:574:        continue-on-error: true
-scripts/probe-natpmp-mapping.sh:33:            "$collision_private_port" tcp 0 >/dev/null 2>&1 || true
-scripts/probe-natpmp-mapping.sh:37:            "$private_port" tcp 0 >/dev/null 2>&1 || true
+scripts/check-csp-policy.sh:16:    | rg -v 'assert!\(!' || true
 scripts/check-web-request-body-limit-differential.sh:24:    kill "$daemon_pid" 2>/dev/null || true
 scripts/check-web-request-body-limit-differential.sh:25:    wait "$daemon_pid" 2>/dev/null || true
 scripts/check-web-request-body-limit-differential.sh:102:      tail -120 "$log" >&2 || true
 scripts/check-web-request-body-limit-differential.sh:107:  tail -120 "$log" >&2 || true
 scripts/run-council-active-bughunt.sh:35:      "$pattern" "$@" || true
 scripts/run-council-active-bughunt.sh:78:  'continue-on-error:|allow_failure:|\|\|[[:space:]]+true|set[[:space:]]+\+e' \
+scripts/probe-natpmp-mapping.sh:33:            "$collision_private_port" tcp 0 >/dev/null 2>&1 || true
+scripts/probe-natpmp-mapping.sh:37:            "$private_port" tcp 0 >/dev/null 2>&1 || true
 scripts/scan-bug-council-candidates.sh:26:    "$pattern" "$@" || true
 scripts/scan-bug-council-candidates.sh:73:  'continue-on-error:|allow_failure:|\|\|[[:space:]]+true|set[[:space:]]+\+e' \
 scripts/check-web-cors-differential.sh:34:    kill "$daemon_pid" 2>/dev/null || true
@@ -2134,8 +2134,7 @@ scripts/check-web-no-auth-passthrough-differential.sh:110:      tail -120 "$log"
 scripts/check-web-no-auth-passthrough-differential.sh:115:  tail -120 "$log" >&2 || true
 scripts/check-web-no-auth-passthrough-differential.sh:298:      wait "$daemon_pid" 2>/dev/null || true
 scripts/check-web-no-auth-passthrough-differential.sh:305:  tail -120 "$log" >&2 || true
-scripts/generate-vpn-soulseek-accounts.sh:65:  grep -v -E '^(SLSKR_TEST_ACCOUNT_COUNT|SLSKR_TEST_[0-9]+_(USERNAME|PASSWORD))=' "$output_file" > "$tmp" || true
-scripts/generate-vpn-soulseek-accounts.sh:78:  set +e
+scripts/validate-changelog.sh:15:unreleased_count="$(rg -c --no-filename '^## \[Unreleased\]$' "$changelog" || true)"
 scripts/check-diagnostics-memory-dump-differential.sh:28:    kill "$daemon_pid" 2>/dev/null || true
 scripts/check-diagnostics-memory-dump-differential.sh:31:        wait "$daemon_pid" 2>/dev/null || true
 scripts/check-diagnostics-memory-dump-differential.sh:37:    kill -KILL "$daemon_pid" 2>/dev/null || true
@@ -2159,10 +2158,19 @@ scripts/check-web-auth-disabled-differential.sh:52:    wait "$daemon_pid" 2>/dev
 scripts/check-web-auth-disabled-differential.sh:118:      tail -120 "$log" >&2 || true
 scripts/check-web-auth-disabled-differential.sh:123:  tail -120 "$log" >&2 || true
 scripts/check-web-auth-disabled-differential.sh:298:      diff -u "$work_dir/$target-upstream-$suffix" "$work_dir/$target-slskr-$suffix" >&2 || true
-scripts/with-process-memory-guard.sh:70:    systemctl --user stop "$unit_name" >/dev/null 2>&1 || true
+scripts/check-remediation-baseline.sh:37:    git -C "$upstream_repo" worktree remove --force "$SLSKR_SLSKD_ROOT" >/dev/null 2>&1 || true
+scripts/check-remediation-baseline.sh:40:    git -C "$upstream_repo" worktree remove --force "$SLSKR_SLSKDN_ROOT" >/dev/null 2>&1 || true
+scripts/check-web-auth-credentials-differential.sh:22:    kill "$daemon_pid" 2>/dev/null || true
+scripts/check-web-auth-credentials-differential.sh:23:    wait "$daemon_pid" 2>/dev/null || true
+scripts/check-web-auth-credentials-differential.sh:49:    kill "$daemon_pid" 2>/dev/null || true
+scripts/check-web-auth-credentials-differential.sh:50:    wait "$daemon_pid" 2>/dev/null || true
+scripts/check-web-auth-credentials-differential.sh:126:      tail -120 "$log" >&2 || true
+scripts/check-web-auth-credentials-differential.sh:131:  tail -120 "$log" >&2 || true
+scripts/check-web-auth-credentials-differential.sh:535:      diff -u "$work_dir/$target-upstream-$suffix" "$work_dir/$target-slskr-$suffix" >&2 || true
 scripts/check-web-audit.sh:28:      npm --prefix "$package_dir" audit --json 2>/dev/null || true
 scripts/check-web-audit.sh:40:    ' <<<"$report" 2>/dev/null || true
 scripts/check-web-audit.sh:54:      npm --prefix "$package_dir" audit --json 2>/dev/null || true
+scripts/with-process-memory-guard.sh:70:    systemctl --user stop "$unit_name" >/dev/null 2>&1 || true
 scripts/run-container-shutdown-smoke.sh:8:  docker rm -f "$container_name" >/dev/null 2>&1 || true
 scripts/run-container-shutdown-smoke.sh:22:  state="$(docker inspect -f '{{.State.Status}}' "$container_name" 2>/dev/null || true)"
 scripts/run-container-shutdown-smoke.sh:35:  docker logs "$container_name" 2>&1 || true
@@ -2171,39 +2179,14 @@ scripts/run-container-shutdown-smoke.sh:48:state="$(docker inspect -f '{{.State.
 scripts/run-container-shutdown-smoke.sh:51:  docker logs "$container_name" 2>&1 || true
 scripts/run-container-shutdown-smoke.sh:58:  docker logs "$container_name" 2>&1 || true
 scripts/run-container-shutdown-smoke.sh:64:  docker logs "$container_name" 2>&1 || true
-scripts/validate-changelog.sh:15:unreleased_count="$(rg -c --no-filename '^## \[Unreleased\]$' "$changelog" || true)"
-scripts/check-rust-format.sh:63:    diff -u -- "$rust_file" "$formatted_file" || true
-scripts/check-web-auth-credentials-differential.sh:22:    kill "$daemon_pid" 2>/dev/null || true
-scripts/check-web-auth-credentials-differential.sh:23:    wait "$daemon_pid" 2>/dev/null || true
-scripts/check-web-auth-credentials-differential.sh:49:    kill "$daemon_pid" 2>/dev/null || true
-scripts/check-web-auth-credentials-differential.sh:50:    wait "$daemon_pid" 2>/dev/null || true
-scripts/check-web-auth-credentials-differential.sh:126:      tail -120 "$log" >&2 || true
-scripts/check-web-auth-credentials-differential.sh:131:  tail -120 "$log" >&2 || true
-scripts/check-web-auth-credentials-differential.sh:535:      diff -u "$work_dir/$target-upstream-$suffix" "$work_dir/$target-slskr-$suffix" >&2 || true
-scripts/check-remediation-baseline.sh:37:    git -C "$upstream_repo" worktree remove --force "$SLSKR_SLSKD_ROOT" >/dev/null 2>&1 || true
-scripts/check-remediation-baseline.sh:40:    git -C "$upstream_repo" worktree remove --force "$SLSKR_SLSKDN_ROOT" >/dev/null 2>&1 || true
-scripts/run-live-interop-matrix.sh:44:  live_slsk_address="$(getent ahostsv4 vps.slsknet.org | awk 'NR == 1 { print $1 }' || true)"
-scripts/run-live-interop-matrix.sh:125:    tail -n 20 "$stderr_file" || true
-scripts/run-live-interop-matrix.sh:142:  set +e
-scripts/run-live-interop-matrix.sh:172:set +e
-scripts/run-live-interop-matrix.sh:198:set +e
-scripts/run-live-interop-matrix.sh:219:set +e
-scripts/check-controller-auth-profiles.sh:20:    kill "$daemon_pid" 2>/dev/null || true
-scripts/check-controller-auth-profiles.sh:21:    wait "$daemon_pid" 2>/dev/null || true
-scripts/check-controller-auth-profiles.sh:39:    wait "$daemon_pid" 2>/dev/null || true
-scripts/check-controller-auth-profiles.sh:75:  tail -80 "$work_dir/$target.log" >&2 || true
-scripts/build-rust-web.sh:16:wasm_bindgen_bin="$(command -v wasm-bindgen || true)"
 scripts/check-web-rate-limiting-differential.sh:29:    kill "$daemon_pid" 2>/dev/null || true
 scripts/check-web-rate-limiting-differential.sh:30:    wait "$daemon_pid" 2>/dev/null || true
 scripts/check-web-rate-limiting-differential.sh:119:      tail -120 "$log" >&2 || true
 scripts/check-web-rate-limiting-differential.sh:124:  tail -120 "$log" >&2 || true
-scripts/run-live-soak-proton-natpmp.sh:65:        renew_ports_once || true
-scripts/run-live-soak-proton-natpmp.sh:75:        kill "$renew_pid" 2>/dev/null || true
-scripts/run-live-soak-proton-natpmp.sh:76:        wait "$renew_pid" 2>/dev/null || true
-scripts/run-live-soak-proton-natpmp.sh:80:            >/dev/null 2>&1 || true
-scripts/run-live-soak-proton-natpmp.sh:84:            >/dev/null 2>&1 || true
-scripts/run-slskd-api-compat-smoke.sh:36:    kill "$daemon_pid" 2>/dev/null || true
-scripts/run-slskd-api-compat-smoke.sh:37:    wait "$daemon_pid" 2>/dev/null || true
+scripts/check-rust-format.sh:63:    diff -u -- "$rust_file" "$formatted_file" || true
+scripts/build-rust-web.sh:16:wasm_bindgen_bin="$(command -v wasm-bindgen || true)"
+scripts/generate-vpn-soulseek-accounts.sh:65:  grep -v -E '^(SLSKR_TEST_ACCOUNT_COUNT|SLSKR_TEST_[0-9]+_(USERNAME|PASSWORD))=' "$output_file" > "$tmp" || true
+scripts/generate-vpn-soulseek-accounts.sh:78:  set +e
 scripts/run-cross-client-validation.sh:83:  set +e
 scripts/run-cross-client-validation.sh:87:  detail="$( { tail -n 40 "$stdout_file"; grep -E '^(error:|FAILED|Failed|Build FAILED|Test Run Failed|warning |thread |panicked|Unhandled exception)' "$stderr_file" || true; } | sanitize_detail )"
 scripts/run-cross-client-validation.sh:155:  set +e
@@ -2240,6 +2223,26 @@ scripts/run-live-http-transfer-smoke.sh:381:status="$(printf '%s' "$last_transfe
 scripts/run-live-http-transfer-smoke.sh:382:bytes="$(printf '%s' "$last_transfer" | json_field bytes_transferred 2>/dev/null || true)"
 scripts/run-live-http-transfer-smoke.sh:385:  tail -n 80 "$source_log" >&2 || true
 scripts/run-live-http-transfer-smoke.sh:386:  tail -n 80 "$target_log" >&2 || true
+scripts/run-proton-public-matrix.sh:222:    set +e
+scripts/run-proton-public-matrix.sh:302:    set +e
+scripts/run-proton-public-matrix.sh:328:                            natpmpc -g "${PROTON_NATPMP_GATEWAY:-10.2.0.1}" -a "$public_port" "$local_port" tcp 60 >/dev/null 2>&1 || true
+scripts/run-proton-public-matrix.sh:334:                    trap "kill \"$renew_pid\" 2>/dev/null || true" EXIT
+scripts/run-proton-public-matrix.sh:421:    wait_for_metadata "$listener" "$metadata_probe" || true
+scripts/run-live-interop-matrix.sh:44:  live_slsk_address="$(getent ahostsv4 vps.slsknet.org | awk 'NR == 1 { print $1 }' || true)"
+scripts/run-live-interop-matrix.sh:125:    tail -n 20 "$stderr_file" || true
+scripts/run-live-interop-matrix.sh:142:  set +e
+scripts/run-live-interop-matrix.sh:172:set +e
+scripts/run-live-interop-matrix.sh:198:set +e
+scripts/run-live-interop-matrix.sh:219:set +e
+scripts/run-live-soak-proton-natpmp.sh:65:        renew_ports_once || true
+scripts/run-live-soak-proton-natpmp.sh:75:        kill "$renew_pid" 2>/dev/null || true
+scripts/run-live-soak-proton-natpmp.sh:76:        wait "$renew_pid" 2>/dev/null || true
+scripts/run-live-soak-proton-natpmp.sh:80:            >/dev/null 2>&1 || true
+scripts/run-live-soak-proton-natpmp.sh:84:            >/dev/null 2>&1 || true
+scripts/check-controller-auth-profiles.sh:20:    kill "$daemon_pid" 2>/dev/null || true
+scripts/check-controller-auth-profiles.sh:21:    wait "$daemon_pid" 2>/dev/null || true
+scripts/check-controller-auth-profiles.sh:39:    wait "$daemon_pid" 2>/dev/null || true
+scripts/check-controller-auth-profiles.sh:75:  tail -80 "$work_dir/$target.log" >&2 || true
 scripts/check-slskdn-controller-parity.sh:34:    kill "$daemon_pid" 2>/dev/null || true
 scripts/check-slskdn-controller-parity.sh:40:      kill -KILL "$daemon_pid" 2>/dev/null || true
 scripts/check-slskdn-controller-parity.sh:42:    wait "$daemon_pid" 2>/dev/null || true
@@ -2248,11 +2251,49 @@ scripts/check-slskdn-controller-parity.sh:109:  rg -n 'generic_404|compatibility
 scripts/check-slskdn-controller-parity.sh:110:  tail -80 "$log_file" >&2 || true
 scripts/check-slskdn-controller-parity.sh:124:  rg -n 'generic_404|compatibility_fallback|AbortError|probe_error' "$slskd_report_file" >&2 || true
 scripts/check-slskdn-controller-parity.sh:125:  tail -80 "$log_file" >&2 || true
-scripts/run-proton-public-matrix.sh:222:    set +e
-scripts/run-proton-public-matrix.sh:302:    set +e
-scripts/run-proton-public-matrix.sh:328:                            natpmpc -g "${PROTON_NATPMP_GATEWAY:-10.2.0.1}" -a "$public_port" "$local_port" tcp 60 >/dev/null 2>&1 || true
-scripts/run-proton-public-matrix.sh:334:                    trap "kill \"$renew_pid\" 2>/dev/null || true" EXIT
-scripts/run-proton-public-matrix.sh:421:    wait_for_metadata "$listener" "$metadata_probe" || true
+scripts/run-certification.sh:153:        set +e
+scripts/run-certification.sh:279:        set +e
+scripts/run-certification.sh:332:    set +e
+scripts/run-certification.sh:349:    set +e
+scripts/run-certification.sh:367:    set +e
+scripts/run-certification.sh:386:        server_ip="$(getent ahostsv4 vps.slsknet.org 2>/dev/null | awk 'NR == 1 { print $1 }')" || true
+scripts/run-certification.sh:420:            set +e
+scripts/run-certification.sh:509:    set +e
+scripts/run-certification.sh:531:    set +e
+scripts/run-certification.sh:553:    set +e
+scripts/run-certification.sh:575:    set +e
+scripts/run-certification.sh:601:    tmux kill-session -t "$listener_session" 2>/dev/null || true
+scripts/run-certification.sh:636:    set +e
+scripts/run-certification.sh:664:    set +e
+scripts/run-certification.sh:691:    set +e
+scripts/run-certification.sh:717:    set +e
+scripts/run-certification.sh:744:    set +e
+scripts/run-certification.sh:803:    set +e
+scripts/run-certification.sh:832:    set +e
+scripts/run-certification.sh:857:    set +e
+scripts/run-certification.sh:874:    set +e
+scripts/run-certification.sh:900:    set +e
+scripts/run-certification.sh:931:    set +e
+scripts/run-certification.sh:963:    set +e
+scripts/run-certification.sh:1003:    set +e
+scripts/run-certification.sh:1032:    set +e
+scripts/run-certification.sh:1059:    set +e
+scripts/run-certification.sh:1086:    set +e
+scripts/run-certification.sh:1114:        set +e
+scripts/run-certification.sh:1184:    set +e
+scripts/run-certification.sh:1213:    set +e
+scripts/run-certification.sh:1250:        set +e
+scripts/run-certification.sh:1286:            set +e
+scripts/run-certification.sh:1324:    set +e
+scripts/run-certification.sh:1356:        set +e
+scripts/run-certification.sh:1387:        set +e
+scripts/run-certification.sh:1418:    set +e
+scripts/run-certification.sh:1433:    set +e
+scripts/run-certification.sh:1450:        set +e
+scripts/run-certification.sh:1477:    set +e
+scripts/run-certification.sh:1502:    set +e
+scripts/run-slskd-api-compat-smoke.sh:36:    kill "$daemon_pid" 2>/dev/null || true
+scripts/run-slskd-api-compat-smoke.sh:37:    wait "$daemon_pid" 2>/dev/null || true
 scripts/run-slskd-cross-client-interop.sh:145:' "$query" 2>/dev/null || true
 scripts/run-slskd-cross-client-interop.sh:165:      kill "$pid" 2>/dev/null || true
 scripts/run-slskd-cross-client-interop.sh:166:      wait "$pid" 2>/dev/null || true
@@ -2355,47 +2396,6 @@ scripts/run-slskdn-cross-client-interop.sh:2064:  hash="$(printf '%s' "$response
 scripts/run-slskdn-cross-client-interop.sh:2091:    auth_get "http://127.0.0.1:$slskr_http_port/api/v0/session" || true
 scripts/run-slskdn-cross-client-interop.sh:2093:    auth_get "http://127.0.0.1:$slskr_http_port/api/v0/listeners" || true
 scripts/run-slskdn-cross-client-interop.sh:2095:    auth_get "http://127.0.0.1:$slskdn_http_port/api/v0/users/$slskr_username/endpoint" || true
-scripts/run-certification.sh:153:        set +e
-scripts/run-certification.sh:279:        set +e
-scripts/run-certification.sh:332:    set +e
-scripts/run-certification.sh:349:    set +e
-scripts/run-certification.sh:367:    set +e
-scripts/run-certification.sh:386:        server_ip="$(getent ahostsv4 vps.slsknet.org 2>/dev/null | awk 'NR == 1 { print $1 }')" || true
-scripts/run-certification.sh:420:            set +e
-scripts/run-certification.sh:509:    set +e
-scripts/run-certification.sh:531:    set +e
-scripts/run-certification.sh:553:    set +e
-scripts/run-certification.sh:575:    set +e
-scripts/run-certification.sh:601:    tmux kill-session -t "$listener_session" 2>/dev/null || true
-scripts/run-certification.sh:636:    set +e
-scripts/run-certification.sh:664:    set +e
-scripts/run-certification.sh:691:    set +e
-scripts/run-certification.sh:717:    set +e
-scripts/run-certification.sh:744:    set +e
-scripts/run-certification.sh:803:    set +e
-scripts/run-certification.sh:832:    set +e
-scripts/run-certification.sh:857:    set +e
-scripts/run-certification.sh:874:    set +e
-scripts/run-certification.sh:900:    set +e
-scripts/run-certification.sh:931:    set +e
-scripts/run-certification.sh:963:    set +e
-scripts/run-certification.sh:1003:    set +e
-scripts/run-certification.sh:1032:    set +e
-scripts/run-certification.sh:1059:    set +e
-scripts/run-certification.sh:1086:    set +e
-scripts/run-certification.sh:1114:        set +e
-scripts/run-certification.sh:1184:    set +e
-scripts/run-certification.sh:1213:    set +e
-scripts/run-certification.sh:1250:        set +e
-scripts/run-certification.sh:1286:            set +e
-scripts/run-certification.sh:1324:    set +e
-scripts/run-certification.sh:1356:        set +e
-scripts/run-certification.sh:1387:        set +e
-scripts/run-certification.sh:1418:    set +e
-scripts/run-certification.sh:1433:    set +e
-scripts/run-certification.sh:1450:        set +e
-scripts/run-certification.sh:1477:    set +e
-scripts/run-certification.sh:1502:    set +e
 scripts/check-controller-options-differential.sh:153:    kill "$daemon_pid" 2>/dev/null || true
 scripts/check-controller-options-differential.sh:154:    wait "$daemon_pid" 2>/dev/null || true
 scripts/check-controller-options-differential.sh:164:    kill "$soulseek_fixture_pid" 2>/dev/null || true

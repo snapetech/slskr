@@ -87,7 +87,7 @@ await client.get_sessions()
 await client.list_users()
 await client.list_rooms()
 await client.browse_user(username)
-await client.get_events()
+await client.get_events(event_type="search.started", topic="searches", query="ambient")
 await client.list_shares()
 await client.update_filters({"enabled": True})
 ```

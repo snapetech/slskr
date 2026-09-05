@@ -490,6 +490,8 @@ class SlskrClient {
             limit: params.limit,
             offset: params.offset,
             ...(params.type ? { kind: params.type } : {}),
+            ...(params.topic ? { topic: params.topic } : {}),
+            ...(params.query ? { q: params.query } : {}),
         };
         const response = await this.getAuth('/api/events', query);
         return responseList(response, 'events', 'entries').map(normalizeEvent);

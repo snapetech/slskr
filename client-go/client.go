@@ -544,11 +544,23 @@ func (c *Client) RespondToBrowseRequest(ctx context.Context, username, action, f
 
 // GetEvents lists recorded events.
 func (c *Client) GetEvents(ctx context.Context, eventType string, limit, offset int) ([]map[string]interface{}, error) {
+	return c.GetEventsWithFilters(ctx, eventType, "", "", limit, offset)
+}
+
+// GetEventsWithFilters lists recorded events filtered by kind, topic, and text.
+// The existing GetEvents method remains the shorthand for kind-only filtering.
+func (c *Client) GetEventsWithFilters(ctx context.Context, eventType, topic, query string, limit, offset int) ([]map[string]interface{}, error) {
 	params := url.Values{}
 	params.Set("limit", fmt.Sprintf("%d", limit))
 	params.Set("offset", fmt.Sprintf("%d", offset))
 	if eventType != "" {
 		params.Set("kind", eventType)
+	}
+	if topic != "" {
+		params.Set("topic", topic)
+	}
+	if query != "" {
+		params.Set("q", query)
 	}
 	result, err := c.getWithParams(ctx, "/api/events", params, true)
 	if err != nil {

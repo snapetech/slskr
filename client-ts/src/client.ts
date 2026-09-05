@@ -595,11 +595,15 @@ export class SlskrClient {
   // Events
   // =========================================================================
 
-  async getEvents(params?: { type?: string } & PaginationParams): Promise<Event[]> {
+  async getEvents(
+    params?: { type?: string; topic?: string; query?: string } & PaginationParams,
+  ): Promise<Event[]> {
     const query = params && {
       limit: params.limit,
       offset: params.offset,
       ...(params.type ? { kind: params.type } : {}),
+      ...(params.topic ? { topic: params.topic } : {}),
+      ...(params.query ? { q: params.query } : {}),
     };
     const response = await this.getAuth<unknown>('/api/events', query);
     return responseList<unknown>(response, 'events', 'entries').map(normalizeEvent);

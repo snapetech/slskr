@@ -161,7 +161,7 @@ Main HTTP client for REST API operations.
 **Browse, Events & Administration**
 - `browse_user()` / `request_browse(username, folder)` - Browse a user's shares
 - `get_browse_requests()` / `respond_to_browse_request()` - Manage browse requests
-- `get_events()` - Read recorded events
+- `get_events(event_type, topic, query, limit, offset)` - Read filtered recorded events
 - `list_shares()` / `refresh_shares()` - Read or rescan shares
 - `get_filters()` / `update_filters()` - Read or update filters
 - `get_cache_stats()` / `invalidate_cache()` - Inspect or clear the MediaCore cache

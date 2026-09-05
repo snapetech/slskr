@@ -52,6 +52,8 @@ export declare class SlskrClient {
     respondToBrowseRequest(id: string, action: 'accept' | 'reject', folder?: string): Promise<BrowseResult>;
     getEvents(params?: {
         type?: string;
+        topic?: string;
+        query?: string;
     } & PaginationParams): Promise<Event[]>;
     getCacheStats(): Promise<CacheStats>;
     invalidateCache(keys: string[]): Promise<void>;

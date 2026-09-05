@@ -358,6 +358,17 @@ func TestClientCoversSessionBrowseEventAndCacheRoutes(t *testing.T) {
 			if request.URL.Query().Get("kind") != "transfer.completed" {
 				t.Errorf("event kind was not encoded: %q", request.URL.RawQuery)
 			}
+			if topic := request.URL.Query().Get("topic"); topic != "" && topic != "searches" {
+				t.Errorf("event topic was not encoded: %q", request.URL.RawQuery)
+			}
+			if query := request.URL.Query().Get("q"); query != "" && query != "ambient & live" {
+				t.Errorf("event query was not encoded: %q", request.URL.RawQuery)
+			}
+			if request.URL.Query().Get("topic") == "searches" &&
+				request.URL.Query().Get("q") == "ambient & live" &&
+				(request.URL.Query().Get("limit") != "10" || request.URL.Query().Get("offset") != "20") {
+				t.Errorf("filtered event pagination was not encoded: %q", request.URL.RawQuery)
+			}
 			write(`{"events":[{"type":"transfer.completed"}]}`)
 		case request.Method == http.MethodGet && request.URL.Path == "/api/mediacore/retrieve/stats":
 			write(`{"entries":4}`)
@@ -418,6 +429,9 @@ func TestClientCoversSessionBrowseEventAndCacheRoutes(t *testing.T) {
 	}
 	if events, err := client.GetEvents(ctx, "transfer.completed", 10, 0); err != nil || len(events) != 1 {
 		t.Fatalf("unexpected events response: %#v, %v", events, err)
+	}
+	if events, err := client.GetEventsWithFilters(ctx, "transfer.completed", "searches", "ambient & live", 10, 20); err != nil || len(events) != 1 {
+		t.Fatalf("unexpected filtered events response: %#v, %v", events, err)
 	}
 	if _, err := client.GetCacheStats(ctx); err != nil {
 		t.Fatalf("get cache stats failed: %v", err)

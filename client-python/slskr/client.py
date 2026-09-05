@@ -400,11 +400,17 @@ class SlskrClient:
         event_type: Optional[str] = None,
         limit: int = 50,
         offset: int = 0,
+        topic: Optional[str] = None,
+        query: Optional[str] = None,
     ) -> List[Dict]:
         """List recorded events."""
         params: Dict[str, Any] = {"limit": limit, "offset": offset}
         if event_type:
             params["kind"] = event_type
+        if topic:
+            params["topic"] = topic
+        if query:
+            params["q"] = query
         result = await self._get("/api/events", params=params)
         return self._response_list(result, "events", "entries")
 

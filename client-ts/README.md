@@ -171,7 +171,7 @@ new SlskrClient({
 - `respondToBrowseRequest(id, action, folder)` - Accept/reject
 
 **Events**
-- `getEvents(params)` - Get event history
+- `getEvents({ type, topic, query, limit, offset })` - Get filtered event history
 
 **Cache**
 - `getCacheStats()` - Get cache statistics

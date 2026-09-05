@@ -311,10 +311,24 @@ describe('SlskrClient request lifecycle', () => {
     });
     await expect(client.leaveRoom('lounge room')).resolves.toBeUndefined();
     await expect(client.getEvents()).resolves.toMatchObject([{ type: 'message', data: {} }]);
+    await expect(client.getEvents({
+      limit: 10,
+      offset: 20,
+      query: 'ambient & live',
+      topic: 'searches',
+      type: 'search.started',
+    })).resolves.toMatchObject([{ type: 'message', data: {} }]);
 
     expect(requests.find((request) => request.url.includes('/api/messages/7/ack'))?.init?.method).toBe('POST');
     const transferRequest = requests.find((request) => request.url.includes('/api/transfers'));
     expect(transferRequest?.url).toContain('direction=0');
+    const filteredEventsRequest = requests.find((request) => (
+      request.url.includes('/api/events') && request.url.includes('kind=search.started')
+    ));
+    expect(filteredEventsRequest?.url).toContain('topic=searches');
+    expect(filteredEventsRequest?.url).toContain('q=ambient+%26+live');
+    expect(filteredEventsRequest?.url).toContain('limit=10');
+    expect(filteredEventsRequest?.url).toContain('offset=20');
     expect(requests.some((request) => request.url.endsWith('/api/rooms/lounge%20room/join'))).toBe(true);
   });
 
