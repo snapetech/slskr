@@ -367,6 +367,7 @@ const SearchDetail = ({
           );
           if (responses.length > 0 || attempt === attempts - 1) {
             if (!cancelled) {
+              setError(undefined);
               setResults(responses);
               setLoading(false);
             }
@@ -715,12 +716,17 @@ const SearchDetail = ({
   const remainingCount = sortedAndFilteredResults.length - displayCount;
   const loaded = !removing && !creating && !loading && results !== null;
 
-  if (error) {
+  if (error && results === null) {
     return <ErrorSegment caption={toDisplayError(error, 'Failed to load search results')} />;
   }
 
   return (
     <>
+      {error && (
+        <div data-testid="search-results-load-error">
+          <ErrorSegment caption={toDisplayError(error, 'Failed to load search results')} />
+        </div>
+      )}
       <SearchDetailHeader
         creating={creating}
         disabled={disabled}

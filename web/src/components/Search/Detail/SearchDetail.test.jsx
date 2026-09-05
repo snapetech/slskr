@@ -64,7 +64,13 @@ vi.mock('../../../lib/wishlist', () => ({
   getIgnoredResults: vi.fn(),
   ignoreResult: vi.fn(),
 }));
-vi.mock('../../Shared/ErrorSegment', () => ({ default: () => null }));
+vi.mock('../../Shared/ErrorSegment', () => ({
+  default: ({ caption, ...props }) => (
+    <div {...props} data-testid={props['data-testid'] || 'search-error'}>
+      {caption}
+    </div>
+  ),
+}));
 vi.mock('../../Shared/LoaderSegment', () => ({
   default: ({ children }) => <div data-testid="search-loader">{children}</div>,
 }));
@@ -220,6 +226,33 @@ describe('SearchDetail wishlist folder ignores', () => {
       ),
     );
     expect(screen.queryByTestId('search-loader')).not.toBeInTheDocument();
+  });
+
+  it('retains prior files when a later result refresh fails', async () => {
+    getResponses
+      .mockResolvedValueOnce([response])
+      .mockRejectedValueOnce(new Error('Search result service unavailable'));
+
+    const { rerender } = render(<SearchDetail {...createProps()} />);
+
+    expect(await screen.findByTestId('visible-files')).toHaveTextContent(
+      'Album\\keep.mp3,Album\\ignored.mp3,Other\\allowed.mp3',
+    );
+
+    rerender(
+      <SearchDetail
+        {...createProps({
+          responseCount: 2,
+        })}
+      />,
+    );
+
+    expect(await screen.findByTestId('search-results-load-error')).toHaveTextContent(
+      'Search result service unavailable',
+    );
+    expect(screen.getByTestId('visible-files')).toHaveTextContent(
+      'Album\\keep.mp3,Album\\ignored.mp3,Other\\allowed.mp3',
+    );
   });
 
   it('confirms and persists a new wishlist folder ignore', async () => {
